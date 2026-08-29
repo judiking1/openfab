@@ -1,0 +1,346 @@
+.tilefab-contextual-save-backdrop {
+	position: fixed;
+	z-index: 1000;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 18px;
+	background: rgb(2 7 8 / 66%);
+	backdrop-filter: blur(3px);
+}
+
+.tilefab-contextual-blueprint-save {
+	display: grid;
+	width: min(540px, 100%);
+	max-height: calc(100dvh - 36px);
+	overflow: auto;
+	border: 1px solid #526064;
+	border-radius: 6px;
+	color: #dfe8e8;
+	background: #111718;
+	box-shadow: 0 18px 52px rgb(0 0 0 / 55%);
+}
+
+.tilefab-contextual-blueprint-save > header {
+	display: grid;
+	grid-template-columns: 38px minmax(0, 1fr) 44px;
+	align-items: center;
+	min-height: 58px;
+	padding: 0 7px 0 12px;
+	border-bottom: 1px solid #354043;
+}
+
+.tilefab-contextual-save-heading-icon {
+	display: grid;
+	width: 30px;
+	height: 30px;
+	place-items: center;
+	border: 1px solid #487c72;
+	border-radius: 4px;
+	color: #a8e7d8;
+	background: #18342e;
+}
+
+.tilefab-contextual-blueprint-save .tilefab-contextual-save-title {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+
+.tilefab-contextual-blueprint-save > header small,
+.tilefab-contextual-save-fields label > span,
+.tilefab-contextual-blueprint-save legend {
+	color: #8f9c9e;
+	font-size: 10px;
+	font-weight: 780;
+}
+
+.tilefab-contextual-blueprint-save > header strong {
+	font-size: 15px;
+	font-weight: 800;
+}
+
+.tilefab-contextual-blueprint-save > header > button {
+	display: grid;
+	width: 44px;
+	height: 44px;
+	place-items: center;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	color: #93a0a2;
+	background: transparent;
+	cursor: pointer;
+}
+
+.tilefab-contextual-blueprint-save > header > button:hover {
+	color: #eef6f6;
+	background: #232c2e;
+}
+
+.tilefab-contextual-save-summary {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 14px;
+	border-bottom: 1px solid #303a3c;
+	background: #161d1e;
+}
+
+.tilefab-contextual-blueprint-save .tilefab-contextual-save-summary-name {
+	min-width: 0;
+	overflow: hidden;
+	font-size: 13px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-contextual-blueprint-save .tilefab-contextual-save-summary-metrics {
+	flex: 0 0 auto;
+	color: #9eabad;
+	font:
+		700 10px / 1.4 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+}
+
+.tilefab-contextual-blueprint-save form {
+	display: grid;
+	gap: 12px;
+	padding: 14px;
+}
+
+.tilefab-contextual-save-fields {
+	display: grid;
+	grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+	gap: 8px;
+}
+
+.tilefab-contextual-save-fields label {
+	display: grid;
+	gap: 5px;
+	min-width: 0;
+}
+
+.tilefab-contextual-save-fields input {
+	min-width: 0;
+	height: 44px;
+	padding: 0 11px;
+	border: 1px solid #3a4749;
+	border-radius: 4px;
+	color: #e4eded;
+	background: #0b1112;
+	font-size: 13px;
+}
+
+.tilefab-contextual-save-fields input:focus,
+.tilefab-contextual-blueprint-save button:focus-visible,
+.tilefab-contextual-save-destination label:focus-within {
+	border-color: #79d7dc;
+	outline: 2px solid #79d7dc;
+	outline-offset: 1px;
+}
+
+.tilefab-contextual-save-fields input[aria-invalid="true"] {
+	border-color: #f17e88;
+}
+
+.tilefab-contextual-save-destination,
+.tilefab-contextual-save-slots {
+	display: grid;
+	gap: 7px;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.tilefab-contextual-save-destination .tilefab-contextual-save-destination-options {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 7px;
+}
+
+.tilefab-contextual-save-destination label {
+	position: relative;
+	display: grid;
+	grid-template-columns: 24px minmax(0, 1fr);
+	min-height: 52px;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 11px;
+	border: 1px solid #3a4749;
+	border-radius: 4px;
+	color: #aab6b7;
+	background: #101718;
+	cursor: pointer;
+}
+
+.tilefab-contextual-save-destination label[data-active="true"] {
+	border-color: #62c5ca;
+	color: #e0f7f7;
+	background: #183033;
+}
+
+.tilefab-contextual-save-destination input {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+}
+
+.tilefab-contextual-save-destination label > span {
+	display: grid;
+	gap: 2px;
+}
+
+.tilefab-contextual-save-destination label strong {
+	font-size: 12px;
+}
+
+.tilefab-contextual-save-destination label small {
+	color: #8e9a9c;
+	font-size: 9px;
+}
+
+.tilefab-contextual-save-slots legend {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.tilefab-contextual-save-slots legend small {
+	color: #6f7c7e;
+	font-size: 9px;
+}
+
+.tilefab-contextual-save-slots .tilefab-contextual-save-slot-options {
+	display: grid;
+	grid-template-columns: minmax(58px, 1.6fr) repeat(9, minmax(38px, 1fr));
+	gap: 4px;
+}
+
+.tilefab-contextual-save-slots .tilefab-contextual-save-slot {
+	min-width: 0;
+	height: 44px;
+	padding: 0;
+	border: 1px solid #384548;
+	border-radius: 4px;
+	color: #aab6b7;
+	background: #101718;
+	cursor: pointer;
+	font-size: 11px;
+	font-weight: 780;
+}
+
+.tilefab-contextual-save-slots .tilefab-contextual-save-slot[data-active="true"] {
+	border-color: #d4ba68;
+	color: #fff0b5;
+	background: #332d1b;
+}
+
+.tilefab-contextual-save-slots .tilefab-contextual-save-slot[data-occupied="true"] {
+	color: #667174;
+	background: #151b1c;
+	text-decoration: line-through;
+}
+
+.tilefab-contextual-save-slots:disabled {
+	display: none;
+}
+
+.tilefab-contextual-save-feedback {
+	min-height: 18px;
+	color: #f3929a;
+	font-size: 11px;
+}
+
+.tilefab-contextual-blueprint-save footer {
+	display: grid;
+	grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+	gap: 7px;
+}
+
+.tilefab-contextual-blueprint-save footer button {
+	display: flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	padding: 0 12px;
+	border: 1px solid #3b484a;
+	border-radius: 4px;
+	color: #bdc8c9;
+	background: #182022;
+	cursor: pointer;
+	font-size: 11px;
+	font-weight: 780;
+}
+
+.tilefab-contextual-blueprint-save footer .tilefab-contextual-save-primary {
+	border-color: #4c9c8b;
+	color: #dbf7ef;
+	background: #1a4037;
+}
+
+.tilefab-contextual-blueprint-save button:disabled,
+.tilefab-contextual-blueprint-save input:disabled {
+	cursor: not-allowed;
+	opacity: 0.48;
+}
+
+.tilefab-contextual-blueprint-save footer kbd {
+	margin-left: auto;
+	padding: 2px 5px;
+	border: 1px solid rgb(255 255 255 / 16%);
+	border-radius: 3px;
+	color: #a9b7b8;
+	background: rgb(0 0 0 / 20%);
+	font:
+		700 9px / 1.35 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+}
+
+@media (max-width: 520px) {
+	.tilefab-contextual-save-backdrop {
+		align-items: start;
+		padding: 8px;
+	}
+
+	.tilefab-contextual-blueprint-save {
+		max-height: calc(100dvh - 16px);
+	}
+
+	.tilefab-contextual-save-summary {
+		display: grid;
+		gap: 4px;
+	}
+
+	.tilefab-contextual-blueprint-save .tilefab-contextual-save-summary-metrics {
+		white-space: normal;
+	}
+
+	.tilefab-contextual-save-fields,
+	.tilefab-contextual-save-destination .tilefab-contextual-save-destination-options {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.tilefab-contextual-save-slots .tilefab-contextual-save-slot-options {
+		grid-template-columns: repeat(5, minmax(44px, 1fr));
+	}
+
+	.tilefab-contextual-blueprint-save footer {
+		grid-template-columns: 84px minmax(0, 1fr);
+	}
+
+	.tilefab-contextual-blueprint-save footer kbd {
+		display: none;
+	}
+}

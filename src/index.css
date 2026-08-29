@@ -1,0 +1,820 @@
+@import "tailwindcss";
+
+:root {
+	font-family:
+		Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	color: #dfe7e8;
+	background: #0b0f12;
+	font-synthesis: none;
+	text-rendering: optimizeLegibility;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+}
+
+button {
+	letter-spacing: 0;
+}
+
+/* TileFab rail-only construction surface */
+.tilefab-app {
+	display: grid;
+	grid-template-rows: 56px minmax(0, 1fr) 32px;
+	width: 100%;
+	height: 100%;
+	color: #dce5e5;
+	background: #080b0c;
+}
+
+.tilefab-topbar {
+	position: relative;
+	z-index: 20;
+	display: grid;
+	grid-template-columns: minmax(132px, 0.55fr) minmax(180px, 0.85fr) auto auto minmax(270px, 1fr);
+	align-items: center;
+	gap: 12px;
+	min-width: 0;
+	padding: 0 10px;
+	border-bottom: 1px solid #283133;
+	background: #121718;
+	box-shadow: 0 1px 0 rgb(255 255 255 / 2%);
+}
+
+.tilefab-brand {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-width: 0;
+}
+
+.tilefab-brand-mark {
+	display: grid;
+	width: 34px;
+	height: 34px;
+	flex: 0 0 auto;
+	place-items: center;
+	border: 1px solid #3b5255;
+	border-radius: 5px;
+	color: #9ce0e5;
+	background: #172123;
+}
+
+.tilefab-brand > span:last-child {
+	display: grid;
+	min-width: 0;
+	line-height: 1.05;
+}
+
+.tilefab-brand strong {
+	overflow: hidden;
+	font-size: 14px;
+	font-weight: 670;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-brand small {
+	margin-top: 4px;
+	color: #7f8d8f;
+	font-size: 10px;
+	font-weight: 520;
+	letter-spacing: 0;
+}
+
+.tilefab-network {
+	display: flex;
+	height: 44px;
+	align-items: center;
+	gap: 7px;
+	padding: 0 10px;
+	border: 1px solid #384244;
+	border-radius: 4px;
+	color: #9ca8aa;
+	background: #171c1d;
+	font-size: 10px;
+	font-weight: 730;
+	white-space: nowrap;
+}
+
+.tilefab-network-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: #697679;
+}
+
+.tilefab-network[data-state="closed"] {
+	border-color: #315e43;
+	color: #83d99f;
+	background: #142219;
+}
+
+.tilefab-network[data-state="closed"] .tilefab-network-dot {
+	background: #61d18a;
+	box-shadow: 0 0 0 3px rgb(97 209 138 / 12%);
+}
+
+.tilefab-network[data-state="open"] {
+	border-color: #66502e;
+	color: #e3bd70;
+	background: #211c13;
+}
+
+.tilefab-network[data-state="open"] .tilefab-network-dot {
+	background: #e3b85e;
+}
+
+.tilefab-network[data-state="disconnected"] {
+	border-color: #734047;
+	color: #ed959c;
+	background: #29191c;
+}
+
+.tilefab-network[data-state="disconnected"] .tilefab-network-dot {
+	background: #e66b73;
+}
+
+.tilefab-network[data-state="unsafe"] {
+	border-color: #7d3d45;
+	color: #ff9ca4;
+	background: #2b181b;
+}
+
+.tilefab-network[data-state="unsafe"] .tilefab-network-dot {
+	background: #f06b72;
+	box-shadow: 0 0 0 3px rgb(240 107 114 / 12%);
+}
+
+.tilefab-metrics {
+	display: flex;
+	height: 36px;
+	align-items: stretch;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 1px solid #2c3638;
+	border-radius: 5px;
+	background: #0d1213;
+}
+
+.tilefab-metrics > span {
+	display: grid;
+	min-width: 56px;
+	align-content: center;
+	padding: 0 9px;
+	border-right: 1px solid #293234;
+	font-variant-numeric: tabular-nums;
+}
+
+.tilefab-metrics > span:last-child {
+	border-right: 0;
+}
+
+.tilefab-metrics small {
+	color: #6e7c7e;
+	font-size: 8px;
+	font-weight: 730;
+}
+
+.tilefab-metrics strong {
+	margin-top: 1px;
+	font-size: 12px;
+	font-weight: 650;
+}
+
+.tilefab-commands {
+	display: flex;
+	justify-self: end;
+	align-items: center;
+	gap: 3px;
+}
+
+:where(.tilefab-app[data-guided-build-active="true"]) .tilefab-topbar {
+	grid-template-columns: minmax(132px, 0.55fr) minmax(180px, 0.85fr) auto minmax(270px, 1fr);
+}
+
+:where(.tilefab-app[data-guided-build-active="true"]) .tilefab-metrics,
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="새 프로젝트"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="FAB 조립"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="FAB 프리셋"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="FAB 전체 지도"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label^="FAB 조직"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="프로젝트 열기"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="다른 이름으로 저장"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="3D 검사 뷰"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="물리 레일 외형"],
+:where(.tilefab-app[data-guided-build-active="true"])
+	.tilefab-commands
+	button[aria-label="전체 삭제"] {
+	display: none;
+}
+
+.tilefab-icon-button,
+.tilefab-tool-button {
+	display: grid;
+	width: 34px;
+	height: 34px;
+	place-items: center;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	color: #9ba7a9;
+	background: transparent;
+	cursor: pointer;
+}
+
+.tilefab-icon-button:hover:not(:disabled),
+.tilefab-tool-button:hover {
+	border-color: #394749;
+	color: #dce7e7;
+	background: #1b2224;
+}
+
+.tilefab-icon-button:disabled {
+	opacity: 0.32;
+	cursor: default;
+}
+
+.tilefab-icon-button[data-tone="danger"]:hover:not(:disabled),
+.tilefab-tool-button[data-tone="danger"][data-active="true"] {
+	border-color: #6f3d42;
+	color: #ee949a;
+	background: #2a191c;
+}
+
+.tilefab-separator {
+	width: 1px;
+	height: 20px;
+	margin: 0 3px;
+	background: #30393b;
+}
+
+.tilefab-workspace {
+	position: relative;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	background: #080b0c;
+}
+
+.tilefab-canvas {
+	position: absolute;
+	inset: 0;
+	display: block;
+	width: 100%;
+	height: 100%;
+	touch-action: none;
+	outline: none;
+}
+
+.tilefab-canvas--static {
+	z-index: 0;
+	pointer-events: none;
+}
+
+.tilefab-canvas:not(.tilefab-canvas--static) {
+	z-index: 1;
+}
+
+.tilefab-canvas--build {
+	cursor: crosshair;
+}
+
+.tilefab-canvas--inspect {
+	cursor: default;
+}
+
+.tilefab-canvas--erase {
+	cursor: cell;
+}
+
+.tilefab-canvas--reshape {
+	cursor: move;
+}
+
+.tilefab-tools {
+	position: absolute;
+	z-index: 2;
+	top: 14px;
+	left: 14px;
+	display: grid;
+	gap: 4px;
+	padding: 5px;
+	border: 1px solid #313c3e;
+	border-radius: 5px;
+	background: rgb(17 23 24 / 94%);
+	box-shadow: 0 8px 20px rgb(0 0 0 / 26%);
+	backdrop-filter: blur(8px);
+}
+
+.tilefab-tool-button {
+	width: 42px;
+	height: 42px;
+}
+
+.tilefab-tool-button[data-active="true"] {
+	border-color: #4c7f84;
+	color: #a8e3e7;
+	background: #1a3033;
+	box-shadow: inset 3px 0 0 #70cbd2;
+}
+
+.tilefab-buildbar {
+	position: absolute;
+	z-index: 2;
+	bottom: 16px;
+	left: 50%;
+	display: flex;
+	height: 50px;
+	align-items: center;
+	gap: 12px;
+	padding: 0 9px 0 14px;
+	transform: translateX(-50%);
+	border: 1px solid #354143;
+	border-radius: 5px;
+	background: rgb(18 24 25 / 95%);
+	box-shadow: 0 10px 28px rgb(0 0 0 / 28%);
+	backdrop-filter: blur(9px);
+}
+
+.tilefab-buildbar-title,
+.tilefab-build-spec {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: #9eadaf;
+	font-size: 10px;
+	font-weight: 730;
+	white-space: nowrap;
+}
+
+.tilefab-build-spec {
+	padding: 0 5px 0 2px;
+	color: #7e8c8e;
+	font-weight: 620;
+}
+
+.tilefab-build-spec span {
+	color: #d2b76e;
+}
+
+.tilefab-segmented {
+	display: flex;
+	height: 36px;
+	min-width: 0;
+	margin: 0;
+	padding: 2px;
+	border: 1px solid #2f393b;
+	border-radius: 4px;
+	background: #0c1112;
+}
+
+.tilefab-segmented button {
+	display: flex;
+	height: 30px;
+	align-items: center;
+	gap: 4px;
+	padding: 0 9px;
+	border: 0;
+	border-radius: 3px;
+	color: #7f8c8e;
+	background: transparent;
+	cursor: pointer;
+	font-size: 10px;
+	font-weight: 690;
+	white-space: nowrap;
+}
+
+.tilefab-segmented button:hover {
+	color: #cbd7d8;
+	background: #1a2223;
+}
+
+.tilefab-segmented button[data-active="true"] {
+	color: #a7e1e5;
+	background: #203336;
+	box-shadow: inset 0 0 0 1px #3d6569;
+}
+
+.tilefab-turn-icon {
+	transform: rotate(90deg);
+}
+
+.tilefab-inspector {
+	position: absolute;
+	z-index: 2;
+	top: 14px;
+	right: 14px;
+	width: 280px;
+	border: 1px solid #344043;
+	border-radius: 5px;
+	background: rgb(18 24 25 / 96%);
+	box-shadow: 0 10px 28px rgb(0 0 0 / 30%);
+	backdrop-filter: blur(9px);
+}
+
+.tilefab-inspector header {
+	display: flex;
+	height: 52px;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 8px 0 12px;
+	border-bottom: 1px solid #2d3739;
+}
+
+.tilefab-inspector header span {
+	display: grid;
+}
+
+.tilefab-inspector header small {
+	color: #738183;
+	font-size: 9px;
+	font-weight: 720;
+}
+
+.tilefab-inspector header strong {
+	margin-top: 3px;
+	font-size: 13px;
+	font-weight: 650;
+}
+
+.tilefab-inspector header button {
+	display: grid;
+	width: 28px;
+	height: 28px;
+	place-items: center;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	color: #829093;
+	background: transparent;
+	cursor: pointer;
+}
+
+.tilefab-inspector header button:hover {
+	color: #d3dddd;
+	background: #21292b;
+}
+
+.tilefab-inspector dl {
+	margin: 0;
+	padding: 7px 12px;
+}
+
+.tilefab-inspector dl div {
+	display: flex;
+	height: 32px;
+	align-items: center;
+	justify-content: space-between;
+	border-bottom: 1px solid #293234;
+	font-size: 11px;
+}
+
+.tilefab-inspector dl div:last-child {
+	border-bottom: 0;
+}
+
+.tilefab-inspector dt {
+	color: #758386;
+}
+
+.tilefab-inspector dd {
+	margin: 0;
+	color: #d2dddd;
+	font-weight: 650;
+}
+
+.tilefab-inspector dd[data-fit="MAP_EXACT"] {
+	color: #79d4d9;
+}
+
+.tilefab-inspector dd[data-fit="GRID_FIT"] {
+	color: #e5b85e;
+}
+
+.tilefab-inspector dd[data-fit="BASELINE"] {
+	color: #a8b1b2;
+}
+
+.tilefab-inspector-primary,
+.tilefab-inspector-danger {
+	display: flex;
+	width: calc(100% - 16px);
+	height: 36px;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	margin: 0 8px 7px;
+	border: 1px solid #3e6569;
+	border-radius: 4px;
+	color: #9edce1;
+	background: #1a2b2e;
+	cursor: pointer;
+	font-size: 11px;
+	font-weight: 640;
+}
+
+.tilefab-inspector-danger {
+	border-color: #663a40;
+	color: #e98f96;
+	background: #29191c;
+}
+
+.tilefab-inspector-primary:hover {
+	border-color: #55868b;
+	background: #20373a;
+}
+
+.tilefab-inspector-danger:hover {
+	border-color: #87474f;
+	background: #341c20;
+}
+
+.tilefab-scale {
+	position: absolute;
+	z-index: 2;
+	right: 16px;
+	bottom: 16px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: #7c898b;
+	font-size: 9px;
+	font-weight: 650;
+}
+
+.tilefab-scale span {
+	width: 58px;
+	height: 7px;
+	border: solid #718083;
+	border-width: 0 1px 1px;
+}
+
+.tilefab-statusbar {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	gap: 9px;
+	padding: 0 11px;
+	border-top: 1px solid #283133;
+	color: #7f8d8f;
+	background: #111617;
+	font-size: 10px;
+	font-variant-numeric: tabular-nums;
+}
+
+.tilefab-status-icon {
+	display: grid;
+	place-items: center;
+	color: #8e9a9c;
+}
+
+.tilefab-statusbar > span:nth-child(2) {
+	overflow: hidden;
+	max-width: 420px;
+	color: #c3cecf;
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-status-preview {
+	overflow: hidden;
+	max-width: 440px;
+	color: #78d8df;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-status-spacer {
+	flex: 1;
+}
+
+.tilefab-worker-state {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	color: #7f8d8f;
+	font-size: 9px;
+	font-weight: 720;
+}
+
+.tilefab-worker-state i {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: #697679;
+}
+
+.tilefab-worker-state[data-state="ready"] {
+	color: #79c895;
+}
+
+.tilefab-worker-state[data-state="ready"] i {
+	background: #61d18a;
+}
+
+.tilefab-worker-state[data-state="syncing"] i {
+	background: #e3b85e;
+}
+
+.tilefab-worker-state[data-state="desynced"],
+.tilefab-worker-state[data-state="error"] {
+	color: #ee8d95;
+}
+
+.tilefab-worker-state[data-state="desynced"] i,
+.tilefab-worker-state[data-state="error"] i {
+	background: #e66b73;
+}
+
+.tilefab-statusbar[data-state="closed"] .tilefab-status-icon,
+.tilefab-statusbar[data-state="closed"] > span:nth-child(2) {
+	color: #7cd599;
+}
+
+.tilefab-statusbar[data-state="disconnected"] .tilefab-status-icon,
+.tilefab-statusbar[data-state="disconnected"] > span:nth-child(2) {
+	color: #ee8d95;
+}
+
+.tilefab-statusbar[data-state="unsafe"] .tilefab-status-icon,
+.tilefab-statusbar[data-state="unsafe"] > span:nth-child(2) {
+	color: #f49aa1;
+}
+
+@media (max-width: 1500px) {
+	.tilefab-topbar {
+		grid-template-columns: minmax(120px, 0.5fr) minmax(170px, 1fr) auto minmax(250px, auto);
+	}
+
+	:where(.tilefab-app[data-guided-build-active="true"]) .tilefab-topbar {
+		grid-template-columns: minmax(120px, 0.5fr) minmax(170px, 1fr) auto minmax(250px, auto);
+	}
+
+	.tilefab-metrics {
+		display: none;
+	}
+
+	.tilefab-commands button[aria-label="새 프로젝트"],
+	.tilefab-commands button[aria-label="FAB 조립"],
+	.tilefab-commands button[aria-label="다른 이름으로 저장"],
+	.tilefab-commands button[aria-label="물리 레일 외형"],
+	.tilefab-commands button[aria-label="전체 삭제"] {
+		display: none;
+	}
+
+	.tilefab-build-spec {
+		display: none;
+	}
+}
+
+@media (max-width: 1000px) {
+	.tilefab-commands button[aria-label="FAB 전체 지도"],
+	.tilefab-commands button[aria-label^="FAB 조직"] {
+		display: none;
+	}
+}
+
+@media (max-width: 860px) {
+	.tilefab-topbar {
+		grid-template-columns: 34px minmax(140px, 1fr) auto auto;
+	}
+
+	:where(.tilefab-app[data-guided-build-active="true"]) .tilefab-topbar {
+		grid-template-columns: 34px minmax(140px, 1fr) auto auto;
+	}
+
+	.tilefab-brand > span:last-child,
+	.tilefab-commands button[aria-label="다른 이름으로 저장"],
+	.tilefab-commands button[aria-label="전체 보기"],
+	.tilefab-commands button[aria-label="물리 레일 외형"] {
+		display: none;
+	}
+}
+
+@media (max-width: 650px) {
+	.tilefab-app {
+		grid-template-rows: 46px minmax(0, 1fr) 26px;
+	}
+
+	.tilefab-topbar {
+		grid-template-columns: 32px 44px 44px minmax(0, 1fr);
+		gap: 6px;
+	}
+
+	:where(.tilefab-app[data-guided-build-active="true"]) .tilefab-topbar {
+		grid-template-columns: 32px 44px 44px minmax(0, 1fr);
+	}
+
+	.tilefab-separator,
+	.tilefab-commands button[aria-label="새 프로젝트"],
+	.tilefab-commands button[aria-label="FAB 조립"],
+	.tilefab-commands button[aria-label="FAB 전체 지도"],
+	.tilefab-commands button[aria-label^="FAB 조직"],
+	.tilefab-commands button[aria-label="프로젝트 열기"],
+	.tilefab-commands button[aria-label="프로젝트 저장"],
+	.tilefab-commands button[aria-label="다시 실행"],
+	.tilefab-commands button[aria-label="전체 삭제"] {
+		display: none;
+	}
+
+	.tilefab-network {
+		width: 44px;
+		justify-content: center;
+		padding: 0;
+		font-size: 0;
+	}
+
+	.tilefab-commands .tilefab-icon-button {
+		width: 44px;
+		height: 44px;
+	}
+
+	.tilefab-commands {
+		min-width: 0;
+		overflow-x: auto;
+		justify-self: stretch;
+		scrollbar-width: none;
+	}
+
+	.tilefab-commands::-webkit-scrollbar {
+		display: none;
+	}
+
+	.tilefab-tools {
+		top: 10px;
+		left: 10px;
+	}
+
+	.tilefab-buildbar {
+		right: 10px;
+		bottom: 10px;
+		left: 58px;
+		justify-content: flex-start;
+		overflow-x: auto;
+		transform: none;
+		scrollbar-width: none;
+	}
+
+	.tilefab-buildbar::-webkit-scrollbar {
+		display: none;
+	}
+
+	.tilefab-buildbar-title {
+		display: none;
+	}
+
+	.tilefab-segmented button {
+		padding: 0 7px;
+	}
+
+	.tilefab-inspector {
+		top: 10px;
+		right: 10px;
+		width: 220px;
+	}
+
+	.tilefab-scale,
+	.tilefab-status-preview,
+	.tilefab-worker-state,
+	.tilefab-statusbar > span:nth-last-child(2),
+	.tilefab-statusbar > span:last-child {
+		display: none;
+	}
+}

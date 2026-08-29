@@ -1,0 +1,524 @@
+.tilefab-station-review {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	z-index: 34;
+	display: grid;
+	grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+	width: min(520px, calc(100% - 104px));
+	max-height: calc(100% - 24px);
+	color: #d9e4e7;
+	background: color-mix(in srgb, #10191d 96%, transparent);
+	border: 1px solid #38515a;
+	border-radius: 12px;
+	box-shadow: 0 18px 48px #020608a8;
+	overflow: hidden;
+	backdrop-filter: blur(14px);
+}
+
+.tilefab-station-review-header,
+.tilefab-station-review-footer {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 12px;
+	background: #142126;
+	border-bottom: 1px solid #2d4148;
+}
+
+.tilefab-station-review-heading {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.tilefab-station-review-heading > span,
+.tilefab-station-review-detail header > span,
+.tilefab-station-review-final > header > span {
+	display: grid;
+	gap: 1px;
+}
+
+.tilefab-station-review-heading small,
+.tilefab-station-review-detail header small,
+.tilefab-station-review-final header small {
+	color: #81969d;
+	font-size: 9px;
+	letter-spacing: 0.08em;
+}
+
+.tilefab-station-review-source {
+	min-width: 0;
+	margin-left: auto;
+	color: #9fb0b6;
+	font:
+		10px / 1.2 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tilefab-station-review button,
+.tilefab-station-review select {
+	min-height: 36px;
+	color: inherit;
+	background: #17262b;
+	border: 1px solid #3a5159;
+	border-radius: 7px;
+}
+
+.tilefab-station-review button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	cursor: pointer;
+}
+
+.tilefab-station-review button:disabled,
+.tilefab-station-review select:disabled {
+	opacity: 0.42;
+	cursor: not-allowed;
+}
+
+.tilefab-station-review-header > button {
+	width: 36px;
+	padding: 0;
+}
+
+.tilefab-station-review-summary {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 1px;
+	background: #263b43;
+}
+
+.tilefab-station-review-summary > span {
+	display: grid;
+	gap: 2px;
+	padding: 8px 10px;
+	background: #101a1e;
+}
+
+.tilefab-station-review-summary small {
+	color: #7f969e;
+	font-size: 9px;
+	letter-spacing: 0.09em;
+}
+
+.tilefab-station-review-summary strong {
+	font:
+		12px / 1.2 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+}
+
+.tilefab-station-review-tabs {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	padding: 7px;
+	gap: 5px;
+	border-bottom: 1px solid #2d4148;
+}
+
+.tilefab-station-review-tabs button {
+	justify-content: space-between;
+	padding: 0 9px;
+	font-size: 10px;
+}
+
+.tilefab-station-review-tabs button[data-active="true"] {
+	color: #d7fbff;
+	background: #174452;
+	border-color: #46a9bd;
+}
+
+.tilefab-station-review-tabs small {
+	color: #8da1a8;
+	font:
+		9px ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+}
+
+.tilefab-station-review-workspace {
+	min-height: 0;
+	overflow: auto;
+}
+
+.tilefab-station-review-list {
+	height: min(352px, 42vh);
+	min-height: 132px;
+	overflow: auto;
+	background: #0d1518;
+	border-bottom: 1px solid #2d4148;
+}
+
+.tilefab-station-review-list:focus-visible {
+	outline: 2px solid #66bfd2;
+	outline-offset: -2px;
+}
+
+.tilefab-station-review-list-space {
+	position: relative;
+	min-width: 100%;
+}
+
+.tilefab-station-review-list-row {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 44px;
+	padding: 2px 6px;
+}
+
+.tilefab-station-review-list-row > button {
+	display: grid;
+	grid-template-columns: 34px minmax(0, 1fr) auto 70px;
+	align-items: center;
+	width: 100%;
+	height: 40px;
+	min-height: 40px;
+	padding: 0 8px;
+	text-align: left;
+}
+
+.tilefab-station-review-list-row > button[data-active="true"] {
+	background: #183d47;
+	border-color: #5db4c7;
+}
+
+.tilefab-station-review-list-row > button > span:nth-child(2) {
+	display: grid;
+	min-width: 0;
+}
+
+.tilefab-station-review-list-row strong,
+.tilefab-station-review-list-row small {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tilefab-station-review-list-row small {
+	color: #83979e;
+	font-size: 9px;
+}
+
+.tilefab-station-review-list-row code,
+.tilefab-station-review-index {
+	color: #9cc6cf;
+	font-size: 9px;
+}
+
+.tilefab-station-review-list-row button[data-disposition="INCLUDE"] {
+	border-left-color: #49b27d;
+}
+
+.tilefab-station-review-list-row button[data-disposition="REJECT"] {
+	border-left-color: #b96969;
+}
+
+.tilefab-station-review-detail,
+.tilefab-station-review-final {
+	display: grid;
+	gap: 10px;
+	padding: 12px;
+}
+
+.tilefab-station-review-detail > header,
+.tilefab-station-review-final > header,
+.tilefab-station-review-evaluation > header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.tilefab-station-review-badge {
+	padding: 4px 7px;
+	color: #a5bac1;
+	background: #0e171a;
+	border: 1px solid #344a52;
+	border-radius: 999px;
+	font-size: 9px;
+}
+
+.tilefab-station-review-badge[data-state="INCLUDE"],
+.tilefab-station-review-badge[data-state="CONFIRM_DECLARED"],
+.tilefab-station-review-badge[data-state="OVERRIDE"] {
+	color: #9de6bd;
+	border-color: #34765b;
+}
+
+.tilefab-station-review-proposal-facts,
+.tilefab-station-review-readiness {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+	margin: 0;
+}
+
+.tilefab-station-review-proposal-facts > div,
+.tilefab-station-review-readiness > div {
+	display: grid;
+	gap: 2px;
+	padding: 7px 8px;
+	background: #111d21;
+	border: 1px solid #2c4148;
+	border-radius: 6px;
+}
+
+.tilefab-station-review dt {
+	color: #748990;
+	font-size: 8px;
+	letter-spacing: 0.08em;
+}
+
+.tilefab-station-review dd {
+	margin: 0;
+	font:
+		10px / 1.3 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tilefab-station-review-row-controls {
+	display: grid;
+	grid-template-columns: 1fr 1fr minmax(140px, 1.2fr);
+	gap: 7px;
+}
+
+.tilefab-station-review-row-controls label {
+	display: grid;
+	gap: 3px;
+}
+
+.tilefab-station-review-row-controls label > span {
+	color: #81969d;
+	font-size: 8px;
+}
+
+.tilefab-station-review-row-controls select {
+	width: 100%;
+	padding: 0 7px;
+	font-size: 9px;
+}
+
+.tilefab-station-review-pick[data-active="true"] {
+	color: #d8fbff;
+	background: #1d5360;
+	border-color: #66bfd2;
+	animation: tilefab-station-review-pulse 1.2s ease-in-out infinite;
+}
+
+.tilefab-station-review-selection {
+	display: grid;
+	gap: 7px;
+	padding: 9px;
+	background: #10271f;
+	border: 1px solid #36795c;
+	border-radius: 7px;
+}
+
+.tilefab-station-review-selection[data-source-position="ACKNOWLEDGE_MISMATCH"] {
+	background: #2a2214;
+	border-color: #9c7937;
+}
+
+.tilefab-station-review-selection > span,
+.tilefab-station-review-acknowledge {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 10px;
+}
+
+.tilefab-station-review-selection > button {
+	justify-self: end;
+	padding: 0 10px;
+}
+
+.tilefab-station-review-row-actions,
+.tilefab-station-review-group-actions,
+.tilefab-station-review-group-detail fieldset {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.tilefab-station-review-row-actions button,
+.tilefab-station-review-row-actions select,
+.tilefab-station-review-group-actions button,
+.tilefab-station-review-group-detail fieldset button {
+	padding: 0 9px;
+	font-size: 9px;
+}
+
+.tilefab-station-review-group-detail fieldset legend {
+	width: 100%;
+	margin-bottom: 5px;
+	color: #81969d;
+	font-size: 8px;
+}
+
+.tilefab-station-review-group-detail button[data-active="true"] {
+	color: #c9f5ff;
+	background: #174452;
+	border-color: #46a9bd;
+}
+
+.tilefab-station-review .tilefab-station-review-delete {
+	color: #ffb0aa;
+	margin-left: auto;
+}
+
+.tilefab-station-review-final > header {
+	justify-content: flex-start;
+}
+
+.tilefab-station-review .tilefab-station-review-policy {
+	justify-content: space-between;
+	padding: 7px 9px;
+	text-align: left;
+}
+
+.tilefab-station-review-policy > span {
+	display: grid;
+}
+
+.tilefab-station-review-policy small {
+	color: #7f939a;
+	font-size: 8px;
+}
+
+.tilefab-station-review-policy code {
+	color: #aabcc2;
+	font-size: 8px;
+}
+
+.tilefab-station-review-policy[data-complete="true"] {
+	border-color: #34765b;
+}
+
+.tilefab-station-review-evaluation {
+	display: grid;
+	gap: 7px;
+	padding: 9px;
+	background: #111d21;
+	border: 1px solid #36505a;
+	border-radius: 7px;
+}
+
+.tilefab-station-review-evaluation[data-state="READY"] {
+	border-color: #3b8b67;
+}
+
+.tilefab-station-review-evaluation p,
+.tilefab-station-review-evaluation ul {
+	margin: 0;
+	font-size: 10px;
+}
+
+.tilefab-station-review-evaluation li {
+	display: flex;
+	justify-content: space-between;
+}
+
+.tilefab-station-review-error {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+	padding: 8px 12px;
+	color: #ffc0ba;
+	background: #351b1c;
+	border-top: 1px solid #713b3c;
+	font-size: 10px;
+}
+
+.tilefab-station-review-footer {
+	border-top: 1px solid #2d4148;
+	border-bottom: 0;
+}
+
+.tilefab-station-review-footer > span {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	margin-right: auto;
+	color: #8da0a7;
+	font-size: 9px;
+}
+
+.tilefab-station-review-footer > span svg,
+.tilefab-station-review[data-phase="evaluating"] .tilefab-station-review-footer svg,
+.tilefab-station-review[data-phase="applying"] .tilefab-station-review-footer svg {
+	flex: 0 0 auto;
+}
+
+.tilefab-station-review-footer > span[data-ready="true"] {
+	color: #91deb2;
+}
+
+.tilefab-station-review-footer button {
+	padding: 0 9px;
+	font-size: 9px;
+}
+
+.tilefab-station-review-apply:not(:disabled) {
+	color: #d8fff0;
+	background: #1b6047;
+	border-color: #55b889;
+}
+
+@keyframes tilefab-station-review-pulse {
+	50% {
+		box-shadow: 0 0 0 3px #53b7ca24;
+	}
+}
+
+@media (max-width: 760px) {
+	.tilefab-station-review {
+		top: auto;
+		right: 6px;
+		bottom: 6px;
+		left: 6px;
+		width: auto;
+		max-height: min(72vh, 620px);
+	}
+
+	.tilefab-station-review-list {
+		height: min(220px, 28vh);
+	}
+
+	.tilefab-station-review-row-controls {
+		grid-template-columns: 1fr 1fr;
+	}
+
+	.tilefab-station-review-pick {
+		grid-column: 1 / -1;
+	}
+
+	.tilefab-station-review-footer {
+		flex-wrap: wrap;
+	}
+
+	.tilefab-station-review-footer > span {
+		width: 100%;
+	}
+}

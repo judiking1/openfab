@@ -1,0 +1,549 @@
+.tilefab-assemble-semantic-bay {
+	display: grid;
+	gap: 5px;
+	padding-top: 2px;
+	border-top: 1px solid #293436;
+}
+
+.tilefab-assemble-semantic-bay > header {
+	display: flex;
+	min-height: 22px;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	color: #96aaa9;
+	font-size: 9px;
+	font-weight: 760;
+	letter-spacing: 0.05em;
+}
+
+.tilefab-assemble-semantic-bay-header-detail {
+	overflow: hidden;
+	color: #68797b;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-assemble-semantic-bay-actions {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 5px;
+}
+
+.tilefab-assemble-semantic-bay-actions button {
+	display: flex;
+	min-width: 0;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 0 8px;
+	border: 1px solid #3b4b4d;
+	border-radius: 4px;
+	color: #becdce;
+	background: #151e1f;
+	cursor: pointer;
+	font-size: 10px;
+	font-weight: 760;
+}
+
+.tilefab-assemble-semantic-bay-actions button:hover:not(:disabled) {
+	border-color: #69817f;
+	color: #eef5f3;
+	background: #202b2b;
+}
+
+.tilefab-assemble-semantic-bay-actions button:last-child:not(:disabled) {
+	border-color: #805756;
+	color: #f0c6c0;
+	background: #2b1b1b;
+}
+
+.tilefab-assemble-semantic-bay-actions button:disabled {
+	color: #596668;
+	background: #111718;
+	cursor: not-allowed;
+}
+
+.tilefab-assemble-semantic-bay-statuses {
+	display: grid;
+	gap: 3px;
+}
+
+.tilefab-assemble-semantic-bay-statuses p {
+	display: grid;
+	grid-template-columns: 76px minmax(0, 1fr);
+	min-height: 20px;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+	color: #758789;
+	font-size: 9px;
+	line-height: 1.3;
+}
+
+.tilefab-assemble-semantic-bay-statuses p > span {
+	color: #7e9192;
+	font:
+		700 8px / 1 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+}
+
+.tilefab-assemble-semantic-bay-statuses p[data-ready="true"] {
+	color: #9cd9c5;
+}
+
+.tilefab-semantic-bay-backdrop {
+	position: fixed;
+	z-index: 90;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 16px;
+	background: rgb(3 8 9 / 74%);
+	backdrop-filter: blur(3px);
+}
+
+.tilefab-semantic-bay-dialog {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr) auto;
+	width: min(720px, calc(100vw - 32px));
+	max-height: calc(100dvh - 32px);
+	overflow: hidden;
+	border: 1px solid #4c5f60;
+	border-radius: 8px;
+	color: #dce7e6;
+	background: #0c1314;
+	box-shadow: 0 22px 70px rgb(0 0 0 / 58%);
+}
+
+.tilefab-semantic-bay-dialog > header {
+	display: grid;
+	grid-template-columns: 44px minmax(0, 1fr) auto;
+	min-height: 64px;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 12px;
+	border-bottom: 1px solid #344142;
+	background: linear-gradient(110deg, rgb(60 112 98 / 18%), transparent 62%), #11191a;
+}
+
+.tilefab-semantic-bay-heading-icon {
+	display: grid;
+	width: 44px;
+	height: 44px;
+	place-items: center;
+	border: 1px solid #57716d;
+	border-radius: 5px;
+	color: #a6dbcc;
+	background: #101d1a;
+}
+
+.tilefab-semantic-bay-dialog[data-action="DELETE"] .tilefab-semantic-bay-heading-icon {
+	border-color: #775452;
+	color: #e6b4ae;
+	background: #251817;
+}
+
+.tilefab-semantic-bay-dialog > header > span:nth-child(2) {
+	display: grid;
+	min-width: 0;
+	gap: 3px;
+}
+
+.tilefab-semantic-bay-dialog > header small {
+	color: #738587;
+	font-size: 9px;
+	font-weight: 760;
+	letter-spacing: 0.08em;
+}
+
+.tilefab-semantic-bay-dialog-title {
+	font-size: 17px;
+	font-weight: 800;
+	letter-spacing: 0.025em;
+}
+
+.tilefab-semantic-bay-dialog-id {
+	padding: 5px 7px;
+	border: 1px solid #354345;
+	border-radius: 4px;
+	color: #8da09f;
+	background: #0b1112;
+	font-size: 9px;
+}
+
+.tilefab-semantic-bay-workspace {
+	display: grid;
+	min-height: 0;
+	gap: 10px;
+	overflow: auto;
+	padding: 12px;
+	overscroll-behavior: contain;
+}
+
+.tilefab-semantic-bay-intro {
+	margin: 0;
+	color: #9aabaa;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+.tilefab-semantic-bay-intro-name {
+	color: #e0e9e7;
+}
+
+.tilefab-semantic-bay-status {
+	display: grid;
+	grid-template-columns: 24px minmax(0, 1fr) auto;
+	min-height: 58px;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	border: 1px solid #3e4d4e;
+	border-radius: 5px;
+	background: #11191a;
+}
+
+.tilefab-semantic-bay-status > span:first-child {
+	display: grid;
+	place-items: center;
+	color: #c9b86e;
+}
+
+.tilefab-semantic-bay-status[data-state="ready"] {
+	border-color: #4e776b;
+	background: #10221d;
+}
+
+.tilefab-semantic-bay-status[data-state="ready"] > span:first-child {
+	color: #9ddfc9;
+}
+
+.tilefab-semantic-bay-status[data-state="rejected"] {
+	border-color: #795150;
+	background: #281919;
+}
+
+.tilefab-semantic-bay-status[data-state="rejected"] > span:first-child {
+	color: #e8aaa3;
+}
+
+.tilefab-semantic-bay-status-copy {
+	display: grid;
+	min-width: 0;
+	gap: 3px;
+}
+
+.tilefab-semantic-bay-status-title {
+	font-size: 11px;
+	font-weight: 790;
+	letter-spacing: 0.035em;
+}
+
+.tilefab-semantic-bay-status-detail {
+	color: #89999a;
+	font-size: 10px;
+	line-height: 1.4;
+}
+
+.tilefab-semantic-bay-status-timing {
+	color: #718284;
+	font-size: 9px;
+}
+
+.tilefab-semantic-bay-spinner {
+	animation: tilefab-semantic-bay-spin 0.9s linear infinite;
+}
+
+@keyframes tilefab-semantic-bay-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.tilefab-semantic-bay-review,
+.tilefab-semantic-bay-evidence {
+	display: grid;
+	gap: 8px;
+	padding: 10px;
+	border: 1px solid #303d3f;
+	border-radius: 5px;
+	background: #0e1516;
+}
+
+.tilefab-semantic-bay-review > header,
+.tilefab-semantic-bay-evidence > header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.tilefab-semantic-bay-review > header strong,
+.tilefab-semantic-bay-evidence > header strong {
+	font-size: 10px;
+	font-weight: 790;
+	letter-spacing: 0.045em;
+}
+
+.tilefab-semantic-bay-review > header small,
+.tilefab-semantic-bay-evidence > header small {
+	color: #6f8082;
+	font-size: 9px;
+}
+
+.tilefab-semantic-bay-impact-grid,
+.tilefab-semantic-bay-evidence-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 6px;
+}
+
+.tilefab-semantic-bay-impact-grid article {
+	display: grid;
+	align-content: start;
+	gap: 5px;
+	min-width: 0;
+	padding: 8px;
+	border: 1px solid #374446;
+	border-radius: 4px;
+	background: #121a1b;
+}
+
+.tilefab-semantic-bay-impact-grid article[data-impact="preserved"] {
+	border-color: #3f685e;
+}
+
+.tilefab-semantic-bay-impact-grid article[data-impact="removed"] {
+	border-color: #6c4a49;
+}
+
+.tilefab-semantic-bay-impact-grid article > strong {
+	color: #96d6c2;
+	font-size: 9px;
+	letter-spacing: 0.055em;
+}
+
+.tilefab-semantic-bay-impact-grid article[data-impact="removed"] > strong {
+	color: #e0aaa5;
+}
+
+.tilefab-semantic-bay-impact-copy,
+.tilefab-semantic-bay-impact-detail {
+	margin: 0;
+	color: #a6b4b4;
+	font-size: 10px;
+	line-height: 1.4;
+}
+
+.tilefab-semantic-bay-impact-detail {
+	color: #78898a;
+}
+
+.tilefab-semantic-bay-bounded-details {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 4px 8px;
+}
+
+.tilefab-semantic-bay-identity {
+	display: grid;
+	min-width: 0;
+	gap: 2px;
+}
+
+.tilefab-semantic-bay-identity-label {
+	color: #6e8081;
+	font-size: 8px;
+	letter-spacing: 0.04em;
+}
+
+.tilefab-semantic-bay-identity-values {
+	overflow: hidden;
+	color: #91a2a3;
+	font-size: 8px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-semantic-bay-candidate-note {
+	margin: 0;
+	color: #6f7f81;
+	font-size: 9px;
+	line-height: 1.4;
+}
+
+.tilefab-semantic-bay-evidence[data-certified="true"] {
+	border-color: #466c63;
+	background: #0d1b18;
+}
+
+.tilefab-semantic-bay-evidence > header {
+	justify-content: flex-start;
+}
+
+.tilefab-semantic-bay-evidence > header > span:first-child {
+	display: grid;
+	place-items: center;
+	color: #9dd7c6;
+}
+
+.tilefab-semantic-bay-evidence > header > span:last-child {
+	display: grid;
+	gap: 2px;
+}
+
+.tilefab-semantic-bay-evidence-grid dl {
+	display: grid;
+	gap: 3px;
+	margin: 0;
+	padding: 7px;
+	border: 1px solid #30413f;
+	border-radius: 4px;
+	background: #101817;
+}
+
+.tilefab-semantic-bay-evidence-grid dl > div {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.tilefab-semantic-bay-evidence-grid dt {
+	color: #758685;
+	font-size: 8px;
+	font-weight: 730;
+}
+
+.tilefab-semantic-bay-evidence-grid dd {
+	margin: 0;
+	color: #bdcfca;
+	font:
+		700 9px / 1.2 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+}
+
+.tilefab-semantic-bay-scope-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.tilefab-semantic-bay-scope {
+	padding: 4px 6px;
+	border: 1px solid #3e665c;
+	border-radius: 3px;
+	color: #99d4c2;
+	background: #10221d;
+	font-size: 8px;
+	font-weight: 760;
+}
+
+.tilefab-semantic-bay-scope-row[data-certified="false"] .tilefab-semantic-bay-scope {
+	border-color: #625d42;
+	color: #c7ba7b;
+	background: #211f14;
+}
+
+.tilefab-semantic-bay-dialog > footer {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 8px;
+	padding: 10px 12px;
+	border-top: 1px solid #344142;
+	background: #101718;
+}
+
+.tilefab-semantic-bay-dialog > footer button {
+	display: flex;
+	min-width: 0;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 0 12px;
+	border: 1px solid #465557;
+	border-radius: 4px;
+	color: #bdc9ca;
+	background: #171f20;
+	cursor: pointer;
+	font-size: 10px;
+	font-weight: 780;
+}
+
+.tilefab-semantic-bay-dialog > footer button:hover:not(:disabled) {
+	border-color: #68797a;
+	color: #edf3f2;
+	background: #202a2b;
+}
+
+.tilefab-semantic-bay-dialog > footer .tilefab-semantic-bay-apply:not(:disabled) {
+	border-color: #4d776c;
+	color: #b9e5d7;
+	background: #142923;
+}
+
+.tilefab-semantic-bay-dialog[data-action="DELETE"]
+	> footer
+	.tilefab-semantic-bay-apply:not(:disabled) {
+	border-color: #825957;
+	color: #efb9b3;
+	background: #2c1b1a;
+}
+
+.tilefab-semantic-bay-dialog > footer button:disabled {
+	color: #5d6a6b;
+	background: #111718;
+	cursor: not-allowed;
+}
+
+@media (width <= 560px) {
+	.tilefab-semantic-bay-backdrop {
+		align-items: end;
+		padding: 8px;
+	}
+
+	.tilefab-semantic-bay-dialog {
+		width: calc(100vw - 16px);
+		max-height: calc(100dvh - 16px);
+	}
+
+	.tilefab-semantic-bay-dialog > header {
+		grid-template-columns: 44px minmax(0, 1fr);
+	}
+
+	.tilefab-semantic-bay-dialog-id {
+		display: none;
+	}
+
+	.tilefab-semantic-bay-status {
+		grid-template-columns: 24px minmax(0, 1fr);
+	}
+
+	.tilefab-semantic-bay-status-timing {
+		display: none;
+	}
+
+	.tilefab-semantic-bay-impact-grid,
+	.tilefab-semantic-bay-evidence-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.tilefab-semantic-bay-review > header,
+	.tilefab-semantic-bay-evidence > header {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tilefab-semantic-bay-spinner {
+		animation: none;
+	}
+}

@@ -1,0 +1,55 @@
+{
+	"schemaVersion": 1,
+	"classification": "INDEPENDENT_SYNTHETIC_CODE_GENERATED",
+	"generatorCommand": "npm run generate:certified-presets",
+	"externalInputFiles": [],
+	"attestations": {
+		"containsImportedFactoryCoordinates": false,
+		"containsCustomerOrCompanyIdentifiers": false,
+		"containsOperationalRecords": false
+	},
+	"commonGeneratorSources": [
+		"scripts/generate-synthetic-fab-certified-presets.mjs",
+		"src/tilefab/compile/SyntheticFabStarter.ts",
+		"src/tilefab/compile/SyntheticFabStarterPreview.ts",
+		"src/tilefab/editor/SyntheticFabStarterCertifiedArtifact.ts"
+	],
+	"artifacts": [
+		{
+			"path": "src/tilefab/generated/synthetic-fab-presets/central-spine-fab-24.default.v1.json",
+			"artifactId": "central-spine-fab-24.default.v1",
+			"sha256": "0bb7a74e6ca81ffe4c67b64833dba58bc65edefcdc54633f4dd9fdd0c556f0a9",
+			"profileSource": "src/tilefab/compile/CentralSpineFabAssemblyPlan.ts"
+		},
+		{
+			"path": "src/tilefab/generated/synthetic-fab-presets/full-fab-52.default.v1.json",
+			"artifactId": "full-fab-52.default.v1",
+			"sha256": "58030a729b1f730acf230ff3c35d38a7339df64253cba4ad9ea7c09fd9358f0a",
+			"profileSource": "src/tilefab/compile/FullFabAssemblyPlan.ts"
+		},
+		{
+			"path": "src/tilefab/generated/synthetic-fab-presets/large-fab-60.default.v1.json",
+			"artifactId": "large-fab-60.default.v1",
+			"sha256": "c92c962a7f0288600d86a065760e21e3f072899610998373ef1bd5ce70a609e3",
+			"profileSource": "src/tilefab/compile/SyntheticFabTopologySpec.ts"
+		},
+		{
+			"path": "src/tilefab/generated/synthetic-fab-presets/paired-circulation-fab-52.default.v2.json",
+			"artifactId": "paired-circulation-fab-52.default.v2",
+			"sha256": "d2bc888a22c679e17d5d90f62f10ad85f69a085623ef062abf15853cffee7b76",
+			"profileSource": "src/tilefab/compile/PairedCirculationFabAssemblyPlan.ts"
+		},
+		{
+			"path": "src/tilefab/generated/synthetic-fab-presets/parallel-hall-fab-12.default.v1.json",
+			"artifactId": "parallel-hall-fab-12.default.v1",
+			"sha256": "95b99118d1a7845c1cae938497eb4ab79bc346df53c7c059e33c6e602c470866",
+			"profileSource": "src/tilefab/compile/ParallelHallFabAssemblyPlan.ts"
+		},
+		{
+			"path": "src/tilefab/generated/synthetic-fab-presets/production-fab-60.default.v1.json",
+			"artifactId": "production-fab-60.default.v1",
+			"sha256": "e0338bbab94587edddba430b538f0e71d1d75fc5665841def7364bf135580896",
+			"profileSource": "src/tilefab/compile/ProductionFabAssemblyPlan.ts"
+		}
+	]
+}

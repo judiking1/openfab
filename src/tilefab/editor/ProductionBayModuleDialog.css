@@ -1,0 +1,488 @@
+.tilefab-production-bay-panel {
+	position: absolute;
+	z-index: 7;
+	top: 14px;
+	right: 14px;
+	display: flex;
+	width: min(404px, calc(100% - 78px));
+	max-height: calc(100% - 28px);
+	flex-direction: column;
+	overflow: hidden;
+	border: 1px solid #456164;
+	border-radius: 5px;
+	color: #d4dfe0;
+	background: rgb(13 19 20 / 97%);
+	box-shadow: 0 14px 36px rgb(0 0 0 / 42%);
+	backdrop-filter: blur(9px);
+}
+
+.tilefab-production-bay-panel :where(button, input):focus-visible {
+	outline: 2px solid #9be4e7;
+	outline-offset: 2px;
+}
+
+.tilefab-production-bay-header {
+	display: grid;
+	min-height: 50px;
+	grid-template-columns: 34px minmax(0, 1fr) auto 44px;
+	align-items: center;
+	gap: 8px;
+	padding: 0 4px 0 10px;
+	border-bottom: 1px solid #303d3f;
+	background: #11191a;
+}
+
+.tilefab-production-bay-heading-icon {
+	display: grid;
+	width: 32px;
+	height: 32px;
+	place-items: center;
+	border: 1px solid #47666a;
+	border-radius: 4px;
+	color: #9be4e7;
+	background: #17282a;
+}
+
+.tilefab-production-bay-heading {
+	display: grid;
+	min-width: 0;
+	gap: 1px;
+}
+
+.tilefab-production-bay-heading small,
+.tilefab-production-bay-family small,
+.tilefab-production-bay-metrics dt,
+.tilefab-production-bay-controls legend {
+	color: #849698;
+	font-size: 9px;
+	font-weight: 780;
+	letter-spacing: 0.04em;
+}
+
+.tilefab-production-bay-heading strong {
+	font-size: 14px;
+	letter-spacing: 0;
+}
+
+.tilefab-production-bay-rotation {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	color: #d4b665;
+	font-size: 10px;
+	font-weight: 760;
+}
+
+.tilefab-production-bay-close {
+	display: grid;
+	width: 44px;
+	height: 44px;
+	place-items: center;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	color: #98a9ab;
+	background: transparent;
+	cursor: pointer;
+}
+
+.tilefab-production-bay-close:hover {
+	border-color: #3d4c4e;
+	color: #fff;
+	background: #1a2325;
+}
+
+.tilefab-production-bay-family {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+	padding: 8px;
+	border-bottom: 1px solid #293638;
+}
+
+.tilefab-production-bay-family > button {
+	display: grid;
+	min-width: 0;
+	min-height: 54px;
+	grid-template-columns: 52px minmax(0, 1fr);
+	align-items: center;
+	gap: 7px;
+	padding: 5px 7px;
+	border: 1px solid #304043;
+	border-radius: 4px;
+	color: #aebdbf;
+	text-align: left;
+	background: #0f1617;
+	cursor: pointer;
+}
+
+.tilefab-production-bay-family > button:hover {
+	border-color: #4d6a6d;
+	background: #152022;
+}
+
+.tilefab-production-bay-family > button[data-active="true"] {
+	border-color: #65b8bd;
+	color: #effafa;
+	background: #17292b;
+	box-shadow: inset 3px 0 #78d4d9;
+}
+
+.tilefab-production-bay-family > button > span {
+	display: grid;
+	min-width: 0;
+	gap: 2px;
+}
+
+.tilefab-production-bay-family strong {
+	overflow: hidden;
+	font-size: 10px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-production-bay-miniature {
+	width: min(100%, 154px);
+	height: auto;
+	overflow: visible;
+}
+
+.tilefab-production-bay-miniature[data-compact="true"] {
+	width: 50px;
+}
+
+.tilefab-production-bay-miniature :where(.shell, .process, .gateway) {
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.tilefab-production-bay-miniature .shell {
+	stroke: #8fe0e4;
+	stroke-width: 3;
+}
+
+.tilefab-production-bay-miniature .process {
+	stroke: #64b8bd;
+	stroke-width: 2.5;
+}
+
+.tilefab-production-bay-miniature .gateway {
+	stroke: #d7ad57;
+	stroke-width: 2.5;
+}
+
+.tilefab-production-bay-miniature .flow {
+	fill: none;
+	stroke: #f0c76f;
+	stroke-width: 1.8;
+}
+
+.tilefab-production-bay-miniature marker path {
+	fill: #f0c76f;
+}
+
+.tilefab-production-bay-preview {
+	display: grid;
+	grid-template-columns: 146px minmax(0, 1fr);
+	align-items: center;
+	gap: 10px;
+	min-height: 98px;
+	padding: 8px 10px;
+	border-bottom: 1px solid #293638;
+	background-color: #0b1112;
+	background-image:
+		linear-gradient(rgb(75 101 104 / 10%) 1px, transparent 1px),
+		linear-gradient(90deg, rgb(75 101 104 / 10%) 1px, transparent 1px);
+	background-size: 18px 18px;
+}
+
+.tilefab-production-bay-metrics {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	margin: 0;
+	border: 1px solid #283537;
+	background: rgb(10 15 16 / 84%);
+}
+
+.tilefab-production-bay-metrics > div {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+	padding: 6px;
+}
+
+.tilefab-production-bay-metrics > div:nth-child(even) {
+	border-left: 1px solid #283537;
+}
+
+.tilefab-production-bay-metrics > div:nth-child(n + 3) {
+	border-top: 1px solid #283537;
+}
+
+.tilefab-production-bay-metrics dd {
+	margin: 0;
+	overflow: hidden;
+	color: #dce8e9;
+	font-size: 10px;
+	font-weight: 760;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-production-bay-controls {
+	display: grid;
+	min-height: 0;
+	grid-template-columns: minmax(0, 1.4fr) minmax(132px, 0.9fr);
+	gap: 10px;
+	padding: 10px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	scrollbar-color: #3b484a transparent;
+	scrollbar-width: thin;
+}
+
+.tilefab-production-bay-controls fieldset {
+	display: grid;
+	min-width: 0;
+	align-content: start;
+	gap: 6px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.tilefab-production-bay-controls legend {
+	margin-bottom: 2px;
+}
+
+.tilefab-production-bay-controls label {
+	display: grid;
+	grid-template-columns: 62px minmax(0, 1fr);
+	align-items: center;
+	gap: 6px;
+}
+
+.tilefab-production-bay-controls label > span:first-child {
+	color: #91a2a4;
+	font-size: 9px;
+	font-weight: 720;
+}
+
+.tilefab-production-bay-controls label > span:last-child {
+	display: grid;
+	grid-template-columns: 34px minmax(0, 1fr) 16px 34px;
+	align-items: center;
+	border: 1px solid #354345;
+	border-radius: 4px;
+	background: #0b1112;
+}
+
+.tilefab-production-bay-controls label button {
+	display: grid;
+	width: 34px;
+	height: 34px;
+	place-items: center;
+	border: 0;
+	color: #9cadb0;
+	background: transparent;
+	cursor: pointer;
+}
+
+.tilefab-production-bay-controls label button:hover:not(:disabled) {
+	color: #fff;
+	background: #1b2729;
+}
+
+.tilefab-production-bay-controls button:disabled {
+	opacity: 0.36;
+	cursor: default;
+}
+
+.tilefab-production-bay-controls input {
+	width: 100%;
+	min-width: 0;
+	height: 34px;
+	border: 0;
+	color: #e6f0f1;
+	text-align: right;
+	background: transparent;
+	font: inherit;
+	font-size: 11px;
+	font-weight: 760;
+}
+
+.tilefab-production-bay-controls label em {
+	color: #718385;
+	font-size: 9px;
+	font-style: normal;
+	text-align: center;
+}
+
+.tilefab-production-bay-flow-controls {
+	display: grid;
+	align-content: start;
+	gap: 10px;
+}
+
+.tilefab-production-bay-flow {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tilefab-production-bay-flow legend {
+	grid-column: 1 / -1;
+}
+
+.tilefab-production-bay-flow button {
+	display: flex;
+	min-height: 34px;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 0 4px;
+	border: 1px solid #354345;
+	border-radius: 4px;
+	color: #91a2a4;
+	background: #0b1112;
+	cursor: pointer;
+	font-size: 8px;
+	font-weight: 760;
+}
+
+.tilefab-production-bay-flow button[data-active="true"] {
+	border-color: #66bdc1;
+	color: #e7fafa;
+	background: #193033;
+}
+
+.tilefab-production-bay-panel > footer {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 78px 92px;
+	align-items: center;
+	gap: 6px;
+	padding: 7px 8px;
+	border-top: 1px solid #2d393b;
+	background: #111819;
+}
+
+.tilefab-production-bay-validation {
+	display: grid;
+	min-width: 0;
+	grid-template-columns: 17px minmax(0, 1fr);
+	column-gap: 6px;
+	color: #75d4b0;
+}
+
+.tilefab-production-bay-panel[data-valid="false"] .tilefab-production-bay-validation {
+	color: #f1848d;
+}
+
+.tilefab-production-bay-validation svg {
+	grid-row: 1 / 3;
+	align-self: center;
+}
+
+.tilefab-production-bay-validation strong,
+.tilefab-production-bay-validation small {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-production-bay-validation strong {
+	font-size: 9px;
+}
+
+.tilefab-production-bay-validation small {
+	color: #87999b;
+	font-size: 9px;
+}
+
+.tilefab-production-bay-panel > footer > button {
+	display: inline-flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	padding: 0 8px;
+	border: 1px solid #405053;
+	border-radius: 4px;
+	color: #b9c7c9;
+	background: #151d1f;
+	cursor: pointer;
+	font-size: 9px;
+	font-weight: 760;
+}
+
+.tilefab-production-bay-panel > footer > .tilefab-production-bay-canvas {
+	border-color: #5da9ad;
+	color: #e6ffff;
+	background: #1b4245;
+}
+
+.tilefab-production-bay-panel > footer > button:disabled {
+	opacity: 0.36;
+	cursor: default;
+}
+
+.tilefab-workspace:has(.tilefab-production-bay-panel) .tilefab-recovery {
+	display: none;
+}
+
+@media (max-width: 760px) {
+	.tilefab-production-bay-panel {
+		top: auto;
+		right: 8px;
+		bottom: 8px;
+		left: 8px;
+		width: auto;
+		max-height: min(66dvh, 570px);
+	}
+
+	.tilefab-production-bay-controls label button,
+	.tilefab-production-bay-controls input {
+		height: 44px;
+	}
+
+	.tilefab-production-bay-controls label button {
+		width: 44px;
+	}
+
+	.tilefab-production-bay-controls label > span:last-child {
+		grid-template-columns: 44px minmax(0, 1fr) 18px 44px;
+	}
+
+	.tilefab-production-bay-flow button {
+		min-height: 44px;
+	}
+}
+
+@media (max-width: 430px) {
+	.tilefab-production-bay-panel {
+		max-height: min(70dvh, 620px);
+	}
+
+	.tilefab-production-bay-family > button {
+		grid-template-columns: minmax(0, 1fr);
+		text-align: center;
+	}
+
+	.tilefab-production-bay-family .tilefab-production-bay-miniature {
+		display: none;
+	}
+
+	.tilefab-production-bay-preview {
+		grid-template-columns: 108px minmax(0, 1fr);
+	}
+
+	.tilefab-production-bay-controls {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.tilefab-production-bay-flow-controls {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.tilefab-production-bay-validation small {
+		display: none;
+	}
+}

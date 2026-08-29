@@ -1,0 +1,971 @@
+.tilefab-operational-backdrop {
+	position: absolute;
+	inset: 0;
+	z-index: 160;
+	display: grid;
+	place-items: center;
+	padding: 18px;
+	background: rgb(5 8 9 / 78%);
+	backdrop-filter: blur(3px);
+}
+
+.tilefab-operational-panel {
+	display: grid;
+	grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+	width: min(1040px, calc(100vw - 36px));
+	height: min(780px, calc(100vh - 36px));
+	overflow: hidden;
+	border: 1px solid #405154;
+	border-radius: 7px;
+	color: #dbe5e6;
+	background: #0b1011;
+	box-shadow: 0 24px 80px rgb(0 0 0 / 58%);
+}
+
+.tilefab-operational-header {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto auto;
+	align-items: center;
+	gap: 11px;
+	min-height: 62px;
+	padding: 10px 12px;
+	border-bottom: 1px solid #263234;
+	background: linear-gradient(110deg, #111a1c, #0c1112 64%);
+}
+
+.tilefab-operational-heading-icon {
+	display: grid;
+	width: 34px;
+	height: 34px;
+	place-items: center;
+	border: 1px solid #31555a;
+	border-radius: 5px;
+	color: #8de3ea;
+	background: #132326;
+}
+
+.tilefab-operational-header > span:nth-child(2) {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+
+.tilefab-operational-header small,
+.tilefab-operational-header em {
+	color: #718486;
+	font-size: 9px;
+	font-style: normal;
+	letter-spacing: 0.06em;
+}
+
+.tilefab-operational-header strong {
+	font-size: 13px;
+	letter-spacing: 0.04em;
+}
+
+.tilefab-operational-header-state {
+	display: grid;
+	gap: 2px;
+	min-width: 74px;
+	text-align: right;
+}
+
+.tilefab-operational-header-state strong {
+	color: #d6bd70;
+	font-size: 10px;
+}
+
+.tilefab-operational-header-state strong[data-state="ready"] {
+	color: #7ad9b3;
+}
+
+.tilefab-operational-header-state strong[data-state="dirty"] {
+	color: #e09b67;
+}
+
+.tilefab-operational-header > button,
+.tilefab-operational-policy-row > button,
+.tilefab-operational-definition-row > button {
+	display: grid;
+	place-items: center;
+	border: 1px solid #303d3f;
+	border-radius: 4px;
+	color: #9aabad;
+	background: #111718;
+	cursor: pointer;
+}
+
+.tilefab-operational-header > button {
+	width: 30px;
+	height: 30px;
+}
+
+.tilefab-operational-tabs {
+	display: grid;
+	grid-template-columns: repeat(6, 1fr);
+	border-bottom: 1px solid #263234;
+	background: #0d1314;
+}
+
+.tilefab-operational-tabs button {
+	display: flex;
+	min-height: 40px;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	border: 0;
+	border-right: 1px solid #222d2f;
+	color: #78898b;
+	background: transparent;
+	cursor: pointer;
+}
+
+.tilefab-operational-tabs button:last-child {
+	border-right: 0;
+}
+
+.tilefab-operational-tabs button[data-active="true"] {
+	color: #c9eff2;
+	background: #162326;
+	box-shadow: inset 0 -2px #70d4dc;
+}
+
+.tilefab-operational-tabs small {
+	color: #52696c;
+	font-size: 8px;
+}
+
+.tilefab-operational-tabs span {
+	font-size: 10px;
+	font-weight: 720;
+	letter-spacing: 0.04em;
+}
+
+.tilefab-operational-body {
+	min-height: 0;
+	overflow: auto;
+	padding: 16px;
+}
+
+.tilefab-operational-section {
+	display: grid;
+	gap: 13px;
+	max-width: 960px;
+	margin: 0 auto;
+}
+
+.tilefab-operational-section > header,
+.tilefab-operational-policy-card > header,
+.tilefab-operational-definitions > header,
+.tilefab-operational-port-overrides > header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.tilefab-operational-section > header > span,
+.tilefab-operational-policy-card > header > span {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	color: #cce8ea;
+}
+
+.tilefab-operational-section > header strong {
+	font-size: 12px;
+	letter-spacing: 0.05em;
+}
+
+.tilefab-operational-section > header small,
+.tilefab-operational-policy-card > header small,
+.tilefab-operational-definitions > header small,
+.tilefab-operational-port-overrides > header small {
+	color: #76888a;
+	font-size: 9px;
+}
+
+.tilefab-operational-section > p {
+	max-width: 760px;
+	margin: -4px 0 0;
+	color: #859597;
+	font-size: 10px;
+	line-height: 1.55;
+}
+
+.tilefab-operational-resident-warning {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	padding: 10px;
+	border: 1px solid #59482c;
+	border-radius: 4px;
+	color: #d9b461;
+	background: #211b10;
+}
+
+.tilefab-operational-resident-warning > span {
+	display: grid;
+	gap: 3px;
+}
+
+.tilefab-operational-resident-warning strong {
+	font-size: 9px;
+	letter-spacing: 0.04em;
+}
+
+.tilefab-operational-resident-warning small {
+	color: #9b8c6d;
+	font-size: 8px;
+	line-height: 1.45;
+}
+
+.tilefab-operational-resident-table {
+	display: grid;
+	overflow: hidden;
+	border: 1px solid #293638;
+	border-radius: 5px;
+}
+
+.tilefab-operational-resident-head,
+.tilefab-operational-resident-row {
+	display: grid;
+	grid-template-columns: 38px minmax(120px, 0.8fr) minmax(260px, 1.4fr) 150px 34px;
+	align-items: center;
+	gap: 6px;
+	min-height: 42px;
+	padding: 6px 8px;
+	border-bottom: 1px solid #202a2c;
+}
+
+.tilefab-operational-resident-head {
+	min-height: 28px;
+	color: #617476;
+	background: #11191a;
+	font-size: 8px;
+	font-weight: 740;
+	letter-spacing: 0.05em;
+}
+
+.tilefab-operational-resident-row:last-child {
+	border-bottom: 0;
+}
+
+.tilefab-operational-resident-row > small {
+	color: #708284;
+	font-size: 8px;
+}
+
+.tilefab-operational-resident-row[data-anchor-current="false"] > select {
+	border-color: #7b533b;
+	color: #e1a179;
+}
+
+.tilefab-operational-resident-row input,
+.tilefab-operational-resident-row select,
+.tilefab-operational-resident-form input,
+.tilefab-operational-resident-form select {
+	height: 29px;
+	padding: 0 7px;
+	font-size: 9px;
+}
+
+.tilefab-operational-resident-row > button {
+	display: grid;
+	width: 28px;
+	height: 28px;
+	place-items: center;
+	border: 1px solid #303d3f;
+	border-radius: 4px;
+	color: #9aabad;
+	background: #111718;
+	cursor: pointer;
+}
+
+.tilefab-operational-resident-form {
+	display: grid;
+	grid-template-columns: minmax(180px, 0.8fr) minmax(280px, 1.4fr) auto;
+	gap: 6px;
+}
+
+.tilefab-operational-resident-form button {
+	border: 1px solid #315158;
+	border-radius: 3px;
+	color: #99d5da;
+	background: #142326;
+	font-size: 8px;
+	font-weight: 730;
+	cursor: pointer;
+}
+
+.tilefab-operational-filterbar {
+	display: grid;
+	grid-template-columns: minmax(180px, 1fr) 150px auto;
+	align-items: center;
+	gap: 8px;
+}
+
+.tilefab-operational-filterbar label {
+	display: flex;
+	height: 34px;
+	align-items: center;
+	gap: 7px;
+	padding: 0 9px;
+	border: 1px solid #2b393b;
+	border-radius: 4px;
+	color: #6f8284;
+	background: #0d1314;
+}
+
+.tilefab-operational-panel input,
+.tilefab-operational-panel select {
+	min-width: 0;
+	border: 1px solid #304043;
+	border-radius: 3px;
+	color: #d3dfe0;
+	background: #0c1213;
+	font: inherit;
+}
+
+.tilefab-operational-filterbar input {
+	width: 100%;
+	border: 0;
+	outline: 0;
+	background: transparent;
+}
+
+.tilefab-operational-filterbar select,
+.tilefab-operational-object-selector select {
+	height: 34px;
+	padding: 0 8px;
+}
+
+.tilefab-operational-filterbar > small {
+	color: #6f8183;
+	font-size: 9px;
+}
+
+.tilefab-operational-table {
+	display: grid;
+	overflow: hidden;
+	border: 1px solid #273436;
+	border-radius: 5px;
+}
+
+.tilefab-operational-table-head,
+.tilefab-operational-table-row {
+	display: grid;
+	grid-template-columns: minmax(190px, 1.3fr) minmax(130px, 0.8fr) minmax(170px, 0.8fr);
+	align-items: center;
+	gap: 10px;
+	min-height: 46px;
+	padding: 6px 9px;
+	border-bottom: 1px solid #202a2c;
+}
+
+.tilefab-operational-table-row:last-child {
+	border-bottom: 0;
+}
+
+.tilefab-operational-table-head {
+	min-height: 30px;
+	color: #617476;
+	background: #11191a;
+	font-size: 8px;
+	font-weight: 740;
+	letter-spacing: 0.05em;
+}
+
+.tilefab-operational-table-row > span,
+.tilefab-operational-object-link {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+
+.tilefab-operational-table-row strong,
+.tilefab-operational-object-link strong {
+	overflow: hidden;
+	font-size: 10px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-operational-table-row small,
+.tilefab-operational-object-link small {
+	overflow: hidden;
+	color: #6f8082;
+	font-size: 8px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-operational-object-link,
+.tilefab-operational-override-row > button {
+	padding: 0;
+	border: 0;
+	color: #bcdadd;
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
+}
+
+.tilefab-operational-object-link:disabled,
+.tilefab-operational-override-row > button:disabled {
+	cursor: default;
+}
+
+.tilefab-operational-table-row > select {
+	height: 30px;
+	padding: 0 7px;
+	font-size: 9px;
+}
+
+.tilefab-operational-table-row > select[data-configured="false"] {
+	border-color: #695941;
+	color: #d5b66f;
+}
+
+.tilefab-operational-overflow {
+	color: #bc9d67;
+	font-size: 9px;
+}
+
+.tilefab-operational-definitions,
+.tilefab-operational-policy-card {
+	display: grid;
+	gap: 8px;
+	padding: 11px;
+	border: 1px solid #293638;
+	border-radius: 5px;
+	background: #0e1516;
+}
+
+.tilefab-operational-definitions > header strong,
+.tilefab-operational-port-overrides > header strong {
+	font-size: 9px;
+	letter-spacing: 0.05em;
+}
+
+.tilefab-operational-definitions > div {
+	display: grid;
+	gap: 4px;
+	max-height: 210px;
+	overflow: auto;
+}
+
+.tilefab-operational-definition-row {
+	display: grid;
+	grid-template-columns: 28px minmax(0, 1fr) 26px;
+	align-items: center;
+	gap: 5px;
+}
+
+.tilefab-operational-definition-row > small,
+.tilefab-operational-policy-row > small {
+	color: #66797b;
+	font-size: 8px;
+}
+
+.tilefab-operational-definition-row input,
+.tilefab-operational-definitions > form input {
+	height: 29px;
+	padding: 0 7px;
+	font-size: 9px;
+}
+
+.tilefab-operational-definition-row > button,
+.tilefab-operational-policy-row > button {
+	width: 26px;
+	height: 26px;
+}
+
+.tilefab-operational-definitions > form {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 5px;
+}
+
+.tilefab-operational-definitions > form button,
+.tilefab-operational-capability-list > button {
+	border: 1px solid #315158;
+	border-radius: 3px;
+	color: #99d5da;
+	background: #142326;
+	font-size: 8px;
+	font-weight: 730;
+	cursor: pointer;
+}
+
+.tilefab-operational-none {
+	padding: 8px;
+	color: #607173;
+	font-size: 8px;
+	text-align: center;
+}
+
+.tilefab-operational-object-selector {
+	display: grid;
+	grid-template-columns: auto minmax(180px, 420px);
+	align-items: center;
+	gap: 10px;
+}
+
+.tilefab-operational-object-selector label {
+	color: #778a8c;
+	font-size: 9px;
+	font-weight: 730;
+}
+
+.tilefab-operational-policy-card > header {
+	padding-bottom: 8px;
+	border-bottom: 1px solid #243032;
+}
+
+.tilefab-operational-capability-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 0;
+	padding: 9px;
+	border: 1px solid #263436;
+	border-radius: 4px;
+}
+
+.tilefab-operational-capability-list legend {
+	padding: 0 5px;
+	color: #748789;
+	font-size: 8px;
+}
+
+.tilefab-operational-capability-list label {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 6px;
+	border: 1px solid #29383a;
+	border-radius: 3px;
+	font-size: 8px;
+}
+
+.tilefab-operational-capability-list label:has(input:checked) {
+	border-color: #39666c;
+	color: #bce9ed;
+	background: #142529;
+}
+
+.tilefab-operational-capability-list input {
+	width: 12px;
+	height: 12px;
+}
+
+.tilefab-operational-capability-list > button {
+	min-height: 24px;
+	padding: 0 7px;
+}
+
+.tilefab-operational-capability-list > button[data-configured="true"] {
+	border-color: #4a3b32;
+	color: #ce9d7b;
+	background: #251b17;
+}
+
+.tilefab-operational-port-overrides {
+	display: grid;
+	gap: 7px;
+}
+
+.tilefab-operational-override-row {
+	display: grid;
+	grid-template-columns: minmax(100px, 0.35fr) minmax(0, 1fr);
+	align-items: center;
+	gap: 8px;
+}
+
+.tilefab-operational-override-row > button {
+	display: grid;
+	gap: 2px;
+}
+
+.tilefab-operational-capability-list[data-compact="true"] {
+	padding: 5px;
+}
+
+.tilefab-operational-capability-list[data-compact="true"] legend {
+	display: none;
+}
+
+.tilefab-operational-definition-grid {
+	display: grid;
+	grid-template-columns: minmax(260px, 0.75fr) minmax(420px, 1.25fr);
+	gap: 10px;
+}
+
+.tilefab-operational-policy-form,
+.tilefab-operational-policy-row {
+	display: grid;
+	grid-template-columns: 28px minmax(100px, 1fr) minmax(90px, 0.8fr) 72px 90px 26px;
+	align-items: center;
+	gap: 4px;
+}
+
+.tilefab-operational-policy-form {
+	grid-template-columns: minmax(100px, 1fr) minmax(90px, 0.8fr) 72px 90px auto;
+}
+
+.tilefab-operational-policy-form input,
+.tilefab-operational-policy-form select,
+.tilefab-operational-policy-row input,
+.tilefab-operational-policy-row select {
+	height: 28px;
+	padding: 0 5px;
+	font-size: 8px;
+}
+
+.tilefab-operational-form-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 9px;
+}
+
+.tilefab-operational-form-grid label {
+	display: grid;
+	gap: 4px;
+}
+
+.tilefab-operational-form-grid label > span {
+	color: #708284;
+	font-size: 8px;
+	font-weight: 700;
+}
+
+.tilefab-operational-form-grid input,
+.tilefab-operational-form-grid select {
+	height: 31px;
+	padding: 0 7px;
+	font-size: 9px;
+}
+
+.tilefab-operational-inline-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+}
+
+.tilefab-operational-inline-actions button,
+.tilefab-operational-footer button {
+	display: inline-flex;
+	min-height: 30px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 0 10px;
+	border: 1px solid #344346;
+	border-radius: 4px;
+	color: #a7b6b8;
+	background: #111819;
+	font-size: 8px;
+	font-weight: 740;
+	cursor: pointer;
+}
+
+.tilefab-operational-inline-actions button.tilefab-operational-primary,
+.tilefab-operational-footer .tilefab-operational-apply {
+	border-color: #3b686e;
+	color: #c7eff2;
+	background: #173034;
+}
+
+.tilefab-operational-review-summary {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	align-items: center;
+	gap: 11px;
+	padding: 14px;
+	border: 1px solid #554c37;
+	border-radius: 5px;
+	color: #d5bc75;
+	background: #201c13;
+}
+
+.tilefab-operational-review-summary[data-ready="true"] {
+	border-color: #315d4c;
+	color: #8bdbb9;
+	background: #12221c;
+}
+
+.tilefab-operational-review-summary div {
+	display: grid;
+	gap: 4px;
+}
+
+.tilefab-operational-review-summary strong {
+	font-size: 10px;
+}
+
+.tilefab-operational-review-summary small {
+	color: #728486;
+	font-size: 8px;
+}
+
+.tilefab-operational-review-facts {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 6px;
+	margin: 0;
+}
+
+.tilefab-operational-review-facts > div {
+	display: grid;
+	gap: 3px;
+	padding: 9px;
+	border: 1px solid #283638;
+	border-radius: 4px;
+	background: #0e1516;
+}
+
+.tilefab-operational-review-facts dt {
+	color: #6b7e80;
+	font-size: 7px;
+}
+
+.tilefab-operational-review-facts dd {
+	margin: 0;
+	font-size: 11px;
+	font-weight: 740;
+}
+
+.tilefab-operational-issue-list {
+	display: grid;
+	gap: 4px;
+}
+
+.tilefab-operational-issue-list > div {
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 9px;
+	border: 1px solid #443a30;
+	border-radius: 4px;
+	color: #d49f79;
+	background: #191411;
+}
+
+.tilefab-operational-issue-list > div[data-review-issue="true"] {
+	border-color: #4e4934;
+	color: #d1bc74;
+	background: #1a1810;
+}
+
+.tilefab-operational-issue-list span {
+	display: grid;
+	gap: 2px;
+}
+
+.tilefab-operational-issue-list strong {
+	font-size: 9px;
+}
+
+.tilefab-operational-issue-list small {
+	color: #8b8580;
+	font-size: 8px;
+}
+
+.tilefab-operational-issue-list em {
+	font-size: 9px;
+	font-style: normal;
+}
+
+.tilefab-operational-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	min-height: 54px;
+	padding: 10px;
+	border: 1px dashed #334143;
+	border-radius: 4px;
+	color: #738587;
+	font-size: 9px;
+}
+
+.tilefab-operational-empty[data-ready="true"] {
+	border-color: #315747;
+	color: #78cfa9;
+}
+
+.tilefab-operational-message {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-height: 30px;
+	padding: 6px 12px;
+	border-top: 1px solid #4a372c;
+	color: #e1a179;
+	background: #211611;
+	font-size: 9px;
+}
+
+.tilefab-operational-footer {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto auto;
+	align-items: center;
+	gap: 7px;
+	min-height: 54px;
+	padding: 9px 12px;
+	border-top: 1px solid #293638;
+	background: #0d1314;
+}
+
+.tilefab-operational-footer > span {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	align-items: baseline;
+	gap: 5px;
+	min-width: 0;
+}
+
+.tilefab-operational-footer > span strong {
+	color: #dbbc72;
+	font-size: 12px;
+}
+
+.tilefab-operational-footer > span {
+	color: #7f9193;
+	font-size: 8px;
+}
+
+.tilefab-operational-footer > span small {
+	grid-column: 1 / -1;
+	overflow: hidden;
+	color: #596b6d;
+	font-size: 7px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-operational-footer .tilefab-operational-review {
+	border-color: #536342;
+	color: #d3df9f;
+	background: #202718;
+}
+
+.tilefab-operational-panel button:disabled,
+.tilefab-operational-panel select:disabled,
+.tilefab-operational-panel input:disabled {
+	cursor: not-allowed;
+	opacity: 0.42;
+}
+
+@media (max-width: 720px) {
+	.tilefab-operational-backdrop {
+		padding: 0;
+	}
+
+	.tilefab-operational-panel {
+		width: 100vw;
+		height: 100dvh;
+		border: 0;
+		border-radius: 0;
+	}
+
+	.tilefab-operational-header {
+		grid-template-columns: auto minmax(0, 1fr) auto;
+	}
+
+	.tilefab-operational-header-state {
+		display: none;
+	}
+
+	.tilefab-operational-tabs button {
+		gap: 3px;
+	}
+
+	.tilefab-operational-tabs small {
+		display: none;
+	}
+
+	.tilefab-operational-tabs span {
+		font-size: 8px;
+	}
+
+	.tilefab-operational-body {
+		padding: 10px;
+	}
+
+	.tilefab-operational-filterbar,
+	.tilefab-operational-object-selector,
+	.tilefab-operational-definition-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.tilefab-operational-table-head,
+	.tilefab-operational-table-row {
+		grid-template-columns: minmax(120px, 1fr) minmax(130px, 0.8fr);
+	}
+
+	.tilefab-operational-table-head span:nth-child(2),
+	.tilefab-operational-table-row > span {
+		display: none;
+	}
+
+	.tilefab-operational-form-grid,
+	.tilefab-operational-review-facts {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.tilefab-operational-override-row {
+		grid-template-columns: 1fr;
+	}
+
+	.tilefab-operational-policy-row,
+	.tilefab-operational-policy-form {
+		grid-template-columns: 24px 1fr;
+	}
+
+	.tilefab-operational-policy-form {
+		grid-template-columns: 1fr 1fr;
+	}
+
+	.tilefab-operational-resident-head {
+		display: none;
+	}
+
+	.tilefab-operational-resident-row {
+		grid-template-columns: 32px minmax(0, 1fr) 30px;
+	}
+
+	.tilefab-operational-resident-row > input,
+	.tilefab-operational-resident-row > select,
+	.tilefab-operational-resident-row > small:nth-of-type(2) {
+		grid-column: 2;
+	}
+
+	.tilefab-operational-resident-row > button {
+		grid-row: 1 / span 3;
+		grid-column: 3;
+	}
+
+	.tilefab-operational-resident-form {
+		grid-template-columns: 1fr;
+	}
+
+	.tilefab-operational-resident-form button {
+		min-height: 30px;
+	}
+
+	.tilefab-operational-footer {
+		grid-template-columns: 1fr 1fr;
+	}
+
+	.tilefab-operational-footer > span {
+		grid-column: 1 / -1;
+	}
+
+	.tilefab-operational-footer button {
+		min-width: 0;
+		padding: 0 5px;
+		font-size: 7px;
+	}
+}

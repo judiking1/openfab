@@ -1,0 +1,304 @@
+.tilefab-command-help-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 180;
+	display: grid;
+	place-items: center;
+	padding: 16px;
+	background: rgb(3 7 8 / 76%);
+	backdrop-filter: blur(4px);
+}
+
+.tilefab-command-help {
+	display: grid;
+	width: min(760px, calc(100vw - 32px));
+	height: min(720px, calc(100dvh - 32px));
+	grid-template-rows: 60px 54px 30px minmax(0, 1fr);
+	overflow: hidden;
+	border: 1px solid #405053;
+	border-radius: 6px;
+	color: #dce6e7;
+	background: #0c1213;
+	box-shadow: 0 24px 70px rgb(0 0 0 / 55%);
+}
+
+.tilefab-command-help > header {
+	display: grid;
+	grid-template-columns: 38px minmax(0, 1fr) 44px;
+	align-items: center;
+	gap: 11px;
+	padding: 0 10px 0 16px;
+	border-bottom: 1px solid #2d393b;
+	background: #111819;
+}
+
+.tilefab-command-help-mark {
+	display: grid;
+	width: 36px;
+	height: 36px;
+	place-items: center;
+	border: 1px solid #47666a;
+	border-radius: 4px;
+	color: #9be4e7;
+	background: #17282a;
+}
+
+.tilefab-command-help > header > span:nth-child(2) {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+
+.tilefab-command-help > header small {
+	color: #7f9294;
+	font-size: 10px;
+	font-weight: 720;
+}
+
+.tilefab-command-help > header strong {
+	font-size: 16px;
+	font-weight: 760;
+}
+
+.tilefab-command-help > header button {
+	display: grid;
+	width: 44px;
+	height: 44px;
+	place-items: center;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	color: #95a5a7;
+	background: transparent;
+	cursor: pointer;
+}
+
+.tilefab-command-help > header button:hover {
+	border-color: #3d4c4e;
+	color: #eef5f5;
+	background: #182022;
+}
+
+.tilefab-command-help-search {
+	display: grid;
+	grid-template-columns: 20px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+	margin: 9px 12px 0;
+	padding: 0 10px;
+	border: 1px solid #344245;
+	border-radius: 4px;
+	color: #7e9193;
+	background: #090e0f;
+}
+
+.tilefab-command-help-search:focus-within {
+	border-color: #71cbd1;
+	box-shadow: 0 0 0 1px #71cbd1;
+}
+
+.tilefab-command-help-search input {
+	width: 100%;
+	height: 42px;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	outline: 0;
+	color: #e2ebeb;
+	background: transparent;
+	font: inherit;
+	font-size: 13px;
+}
+
+.tilefab-command-help-search input::placeholder {
+	color: #657577;
+}
+
+.tilefab-command-help-search kbd,
+.tilefab-command-help-binding kbd {
+	display: inline-grid;
+	min-width: 26px;
+	height: 24px;
+	place-items: center;
+	box-sizing: border-box;
+	padding: 0 7px;
+	border: 1px solid #48575a;
+	border-bottom-color: #68777a;
+	border-radius: 3px;
+	color: #d7e2e3;
+	background: #1c2527;
+	font: inherit;
+	font-size: 10px;
+	font-weight: 760;
+	white-space: nowrap;
+}
+
+.tilefab-command-help-summary {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	padding: 0 14px;
+	color: #728285;
+	font-size: 9px;
+	font-weight: 700;
+}
+
+.tilefab-command-help-summary-value {
+	color: #d9c06c;
+	font-size: 11px;
+}
+
+.tilefab-command-help-results {
+	overflow: auto;
+	padding: 0 12px 14px;
+	scrollbar-color: #344346 transparent;
+}
+
+.tilefab-command-help-results > section > header {
+	position: sticky;
+	z-index: 1;
+	top: 0;
+	display: grid;
+	height: 34px;
+	grid-template-columns: 18px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 6px;
+	border-bottom: 1px solid #334043;
+	color: #8bd4d8;
+	background: #0c1213;
+}
+
+.tilefab-command-help-results > section > header strong {
+	color: #aebbbc;
+	font-size: 10px;
+	font-weight: 760;
+}
+
+.tilefab-command-help-results > section > header span {
+	color: #67787a;
+	font-size: 9px;
+	font-weight: 720;
+}
+
+.tilefab-command-help-results ul {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.tilefab-command-help-results li {
+	display: grid;
+	min-height: 48px;
+	grid-template-columns: minmax(150px, 1fr) minmax(220px, auto);
+	align-items: center;
+	gap: 12px;
+	padding: 5px 8px;
+	border-bottom: 1px solid #202b2d;
+}
+
+.tilefab-command-help-results li:hover {
+	background: #11191a;
+}
+
+.tilefab-command-help-results li > span:first-child {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+}
+
+.tilefab-command-help-results li > span:first-child strong {
+	overflow: hidden;
+	color: #d5dfe0;
+	font-size: 12px;
+	font-weight: 680;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-command-help-results li > span:first-child small {
+	overflow: hidden;
+	color: #627376;
+	font-size: 8px;
+	font-weight: 700;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-command-help-results li > fieldset,
+.tilefab-command-help-binding,
+.tilefab-command-help-binding-part {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 5px;
+}
+
+.tilefab-command-help-results li > fieldset {
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.tilefab-command-help-binding > i,
+.tilefab-command-help-binding > span > i {
+	color: #6f8082;
+	font-size: 8px;
+	font-style: normal;
+	font-weight: 760;
+}
+
+.tilefab-command-help-binding .tilefab-mouse-cue {
+	height: 28px;
+}
+
+.tilefab-command-help-empty {
+	display: grid;
+	height: 180px;
+	place-items: center;
+	align-content: center;
+	gap: 9px;
+	color: #607174;
+}
+
+.tilefab-command-help-empty-title {
+	font-size: 12px;
+	font-weight: 680;
+}
+
+@media (max-width: 620px) {
+	.tilefab-command-help-backdrop {
+		padding: 8px;
+	}
+
+	.tilefab-command-help {
+		width: calc(100vw - 16px);
+		height: calc(100dvh - 16px);
+		grid-template-rows: 60px 62px 30px minmax(0, 1fr);
+	}
+
+	.tilefab-command-help-search {
+		margin: 9px 8px 0;
+	}
+
+	.tilefab-command-help-search input {
+		height: 44px;
+	}
+
+	.tilefab-command-help-results {
+		padding-inline: 8px;
+	}
+
+	.tilefab-command-help-results li {
+		min-height: 62px;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 4px;
+		padding: 7px 6px;
+	}
+
+	.tilefab-command-help-results li > div,
+	.tilefab-command-help-binding {
+		justify-content: flex-start;
+		flex-wrap: wrap;
+	}
+}

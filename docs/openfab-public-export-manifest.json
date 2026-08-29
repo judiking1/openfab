@@ -1,0 +1,73 @@
+{
+	"schemaVersion": 1,
+	"includeFiles": [
+		".github/pull_request_template.md",
+		".github/workflows/ci.yml",
+		".gitignore",
+		"CHANGELOG.md",
+		"CONTRIBUTING.md",
+		"DEPLOYMENT_STRATEGY.md",
+		"NOTICE",
+		"README.md",
+		"SECURITY.md",
+		"THIRD_PARTY_NOTICES.md",
+		"VISION.md",
+		"biome.json",
+		"docs/fab-layout-authoring-rules.md",
+		"docs/fab-layout-grammar.md",
+		"docs/openfab-editor-v1-release-baseline.md",
+		"docs/openfab-production-dependency-licenses.json",
+		"docs/openfab-public-export-manifest.json",
+		"docs/openfab-rail-templates.md",
+		"docs/openfab-synthetic-fixture-provenance.json",
+		"docs/operational-configuration-state.md",
+		"docs/port-derived-equipment-and-scenario-boundaries.md",
+		"docs/rail-construction-v3.md",
+		"eslint.config.js",
+		"index.html",
+		"package.json",
+		"pnpm-lock.yaml",
+		"tsconfig.app.json",
+		"tsconfig.core.json",
+		"tsconfig.json",
+		"tsconfig.node.json",
+		"vite.config.ts",
+		"vitest.config.ts",
+		"vitest.scenario-runtime-scale.config.ts",
+		"vitest.station-proposal-scale.config.ts"
+	],
+	"includePrefixes": ["public/", "scripts/", "src/"],
+	"requiredBuildFiles": [
+		"index.html",
+		"package.json",
+		"pnpm-lock.yaml",
+		"src/App.tsx",
+		"src/main.tsx",
+		"tsconfig.json",
+		"vite.config.ts"
+	],
+	"releaseRequiredFiles": [
+		"LICENSE",
+		"NOTICE",
+		"SECURITY.md",
+		"CONTRIBUTING.md",
+		"CHANGELOG.md",
+		".github/workflows/ci.yml"
+	],
+	"excludedPrivatePrefixes": [
+		".claude/",
+		".githooks/",
+		"artifacts/",
+		"dist/",
+		"logs/",
+		"node_modules/",
+		"public/railConfig/"
+	],
+	"manualReleaseReviews": [
+		"Owner-approved open-source license",
+		"Final human source-originality and synthetic-fixture provenance approval",
+		"Final human dependency-license and third-party-notice approval",
+		"Clean history-independent export review",
+		"Live demo built from the exact exported commit"
+	]
+}
