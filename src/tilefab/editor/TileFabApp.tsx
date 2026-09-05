@@ -8119,7 +8119,13 @@ export default function TileFabApp(): React.ReactElement {
 			}
 		}
 		if (blueprintPlacementWasActive && !areaStampReturnContext) {
-			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+			const focusOwner = document.activeElement;
+			requestAnimationFrame(() => {
+				// Keyboard navigation can finish before this frame. Preserve its new target;
+				// an unmounted exit button leaves body focused and still needs Canvas recovery.
+				if (document.activeElement !== focusOwner && document.activeElement !== document.body) return;
+				canvasRef.current?.focus({ preventScroll: true });
+			});
 		}
 		if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
 		if (finalMessage) setStatus(finalMessage);

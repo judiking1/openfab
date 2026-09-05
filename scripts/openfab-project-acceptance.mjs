@@ -246,7 +246,8 @@ await Promise.all([
 ]);
 process.exit(result.status === "PASS" ? 0 : 1);
 
-// Test-only explicit Contact evidence; ordinary file load must never infer relationships.
+// Test-only explicit Contact evidence with a future creation time exercises native save clock skew.
+// Ordinary file load must never infer relationships.
 async function createRelationshipProjectFixture(directory) {
 	const source = await createServer({
 		root,
@@ -284,7 +285,7 @@ async function createRelationshipProjectFixture(directory) {
 			manifest: createOpenFabProjectManifest(
 				projectId,
 				"Synthetic Contact startup",
-				"2020-01-01T00:00:00.000Z",
+				"2099-01-01T00:00:00.000Z",
 			),
 		});
 		const checksum = captureRailMirrorSnapshot(
@@ -348,6 +349,16 @@ async function exerciseRelationshipProjectStartup(activePage) {
 				`relationship saved ${section}`,
 			);
 		}
+		assertEqual(
+			saved.manifest.createdAt,
+			original.manifest.createdAt,
+			"saved project creation time",
+		);
+		assertEqual(
+			saved.manifest.updatedAt >= original.manifest.updatedAt,
+			true,
+			"saved project timestamps remain monotonic across host clock skew",
+		);
 		assertEqual(saved.relationships.records.length, 1, "saved nonempty relationship count");
 		assertEqual(saved.relationships.nextRelationshipId, 2, "saved relationship cursor");
 		const reopened = await openRelationshipProject(activePage, savedPath, fixture);
@@ -357,7 +368,7 @@ async function exerciseRelationshipProjectStartup(activePage) {
 			"relationship reopened physical identity",
 		);
 		console.log(
-			`PASS nonempty relationship project startup | 30,488 cells | 184 organizations | 1 relationship | slices ${first.maxSliceMilliseconds.toFixed(1)}/${reopened.maxSliceMilliseconds.toFixed(1)} ms | Long Tasks 0/0 | native save/reopen`,
+			`PASS nonempty relationship project startup | 30,488 cells | 184 organizations | 1 relationship | slices ${first.maxSliceMilliseconds.toFixed(1)}/${reopened.maxSliceMilliseconds.toFixed(1)} ms | Long Tasks 0/0 | native save/reopen | monotonic manifest timestamps`,
 		);
 		return { first, reopened };
 	} finally {

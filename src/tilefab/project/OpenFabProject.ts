@@ -207,8 +207,19 @@ export function updateOpenFabProjectManifest(
 		id: manifest.id,
 		name,
 		createdAt: manifest.createdAt,
-		updatedAt,
+		// A valid project can come from a host whose clock is ahead of ours. Keep its
+		// last saved instant until this clock catches up, but do not hide invalid input.
+		updatedAt:
+			isCanonicalManifestTimestamp(updatedAt) && updatedAt < manifest.updatedAt
+				? manifest.updatedAt
+				: updatedAt,
 	});
+}
+
+function isCanonicalManifestTimestamp(value: string): boolean {
+	if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+	const milliseconds = Date.parse(value);
+	return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value;
 }
 
 export function captureOpenFabProject(

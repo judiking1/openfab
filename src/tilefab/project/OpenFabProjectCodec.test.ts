@@ -58,11 +58,13 @@ import {
 } from "./OpenFabBlueprintLibrary";
 import {
 	captureOpenFabProject,
+	createOpenFabProjectManifest,
 	createPortEquipmentStateFromOpenFabProject,
 	createRailSnapshotFromOpenFabProject,
 	OPENFAB_PROJECT_KIND,
 	OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER,
 	type OpenFabProject,
+	updateOpenFabProjectManifest,
 } from "./OpenFabProject";
 import {
 	OpenFabProjectParseError,
@@ -72,6 +74,62 @@ import {
 } from "./OpenFabProjectCodec";
 
 describe("OpenFab project codec", () => {
+	it("saves a valid project created on a clock ahead of the current host", () => {
+		const sourceManifest = createOpenFabProjectManifest(
+			"clock-ahead-project",
+			"Future clock",
+			"2099-01-01T00:00:00.000Z",
+		);
+		const source = captureOpenFabProject(new RailDocument(), { manifest: sourceManifest });
+		const loaded = parseOpenFabProjectJson(serializeOpenFabProject(source)).project;
+		const manifest = updateOpenFabProjectManifest(
+			loaded.manifest,
+			"2026-01-01T00:00:00.000Z",
+			"Renamed while clock is behind",
+		);
+		const reopened = parseOpenFabProjectJson(
+			serializeOpenFabProject({ ...loaded, manifest }),
+		).project;
+
+		expect(reopened.manifest).toEqual({
+			...sourceManifest,
+			name: "Renamed while clock is behind",
+		});
+		expect(reopened.rail).toEqual(source.rail);
+		expect(source.manifest).toStrictEqual(sourceManifest);
+	});
+
+	it("keeps successive manifest updates monotonic across clock rollback and recovery", () => {
+		const first = updateOpenFabProjectManifest(MANIFEST, "2026-07-19T00:00:00.000Z");
+		const rollback = updateOpenFabProjectManifest(first, "2026-07-18T12:00:00.000Z");
+		const equal = updateOpenFabProjectManifest(rollback, rollback.updatedAt);
+		const recovered = updateOpenFabProjectManifest(equal, "2026-07-20T00:00:00.000Z");
+
+		expect(rollback.updatedAt).toBe(first.updatedAt);
+		expect(equal.updatedAt).toBe(first.updatedAt);
+		expect(recovered.updatedAt).toBe("2026-07-20T00:00:00.000Z");
+		expect(recovered.createdAt).toBe(MANIFEST.createdAt);
+		expect(Object.isFrozen(recovered)).toBe(true);
+	});
+
+	it("does not hide malformed save timestamps behind a later valid manifest instant", () => {
+		const source = captureOpenFabProject(new RailDocument(), { manifest: MANIFEST });
+		for (const timestamp of [
+			"",
+			"2020-01-01",
+			"2020-01-01T00:00:00Z",
+			"2020-01-01T00:00:00.000+00:00",
+			"2020-02-30T00:00:00.000Z",
+			"not-a-date",
+		]) {
+			const manifest = updateOpenFabProjectManifest(MANIFEST, timestamp);
+			expect(manifest.updatedAt).toBe(timestamp);
+			expect(() => serializeOpenFabProject({ ...source, manifest })).toThrow(
+				OpenFabProjectParseError,
+			);
+		}
+	});
+
 	it("round-trips reviewed non-geometric operational configuration in project v11", () => {
 		const document = new RailDocument();
 		const sourceSnapshot = captureRailMirrorSnapshot(

@@ -11415,6 +11415,21 @@ button.tilefab-action-hint[data-guided-target="true"] {
 		min-height: 146px;
 	}
 
+	.tilefab-buildbar:not([data-catalog-id="network-link"]):not([data-smart-link-active="true"])
+		> .tilefab-template-catalog {
+		flex: 1 1 100%;
+		max-width: 100%;
+	}
+
+	.tilefab-buildbar:not([data-catalog-id="network-link"]):not([data-smart-link-active="true"])
+		> .tilefab-template-catalog
+		> button {
+		min-width: 44px;
+		flex: 1 1 auto;
+		justify-content: center;
+		padding-inline: 4px;
+	}
+
 	.tilefab-blueprint-favorite-tray {
 		bottom: 164px;
 	}

@@ -24841,6 +24841,29 @@ async function exerciseCompactLayout(page) {
 	]) {
 		await assertLocatorInsideViewport(page, legacyBuildbarButton(page, name));
 	}
+	const catalogFontProbe = await page.addStyleTag({
+		content: ".tilefab-template-catalog > button { font-family: Verdana, sans-serif !important; }",
+	});
+	try {
+		for (const id of [
+			"rail-pattern-browser-toggle",
+			"rail-blueprint-library-toggle",
+			"rail-blueprint-recent",
+		]) {
+			const button = page.getByTestId(id);
+			await assertLocatorInsideViewport(page, button);
+			const size = await button.evaluate((element) => ({
+				width: element.getBoundingClientRect().width,
+				height: element.getBoundingClientRect().height,
+				textFits: element.scrollWidth <= element.clientWidth + 1,
+			}));
+			assertAtLeast(size.width, 44, `${id} fallback-font target width`);
+			assertAtLeast(size.height, 44, `${id} fallback-font target height`);
+			assertEqual(size.textFits, true, `${id} fallback-font text fits`);
+		}
+	} finally {
+		await catalogFontProbe.evaluate((element) => element.remove());
+	}
 	const compactAssembleMenu = page.getByTestId("static-fab-assemble-menu");
 	const compactOrganizationLibrary = page.getByTestId("static-fab-organization-library");
 	const compactHeaderAssemble = page.getByRole("button", { name: "FAB 조립", exact: true });
@@ -29802,6 +29825,10 @@ async function exerciseOrdinaryPlacedTwinBayDuplicateHandoff(
 	connectorHandoff = page.getByTestId("ordinary-duplicated-twin-bay-connector-handoff");
 	await canvas.focus();
 	await page.keyboard.press("Tab");
+	// A queued placement-exit focus recovery must not steal the user's new Tab target.
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
 	assertEqual(
 		await connectorHandoff.evaluate((element) => document.activeElement === element),
 		true,
