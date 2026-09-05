@@ -4174,6 +4174,84 @@ async function auditOrdinaryNoSlotStkInstructionOwnership(page, viewport, canvas
 	});
 }
 
+async function recoverOrdinaryStkFromOccupiedStart(page, baseline, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	const marker = page.getByTestId("ordinary-port-keyboard-target");
+	// Reproduce the Linux failure explicitly: a physical STK candidate can lie inside the OHB
+	// just authored above. Read fixture coordinates, then use ordinary pointer/keyboard input.
+	const occupied = await page.evaluate(() => {
+		const model = window.__tileFab?.getEditorModel();
+		const ohb = model?.portEquipment.ports.find((port) => port.portType === "OHB");
+		const slots = model?.portSlotArtifacts.STK?.slots;
+		if (!ohb || ohb.route.kind !== "CARDINAL_CELL" || !slots) return null;
+		for (let row = 0; row < slots.count; row++) {
+			if (
+				slots.statuses[row] === 0 &&
+				slots.routeXs[row] === ohb.route.x &&
+				slots.routeZs[row] === ohb.route.z &&
+				slots.routeFromDirections[row] === ohb.route.from &&
+				slots.routeToDirections[row] === ohb.route.to &&
+				slots.stationMillimeters[row] === ohb.stationMillimeters
+			)
+				return { row, x: slots.worldPositions[row * 2], y: slots.worldPositions[row * 2 + 1] };
+		}
+		return null;
+	});
+	if (!occupied) throw new Error(`${label}: missing OHB-occupied STK fixture candidate.`);
+	await ensureWorldPointVisible(page, occupied);
+	await moveToWorld(page, occupied);
+	await canvas.focus();
+	await page.waitForFunction(
+		(row) => {
+			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+			return (
+				marker?.getAttribute("data-port-type") === "STK" &&
+				marker.getAttribute("data-port-slot-row") === String(row) &&
+				marker.getAttribute("data-legal") === "false"
+			);
+		},
+		occupied.row,
+		{ timeout: 10_000 },
+	);
+	await canvas.press("Enter");
+	// Canvas diagnostics publish at a bounded 100 ms cadence; observe the rejected input afterward.
+	await page.waitForTimeout(140);
+	assertEqual(
+		await page.getByTestId("tilefab-app").getAttribute("data-stk-draft-rows"),
+		"0",
+		`${label} occupied input keeps an empty draft`,
+	);
+	assertProjectUnchanged(await readMetrics(page), baseline, `${label} occupied input`);
+
+	const deadline = Date.now() + 10_000;
+	for (const key of ["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]) {
+		for (let attempt = 0; attempt < 64 && Date.now() < deadline; attempt++) {
+			if ((await marker.getAttribute("data-legal")) === "true") {
+				assertProjectUnchanged(await readMetrics(page), baseline, `${label} navigation`);
+				return marker.getAttribute("data-port-slot-row");
+			}
+			const beforeRow = await marker.getAttribute("data-port-slot-row");
+			await canvas.press(key);
+			await page
+				.waitForFunction(
+					(row) =>
+						document
+							.querySelector('[data-testid="ordinary-port-keyboard-target"]')
+							?.getAttribute("data-port-slot-row") !== row,
+					beforeRow,
+					{ timeout: Math.max(1, Math.min(1_000, deadline - Date.now())) },
+				)
+				.catch((error) => {
+					if (error.name !== "TimeoutError") throw error;
+				});
+			if ((await marker.getAttribute("data-port-slot-row")) === beforeRow) break;
+		}
+	}
+	throw new Error(
+		`${label}: no usable STK target after bounded keyboard navigation: ${await page.getByTestId("guided-port-keyboard-readout").innerText()}`,
+	);
+}
+
 async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
 	const proofs = [];
 	for (const viewport of [
@@ -4267,7 +4345,6 @@ async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
 						app.getAttribute("data-stk-draft-rows") === "0" &&
 						canvas?.getAttribute("data-guided-port-keyboard") === "STK" &&
 						marker?.getAttribute("data-port-type") === "STK" &&
-						marker.getAttribute("data-legal") === "true" &&
 						marker.getBoundingClientRect().width > 0 &&
 						document.activeElement === canvas
 					);
@@ -4275,13 +4352,21 @@ async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
 				undefined,
 				{ timeout: 10_000 },
 			);
+			const stkRow = await recoverOrdinaryStkFromOccupiedStart(
+				page,
+				stkBefore,
+				`ordinary hierarchy STK start ${viewport.label}`,
+			);
 			await canvas.press("Enter");
 			await page.waitForFunction(
-				() =>
+				(expectedRow) =>
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-stk-draft-selected-rows") === expectedRow &&
 					document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "1" &&
 					document.querySelector('[data-testid="stk-complete"]')?.hasAttribute("disabled") ===
 						false,
-				undefined,
+				stkRow,
 				{ timeout: 10_000 },
 			);
 			await canvas.press("Shift+Enter");
