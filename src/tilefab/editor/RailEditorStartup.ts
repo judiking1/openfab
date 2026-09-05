@@ -41,7 +41,10 @@ import {
 	type StaticFabAssemblyRelationshipStateV1,
 	staticFabAssemblyRelationshipRecordEquals,
 } from "../core/StaticFabAssemblyRelationship";
-import { validateStaticFabAssemblyRelationshipActivation } from "../core/StaticFabAssemblyRelationshipActivation";
+import {
+	validateStaticFabAssemblyRelationshipActivation,
+	validateStaticFabAssemblyRelationshipSourceActivation,
+} from "../core/StaticFabAssemblyRelationshipActivation";
 import {
 	type StaticFabOrganizationState,
 	staticFabOrganizationRecordEquals,
@@ -384,17 +387,39 @@ async function activateRailEditorStartupInternal(
 	currentPhase = "ownership-activation";
 	bindValidatedCompiledPhysicalLayoutSource(derivedBuffers.physical, publishedMap);
 
-	const ownershipHydrator = await createRailModuleOwnershipIndexHydratorCooperatively(
-		derivedBuffers.ownership,
-		yieldIfNeeded,
-		RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
-	);
-	while (!ownershipHydrator.done) {
-		ownershipHydrator.step(RAIL_EDITOR_STARTUP_OPERATION_BUDGET);
-		await yieldIfNeeded();
+	// Snapshot proofs bind hydrated instances; an existing document needs its own proof
+	// even after the complete authored-byte comparison above.
+	const sourceActivation =
+		relationships.records.length === 0
+			? null
+			: publicationDocument === undefined
+				? snapshotActivation.sourceActivation
+				: await validateStaticFabAssemblyRelationshipSourceActivation(
+						publishedMap,
+						publishedPortEquipment,
+						publishedOrganizations,
+						publishedRelationships,
+						yieldIfNeeded,
+						RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
+					);
+	if (relationships.records.length > 0 && !sourceActivation) {
+		throw new Error("Rail startup lacks independently compiled relationship source activation.");
 	}
-	const ownership = ownershipHydrator.finish();
-	bindValidatedRailModuleOwnershipIndexSource(ownership, derivedBuffers.ownership, publishedMap);
+	let ownership: RailModuleOwnershipIndex;
+	if (sourceActivation) ownership = sourceActivation.ownership;
+	else {
+		const ownershipHydrator = await createRailModuleOwnershipIndexHydratorCooperatively(
+			derivedBuffers.ownership,
+			yieldIfNeeded,
+			RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
+		);
+		while (!ownershipHydrator.done) {
+			ownershipHydrator.step(RAIL_EDITOR_STARTUP_OPERATION_BUDGET);
+			await yieldIfNeeded();
+		}
+		ownership = ownershipHydrator.finish();
+		bindValidatedRailModuleOwnershipIndexSource(ownership, derivedBuffers.ownership, publishedMap);
+	}
 	await yieldIfNeeded();
 	currentPhase = "port-equipment-activation";
 	const portEquipmentActivation = await validatePortEquipmentActivation(
@@ -405,26 +430,30 @@ async function activateRailEditorStartupInternal(
 	);
 	await yieldIfNeeded();
 	currentPhase = "organization-activation";
-	const organizationActivation = await validateStaticFabOrganizationActivation(
-		publishedMap,
-		publishedPortEquipment,
-		publishedOrganizations,
-		ownership,
-		yieldIfNeeded,
-		RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
-	);
+	const organizationActivation =
+		sourceActivation?.organizationActivation ??
+		(await validateStaticFabOrganizationActivation(
+			publishedMap,
+			publishedPortEquipment,
+			publishedOrganizations,
+			ownership,
+			yieldIfNeeded,
+			RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
+		));
 	await yieldIfNeeded();
 	currentPhase = "relationship-activation";
-	const relationshipActivation = await validateStaticFabAssemblyRelationshipActivation(
-		publishedMap,
-		publishedPortEquipment,
-		publishedOrganizations,
-		publishedRelationships,
-		ownership,
-		organizationActivation,
-		yieldIfNeeded,
-		RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
-	);
+	const relationshipActivation =
+		sourceActivation?.relationshipActivation ??
+		(await validateStaticFabAssemblyRelationshipActivation(
+			publishedMap,
+			publishedPortEquipment,
+			publishedOrganizations,
+			publishedRelationships,
+			ownership,
+			organizationActivation,
+			yieldIfNeeded,
+			RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
+		));
 	await yieldIfNeeded();
 	currentPhase = "document-publication";
 	if (

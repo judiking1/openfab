@@ -60,7 +60,7 @@ const consumedImpactIndexActivations = new WeakSet<object>();
 /**
  * Validate canonical organization truth without monopolizing the caller's event loop.
  *
- * The supplied ownership index must already be hydrated for the same authored revision. The
+ * The supplied ownership index must already be bound to this exact authored generation. The
  * returned value deliberately exposes no data; consumers must use the runtime matcher/assertion so
  * a proof cannot be reused with another map, equipment generation, or organization generation.
  */

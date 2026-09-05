@@ -24,7 +24,7 @@ class FakeStarterWorker implements SyntheticFabStarterWorkerPort {
 	terminated = false;
 
 	postMessage(message: SyntheticFabStarterWorkerRequest): void {
-		const prepared = prepareSyntheticFabStarter(message.starter);
+		const prepared = structuredClone(prepareSyntheticFabStarter(message.starter));
 		queueMicrotask(() => {
 			this.onmessage?.({
 				data: {
@@ -189,6 +189,49 @@ describe("SyntheticFabStarterBridge", () => {
 		expect(prepared?.snapshot.xs.length).toBe(prepared?.summary.railCells);
 		expect(worker.terminated).toBe(true);
 	});
+
+	it("restores cloned bundle immutability without trusting changed snapshot bytes", async () => {
+		const request = defaultSyntheticFabStarterRequest("production-fab-60");
+		const worker = new FakeStarterWorker();
+		const bridge = new SyntheticFabStarterBridge(() => worker);
+		const prepared = await bridge.prepare(request);
+		const bundle = prepared.placementBundle;
+		if (!bundle) throw new Error("Expected a portable production FAB bundle.");
+
+		expect(Object.isFrozen(prepared)).toBe(true);
+		expect(Object.isFrozen(bundle)).toBe(true);
+		expect(Object.isFrozen(bundle.railEdges)).toBe(true);
+		expect(Object.isFrozen(bundle.railEdges[0]?.from)).toBe(true);
+		expect(Object.isFrozen(bundle.organizations[0]?.membership.railEdgeIndices)).toBe(true);
+		expect(preparedSyntheticFabStarterMatchesRequest(prepared, request)).toBe(true);
+		expect(worker.terminated).toBe(true);
+
+		prepared.snapshot.encoded[0] = (prepared.snapshot.encoded[0] as number) ^ 1;
+		expect(preparedSyntheticFabStarterMatchesRequest(prepared, request)).toBe(false);
+	}, 30_000);
+
+	it("rejects cloned source-invalid bundles even after restoring frozen containers", async () => {
+		const request = defaultSyntheticFabStarterRequest("production-fab-60");
+		const prepared = structuredClone(prepareSyntheticFabStarter(request));
+		const bundle = prepared.placementBundle;
+		if (!bundle) throw new Error("Expected a portable production FAB bundle.");
+		const invalid = {
+			...prepared,
+			placementBundle: { ...bundle, sourceModuleCount: bundle.sourceModuleCount + 1 },
+		};
+		const worker = new ManualStarterWorker();
+		const bridge = new SyntheticFabStarterBridge(() => worker);
+		const preparation = bridge.prepare(request);
+		worker.respond({
+			type: "SYNTHETIC_FAB_STARTER_PREPARED",
+			requestId: worker.request?.requestId,
+			prepared: invalid,
+		});
+
+		await expect(preparation).rejects.toThrow(/mismatched prepared project/);
+		expect(Object.isFrozen(invalid.placementBundle)).toBe(true);
+		expect(worker.terminated).toBe(true);
+	}, 30_000);
 
 	it("accepts the production FAB plan without transferring oversized route geometry", async () => {
 		const request = defaultSyntheticFabStarterRequest("production-fab-60");

@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { productionBankContactFixture } from "../compile/StaticFabAssemblyRelationshipTestFixture";
 import {
 	createStaticFabAssemblyRelationshipState,
 	type StaticFabAssemblyRelationshipStateV1,
 } from "../core/StaticFabAssemblyRelationship";
-import { checksumRailMirrorSnapshot } from "./RailMirrorChecksum";
+import * as relationshipActivation from "../core/StaticFabAssemblyRelationshipActivation";
+import { captureRailMirrorSnapshot, checksumRailMirrorSnapshot } from "./RailMirrorChecksum";
 import { compileRailStartup } from "./RailStartupRuntime";
 import {
 	releaseValidatedRailStartupSnapshotForFullValidation,
@@ -17,9 +19,54 @@ import {
 import { createStaticFabAssemblyRelationshipSnapshot } from "./StaticFabAssemblyRelationshipSoA";
 
 describe("RailStartupSnapshotActivation relationships", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	it("checks a separate cancellation callback after independent source proof completion", async () => {
+		const fixture = productionBankContactFixture();
+		const payload = compileRailStartup({
+			kind: "snapshot",
+			snapshot: captureRailMirrorSnapshot(
+				fixture.map,
+				17,
+				fixture.portEquipment,
+				fixture.organizations,
+				fixture.relationships,
+			).snapshot,
+		});
+		const adopted = await adopt(transportFromPayload(payload));
+		let cancelled = false;
+		const original = relationshipActivation.validateStaticFabAssemblyRelationshipSourceActivation;
+		const validation = vi
+			.spyOn(relationshipActivation, "validateStaticFabAssemblyRelationshipSourceActivation")
+			.mockImplementation(async (...args) => {
+				const complete = await original(...args);
+				cancelled = true;
+				return complete;
+			});
+		await expect(
+			validateAndHydrateRailStartupSnapshotCooperatively(
+				adopted.value.snapshot,
+				adopted.value,
+				adopted.authority,
+				async () => undefined,
+				() => {
+					if (cancelled) throw new Error("cancelled after complete source proof");
+				},
+				128,
+			),
+		).rejects.toThrow("cancelled after complete source proof");
+		expect(validation).toHaveBeenCalledOnce();
+	});
+
 	it("returns and release-binds the exact hydrated relationship generation and cursor", async () => {
 		const adopted = await createAdoptedFixture(7);
+		const source = vi.spyOn(
+			relationshipActivation,
+			"validateStaticFabAssemblyRelationshipSourceActivation",
+		);
 		const validated = await validate(adopted);
+		expect(validated.sourceActivation).toBeNull();
+		expect(source).not.toHaveBeenCalled();
 
 		expect(validated.relationships).toEqual({ nextRelationshipId: 7, records: [] });
 		expect(validated.nextRelationshipId).toBe(7);

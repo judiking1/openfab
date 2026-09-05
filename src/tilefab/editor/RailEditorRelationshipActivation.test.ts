@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { productionBankContactFixture } from "../compile/StaticFabAssemblyRelationshipTestFixture";
 import { RailDocument } from "../core/RailDocument";
+import * as ownershipActivation from "../core/RailModuleOwnership";
 import { railModuleOwnershipIndexMatchesMap } from "../core/RailModuleOwnership";
 import * as relationshipSource from "../core/StaticFabAssemblyRelationship";
 import * as relationshipActivation from "../core/StaticFabAssemblyRelationshipActivation";
@@ -25,7 +26,11 @@ describe("non-empty relationship document activation", () => {
 		);
 		const proofValidation = vi.spyOn(
 			relationshipActivation,
-			"validateStaticFabAssemblyRelationshipActivation",
+			"validateStaticFabAssemblyRelationshipSourceActivation",
+		);
+		const transferredOwnershipHydration = vi.spyOn(
+			ownershipActivation,
+			"createRailModuleOwnershipIndexHydratorCooperatively",
 		);
 		const scheduler = new TestScheduler();
 		const activation = await activateRailEditorStartup(payload, scheduler, undefined, 1);
@@ -56,7 +61,8 @@ describe("non-empty relationship document activation", () => {
 			).snapshot.checksum,
 		);
 		expect(proofValidation).toHaveBeenCalledOnce();
-		expect(sourceValidation).toHaveBeenCalledOnce();
+		expect(sourceValidation).not.toHaveBeenCalled();
+		expect(transferredOwnershipHydration).not.toHaveBeenCalled();
 		expect(scheduler.yields).toBeGreaterThan(0);
 	});
 
@@ -81,7 +87,7 @@ describe("non-empty relationship document activation", () => {
 		});
 		const proofValidation = vi.spyOn(
 			relationshipActivation,
-			"validateStaticFabAssemblyRelationshipActivation",
+			"validateStaticFabAssemblyRelationshipSourceActivation",
 		);
 		const activation = await activateRailEditorStartup(
 			payload,
@@ -92,8 +98,9 @@ describe("non-empty relationship document activation", () => {
 		);
 		expect(activation.model.document).toBe(document);
 		expect(activation.model.relationships).toBe(document.relationships);
-		expect(proofValidation).toHaveBeenCalledOnce();
-		const [map, ports, organizations, relationships] = proofValidation.mock.calls[0] ?? [];
+		expect(proofValidation).toHaveBeenCalledTimes(2);
+		const [map, ports, organizations, relationships] = proofValidation.mock.calls.at(-1) ?? [];
+		expect(proofValidation.mock.calls[0]?.[0]).not.toBe(document.map);
 		expect(map).toBe(document.map);
 		expect(ports).toBe(document.portEquipment);
 		expect(organizations).toBe(document.organizations);
@@ -105,10 +112,10 @@ describe("non-empty relationship document activation", () => {
 	it("honors cancellation after relationship proof completion before document publication", async () => {
 		const payload = startupPayload();
 		const controller = new AbortController();
-		const original = relationshipActivation.validateStaticFabAssemblyRelationshipActivation;
+		const original = relationshipActivation.validateStaticFabAssemblyRelationshipSourceActivation;
 		vi.spyOn(
 			relationshipActivation,
-			"validateStaticFabAssemblyRelationshipActivation",
+			"validateStaticFabAssemblyRelationshipSourceActivation",
 		).mockImplementation(async (...args) => {
 			const proof = await original(...args);
 			controller.abort();
@@ -151,13 +158,13 @@ describe("non-empty relationship document activation", () => {
 			"Renamed during activation",
 		);
 		expect(rename.valid).toBe(true);
-		const original = relationshipActivation.validateStaticFabAssemblyRelationshipActivation;
+		const original = relationshipActivation.validateStaticFabAssemblyRelationshipSourceActivation;
 		vi.spyOn(
 			relationshipActivation,
-			"validateStaticFabAssemblyRelationshipActivation",
+			"validateStaticFabAssemblyRelationshipSourceActivation",
 		).mockImplementation(async (...args) => {
 			const proof = await original(...args);
-			expect(document.commitOrganization(rename)).toBe(true);
+			if (args[0] === document.map) expect(document.commitOrganization(rename)).toBe(true);
 			return proof;
 		});
 		await expect(
@@ -191,16 +198,18 @@ describe("non-empty relationship document activation", () => {
 		const y = payload.snapshot.ys[0] as number;
 		const before = document.map.getEncoded(x, y);
 		const revision = document.map.getRevision();
-		const original = relationshipActivation.validateStaticFabAssemblyRelationshipActivation;
+		const original = relationshipActivation.validateStaticFabAssemblyRelationshipSourceActivation;
 		vi.spyOn(
 			relationshipActivation,
-			"validateStaticFabAssemblyRelationshipActivation",
+			"validateStaticFabAssemblyRelationshipSourceActivation",
 		).mockImplementation(async (...args) => {
 			const proof = await original(...args);
-			const checkpoint = document.map.createMutationCheckpoint();
-			const mutations = [{ x, y, before, after: 0 }];
-			document.map.applyAtomicMutations(mutations, []);
-			document.map.rollbackAtomicMutations(mutations, [], checkpoint);
+			if (args[0] === document.map) {
+				const checkpoint = document.map.createMutationCheckpoint();
+				const mutations = [{ x, y, before, after: 0 }];
+				document.map.applyAtomicMutations(mutations, []);
+				document.map.rollbackAtomicMutations(mutations, [], checkpoint);
+			}
 			return proof;
 		});
 		await expect(

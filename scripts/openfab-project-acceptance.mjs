@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { createServer } from "vite";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactRoot = path.join(root, "artifacts", "openfab-project");
@@ -22,6 +24,7 @@ const result = {
 	firstBytes: 0,
 	secondBytes: 0,
 	recoveryCleanupRemoved: 0,
+	relationshipStartup: null,
 };
 
 try {
@@ -149,6 +152,8 @@ try {
 	const afterInvalid = await readProjectMetrics(page);
 	assertBoundIdentity(afterInvalid, authored, "malformed-file rollback");
 
+	result.relationshipStartup = await exerciseRelationshipProjectStartup(page);
+
 	await seedIsolatedRecoveryCleanupInventory(page, 55);
 	await page.reload({ waitUntil: "domcontentloaded" });
 	await waitForReady(page, 0);
@@ -240,6 +245,201 @@ await Promise.all([
 	new Promise((resolve) => process.stderr.write("", resolve)),
 ]);
 process.exit(result.status === "PASS" ? 0 : 1);
+
+// Test-only explicit Contact evidence; ordinary file load must never infer relationships.
+async function createRelationshipProjectFixture(directory) {
+	const source = await createServer({
+		root,
+		configFile: false,
+		appType: "custom",
+		logLevel: "error",
+		optimizeDeps: { noDiscovery: true },
+		server: { middlewareMode: true },
+	});
+	try {
+		const { productionBankContactFixture } = await source.ssrLoadModule(
+			"/src/tilefab/compile/StaticFabAssemblyRelationshipTestFixture.ts",
+		);
+		const { RailDocument } = await source.ssrLoadModule("/src/tilefab/core/RailDocument.ts");
+		const { captureOpenFabProject, createOpenFabProjectManifest } = await source.ssrLoadModule(
+			"/src/tilefab/project/OpenFabProject.ts",
+		);
+		const { serializeOpenFabProject } = await source.ssrLoadModule(
+			"/src/tilefab/project/OpenFabProjectCodec.ts",
+		);
+		const { captureRailMirrorSnapshot } = await source.ssrLoadModule(
+			"/src/tilefab/worker/RailMirrorChecksum.ts",
+		);
+		const fixture = productionBankContactFixture();
+		const document = RailDocument.fromLoadedMap(
+			fixture.map,
+			17,
+			fixture.portEquipment,
+			fixture.organizations,
+			undefined,
+			fixture.relationships,
+		);
+		const projectId = "relationship-startup-production-60";
+		const project = captureOpenFabProject(document, {
+			manifest: createOpenFabProjectManifest(
+				projectId,
+				"Synthetic Contact startup",
+				"2020-01-01T00:00:00.000Z",
+			),
+		});
+		const checksum = captureRailMirrorSnapshot(
+			document.map,
+			17,
+			document.portEquipment,
+			document.organizations,
+			document.relationships,
+		).snapshot.checksum;
+		const file = path.join(directory, "production-contact.openfab");
+		const json = serializeOpenFabProject(project);
+		await writeFile(file, json);
+		assertEqual(document.map.size, 30_488, "relationship fixture cells");
+		assertEqual(document.organizations.records.length, 184, "relationship fixture organizations");
+		assertEqual(document.relationships.records.length, 1, "relationship fixture records");
+		return { file, projectId, checksum, json };
+	} finally {
+		await source.close();
+	}
+}
+
+async function exerciseRelationshipProjectStartup(activePage) {
+	const directory = await mkdtemp(path.join(tmpdir(), "openfab-relationship-project-"));
+	try {
+		const fixture = await createRelationshipProjectFixture(directory);
+		await activePage.evaluate(() => {
+			window.__openfabRelationshipLongTasks = [];
+			window.__openfabRelationshipObserver = new PerformanceObserver((list) => {
+				for (const entry of list.getEntries()) {
+					window.__openfabRelationshipLongTasks.push({
+						startTime: entry.startTime,
+						duration: entry.duration,
+					});
+				}
+			});
+			window.__openfabRelationshipObserver.observe({ type: "longtask", buffered: false });
+		});
+		const first = await openRelationshipProject(activePage, fixture.file, fixture);
+		const downloadPromise = activePage.waitForEvent("download");
+		await activePage.getByRole("button", { name: "프로젝트 저장", exact: true }).click();
+		const download = await downloadPromise;
+		const savedPath = await download.path();
+		if (!savedPath) throw new Error("Relationship project save has no downloaded file.");
+		await waitForProjectOperation(activePage, "idle");
+		const original = JSON.parse(fixture.json);
+		const saved = JSON.parse(await readFile(savedPath, "utf8"));
+		for (const section of [
+			"rail",
+			"ports",
+			"equipment",
+			"areas",
+			"relationships",
+			"operations",
+			"blueprints",
+			"scenarios",
+		]) {
+			assertEqual(Object.hasOwn(saved, section), true, `relationship saved ${section} exists`);
+			assertEqual(
+				JSON.stringify(saved[section]),
+				JSON.stringify(original[section]),
+				`relationship saved ${section}`,
+			);
+		}
+		assertEqual(saved.relationships.records.length, 1, "saved nonempty relationship count");
+		assertEqual(saved.relationships.nextRelationshipId, 2, "saved relationship cursor");
+		const reopened = await openRelationshipProject(activePage, savedPath, fixture);
+		assertEqual(
+			reopened.physicalFingerprint,
+			first.physicalFingerprint,
+			"relationship reopened physical identity",
+		);
+		console.log(
+			`PASS nonempty relationship project startup | 30,488 cells | 184 organizations | 1 relationship | slices ${first.maxSliceMilliseconds.toFixed(1)}/${reopened.maxSliceMilliseconds.toFixed(1)} ms | Long Tasks 0/0 | native save/reopen`,
+		);
+		return { first, reopened };
+	} finally {
+		await activePage
+			.evaluate(() => {
+				window.__openfabRelationshipObserver?.disconnect();
+				delete window.__openfabRelationshipObserver;
+				delete window.__openfabRelationshipLongTasks;
+				delete window.__openfabRelationshipStartedAt;
+			})
+			.catch(() => undefined);
+		await rm(directory, { recursive: true, force: true });
+	}
+}
+
+async function openRelationshipProject(activePage, file, fixture) {
+	const chooserPromise = activePage.waitForEvent("filechooser");
+	await activePage.getByRole("button", { name: "프로젝트 열기", exact: true }).click();
+	const chooser = await chooserPromise;
+	await activePage.evaluate(() => {
+		window.__openfabRelationshipLongTasks = [];
+		window.__openfabRelationshipStartedAt = performance.now();
+	});
+	// The second open has the same project identity; require its new opening transition first.
+	const opening = activePage.waitForFunction(
+		() => document.querySelector(".tilefab-app")?.dataset.projectOperation === "opening",
+		undefined,
+		{ timeout: 20_000 },
+	);
+	await chooser.setFiles(file);
+	await opening;
+	await activePage.waitForFunction(
+		(expected) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			return (
+				document.querySelector(".tilefab-app")?.dataset.projectOperation === "idle" &&
+				canvas?.dataset.projectId === expected &&
+				canvas.dataset.startupStatus === "ready" &&
+				canvas.dataset.workerStatus === "ready" &&
+				canvas.dataset.modelSyncPending === "false"
+			);
+		},
+		fixture.projectId,
+		{ timeout: 20_000 },
+	);
+	const measured = await activePage.getByTestId("rail-canvas").evaluate((canvas) => ({
+		readyMilliseconds: performance.now() - window.__openfabRelationshipStartedAt,
+		activationMilliseconds: Number(canvas.dataset.startupActivationTotalMs),
+		maxSliceMilliseconds: Number(canvas.dataset.startupActivationMaxSliceMs),
+		maxSlicePhase: canvas.dataset.startupActivationMaxSlicePhase,
+		yields: Number(canvas.dataset.startupActivationYields),
+		checksum: canvas.dataset.workerChecksum,
+		targetChecksum: canvas.dataset.workerTargetChecksum,
+		startupChecksum: canvas.dataset.startupAuthoredChecksum,
+		physicalFingerprint: canvas.dataset.workerPhysicalFingerprint,
+		mirrorFingerprintMatch: canvas.dataset.startupMirrorFingerprintMatch,
+		physicalPaths: Number(canvas.dataset.physicalPaths),
+		simulationReady: canvas.dataset.workerSimulationReady,
+	}));
+	// Deliver observer entries from the final activation/paint task before reading the window.
+	await activePage.waitForTimeout(50);
+	measured.longTasks = await activePage.evaluate(() => window.__openfabRelationshipLongTasks);
+	assertEqual(measured.checksum, fixture.checksum, "relationship startup checksum");
+	assertEqual(measured.targetChecksum, fixture.checksum, "relationship mirror target checksum");
+	assertEqual(measured.startupChecksum, fixture.checksum, "relationship source checksum");
+	assertEqual(measured.mirrorFingerprintMatch, "true", "relationship physical mirror match");
+	assertEqual(measured.physicalPaths, 30_856, "relationship physical paths");
+	assertEqual(measured.simulationReady, "false", "relationship simulation remains closed");
+	assertEqual(measured.longTasks.length, 0, "relationship startup Long Tasks");
+	if (
+		!(
+			measured.yields > 0 &&
+			measured.maxSliceMilliseconds > 0 &&
+			measured.maxSliceMilliseconds <= 8
+		)
+	) {
+		throw new Error(
+			`Relationship startup exceeds the 8 ms scale slice budget: ${JSON.stringify(measured)}`,
+		);
+	}
+	return measured;
+}
 
 async function closeBrowserResource(resource, label) {
 	if (!resource) return;

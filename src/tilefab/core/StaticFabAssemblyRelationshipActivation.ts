@@ -1,6 +1,7 @@
 import { createCooperativeTask } from "./CooperativeTask";
 import type { PortEquipmentState } from "./EquipmentGroup";
 import {
+	createRailModuleOwnershipIndexCompiler,
 	type RailModuleOwnershipIndex,
 	railModuleOwnershipIndexMatchesMap,
 } from "./RailModuleOwnership";
@@ -12,6 +13,7 @@ import type { StaticFabOrganizationState } from "./StaticFabOrganization";
 import {
 	assertStaticFabOrganizationActivation,
 	type ValidatedStaticFabOrganizationActivation,
+	validateStaticFabOrganizationActivation,
 } from "./StaticFabOrganizationActivation";
 import type { TileMap } from "./TileMap";
 
@@ -32,6 +34,54 @@ interface RelationshipActivationBinding {
 }
 
 const activations = new WeakMap<object, RelationshipActivationBinding>();
+
+/** Complete independently reconstructed prerequisites for one exact authored generation. */
+export interface ValidatedStaticFabAssemblyRelationshipSourceActivation {
+	readonly ownership: RailModuleOwnershipIndex;
+	readonly organizationActivation: ValidatedStaticFabOrganizationActivation;
+	readonly relationshipActivation: ValidatedStaticFabAssemblyRelationshipActivation;
+}
+
+/** Derive ownership from authored cells, never from transferred Worker ownership claims. */
+export async function validateStaticFabAssemblyRelationshipSourceActivation(
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<ValidatedStaticFabAssemblyRelationshipSourceActivation> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0) {
+		throw new Error(
+			"Relationship source activation operation budget must be a positive safe integer.",
+		);
+	}
+	const compiler = createRailModuleOwnershipIndexCompiler(map);
+	while (!compiler.done) {
+		compiler.step(operationBudget);
+		await checkpoint();
+	}
+	const ownership = compiler.finish();
+	const organizationActivation = await validateStaticFabOrganizationActivation(
+		map,
+		portEquipment,
+		organizations,
+		ownership,
+		checkpoint,
+		operationBudget,
+	);
+	const relationshipActivation = await validateStaticFabAssemblyRelationshipActivation(
+		map,
+		portEquipment,
+		organizations,
+		relationships,
+		ownership,
+		organizationActivation,
+		checkpoint,
+		operationBudget,
+	);
+	return Object.freeze({ ownership, organizationActivation, relationshipActivation });
+}
 
 /** Reuse the already validated organization and ownership generations; never compile them again. */
 export async function validateStaticFabAssemblyRelationshipActivation(

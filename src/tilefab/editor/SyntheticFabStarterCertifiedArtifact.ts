@@ -19,6 +19,7 @@ import {
 	preparedSyntheticFabStarterMatchesRequest,
 	preparedSyntheticFabStarterMaterializationFingerprint,
 } from "./SyntheticFabStarterBridge";
+import { freezeSyntheticFabStarterContainers } from "./SyntheticFabStarterContainers";
 
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_SCHEMA_VERSION = 2 as const;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "large-fab-60.default.v2" as const;
@@ -550,7 +551,7 @@ function validateTransferredCertificationPrelude(
 		throw new Error("Transferred certified starter attestation checksum does not match.");
 	}
 	assertTransferredPreparedBuffers(prepared, attestation.typedArrayByteLength);
-	deepFreezeContainers(prepared);
+	freezeSyntheticFabStarterContainers(prepared);
 	// The disposable same-origin Worker already performed strict shape, request, topology,
 	// organization, and certification-contract validation before transferring this graph. The main
 	// realm validates buffer ownership and identity without repeating those full domain walks.
@@ -624,7 +625,7 @@ function validateAndHydrateCertifiedArtifact(
 		// Freeze the decoded container graph before structural validation. Large FAB placement
 		// bundles are validated and fingerprinted several times by the fail-closed contract;
 		// immutable containers let those checks safely reuse their WeakMap/WeakSet evidence.
-		deepFreezeContainers(decoded);
+		freezeSyntheticFabStarterContainers(decoded);
 		assertStrictPreparedShape(decoded);
 		const prepared = decoded as unknown as PreparedSyntheticFabStarter;
 		if (!preparedSyntheticFabStarterMatchesRequest(prepared, request)) {
@@ -1827,20 +1828,4 @@ function isBoundedNonnegativeInteger(value: unknown, maximum: number): value is 
 
 function utf8ByteLength(value: string): number {
 	return new TextEncoder().encode(value).byteLength;
-}
-
-function deepFreezeContainers(value: unknown, visited = new WeakSet<object>()): void {
-	if (
-		typeof value !== "object" ||
-		value === null ||
-		ArrayBuffer.isView(value) ||
-		visited.has(value)
-	) {
-		return;
-	}
-	visited.add(value);
-	for (const child of Array.isArray(value) ? value : Object.values(value)) {
-		deepFreezeContainers(child, visited);
-	}
-	Object.freeze(value);
 }

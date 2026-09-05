@@ -1,8 +1,9 @@
 import type { PortEquipmentState } from "../core/EquipmentGroup";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import {
-	assertStaticFabAssemblyRelationshipStateSource,
-	type StaticFabAssemblyRelationshipStateV1,
-} from "../core/StaticFabAssemblyRelationship";
+	type ValidatedStaticFabAssemblyRelationshipSourceActivation,
+	validateStaticFabAssemblyRelationshipSourceActivation,
+} from "../core/StaticFabAssemblyRelationshipActivation";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import { TileMap } from "../core/TileMap";
 import {
@@ -31,6 +32,7 @@ export interface ValidatedRailStartupSnapshotAuthority {
 }
 
 export interface ValidatedRailStartupSnapshotActivation {
+	readonly sourceActivation: ValidatedStaticFabAssemblyRelationshipSourceActivation | null;
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
@@ -208,7 +210,18 @@ export async function validateAndHydrateRailStartupSnapshotCooperatively(
 		);
 	}
 	const map = mapHydrator.finish(snapshot.revision, snapshot.nextAdvancedSwitchId);
-	assertStaticFabAssemblyRelationshipStateSource(map, organizations, relationships);
+	const sourceActivation =
+		relationships.records.length === 0
+			? null
+			: await validateStaticFabAssemblyRelationshipSourceActivation(
+					map,
+					portEquipment,
+					organizations,
+					relationships,
+					checkpoint,
+					operationBudget,
+				);
+	checkCancelled();
 	const token = Object.freeze({});
 	validatedRailStartupSnapshotBindings.set(
 		token,
@@ -245,6 +258,7 @@ export async function validateAndHydrateRailStartupSnapshotCooperatively(
 		}),
 	);
 	return Object.freeze({
+		sourceActivation,
 		map,
 		portEquipment,
 		organizations,

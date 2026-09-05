@@ -13,12 +13,136 @@ import {
 	assertStaticFabAssemblyRelationshipActivation,
 	staticFabAssemblyRelationshipActivationMatches,
 	validateStaticFabAssemblyRelationshipActivation,
+	validateStaticFabAssemblyRelationshipSourceActivation,
 } from "./StaticFabAssemblyRelationshipActivation";
 import { copyStaticFabOrganizationState } from "./StaticFabOrganization";
 import { validateStaticFabOrganizationActivation } from "./StaticFabOrganizationActivation";
 import { encodeRailCell, TileMap } from "./TileMap";
 
 describe("StaticFabAssemblyRelationshipActivation", () => {
+	it("independently compiles large authored ownership and returns reusable exact proofs", async () => {
+		const fixture = await sourceFixture(50_000);
+		const portProof = await validatePortEquipmentActivation(
+			fixture.map,
+			fixture.portEquipment,
+			async () => undefined,
+		);
+		const railScan = vi.spyOn(fixture.map, "forEachRail").mockImplementation(() => {
+			throw new Error("Independent cooperative source activation must not synchronously scan Rail");
+		});
+		const switchScan = vi.spyOn(fixture.map, "forEachAdvancedSwitch").mockImplementation(() => {
+			throw new Error(
+				"Independent cooperative source activation must not synchronously scan switches",
+			);
+		});
+		let checkpoints = 0;
+		try {
+			const source = await validateStaticFabAssemblyRelationshipSourceActivation(
+				fixture.map,
+				fixture.portEquipment,
+				fixture.organizations,
+				fixture.relationships,
+				async () => {
+					checkpoints++;
+				},
+				128,
+			);
+			expect(source.ownership).not.toBe(fixture.ownership);
+			expect(source.ownership.modules).toEqual(fixture.ownership.modules);
+			expect(checkpoints).toBeGreaterThan(1_000);
+			expect(railScan).not.toHaveBeenCalled();
+			expect(switchScan).not.toHaveBeenCalled();
+			expect(
+				staticFabAssemblyRelationshipActivationMatches(
+					source.relationshipActivation,
+					fixture.map,
+					fixture.portEquipment,
+					fixture.organizations,
+					fixture.relationships,
+				),
+			).toBe(true);
+			expect(Object.isFrozen(source)).toBe(true);
+			const document = RailDocument.fromCooperativelyValidatedMap(
+				fixture.map,
+				17,
+				fixture.portEquipment,
+				fixture.organizations,
+				portProof,
+				source.organizationActivation,
+				undefined,
+				fixture.relationships,
+				source.relationshipActivation,
+			);
+			expect(document.relationships).toBe(fixture.relationships);
+			expect(document.canUndo).toBe(false);
+			expect(() =>
+				RailDocument.fromCooperativelyValidatedMap(
+					fixture.map,
+					17,
+					fixture.portEquipment,
+					fixture.organizations,
+					portProof,
+					source.organizationActivation,
+					undefined,
+					fixture.relationships,
+					source.relationshipActivation,
+				),
+			).toThrow(/이미 다른 문서에서 소비/);
+		} finally {
+			railScan.mockRestore();
+			switchScan.mockRestore();
+		}
+	});
+
+	it("rejects source mutation during independent compilation before issuing composite proof", async () => {
+		const fixture = await sourceFixture();
+		let checkpoints = 0;
+		await expect(
+			validateStaticFabAssemblyRelationshipSourceActivation(
+				fixture.map,
+				fixture.portEquipment,
+				fixture.organizations,
+				fixture.relationships,
+				async () => {
+					checkpoints++;
+					if (checkpoints === 1)
+						fixture.map.setEncoded(
+							100_000,
+							100_000,
+							encodeRailCell({ incoming: DIR_W, outgoing: DIR_E }),
+						);
+				},
+				1,
+			),
+		).rejects.toThrow(/source changed/);
+		expect(checkpoints).toBe(1);
+	});
+
+	it("rejects invalid independent source budgets without consuming valid later activation", async () => {
+		const fixture = await sourceFixture();
+		for (const budget of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			await expect(
+				validateStaticFabAssemblyRelationshipSourceActivation(
+					fixture.map,
+					fixture.portEquipment,
+					fixture.organizations,
+					fixture.relationships,
+					async () => undefined,
+					budget,
+				),
+			).rejects.toThrow(/positive safe integer/);
+		}
+		await expect(
+			validateStaticFabAssemblyRelationshipSourceActivation(
+				fixture.map,
+				fixture.portEquipment,
+				fixture.organizations,
+				fixture.relationships,
+				async () => undefined,
+			),
+		).resolves.toBeDefined();
+	});
+
 	it("requires the exact completed proof before consuming document adoption evidence", async () => {
 		const fixture = await sourceFixture();
 		const portProof = await validatePortEquipmentActivation(

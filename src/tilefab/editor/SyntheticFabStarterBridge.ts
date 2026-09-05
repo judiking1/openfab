@@ -38,6 +38,7 @@ import type {
 	SyntheticFabStarterWorkerRequest,
 	SyntheticFabStarterWorkerResponse,
 } from "../worker/SyntheticFabStarterProtocol";
+import { freezeSyntheticFabStarterContainers } from "./SyntheticFabStarterContainers";
 
 export interface SyntheticFabStarterWorkerPort {
 	onmessage: ((event: MessageEvent<SyntheticFabStarterWorkerResponse>) => void) | null;
@@ -116,6 +117,14 @@ export class SyntheticFabStarterBridge {
 				}
 				if (response.type === "SYNTHETIC_FAB_STARTER_PREPARATION_ERROR") {
 					fail(new Error(response.message));
+					return;
+				}
+				try {
+					// Structured clone drops Object.freeze. Restore the container boundary before
+					// validation so repeated checks can reuse only proven immutable bundle data.
+					freezeSyntheticFabStarterContainers(response.prepared);
+				} catch (error) {
+					fail(normalizeWorkerError(error, "FAB starter Worker response could not be frozen."));
 					return;
 				}
 				if (
