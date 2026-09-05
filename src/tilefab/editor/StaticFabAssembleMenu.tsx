@@ -183,7 +183,7 @@ export function StaticFabAssembleMenu({
 						onClick={onDuplicateSelection}
 						title={duplicateAvailability.reason}
 					>
-						<Copy size={16} /> DUPLICATE
+						<Copy size={16} /> DUPLICATE ORGANIZATION
 					</button>
 					<button
 						type="button"
@@ -205,13 +205,13 @@ export function StaticFabAssembleMenu({
 								: "CONNECT BAYS"}
 					</button>
 				</div>
-				<div className="tilefab-assemble-availability" aria-live="polite">
+				<div className="tilefab-assemble-availability">
 					<p
 						id="tilefab-assemble-duplicate-status"
 						data-testid="assemble-duplicate-status"
 						data-ready={duplicateAvailability.state === "ready"}
 					>
-						<span>DUPLICATE</span>
+						<span>DUPLICATE ORGANIZATION</span>
 						{duplicateAvailability.reason}
 					</p>
 					<p
@@ -228,84 +228,86 @@ export function StaticFabAssembleMenu({
 						{connectorAvailability.reason}
 					</p>
 				</div>
-				<section className="tilefab-assemble-semantic-bay" aria-label="Selected Bay commands">
-					<header>
-						<span>SELECTED BAY</span>
-						<small className="tilefab-assemble-semantic-bay-header-detail">
-							{selectedBayCount === 1 ? "Semantic Bay actions" : "Select exactly one Bay"}
-						</small>
-					</header>
-					<div className="tilefab-assemble-semantic-bay-actions">
-						<button
-							type="button"
-							data-testid="assemble-edit-selected-bay-alternating"
-							data-target-pattern="alternating"
-							aria-describedby="tilefab-assemble-edit-flow-status"
-							disabled={editFlowAvailability.state !== "ready"}
-							title={editFlowAvailability.reason}
-							onClick={(event) => onEditSelectedBayFlow("alternating", event.currentTarget)}
-						>
-							<RefreshCw size={15} /> SET ALTERNATING…
-						</button>
-						<button
-							type="button"
-							data-testid="assemble-edit-selected-bay-co-rotating"
-							data-target-pattern="co-rotating"
-							aria-describedby="tilefab-assemble-edit-flow-status"
-							disabled={editFlowAvailability.state !== "ready"}
-							title={editFlowAvailability.reason}
-							onClick={(event) => onEditSelectedBayFlow("co-rotating", event.currentTarget)}
-						>
-							<RefreshCw size={15} /> SET CO-ROTATING…
-						</button>
-						<button
-							type="button"
-							data-testid="assemble-disconnect-selected-bay"
-							aria-describedby="tilefab-assemble-disconnect-status"
-							disabled={disconnectAvailability.state !== "ready"}
-							title={disconnectAvailability.reason}
-							onClick={(event) => onDisconnectSelectedBay(event.currentTarget)}
-						>
-							<Unlink size={15} /> DISCONNECT BAY…
-						</button>
-						<button
-							type="button"
-							data-testid="assemble-delete-selected-bay"
-							aria-describedby="tilefab-assemble-delete-status"
-							disabled={deleteAvailability.state !== "ready"}
-							title={deleteAvailability.reason}
-							onClick={(event) => onDeleteSelectedBay(event.currentTarget)}
-						>
-							<Trash2 size={15} /> DELETE BAY…
-						</button>
-					</div>
-					<div className="tilefab-assemble-semantic-bay-statuses" aria-live="polite">
-						<p
-							id="tilefab-assemble-edit-flow-status"
-							data-testid="assemble-edit-flow-status"
-							data-ready={editFlowAvailability.state === "ready"}
-						>
-							<span>FLOW TARGET</span>
-							{editFlowAvailability.reason}
-						</p>
-						<p
-							id="tilefab-assemble-disconnect-status"
-							data-testid="assemble-disconnect-status"
-							data-ready={disconnectAvailability.state === "ready"}
-						>
-							<span>DISCONNECT</span>
-							{disconnectAvailability.reason}
-						</p>
-						<p
-							id="tilefab-assemble-delete-status"
-							data-testid="assemble-delete-status"
-							data-ready={deleteAvailability.state === "ready"}
-						>
-							<span>DELETE</span>
-							{deleteAvailability.reason}
-						</p>
-					</div>
-				</section>
+				{selectionCount === 1 && selectedBayCount === 1 ? (
+					<section className="tilefab-assemble-semantic-bay" aria-label="Selected Bay commands">
+						<header>
+							<span>SELECTED BAY</span>
+							<small className="tilefab-assemble-semantic-bay-header-detail">
+								Semantic Bay actions
+							</small>
+						</header>
+						<div className="tilefab-assemble-semantic-bay-actions">
+							<button
+								type="button"
+								data-testid="assemble-edit-selected-bay-alternating"
+								data-target-pattern="alternating"
+								aria-describedby="tilefab-assemble-edit-flow-status"
+								disabled={editFlowAvailability.state !== "ready"}
+								title={editFlowAvailability.reason}
+								onClick={(event) => onEditSelectedBayFlow("alternating", event.currentTarget)}
+							>
+								<RefreshCw size={15} /> SET ALTERNATING…
+							</button>
+							<button
+								type="button"
+								data-testid="assemble-edit-selected-bay-co-rotating"
+								data-target-pattern="co-rotating"
+								aria-describedby="tilefab-assemble-edit-flow-status"
+								disabled={editFlowAvailability.state !== "ready"}
+								title={editFlowAvailability.reason}
+								onClick={(event) => onEditSelectedBayFlow("co-rotating", event.currentTarget)}
+							>
+								<RefreshCw size={15} /> SET CO-ROTATING…
+							</button>
+							<button
+								type="button"
+								data-testid="assemble-disconnect-selected-bay"
+								aria-describedby="tilefab-assemble-disconnect-status"
+								disabled={disconnectAvailability.state !== "ready"}
+								title={disconnectAvailability.reason}
+								onClick={(event) => onDisconnectSelectedBay(event.currentTarget)}
+							>
+								<Unlink size={15} /> DISCONNECT BAY…
+							</button>
+							<button
+								type="button"
+								data-testid="assemble-delete-selected-bay"
+								aria-describedby="tilefab-assemble-delete-status"
+								disabled={deleteAvailability.state !== "ready"}
+								title={deleteAvailability.reason}
+								onClick={(event) => onDeleteSelectedBay(event.currentTarget)}
+							>
+								<Trash2 size={15} /> DELETE BAY…
+							</button>
+						</div>
+						<div className="tilefab-assemble-semantic-bay-statuses">
+							<p
+								id="tilefab-assemble-edit-flow-status"
+								data-testid="assemble-edit-flow-status"
+								data-ready={editFlowAvailability.state === "ready"}
+							>
+								<span>FLOW TARGET</span>
+								{editFlowAvailability.reason}
+							</p>
+							<p
+								id="tilefab-assemble-disconnect-status"
+								data-testid="assemble-disconnect-status"
+								data-ready={disconnectAvailability.state === "ready"}
+							>
+								<span>DISCONNECT</span>
+								{disconnectAvailability.reason}
+							</p>
+							<p
+								id="tilefab-assemble-delete-status"
+								data-testid="assemble-delete-status"
+								data-ready={deleteAvailability.state === "ready"}
+							>
+								<span>DELETE</span>
+								{deleteAvailability.reason}
+							</p>
+						</div>
+					</section>
+				) : null}
 			</section>
 
 			<details

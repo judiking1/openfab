@@ -115,12 +115,14 @@ async function expectEquipmentReviewEndToEnd(scenario: EquipmentReviewScenario):
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	const snapshotHandoff = issueRailMirrorSnapshotCaptureHandoff(
 		document.map,
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 		sourceCapture.snapshot.checksum,
 	);
 	const sourceSnapshot = structuredClone(sourceCapture.snapshot, {

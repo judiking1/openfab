@@ -63,6 +63,7 @@ import {
 	revokeReviewedPortEquipmentApply,
 } from "../core/ReviewedPortEquipmentApplyCertification";
 import { ALL_DIRECTIONS, type Direction } from "../core/railShape";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import {
@@ -179,12 +180,14 @@ export function prepareOpenFabStationProposalReviewEvaluationTransfer(
 	let map: TileMap | null = null;
 	let portEquipment: PortEquipmentState | null = null;
 	let organizations: StaticFabOrganizationState | null = null;
+	let relationships: StaticFabAssemblyRelationshipStateV1 | null = null;
 	let patchSequence: number | null = null;
 	let snapshotAuthorized = false;
 	try {
 		map = document.map;
 		portEquipment = document.portEquipment;
 		organizations = document.organizations;
+		relationships = document.relationships;
 		patchSequence = document.getPatchSequence();
 		snapshotAuthorized = consumeRailMirrorSnapshotCaptureAuthority(
 			sourceSnapshot,
@@ -192,6 +195,7 @@ export function prepareOpenFabStationProposalReviewEvaluationTransfer(
 			patchSequence,
 			portEquipment,
 			organizations,
+			relationships,
 		);
 	} catch {
 		revokeRailMirrorSnapshotCaptureAuthority(sourceSnapshot);
@@ -201,6 +205,7 @@ export function prepareOpenFabStationProposalReviewEvaluationTransfer(
 		map === null ||
 		portEquipment === null ||
 		organizations === null ||
+		relationships === null ||
 		patchSequence === null ||
 		!proposalRelease ||
 		!draftRelease ||
@@ -227,6 +232,7 @@ export function prepareOpenFabStationProposalReviewEvaluationTransfer(
 			map,
 			portEquipment,
 			organizations,
+			relationships,
 			sourceRevision: map.getRevision(),
 			sourcePatchSequence: patchSequence,
 			sourceChecksum: sourceSnapshot.checksum,
@@ -418,7 +424,12 @@ export function materializeOpenFabStationProposalReviewedApplyMeasured(
 		organizationNextIdBefore: source.sourceNextOrganizationId,
 		organizationNextIdAfter: source.sourceNextOrganizationId,
 	});
-	const fullChecksum = checksumRailMap(source.map, prospective, source.organizations);
+	const fullChecksum = checksumRailMap(
+		source.map,
+		prospective,
+		source.organizations,
+		source.relationships,
+	);
 	assertReviewedApplyProspectiveIdentity(authority, prospective, incrementalChecksum, fullChecksum);
 	const checksumValidationFinishedAt = readMaterializationTime(now, checksumValidationStartedAt);
 	const applyIssuanceStartedAt = checksumValidationFinishedAt;
@@ -482,6 +493,7 @@ export async function materializeOpenFabStationProposalReviewedApplyCooperativel
 			source.organizations,
 			() => cooperative.checkTime(),
 			OPERATIONS_PER_TIME_CHECK,
+			source.relationships,
 		)) !== source.sourceChecksum
 	) {
 		throw new Error("STATION_PROPOSAL_REVIEW_APPLY_IDENTITY_MISMATCH");
@@ -554,6 +566,7 @@ export async function materializeOpenFabStationProposalReviewedApplyCooperativel
 		source.organizations,
 		() => cooperative.checkTime(),
 		OPERATIONS_PER_TIME_CHECK,
+		source.relationships,
 	);
 	assertReviewedApplyProspectiveIdentity(authority, prospective, incrementalChecksum, fullChecksum);
 	const checksumValidationFinishedAt = cooperative.readTime(checksumValidationStartedAt);
@@ -778,6 +791,7 @@ interface OpenFabStationProposalReviewPermitSource {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly sourceRevision: number;
 	readonly sourcePatchSequence: number;
 	readonly sourceChecksum: string;
@@ -811,7 +825,7 @@ const PLAN_GRAPH_FINGERPRINT_PATTERN =
 	/^openfab-station-proposal-reviewed-plan-graph:v1:[0-9a-f]{8}:[0-9a-f]{8}$/;
 const EVALUATION_SNAPSHOT_FINGERPRINT_PATTERN =
 	/^openfab-station-proposal-review-evaluation-snapshot:v1:[0-9a-f]{8}:[0-9a-f]{8}$/;
-const RAIL_CHECKSUM_PATTERN = /^(?:[0-9a-f]{8}:){8}[0-9a-f]{8}$/;
+const RAIL_CHECKSUM_PATTERN = /^(?:[0-9a-f]{8}:){11}[0-9a-f]{8}$/;
 const READY_PLAN_REASON =
 	"Port/equipment mutations are structurally ready for document validation.";
 const DEFAULT_SLICE_MILLISECONDS = 4;
@@ -2753,8 +2767,12 @@ function assertReviewedApplyMaterializationAuthority(
 		!matchesPattern(ticket.planFingerprint, PLAN_GRAPH_FINGERPRINT_PATTERN) ||
 		!matchesPattern(ticket.prospectiveChecksum, RAIL_CHECKSUM_PATTERN) ||
 		(validateSourceChecksum &&
-			checksumRailMap(source.map, source.portEquipment, source.organizations) !==
-				source.sourceChecksum)
+			checksumRailMap(
+				source.map,
+				source.portEquipment,
+				source.organizations,
+				source.relationships,
+			) !== source.sourceChecksum)
 	) {
 		throw new Error("STATION_PROPOSAL_REVIEW_APPLY_IDENTITY_MISMATCH");
 	}
@@ -2787,6 +2805,7 @@ function livePermitSourceMatches(source: OpenFabStationProposalReviewPermitSourc
 		source.document.map === source.map &&
 		source.document.portEquipment === source.portEquipment &&
 		source.document.organizations === source.organizations &&
+		source.document.relationships === source.relationships &&
 		source.map.getRevision() === source.sourceRevision &&
 		source.document.getPatchSequence() === source.sourcePatchSequence &&
 		source.map.getAdvancedSwitchIdCursor() === source.sourceNextAdvancedSwitchId &&

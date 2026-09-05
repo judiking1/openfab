@@ -1,4 +1,5 @@
 import type { PortEquipmentState } from "../core/EquipmentGroup";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type {
 	StaticFabSemanticBayMutationIntent,
@@ -42,6 +43,7 @@ export interface StaticFabSemanticBayMutationLiveState {
 	readonly patchSequence: number;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 export interface StaticFabSemanticBayMutationInput {
@@ -115,6 +117,7 @@ export class StaticFabSemanticBayMutationBridge {
 				source.patchSequence,
 				source.portEquipment,
 				source.organizations,
+				source.relationships,
 			)
 		) {
 			return Promise.reject(
@@ -478,6 +481,7 @@ function sourceBindingMatchesLiveState(binding: PendingSemanticBayMutation): boo
 		live.map === binding.source.map &&
 		live.portEquipment === binding.source.portEquipment &&
 		live.organizations === binding.source.organizations &&
+		live.relationships === binding.source.relationships &&
 		sourceIdentityMatchesLiveState(binding.sourceIdentity, live)
 	);
 }

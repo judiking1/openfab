@@ -47,16 +47,27 @@ describe("StaticFabAssembleMenu", () => {
 		expect(markup).toContain("PLACE BLUEPRINT");
 		expect(markup).toContain("BROWSE ORGANIZATIONS");
 		expect(markup).toContain("SELECT ON CANVAS");
-		expect(markup).toContain("DISCONNECT BAY…");
-		expect(markup).toContain("DELETE BAY…");
-		expect(markup).toContain("SET ALTERNATING…");
-		expect(markup).toContain("SET CO-ROTATING…");
+		expect(markup).not.toContain("SELECTED BAY");
+		expect(markup).not.toContain("DISCONNECT BAY…");
+		expect(markup).not.toContain("DELETE BAY…");
 		expect(markup).toContain('data-testid="assemble-select-on-canvas"');
 		expect(markup).toContain('data-testid="assemble-browse-organizations"');
+		expect(markup).toContain("DUPLICATE ORGANIZATION");
+		expect(markup).not.toMatch(/>DUPLICATE</);
 		expect(markup).toContain("ADVANCED RAIL MOTIFS");
 		expect(markup).toMatch(/<details class="tilefab-assemble-advanced">/);
 		expect(markup).not.toMatch(/<details class="tilefab-assemble-advanced"[^>]*open/);
 		expect(markup).not.toContain('data-testid="advanced-content"');
+	});
+
+	it("does not show irrelevant Bay commands for a selected Bank", () => {
+		const markup = renderToStaticMarkup(
+			<StaticFabAssembleMenu {...props({ selectionCount: 1, selectedBankCount: 1 })} />,
+		);
+		expect(markup).toContain("1 ORGANIZATION");
+		expect(markup).not.toContain("SELECTED BAY");
+		expect(markup).not.toContain('data-testid="assemble-disconnect-selected-bay"');
+		expect(markup).not.toContain('data-testid="assemble-delete-selected-bay"');
 	});
 
 	it("shows one selected-Bay row with independent semantic command availability", () => {
@@ -213,6 +224,8 @@ describe("StaticFabAssembleMenu", () => {
 		const markup = renderToStaticMarkup(
 			<StaticFabAssembleMenu
 				{...props({
+					selectionCount: 1,
+					selectedBayCount: 1,
 					duplicateAvailability: {
 						state: "blocked",
 						reason: "Finish organization edits before duplicating.",

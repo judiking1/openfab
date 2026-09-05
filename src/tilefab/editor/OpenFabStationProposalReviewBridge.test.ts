@@ -273,7 +273,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 			preview: { state: "READY" },
 		});
 		const objectDraftTransfers = objectWorker.requestTransferBatches[0] ?? [];
-		expect(objectDraftTransfers).toHaveLength(95);
+		expect(objectDraftTransfers).toHaveLength(126);
 		objectBridge.cancel();
 
 		const fixture = await snapshotReviewFixture();
@@ -299,7 +299,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 			expect(worker.requestTransferBatches).toHaveLength(1);
 			const snapshotDraftTransfers = worker.requestTransferBatches[0] ?? [];
 			expect(snapshotDraftTransfers).toHaveLength(objectDraftTransfers.length);
-			expect(snapshotDraftTransfers).toHaveLength(95);
+			expect(snapshotDraftTransfers).toHaveLength(126);
 			expect(new Set(snapshotDraftTransfers).size).toBe(snapshotDraftTransfers.length);
 			expect(worker.requestTransfersDetached).toEqual([true]);
 			expect(fixture.draftSnapshot.decisionRows.byteLength).toBe(0);
@@ -356,7 +356,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 				canApply: true,
 				preview: { state: "READY", includedPortCount: 1, equipmentGroupCount: 1 },
 			});
-			expect(worker.requestTransferBatches[0]).toHaveLength(95);
+			expect(worker.requestTransferBatches[0]).toHaveLength(126);
 			expect(session.readRowWindow(0, 1).items[0]).toMatchObject({
 				row: 0,
 				reviewGroupId: 1,
@@ -1243,6 +1243,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(false);
 		expectDocumentIdentity(fixture.document, before);
@@ -1278,6 +1279,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(false);
 		expectDocumentIdentity(fixture.document, before);
@@ -1311,6 +1313,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(false);
 		expectDocumentIdentity(fixture.document, before);
@@ -1460,6 +1463,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(false);
 		expectDocumentIdentity(fixture.document, before);
@@ -1637,6 +1641,7 @@ function expectRailAuthorityRevoked(fixture: {
 			fixture.document.getPatchSequence(),
 			fixture.document.portEquipment,
 			fixture.document.organizations,
+			fixture.document.relationships,
 		),
 	).toBe(false);
 }
@@ -1656,6 +1661,7 @@ function reviewFixture(
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	).snapshot;
 	let generation = initialGeneration;
 	return {

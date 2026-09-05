@@ -7,6 +7,7 @@ export interface OpenFabProjectDirtyState {
 
 export interface OpenFabProjectRecoveryScheduleState {
 	readonly dirty: boolean;
+	readonly recoverableContent: boolean;
 	readonly scaleProbeActive: boolean;
 	readonly startupReady: boolean;
 	readonly modelSyncPending: boolean;
@@ -51,6 +52,7 @@ export function shouldScheduleOpenFabProjectRecovery(
 ): boolean {
 	return (
 		state.dirty &&
+		state.recoverableContent &&
 		!state.scaleProbeActive &&
 		state.startupReady &&
 		!state.modelSyncPending &&

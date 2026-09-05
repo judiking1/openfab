@@ -6,7 +6,7 @@ import type { StaticFabAssemblyConnectorWorkerTicket } from "../core/StaticFabAs
 import type { Cell } from "../core/TileMap";
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
 
-export const STATIC_FAB_ASSEMBLY_CONNECTOR_PROTOCOL_VERSION = 4 as const;
+export const STATIC_FAB_ASSEMBLY_CONNECTOR_PROTOCOL_VERSION = 5 as const;
 export const STATIC_FAB_ASSEMBLY_CONNECTOR_CONFLICT_LIMIT = 512;
 export const STATIC_FAB_ASSEMBLY_CONNECTOR_MAX_PLAN_CELLS = 4_096;
 export const STATIC_FAB_ASSEMBLY_CONNECTOR_MAX_ORGANIZATION_MUTATIONS = 256;

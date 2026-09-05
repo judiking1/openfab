@@ -394,6 +394,7 @@ function bridgeFixture(composition: CertifiedOpenFabFabComposition): BridgeFixtu
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	).snapshot;
 	const intent: StaticFabBayFlowEditIntent = Object.freeze({
 		version: STATIC_FAB_BAY_FLOW_EDIT_VERSION,
@@ -414,6 +415,7 @@ function bridgeFixture(composition: CertifiedOpenFabFabComposition): BridgeFixtu
 				patchSequence: livePatchSequence,
 				portEquipment: document.portEquipment,
 				organizations: liveOrganizations,
+				relationships: document.relationships,
 			}),
 		},
 		setPatchSequence(sequence: number): void {

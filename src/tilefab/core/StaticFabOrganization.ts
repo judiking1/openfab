@@ -1,8 +1,10 @@
+import { completeCooperativeSteps } from "./CooperativeTask";
 import type { PortEquipmentState } from "./EquipmentGroup";
 import {
 	buildRailModuleOwnershipIndex,
 	type DirectedRailEdge,
 	type RailModuleOwnershipIndex,
+	railModuleOwnershipIndexMatchesMap,
 } from "./RailModuleOwnership";
 import { type Direction, directionBetween, moveCell, oppositeDirection } from "./railShape";
 import { decodeRailCell, type TileMap } from "./TileMap";
@@ -23,6 +25,8 @@ export const STATIC_FAB_ORGANIZATION_COLORS = [
 export const DEFAULT_STATIC_FAB_ORGANIZATION_COLOR = "TEAL" as const;
 export const STATIC_FAB_ORGANIZATION_MAX_PARENTS = 32;
 export const STATIC_FAB_ORGANIZATION_MAX_DESCRIPTION_LENGTH = 500;
+export const STATIC_FAB_ORGANIZATION_MAX_RECORDS = 100_000;
+export const STATIC_FAB_ORGANIZATION_MAX_MEMBERSHIP_REFERENCES = 5_000_000;
 
 export type StaticFabOrganizationKind = (typeof STATIC_FAB_ORGANIZATION_KINDS)[number];
 export type StaticFabOrganizationColor = (typeof STATIC_FAB_ORGANIZATION_COLORS)[number];
@@ -52,6 +56,12 @@ export interface StaticFabOrganizationRecord {
 export interface StaticFabOrganizationState {
 	readonly nextOrganizationId: number;
 	readonly records: readonly StaticFabOrganizationRecord[];
+}
+
+export interface StaticFabOrganizationRailValidationOptions {
+	readonly ownership?: RailModuleOwnershipIndex;
+	readonly maximumRecords?: number;
+	readonly maximumMembershipReferences?: number;
 }
 
 /** Opaque provenance for plain immutable organization generations built by trusted boundaries. */
@@ -329,52 +339,56 @@ export function staticFabOrganizationProperties(
 export function deriveStaticFabOrganizationSemanticRoles(
 	state: StaticFabOrganizationState,
 ): ReadonlyMap<number, StaticFabOrganizationSemanticRole> {
-	const recordsById = new Map(state.records.map((record) => [record.id, record]));
+	return completeCooperativeSteps(deriveStaticFabOrganizationSemanticRoleSteps(state));
+}
+
+/** Same ordered semantic derivation, with a checkpoint opportunity for every record/child. */
+export function* deriveStaticFabOrganizationSemanticRoleSteps(
+	state: StaticFabOrganizationState,
+): Generator<void, ReadonlyMap<number, StaticFabOrganizationSemanticRole>> {
+	const recordsById = new Map<number, StaticFabOrganizationRecord>();
+	for (const record of state.records) {
+		yield;
+		recordsById.set(record.id, record);
+	}
 	const childrenByParentId = new Map<number, StaticFabOrganizationRecord[]>();
 	for (const record of state.records) {
+		yield;
 		for (const parentId of staticFabOrganizationParentIds(record)) {
+			yield;
 			if (!recordsById.has(parentId)) continue;
 			const children = childrenByParentId.get(parentId);
 			if (children) children.push(record);
 			else childrenByParentId.set(parentId, [record]);
 		}
 	}
-
 	const roles = new Map<number, StaticFabOrganizationSemanticRole>();
 	for (const record of state.records) {
-		if (
-			record.kind === "AISLE" &&
-			staticFabOrganizationParentIds(record).some(
-				(parentId) => recordsById.get(parentId)?.kind === "BAY",
-			)
-		) {
-			roles.set(record.id, "PROCESS_LOOP");
+		yield;
+		if (record.kind !== "AISLE") continue;
+		for (const parentId of staticFabOrganizationParentIds(record)) {
+			yield;
+			if (recordsById.get(parentId)?.kind === "BAY") {
+				roles.set(record.id, "PROCESS_LOOP");
+				break;
+			}
 		}
 	}
-	for (const record of state.records) {
-		if (
-			record.kind === "BAY" &&
-			(childrenByParentId.get(record.id) ?? []).some(
-				(child) => roles.get(child.id) === "PROCESS_LOOP",
-			)
-		) {
-			roles.set(record.id, "BAY");
-		}
-	}
-	for (const record of state.records) {
-		if (
-			record.kind === "AREA" &&
-			(childrenByParentId.get(record.id) ?? []).some((child) => roles.get(child.id) === "BAY")
-		) {
-			roles.set(record.id, "BAY_BANK");
-		}
-	}
-	for (const record of state.records) {
-		if (
-			record.kind === "AREA" &&
-			(childrenByParentId.get(record.id) ?? []).some((child) => roles.get(child.id) === "BAY_BANK")
-		) {
-			roles.set(record.id, "FAB");
+	for (const [kind, childRole, role] of [
+		["BAY", "PROCESS_LOOP", "BAY"],
+		["AREA", "BAY", "BAY_BANK"],
+		["AREA", "BAY_BANK", "FAB"],
+	] as const) {
+		for (const record of state.records) {
+			yield;
+			if (record.kind !== kind) continue;
+			for (const child of childrenByParentId.get(record.id) ?? []) {
+				yield;
+				if (roles.get(child.id) === childRole) {
+					roles.set(record.id, role);
+					break;
+				}
+			}
 		}
 	}
 	return roles;
@@ -542,6 +556,101 @@ export function staticFabOrganizationStateShapeError(
 	}
 	const relationshipError = staticFabOrganizationRelationshipError(state);
 	if (relationshipError) return relationshipError;
+	return null;
+}
+
+/** Bounded preflight shared by synchronous Rail validation and cooperative relationship activation. */
+export function* staticFabOrganizationRailStateBudgetSteps(
+	state: StaticFabOrganizationState,
+	options: StaticFabOrganizationRailValidationOptions = {},
+): Generator<void, string | null> {
+	const maximumRecords = options.maximumRecords ?? STATIC_FAB_ORGANIZATION_MAX_RECORDS;
+	const maximumMembershipReferences =
+		options.maximumMembershipReferences ?? STATIC_FAB_ORGANIZATION_MAX_MEMBERSHIP_REFERENCES;
+	if (
+		!Number.isSafeInteger(maximumRecords) ||
+		maximumRecords <= 0 ||
+		maximumRecords > STATIC_FAB_ORGANIZATION_MAX_RECORDS ||
+		!Number.isSafeInteger(maximumMembershipReferences) ||
+		maximumMembershipReferences <= 0 ||
+		maximumMembershipReferences > STATIC_FAB_ORGANIZATION_MAX_MEMBERSHIP_REFERENCES
+	) {
+		return "정적 FAB 조직 Rail 검증 예산이 유효하지 않습니다";
+	}
+	if (!state || typeof state !== "object" || !Array.isArray(state.records)) {
+		return "정적 FAB 조직 레코드 목록은 배열이어야 합니다";
+	}
+	if (state.records.length > maximumRecords) {
+		return `정적 FAB 조직은 최대 ${maximumRecords}개까지 검증할 수 있습니다`;
+	}
+	let membershipReferenceCount = 0;
+	for (let index = 0; index < state.records.length; index++) {
+		yield;
+		const record = state.records[index];
+		const membership = record?.membership;
+		if (
+			!membership ||
+			!Array.isArray(membership.railEdges) ||
+			!Array.isArray(membership.advancedSwitchIds) ||
+			!Array.isArray(membership.equipmentGroupIds)
+		) {
+			return `조직 ${record?.id ?? index + 1}: 멤버십 목록이 유효하지 않습니다`;
+		}
+		const recordReferenceCount =
+			membership.railEdges.length +
+			membership.advancedSwitchIds.length +
+			membership.equipmentGroupIds.length;
+		if (
+			!Number.isSafeInteger(recordReferenceCount) ||
+			recordReferenceCount > maximumMembershipReferences - membershipReferenceCount
+		) {
+			return `정적 FAB 조직 멤버십 참조는 최대 ${maximumMembershipReferences}개까지 검증할 수 있습니다`;
+		}
+		membershipReferenceCount += recordReferenceCount;
+	}
+	return null;
+}
+
+/**
+ * Validate the current Rail-facing portion of organization truth without coupling callers to Port
+ * or equipment state. Relationship identity uses this gate before trusting direct-owner evidence.
+ */
+export function staticFabOrganizationRailStateError(
+	map: TileMap,
+	state: StaticFabOrganizationState,
+	options: StaticFabOrganizationRailValidationOptions = {},
+): string | null {
+	const budgetError = completeCooperativeSteps(
+		staticFabOrganizationRailStateBudgetSteps(state, options),
+	);
+	if (budgetError) return budgetError;
+	const shapeError = staticFabOrganizationStateShapeError(state);
+	if (shapeError) return shapeError;
+	if (options.ownership && !railModuleOwnershipIndexMatchesMap(options.ownership, map)) {
+		return "정적 FAB 조직 Rail module 소유권 인덱스가 현재 맵 generation과 일치하지 않습니다";
+	}
+	const ownership =
+		state.records.length > 0 ? organizationOwnershipIndex(map, options.ownership) : null;
+	for (const record of state.records) {
+		for (const edge of record.membership.railEdges) {
+			if (!directedRailEdgeExists(map, edge)) {
+				return `조직 ${record.id}의 레일 ${staticFabOrganizationEdgeKey(edge)}을 현재 맵에서 찾을 수 없습니다`;
+			}
+		}
+		for (const switchId of record.membership.advancedSwitchIds) {
+			if (!map.getAdvancedSwitch(switchId)) {
+				return `조직 ${record.id}의 고급 스위치 ${switchId}을 현재 맵에서 찾을 수 없습니다`;
+			}
+		}
+		const ownershipError = ownership
+			? staticFabOrganizationOwnershipError(ownership, record)
+			: null;
+		if (ownershipError) return ownershipError;
+	}
+	const railOverlap = staticFabOrganizationSameKindRailOverlapError(state);
+	if (railOverlap) return railOverlap;
+	const switchOverlap = staticFabOrganizationSameKindSwitchOverlapError(state);
+	if (switchOverlap) return switchOverlap;
 	return null;
 }
 
@@ -1067,6 +1176,152 @@ function canonicalDirectedRailEdgeArray(edges: readonly DirectedRailEdge[]): boo
 	return true;
 }
 
+interface OrganizationRailMembershipCursor {
+	readonly recordId: number;
+	readonly edges: readonly DirectedRailEdge[];
+	index: number;
+}
+
+interface OrganizationSwitchMembershipCursor {
+	readonly recordId: number;
+	readonly switchIds: readonly number[];
+	index: number;
+}
+
+function staticFabOrganizationSameKindRailOverlapError(
+	state: StaticFabOrganizationState,
+): string | null {
+	for (const kind of STATIC_FAB_ORGANIZATION_KINDS) {
+		const heap: OrganizationRailMembershipCursor[] = [];
+		for (const record of state.records) {
+			if (record.kind === kind && record.membership.railEdges.length > 0) {
+				minHeapPush(
+					heap,
+					{ recordId: record.id, edges: record.membership.railEdges, index: 0 },
+					compareOrganizationRailMembershipCursors,
+				);
+			}
+		}
+		let previous: { readonly recordId: number; readonly edge: DirectedRailEdge } | null = null;
+		while (heap.length > 0) {
+			const cursor = minHeapPop(heap, compareOrganizationRailMembershipCursors);
+			if (!cursor) break;
+			const edge = cursor.edges[cursor.index] as DirectedRailEdge;
+			if (previous && compareDirectedRailEdges(previous.edge, edge) === 0) {
+				return `${kind} 조직 ${previous.recordId}과 ${cursor.recordId}이 rail:${staticFabOrganizationEdgeKey(edge)} 멤버십을 함께 소유합니다`;
+			}
+			previous = { recordId: cursor.recordId, edge };
+			cursor.index++;
+			if (cursor.index < cursor.edges.length) {
+				minHeapPush(heap, cursor, compareOrganizationRailMembershipCursors);
+			}
+		}
+	}
+	return null;
+}
+
+function staticFabOrganizationSameKindSwitchOverlapError(
+	state: StaticFabOrganizationState,
+): string | null {
+	for (const kind of STATIC_FAB_ORGANIZATION_KINDS) {
+		const heap: OrganizationSwitchMembershipCursor[] = [];
+		for (const record of state.records) {
+			if (record.kind === kind && record.membership.advancedSwitchIds.length > 0) {
+				minHeapPush(
+					heap,
+					{
+						recordId: record.id,
+						switchIds: record.membership.advancedSwitchIds,
+						index: 0,
+					},
+					compareOrganizationSwitchMembershipCursors,
+				);
+			}
+		}
+		let previousRecordId = 0;
+		let previousSwitchId: number | null = null;
+		while (heap.length > 0) {
+			const cursor = minHeapPop(heap, compareOrganizationSwitchMembershipCursors);
+			if (!cursor) break;
+			const switchId = cursor.switchIds[cursor.index] as number;
+			if (previousSwitchId === switchId) {
+				return `${kind} 조직 ${previousRecordId}과 ${cursor.recordId}이 switch:${switchId} 멤버십을 함께 소유합니다`;
+			}
+			previousRecordId = cursor.recordId;
+			previousSwitchId = switchId;
+			cursor.index++;
+			if (cursor.index < cursor.switchIds.length) {
+				minHeapPush(heap, cursor, compareOrganizationSwitchMembershipCursors);
+			}
+		}
+	}
+	return null;
+}
+
+function compareOrganizationRailMembershipCursors(
+	left: OrganizationRailMembershipCursor,
+	right: OrganizationRailMembershipCursor,
+): number {
+	return (
+		compareDirectedRailEdges(
+			left.edges[left.index] as DirectedRailEdge,
+			right.edges[right.index] as DirectedRailEdge,
+		) || left.recordId - right.recordId
+	);
+}
+
+function compareOrganizationSwitchMembershipCursors(
+	left: OrganizationSwitchMembershipCursor,
+	right: OrganizationSwitchMembershipCursor,
+): number {
+	return (
+		(left.switchIds[left.index] as number) - (right.switchIds[right.index] as number) ||
+		left.recordId - right.recordId
+	);
+}
+
+function minHeapPush<Value>(
+	heap: Value[],
+	value: Value,
+	compare: (left: Value, right: Value) => number,
+): void {
+	heap.push(value);
+	let index = heap.length - 1;
+	while (index > 0) {
+		const parentIndex = Math.floor((index - 1) / 2);
+		const parent = heap[parentIndex] as Value;
+		if (compare(parent, value) <= 0) break;
+		heap[index] = parent;
+		index = parentIndex;
+	}
+	heap[index] = value;
+}
+
+function minHeapPop<Value>(
+	heap: Value[],
+	compare: (left: Value, right: Value) => number,
+): Value | undefined {
+	const first = heap[0];
+	const last = heap.pop();
+	if (first === undefined || last === undefined || heap.length === 0) return first;
+	let index = 0;
+	while (true) {
+		const leftIndex = index * 2 + 1;
+		if (leftIndex >= heap.length) break;
+		const rightIndex = leftIndex + 1;
+		const childIndex =
+			rightIndex < heap.length && compare(heap[rightIndex] as Value, heap[leftIndex] as Value) < 0
+				? rightIndex
+				: leftIndex;
+		const child = heap[childIndex] as Value;
+		if (compare(last, child) <= 0) break;
+		heap[index] = child;
+		index = childIndex;
+	}
+	heap[index] = last;
+	return first;
+}
+
 const organizationOwnershipCache = new WeakMap<
 	TileMap,
 	Readonly<{
@@ -1076,16 +1331,27 @@ const organizationOwnershipCache = new WeakMap<
 >();
 
 interface OrganizationOwnershipValidationIndex {
+	readonly ownership: RailModuleOwnershipIndex;
 	readonly modules: RailModuleOwnershipIndex["modules"];
 	readonly moduleIndicesByEdge: ReadonlyMap<string, readonly number[]>;
 	readonly moduleIndicesBySwitch: ReadonlyMap<number, readonly number[]>;
 }
 
-function organizationOwnershipIndex(map: TileMap): OrganizationOwnershipValidationIndex {
+function organizationOwnershipIndex(
+	map: TileMap,
+	providedOwnership?: RailModuleOwnershipIndex,
+): OrganizationOwnershipValidationIndex {
 	const revision = map.getRevision();
-	const cached = organizationOwnershipCache.get(map);
-	if (cached?.revision === revision) return cached.index;
-	const ownership = buildRailModuleOwnershipIndex(map);
+	if (!providedOwnership) {
+		const cached = organizationOwnershipCache.get(map);
+		if (
+			cached?.revision === revision &&
+			railModuleOwnershipIndexMatchesMap(cached.index.ownership, map)
+		) {
+			return cached.index;
+		}
+	}
+	const ownership = providedOwnership ?? buildRailModuleOwnershipIndex(map);
 	const moduleIndicesByEdge = new Map<string, number[]>();
 	const moduleIndicesBySwitch = new Map<number, number[]>();
 	for (let moduleIndex = 0; moduleIndex < ownership.modules.length; moduleIndex += 1) {
@@ -1103,12 +1369,20 @@ function organizationOwnershipIndex(map: TileMap): OrganizationOwnershipValidati
 		}
 	}
 	const index = Object.freeze({
+		ownership,
 		modules: ownership.modules,
 		moduleIndicesByEdge,
 		moduleIndicesBySwitch,
 	});
-	organizationOwnershipCache.set(map, Object.freeze({ revision, index }));
+	if (!providedOwnership) {
+		organizationOwnershipCache.set(map, Object.freeze({ revision, index }));
+	}
 	return index;
+}
+
+/** Reuse the same source-bound module graph after Rail-only organization validation. */
+export function staticFabOrganizationRailOwnershipIndex(map: TileMap): RailModuleOwnershipIndex {
+	return organizationOwnershipIndex(map).ownership;
 }
 
 function staticFabOrganizationOwnershipError(

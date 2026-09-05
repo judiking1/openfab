@@ -4,11 +4,11 @@ import {
 	type SyntheticFabStarterRequest,
 	setSyntheticFabStarterParameter,
 } from "../compile/SyntheticFabStarter";
-import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v1.json?raw";
-import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v1.json?raw";
-import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v2.json?raw";
-import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v1.json?raw";
-import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v1.json?raw";
+import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v2.json?raw";
+import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v2.json?raw";
+import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v3.json?raw";
+import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v2.json?raw";
+import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v2.json?raw";
 import {
 	hydrateSyntheticFabStarterCertifiedArtifact,
 	SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES,
@@ -55,7 +55,7 @@ describe("SyntheticFabStarterCertifiedCatalog", () => {
 		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_CATALOG_METADATA).toHaveLength(6);
 		expect(syntheticFabStarterCertifiedCatalogMetadataForRequest(pairedRequest)).toEqual({
 			requestId: "paired-circulation-fab-52",
-			artifactId: "paired-circulation-fab-52.default.v2",
+			artifactId: "paired-circulation-fab-52.default.v3",
 			loading: "lazy-raw-import",
 		});
 		expect(

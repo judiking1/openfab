@@ -5,7 +5,7 @@ import type { Cell } from "../core/TileMap";
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
 
 export const STATIC_FAB_ARRANGEMENT_CONFLICT_LIMIT = 512;
-export const STATIC_FAB_ARRANGEMENT_SESSION_VERSION = 2;
+export const STATIC_FAB_ARRANGEMENT_SESSION_VERSION = 3;
 
 export type StaticFabArrangementFailureCode =
 	| "snapshot"

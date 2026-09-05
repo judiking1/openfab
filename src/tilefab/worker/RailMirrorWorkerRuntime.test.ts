@@ -126,7 +126,13 @@ describe("RailMirrorWorkerRuntime", () => {
 
 		failCompilation = false;
 		const encodedPatch = encodeRailPatchEvent(patches[0] as RailPatchEvent).patch;
-		expect(runtime.handle({ type: "APPLY_RAIL_PATCH", epoch: 1, patch: encodedPatch })).toBeNull();
+		expect(
+			runtime.handle({
+				type: "APPLY_RAIL_PATCH",
+				epoch: 1,
+				patch: encodedPatch,
+			}),
+		).toBeNull();
 		expect(
 			runtime.handle({
 				type: "SYNC_RAIL",
@@ -176,6 +182,7 @@ describe("RailMirrorWorkerRuntime", () => {
 			expectedNextPortId: source.portEquipment.nextPortId,
 			expectedNextEquipmentGroupId: source.portEquipment.nextEquipmentGroupId,
 			expectedNextOrganizationId: source.organizations.nextOrganizationId,
+			expectedNextRelationshipId: source.relationships.nextRelationshipId,
 		};
 		const response = runtime.handle(request);
 		expect(response).toMatchObject({
@@ -207,7 +214,7 @@ describe("RailMirrorWorkerRuntime", () => {
 			runtime.handle({
 				...request,
 				requestId: 20,
-				expectedNextPortId: request.expectedNextPortId + 1,
+				expectedNextRelationshipId: request.expectedNextRelationshipId + 1,
 			}),
 		).toMatchObject({
 			type: "RAIL_MIRROR_ERROR",
@@ -417,7 +424,9 @@ describe("RailMirrorWorkerRuntime", () => {
 			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 6, y: 0 })),
 		).toBe(true);
 		const runtime = new RailMirrorWorkerRuntime();
-		expect(runtime.handle(syncMessage(document, 1))).toMatchObject({ type: "RAIL_SYNCED" });
+		expect(runtime.handle(syncMessage(document, 1))).toMatchObject({
+			type: "RAIL_SYNCED",
+		});
 		const publication = runtime.physicalPublication;
 		const before = runtime.mirrorState;
 		const create = capturePatch(document, () => commitArea(document, "Area A"));

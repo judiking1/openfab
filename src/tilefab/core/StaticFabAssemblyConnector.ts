@@ -156,6 +156,15 @@ export type StaticFabAssemblyConnectorHierarchyEligibility = Readonly<
 	  }
 >;
 
+export type StaticFabAssemblyConnectorNetworkEligibility = Readonly<
+	| { valid: true; issueCode: null; reason: string }
+	| {
+			valid: false;
+			issueCode: "ALREADY_CONNECTED";
+			reason: string;
+	  }
+>;
+
 const STATIC_FAB_ASSEMBLY_GATEWAY_ID_MAXIMUM_LENGTH = 512;
 
 export function staticFabAssemblyConnectorIntentError(value: unknown): string | null {
@@ -343,6 +352,52 @@ export function staticFabAssemblyInterbayConnectorHierarchyEligibility(
 		targetOrganizationId,
 		"BAY_BANK",
 	);
+}
+
+/**
+ * Selection-time component preflight for a hierarchy connector.
+ *
+ * This deliberately reuses authored gateway candidates and the canonical rail-network component
+ * context. It does not plan a route or mutate project truth; the Worker remains responsible for
+ * exact gateway, clearance, and patch certification after launch.
+ */
+export function staticFabAssemblyConnectorNetworkEligibility(
+	map: TileMap,
+	organizations: StaticFabOrganizationState,
+	sourceOrganizationId: number,
+	targetOrganizationId: number,
+	hierarchyRole: StaticFabAssemblyConnectorHierarchyRole,
+): StaticFabAssemblyConnectorNetworkEligibility {
+	const sourceGateways = discoverStaticFabAssemblyGateways(
+		map,
+		organizations,
+		sourceOrganizationId,
+	);
+	const targetGateways = discoverStaticFabAssemblyGateways(
+		map,
+		organizations,
+		targetOrganizationId,
+	);
+	const sourceContexts: ReturnType<typeof createRailNetworkLinkAnchorContext>[] = [];
+	for (const sourceGateway of sourceGateways) {
+		if (sourceContexts.some((context) => context.containsSourceCell(sourceGateway.anchor))) {
+			continue;
+		}
+		const context = createRailNetworkLinkAnchorContext(map, sourceGateway.anchor);
+		sourceContexts.push(context);
+		if (targetGateways.some((targetGateway) => context.containsSourceCell(targetGateway.anchor))) {
+			return Object.freeze({
+				valid: false,
+				issueCode: "ALREADY_CONNECTED" as const,
+				reason: alreadyConnectedReason(hierarchyRole),
+			});
+		}
+	}
+	return Object.freeze({
+		valid: true,
+		issueCode: null,
+		reason: "선택한 두 조직은 아직 같은 FAB 순환망에 연결되지 않았습니다",
+	});
 }
 
 function hierarchyEligibility(
@@ -656,6 +711,25 @@ export function planStaticFabAssemblyConnectorWithProspectiveState(
 		);
 	}
 	const purpose = intent.purpose;
+	if (
+		purpose === "FAB_LOOP" &&
+		parentResolution.parent &&
+		staticFabBankPairHasResilientCirculation(
+			organizations,
+			parentResolution.parent.id,
+			source.id,
+			target.id,
+		)
+	) {
+		return rejected(
+			fallback,
+			basePatchSequence,
+			organizations,
+			intent,
+			"ALREADY_CONNECTED",
+			"두 Bay Bank 사이에 이미 독립적인 outbound·return 순환 경로가 있습니다",
+		);
+	}
 
 	const networkLink = planRailNetworkLink(map, context, intent.targetAnchor, intent.side);
 	if (!networkLink.valid) {
@@ -686,7 +760,7 @@ export function planStaticFabAssemblyConnectorWithProspectiveState(
 		) {
 			throw new Error("Assembly Connector mutation이 현재 레일 상태와 일치하지 않습니다");
 		}
-		const addedEdges = addedDirectedEdges(networkLink);
+		const addedEdges = staticFabAssemblyConnectorAddedDirectedEdges(networkLink);
 		const impactIndex = new StaticFabOrganizationImpactIndex();
 		impactIndex.synchronize(organizations);
 		const organizationImpactAuthorizations = Object.freeze(
@@ -1264,7 +1338,10 @@ function resolveAssemblyParent(
 	});
 }
 
-function addedDirectedEdges(plan: RailNetworkLinkPlan): readonly DirectedRailEdge[] {
+/** Exact directed edges introduced by a Connector rail patch, independent of ownership expansion. */
+export function staticFabAssemblyConnectorAddedDirectedEdges(
+	plan: RailNetworkLinkPlan,
+): readonly DirectedRailEdge[] {
 	const edges = new Map<string, DirectedRailEdge>();
 	for (const mutation of plan.mutations) {
 		const before = decodeRailCell(mutation.before);

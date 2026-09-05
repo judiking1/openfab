@@ -606,6 +606,11 @@ try {
 	);
 	await page.keyboard.press("Escape");
 	await waitForView(page, "2d");
+	await page.waitForFunction(
+		() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+		undefined,
+		{ timeout: 2_000 },
+	);
 	assertEqual(
 		await page.getByTestId("tilefab-app").getAttribute("data-editor-activity"),
 		"inspect",
@@ -729,6 +734,12 @@ try {
 			canvasHeight: canvas?.clientHeight ?? 0,
 			canvasBottom: canvasBounds?.bottom ?? 0,
 			inspectorTop: inspectorBounds?.top ?? 0,
+			inspectorLeft: inspectorBounds?.left ?? 0,
+			inspectorRight: inspectorBounds?.right ?? 0,
+			inspectorHeight: inspectorBounds?.height ?? 0,
+			inspectorPresentation: inspector?.getAttribute("data-compact-layout") ?? "",
+			compactDisclosureCount:
+				inspector?.querySelectorAll('[data-testid="compact-inspector-disclosure"]').length ?? 0,
 			inspectorVisible: Boolean(
 				inspectorBounds && inspectorBounds.width > 0 && inspectorBounds.height > 0,
 			),
@@ -739,6 +750,11 @@ try {
 	assertEqual(result.mobile.canvasWidth, 390, "mobile 3D canvas width");
 	assertAtLeast(result.mobile.canvasHeight, 300, "mobile 3D usable canvas height");
 	assertEqual(result.mobile.inspectorVisible, true, "mobile semantic inspector visibility");
+	assertEqual(result.mobile.inspectorPresentation, "side-panel", "mobile 3D side Inspector");
+	assertEqual(result.mobile.compactDisclosureCount, 0, "mobile 3D omits compact disclosure");
+	assertAtLeast(result.mobile.inspectorLeft, 10, "mobile 3D Inspector left edge");
+	assertAtMost(result.mobile.inspectorRight, 380, "mobile 3D Inspector right edge");
+	assertAtMost(result.mobile.inspectorHeight, 320, "mobile 3D Inspector height budget");
 	assertAtMost(
 		result.mobile.canvasBottom,
 		result.mobile.inspectorTop,
@@ -906,6 +922,60 @@ try {
 			"Visible switch proxy did not restore semantic switch picking with rail hidden.",
 		);
 	}
+	await switchPage.setViewportSize({ width: 390, height: 844 });
+	await switchPage.waitForFunction(
+		() => {
+			const canvas = document.querySelector('[data-testid="static-fab-inspection-3d-canvas"]');
+			const inspector = document.querySelector('[data-testid="advanced-switch-inspector"]');
+			const canvasBounds = canvas?.getBoundingClientRect();
+			const inspectorBounds = inspector?.getBoundingClientRect();
+			return Boolean(
+				canvasBounds &&
+					inspectorBounds &&
+					canvasBounds.height >= 300 &&
+					canvasBounds.bottom <= inspectorBounds.top,
+			);
+		},
+		undefined,
+		{ timeout: 2_000 },
+	);
+	const compactSwitchInspector = await switchPage.evaluate(() => {
+		const canvas = document.querySelector('[data-testid="static-fab-inspection-3d-canvas"]');
+		const inspector = document.querySelector('[data-testid="advanced-switch-inspector"]');
+		const close = inspector?.querySelector('button[aria-label="선택 닫기"]');
+		const canvasBounds = canvas?.getBoundingClientRect();
+		const inspectorBounds = inspector?.getBoundingClientRect();
+		const closeBounds = close?.getBoundingClientRect();
+		return {
+			canvasHeight: canvasBounds?.height ?? 0,
+			inspectorLeft: inspectorBounds?.left ?? 0,
+			inspectorRight: inspectorBounds?.right ?? 0,
+			inspectorHeight: inspectorBounds?.height ?? 0,
+			presentation: inspector?.getAttribute("data-compact-layout") ?? "",
+			disclosureCount:
+				inspector?.querySelectorAll('[data-testid="compact-inspector-disclosure"]').length ?? 0,
+			closeHit:
+				close instanceof HTMLElement && closeBounds
+					? close.contains(
+							document.elementFromPoint(
+								closeBounds.left + closeBounds.width / 2,
+								closeBounds.top + closeBounds.height / 2,
+							),
+						)
+					: false,
+		};
+	});
+	assertAtLeast(compactSwitchInspector.canvasHeight, 300, "mobile switch 3D Canvas height");
+	assertEqual(compactSwitchInspector.presentation, "side-panel", "mobile switch side Inspector");
+	assertEqual(compactSwitchInspector.disclosureCount, 0, "mobile switch compact disclosure");
+	assertAtLeast(compactSwitchInspector.inspectorLeft, 10, "mobile switch Inspector left edge");
+	assertAtMost(compactSwitchInspector.inspectorRight, 380, "mobile switch Inspector right edge");
+	assertAtMost(
+		compactSwitchInspector.inspectorHeight,
+		320,
+		"mobile switch Inspector height budget",
+	);
+	assertEqual(compactSwitchInspector.closeHit, true, "mobile switch Inspector close hit");
 	const switchScene = await readSceneStats(switchCanvas3D);
 	assertEqual(switchScene.advancedSwitchInstances, 1, "advanced-switch rigid instance count");
 	assertEqual(switchScene.contentBuilds, 1, "switch visibility/picking does not rebuild content");

@@ -14,6 +14,7 @@ import {
 	type StaticFabAssemblyConnectorIntent,
 	type StaticFabAssemblyConnectorPlanningResult,
 	staticFabAssemblyConnectorHierarchyEligibility,
+	staticFabAssemblyConnectorNetworkEligibility,
 	staticFabAssemblyConnectorSelectionBounds,
 	staticFabAssemblyInterbayConnectorHierarchyEligibility,
 } from "./StaticFabAssemblyConnector";
@@ -31,6 +32,7 @@ import {
 	planStaticFabOrganizationBundlePlacementWithProspectiveState,
 	type StaticFabOrganizationBundlePlacementProspectiveState,
 } from "./StaticFabOrganizationBundlePlacement";
+import { staticFabBankPairHasResilientCirculation } from "./StaticFabOuterCirculation";
 import { TileMap } from "./TileMap";
 
 interface FixtureState extends StaticFabOrganizationBundlePlacementProspectiveState {
@@ -226,6 +228,46 @@ describe("StaticFabAssemblyConnector", () => {
 			strongComponents: 1,
 			openEnds: 0,
 		});
+		expect(
+			staticFabBankPairHasResilientCirculation(
+				outer.prospectiveState.organizations,
+				fabId as number,
+				banks[0]?.id ?? -1,
+				banks[1]?.id ?? -1,
+			),
+		).toBe(true);
+		const completedSources = discoverStaticFabOuterCirculationGateways(
+			outer.prospectiveState.map,
+			outer.prospectiveState.organizations,
+			banks[0]?.id ?? -1,
+		);
+		const completedTargets = discoverStaticFabOuterCirculationGateways(
+			outer.prospectiveState.map,
+			outer.prospectiveState.organizations,
+			banks[1]?.id ?? -1,
+		);
+		const repeated = planStaticFabAssemblyConnectorWithProspectiveState(
+			outer.prospectiveState.map,
+			outer.prospectiveState.portEquipment,
+			connectedFab.patchSequence + 1,
+			outer.prospectiveState.organizations,
+			{
+				version: STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION,
+				purpose: "FAB_LOOP",
+				sourceOrganizationId: banks[0]?.id ?? -1,
+				sourceGatewayId: completedSources[0]?.id ?? "missing",
+				sourceAnchor: completedSources[0]?.anchor ?? { x: 0, y: 0 },
+				targetOrganizationId: banks[1]?.id ?? -1,
+				targetGatewayId: completedTargets[0]?.id ?? "missing",
+				targetAnchor: completedTargets[0]?.anchor ?? { x: 0, y: 0 },
+				side: null,
+			},
+		);
+		expect(repeated.plan).toMatchObject({
+			valid: false,
+			assemblyConnector: { issueCode: "ALREADY_CONNECTED" },
+		});
+		expect(repeated.plan.reason).toContain("이미 독립적인 outbound·return 순환 경로");
 	});
 
 	it("accepts gateway rails inherited by their Bay Bank and FAB ancestors", () => {
@@ -403,6 +445,15 @@ describe("StaticFabAssemblyConnector", () => {
 			{ x: 100, y: 0 },
 		]);
 		const bays = fixture.organizations.records.filter((record) => record.kind === "BAY");
+		expect(
+			staticFabAssemblyConnectorNetworkEligibility(
+				fixture.map,
+				fixture.organizations,
+				bays[0]?.id ?? -1,
+				bays[1]?.id ?? -1,
+				"BAY_TO_BANK",
+			),
+		).toMatchObject({ valid: true, issueCode: null });
 		const first = firstValidConnector(fixture, bays[0]?.id ?? -1, bays[1]?.id ?? -1);
 		if (!first.prospectiveState) throw new Error(first.plan.reason);
 		const connected: FixtureState = {
@@ -420,6 +471,20 @@ describe("StaticFabAssemblyConnector", () => {
 			bays[1]?.id ?? -1,
 		)[0];
 		if (!sourceGateway || !targetGateway) throw new Error("Expected connected Bay gateways.");
+		expect(
+			staticFabAssemblyConnectorNetworkEligibility(
+				connected.map,
+				connected.organizations,
+				bays[0]?.id ?? -1,
+				bays[1]?.id ?? -1,
+				"BAY_TO_BANK",
+			),
+		).toEqual({
+			valid: false,
+			issueCode: "ALREADY_CONNECTED",
+			reason:
+				"두 Production Bay는 이미 같은 FAB 순환망에 연결되어 있습니다 · 중복 조립 연결은 만들지 않습니다",
+		});
 
 		const duplicate = planStaticFabAssemblyConnectorWithProspectiveState(
 			connected.map,

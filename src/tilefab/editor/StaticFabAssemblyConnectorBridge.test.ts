@@ -8,17 +8,22 @@ import { analyzeRailNetwork } from "../core/network";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
 import {
 	discoverStaticFabAssemblyGateways,
+	discoverStaticFabOuterCirculationGateways,
 	planStaticFabAssemblyConnector,
 	STATIC_FAB_ASSEMBLY_CONNECTOR_PATCH_KIND,
 	STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION,
 	type StaticFabAssemblyConnectorIntent,
 } from "../core/StaticFabAssemblyConnector";
 import { isIssuedStaticFabAssemblyConnectorPlan } from "../core/StaticFabAssemblyConnectorCertification";
-import { emptyStaticFabOrganizationState } from "../core/StaticFabOrganization";
+import {
+	deriveStaticFabOrganizationSemanticRoles,
+	emptyStaticFabOrganizationState,
+} from "../core/StaticFabOrganization";
 import {
 	planStaticFabOrganizationBundlePlacementWithProspectiveState,
 	type StaticFabOrganizationBundlePlacementProspectiveState,
 } from "../core/StaticFabOrganizationBundlePlacement";
+import { staticFabBankPairHasResilientCirculation } from "../core/StaticFabOuterCirculation";
 import { TileMap } from "../core/TileMap";
 import { captureRailMirrorSnapshot, checksumRailMap } from "../worker/RailMirrorChecksum";
 import { RailPatchMirror } from "../worker/RailPatchMirror";
@@ -33,6 +38,21 @@ import {
 	prepareStaticFabAssemblyConnectorInSession,
 	type StaticFabAssemblyConnectorRuntimeSession,
 } from "../worker/StaticFabAssemblyConnectorRuntime";
+import {
+	appliedConnectedBayBankEvidence,
+	appliedConnectedBayBankEvidenceIsCurrent,
+	connectedBayBankUndoProjectionExists,
+} from "./OrdinaryConnectedBayBankDuplicateHandoff";
+import {
+	appliedConnectedFabEvidence,
+	appliedConnectedFabEvidenceIsCurrent,
+	connectedFabUndoProjectionExists,
+} from "./OrdinaryConnectedFabLoopHandoff";
+import {
+	appliedResilientFabLoopEvidence,
+	appliedResilientFabLoopEvidenceIsCurrent,
+	resilientFabLoopUndoProjectionExists,
+} from "./OrdinaryResilientFabChecksHandoff";
 import {
 	type StaticFabAssemblyConnectorBindingInput,
 	StaticFabAssemblyConnectorBridge,
@@ -241,6 +261,183 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 		expect(worker.terminated).toBe(true);
 	});
 
+	it("binds an attached/detached Bank extension to an exact real plan through undo and redo", async () => {
+		const document = productionBayDocument(3);
+		const bayIds = document.organizations.records
+			.filter((record) => record.kind === "BAY")
+			.map((record) => record.id);
+		const [firstBayId, attachedBayId, detachedBayId] = bayIds;
+		if (firstBayId === undefined || attachedBayId === undefined || detachedBayId === undefined) {
+			throw new Error("Expected three Production Bay fixtures.");
+		}
+		const firstBridge = new StaticFabAssemblyConnectorBridge(() => new RuntimeWorker());
+		await firstBridge.initialize(connectorBindingInput(document));
+		const firstPrepared = await firstBridge.prepare({
+			intent: firstValidIntentFor(document, firstBayId, attachedBayId),
+		});
+		if (!firstPrepared.plan) throw new Error("Expected initial Bank Connector plan.");
+		expect(firstPrepared.plan.assemblyConnector.createdBank).toBe(true);
+		expect(document.commitStaticFabAssemblyConnector(firstPrepared.plan)).toBe(true);
+		firstBridge.dispose();
+
+		const organizationsBeforeExtend = document.organizations;
+		const organizationCursorBeforeExtend = organizationsBeforeExtend.nextOrganizationId;
+		const extendBridge = new StaticFabAssemblyConnectorBridge(() => new RuntimeWorker());
+		await extendBridge.initialize(connectorBindingInput(document));
+		const extendPrepared = await extendBridge.prepare({
+			intent: firstValidIntentFor(document, attachedBayId, detachedBayId),
+		});
+		if (!extendPrepared.plan) throw new Error("Expected Bank extension Connector plan.");
+		expect(extendPrepared.plan.assemblyConnector).toMatchObject({
+			createdBank: false,
+			sourceOrganizationId: attachedBayId,
+			targetOrganizationId: detachedBayId,
+		});
+		expect(extendPrepared.plan.nextOrganizationIdAfter).toBe(organizationCursorBeforeExtend);
+		const evidence = appliedConnectedBayBankEvidence(
+			extendPrepared.plan,
+			organizationsBeforeExtend,
+		);
+		expect(evidence).not.toBeNull();
+		if (!evidence) throw new Error("Expected exact Bank extension evidence.");
+		expect(evidence.connectedTwinBayParentOrganizationIdsBefore).toEqual([
+			[evidence.bankOrganizationId],
+			[],
+		]);
+
+		expect(document.commitStaticFabAssemblyConnector(extendPrepared.plan)).toBe(true);
+		expect(document.organizations.nextOrganizationId).toBe(organizationCursorBeforeExtend);
+		expect(appliedConnectedBayBankEvidenceIsCurrent(document.organizations, evidence)).toBe(true);
+		const extendedChecksum = documentChecksum(document);
+
+		expect(document.undo()).toBe(true);
+		expect(document.organizations.nextOrganizationId).toBe(organizationCursorBeforeExtend);
+		expect(connectedBayBankUndoProjectionExists(document.organizations, evidence)).toBe(true);
+		expect(appliedConnectedBayBankEvidenceIsCurrent(document.organizations, evidence)).toBe(false);
+
+		expect(document.redo()).toBe(true);
+		expect(documentChecksum(document)).toBe(extendedChecksum);
+		expect(document.organizations.nextOrganizationId).toBe(organizationCursorBeforeExtend);
+		expect(appliedConnectedBayBankEvidenceIsCurrent(document.organizations, evidence)).toBe(true);
+		extendBridge.dispose();
+	});
+
+	it("binds one newly created Fab receipt to an exact real Worker plan through undo and redo", async () => {
+		const document = productionBayDocument(4);
+		const bayIds = document.organizations.records
+			.filter((record) => record.kind === "BAY")
+			.map((record) => record.id);
+		if (bayIds.length !== 4) throw new Error("Expected four Production Bay fixtures.");
+		const connectBays = async (sourceId: number, targetId: number) => {
+			const bridge = new StaticFabAssemblyConnectorBridge(() => new RuntimeWorker());
+			await bridge.initialize(connectorBindingInput(document));
+			const prepared = await bridge.prepare({
+				intent: firstValidIntentFor(document, sourceId, targetId),
+			});
+			if (!prepared.plan) throw new Error("Expected an exact Bay Connector plan.");
+			expect(document.commitStaticFabAssemblyConnector(prepared.plan)).toBe(true);
+			bridge.dispose();
+		};
+
+		await connectBays(bayIds[0] as number, bayIds[1] as number);
+		await connectBays(bayIds[2] as number, bayIds[3] as number);
+		const roles = deriveStaticFabOrganizationSemanticRoles(document.organizations);
+		const bankIds = document.organizations.records
+			.filter((record) => roles.get(record.id) === "BAY_BANK")
+			.map((record) => record.id);
+		expect(bankIds).toHaveLength(2);
+		const organizationsBeforeFabApply = document.organizations;
+		const cursorBeforeFabApply = organizationsBeforeFabApply.nextOrganizationId;
+		const fabBridge = new StaticFabAssemblyConnectorBridge(() => new RuntimeWorker());
+		await fabBridge.initialize(connectorBindingInput(document));
+		const prepared = await fabBridge.prepare({
+			intent: firstValidIntentFor(document, bankIds[0] as number, bankIds[1] as number),
+		});
+		if (!prepared.plan) throw new Error("Expected one exact new-Fab Connector plan.");
+		expect(prepared.plan.assemblyConnector).toMatchObject({
+			hierarchyRole: "BANK_TO_FAB",
+			purpose: "HIERARCHY_LINK",
+			fabOrganizationId: cursorBeforeFabApply,
+			createdFab: true,
+		});
+		const evidence = appliedConnectedFabEvidence(prepared.plan, organizationsBeforeFabApply);
+		expect(evidence).toMatchObject({
+			fabOrganizationId: cursorBeforeFabApply,
+			connectedBayBankOrganizationIds: [...bankIds].sort((left, right) => left - right),
+			createdFab: true,
+		});
+		if (!evidence) throw new Error("Expected exact newly created Fab evidence.");
+
+		expect(document.commitStaticFabAssemblyConnector(prepared.plan)).toBe(true);
+		expect(document.organizations.nextOrganizationId).toBe(cursorBeforeFabApply + 1);
+		expect(appliedConnectedFabEvidenceIsCurrent(document.organizations, evidence)).toBe(true);
+		const connectedChecksum = documentChecksum(document);
+		expect(document.undo()).toBe(true);
+		expect(document.organizations.nextOrganizationId).toBe(cursorBeforeFabApply + 1);
+		expect(connectedFabUndoProjectionExists(document.organizations, evidence)).toBe(true);
+		expect(document.redo()).toBe(true);
+		expect(documentChecksum(document)).toBe(connectedChecksum);
+		expect(appliedConnectedFabEvidenceIsCurrent(document.organizations, evidence)).toBe(true);
+		fabBridge.dispose();
+
+		const organizationsBeforeLoop = document.organizations;
+		const mapBeforeLoop = document.map.clone();
+		const loopBridge = new StaticFabAssemblyConnectorBridge(() => new RuntimeWorker());
+		await loopBridge.initialize(connectorBindingInput(document));
+		const loopPrepared = await loopBridge.prepare({
+			intent: firstValidFabLoopIntentFor(
+				document,
+				evidence.fabOrganizationId,
+				bankIds[0] as number,
+				bankIds[1] as number,
+			),
+		});
+		if (!loopPrepared.plan) throw new Error("Expected one exact Fab Loop plan.");
+		expect(loopPrepared.plan.assemblyConnector).toMatchObject({
+			hierarchyRole: "BANK_TO_FAB",
+			purpose: "FAB_LOOP",
+			fabOrganizationId: evidence.fabOrganizationId,
+			createdFab: false,
+		});
+		const loopEvidence = appliedResilientFabLoopEvidence(
+			loopPrepared.plan,
+			mapBeforeLoop,
+			organizationsBeforeLoop,
+		);
+		expect(loopEvidence).not.toBeNull();
+		if (!loopEvidence) throw new Error("Expected exact resilient Fab Loop evidence.");
+		expect(loopEvidence.connectedBayBankOrganizationIds).toEqual(
+			[...bankIds].sort((left, right) => left - right),
+		);
+
+		expect(document.commitStaticFabAssemblyConnector(loopPrepared.plan)).toBe(true);
+		expect(document.organizations.nextOrganizationId).toBe(cursorBeforeFabApply + 1);
+		expect(
+			appliedResilientFabLoopEvidenceIsCurrent(document.map, document.organizations, loopEvidence),
+		).toBe(true);
+		expect(
+			staticFabBankPairHasResilientCirculation(
+				document.organizations,
+				loopEvidence.fabOrganizationId,
+				loopEvidence.connectedBayBankOrganizationIds[0],
+				loopEvidence.connectedBayBankOrganizationIds[1],
+			),
+		).toBe(true);
+		const loopChecksum = documentChecksum(document);
+
+		expect(document.undo()).toBe(true);
+		expect(document.organizations.nextOrganizationId).toBe(cursorBeforeFabApply + 1);
+		expect(
+			resilientFabLoopUndoProjectionExists(document.map, document.organizations, loopEvidence),
+		).toBe(true);
+		expect(document.redo()).toBe(true);
+		expect(documentChecksum(document)).toBe(loopChecksum);
+		expect(
+			appliedResilientFabLoopEvidenceIsCurrent(document.map, document.organizations, loopEvidence),
+		).toBe(true);
+		loopBridge.dispose();
+	});
+
 	it("does not certify a Worker result after its live document becomes stale", async () => {
 		const document = productionBayDocument();
 		const worker = new ManualRuntimeWorker();
@@ -323,7 +520,7 @@ interface ProductionBayFixture extends StaticFabOrganizationBundlePlacementProsp
 	readonly patchSequence: number;
 }
 
-function productionBayDocument(): RailDocument {
+function productionBayDocument(count = 2): RailDocument {
 	const artifact = certifyProductionBayModuleCatalogRequest(
 		defaultProductionBayModuleCatalogRequest("single-production-bay"),
 	);
@@ -333,10 +530,7 @@ function productionBayDocument(): RailDocument {
 		organizations: emptyStaticFabOrganizationState(),
 		patchSequence: 0,
 	};
-	for (const anchor of [
-		{ x: 0, y: 0 },
-		{ x: 100, y: 0 },
-	]) {
+	for (const anchor of Array.from({ length: count }, (_, index) => ({ x: index * 100, y: 0 }))) {
 		const placement = planStaticFabOrganizationBundlePlacementWithProspectiveState(
 			fixture.map,
 			fixture.portEquipment,
@@ -370,12 +564,14 @@ function connectorBindingInput(document: RailDocument): StaticFabAssemblyConnect
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot,
 		getCurrentState: () => ({
 			map: document.map,
 			patchSequence: document.getPatchSequence(),
 			portEquipment: document.portEquipment,
 			organizations: document.organizations,
+			relationships: document.relationships,
 		}),
 	};
 }
@@ -389,6 +585,21 @@ function firstValidIntent(document: RailDocument): StaticFabAssemblyConnectorInt
 	const sourceBay = bays[0];
 	const targetBay = bays[1];
 	if (!sourceBay || !targetBay) throw new Error("Expected two public Production Bay fixtures.");
+	return firstValidIntentFor(document, sourceBay.id, targetBay.id);
+}
+
+function firstValidIntentFor(
+	document: RailDocument,
+	sourceOrganizationId: number,
+	targetOrganizationId: number,
+): StaticFabAssemblyConnectorIntent {
+	const sourceBay = document.organizations.records.find(
+		(record) => record.id === sourceOrganizationId,
+	);
+	const targetBay = document.organizations.records.find(
+		(record) => record.id === targetOrganizationId,
+	);
+	if (!sourceBay || !targetBay) throw new Error("Expected exact Production Bay fixtures.");
 	const sources = discoverStaticFabAssemblyGateways(
 		document.map,
 		document.organizations,
@@ -421,6 +632,51 @@ function firstValidIntent(document: RailDocument): StaticFabAssemblyConnectorInt
 				intent,
 			);
 			if (plan.valid) return intent;
+			lastReason = plan.reason;
+		}
+	}
+	throw new Error(lastReason);
+}
+
+function firstValidFabLoopIntentFor(
+	document: RailDocument,
+	fabOrganizationId: number,
+	sourceBankOrganizationId: number,
+	targetBankOrganizationId: number,
+): StaticFabAssemblyConnectorIntent {
+	const sources = discoverStaticFabOuterCirculationGateways(
+		document.map,
+		document.organizations,
+		sourceBankOrganizationId,
+	);
+	const targets = discoverStaticFabOuterCirculationGateways(
+		document.map,
+		document.organizations,
+		targetBankOrganizationId,
+	);
+	let lastReason = "No Fab Loop gateway pair was found.";
+	for (const source of sources) {
+		for (const target of targets) {
+			const intent = Object.freeze({
+				version: STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION,
+				purpose: "FAB_LOOP",
+				sourceOrganizationId: sourceBankOrganizationId,
+				sourceGatewayId: source.id,
+				sourceAnchor: source.anchor,
+				targetOrganizationId: targetBankOrganizationId,
+				targetGatewayId: target.id,
+				targetAnchor: target.anchor,
+				side: null,
+			}) satisfies StaticFabAssemblyConnectorIntent;
+			const plan = planStaticFabAssemblyConnector(
+				document.map,
+				document.portEquipment,
+				document.getPatchSequence(),
+				document.organizations,
+				intent,
+			);
+			if (plan.valid && plan.assemblyConnector.fabOrganizationId === fabOrganizationId)
+				return intent;
 			lastReason = plan.reason;
 		}
 	}

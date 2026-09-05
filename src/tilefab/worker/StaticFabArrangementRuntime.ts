@@ -234,6 +234,7 @@ function prepareStaticFabArrangementCandidate(
 			prospectiveMap,
 			prospectiveEquipment,
 			prospectiveOrganizations,
+			source.relationships,
 		);
 		return Object.freeze({
 			plan,

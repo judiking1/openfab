@@ -18,6 +18,8 @@ export interface StaticFabOrganizationBundlePlacementSessionMetadata {
 	readonly origin: BlueprintPlacementOrigin;
 	readonly quarterTurns?: StaticFabOrganizationBundleQuarterTurns;
 	readonly sourceBounds?: StaticFabOrganizationBundleSourceBounds | null;
+	/** Runtime-only roots for an immediate copy. Never serialized into the portable bundle. */
+	readonly sourceRootOrganizationIds?: readonly number[];
 }
 
 export interface StaticFabOrganizationBundlePlacementSessionSummary {
@@ -53,6 +55,46 @@ export interface StaticFabOrganizationBundlePlacementAlignment {
 const ORGANIZATION_BUNDLE_ALIGNMENT_SNAP_METERS = 2;
 const ORGANIZATION_BUNDLE_ADJACENT_GAP_METERS = 8;
 
+/**
+ * Deterministic collision-avoidance candidates for a new bundle that has no authored source.
+ * The gap is measured between the inclusive occupied map bounds and local placement bounds.
+ */
+export function organizationBundleOutsideMapPlacementAnchors(
+	mapBounds: StaticFabOrganizationBundlePlacementBounds | null,
+	placementBounds: StaticFabOrganizationBundlePlacementBounds,
+	gapMeters = ORGANIZATION_BUNDLE_ADJACENT_GAP_METERS,
+): readonly Readonly<Cell>[] {
+	if (!mapBounds || !Number.isSafeInteger(gapMeters) || gapMeters < 0) {
+		return Object.freeze([]);
+	}
+	const centeredX = nearestIntegerAnchor(
+		mapBounds.minX + mapBounds.maxX + 1,
+		placementBounds.minX + placementBounds.maxX + 1,
+	);
+	const centeredY = nearestIntegerAnchor(
+		mapBounds.minY + mapBounds.maxY + 1,
+		placementBounds.minY + placementBounds.maxY + 1,
+	);
+	return Object.freeze([
+		Object.freeze({
+			x: mapBounds.maxX + gapMeters + 1 - placementBounds.minX,
+			y: centeredY,
+		}),
+		Object.freeze({
+			x: mapBounds.minX - gapMeters - 1 - placementBounds.maxX,
+			y: centeredY,
+		}),
+		Object.freeze({
+			x: centeredX,
+			y: mapBounds.maxY + gapMeters + 1 - placementBounds.minY,
+		}),
+		Object.freeze({
+			x: centeredX,
+			y: mapBounds.minY - gapMeters - 1 - placementBounds.maxY,
+		}),
+	]);
+}
+
 /** Pure immutable UI session over one prepared portable organization bundle. */
 export class StaticFabOrganizationBundlePlacementSession {
 	readonly bundle: StaticFabOrganizationBundle;
@@ -60,6 +102,7 @@ export class StaticFabOrganizationBundlePlacementSession {
 	readonly label: string;
 	readonly origin: BlueprintPlacementOrigin;
 	readonly sourceBounds: StaticFabOrganizationBundleSourceBounds | null;
+	readonly sourceRootOrganizationIds: readonly number[];
 	readonly quarterTurns: StaticFabOrganizationBundleQuarterTurns;
 	readonly rotationDegrees: StaticFabOrganizationBundleRotationDegrees;
 	readonly bounds: StaticFabOrganizationBundlePlacementBounds;
@@ -80,6 +123,9 @@ export class StaticFabOrganizationBundlePlacementSession {
 			throw new RangeError("Organization bundle rotation must be 0, 1, 2, or 3 quarter turns");
 		}
 		const sourceBounds = prepareSourceBounds(metadata.sourceBounds);
+		const sourceRootOrganizationIds = prepareSourceRootOrganizationIds(
+			metadata.sourceRootOrganizationIds,
+		);
 
 		const bounds = rotatedPlacementBounds(
 			prepared.bundle.sourceWidthMeters,
@@ -95,6 +141,7 @@ export class StaticFabOrganizationBundlePlacementSession {
 		this.label = metadata.label;
 		this.origin = metadata.origin;
 		this.sourceBounds = sourceBounds;
+		this.sourceRootOrganizationIds = sourceRootOrganizationIds;
 		this.quarterTurns = quarterTurns;
 		this.rotationDegrees = rotationDegrees;
 		this.bounds = bounds;
@@ -130,6 +177,7 @@ export class StaticFabOrganizationBundlePlacementSession {
 			origin: this.origin,
 			quarterTurns,
 			sourceBounds: this.sourceBounds,
+			sourceRootOrganizationIds: this.sourceRootOrganizationIds,
 		});
 	}
 
@@ -234,6 +282,17 @@ export class StaticFabOrganizationBundlePlacementSession {
 			centerY,
 		});
 	}
+}
+
+function prepareSourceRootOrganizationIds(input: readonly number[] | undefined): readonly number[] {
+	if (input === undefined) return Object.freeze([]);
+	if (
+		input.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
+		new Set(input).size !== input.length
+	) {
+		throw new TypeError("Organization bundle source root IDs must be unique positive integers");
+	}
+	return Object.freeze([...input].sort((left, right) => left - right));
 }
 
 function prepareSourceBounds(

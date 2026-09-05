@@ -25,7 +25,8 @@ directed FAB topology:
 - pointer gestures create modular, axis-aligned, directed rail;
 - straight, curve, branch, merge, 180-degree, and offset patterns derive from the path;
 - the preview is the exact proposed post-commit topology;
-- invalid crossings, reverse overlaps, and detached manual routes are visible before release;
+- invalid crossings and reverse overlaps are visible before release, while detached manual routes
+  remain valid work-in-progress and are reported by whole-project readiness until connected;
 - every gesture is atomic, cancelable, undoable, and suitable for worker replication;
 - committed rail is a connected, closed directed system before simulation can start.
 
@@ -90,7 +91,9 @@ without merging them.
 6. Degree four is a planar crossing and is rejected.
 7. A degree-three junction must retain one directed straight-through trunk. The third port joins by
    a curve; head-on T layouts such as `N+S -> W` or `E -> N+S` are rejected.
-8. After the first command, every new route must touch the existing network.
+8. An ordinary Smart Route may start on any empty cell. Separate authored components are valid
+   work-in-progress; the completed-layout readiness gate, not the drawing gesture, requires final
+   connectivity.
 9. Reverse-direction overlap on an occupied physical rail is rejected.
 10. A simulation-ready layout has no open terminals and is strongly connected in both traversals.
 
@@ -268,7 +271,8 @@ The visible UI uses icons and tooltips; this table is documentation, not an in-a
 - [x] straight, repeated 90-degree curve chaining, branch, and merge;
 - [x] smooth direction-aware turnout rendering;
 - [x] tangent turnout grammar: straight trunk plus one curved branch/merge, with head-on T rejection;
-- [x] disconnected build, reverse overlap, and planar crossing rejection;
+- [x] disconnected ordinary-route authoring with whole-project connectivity diagnostics, while
+  reverse overlap and planar crossing remain rejected;
 - [x] closed-loop and directed strong-connectivity analysis;
 - [x] click anchor plus repeated drag continuation;
 - [x] right-click/Escape/pointer-cancel cancellation;

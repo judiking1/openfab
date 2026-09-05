@@ -63,7 +63,12 @@ export function hydrateStaticFabSemanticBayMutationSession(
 	snapshot: RailMirrorSnapshot,
 ): StaticFabSemanticBayMutationRuntimeSession {
 	const source = hydrateRailMirrorSnapshotDocument(snapshot);
-	const sourceChecksum = checksumRailMap(source.map, source.portEquipment, source.organizations);
+	const sourceChecksum = checksumRailMap(
+		source.map,
+		source.portEquipment,
+		source.organizations,
+		source.relationships,
+	);
 	if (sourceChecksum !== snapshot.checksum) {
 		throw new Error("Semantic Bay mutation source checksum diverged after hydration.");
 	}
@@ -332,11 +337,13 @@ export function prepareStaticFabSemanticBayMutationInSession(
 			prospectiveMap,
 			prospectiveEquipment,
 			prospectiveOrganizations,
+			source.relationships,
 		);
 		const plannerProspectiveChecksum = checksumRailMap(
 			planning.prospectiveState.map,
 			planning.prospectiveState.portEquipment,
 			planning.prospectiveState.organizations,
+			source.relationships,
 		);
 		const incrementalChecksum = checksumRailPatchResult(sourceIdentity.checksum, {
 			changes: plan.mutations,

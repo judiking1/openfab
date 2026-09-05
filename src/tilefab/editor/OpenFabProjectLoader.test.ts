@@ -163,6 +163,9 @@ function candidateFor(
 						? payload.source.operations
 						: emptyOperationalConfigurationState(),
 				map: document.map,
+				portEquipment: document.portEquipment,
+				organizations: document.organizations,
+				relationships: document.relationships,
 				authoredChecksum: payload.authoredChecksum,
 				ownership: {} as RailEditorStartupCandidate["activation"]["model"]["ownership"],
 				analysis: payload.analysis.value,

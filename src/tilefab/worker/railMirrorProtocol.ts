@@ -30,6 +30,12 @@ import { assertInt32Coordinate } from "./RailMirrorChecksum";
 import type { RailMirrorState } from "./RailPatchMirror";
 import type { RailPhysicalLayoutState } from "./RailPhysicalLayout";
 import {
+	decodeStaticFabAssemblyRelationshipPatch,
+	encodeStaticFabAssemblyRelationshipPatch,
+	type StaticFabAssemblyRelationshipPatchSoA,
+	staticFabAssemblyRelationshipSnapshotTransfers,
+} from "./StaticFabAssemblyRelationshipSoA";
+import {
 	decodeStaticFabOrganizationPatch,
 	encodeStaticFabOrganizationPatch,
 	type StaticFabOrganizationPatchSoA,
@@ -52,6 +58,7 @@ export interface RailPatchSoA {
 	switchAfter: AdvancedSwitchRecordFieldsSoA;
 	portEquipment: PortEquipmentPatchSoA;
 	organizations: StaticFabOrganizationPatchSoA;
+	relationships: StaticFabAssemblyRelationshipPatchSoA;
 	organizationImpactAuthorizations: Int32Array;
 	operationalConfigurationPatch: OperationalConfigurationPatch | null;
 	historyOriginKind?: RailHistoryOriginKind | null;
@@ -86,6 +93,7 @@ export type MainToRailMirrorMessage =
 			expectedNextPortId: number;
 			expectedNextEquipmentGroupId: number;
 			expectedNextOrganizationId: number;
+			expectedNextRelationshipId: number;
 	  }
 	| {
 			type: "CAPTURE_STATIC_FAB_ORGANIZATION_OUTLINE";
@@ -156,6 +164,7 @@ export function railMirrorSnapshotTransfers(snapshot: RailMirrorSnapshot): Trans
 		...advancedSwitchRecordFieldTransfers(snapshot.switchRecords),
 		...portEquipmentSnapshotTransfers(snapshot.portEquipment),
 		...staticFabOrganizationSnapshotTransfers(snapshot.organizations),
+		...staticFabAssemblyRelationshipSnapshotTransfers(snapshot.relationships),
 	];
 }
 
@@ -215,6 +224,11 @@ export function encodeRailPatchEvent(
 		event.organizationNextIdAfter,
 		{ compactExisting: options.compactOrganizations },
 	);
+	const relationships = encodeStaticFabAssemblyRelationshipPatch(
+		event.relationshipChanges,
+		event.relationshipNextIdBefore,
+		event.relationshipNextIdAfter,
+	);
 	const organizationImpactAuthorizations = encodeOrganizationImpactAuthorizations(
 		event.organizationImpactAuthorizations ?? [],
 	);
@@ -235,6 +249,7 @@ export function encodeRailPatchEvent(
 			switchAfter,
 			portEquipment: portEquipment.fields,
 			organizations: organizations.fields,
+			relationships: relationships.fields,
 			organizationImpactAuthorizations,
 			operationalConfigurationPatch: event.operationalConfigurationPatch ?? null,
 			historyOriginKind: event.historyOriginKind ?? null,
@@ -251,6 +266,7 @@ export function encodeRailPatchEvent(
 			...advancedSwitchRecordFieldTransfers(switchAfter),
 			...portEquipment.transfer,
 			...organizations.transfer,
+			...relationships.transfer,
 			organizationImpactAuthorizations.buffer,
 		],
 	};
@@ -272,6 +288,7 @@ export async function encodeReviewedPortEquipmentRailPatchEventCooperatively(
 		event.changes.length !== 0 ||
 		event.switchChanges.length !== 0 ||
 		event.organizationChanges.length !== 0 ||
+		event.relationshipChanges.length !== 0 ||
 		(event.organizationImpactAuthorizations?.length ?? 0) !== 0 ||
 		(event.operationalConfigurationPatch ?? null) !== null ||
 		event.historyOriginKind !== undefined
@@ -301,6 +318,11 @@ export async function encodeReviewedPortEquipmentRailPatchEventCooperatively(
 		event.organizationNextIdAfter,
 		{ compactExisting: options.compactOrganizations },
 	);
+	const relationships = encodeStaticFabAssemblyRelationshipPatch(
+		[],
+		event.relationshipNextIdBefore,
+		event.relationshipNextIdAfter,
+	);
 	const organizationImpactAuthorizations = new Int32Array(0);
 	return {
 		patch: {
@@ -319,6 +341,7 @@ export async function encodeReviewedPortEquipmentRailPatchEventCooperatively(
 			switchAfter,
 			portEquipment: portEquipment.fields,
 			organizations: organizations.fields,
+			relationships: relationships.fields,
 			organizationImpactAuthorizations,
 			operationalConfigurationPatch: null,
 			historyOriginKind: null,
@@ -335,6 +358,7 @@ export async function encodeReviewedPortEquipmentRailPatchEventCooperatively(
 			...advancedSwitchRecordFieldTransfers(switchAfter),
 			...portEquipment.transfer,
 			...organizations.transfer,
+			...relationships.transfer,
 			organizationImpactAuthorizations.buffer,
 		],
 	};
@@ -404,6 +428,7 @@ export function decodeRailPatchSoA(
 		patch.organizations,
 		currentOrganizations,
 	);
+	const relationshipChanges = decodeStaticFabAssemblyRelationshipPatch(patch.relationships);
 	const organizationImpactAuthorizations = decodeOrganizationImpactAuthorizations(
 		patch.organizationImpactAuthorizations,
 	);
@@ -420,6 +445,9 @@ export function decodeRailPatchSoA(
 		organizationChanges,
 		organizationNextIdBefore: patch.organizations.nextOrganizationIdBefore,
 		organizationNextIdAfter: patch.organizations.nextOrganizationIdAfter,
+		relationshipChanges,
+		relationshipNextIdBefore: patch.relationships.nextRelationshipIdBefore,
+		relationshipNextIdAfter: patch.relationships.nextRelationshipIdAfter,
 		organizationImpactAuthorizations,
 		operationalConfigurationPatch: patch.operationalConfigurationPatch,
 		...(historyOriginKind ? { historyOriginKind } : {}),

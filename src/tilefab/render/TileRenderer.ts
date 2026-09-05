@@ -94,6 +94,7 @@ import {
 	type Direction,
 	directionBetween,
 	isTangentJunction,
+	moveCell,
 	oppositeDirection,
 	tangentJunctionSide,
 } from "../core/railShape";
@@ -338,6 +339,35 @@ export interface StaticFabAssemblyConnectorOverlay {
 
 export type TileInteractionFocus = "rail" | "ports";
 
+/** Below this scale, consecutive 1 m STK diamonds merge into a rail-wide gold band. */
+export const STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM = 6;
+/** Below this scale, overlapping passive ordinary OHB circles would obscure overview rails. */
+export const OHB_PASSIVE_SLOT_VISUAL_MIN_ZOOM = 6;
+/** Below this scale, overlapping passive ordinary EQ center ticks would obscure overview rails. */
+export const EQ_PASSIVE_SLOT_VISUAL_MIN_ZOOM = 6;
+
+export function passivePortSlotVisualsVisible(
+	portType: CompiledPortSlots["portType"],
+	zoom: number,
+): boolean {
+	if (!Number.isFinite(zoom)) return true;
+	if (portType === "STK") return zoom >= STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM;
+	if (portType === "OHB") return zoom >= OHB_PASSIVE_SLOT_VISUAL_MIN_ZOOM;
+	return zoom >= EQ_PASSIVE_SLOT_VISUAL_MIN_ZOOM;
+}
+
+export interface GuidedCanvasActionMarker {
+	readonly role: "target" | "start" | "end" | "rail" | "organization-placement";
+	readonly x: number;
+	readonly y: number;
+	/** Exact derived slot row for Port markers. Never an authored identity. */
+	readonly portSlotRow?: number;
+	/** Exact physical-path identity for a Guided rail selection marker. */
+	readonly pathIndex?: number;
+	readonly worldX?: number;
+	readonly worldY?: number;
+}
+
 interface RailIssueCorridor {
 	readonly cells: readonly Cell[];
 	readonly departure: Readonly<{ from: Cell; to: Cell }>;
@@ -358,6 +388,30 @@ export interface TileRenderInput {
 	portSlotSpatialIndex?: PortSlotSpatialIndexSnapshot | null;
 	portSlotAvailability?: PreparedPortSlotAvailabilityIndex | null;
 	showPortSlots?: boolean;
+	guidedPortPlacement?: Readonly<{
+		readonly label: string;
+		readonly instruction: string;
+		readonly reservedLeftPixels?: number;
+		readonly gesture?: "single" | "row";
+		readonly recommendedPortCount?: number;
+	}> | null;
+	guidedRailSelection?: Readonly<{
+		readonly label: string;
+		readonly instruction: string;
+		readonly reservedLeftPixels?: number;
+		readonly reservedTopPixels?: number;
+		readonly eligibleRailCells?: ReadonlySet<string>;
+	}> | null;
+	guidedOrganizationPlacement?: Readonly<{
+		readonly reservedLeftPixels?: number;
+		readonly reservedRightPixels?: number;
+		readonly reservedTopPixels?: number;
+		readonly reservedBottomPixels?: number;
+	}> | null;
+	guidedRailKeyboardCursor?: Readonly<{
+		readonly cell: Cell;
+		readonly phase: "choose-start" | "choose-end";
+	}> | null;
 	portEquipmentPresentation?: CompiledPortEquipmentPresentation | null;
 	hoverPortId?: number | null;
 	selectedPortId?: number | null;
@@ -644,6 +698,11 @@ export class TileRenderer {
 	private portSlotPreparedArtifactBindings = 0;
 	private readonly visiblePortSlotBuffer: number[] = [];
 	private visiblePortSlotCandidates = 0;
+	private visiblePortSlotMarks = 0;
+	private renderedPassivePortSlotMarkers = 0;
+	private suppressedPassivePortSlotMarkers = 0;
+	private portSlotPresentationLod: "hidden" | "overview" | "detail" = "hidden";
+	private guidedCanvasActionMarkers: readonly GuidedCanvasActionMarker[] = Object.freeze([]);
 	private readonly hitPortSlotBuffer: number[] = [];
 	private ohbDraftRows = 0;
 	private ohbDraftSkippedRows = 0;
@@ -782,8 +841,7 @@ export class TileRenderer {
 	private advancedSwitchVisitGeneration = 0;
 	private readonly visibleAdvancedSwitchBuffer: AdvancedSwitchVisual[] = [];
 	private visibleAdvancedSwitchCount = 0;
-	private areaSelectionSource: RailAreaSelection | null = null;
-	private areaSelectionCells: readonly Cell[] = [];
+	private readonly areaSelectionCells = new WeakMap<RailAreaSelection, readonly Cell[]>();
 	private issueCorridorSource: RailIssueCorridor | null = null;
 	private issueCorridorScreenKey = "";
 	private issueCorridorScreenPath: Path2D | null = null;
@@ -831,6 +889,7 @@ export class TileRenderer {
 		this.drawOrganizationBundlePlacementGuide(overlayContext, input);
 		this.drawStaticFabOrganizationBundlePlacementPreview(overlayContext, input);
 		this.drawGhost(overlayContext, input);
+		this.drawGuidedRailKeyboardCursor(overlayContext, input);
 		this.drawStaticFabAssemblyConnectorOverlay(overlayContext, input);
 		this.drawClosureSnap(overlayContext, input);
 		this.drawPortRowDraft(overlayContext, input);
@@ -938,12 +997,17 @@ export class TileRenderer {
 		world: { x: number; y: number },
 		zoom: number,
 	): PortEquipmentHit | null {
-		if (this.boundPortEquipmentPresentation !== presentation || !this.portEquipmentSpatialIndex) {
-			return null;
-		}
+		// Pointer input can arrive after the immutable editor presentation changes but before the
+		// next animation frame binds it for painting. The shared WeakMap-backed compiler prevents an
+		// index rebuild after the first lookup and keeps a valid first click from being discarded solely
+		// because rendering has not caught up yet.
+		const spatialIndex =
+			this.boundPortEquipmentPresentation === presentation && this.portEquipmentSpatialIndex
+				? this.portEquipmentSpatialIndex
+				: portEquipmentSpatialIndexFor(presentation);
 		return (
-			this.portEquipmentSpatialIndex.nearest(world.x, world.y, clamp(13 / zoom, 0.24, 0.42)) ??
-			this.portEquipmentSpatialIndex.groupAt(world.x, world.y, clamp(3 / zoom, 0.04, 0.12))
+			spatialIndex.nearest(world.x, world.y, clamp(13 / zoom, 0.24, 0.42)) ??
+			spatialIndex.groupAt(world.x, world.y, clamp(3 / zoom, 0.04, 0.12))
 		);
 	}
 
@@ -1004,6 +1068,10 @@ export class TileRenderer {
 		this.staticKey = "";
 	}
 
+	getGuidedCanvasActionMarkers(): readonly GuidedCanvasActionMarker[] {
+		return this.guidedCanvasActionMarkers;
+	}
+
 	getStats(): {
 		staticRedraws: number;
 		overlayRedraws: number;
@@ -1013,6 +1081,10 @@ export class TileRenderer {
 		physicalPreparedArtifactBindings: number;
 		portSlotPreparedArtifactBindings: number;
 		visiblePortSlotCandidates: number;
+		visiblePortSlotMarks: number;
+		renderedPassivePortSlotMarkers: number;
+		suppressedPassivePortSlotMarkers: number;
+		portSlotPresentationLod: "hidden" | "overview" | "detail";
 		ohbDraftRows: number;
 		ohbDraftSkippedRows: number;
 		eqDraftRows: number;
@@ -1075,6 +1147,10 @@ export class TileRenderer {
 			physicalPreparedArtifactBindings: this.physicalPreparedArtifactBindings,
 			portSlotPreparedArtifactBindings: this.portSlotPreparedArtifactBindings,
 			visiblePortSlotCandidates: this.visiblePortSlotCandidates,
+			visiblePortSlotMarks: this.visiblePortSlotMarks,
+			renderedPassivePortSlotMarkers: this.renderedPassivePortSlotMarkers,
+			suppressedPassivePortSlotMarkers: this.suppressedPassivePortSlotMarkers,
+			portSlotPresentationLod: this.portSlotPresentationLod,
 			ohbDraftRows: this.ohbDraftRows,
 			ohbDraftSkippedRows: this.ohbDraftSkippedRows,
 			eqDraftRows: this.eqDraftRows,
@@ -1351,6 +1427,18 @@ export class TileRenderer {
 			camera.rotation,
 			input.railPresentationMode ?? "profiled",
 			input.showPortSlots === false ? "slots-hidden" : "slots-visible",
+			input.guidedPortPlacement?.label ?? "no-port-guide",
+			input.guidedPortPlacement?.instruction ?? "",
+			String(input.guidedPortPlacement?.reservedLeftPixels ?? 0),
+			input.guidedPortPlacement?.gesture ?? "single",
+			String(input.guidedPortPlacement?.recommendedPortCount ?? 1),
+			input.guidedRailSelection?.label ?? "no-rail-guide",
+			input.guidedRailSelection?.instruction ?? "",
+			String(input.guidedRailSelection?.reservedLeftPixels ?? 0),
+			String(input.guidedRailSelection?.reservedTopPixels ?? 0),
+			input.guidedRailSelection?.eligibleRailCells
+				? [...input.guidedRailSelection.eligibleRailCells].sort().join(",")
+				: "",
 			input.interactionFocus ?? "rail",
 			input.ignoredPortIdForPortSlots ?? 0,
 			input.ignoredEquipmentGroupIdForPortSlots ?? 0,
@@ -1371,6 +1459,7 @@ export class TileRenderer {
 		this.drawPortEquipmentFootprints(staticContext, input);
 		this.drawRails(staticContext, input);
 		this.drawPortSlots(staticContext, input);
+		this.drawGuidedRailSelection(staticContext, input);
 		this.drawPortEquipment(staticContext, input);
 		this.staticRedraws++;
 	}
@@ -1458,6 +1547,11 @@ export class TileRenderer {
 	private drawPortSlots(ctx: CanvasRenderingContext2D, input: TileRenderInput): void {
 		const slots = input.portSlots;
 		this.visiblePortSlotCandidates = 0;
+		this.visiblePortSlotMarks = 0;
+		this.renderedPassivePortSlotMarkers = 0;
+		this.suppressedPassivePortSlotMarkers = 0;
+		this.portSlotPresentationLod = "hidden";
+		this.guidedCanvasActionMarkers = Object.freeze([]);
 		if (input.showPortSlots === false || !slots || !this.portSlotSpatialIndex) return;
 		const visible = visibleBounds(input.camera, input.width, input.height, 1);
 		this.portSlotSpatialIndex.query(
@@ -1476,12 +1570,65 @@ export class TileRenderer {
 				: slots.portType === "EQ"
 					? clamp(input.camera.zoom * 0.19, 7, 11)
 					: clamp(input.camera.zoom * 0.15, 6, 9);
+		const guidedRows = this.selectGuidedPortPlacementRows(input, slots, markerRadius);
+		const guidedRowSet = new Set(guidedRows);
+		const passiveVisualsVisible = passivePortSlotVisualsVisible(slots.portType, input.camera.zoom);
+		this.portSlotPresentationLod = passiveVisualsVisible ? "detail" : "overview";
+		const guidedAnchorRow = guidedRows[0] ?? -1;
+		if (input.guidedPortPlacement?.gesture !== "row" && guidedAnchorRow >= 0) {
+			const target = this.portSlotScreenPoint(input, slots, guidedAnchorRow);
+			this.guidedCanvasActionMarkers = Object.freeze([
+				Object.freeze({
+					role: "target" as const,
+					x: target.x,
+					y: target.y,
+					portSlotRow: guidedAnchorRow,
+				}),
+			]);
+		} else if (input.guidedPortPlacement?.gesture === "row" && guidedRows.length >= 2) {
+			const start = this.portSlotScreenPoint(input, slots, guidedRows[0] as number);
+			const end = this.portSlotScreenPoint(
+				input,
+				slots,
+				guidedRows[guidedRows.length - 1] as number,
+			);
+			ctx.save();
+			ctx.strokeStyle = "rgba(145, 243, 244, 0.72)";
+			ctx.lineWidth = Math.max(4, markerRadius * 0.5);
+			ctx.lineCap = "round";
+			ctx.beginPath();
+			ctx.moveTo(start.x, start.y);
+			ctx.lineTo(end.x, end.y);
+			ctx.stroke();
+			ctx.restore();
+			this.guidedCanvasActionMarkers = Object.freeze([
+				Object.freeze({
+					role: "start" as const,
+					x: start.x,
+					y: start.y,
+					portSlotRow: guidedRows[0] as number,
+				}),
+				Object.freeze({
+					role: "end" as const,
+					x: end.x,
+					y: end.y,
+					portSlotRow: guidedRows[guidedRows.length - 1] as number,
+				}),
+			]);
+		}
 		for (const row of this.visiblePortSlotBuffer) {
 			const status = this.portSlotStatus(input, row);
 			const legal = status === PORT_SLOT_STATUS.LEGAL;
 			const dynamicConflict = isDynamicPortSlotConflict(status);
 			const showStaticConflict = input.portEquipmentGroupEditPreview !== null;
 			if (!legal && !dynamicConflict && !showStaticConflict) continue;
+			const guidedRecommended = legal && guidedRowSet.has(row);
+			if (legal && !guidedRecommended && !passiveVisualsVisible) {
+				this.suppressedPassivePortSlotMarkers++;
+				continue;
+			}
+			this.visiblePortSlotMarks++;
+			if (legal && !guidedRecommended) this.renderedPassivePortSlotMarkers++;
 			const bodyReserved = status === PORT_SLOT_STATUS.EQUIPMENT_BODY_CONFLICT;
 			const port = this.worldToScreen(
 				{
@@ -1490,6 +1637,7 @@ export class TileRenderer {
 				},
 				input.camera,
 			);
+			const guidedSecondary = legal && input.guidedPortPlacement && !guidedRecommended;
 			const tangentTip = this.worldToScreen(
 				{
 					x: (slots.worldPositions[row * 2] as number) + (slots.tangents[row * 2] as number),
@@ -1511,24 +1659,28 @@ export class TileRenderer {
 				? "rgba(225, 188, 91, 0.58)"
 				: !legal
 					? "rgba(238, 122, 132, 0.62)"
-					: slots.portType === "STK"
-						? "rgba(225, 188, 91, 0.82)"
-						: slots.portType === "EQ"
-							? "rgba(102, 211, 190, 0.76)"
-							: "rgba(91, 221, 227, 0.68)";
+					: guidedSecondary
+						? "rgba(126, 160, 160, 0.28)"
+						: slots.portType === "STK"
+							? "rgba(225, 188, 91, 0.82)"
+							: slots.portType === "EQ"
+								? "rgba(102, 211, 190, 0.76)"
+								: "rgba(91, 221, 227, 0.68)";
 			ctx.fillStyle = bodyReserved
 				? "rgba(225, 188, 91, 0.06)"
 				: !legal
 					? "rgba(238, 122, 132, 0.06)"
-					: slots.portType === "STK"
-						? "rgba(225, 188, 91, 0.14)"
-						: slots.portType === "EQ"
-							? "rgba(102, 211, 190, 0.12)"
-							: "rgba(95, 225, 231, 0.1)";
+					: guidedSecondary
+						? "rgba(95, 125, 126, 0.025)"
+						: slots.portType === "STK"
+							? "rgba(225, 188, 91, 0.14)"
+							: slots.portType === "EQ"
+								? "rgba(102, 211, 190, 0.12)"
+								: "rgba(95, 225, 231, 0.1)";
 			ctx.lineWidth = 1.5;
 			if (slots.portType === "EQ") {
 				const halfTick = markerRadius * 1.25;
-				ctx.lineWidth = legal ? 2 : 1.4;
+				ctx.lineWidth = legal ? (guidedSecondary ? 1 : 2) : 1.4;
 				ctx.lineCap = "round";
 				ctx.beginPath();
 				ctx.arc(port.x, port.y, markerRadius * 0.9, 0, Math.PI * 2);
@@ -1567,15 +1719,24 @@ export class TileRenderer {
 			} else if (slots.portType === "STK") {
 				ctx.translate(port.x, port.y);
 				ctx.rotate(Math.PI / 4);
-				const size = clamp(markerRadius * 1.45, 16, 22);
-				ctx.fillRect(-size / 2, -size / 2, size, size);
+				const emphasized = guidedRecommended;
+				const size = emphasized
+					? clamp(markerRadius * 1.45, 16, 22)
+					: clamp(markerRadius * 0.42, 3, 6);
+				if (!emphasized) {
+					ctx.strokeStyle = guidedSecondary
+						? "rgba(126, 160, 160, 0.18)"
+						: "rgba(225, 188, 91, 0.22)";
+					ctx.lineWidth = 0.85;
+				}
+				if (emphasized) ctx.fillRect(-size / 2, -size / 2, size, size);
 				ctx.strokeRect(-size / 2, -size / 2, size, size);
-				if (legal) {
+				if (legal && emphasized) {
 					ctx.beginPath();
 					ctx.arc(0, 0, Math.max(1.2, markerRadius * 0.22), 0, Math.PI * 2);
 					ctx.fillStyle = "#f6dc8b";
 					ctx.fill();
-				} else {
+				} else if (!legal) {
 					ctx.strokeStyle = bodyReserved ? "#c5a758" : "#d96f79";
 					ctx.lineWidth = 2;
 					ctx.beginPath();
@@ -1598,7 +1759,263 @@ export class TileRenderer {
 				}
 			}
 			ctx.restore();
+			if (guidedRecommended && input.guidedPortPlacement) {
+				ctx.save();
+				ctx.strokeStyle = slots.portType === "STK" ? "#f6dc8b" : "#91f3f4";
+				ctx.lineWidth = 2;
+				ctx.setLineDash([4, 3]);
+				ctx.beginPath();
+				ctx.arc(port.x, port.y, markerRadius + 5, 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.restore();
+			}
 		}
+		if (
+			guidedAnchorRow >= 0 &&
+			input.guidedPortPlacement &&
+			input.guidedPortPlacement.gesture !== "row"
+		) {
+			const calloutRow = guidedRows[Math.floor((guidedRows.length - 1) / 2)] ?? guidedAnchorRow;
+			this.drawGuidedPortPlacementCallout(ctx, input, slots, calloutRow);
+		}
+	}
+
+	private drawGuidedRailSelection(ctx: CanvasRenderingContext2D, input: TileRenderInput): void {
+		const guidance = input.guidedRailSelection;
+		if (!guidance) return;
+		const reservedLeft = Math.max(0, guidance.reservedLeftPixels ?? 0);
+		const reservedTop = Math.max(0, guidance.reservedTopPixels ?? 0);
+		let target: Readonly<{
+			x: number;
+			y: number;
+			pathIndex: number;
+			worldX: number;
+			worldY: number;
+		}> | null = null;
+		let bestDistance = Number.POSITIVE_INFINITY;
+		for (const pathIndex of this.visiblePathBuffer) {
+			const pathCellOffset = pathIndex * 2;
+			if (
+				guidance.eligibleRailCells &&
+				!guidance.eligibleRailCells.has(
+					cellKey(
+						input.physicalPaths.cells[pathCellOffset] as number,
+						input.physicalPaths.cells[pathCellOffset + 1] as number,
+					),
+				)
+			) {
+				continue;
+			}
+			const sample = samplePhysicalPath(
+				input.physicalPaths,
+				pathIndex,
+				(input.physicalPaths.lengths[pathIndex] as number) * 0.5,
+			);
+			if (!sample) continue;
+			const screen = this.worldToScreen({ x: sample.x, y: sample.y }, input.camera);
+			if (
+				screen.x < reservedLeft + 28 ||
+				screen.x > input.width - 28 ||
+				screen.y < reservedTop + 28 ||
+				screen.y > input.height - 28
+			) {
+				continue;
+			}
+			const distance = Math.hypot(screen.x - input.width / 2, screen.y - input.height / 2);
+			if (distance < bestDistance) {
+				target = Object.freeze({
+					x: screen.x,
+					y: screen.y,
+					pathIndex,
+					worldX: sample.x,
+					worldY: sample.y,
+				});
+				bestDistance = distance;
+			}
+		}
+		if (!target) return;
+		this.guidedCanvasActionMarkers = Object.freeze([
+			Object.freeze({
+				role: "rail" as const,
+				x: target.x,
+				y: target.y,
+				pathIndex: target.pathIndex,
+				worldX: target.worldX,
+				worldY: target.worldY,
+			}),
+		]);
+		ctx.save();
+		ctx.fillStyle = "rgba(145, 243, 244, 0.14)";
+		ctx.strokeStyle = "#91f3f4";
+		ctx.lineWidth = 2.5;
+		ctx.setLineDash([5, 3]);
+		ctx.beginPath();
+		ctx.arc(target.x, target.y, 17, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.stroke();
+		ctx.restore();
+	}
+
+	private portSlotScreenPoint(
+		input: TileRenderInput,
+		slots: CompiledPortSlots,
+		row: number,
+	): Readonly<{ x: number; y: number }> {
+		return this.worldToScreen(
+			{
+				x: slots.worldPositions[row * 2] as number,
+				y: slots.worldPositions[row * 2 + 1] as number,
+			},
+			input.camera,
+		);
+	}
+
+	private selectGuidedPortPlacementRows(
+		input: TileRenderInput,
+		slots: CompiledPortSlots,
+		markerRadius: number,
+	): readonly number[] {
+		const guidance = input.guidedPortPlacement;
+		if (!guidance) return [];
+		const reservedLeft = Math.max(0, guidance.reservedLeftPixels ?? 0);
+		const selectedRows = new Set(
+			input.portRowDraft?.portType === slots.portType ? input.portRowDraft.selection.rows : [],
+		);
+		const candidates = this.visiblePortSlotBuffer.filter((row) => {
+			if (this.portSlotStatus(input, row) !== PORT_SLOT_STATUS.LEGAL) return false;
+			if (guidance.gesture !== "row" && selectedRows.has(row)) return false;
+			const port = this.portSlotScreenPoint(input, slots, row);
+			return (
+				port.x >= reservedLeft + markerRadius + 8 &&
+				port.x <= input.width - markerRadius - 8 &&
+				port.y >= markerRadius + 8 &&
+				port.y <= input.height - markerRadius - 8
+			);
+		});
+		if (guidance.gesture !== "row") {
+			let bestRow = -1;
+			let bestDistance = Number.POSITIVE_INFINITY;
+			for (const row of candidates) {
+				const port = this.portSlotScreenPoint(input, slots, row);
+				const distance = Math.hypot(port.x - input.width / 2, port.y - input.height / 2);
+				if (distance < bestDistance || (distance === bestDistance && row < bestRow)) {
+					bestRow = row;
+					bestDistance = distance;
+				}
+			}
+			return bestRow >= 0 ? [bestRow] : [];
+		}
+
+		const targetCount = Math.max(2, Math.min(6, Math.floor(guidance.recommendedPortCount ?? 3)));
+		let bestRows: readonly number[] = [];
+		let bestDistance = Number.POSITIVE_INFINITY;
+		let bestFirstRow = Number.POSITIVE_INFINITY;
+		const straightGroups = new Map<
+			string,
+			{ readonly travel: Readonly<{ x: number; y: number }>; readonly rows: number[] }
+		>();
+		for (const row of candidates) {
+			const from = slots.routeFromDirections[row] as number;
+			const to = slots.routeToDirections[row] as number;
+			const side = slots.sides[row] as number;
+			const travel = moveCell({ x: 0, y: 0 }, to as Direction);
+			const lateral =
+				(slots.routeXs[row] as number) * -travel.y + (slots.routeZs[row] as number) * travel.x;
+			const key = `${from}:${to}:${side}:${lateral}`;
+			const group = straightGroups.get(key);
+			if (group) group.rows.push(row);
+			else straightGroups.set(key, { travel, rows: [row] });
+		}
+		for (const { travel, rows: unsortedRows } of straightGroups.values()) {
+			const straightRows = unsortedRows.sort((left, right) => {
+				const leftLongitudinal =
+					(slots.routeXs[left] as number) * travel.x + (slots.routeZs[left] as number) * travel.y;
+				const rightLongitudinal =
+					(slots.routeXs[right] as number) * travel.x + (slots.routeZs[right] as number) * travel.y;
+				return leftLongitudinal - rightLongitudinal || left - right;
+			});
+			for (let start = 0; start + targetCount <= straightRows.length; start++) {
+				const rows = straightRows.slice(start, start + targetCount);
+				let consecutive = true;
+				for (let index = 1; index < rows.length; index++) {
+					const previous = rows[index - 1] as number;
+					const current = rows[index] as number;
+					const deltaX = (slots.routeXs[current] as number) - (slots.routeXs[previous] as number);
+					const deltaZ = (slots.routeZs[current] as number) - (slots.routeZs[previous] as number);
+					if (deltaX * travel.x + deltaZ * travel.y !== 1) {
+						consecutive = false;
+						break;
+					}
+				}
+				if (!consecutive) continue;
+				const first = this.portSlotScreenPoint(input, slots, rows[0] as number);
+				const last = this.portSlotScreenPoint(input, slots, rows[rows.length - 1] as number);
+				const distance = Math.hypot(
+					(first.x + last.x) / 2 - input.width / 2,
+					(first.y + last.y) / 2 - input.height / 2,
+				);
+				const firstRow = rows[0] as number;
+				if (distance < bestDistance || (distance === bestDistance && firstRow < bestFirstRow)) {
+					bestRows = rows;
+					bestDistance = distance;
+					bestFirstRow = firstRow;
+				}
+			}
+		}
+		return bestRows;
+	}
+
+	private drawGuidedPortPlacementCallout(
+		ctx: CanvasRenderingContext2D,
+		input: TileRenderInput,
+		slots: CompiledPortSlots,
+		row: number,
+	): void {
+		const guidance = input.guidedPortPlacement;
+		if (!guidance) return;
+		const anchor = this.worldToScreen(
+			{
+				x: slots.worldPositions[row * 2] as number,
+				y: slots.worldPositions[row * 2 + 1] as number,
+			},
+			input.camera,
+		);
+		ctx.save();
+		ctx.font = "700 10px ui-sans-serif, system-ui, sans-serif";
+		const labelWidth = ctx.measureText(guidance.label).width;
+		ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+		const instructionWidth = ctx.measureText(guidance.instruction).width;
+		const reservedLeft = clamp(guidance.reservedLeftPixels ?? 0, 0, Math.max(0, input.width - 180));
+		const width = Math.min(
+			input.width - reservedLeft - 16,
+			Math.max(164, labelWidth, instructionWidth) + 20,
+		);
+		const height = 44;
+		const x = clamp(
+			anchor.x - width / 2,
+			reservedLeft + 8,
+			Math.max(reservedLeft + 8, input.width - width - 8),
+		);
+		const y = clamp(anchor.y - 62, 8, Math.max(8, input.height - height - 8));
+		ctx.fillStyle = "rgba(10, 20, 21, 0.96)";
+		ctx.strokeStyle = slots.portType === "STK" ? "#d8b95f" : "#68cfd4";
+		ctx.lineWidth = 1.5;
+		roundRect(ctx, x, y, width, height, 5);
+		ctx.fill();
+		ctx.stroke();
+		ctx.fillStyle = slots.portType === "STK" ? "#f6dc8b" : "#a8f3f5";
+		ctx.font = "700 10px ui-sans-serif, system-ui, sans-serif";
+		ctx.textAlign = "left";
+		ctx.textBaseline = "top";
+		ctx.fillText(guidance.label, x + 10, y + 8);
+		ctx.fillStyle = "#b9c9ca";
+		ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+		ctx.fillText(guidance.instruction, x + 10, y + 24);
+		ctx.beginPath();
+		ctx.moveTo(anchor.x, y + height);
+		ctx.lineTo(anchor.x, Math.min(anchor.y - 7, y + height + 12));
+		ctx.stroke();
+		ctx.restore();
 	}
 
 	private drawPortEquipment(ctx: CanvasRenderingContext2D, input: TileRenderInput): void {
@@ -3953,7 +4370,17 @@ export class TileRenderer {
 		this.organizationBundlePreviewPortBuffer.length = 0;
 		this.organizationBundlePreviewGroupBuffer.length = 0;
 		const preview = input.organizationBundlePreview;
-		if (!preview) return;
+		const clearGuidedPlacementMarker = (): void => {
+			if (
+				this.guidedCanvasActionMarkers.some((marker) => marker.role === "organization-placement")
+			) {
+				this.guidedCanvasActionMarkers = Object.freeze([]);
+			}
+		};
+		if (!preview) {
+			clearGuidedPlacementMarker();
+			return;
+		}
 
 		const artifact = preview.artifact;
 		if (this.organizationBundlePreviewArtifact !== artifact) {
@@ -4052,6 +4479,46 @@ export class TileRenderer {
 			this.worldToScreen({ x: outline.maxX, y: outline.maxY }, input.camera),
 			this.worldToScreen({ x: outline.minX, y: outline.maxY }, input.camera),
 		];
+		const guidedPlacement = input.guidedOrganizationPlacement;
+		if (guidedPlacement && !sampledCollision) {
+			const markerHalfExtent = 26;
+			const outlineMinX = Math.min(...outlineCorners.map((corner) => corner.x));
+			const outlineMaxX = Math.max(...outlineCorners.map((corner) => corner.x));
+			const outlineMinY = Math.min(...outlineCorners.map((corner) => corner.y));
+			const outlineMaxY = Math.max(...outlineCorners.map((corner) => corner.y));
+			// The marker center must identify the preview itself, while its 52 px touch ring may extend
+			// beyond a shallow organization outline. Large Bank bundles can be shorter than one touch
+			// target after fit-to-view, so requiring the whole ring inside the outline hides the action.
+			const minX = Math.max(
+				outlineMinX,
+				(guidedPlacement.reservedLeftPixels ?? 0) + markerHalfExtent,
+			);
+			const maxX = Math.min(
+				outlineMaxX,
+				input.width - (guidedPlacement.reservedRightPixels ?? 0) - markerHalfExtent,
+			);
+			const minY = Math.max(
+				outlineMinY,
+				(guidedPlacement.reservedTopPixels ?? 0) + markerHalfExtent,
+			);
+			const maxY = Math.min(
+				outlineMaxY,
+				input.height - (guidedPlacement.reservedBottomPixels ?? 0) - markerHalfExtent,
+			);
+			if (minX <= maxX && minY <= maxY) {
+				this.guidedCanvasActionMarkers = Object.freeze([
+					Object.freeze({
+						role: "organization-placement" as const,
+						x: (minX + maxX) / 2,
+						y: (minY + maxY) / 2,
+					}),
+				]);
+			} else {
+				clearGuidedPlacementMarker();
+			}
+		} else {
+			clearGuidedPlacementMarker();
+		}
 
 		ctx.save();
 		ctx.lineCap = "round";
@@ -4189,21 +4656,26 @@ export class TileRenderer {
 			ctx.stroke();
 		}
 
-		const labelAnchor = this.worldToScreen({ x: outline.minX, y: outline.minY }, input.camera);
-		const label = sampledCollision
-			? `SAMPLED COLLISION ${preview.sampledOccupiedCellCount.toLocaleString()} · MOVE BEFORE EXACT CHECK`
-			: `${artifact.sourceModuleCount.toLocaleString()} MODULE · ${artifact.portCount.toLocaleString()} PORT · CLICK = EXACT CHECK`;
-		ctx.font = "750 10px Inter, system-ui, sans-serif";
-		const labelWidth = Math.min(input.width - 16, ctx.measureText(label).width + 16);
-		const labelX = clamp(labelAnchor.x + 8, 8, Math.max(8, input.width - labelWidth - 8));
-		const labelY = clamp(labelAnchor.y - 28, 8, Math.max(8, input.height - 30));
-		ctx.fillStyle = sampledCollision ? "rgba(52, 9, 15, 0.96)" : "rgba(5, 23, 25, 0.96)";
-		roundRect(ctx, labelX, labelY, labelWidth, 22, 4);
-		ctx.fill();
-		ctx.fillStyle = color;
-		ctx.textAlign = "left";
-		ctx.textBaseline = "middle";
-		ctx.fillText(label, labelX + 8, labelY + 11, Math.max(0, labelWidth - 16));
+		// Guided already provides one semantic marker plus the mission/status copy. Repeating that
+		// instruction as a long Canvas label can slide under a responsive Guide panel; only collision
+		// feedback is important enough to add another label in the bounded lesson.
+		if (!guidedPlacement || sampledCollision) {
+			const labelAnchor = this.worldToScreen({ x: outline.minX, y: outline.minY }, input.camera);
+			const label = sampledCollision
+				? `SAMPLED COLLISION ${preview.sampledOccupiedCellCount.toLocaleString()} · MOVE BEFORE EXACT CHECK`
+				: `${artifact.sourceModuleCount.toLocaleString()} MODULE · ${artifact.portCount.toLocaleString()} PORT · CLICK = EXACT CHECK`;
+			ctx.font = "750 10px Inter, system-ui, sans-serif";
+			const labelWidth = Math.min(input.width - 16, ctx.measureText(label).width + 16);
+			const labelX = clamp(labelAnchor.x + 8, 8, Math.max(8, input.width - labelWidth - 8));
+			const labelY = clamp(labelAnchor.y - 28, 8, Math.max(8, input.height - 30));
+			ctx.fillStyle = sampledCollision ? "rgba(52, 9, 15, 0.96)" : "rgba(5, 23, 25, 0.96)";
+			roundRect(ctx, labelX, labelY, labelWidth, 22, 4);
+			ctx.fill();
+			ctx.fillStyle = color;
+			ctx.textAlign = "left";
+			ctx.textBaseline = "middle";
+			ctx.fillText(label, labelX + 8, labelY + 11, Math.max(0, labelWidth - 16));
+		}
 		ctx.restore();
 	}
 
@@ -4963,6 +5435,7 @@ export class TileRenderer {
 				ctx,
 				gateway,
 				input.camera,
+				input.width,
 				role,
 				gateway.id === overlay.hoveredGatewayId,
 				rejected,
@@ -4970,7 +5443,7 @@ export class TileRenderer {
 		}
 
 		if (plan) {
-			this.drawStaticFabAssemblyConnectorStatus(ctx, overlay, input.camera);
+			this.drawStaticFabAssemblyConnectorStatus(ctx, overlay, input.camera, input.width);
 		}
 		ctx.restore();
 	}
@@ -5151,6 +5624,7 @@ export class TileRenderer {
 		ctx: CanvasRenderingContext2D,
 		gateway: StaticFabAssemblyGatewayCandidate,
 		camera: Camera,
+		viewportWidth: number,
 		role: "candidate" | "source" | "target",
 		hovered: boolean,
 		rejected: boolean,
@@ -5223,7 +5697,14 @@ export class TileRenderer {
 		if (label) {
 			ctx.font = "760 10px Inter, system-ui, sans-serif";
 			const labelWidth = ctx.measureText(label).width + 12;
-			const labelX = center.x + markerRadius + 7;
+			const preferredRight = center.x + markerRadius + 7;
+			const preferredLeft = center.x - markerRadius - 7 - labelWidth;
+			const labelX =
+				role === "source"
+					? clamp(preferredLeft, 6, Math.max(6, viewportWidth - labelWidth - 6))
+					: preferredRight + labelWidth <= viewportWidth - 6
+						? preferredRight
+						: clamp(preferredLeft, 6, Math.max(6, viewportWidth - labelWidth - 6));
 			const labelY = center.y - markerRadius - 5;
 			ctx.fillStyle = rejected ? "rgba(48, 8, 13, 0.96)" : "rgba(7, 18, 20, 0.96)";
 			roundRect(ctx, labelX, labelY - 12, labelWidth, 18, 4);
@@ -5240,6 +5721,7 @@ export class TileRenderer {
 		ctx: CanvasRenderingContext2D,
 		overlay: StaticFabAssemblyConnectorOverlay,
 		camera: Camera,
+		viewportWidth: number,
 	): void {
 		const plan = overlay.plan;
 		if (!plan) return;
@@ -5258,7 +5740,12 @@ export class TileRenderer {
 		const color = rejected ? "#ff6f80" : "#8de3ea";
 		ctx.font = "780 10px Inter, system-ui, sans-serif";
 		const width = ctx.measureText(label).width + 14;
-		const x = center.x + 18;
+		const preferredRight = center.x + 18;
+		const preferredLeft = center.x - 18 - width;
+		const x =
+			preferredRight + width <= viewportWidth - 6
+				? preferredRight
+				: clamp(preferredLeft, 6, Math.max(6, viewportWidth - width - 6));
 		const y = center.y + 31;
 		ctx.fillStyle = rejected ? "rgba(48, 8, 13, 0.96)" : "rgba(7, 20, 22, 0.96)";
 		roundRect(ctx, x, y - 14, width, 20, 4);
@@ -6480,16 +6967,17 @@ export class TileRenderer {
 	}
 
 	private resolveRailAreaSelectionCells(selection: RailAreaSelection): readonly Cell[] {
-		if (this.areaSelectionSource === selection) return this.areaSelectionCells;
+		const cached = this.areaSelectionCells.get(selection);
+		if (cached) return cached;
 		const cells = new Map<string, Cell>();
 		for (const ownership of selection.ownerships) {
 			for (const cell of ownership.footprintCells) {
 				cells.set(cellKey(cell.x, cell.y), cell);
 			}
 		}
-		this.areaSelectionSource = selection;
-		this.areaSelectionCells = Object.freeze([...cells.values()]);
-		return this.areaSelectionCells;
+		const resolved = Object.freeze([...cells.values()]);
+		this.areaSelectionCells.set(selection, resolved);
+		return resolved;
 	}
 
 	private drawSelectedModule(ctx: CanvasRenderingContext2D, input: TileRenderInput): void {
@@ -7231,6 +7719,38 @@ export class TileRenderer {
 		ctx.textAlign = "left";
 		ctx.textBaseline = "alphabetic";
 		ctx.fillText(label, labelX, labelY);
+	}
+
+	private drawGuidedRailKeyboardCursor(
+		ctx: CanvasRenderingContext2D,
+		input: TileRenderInput,
+	): void {
+		const cursor = input.guidedRailKeyboardCursor;
+		if (!cursor) return;
+		const accent = cursor.phase === "choose-start" ? "#f1c66f" : "#8de3ea";
+		const center = this.tileCenterAtScreen(cursor.cell, input.camera);
+		const radius = Math.max(10, input.camera.zoom * 0.34);
+		ctx.save();
+		ctx.strokeStyle = accent;
+		ctx.lineWidth = 2;
+		ctx.setLineDash([4, 3]);
+		ctx.beginPath();
+		ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+		ctx.stroke();
+		ctx.setLineDash([]);
+		this.drawHandle(ctx, cursor.cell, input.camera, accent, true);
+		ctx.font = "750 8px Inter, system-ui, sans-serif";
+		ctx.textAlign = "center";
+		ctx.textBaseline = "bottom";
+		const label = cursor.phase === "choose-start" ? "KEY START" : "KEY END";
+		const labelWidth = ctx.measureText(label).width;
+		const labelY = center.y - radius - 8;
+		ctx.fillStyle = "rgba(7, 12, 13, 0.94)";
+		roundRect(ctx, center.x - labelWidth / 2 - 4, labelY - 9, labelWidth + 8, 13, 3);
+		ctx.fill();
+		ctx.fillStyle = accent;
+		ctx.fillText(label, center.x, labelY);
+		ctx.restore();
 	}
 
 	private drawClosureSnap(ctx: CanvasRenderingContext2D, input: TileRenderInput): void {

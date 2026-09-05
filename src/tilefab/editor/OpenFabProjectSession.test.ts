@@ -90,6 +90,7 @@ describe("OpenFab project session policy", () => {
 	it("never overwrites a recovery offer before the user resolves it", () => {
 		const readyDirtySession = {
 			dirty: true,
+			recoverableContent: true,
 			scaleProbeActive: false,
 			startupReady: true,
 			modelSyncPending: false,
@@ -100,6 +101,12 @@ describe("OpenFab project session policy", () => {
 		};
 
 		expect(shouldScheduleOpenFabProjectRecovery(readyDirtySession)).toBe(true);
+		expect(
+			shouldScheduleOpenFabProjectRecovery({
+				...readyDirtySession,
+				recoverableContent: false,
+			}),
+		).toBe(false);
 		expect(
 			shouldScheduleOpenFabProjectRecovery({
 				...readyDirtySession,

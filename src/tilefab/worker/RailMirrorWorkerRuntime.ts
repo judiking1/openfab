@@ -117,7 +117,8 @@ export class RailMirrorWorkerRuntime {
 				snapshot.nextAdvancedSwitchId !== message.expectedNextAdvancedSwitchId ||
 				snapshot.portEquipment.nextPortId !== message.expectedNextPortId ||
 				snapshot.portEquipment.nextEquipmentGroupId !== message.expectedNextEquipmentGroupId ||
-				snapshot.organizations.nextOrganizationId !== message.expectedNextOrganizationId
+				snapshot.organizations.nextOrganizationId !== message.expectedNextOrganizationId ||
+				snapshot.relationships.nextRelationshipId !== message.expectedNextRelationshipId
 			) {
 				return this.latchTerminalError(
 					message.epoch,

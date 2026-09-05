@@ -3,9 +3,13 @@ import {
 	type BlueprintPlacementOrigin,
 	blueprintPlacementAnchorAtWorldCenter,
 	blueprintPlacementCapturesRecent,
+	blueprintPlacementCompactIdentity,
+	blueprintPlacementLifecycle,
 	blueprintPlacementSource,
 	blueprintPlacementStatusPrefix,
+	blueprintPlacementUsesSingleCommitByDefault,
 	blueprintPlacementWorldCenterAtAnchor,
+	moduleStampUsesSingleCommit,
 	rotateBlueprintPlacementAroundStableCenter,
 	shouldRetainPlacementGhostOnPointerLeave,
 } from "./BlueprintCommandLoop";
@@ -37,6 +41,67 @@ describe("BlueprintCommandLoop", () => {
 		for (const origin of ["recent", "library", "favorite", "assembly-pattern"] as const) {
 			expect(blueprintPlacementCapturesRecent(origin)).toBe(false);
 		}
+	});
+
+	it("makes a full FAB preset one-shot unless the placement gesture explicitly asks to repeat", () => {
+		expect(blueprintPlacementUsesSingleCommitByDefault("fab-preset")).toBe(true);
+		for (const origin of [
+			"selection-copy",
+			"recent",
+			"library",
+			"favorite",
+			"assembly-pattern",
+		] as const) {
+			expect(blueprintPlacementUsesSingleCommitByDefault(origin)).toBe(false);
+		}
+	});
+
+	it("derives one truthful preset lifecycle before and after an explicit repeat commit", () => {
+		expect(blueprintPlacementLifecycle("fab-preset", 0)).toEqual({
+			mode: "single",
+			exitIsCancellation: true,
+			modeLabel: "1회 배치 · Shift+클릭 시 계속",
+			primaryActionLabel: "여기에 1회 배치",
+		});
+		expect(blueprintPlacementLifecycle("fab-preset", 1)).toEqual({
+			mode: "repeat",
+			exitIsCancellation: false,
+			modeLabel: "반복 배치 중",
+			primaryActionLabel: "여기에 배치",
+		});
+		expect(blueprintPlacementLifecycle("recent", 0)).toEqual({
+			mode: "repeat",
+			exitIsCancellation: true,
+			modeLabel: "반복 배치 중",
+			primaryActionLabel: "여기에 배치",
+		});
+		expect(blueprintPlacementLifecycle("recent", 1).exitIsCancellation).toBe(false);
+	});
+
+	it("labels module stamps by whether the ghost actually survives a commit", () => {
+		expect(moduleStampUsesSingleCommit("single")).toBe(true);
+		expect(moduleStampUsesSingleCommit("choose-output")).toBe(true);
+		expect(moduleStampUsesSingleCommit("from-output")).toBe(false);
+		expect(moduleStampUsesSingleCommit("compatible-anchor")).toBe(false);
+	});
+
+	it("keeps the held object identity and exact static FAB counts visible in compact placement", () => {
+		expect(
+			blueprintPlacementCompactIdentity({
+				origin: "selection-copy",
+				sourceModuleCount: 17,
+				equipmentGroupCount: 3,
+				portCount: 6,
+			}),
+		).toBe("COPY 17 RAIL · 3 GROUPS · 6 PORTS");
+		expect(
+			blueprintPlacementCompactIdentity({
+				origin: "assembly-pattern",
+				sourceModuleCount: 97,
+				equipmentGroupCount: 0,
+				portCount: 0,
+			}),
+		).toBe("ASSEMBLY 97 RAIL");
 	});
 
 	it("retains active placement ghosts while the pointer uses editor chrome", () => {

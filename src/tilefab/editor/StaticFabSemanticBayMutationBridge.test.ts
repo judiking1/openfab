@@ -301,6 +301,7 @@ function bridgeFixture(
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	).snapshot;
 	const intent: StaticFabSemanticBayMutationIntent = Object.freeze({
 		version: STATIC_FAB_SEMANTIC_BAY_MUTATION_VERSION,
@@ -320,6 +321,7 @@ function bridgeFixture(
 				patchSequence: livePatchSequence,
 				portEquipment: document.portEquipment,
 				organizations: document.organizations,
+				relationships: document.relationships,
 			}),
 		},
 		setPatchSequence(sequence: number): void {

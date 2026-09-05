@@ -90,6 +90,35 @@ describe("RailAreaStamp", () => {
 		expect(plan.newEdges).toBe(template.sourceEdgeCount);
 	});
 
+	it("keeps cached pose coordinates isolated across all rotations, flow directions, and anchors", () => {
+		const template = createRailAreaStampTemplate(selectWholeMap(longBayDocument()));
+		const sourceBytes = JSON.stringify(template);
+		let pose = initialRailAreaStampPose();
+		for (let rotation = 0; rotation < 4; rotation++) {
+			for (const oriented of [pose, reverseRailAreaStampFlow(pose)]) {
+				const target = new RailDocument();
+				const first = planRailAreaStamp(target.map, template, { x: -100, y: 40 }, oriented);
+				const shifted = planRailAreaStamp(target.map, template, { x: 200, y: -60 }, oriented);
+				expect(shifted.valid, shifted.reason).toBe(true);
+				expect(shifted.mutations).toEqual(
+					first.mutations.map((cell) => ({ ...cell, x: cell.x + 300, y: cell.y - 100 })),
+				);
+				expect(target.commit(first)).toBe(true);
+				expect(analyzeRailNetwork(target.map)).toMatchObject({
+					components: 1,
+					strongComponents: 1,
+					openEnds: 0,
+				});
+				expect(target.undo()).toBe(true);
+				expect(
+					planRailAreaStamp(target.map, template, { x: -100, y: 40 }, oriented).mutations,
+				).toEqual(first.mutations);
+			}
+			pose = rotateRailAreaStampPose(pose, 1);
+		}
+		expect(JSON.stringify(template)).toBe(sourceBytes);
+	});
+
 	it("bounds factory-scale pointer previews and requires an exact plan before commit", () => {
 		const edgeCount = RAIL_AREA_STAMP_PREVIEW_MAX_CELLS * 4;
 		const template = Object.freeze({

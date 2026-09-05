@@ -76,6 +76,52 @@ describe("EditorCommandRegistry", () => {
 			"command.apply",
 		);
 		expect(resolveEditorCommand(keyboard("ArrowUp"), "canvas")?.command.id).toBe("camera.pan-up");
+		expect(resolveEditorCommand(keyboard("ArrowUp"), "rail-keyboard")?.command.id).toBe(
+			"construction.endpoint-navigate",
+		);
+		expect(
+			resolveEditorCommand(keyboard("ArrowRight", { shiftKey: true }), "rail-keyboard")?.command.id,
+		).toBe("construction.endpoint-navigate");
+		expect(resolveEditorCommand(keyboard("Enter"), "rail-keyboard")?.command.id).toBe(
+			"command.apply",
+		);
+		expect(resolveEditorCommand(keyboard("ArrowLeft"), "placement")?.command.id).toBe(
+			"placement.navigate",
+		);
+		expect(resolveEditorCommand(keyboard("KeyD"), "placement")?.command.id).toBe(
+			"placement.navigate",
+		);
+		expect(resolveEditorCommand(keyboard("Enter"), "placement")?.command.id).toBe(
+			"placement.apply",
+		);
+		expect(resolveEditorCommand(keyboard("Space"), "placement")?.command.id).toBe(
+			"placement.apply",
+		);
+		expect(
+			resolveEditorCommand(keyboard("Enter", { shiftKey: true }), "placement")?.command.id,
+		).toBe("placement.apply");
+		expect(
+			resolveEditorCommand(keyboard("Space", { shiftKey: true }), "placement")?.command.id,
+		).toBe("placement.apply");
+		expect(resolveEditorCommand(keyboard("ArrowRight"), "guided-port-keyboard")?.command.id).toBe(
+			"equipment.navigate",
+		);
+		expect(resolveEditorCommand(keyboard("Enter"), "guided-port-keyboard")?.command.id).toBe(
+			"command.apply",
+		);
+		expect(
+			resolveEditorCommand(keyboard("Enter", { shiftKey: true }), "guided-port-keyboard")?.command
+				.id,
+		).toBe("equipment.complete-stk");
+		expect(resolveEditorCommand(keyboard("ArrowLeft"), "inspect-area-keyboard")?.command.id).toBe(
+			"selection.area-navigate",
+		);
+		expect(resolveEditorCommand(keyboard("KeyD"), "inspect-area-keyboard")?.command.id).toBe(
+			"selection.area-navigate",
+		);
+		expect(resolveEditorCommand(keyboard("Enter"), "inspect-area-keyboard")?.command.id).toBe(
+			"command.apply",
+		);
 		expect(resolveEditorCommand(keyboard("ArrowUp"), "equipment-membership-stk")?.command.id).toBe(
 			"equipment.navigate",
 		);
@@ -127,6 +173,12 @@ describe("EditorCommandRegistry", () => {
 	it("derives accessible keyboard declarations and compact action hints", () => {
 		expect(editorCommandAriaKeyShortcuts(["project.save-context"])).toBe("Control+S Meta+S");
 		expect(editorCommandAriaKeyShortcuts(["help.open"])).toBe("F1 Shift+/");
+		expect(editorCommandAriaKeyShortcuts(["placement.navigate", "placement.apply"])).toBe(
+			"W ArrowUp S ArrowDown A ArrowLeft D ArrowRight Enter NumpadEnter Space Shift+Enter Shift+NumpadEnter Shift+Space",
+		);
+		expect(editorCommandAriaKeyShortcuts(["equipment.complete-stk"])).toBe(
+			"Shift+Enter Shift+NumpadEnter",
+		);
 		expect(editorCommandAriaKeyShortcuts(["camera.pan-pointer"])).toBeUndefined();
 		expect(editorCommandHintBinding("selection.copy")).toEqual({
 			inputs: ["⌘ / CTRL", "C"],

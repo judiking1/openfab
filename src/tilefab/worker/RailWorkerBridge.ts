@@ -53,6 +53,8 @@ export interface RailWorkerBridgeState extends RailPhysicalLayoutState {
 	targetPorts: number;
 	targetEquipmentGroups: number;
 	targetOrganizations: number;
+	targetAssemblyRelationships: number;
+	targetAssemblyRelationshipNextId: number;
 	targetOperationalConfigurationRevision: number;
 	targetOperationalConfigurationFingerprint: string;
 	/** Latest authored state actually published by the worker. */
@@ -65,6 +67,8 @@ export interface RailWorkerBridgeState extends RailPhysicalLayoutState {
 	ports: number;
 	equipmentGroups: number;
 	organizations: number;
+	assemblyRelationships: number;
+	assemblyRelationshipNextId: number;
 	operationalConfigurationRevision: number;
 	operationalConfigurationFingerprint: string;
 	message: string | null;
@@ -78,26 +82,31 @@ export const INITIAL_RAIL_WORKER_STATE: RailWorkerBridgeState = {
 	targetSequence: 0,
 	targetRevision: 0,
 	targetChecksum:
-		"00000000:00000000:00000000:00000000:00000000:00000000:00000001:00000000:00000000",
+		"00000002:00000000:00000000:00000000:00000000:00000000:00000000:00000001:00000000:00000001:00000000:00000000",
 	targetCells: 0,
 	targetEdges: 0,
 	targetSwitches: 0,
 	targetPorts: 0,
 	targetEquipmentGroups: 0,
 	targetOrganizations: 0,
+	targetAssemblyRelationships: 0,
+	targetAssemblyRelationshipNextId: 1,
 	targetOperationalConfigurationRevision: 0,
 	targetOperationalConfigurationFingerprint: checksumOperationalConfigurationState(
 		emptyOperationalConfigurationState(),
 	),
 	sequence: 0,
 	revision: 0,
-	checksum: "00000000:00000000:00000000:00000000:00000000:00000000:00000001:00000000:00000000",
+	checksum:
+		"00000002:00000000:00000000:00000000:00000000:00000000:00000000:00000001:00000000:00000001:00000000:00000000",
 	cells: 0,
 	edges: 0,
 	switches: 0,
 	ports: 0,
 	equipmentGroups: 0,
 	organizations: 0,
+	assemblyRelationships: 0,
+	assemblyRelationshipNextId: 1,
 	operationalConfigurationRevision: 0,
 	operationalConfigurationFingerprint: checksumOperationalConfigurationState(
 		emptyOperationalConfigurationState(),
@@ -128,6 +137,8 @@ interface ExpectedRailAcknowledgement {
 	ports: number;
 	equipmentGroups: number;
 	organizations: number;
+	assemblyRelationships: number;
+	assemblyRelationshipNextId: number;
 	operationalConfigurationRevision: number;
 	operationalConfigurationFingerprint: string;
 	physicalPublicationKind: RailPhysicalPublication["kind"];
@@ -187,9 +198,11 @@ interface RailWorkerSnapshotCaptureWaiter {
 	readonly nextPortId: number;
 	readonly nextEquipmentGroupId: number;
 	readonly nextOrganizationId: number;
+	readonly nextRelationshipId: number;
 	readonly map: RailDocument["map"];
 	readonly portEquipment: RailDocument["portEquipment"];
 	readonly organizations: RailDocument["organizations"];
+	readonly relationships: RailDocument["relationships"];
 	readonly handoff: RailMirrorSnapshotCaptureHandoff;
 	readonly resolve: (snapshot: RailMirrorSnapshot) => void;
 	readonly reject: (error: Error) => void;
@@ -229,6 +242,7 @@ interface RailWorkerInitialSnapshotBinding {
 	readonly map: RailDocument["map"];
 	readonly portEquipment: RailDocument["portEquipment"];
 	readonly organizations: RailDocument["organizations"];
+	readonly relationships: RailDocument["relationships"];
 	readonly operationalConfiguration: RailDocument["operationalConfiguration"];
 	readonly operationalConfigurationFingerprint: string;
 	readonly snapshot: RailMirrorSnapshot;
@@ -239,6 +253,7 @@ interface RailWorkerInitialSnapshotBinding {
 	readonly switchRecords: RailMirrorSnapshot["switchRecords"];
 	readonly portEquipmentSnapshot: RailMirrorSnapshot["portEquipment"];
 	readonly organizationSnapshot: RailMirrorSnapshot["organizations"];
+	readonly relationshipSnapshot: RailMirrorSnapshot["relationships"];
 	readonly transferables: readonly Transferable[];
 	readonly sequence: number;
 	readonly revision: number;
@@ -248,12 +263,14 @@ interface RailWorkerInitialSnapshotBinding {
 	readonly nextPortId: number;
 	readonly nextEquipmentGroupId: number;
 	readonly nextOrganizationId: number;
+	readonly nextRelationshipId: number;
 	readonly cellCount: number;
 	readonly edgeCount: number;
 	readonly switchCount: number;
 	readonly portCount: number;
 	readonly equipmentGroupCount: number;
 	readonly organizationCount: number;
+	readonly relationshipCount: number;
 	readonly checkCancelled?: () => void;
 }
 
@@ -310,6 +327,7 @@ export function createRailWorkerBridgeFromValidatedStartup(
 		document.map,
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	if (!snapshot) {
 		throw new Error(
@@ -426,6 +444,10 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			event.organizationNextIdBefore,
 			event.organizationNextIdAfter,
 		);
+		expectedChecksum.applyAssemblyRelationshipNextId(
+			event.relationshipNextIdBefore,
+			event.relationshipNextIdAfter,
+		);
 		let operations = 0;
 		const consumeOperation = async (): Promise<void> => {
 			operations++;
@@ -522,7 +544,9 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 					timeout,
 				}),
 			);
-			signal?.addEventListener("abort", abortListener as EventListener, { once: true });
+			signal?.addEventListener("abort", abortListener as EventListener, {
+				once: true,
+			});
 			if (signal?.aborted) {
 				abortListener?.();
 				return;
@@ -564,6 +588,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		const map = this.document.map;
 		const portEquipment = this.document.portEquipment;
 		const organizations = this.document.organizations;
+		const relationships = this.document.relationships;
 		const sequence = this.document.getPatchSequence();
 		const revision = map.getRevision();
 		const checksum = this.expectedChecksum.digest();
@@ -574,6 +599,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				sequence,
 				portEquipment,
 				organizations,
+				relationships,
 				checksum,
 			);
 		} catch (error) {
@@ -612,9 +638,11 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 					nextPortId: portEquipment.nextPortId,
 					nextEquipmentGroupId: portEquipment.nextEquipmentGroupId,
 					nextOrganizationId: organizations.nextOrganizationId,
+					nextRelationshipId: relationships.nextRelationshipId,
 					map,
 					portEquipment,
 					organizations,
+					relationships,
 					handoff,
 					resolve,
 					reject,
@@ -623,7 +651,9 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 					timeout,
 				}),
 			);
-			signal?.addEventListener("abort", abortListener as EventListener, { once: true });
+			signal?.addEventListener("abort", abortListener as EventListener, {
+				once: true,
+			});
 			if (signal?.aborted) {
 				abortListener?.();
 				return;
@@ -639,6 +669,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				expectedNextPortId: portEquipment.nextPortId,
 				expectedNextEquipmentGroupId: portEquipment.nextEquipmentGroupId,
 				expectedNextOrganizationId: organizations.nextOrganizationId,
+				expectedNextRelationshipId: relationships.nextRelationshipId,
 			});
 		});
 	}
@@ -713,7 +744,9 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				abortListener,
 			};
 			this.readyWaiters.add(waiter);
-			signal?.addEventListener("abort", abortListener as EventListener, { once: true });
+			signal?.addEventListener("abort", abortListener as EventListener, {
+				once: true,
+			});
 			if (signal?.aborted) abortListener?.();
 		});
 	}
@@ -736,6 +769,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 					this.document.getPatchSequence(),
 					this.document.portEquipment,
 					this.document.organizations,
+					this.document.relationships,
 				);
 		this.epoch++;
 		this.expectedChecksum = capture.checksum;
@@ -754,6 +788,8 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			ports: capture.checksum.portCount,
 			equipmentGroups: capture.checksum.equipmentGroupCount,
 			organizations: capture.checksum.organizationCount,
+			assemblyRelationships: capture.checksum.assemblyRelationshipCount,
+			assemblyRelationshipNextId: capture.checksum.assemblyRelationshipNextId,
 			operationalConfigurationRevision: this.document.operationalConfiguration.revision,
 			operationalConfigurationFingerprint,
 			physicalPublicationKind: "reset",
@@ -771,6 +807,8 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			targetPorts: capture.checksum.portCount,
 			targetEquipmentGroups: capture.checksum.equipmentGroupCount,
 			targetOrganizations: capture.checksum.organizationCount,
+			targetAssemblyRelationships: capture.checksum.assemblyRelationshipCount,
+			targetAssemblyRelationshipNextId: capture.checksum.assemblyRelationshipNextId,
 			targetOperationalConfigurationRevision: this.document.operationalConfiguration.revision,
 			targetOperationalConfigurationFingerprint: operationalConfigurationFingerprint,
 			message: null,
@@ -826,6 +864,10 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 					patch.organizationNextIdBefore,
 					patch.organizationNextIdAfter,
 				);
+				this.expectedChecksum.applyAssemblyRelationshipNextId(
+					patch.relationshipNextIdBefore,
+					patch.relationshipNextIdAfter,
+				);
 				encoded = encodeRailPatchEvent(patch, { compactOrganizations: true });
 				for (const change of patch.changes) this.expectedChecksum.applyMutation(change);
 				for (const change of patch.switchChanges) {
@@ -839,6 +881,9 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				}
 				for (const change of patch.organizationChanges) {
 					this.expectedChecksum.applyOrganizationMutation(change);
+				}
+				for (const change of patch.relationshipChanges) {
+					this.expectedChecksum.applyAssemblyRelationshipMutation(change);
 				}
 			}
 			this.latestSentSequence = patch.sequence;
@@ -855,6 +900,8 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				ports: this.expectedChecksum.portCount,
 				equipmentGroups: this.expectedChecksum.equipmentGroupCount,
 				organizations: this.expectedChecksum.organizationCount,
+				assemblyRelationships: this.expectedChecksum.assemblyRelationshipCount,
+				assemblyRelationshipNextId: this.expectedChecksum.assemblyRelationshipNextId,
 				operationalConfigurationRevision: this.document.operationalConfiguration.revision,
 				operationalConfigurationFingerprint,
 				physicalPublicationKind:
@@ -876,6 +923,8 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				targetPorts: this.expectedChecksum.portCount,
 				targetEquipmentGroups: this.expectedChecksum.equipmentGroupCount,
 				targetOrganizations: this.expectedChecksum.organizationCount,
+				targetAssemblyRelationships: this.expectedChecksum.assemblyRelationshipCount,
+				targetAssemblyRelationshipNextId: this.expectedChecksum.assemblyRelationshipNextId,
 				targetOperationalConfigurationRevision: this.document.operationalConfiguration.revision,
 				targetOperationalConfigurationFingerprint: operationalConfigurationFingerprint,
 				message: null,
@@ -885,7 +934,11 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				encoded.transfer,
 			);
 		} catch (error) {
-			this.update({ ...this.state, status: "error", message: errorMessage(error) });
+			this.update({
+				...this.state,
+				status: "error",
+				message: errorMessage(error),
+			});
 		}
 	}
 
@@ -1020,6 +1073,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				message.snapshot.portEquipment.nextPortId === waiter.nextPortId &&
 				message.snapshot.portEquipment.nextEquipmentGroupId === waiter.nextEquipmentGroupId &&
 				message.snapshot.organizations.nextOrganizationId === waiter.nextOrganizationId &&
+				message.snapshot.relationships.nextRelationshipId === waiter.nextRelationshipId &&
 				adoptRailMirrorSnapshotCaptureHandoff(waiter.handoff, message.snapshot);
 		} catch {
 			accepted = false;
@@ -1096,7 +1150,11 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			state.revision !== document.map.getRevision() ||
 			state.targetRevision !== document.map.getRevision() ||
 			state.checksum !== checksum ||
-			state.targetChecksum !== checksum
+			state.targetChecksum !== checksum ||
+			state.assemblyRelationships !== document.relationships.records.length ||
+			state.targetAssemblyRelationships !== document.relationships.records.length ||
+			state.assemblyRelationshipNextId !== document.relationships.nextRelationshipId ||
+			state.targetAssemblyRelationshipNextId !== document.relationships.nextRelationshipId
 		) {
 			return "Rail worker does not match the current authored document identity.";
 		}
@@ -1124,12 +1182,14 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			this.document.map === waiter.map &&
 			this.document.portEquipment === waiter.portEquipment &&
 			this.document.organizations === waiter.organizations &&
+			this.document.relationships === waiter.relationships &&
 			this.document.getPatchSequence() === waiter.sequence &&
 			this.document.map.getRevision() === waiter.revision &&
 			this.document.map.getAdvancedSwitchIdCursor() === waiter.nextAdvancedSwitchId &&
 			this.document.portEquipment.nextPortId === waiter.nextPortId &&
 			this.document.portEquipment.nextEquipmentGroupId === waiter.nextEquipmentGroupId &&
 			this.document.organizations.nextOrganizationId === waiter.nextOrganizationId &&
+			this.document.relationships.nextRelationshipId === waiter.nextRelationshipId &&
 			this.expectedChecksum.digest() === waiter.checksum
 		);
 	}
@@ -1175,7 +1235,11 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		revokeRailMirrorSnapshotCaptureHandoff(waiter.handoff);
 		this.abandonedSnapshotCaptures.set(
 			requestId,
-			Object.freeze({ requestId, epoch: waiter.epoch, timeout: waiter.timeout }),
+			Object.freeze({
+				requestId,
+				epoch: waiter.epoch,
+				timeout: waiter.timeout,
+			}),
 		);
 		waiter.reject(error);
 	}
@@ -1258,7 +1322,11 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			try {
 				this.replaceWorker();
 			} catch (error) {
-				this.update({ ...this.state, status: "error", message: errorMessage(error) });
+				this.update({
+					...this.state,
+					status: "error",
+					message: errorMessage(error),
+				});
 			}
 			return;
 		}
@@ -1272,7 +1340,11 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			try {
 				this.replaceWorker();
 			} catch (error) {
-				this.update({ ...this.state, status: "error", message: errorMessage(error) });
+				this.update({
+					...this.state,
+					status: "error",
+					message: errorMessage(error),
+				});
 				return;
 			}
 		}
@@ -1302,7 +1374,11 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		try {
 			this.worker.postMessage(message, transfer);
 		} catch (error) {
-			this.update({ ...this.state, status: "error", message: errorMessage(error) });
+			this.update({
+				...this.state,
+				status: "error",
+				message: errorMessage(error),
+			});
 		}
 	}
 
@@ -1374,6 +1450,7 @@ function assertInitialSnapshotIdentity(
 		document.map,
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	if (
 		snapshot.sequence !== document.getPatchSequence() ||
@@ -1382,6 +1459,7 @@ function assertInitialSnapshotIdentity(
 		snapshot.portEquipment.nextPortId !== document.portEquipment.nextPortId ||
 		snapshot.portEquipment.nextEquipmentGroupId !== document.portEquipment.nextEquipmentGroupId ||
 		snapshot.organizations.nextOrganizationId !== document.organizations.nextOrganizationId ||
+		snapshot.relationships.nextRelationshipId !== document.relationships.nextRelationshipId ||
 		snapshot.checksum !== documentChecksum
 	) {
 		throw new Error("Initial rail Worker snapshot does not match the active document identity.");
@@ -1410,6 +1488,7 @@ function captureInitialSnapshotBinding(
 		map: document.map,
 		portEquipment: document.portEquipment,
 		organizations: document.organizations,
+		relationships: document.relationships,
 		operationalConfiguration: document.operationalConfiguration,
 		operationalConfigurationFingerprint: checksumOperationalConfigurationState(
 			document.operationalConfiguration,
@@ -1422,6 +1501,7 @@ function captureInitialSnapshotBinding(
 		switchRecords: snapshot.switchRecords,
 		portEquipmentSnapshot: snapshot.portEquipment,
 		organizationSnapshot: snapshot.organizations,
+		relationshipSnapshot: snapshot.relationships,
 		transferables: Object.freeze(railMirrorSnapshotTransfers(snapshot)),
 		sequence: document.getPatchSequence(),
 		revision: document.map.getRevision(),
@@ -1431,12 +1511,14 @@ function captureInitialSnapshotBinding(
 		nextPortId: document.portEquipment.nextPortId,
 		nextEquipmentGroupId: document.portEquipment.nextEquipmentGroupId,
 		nextOrganizationId: document.organizations.nextOrganizationId,
+		nextRelationshipId: document.relationships.nextRelationshipId,
 		cellCount: checksum.cellCount,
 		edgeCount: checksum.edgeCount,
 		switchCount: checksum.switchCount,
 		portCount: checksum.portCount,
 		equipmentGroupCount: checksum.equipmentGroupCount,
 		organizationCount: checksum.organizationCount,
+		relationshipCount: checksum.assemblyRelationshipCount,
 		checkCancelled,
 	});
 }
@@ -1464,6 +1546,7 @@ function initialSnapshotBindingMismatch(
 		document.map !== binding.map ||
 		document.portEquipment !== binding.portEquipment ||
 		document.organizations !== binding.organizations ||
+		document.relationships !== binding.relationships ||
 		document.operationalConfiguration !== binding.operationalConfiguration
 	) {
 		return "the active document generation changed";
@@ -1476,7 +1559,8 @@ function initialSnapshotBindingMismatch(
 		snapshot.switchIds !== binding.switchIds ||
 		snapshot.switchRecords !== binding.switchRecords ||
 		snapshot.portEquipment !== binding.portEquipmentSnapshot ||
-		snapshot.organizations !== binding.organizationSnapshot
+		snapshot.organizations !== binding.organizationSnapshot ||
+		snapshot.relationships !== binding.relationshipSnapshot
 	) {
 		return "the exact snapshot view identity changed";
 	}
@@ -1495,9 +1579,11 @@ function initialSnapshotBindingMismatch(
 		snapshot.portEquipment.nextPortId !== binding.nextPortId ||
 		snapshot.portEquipment.nextEquipmentGroupId !== binding.nextEquipmentGroupId ||
 		snapshot.organizations.nextOrganizationId !== binding.nextOrganizationId ||
+		snapshot.relationships.nextRelationshipId !== binding.nextRelationshipId ||
 		binding.portEquipment.nextPortId !== binding.nextPortId ||
 		binding.portEquipment.nextEquipmentGroupId !== binding.nextEquipmentGroupId ||
-		binding.organizations.nextOrganizationId !== binding.nextOrganizationId
+		binding.organizations.nextOrganizationId !== binding.nextOrganizationId ||
+		binding.relationships.nextRelationshipId !== binding.nextRelationshipId
 	) {
 		return "the authored scalar identity changed";
 	}
@@ -1514,13 +1600,15 @@ function initialSnapshotBindingMismatch(
 		binding.portEquipment.ports.length !== binding.portCount ||
 		binding.portEquipment.equipmentGroups.length !== binding.equipmentGroupCount ||
 		binding.organizations.records.length !== binding.organizationCount ||
+		binding.relationships.records.length !== binding.relationshipCount ||
 		snapshot.xs.length !== binding.cellCount ||
 		snapshot.ys.length !== binding.cellCount ||
 		snapshot.encoded.length !== binding.cellCount ||
 		snapshot.switchIds.length !== binding.switchCount ||
 		snapshot.portEquipment.portIds.length !== binding.portCount ||
 		snapshot.portEquipment.equipmentGroupIds.length !== binding.equipmentGroupCount ||
-		snapshot.organizations.organizationIds.length !== binding.organizationCount
+		snapshot.organizations.organizationIds.length !== binding.organizationCount ||
+		snapshot.relationships.relationshipIds.length !== binding.relationshipCount
 	) {
 		return "the checksum counters do not match the exact source and snapshot";
 	}
@@ -1578,6 +1666,8 @@ export function railWorkerStateMatchesAuthoredReadyExpectation(
 		state.targetPorts === state.ports &&
 		state.targetEquipmentGroups === state.equipmentGroups &&
 		state.targetOrganizations === state.organizations &&
+		state.targetAssemblyRelationships === state.assemblyRelationships &&
+		state.targetAssemblyRelationshipNextId === state.assemblyRelationshipNextId &&
 		state.targetOperationalConfigurationRevision === state.operationalConfigurationRevision &&
 		state.targetOperationalConfigurationFingerprint === state.operationalConfigurationFingerprint &&
 		state.physicalSequence === expectation.sequence &&
@@ -1626,9 +1716,11 @@ function validatePhysicalState(
 	if (
 		message.ports !== expected.ports ||
 		message.equipmentGroups !== expected.equipmentGroups ||
-		message.organizations !== expected.organizations
+		message.organizations !== expected.organizations ||
+		message.assemblyRelationships !== expected.assemblyRelationships ||
+		message.assemblyRelationshipNextId !== expected.assemblyRelationshipNextId
 	) {
-		return `Rail worker static entity counts ${message.ports}/${message.equipmentGroups}/${message.organizations} do not match expected ${expected.ports}/${expected.equipmentGroups}/${expected.organizations}.`;
+		return `Rail worker static entity identity ${message.ports}/${message.equipmentGroups}/${message.organizations}/${message.assemblyRelationships}@${message.assemblyRelationshipNextId} does not match expected ${expected.ports}/${expected.equipmentGroups}/${expected.organizations}/${expected.assemblyRelationships}@${expected.assemblyRelationshipNextId}.`;
 	}
 	const counters = [
 		message.physicalPathCount,

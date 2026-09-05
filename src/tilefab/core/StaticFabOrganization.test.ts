@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planAdvancedSwitch } from "./AdvancedSwitchPlanner";
+import { createCooperativeTask } from "./CooperativeTask";
 import type { PortEquipmentState } from "./EquipmentGroup";
 import { planRailConstruction } from "./paint";
 import {
@@ -7,7 +8,10 @@ import {
 	createRailAreaSelectionFromOwnerships,
 } from "./RailAreaSelection";
 import { RailDocument } from "./RailDocument";
-import { buildRailModuleOwnershipIndex } from "./RailModuleOwnership";
+import {
+	buildRailModuleOwnershipIndex,
+	railModuleOwnershipIndexMatchesMap,
+} from "./RailModuleOwnership";
 import {
 	defaultRailTemplateParameters,
 	initialRailTemplatePose,
@@ -16,13 +20,18 @@ import {
 import type { Direction } from "./railShape";
 import {
 	applyStaticFabOrganizationMutations,
+	compareDirectedRailEdges,
+	deriveStaticFabOrganizationSemanticRoleSteps,
 	deriveStaticFabOrganizationSemanticRoles,
 	emptyStaticFabOrganizationState,
 	isCanonicalStaticFabOrganizationState,
 	replaceStaticFabOrganizationRecordMembership,
 	resolveStaticFabOrganizationCoverage,
+	type StaticFabOrganizationState,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
+	staticFabOrganizationRailOwnershipIndex,
+	staticFabOrganizationRailStateError,
 	staticFabOrganizationStateError,
 	staticFabOrganizationStateShapeError,
 } from "./StaticFabOrganization";
@@ -37,8 +46,141 @@ import {
 } from "./StaticFabOrganizationPlan";
 import { resolveStaticFabOrganizationSelection } from "./StaticFabOrganizationSelection";
 import { createStaticFabSelection } from "./StaticFabSelection";
+import { encodeRailCell } from "./TileMap";
 
 describe("StaticFabOrganization", () => {
+	it("schedules a wide semantic hierarchy while preserving ordered role derivation", () => {
+		const membership = { railEdges: [], advancedSwitchIds: [], equipmentGroupIds: [] };
+		const state: StaticFabOrganizationState = {
+			nextOrganizationId: 10_005,
+			records: [
+				{ id: 1, kind: "BAY", name: "Bay", parentOrganizationIds: [2], membership },
+				{ id: 2, kind: "AREA", name: "Bank", parentOrganizationIds: [3], membership },
+				{ id: 3, kind: "AREA", name: "Fab", membership },
+				...Array.from({ length: 10_000 }, (_, index) => ({
+					id: index + 4,
+					kind: "PROCESS_FAMILY" as const,
+					name: `Family ${index}`,
+					parentOrganizationIds: [1],
+					membership,
+				})),
+				{ id: 10_004, kind: "AISLE", name: "Process Loop", parentOrganizationIds: [1], membership },
+			],
+		};
+		const task = createCooperativeTask(deriveStaticFabOrganizationSemanticRoleSteps(state));
+		let operations = 0;
+		while (!task.done) {
+			const completed = task.step(16);
+			expect(completed).toBeLessThanOrEqual(16);
+			operations += completed;
+		}
+		expect(operations).toBeGreaterThan(state.records.length * 7);
+		expect([...task.finish()]).toEqual([
+			[10_004, "PROCESS_LOOP"],
+			[1, "BAY"],
+			[2, "BAY_BANK"],
+			[3, "FAB"],
+		]);
+	});
+
+	it("bounds Rail-only organization records and memberships before reading sparse elements", () => {
+		let recordRead = false;
+		const oversizedRecords = new Proxy(new Array(2), {
+			get(target, property, receiver) {
+				if (typeof property === "string" && /^\d+$/.test(property)) recordRead = true;
+				return Reflect.get(target, property, receiver);
+			},
+		});
+		expect(
+			staticFabOrganizationRailStateError(
+				new RailDocument().map,
+				{ nextOrganizationId: 1, records: oversizedRecords } as StaticFabOrganizationState,
+				{ maximumRecords: 1 },
+			),
+		).toContain("최대 1개");
+		expect(recordRead).toBe(false);
+
+		let edgeRead = false;
+		const oversizedEdges = new Proxy(new Array(2), {
+			get(target, property, receiver) {
+				if (typeof property === "string" && /^\d+$/.test(property)) edgeRead = true;
+				return Reflect.get(target, property, receiver);
+			},
+		});
+		const membershipState = {
+			nextOrganizationId: 2,
+			records: [
+				{
+					id: 1,
+					kind: "AREA" as const,
+					name: "Bounded",
+					membership: {
+						railEdges: oversizedEdges,
+						advancedSwitchIds: [],
+						equipmentGroupIds: [],
+					},
+				},
+			],
+		};
+		expect(
+			staticFabOrganizationRailStateError(
+				new RailDocument().map,
+				membershipState as StaticFabOrganizationState,
+				{ maximumMembershipReferences: 1 },
+			),
+		).toContain("최대 1개");
+		expect(edgeRead).toBe(false);
+	});
+
+	it("streams same-kind Rail overlap and allows the same module across different kinds", () => {
+		const document = longBayDocument();
+		const module = wholeSelection(document).rail.ownerships[0];
+		if (!module) throw new Error("expected one Rail module");
+		const membership = {
+			railEdges: [...module.eraseEdges].sort(compareDirectedRailEdges),
+			advancedSwitchIds: [],
+			equipmentGroupIds: [],
+		};
+		const sameKind: StaticFabOrganizationState = {
+			nextOrganizationId: 3,
+			records: [
+				{ id: 1, kind: "AREA", name: "Area A", membership },
+				{ id: 2, kind: "AREA", name: "Area B", membership },
+			],
+		};
+		expect(staticFabOrganizationRailStateError(document.map, sameKind)).toContain(
+			"멤버십을 함께 소유",
+		);
+		const first = sameKind.records[0];
+		const second = sameKind.records[1];
+		if (!first || !second) throw new Error("expected two organization records");
+
+		const crossKind: StaticFabOrganizationState = {
+			...sameKind,
+			records: [first, { ...second, kind: "BAY" }],
+		};
+		expect(staticFabOrganizationRailStateError(document.map, crossKind)).toBeNull();
+	});
+
+	it("invalidates the cached Rail ownership graph across a rollback ABA generation", () => {
+		const document = new RailDocument();
+		const before = staticFabOrganizationRailOwnershipIndex(document.map);
+		const checkpoint = document.map.createMutationCheckpoint();
+		const mutation = {
+			x: 0,
+			y: 0,
+			before: 0,
+			after: encodeRailCell({ incoming: 0, outgoing: 2 }),
+		};
+		expect(document.map.applyAtomicMutations([mutation], [])).toBe(true);
+		document.map.rollbackAtomicMutations([mutation], [], checkpoint);
+
+		const after = staticFabOrganizationRailOwnershipIndex(document.map);
+		expect(after).not.toBe(before);
+		expect(railModuleOwnershipIndexMatchesMap(before, document.map)).toBe(false);
+		expect(railModuleOwnershipIndexMatchesMap(after, document.map)).toBe(true);
+	});
+
 	it("derives Process Loop, Bay, Bay Bank, and Fab roles only from the persisted DAG", () => {
 		const membership = Object.freeze({
 			railEdges: Object.freeze([]),

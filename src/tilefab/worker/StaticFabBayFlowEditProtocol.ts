@@ -6,7 +6,7 @@ import type {
 import type { StaticFabBayFlowEditWorkerTicket } from "../core/StaticFabBayFlowEditCertification";
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
 
-export const STATIC_FAB_BAY_FLOW_EDIT_PROTOCOL_VERSION = 1 as const;
+export const STATIC_FAB_BAY_FLOW_EDIT_PROTOCOL_VERSION = 2 as const;
 export const STATIC_FAB_BAY_FLOW_EDIT_MAX_RESPONSE_TEXT = 4_096;
 export const STATIC_FAB_BAY_FLOW_EDIT_MAX_RAIL_MUTATIONS = 65_536;
 export const STATIC_FAB_BAY_FLOW_EDIT_MAX_SWITCH_MUTATIONS = 0;

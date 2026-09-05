@@ -445,7 +445,12 @@ function readRailDocumentLiveSource(
 	return Object.freeze({
 		patchSequence: document.getPatchSequence(),
 		revision: document.map.getRevision(),
-		authoredChecksum: checksumRailMap(document.map, document.portEquipment, document.organizations),
+		authoredChecksum: checksumRailMap(
+			document.map,
+			document.portEquipment,
+			document.organizations,
+			document.relationships,
+		),
 		operationalConfigurationFingerprint: checksumOperationalConfiguration(
 			document.operationalConfiguration,
 		),

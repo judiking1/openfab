@@ -375,24 +375,22 @@ describe("RailDraftEvaluator", () => {
 		expect(evaluation.paths).toBeNull();
 	});
 
-	it("retains topology conflict cells when a local physical draft can still compile", () => {
+	it("accepts a physically clear disconnected construction draft for later readiness repair", () => {
 		const document = documentEndingAt({ x: -3, y: 0 }, { x: 0, y: 0 });
 		const committedLayout = compilePhysicalRail(document.map);
 		const disconnected = planRailConstruction(document.map, { x: 20, y: 20 }, { x: 24, y: 20 });
 
-		expect(disconnected.valid).toBe(false);
+		expect(disconnected.valid).toBe(true);
 		const evaluation = new RailDraftEvaluator().evaluate(
 			document.map,
 			committedLayout,
 			disconnected,
 		);
 
-		expect(evaluation.valid).toBe(false);
-		expect(evaluation.topologyValid).toBe(false);
-		expect(evaluation.reason).toBe(disconnected.reason);
-		for (const conflict of disconnected.conflicts) {
-			expect(evaluation.conflictCells).toContainEqual(conflict);
-		}
+		expect(evaluation.valid).toBe(true);
+		expect(evaluation.topologyValid).toBe(true);
+		expect(evaluation.reason).toBe("배치 가능");
+		expect(evaluation.conflictCells).toEqual([]);
 	});
 
 	it("reports identities and exact conflict cells for a local proximity intrusion", () => {

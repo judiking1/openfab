@@ -259,15 +259,16 @@ describe("construction planning", () => {
 		expect(supported.valid).toBe(true);
 	});
 
-	it("rejects disconnected additions after the first network exists", () => {
+	it("allows disconnected construction drafts while catalog roots still prove self-closure", () => {
 		const document = new RailDocument();
 		document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 }));
 		const disconnected = planRailConstruction(document.map, { x: 20, y: 20 }, { x: 24, y: 20 });
-		expect(disconnected.valid).toBe(false);
-		expect(disconnected.reason).toContain("기존 네트워크");
+		expect(disconnected.valid).toBe(true);
+		expect(disconnected.reason).toBe("배치 가능");
+		expect(document.commit(disconnected)).toBe(true);
 		const openEscapeAttempt = planClosedRailPathComponent(document.map, [
-			{ x: 20, y: 20 },
-			{ x: 21, y: 20 },
+			{ x: 40, y: 40 },
+			{ x: 41, y: 40 },
 		]);
 		expect(openEscapeAttempt.valid).toBe(false);
 		expect(openEscapeAttempt.reason).toContain("자체 폐합");

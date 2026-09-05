@@ -60,6 +60,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 
 		expect(checksumRailMirrorSnapshotDiagnostic(snapshot)).toBe(
@@ -82,6 +83,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 
 		expect(() =>
@@ -119,6 +121,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 
 		expect(
@@ -128,6 +131,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 				document.getPatchSequence(),
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 			),
 		).toBe(true);
 		expect(
@@ -137,6 +141,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 				document.getPatchSequence(),
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 			),
 		).toBe(false);
 	});
@@ -149,6 +154,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 			source.getPatchSequence(),
 			source.portEquipment,
 			source.organizations,
+			source.relationships,
 		).snapshot;
 
 		expect(
@@ -158,6 +164,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 				foreign.getPatchSequence(),
 				foreign.portEquipment,
 				foreign.organizations,
+				foreign.relationships,
 			),
 		).toBe(false);
 		expect(
@@ -167,6 +174,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 				source.getPatchSequence(),
 				source.portEquipment,
 				source.organizations,
+				source.relationships,
 			),
 		).toBe(false);
 	});
@@ -178,6 +186,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 		const transferred = structuredClone(captured);
 		const handoff = issueRailMirrorSnapshotCaptureHandoff(
@@ -185,6 +194,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 			captured.checksum,
 		);
 
@@ -197,6 +207,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 				document.getPatchSequence(),
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 			),
 		).toBe(true);
 	});
@@ -208,12 +219,14 @@ describe("RailMirrorSnapshot capture authority", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 		const handoff = issueRailMirrorSnapshotCaptureHandoff(
 			document.map,
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 			captured.checksum,
 		);
 		let tokenReads = 0;
@@ -302,6 +315,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 				document.getPatchSequence(),
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 				captured.checksum,
 			);
 			expect(adoptRailMirrorSnapshotCaptureHandoff(handoff, snapshot), name).toBe(false);
@@ -312,6 +326,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 					document.getPatchSequence(),
 					document.portEquipment,
 					document.organizations,
+					document.relationships,
 				),
 				name,
 			).toBe(false);
@@ -325,12 +340,14 @@ describe("RailMirrorSnapshot capture authority", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 		const revoked = issueRailMirrorSnapshotCaptureHandoff(
 			document.map,
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 			captured.checksum,
 		);
 		revokeRailMirrorSnapshotCaptureHandoff(revoked);
@@ -341,6 +358,7 @@ describe("RailMirrorSnapshot capture authority", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 			captured.checksum,
 		);
 		document.map.setEncoded(0, 0, 0x12);
@@ -377,7 +395,7 @@ describe("RailChecksumAccumulator organization hashing", () => {
 		checksum.setOrganizationNextId(31);
 
 		expect(checksum.digest()).toBe(
-			"00000000:00000000:00000000:00000000:00000000:00000001:0000001f:55bf56a6:f5ae92b4",
+			"00000002:00000000:00000000:00000000:00000000:00000000:00000001:0000001f:00000000:00000001:55bf56a6:f5ae92b4",
 		);
 	});
 

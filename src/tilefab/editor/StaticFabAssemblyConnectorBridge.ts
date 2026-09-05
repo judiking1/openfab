@@ -10,6 +10,7 @@ import {
 	type StaticFabAssemblyConnectorPermit,
 	staticFabAssemblyConnectorIntentFingerprint,
 } from "../core/StaticFabAssemblyConnectorCertification";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import {
@@ -40,6 +41,7 @@ export interface StaticFabAssemblyConnectorLiveState {
 	readonly patchSequence: number;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 export interface StaticFabAssemblyConnectorBindingInput {
@@ -140,6 +142,7 @@ export class StaticFabAssemblyConnectorBridge {
 				source.patchSequence,
 				source.portEquipment,
 				source.organizations,
+				source.relationships,
 			)
 		) {
 			return Promise.reject(
@@ -575,7 +578,8 @@ function snapshotMatchesLiveState(
 		live.map.getAdvancedSwitchIdCursor() === snapshot.nextAdvancedSwitchId &&
 		live.portEquipment.nextPortId === snapshot.portEquipment.nextPortId &&
 		live.portEquipment.nextEquipmentGroupId === snapshot.portEquipment.nextEquipmentGroupId &&
-		live.organizations.nextOrganizationId === snapshot.organizations.nextOrganizationId
+		live.organizations.nextOrganizationId === snapshot.organizations.nextOrganizationId &&
+		live.relationships.nextRelationshipId === snapshot.relationships.nextRelationshipId
 	);
 }
 
@@ -599,6 +603,7 @@ function bindingMatchesLiveState(
 		live.map === binding.source.map &&
 		live.portEquipment === binding.source.portEquipment &&
 		live.organizations === binding.source.organizations &&
+		live.relationships === binding.source.relationships &&
 		live.map.getRevision() === binding.identity.revision &&
 		live.patchSequence === binding.identity.sequence &&
 		live.map.getAdvancedSwitchIdCursor() === binding.identity.nextAdvancedSwitchId &&

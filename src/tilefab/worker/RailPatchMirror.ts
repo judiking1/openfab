@@ -50,10 +50,17 @@ import {
 	type RailMirrorHistoryLedger,
 	type RailMirrorHistoryLedgerEntry,
 	railPatchTransitionFingerprint,
+	trimRailMirrorHistoryRelationshipBudget,
 } from "../core/RailPatchHistory";
 import { ALL_DIRECTIONS, moveCell } from "../core/railShape";
 import { STATIC_FAB_ARRANGEMENT_PLAN_KIND } from "../core/StaticFabArrangementPlan";
 import { STATIC_FAB_ASSEMBLY_CONNECTOR_PATCH_KIND } from "../core/StaticFabAssemblyConnector";
+import {
+	applyStaticFabAssemblyRelationshipMutations,
+	assertStaticFabAssemblyRelationshipStateSource,
+	emptyStaticFabAssemblyRelationshipState,
+	type StaticFabAssemblyRelationshipStateV1,
+} from "../core/StaticFabAssemblyRelationship";
 import { STATIC_FAB_BAY_FLOW_EDIT_KIND } from "../core/StaticFabBayFlowEdit";
 import {
 	applyStaticFabOrganizationMutations,
@@ -93,6 +100,7 @@ import {
 	createRailPhysicalStaticPublication,
 	type RailPhysicalPublication,
 } from "./RailPhysicalLayout";
+import { hydrateStaticFabAssemblyRelationshipSnapshot } from "./StaticFabAssemblyRelationshipSoA";
 import { hydrateStaticFabOrganizationSnapshot } from "./StaticFabOrganizationSoA";
 
 export interface RailMirrorState {
@@ -105,6 +113,8 @@ export interface RailMirrorState {
 	ports: number;
 	equipmentGroups: number;
 	organizations: number;
+	assemblyRelationships: number;
+	assemblyRelationshipNextId: number;
 	operationalConfigurationRevision: number;
 	operationalConfigurationFingerprint: string;
 }
@@ -130,6 +140,8 @@ export class RailPatchMirror {
 	private mirroredMap = new TileMap();
 	private mirroredPortEquipment: PortEquipmentState = emptyPortEquipmentState();
 	private mirroredOrganizations: StaticFabOrganizationState = emptyStaticFabOrganizationState();
+	private mirroredRelationships: StaticFabAssemblyRelationshipStateV1 =
+		emptyStaticFabAssemblyRelationshipState();
 	private mirroredOperationalConfiguration = emptyOperationalConfigurationState();
 	private readonly organizationImpactIndex = new StaticFabOrganizationImpactIndex();
 	private checksum = new RailChecksumAccumulator();
@@ -143,6 +155,9 @@ export class RailPatchMirror {
 
 	get organizationState(): StaticFabOrganizationState {
 		return this.mirroredOrganizations;
+	}
+	get relationshipState(): StaticFabAssemblyRelationshipStateV1 {
+		return this.mirroredRelationships;
 	}
 	private physicalPublication: RailPhysicalPublication;
 	private readonly compilePhysical: RailPhysicalCompiler;
@@ -171,6 +186,8 @@ export class RailPatchMirror {
 			ports: this.checksum.portCount,
 			equipmentGroups: this.checksum.equipmentGroupCount,
 			organizations: this.checksum.organizationCount,
+			assemblyRelationships: this.checksum.assemblyRelationshipCount,
+			assemblyRelationshipNextId: this.checksum.assemblyRelationshipNextId,
 			operationalConfigurationRevision: this.mirroredOperationalConfiguration.revision,
 			operationalConfigurationFingerprint: checksumOperationalConfigurationState(
 				this.mirroredOperationalConfiguration,
@@ -192,6 +209,7 @@ export class RailPatchMirror {
 			this.currentSequence,
 			this.mirroredPortEquipment,
 			this.mirroredOrganizations,
+			this.mirroredRelationships,
 		).snapshot;
 		if (
 			snapshot.revision !== this.currentRevision ||
@@ -322,10 +340,16 @@ export class RailPatchMirror {
 		const nextOrganizations = hydrateStaticFabOrganizationSnapshot(snapshot.organizations);
 		for (const record of nextOrganizations.records) nextChecksum.addOrganization(record);
 		nextChecksum.setOrganizationNextId(nextOrganizations.nextOrganizationId);
+		const nextRelationships = hydrateStaticFabAssemblyRelationshipSnapshot(snapshot.relationships);
+		for (const record of nextRelationships.records) {
+			nextChecksum.addAssemblyRelationship(record);
+		}
+		nextChecksum.setAssemblyRelationshipNextId(nextRelationships.nextRelationshipId);
 		const nextMap = hydrator.finish(snapshot.revision, snapshot.nextAdvancedSwitchId);
 		assertAdvancedSwitchTopology(nextMap);
 		assertPortEquipmentLayout(nextMap, nextPortEquipment);
 		assertStaticFabOrganizationState(nextMap, nextPortEquipment, nextOrganizations);
+		assertStaticFabAssemblyRelationshipStateSource(nextMap, nextOrganizations, nextRelationships);
 		if (nextChecksum.digest() !== snapshot.checksum) {
 			throw new Error(
 				`Rail snapshot checksum mismatch: expected ${snapshot.checksum}, received ${nextChecksum.digest()}.`,
@@ -341,6 +365,7 @@ export class RailPatchMirror {
 		this.mirroredMap = nextMap;
 		this.mirroredPortEquipment = nextPortEquipment;
 		this.mirroredOrganizations = nextOrganizations;
+		this.mirroredRelationships = nextRelationships;
 		this.mirroredOperationalConfiguration = nextOperationalConfiguration;
 		this.organizationImpactIndex.synchronize(nextOrganizations);
 		this.checksum = nextChecksum;
@@ -363,6 +388,7 @@ export class RailPatchMirror {
 			patch.portChanges.length === 0 &&
 			patch.equipmentGroupChanges.length === 0 &&
 			patch.organizationChanges.length === 0 &&
+			patch.relationshipChanges.length === 0 &&
 			!patch.operationalConfigurationPatch
 		) {
 			throw new Error("Static-world patch must contain at least one authored change.");
@@ -443,11 +469,21 @@ export class RailPatchMirror {
 				`Organization ID cursor mismatch: expected ${this.mirroredOrganizations.nextOrganizationId}, received ${patch.organizationNextIdBefore}.`,
 			);
 		}
+		if (patch.relationshipNextIdBefore !== this.mirroredRelationships.nextRelationshipId) {
+			throw new Error(
+				`Assembly relationship ID cursor mismatch: expected ${this.mirroredRelationships.nextRelationshipId}, received ${patch.relationshipNextIdBefore}.`,
+			);
+		}
 		const nextOrganizations = applyStaticFabOrganizationMutations(
 			this.mirroredOrganizations,
 			patch.organizationChanges,
 			patch.organizationNextIdAfter,
 			true,
+		);
+		const nextRelationships = applyStaticFabAssemblyRelationshipMutations(
+			this.mirroredRelationships,
+			patch.relationshipChanges,
+			Math.max(this.mirroredRelationships.nextRelationshipId, patch.relationshipNextIdAfter),
 		);
 		const nextOperationalConfiguration = patch.operationalConfigurationPatch
 			? applyOperationalConfigurationPatch(
@@ -543,6 +579,13 @@ export class RailPatchMirror {
 			) {
 				assertStaticFabOrganizationState(this.mirroredMap, nextPortEquipment, nextOrganizations);
 			}
+			if (this.mirroredRelationships.records.length > 0 || nextRelationships.records.length > 0) {
+				assertStaticFabAssemblyRelationshipStateSource(
+					this.mirroredMap,
+					nextOrganizations,
+					nextRelationships,
+				);
+			}
 			for (const change of patch.switchChanges) {
 				if (!change.before) continue;
 				this.checksum.removeSwitch(change.before);
@@ -565,7 +608,14 @@ export class RailPatchMirror {
 			for (const change of patch.organizationChanges) {
 				this.checksum.applyOrganizationMutation(change);
 			}
-			this.assertCounters(nextPortEquipment, nextOrganizations);
+			this.checksum.applyAssemblyRelationshipNextId(
+				patch.relationshipNextIdBefore,
+				patch.relationshipNextIdAfter,
+			);
+			for (const change of patch.relationshipChanges) {
+				this.checksum.applyAssemblyRelationshipMutation(change);
+			}
+			this.assertCounters(nextPortEquipment, nextOrganizations, nextRelationships);
 			assertAdvancedSwitchTopology(this.mirroredMap);
 			const previousPhysical = this.physicalPublication.current;
 			if (railMutationCount === 0) {
@@ -608,6 +658,7 @@ export class RailPatchMirror {
 		this.currentRevision = patch.revision;
 		this.mirroredPortEquipment = nextPortEquipment;
 		this.mirroredOrganizations = nextOrganizations;
+		this.mirroredRelationships = nextRelationships;
 		this.mirroredOperationalConfiguration = nextOperationalConfiguration;
 		this.organizationImpactIndex.synchronize(nextOrganizations);
 		this.physicalPublication = nextPhysicalPublication;
@@ -633,6 +684,11 @@ export class RailPatchMirror {
 		if (patch.organizationNextIdBefore !== patch.organizationNextIdAfter) {
 			throw new Error(
 				`Rail ${patch.kind} patch cannot change the monotonic organization ID cursor.`,
+			);
+		}
+		if (patch.relationshipNextIdBefore !== patch.relationshipNextIdAfter) {
+			throw new Error(
+				`Rail ${patch.kind} patch cannot change the monotonic relationship ID cursor.`,
 			);
 		}
 		const historyOriginKind = rawHistoryOriginKind;
@@ -679,6 +735,7 @@ export class RailPatchMirror {
 		}
 		appendBoundedRailHistoryEntry(this.undoHistory, authoredHistoryEntry);
 		this.redoHistory = [];
+		trimRailMirrorHistoryRelationshipBudget(this.undoHistory, this.redoHistory);
 	}
 
 	private compileAtRevision(map: TileMap, revision: number): CompiledPhysicalLayout {
@@ -694,6 +751,7 @@ export class RailPatchMirror {
 	private assertCounters(
 		portEquipment: PortEquipmentState = this.mirroredPortEquipment,
 		organizations: StaticFabOrganizationState = this.mirroredOrganizations,
+		relationships: StaticFabAssemblyRelationshipStateV1 = this.mirroredRelationships,
 	): void {
 		if (
 			this.mirroredMap.size !== this.checksum.cellCount ||
@@ -701,7 +759,10 @@ export class RailPatchMirror {
 			this.mirroredMap.advancedSwitchCount !== this.checksum.switchCount ||
 			portEquipment.ports.length !== this.checksum.portCount ||
 			portEquipment.equipmentGroups.length !== this.checksum.equipmentGroupCount ||
-			organizations.records.length !== this.checksum.organizationCount
+			organizations.records.length !== this.checksum.organizationCount ||
+			organizations.nextOrganizationId !== this.checksum.organizationNextId ||
+			relationships.records.length !== this.checksum.assemblyRelationshipCount ||
+			relationships.nextRelationshipId !== this.checksum.assemblyRelationshipNextId
 		) {
 			throw new Error("Rail mirror counters diverged after applying a validated patch.");
 		}
@@ -927,7 +988,10 @@ function directedRailDeltaForCellChanges(
 		const after = decodeRailCell(change.after);
 		for (const direction of ALL_DIRECTIONS) {
 			const neighbor = moveCell(change, direction);
-			const outgoingKey = staticFabOrganizationEdgeKey({ from: change, to: neighbor });
+			const outgoingKey = staticFabOrganizationEdgeKey({
+				from: change,
+				to: neighbor,
+			});
 			collectChangedBit(
 				(before.outgoing & direction) !== 0,
 				(after.outgoing & direction) !== 0,
@@ -935,7 +999,10 @@ function directedRailDeltaForCellChanges(
 				outgoingRemoved,
 				outgoingAdded,
 			);
-			const incomingKey = staticFabOrganizationEdgeKey({ from: neighbor, to: change });
+			const incomingKey = staticFabOrganizationEdgeKey({
+				from: neighbor,
+				to: change,
+			});
 			collectChangedBit(
 				(before.incoming & direction) !== 0,
 				(after.incoming & direction) !== 0,

@@ -2,25 +2,180 @@ import { describe, expect, it } from "vitest";
 import { emptyPortEquipmentState, type PortEquipmentState } from "../core/EquipmentGroup";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
+import { createRailEquipmentScaleProbeDocument } from "../worker/RailStartupFixture";
 import {
 	EQ_PORT_PITCHES_MILLIMETERS,
 	eqRowDraftCandidatesFromSlotIndex,
 	eqRowDraftExceedsMaximum,
+	hasAvailableEqRowDraftSpan,
 	selectEqRowDraft,
 } from "./EqRowDraftSelector";
 import { portRowDragBounds } from "./OhbRowDragSelector";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { PortEquipmentGroupSlotIndex } from "./PortEquipmentGroupEditPlanner";
+import { compilePortEquipmentPresentation } from "./PortEquipmentPresentation";
 import { planEqRowPlacement } from "./PortPlacementPlanner";
 import {
+	compilePortSlotSpatialIndex,
 	PORT_SLOT_STATUS,
 	PortSlotAvailabilityIndex,
 	PortSlotSpatialIndex,
 	portSlotRecord,
 } from "./PortSlotCompiler";
-import { compilePortSlotPreparedArtifactCatalog } from "./PortSlotPreparedArtifacts";
+import {
+	compilePortSlotPreparedArtifactCatalog,
+	createPreparedPortSlotAvailabilityIndex,
+} from "./PortSlotPreparedArtifacts";
 
 describe("EqRowDraftSelector", () => {
+	it("offers a handoff only for an immediately completable same-straight EQ span", () => {
+		const shortDocument = straightDocument(4);
+		const shortPhysical = compilePhysicalRail(shortDocument.map);
+		const shortArtifacts = compilePortSlotPreparedArtifactCatalog(shortPhysical).EQ;
+		const shortSlots = shortArtifacts.slots;
+		const shortAvailability = new PortSlotAvailabilityIndex(
+			shortPhysical,
+			emptyPortEquipmentState(),
+			"EQ",
+		);
+		expect(legalRows(shortSlots)).toHaveLength(1);
+		expect(
+			hasAvailableEqRowDraftSpan(shortSlots, shortArtifacts.spatialIndex, shortAvailability, 1_000),
+		).toBe(false);
+
+		const readyDocument = straightDocument(5);
+		const readyPhysical = compilePhysicalRail(readyDocument.map);
+		const readyArtifacts = compilePortSlotPreparedArtifactCatalog(readyPhysical).EQ;
+		const readySlots = readyArtifacts.slots;
+		const readyAvailability = new PortSlotAvailabilityIndex(
+			readyPhysical,
+			emptyPortEquipmentState(),
+			"EQ",
+		);
+		expect(legalRows(readySlots)).toHaveLength(2);
+		expect(
+			hasAvailableEqRowDraftSpan(readySlots, readyArtifacts.spatialIndex, readyAvailability, 1_000),
+		).toBe(true);
+		expect(
+			hasAvailableEqRowDraftSpan(readySlots, readyArtifacts.spatialIndex, readyAvailability, 2_000),
+		).toBe(false);
+
+		const widerDocument = straightDocument(6);
+		const widerPhysical = compilePhysicalRail(widerDocument.map);
+		const widerArtifacts = compilePortSlotPreparedArtifactCatalog(widerPhysical).EQ;
+		const widerSlots = widerArtifacts.slots;
+		const widerAvailability = new PortSlotAvailabilityIndex(
+			widerPhysical,
+			emptyPortEquipmentState(),
+			"EQ",
+		);
+		expect(legalRows(widerSlots)).toHaveLength(3);
+		expect(
+			hasAvailableEqRowDraftSpan(widerSlots, widerArtifacts.spatialIndex, widerAvailability, 2_000),
+		).toBe(true);
+
+		const splitDocument = new RailDocument();
+		expect(
+			splitDocument.commit(planRailConstruction(splitDocument.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
+		).toBe(true);
+		expect(
+			splitDocument.commit(
+				planRailConstruction(splitDocument.map, { x: 10, y: 0 }, { x: 14, y: 0 }),
+			),
+		).toBe(true);
+		const splitPhysical = compilePhysicalRail(splitDocument.map);
+		const splitArtifacts = compilePortSlotPreparedArtifactCatalog(splitPhysical).EQ;
+		const splitSlots = splitArtifacts.slots;
+		const splitAvailability = new PortSlotAvailabilityIndex(
+			splitPhysical,
+			emptyPortEquipmentState(),
+			"EQ",
+		);
+		expect(legalRows(splitSlots)).toHaveLength(2);
+		expect(
+			hasAvailableEqRowDraftSpan(splitSlots, splitArtifacts.spatialIndex, splitAvailability, 1_000),
+		).toBe(false);
+	});
+
+	it("cannot promote an advisory candidate that fails the canonical prepared-row proof", () => {
+		const document = straightDocument(5);
+		const physical = compilePhysicalRail(document.map);
+		const artifacts = compilePortSlotPreparedArtifactCatalog(physical).EQ;
+		const availability = createPreparedPortSlotAvailabilityIndex(
+			physical,
+			artifacts,
+			document.portEquipment,
+			compilePortEquipmentPresentation(physical, document.portEquipment).resolvedPositions,
+		);
+		const rows = legalRows(artifacts.slots);
+		const originalFinalPathIndices = rows.map(
+			(row) => artifacts.slots.finalPathIndices[row] as number,
+		);
+		for (const row of rows) artifacts.slots.finalPathIndices[row] += 1;
+		expect(
+			hasAvailableEqRowDraftSpan(artifacts.slots, artifacts.spatialIndex, availability, 1_000),
+		).toBe(false);
+		for (const [index, row] of rows.entries()) {
+			artifacts.slots.finalPathIndices[row] = originalFinalPathIndices[index] as number;
+		}
+		expect(
+			hasAvailableEqRowDraftSpan(artifacts.slots, artifacts.spatialIndex, availability, 1_000),
+		).toBe(true);
+	});
+
+	it("short-circuits one prepared 50k straight within the main-thread query budget", () => {
+		const document = straightDocument(50_000);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifactCatalog(physical).EQ;
+		const availability = new PortSlotAvailabilityIndex(physical, emptyPortEquipmentState(), "EQ");
+		const startedAt = Date.now();
+		expect(
+			hasAvailableEqRowDraftSpan(prepared.slots, prepared.spatialIndex, availability, 5_000),
+		).toBe(true);
+		expect(Date.now() - startedAt).toBeLessThan(50);
+	});
+
+	it("rejects one fully occupied 50k straight within the whole main-thread command budget", () => {
+		const document = createRailEquipmentScaleProbeDocument(50_000);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifactCatalog(physical).EQ;
+		const presentation = compilePortEquipmentPresentation(physical, document.portEquipment);
+		const startedAt = Date.now();
+		const availability = createPreparedPortSlotAvailabilityIndex(
+			physical,
+			prepared,
+			document.portEquipment,
+			presentation.resolvedPositions,
+		);
+		const availabilityReadyAt = Date.now();
+		expect(
+			hasAvailableEqRowDraftSpan(prepared.slots, prepared.spatialIndex, availability, 5_000),
+		).toBe(false);
+		const finishedAt = Date.now();
+		expect(
+			finishedAt - startedAt,
+			`availability ${availabilityReadyAt - startedAt} ms · negative probe ${finishedAt - availabilityReadyAt} ms`,
+		).toBeLessThan(50);
+	});
+
+	it("rejects 50k detached legal centers within the whole main-thread command budget", () => {
+		const document = straightDocument(50_000);
+		const physical = compilePhysicalRail(document.map);
+		const source = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const routeXs = source.routeXs.slice();
+		const worldPositions = source.worldPositions.slice();
+		for (let row = 0; row < source.count; row++) {
+			routeXs[row] = row * 10;
+			worldPositions[row * 2] = row * 10;
+		}
+		const slots = Object.freeze({ ...source, routeXs, worldPositions });
+		const spatialIndex = compilePortSlotSpatialIndex(slots);
+		const startedAt = Date.now();
+		const availability = new PortSlotAvailabilityIndex(physical, emptyPortEquipmentState(), "EQ");
+		expect(hasAvailableEqRowDraftSpan(slots, spatialIndex, availability, 5_000)).toBe(false);
+		expect(Date.now() - startedAt).toBeLessThan(50);
+	});
+
 	it("treats the first legal port as an anchored draft instead of an error", () => {
 		const document = straightDocument(8);
 		const physical = compilePhysicalRail(document.map);

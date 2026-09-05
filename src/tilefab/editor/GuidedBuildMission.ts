@@ -62,7 +62,6 @@ export type GuidedBuildSuggestedAction =
 	| "connect-banks"
 	| "add-fab-loop"
 	| "open-checks"
-	| "repair-networks"
 	| "confirm-checks"
 	| "save-project"
 	| "open-project";
@@ -73,6 +72,8 @@ export interface GuidedBuildMissionPrompt {
 	readonly objective: string;
 	readonly rationale: string;
 	readonly presentation?: "connector";
+	/** Keeps a successful exact reopen visually at 12/12 while fresh CHECKS are republished. */
+	readonly progressPresentation?: "reopen-final-check";
 	readonly primaryCommandId: EditorCommandId | null;
 	readonly suggestedAction: GuidedBuildSuggestedAction | null;
 	readonly suggestedActionLabel: string | null;
@@ -104,7 +105,7 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		activity: "build",
 		eyebrow: "MISSION 2 · FIRST RAIL",
 		title: "첫 단방향 레일",
-		objective: "빈 격자에서 시작점과 도착점을 이어 단방향 레일을 만드세요.",
+		objective: "맵의 어느 빈 곳에서든 가로 또는 세로로 15 m 이상의 단방향 레일을 만드세요.",
 		rationale: "모든 Process Loop와 Bay는 검증된 directed rail에서 시작합니다.",
 		primaryCommandId: "canvas.primary-drag",
 	}),
@@ -135,7 +136,8 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		eyebrow: "MISSION 5 · REUSE LOOP",
 		title: "Process Loop 재사용",
 		objective: "완성한 Process Loop를 선택하고 복제해 정렬된 두 번째 닫힌 Loop를 만드세요.",
-		rationale: "검증된 구조를 재사용하면 반복 FAB 저작이 빨라지고 방향·규격도 일관됩니다.",
+		rationale:
+			"이 미션은 Port까지 보존하는 닫힌 Loop 전체 복제를 연습합니다. 일반 편집에서는 드래그 상자에 닿은 일부 레일 모듈도 닫히지 않아도 그대로 복제할 수 있습니다.",
 		primaryCommandId: "selection.connected",
 	}),
 	Object.freeze({
@@ -143,7 +145,7 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		sequence: 6,
 		activity: "assemble",
 		eyebrow: "MISSION 6 · BAY",
-		title: "첫 Semantic Twin Bay",
+		title: "첫 Twin Bay",
 		objective: "큰 순환 Shell, 두 Process Loop, 검증된 Gateway를 가진 Twin Bay를 배치하세요.",
 		rationale:
 			"Bay는 Loop 묶음이나 외곽 박스가 아니라 명시적 계층과 순환 Gateway를 가진 조립 단위입니다.",
@@ -154,10 +156,10 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		sequence: 7,
 		activity: "assemble",
 		eyebrow: "MISSION 7 · BAY BANK",
-		title: "첫 Semantic Bay Bank",
-		objective: "Twin Bay를 복제·정렬하고 검증된 양방향 Connector로 하나의 Bank를 만드세요.",
+		title: "첫 Bay Bank",
+		objective: "Twin Bay를 복제·정렬하고 왕복 연결 레일로 하나의 Bay Bank를 만드세요.",
 		rationale:
-			"Bay Bank는 화면상의 행이 아니라 반복 Bay와 공유 Connector를 소유하는 명시적 상위 조직입니다.",
+			"Bay Bank는 반복되는 Bay와 그 사이의 왕복 연결 레일을 하나로 묶어 관리하는 단위입니다.",
 		primaryCommandId: null,
 	}),
 	Object.freeze({
@@ -165,10 +167,11 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		sequence: 8,
 		activity: "assemble",
 		eyebrow: "MISSION 8 · INTERBAY",
-		title: "두 Bank를 잇는 Interbay",
-		objective: "완성된 Bay Bank를 복제·정렬하고 typed Interbay로 하나의 Fab에 연결하세요.",
+		title: "두 Bay Bank를 잇는 Interbay",
+		objective:
+			"완성된 Bay Bank를 복제·정렬하고 CONNECT BANKS로 Interbay 왕복 연결과 하나의 Fab을 만드세요.",
 		rationale:
-			"Interbay는 화면상의 긴 선이 아니라 Bank gateway를 잇고 Fab가 직접 소유하는 outbound·return 순환 인프라입니다.",
+			"Interbay는 두 Bay Bank 사이의 outbound·return 왕복 연결이며, Fab은 두 Bay Bank와 이 연결을 함께 소유합니다.",
 		primaryCommandId: null,
 	}),
 	Object.freeze({
@@ -177,9 +180,10 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		activity: "assemble",
 		eyebrow: "MISSION 9 · FAB LOOP",
 		title: "Fab 외곽 순환 완성",
-		objective: "같은 Fab의 두 Bank를 다시 선택해 독립적인 두 번째 outbound·return 경로를 만드세요.",
+		objective:
+			"같은 Fab의 두 Bay Bank 사이에 기존 Interbay와 겹치지 않는 두 번째 왕복 길을 만드세요.",
 		rationale:
-			"Fab Loop는 화면상의 외곽 사각형이 아니라 Bank 사이에 양방향 edge-disjoint 경로를 보장하는 복원력 있는 순환 인프라입니다.",
+			"Fab Loop를 더하면 한쪽 연결을 사용할 수 없을 때도 다른 왕복 길로 이동할 수 있습니다.",
 		primaryCommandId: null,
 	}),
 	Object.freeze({
@@ -188,9 +192,9 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		activity: "inspect",
 		eyebrow: "MISSION 10 · CHECKS",
 		title: "정적 FAB 전체 검증",
-		objective: "CHECKS를 열어 Rail, Switch, Port, Equipment, Organization 검사를 확인하세요.",
+		objective: "CHECKS를 열어 레일·포트·장비·조직이 서로 올바르게 연결됐는지 확인하세요.",
 		rationale:
-			"저장 전 전체 검사는 화면 모양이 아니라 현재 프로젝트 리비전과 체크섬에 묶인 Worker 검증 결과를 사용합니다.",
+			"저장하기 전에 현재 FAB의 레일 흐름과 모든 구성 요소의 관계를 한 화면에서 확인합니다.",
 		primaryCommandId: null,
 	}),
 	Object.freeze({
@@ -199,9 +203,8 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		activity: "inspect",
 		eyebrow: "MISSION 11 · SAVE",
 		title: "OpenFab 프로젝트 저장",
-		objective: "현재 정적 FAB를 기존 네이티브 OpenFab 프로젝트 파일로 저장하세요.",
-		rationale:
-			"저장은 Canvas나 튜토리얼 상태가 아니라 canonical 프로젝트 데이터와 검토된 운영 설정을 보존합니다.",
+		objective: "현재 FAB 전체를 하나의 .openfab 프로젝트 파일로 저장하세요.",
+		rationale: ".openfab 파일에는 레일·포트·장비·조직과 프로젝트 설정이 함께 저장됩니다.",
 		primaryCommandId: null,
 	}),
 	Object.freeze({
@@ -211,8 +214,7 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		eyebrow: "MISSION 12 · REOPEN",
 		title: "저장한 프로젝트 다시 열기",
 		objective: "방금 저장한 OpenFab 프로젝트 파일을 다시 열어 동일한 FAB에서 가이드를 재개하세요.",
-		rationale:
-			"재개는 저장 파일의 프로젝트 ID와 authored checksum을 다시 검증한 뒤 canonical 증거에서 진행률을 재구성합니다.",
+		rationale: "방금 저장한 파일을 직접 다시 열어 같은 FAB가 온전히 복원되는지 확인합니다.",
 		primaryCommandId: null,
 	}),
 ] as const satisfies readonly GuidedBuildMissionDefinition[]);
@@ -223,6 +225,8 @@ export type GuidedBuildEquipmentToolId = "ohb" | "eq" | "stk";
 export interface GuidedBuildEquipmentKindEvidence {
 	readonly groupCount: number;
 	readonly portCount: number;
+	/** Largest canonical group membership. Aggregate Port totals cannot substitute for this value. */
+	readonly largestGroupPortCount: number;
 }
 
 export interface GuidedBuildEquipmentEvidence {
@@ -296,9 +300,6 @@ export interface GuidedBuildChecksGuidanceEvidence {
 	readonly navigatorOpen: boolean;
 	readonly inspectionPending: boolean;
 	readonly acknowledgedFingerprint: string | null;
-	readonly networkLinkRepairAvailable: boolean;
-	readonly networkLinkRepairActive: boolean;
-	readonly networkLinkSourceSelected: boolean;
 }
 
 export type GuidedBuildProjectOperation = "idle" | "opening" | "saving" | "other";
@@ -437,7 +438,7 @@ export function guidedBuildRevealsErase(evaluation: GuidedBuildEvaluation): bool
 }
 
 export function guidedBuildRevealsConstructionBar(evaluation: GuidedBuildEvaluation): boolean {
-	return guidedBuildRevealsErase(evaluation);
+	return evaluation.currentMissionId !== "orient" && evaluation.currentMissionId !== "first-rail";
 }
 
 export function guidedBuildHidesPracticeHandoffConstructionBar(
@@ -445,6 +446,16 @@ export function guidedBuildHidesPracticeHandoffConstructionBar(
 ): boolean {
 	const current = evaluation.missions.find((mission) => mission.status === "current");
 	return current?.prompt.suggestedAction === "graduate-practice";
+}
+
+export function guidedBuildHidesOrganizationSelectionConstructionBar(
+	evaluation: GuidedBuildEvaluation,
+): boolean {
+	const current = evaluation.missions.find((mission) => mission.status === "current");
+	return (
+		current?.prompt.suggestedAction === "browse-bays" ||
+		current?.prompt.suggestedAction === "browse-banks"
+	);
 }
 
 export function guidedBuildRevealsRouteBendControls(evaluation: GuidedBuildEvaluation): boolean {
@@ -513,6 +524,19 @@ export function guidedBuildUsesCompactOrganizationPicker(
 	);
 }
 
+export function guidedBuildVisibleOrganizationSelectionCount(
+	guidedPickerActive: boolean,
+	selectedOrganizationIds: readonly number[],
+	visibleOrganizationIds: readonly number[],
+): number | null {
+	if (!guidedPickerActive) return null;
+	const selectedIds = new Set(selectedOrganizationIds);
+	return visibleOrganizationIds.reduce(
+		(count, organizationId) => count + (selectedIds.has(organizationId) ? 1 : 0),
+		0,
+	);
+}
+
 export function guidedBuildSuggestedActionSuppressesBayConfiguration(
 	action: GuidedBuildSuggestedAction,
 	currentMissionId: GuidedBuildFoundationMissionId | null,
@@ -524,6 +548,26 @@ export function guidedBuildOrganizationPlacementIsHierarchyDuplicate(
 	origin: BlueprintPlacementOrigin | null,
 ): boolean {
 	return origin === "selection-copy";
+}
+
+export function guidedBuildSelectionCopyPlacementIsSingleCommit(
+	guidedBuildActive: boolean,
+	currentMissionId: GuidedBuildFoundationMissionId | null,
+	origin: BlueprintPlacementOrigin | null,
+): boolean {
+	return guidedBuildActive && currentMissionId === "reuse-loop" && origin === "selection-copy";
+}
+
+export function guidedBuildOrganizationPlacementIsSingleCommit(
+	currentMissionId: GuidedBuildFoundationMissionId | null,
+	primaryCommandId: EditorCommandId | null,
+): boolean {
+	return (
+		primaryCommandId === "canvas.primary-click" &&
+		(currentMissionId === "bay" ||
+			currentMissionId === "bay-bank" ||
+			currentMissionId === "interbay")
+	);
 }
 
 export function guidedBuildSuggestedActionClearsOrganizationPlacement(
@@ -565,7 +609,7 @@ export function evaluateGuidedBuildFoundation(
 				evidence.railReuse.networkLinkSupportedComponentCount > 0),
 		"process-loop":
 			evidence.practiceGraduated ||
-			(processLoopConditionMet(evidence.readiness) &&
+			(processLoopConditionMet(evidence.readiness, evidence.railReuse) &&
 				evidence.railReuse.networkLinkSupportedComponentCount > 0),
 		ports: evidence.practiceGraduated || portEquipmentConditionMet(evidence.equipment),
 		"reuse-loop":
@@ -613,11 +657,11 @@ export function evaluateGuidedBuildFoundation(
 	});
 }
 
-function guidedBuildSuggestedActionActivity(
+export function guidedBuildSuggestedActionActivity(
 	action: GuidedBuildSuggestedAction | null,
 ): EditorActivity | null {
 	if (action === null) return null;
-	if (action === "build" || action === "repair-networks") return "build";
+	if (action === "build") return "build";
 	if (action === "inspect" || action === "open-checks" || action === "confirm-checks") {
 		return "inspect";
 	}
@@ -626,16 +670,39 @@ function guidedBuildSuggestedActionActivity(
 	return "assemble";
 }
 
+/**
+ * Identify the Activity that can perform the current mission instruction.
+ *
+ * A cross-Activity suggested action takes precedence (for example Inspect while Reuse Loop is
+ * waiting for an anchor). Missions without an action still point back to their owning Activity so
+ * an ordinary Expert detour cannot leave the visible instruction bound to the wrong tool.
+ */
+export function guidedBuildTargetActivity(
+	evaluation: GuidedBuildEvaluation,
+): EditorActivity | null {
+	const current = evaluation.missions.find((mission) => mission.status === "current") ?? null;
+	if (current === null) return null;
+	return (
+		guidedBuildSuggestedActionActivity(current.prompt.suggestedAction) ??
+		current.definition.activity
+	);
+}
+
 function guidedBuildMissionPrompt(
 	definition: GuidedBuildMissionDefinition,
 	evidence: GuidedBuildEvidence,
 ): GuidedBuildMissionPrompt {
 	if (definition.id === "orient") return guidedBuildOrientPrompt(definition);
-	if (definition.id === "first-rail") return guidedBuildFirstRailPrompt(definition);
+	if (definition.id === "first-rail") return guidedBuildFirstRailPrompt(definition, evidence);
 	if (definition.id === "process-loop") {
 		return guidedBuildProcessLoopPrompt(definition, evidence.readiness);
 	}
-	if (definition.id === "checks") return guidedBuildChecksPrompt(definition, evidence);
+	if (definition.id === "checks") {
+		const checksPrompt = guidedBuildChecksPrompt(definition, evidence);
+		return guidedBuildProjectReopened(evidence.projectPersistence)
+			? guidedBuildReopenFinalCheckPrompt(checksPrompt, evidence)
+			: checksPrompt;
+	}
 	if (definition.id === "project-save") return guidedBuildProjectSavePrompt(definition, evidence);
 	if (definition.id === "project-reopen")
 		return guidedBuildProjectReopenPrompt(definition, evidence);
@@ -650,7 +717,7 @@ function guidedBuildMissionPrompt(
 				objective:
 					"START FAB를 누른 뒤 연습 프로젝트를 저장할지 선택하세요. 그러면 빈 실제 FAB 프로젝트에서 Twin Bay 배치를 시작합니다.",
 				rationale:
-					"연습 Loop와 보호된 Semantic Bay를 한 프로젝트에 섞지 않습니다. 저장을 선택하면 연습 파일도 남길 수 있습니다.",
+					"연습 Loop와 실제 FAB 구조는 별도 프로젝트로 관리합니다. 저장을 선택하면 연습 파일도 남길 수 있습니다.",
 				primaryCommandId: null,
 				suggestedAction: "graduate-practice",
 				suggestedActionLabel: "START FAB · 새 프로젝트",
@@ -661,7 +728,7 @@ function guidedBuildMissionPrompt(
 				eyebrow: "MISSION 6 · BAY · 2/2",
 				title: "기본 Twin Bay 배치",
 				objective:
-					"−로 Twin Bay 전체가 보일 때까지 축소한 뒤, 캔버스의 빈 곳을 탭해 미리보기를 배치하세요.",
+					"청록색 Twin Bay 미리보기의 ‘여기를 탭’ 표식을 눌러 현재 위치에 배치하세요. 표식이 보이지 않으면 −로 한 번 축소하세요.",
 				rationale: definition.rationale,
 				primaryCommandId: "canvas.primary-click",
 				suggestedAction: null,
@@ -693,7 +760,9 @@ function guidedBuildMissionPrompt(
 					? "선택한 원본 Loop의 연결 구조 전체를 선택해 OHB, EQ, STK까지 함께 복제하세요."
 					: "OHB, EQ, STK가 붙은 원본 Loop의 레일 하나를 먼저 탭하세요.",
 				rationale: definition.rationale,
-				primaryCommandId: "selection.connected",
+				primaryCommandId: evidence.reuseGuidance.selectionAnchorReady
+					? "selection.connected"
+					: "selection.inspect-target",
 				suggestedAction: evidence.reuseGuidance.selectionAnchorReady
 					? "select-connected"
 					: "inspect",
@@ -707,7 +776,7 @@ function guidedBuildMissionPrompt(
 				eyebrow: "MISSION 5 · REUSE LOOP · 3/3",
 				title: "Port 포함 Loop 배치",
 				objective:
-					"공간이 부족하면 −로 축소한 뒤, 기존 Loop와 겹치지 않는 정렬된 위치에 레일과 OHB·EQ·STK 복제 미리보기를 배치하세요.",
+					"공간이 부족하면 −로 축소한 뒤, 기존 Loop와 겹치지 않는 정렬된 위치에 레일과 OHB·EQ·STK 복제 미리보기를 한 번 배치하세요.",
 				rationale: definition.rationale,
 				primaryCommandId: "canvas.primary-click",
 				suggestedAction: null,
@@ -718,7 +787,7 @@ function guidedBuildMissionPrompt(
 			return Object.freeze({
 				eyebrow: "MISSION 5 · REUSE LOOP · 2/3",
 				title: "Port 포함 Loop 복제",
-				objective: "선택한 레일과 OHB·EQ·STK를 함께 복사해 반복 배치 미리보기를 시작하세요.",
+				objective: "선택한 레일과 OHB·EQ·STK를 함께 복사해 1회 배치 미리보기를 시작하세요.",
 				rationale: definition.rationale,
 				primaryCommandId: "selection.copy",
 				suggestedAction: "copy-selection",
@@ -734,7 +803,9 @@ function guidedBuildMissionPrompt(
 				? "현재 선택이 속한 Loop의 레일과 OHB·EQ·STK 전체를 선택하세요."
 				: "원본 Loop의 레일이나 OHB·EQ·STK 하나를 먼저 탭하세요.",
 			rationale: definition.rationale,
-			primaryCommandId: "selection.connected",
+			primaryCommandId: evidence.reuseGuidance.selectionAnchorReady
+				? "selection.connected"
+				: "selection.inspect-target",
 			suggestedAction: evidence.reuseGuidance.selectionAnchorReady ? "select-connected" : "inspect",
 			suggestedActionLabel: evidence.reuseGuidance.selectionAnchorReady
 				? "SELECT · Port 포함 Loop 전체"
@@ -753,7 +824,7 @@ function guidedBuildMissionPrompt(
 			suggestedActionLabel: "EQUIP · OHB 열기",
 			progressCue: guidedBuildPortProgressCue(
 				evidence.equipment,
-				"표식이 작으면 왼쪽 아래 +로 확대하고, 레일 옆 청록 원 하나를 탭하세요. 레일 흐름이 Port와 OHB 방향을 정합니다.",
+				"왼쪽의 강조된 OHB · 단일 Port를 선택하세요. 캔버스 포커스에서 방향키로 슬롯을 고르고 Enter로 배치하거나, 점선 고리가 있는 청록 슬롯을 클릭하세요.",
 			),
 		});
 	}
@@ -768,7 +839,7 @@ function guidedBuildMissionPrompt(
 			suggestedActionLabel: "EQUIP · EQ 열기",
 			progressCue: guidedBuildPortProgressCue(
 				evidence.equipment,
-				"표식이 작으면 +로 확대하고, 같은 직선 레일 위 청록 CENTER 표식 두 개를 한 번에 드래그하세요.",
+				"강조된 EQ · Port를 선택하세요. 캔버스에서 Enter로 시작을 고른 뒤 방향키와 Enter로 끝을 확정하거나, 청록색 1 시작에서 2 끝까지 드래그하세요.",
 			),
 		});
 	}
@@ -783,7 +854,7 @@ function guidedBuildMissionPrompt(
 			suggestedActionLabel: "EQUIP · STK 열기",
 			progressCue: guidedBuildPortProgressCue(
 				evidence.equipment,
-				"표식이 작으면 +로 확대하고, 같은 흐름의 황금색 마름모 CENTER 표식 두 개를 차례로 탭하세요.",
+				"왼쪽의 강조된 STK · 입출고 Port를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 STK 생성을 누르세요.",
 			),
 		});
 	}
@@ -811,7 +882,8 @@ function guidedBuildPortProgressCue(
 	const completedPortCount = (
 		kind: GuidedBuildEquipmentKind,
 		evidence: GuidedBuildEquipmentKindEvidence,
-	): number => (evidence.groupCount > 0 ? Math.min(evidence.portCount, kind === "OHB" ? 1 : 2) : 0);
+	): number =>
+		evidence.groupCount > 0 ? Math.min(evidence.largestGroupPortCount, kind === "OHB" ? 1 : 2) : 0;
 	return Object.freeze({
 		label: "Port-first 진행",
 		value: `OHB ${completedPortCount("OHB", equipment.OHB)}/1 · EQ ${completedPortCount("EQ", equipment.EQ)}/2 · STK ${completedPortCount("STK", equipment.STK)}/2`,
@@ -821,14 +893,22 @@ function guidedBuildPortProgressCue(
 
 function guidedBuildFirstRailPrompt(
 	definition: GuidedBuildMissionDefinition,
+	evidence: GuidedBuildEvidence,
 ): GuidedBuildMissionPrompt {
+	const existingEdgeCount = evidence.readiness.summary.edges;
+	const longestStraightRunMeters = evidence.railReuse.longestStraightRunMeters ?? 0;
 	return Object.freeze({
 		...promptFromDefinition(definition, null, null),
 		progressCue: Object.freeze({
-			label: "첫 실습",
-			value: "연결 가능한 직선 0 / 1",
+			label: existingEdgeCount > 0 ? "다시 그려도 안전해요" : "첫 실습",
+			value:
+				existingEdgeCount > 0
+					? `가장 긴 직선 ${longestStraightRunMeters.toLocaleString()} / 15 m · 전체 ${existingEdgeCount.toLocaleString()} m`
+					: "가장 긴 직선 0 / 15 m",
 			instruction:
-				"터치는 빈 곳을 누른 채, 마우스는 LMB를 누른 채 가로 또는 세로로 15칸 이상 끌고 놓으세요. 이 직선이 나중에 Loop Connect의 두 분기를 지지합니다.",
+				existingEdgeCount > 0
+					? "꺾인 길이의 합이 아니라 한 방향의 연속 직선이 목표입니다. 주황색 열린 끝을 같은 방향으로 늘리거나, 다른 빈 곳에서 15 m 직선을 새로 그리세요. 연습 초안은 남겨도 되며 START FAB에서 새 프로젝트로 넘어갑니다."
+					: "빈 곳 어디에서든 터치는 누른 채, 마우스는 LMB를 누른 채 가로 또는 세로로 15 m 이상 끌고 놓으세요. 이 직선은 그대로 유지하고, 다음 단계에서 레일 화살표가 향하는 끝부터 Loop를 닫습니다.",
 		}),
 	});
 }
@@ -838,6 +918,7 @@ function guidedBuildProcessLoopPrompt(
 	readiness: GuidedBuildReadinessEvidence,
 ): GuidedBuildMissionPrompt {
 	const openTerminalCount = readiness.summary.openTerminals;
+	const multipleDrafts = readiness.summary.weakComponents > 1;
 	return Object.freeze({
 		...promptFromDefinition(definition, null, null),
 		progressCue: Object.freeze({
@@ -846,9 +927,10 @@ function guidedBuildProcessLoopPrompt(
 				openTerminalCount > 0
 					? `열린 끝 ${openTerminalCount}개 · 목표 0개`
 					: "열린 끝 0개 · 방향 흐름 확인",
-			instruction:
-				openTerminalCount > 0
-					? "공간이 부족하면 −로 축소하세요. 첫 15칸 이상 직선을 유지한 채 주황색 끝에서 나머지 세 변을 이어 시작점에 닫으세요."
+			instruction: multipleDrafts
+				? "15 m 이상인 긴 직선에서 레일 화살표가 향하는 주황색 열린 끝을 찾으세요. 먼저 바깥으로 최소 6칸 뻗은 뒤 나머지 두 변을 이어 그 직선의 시작점에 닫으세요. 짧은 연습 초안은 남겨도 됩니다."
+				: openTerminalCount > 0
+					? "공간이 부족하면 −로 축소하세요. 첫 15칸 이상 직선을 유지한 채 레일 화살표가 향하는 주황색 열린 끝에서 먼저 바깥으로 최소 6칸 뻗고, 나머지 두 변을 이어 시작점에 닫으세요."
 					: "모든 단방향 흐름이 끊김 없이 한 바퀴 이어지도록 표시된 구간을 고치세요.",
 		}),
 	});
@@ -864,8 +946,8 @@ function guidedBuildBayBankPrompt(
 			return bankPrompt(
 				definition,
 				"MISSION 7 · BAY BANK · 3/8",
-				"복제 Bay 배치",
-				"원본 옆의 빈 정렬 후보로 준비된 전체 계층 미리보기를 탭하세요. 직접 옮기면 가까운 X/Z 중심축에 스냅됩니다.",
+				"복제 Twin Bay 배치",
+				"원본 옆 청록색 복제 미리보기의 ‘여기를 탭’ 표식을 눌러 현재 위치에 배치하세요. 직접 옮기면 가까운 X/Z 중심축에 스냅됩니다.",
 				"canvas.primary-click",
 			);
 		}
@@ -874,10 +956,10 @@ function guidedBuildBayBankPrompt(
 				definition,
 				"MISSION 7 · BAY BANK · 2/8",
 				"Twin Bay 전체 계층 복제",
-				"ASSEMBLE의 DUPLICATE로 Shell과 두 Process Loop를 EFFECTIVE 범위 그대로 복제하세요.",
+				"아래 DUPLICATE를 눌러 Twin Bay와 하위 Process Loop 두 개를 함께 복제하세요.",
 				null,
 				"duplicate-bay",
-				"DUPLICATE · 하위 계층 포함",
+				"DUPLICATE · TWIN BAY 전체 복제",
 			);
 		}
 		return bankPrompt(
@@ -886,25 +968,31 @@ function guidedBuildBayBankPrompt(
 			"복제할 Twin Bay 선택",
 			guidance.organizationBrowserOpen
 				? "FAB ORGANIZATION 목록에서 Twin Bay 하나만 선택하세요."
-				: "조직 브라우저를 열어 방금 만든 Semantic Twin Bay 하나를 선택하세요.",
+				: "FAB ORGANIZATION 목록을 열어 방금 만든 Twin Bay 하나를 선택하세요.",
 			"organization.select",
 			guidance.organizationBrowserOpen ? null : "browse-bays",
-			guidance.organizationBrowserOpen ? null : "ASSEMBLE · BAY 선택",
+			guidance.organizationBrowserOpen ? null : "TWIN BAY 목록 열기",
 			1,
 		);
 	}
 
 	if (guidance.selectedOrganizationCount !== 2 || guidance.selectedTwinBayCount !== 2) {
+		const originalBaySelectionRetained =
+			guidance.selectedOrganizationCount === 1 && guidance.selectedTwinBayCount === 1;
 		return bankPrompt(
 			definition,
 			"MISSION 7 · BAY BANK · 4/8",
 			"Twin Bay 두 개 선택",
 			guidance.organizationBrowserOpen
-				? "FAB ORGANIZATION 목록에서 원본과 복제 Twin Bay를 차례로 탭하세요."
-				: "조직 브라우저에서 원본과 복제 Twin Bay 두 개를 함께 선택하세요.",
+				? originalBaySelectionRetained
+					? "원본 Twin Bay는 이미 선택되어 있습니다(✓). 체크가 없는 복제 Twin Bay 하나만 탭해 2 / 2로 만드세요."
+					: "FAB ORGANIZATION 목록에서 원본과 복제 Twin Bay 두 개를 선택하세요."
+				: originalBaySelectionRetained
+					? "원본 Twin Bay 선택은 유지되었습니다. FAB ORGANIZATION 목록을 열어 복제 Twin Bay 하나를 추가하세요."
+					: "FAB ORGANIZATION 목록을 열어 원본과 복제 Twin Bay 두 개를 선택하세요.",
 			"organization.select",
 			guidance.organizationBrowserOpen ? null : "browse-bays",
-			guidance.organizationBrowserOpen ? null : "ASSEMBLE · 두 BAY 선택",
+			guidance.organizationBrowserOpen ? null : "TWIN BAY 목록 열기 · 2개 선택",
 			2,
 		);
 	}
@@ -917,33 +1005,37 @@ function guidedBuildBayBankPrompt(
 			return bankPrompt(
 				definition,
 				"MISSION 7 · BAY BANK · 6/8",
-				guidance.arrangementPhase === "rejected" ? "정렬 옵션 조정" : "중심 정렬 검증·적용",
+				guidance.arrangementPhase === "rejected" ? "현재 정렬 적용 불가" : "중심 정렬 검증·적용",
 				guidance.arrangementPhase === "certified"
-					? "Worker가 인증한 ALIGN CENTER 미리보기를 적용하세요."
+					? "충돌 없이 정렬된 미리보기를 APPLY로 적용하세요."
 					: guidance.arrangementPhase === "rejected"
-						? "X/Z 축을 바꾸거나 충돌 없는 정렬 옵션을 선택한 뒤 적용하세요."
-						: "Worker가 두 Bay의 정렬 미리보기를 검증할 때까지 기다리세요.",
-				guidance.arrangementPhase === "certified" ? "command.apply" : null,
+						? "현재 옵션은 적용할 수 없습니다. 강조된 취소로 두 Twin Bay 선택을 유지한 뒤 복제 Bay 위치를 바꾸세요."
+						: "두 Twin Bay의 정렬 미리보기가 준비될 때까지 기다리세요.",
+				guidance.arrangementPhase === "certified"
+					? "command.apply"
+					: guidance.arrangementPhase === "rejected"
+						? "command.cancel"
+						: null,
 			);
 		}
 		return bankPrompt(
 			definition,
 			"MISSION 7 · BAY BANK · 5/8",
-			"Bay 중심 정렬",
-			"두 Bay의 선택을 유지하고 ARRANGE로 행 또는 열 중심을 맞추세요.",
+			"Twin Bay 중심 정렬",
+			"두 Twin Bay의 선택을 유지하고 ARRANGE로 행 또는 열 중심을 맞추세요.",
 			"arrangement.start",
 			"arrange-bays",
-			"ARRANGE · 중심 맞추기",
+			"ARRANGE · TWIN BAY 중심 맞추기",
 		);
 	}
 	return bankPrompt(
 		definition,
 		"MISSION 7 · BAY BANK · 7/8",
-		"두 Production Bay 연결",
-		"선택한 두 Bay를 CONNECT BAYS로 연결해 하나의 Bay Bank를 만드세요. 연결 경로는 적용 전에 검토합니다.",
+		"두 Twin Bay 연결",
+		"현재 두 Twin Bay가 같은 중심축이므로 추가 ARRANGE 없이 아래 CONNECT BAYS를 눌러 하나의 Bay Bank를 만들 연결 경로를 검토하세요.",
 		"assembly-connector.start",
 		"connect-bays",
-		"CONNECT BAYS · BANK 생성",
+		"CONNECT BAYS · BAY BANK 만들기",
 	);
 }
 
@@ -955,10 +1047,10 @@ function guidedBuildConnectorPrompt(
 		return connectorPrompt(
 			definition,
 			"MISSION 7 · BAY BANK · 8/8",
-			phase === "pick-source-gateway" ? "Source Gateway 선택" : "Target Gateway 선택",
+			phase === "pick-source-gateway" ? "출발 Gateway(연결 지점) 선택" : "도착 Gateway 선택",
 			phase === "pick-source-gateway"
-				? "첫 Bay 외곽에서 강조된 직선 Gateway 하나를 선택하세요."
-				: "다른 Bay 외곽에서 마주보는 강조 Gateway를 선택하세요.",
+				? "첫 Twin Bay 외곽에서 강조된 직선 Gateway 하나를 선택하세요."
+				: "다른 Twin Bay 외곽에서 마주보는 강조 Gateway를 선택하세요.",
 			"canvas.primary-click",
 		);
 	}
@@ -975,18 +1067,18 @@ function guidedBuildConnectorPrompt(
 		return connectorPrompt(
 			definition,
 			"MISSION 7 · BAY BANK · 8/8",
-			"Connector 충돌 조정",
-			"다른 Gateway 또는 Q/E corridor side를 선택해 충돌 없는 경로를 다시 검증하세요.",
-			"assembly-connector.cycle-side",
+			"다음 연결 시도 확인",
+			"CONNECT BAYS 패널에서 맥동하는 다음 시도 하나를 선택하세요. 새 경로가 READY가 될 때까지 적용은 잠깁니다.",
+			null,
 		);
 	}
 	return connectorPrompt(
 		definition,
 		"MISSION 7 · BAY BANK · 8/8",
-		phase === "applying" ? "Bay Bank 적용 중" : "Connector 검증 중",
+		phase === "applying" ? "Bay Bank 적용 중" : "왕복 연결 확인 중",
 		phase === "applying"
-			? "원자적 Rail·Organization 패치가 Worker mirror에 반영되고 있습니다."
-			: "Worker가 경로·clearance·Bank 계층을 검증할 때까지 기다리세요.",
+			? "검증된 왕복 연결과 Bay Bank 계층을 적용하고 있습니다."
+			: "충돌 없는 왕복 경로가 준비될 때까지 기다리세요.",
 		null,
 	);
 }
@@ -1001,8 +1093,8 @@ function guidedBuildInterbayPrompt(
 			return bankPrompt(
 				definition,
 				"MISSION 8 · INTERBAY · 3/8",
-				"복제 Bank 배치",
-				"원본 옆의 빈 정렬 후보로 준비된 Bay·Loop 하위 계층 미리보기를 탭하세요. 직접 옮기면 가까운 X/Z 중심축에 스냅됩니다.",
+				"복제 Bay Bank 배치",
+				"원본 옆 청록색 복제 Bay Bank 미리보기의 ‘여기를 탭’ 표식을 눌러 현재 위치에 배치하세요. 직접 옮기면 가까운 X/Z 중심축에 스냅됩니다.",
 				"canvas.primary-click",
 			);
 		}
@@ -1011,10 +1103,10 @@ function guidedBuildInterbayPrompt(
 				definition,
 				"MISSION 8 · INTERBAY · 2/8",
 				"Bay Bank 전체 계층 복제",
-				"DUPLICATE로 Bank의 Connector, Bay, Process Loop를 EFFECTIVE 범위 그대로 복제하세요.",
+				"아래 DUPLICATE를 눌러 Bay Bank와 하위 Bay·Process Loop·연결 레일을 함께 복제하세요.",
 				null,
 				"duplicate-bank",
-				"DUPLICATE · BANK 하위 계층 포함",
+				"DUPLICATE · BAY BANK 전체 복제",
 			);
 		}
 		return bankPrompt(
@@ -1023,25 +1115,31 @@ function guidedBuildInterbayPrompt(
 			"복제할 Bay Bank 선택",
 			guidance.organizationBrowserOpen
 				? "FAB ORGANIZATION 목록에서 방금 완성한 Bay Bank 하나만 선택하세요."
-				: "조직 브라우저를 열어 방금 완성한 Bay Bank 하나를 선택하세요.",
+				: "FAB ORGANIZATION 목록을 열어 방금 완성한 Bay Bank 하나를 선택하세요.",
 			"organization.select",
 			guidance.organizationBrowserOpen ? null : "browse-banks",
-			guidance.organizationBrowserOpen ? null : "ASSEMBLE · BANK 선택",
+			guidance.organizationBrowserOpen ? null : "BAY BANK 목록 열기",
 			1,
 		);
 	}
 
 	if (guidance.selectedOrganizationCount !== 2 || guidance.selectedBayBankCount !== 2) {
+		const originalBankSelectionRetained =
+			guidance.selectedOrganizationCount === 1 && guidance.selectedBayBankCount === 1;
 		return bankPrompt(
 			definition,
 			"MISSION 8 · INTERBAY · 4/8",
 			"Bay Bank 두 개 선택",
 			guidance.organizationBrowserOpen
-				? "FAB ORGANIZATION 목록에서 원본과 복제 Bay Bank를 차례로 탭하세요."
-				: "조직 브라우저에서 원본과 복제 Bay Bank 두 개를 함께 선택하세요.",
+				? originalBankSelectionRetained
+					? "원본 Bay Bank는 이미 선택되어 있습니다(✓). 체크가 없는 복제 Bay Bank 하나만 탭해 2 / 2로 만드세요."
+					: "FAB ORGANIZATION 목록에서 원본과 복제 Bay Bank 두 개를 선택하세요."
+				: originalBankSelectionRetained
+					? "원본 Bay Bank 선택은 유지되었습니다. FAB ORGANIZATION 목록을 열어 복제 Bay Bank 하나를 추가하세요."
+					: "FAB ORGANIZATION 목록을 열어 원본과 복제 Bay Bank 두 개를 선택하세요.",
 			"organization.select",
 			guidance.organizationBrowserOpen ? null : "browse-banks",
-			guidance.organizationBrowserOpen ? null : "ASSEMBLE · 두 BANK 선택",
+			guidance.organizationBrowserOpen ? null : "BAY BANK 목록 열기 · 2개 선택",
 			2,
 		);
 	}
@@ -1055,34 +1153,38 @@ function guidedBuildInterbayPrompt(
 				definition,
 				"MISSION 8 · INTERBAY · 6/8",
 				guidance.arrangementPhase === "rejected"
-					? "Bank 정렬 옵션 조정"
-					: "Bank 중심 정렬 검증·적용",
+					? "현재 정렬 적용 불가"
+					: "Bay Bank 중심 정렬 검증·적용",
 				guidance.arrangementPhase === "certified"
-					? "Worker가 인증한 ALIGN CENTER 미리보기를 적용하세요."
+					? "충돌 없이 정렬된 미리보기를 APPLY로 적용하세요."
 					: guidance.arrangementPhase === "rejected"
-						? "X/Z 축을 바꾸거나 충돌 없는 정렬 옵션을 선택한 뒤 적용하세요."
-						: "Worker가 두 Bank의 정렬 미리보기를 검증할 때까지 기다리세요.",
-				guidance.arrangementPhase === "certified" ? "command.apply" : null,
+						? "현재 옵션은 적용할 수 없습니다. 강조된 취소로 두 Bay Bank 선택을 유지한 뒤 복제 Bay Bank 위치를 바꾸세요."
+						: "두 Bay Bank의 정렬 미리보기가 준비될 때까지 기다리세요.",
+				guidance.arrangementPhase === "certified"
+					? "command.apply"
+					: guidance.arrangementPhase === "rejected"
+						? "command.cancel"
+						: null,
 			);
 		}
 		return bankPrompt(
 			definition,
 			"MISSION 8 · INTERBAY · 5/8",
 			"Bay Bank 중심 정렬",
-			"두 Bank의 선택을 유지하고 ARRANGE로 Interbay가 지나갈 행 또는 열 중심을 맞추세요.",
+			"두 Bay Bank의 선택을 유지하고 ARRANGE로 Interbay가 지나갈 행 또는 열 중심을 맞추세요.",
 			"arrangement.start",
 			"arrange-banks",
-			"ARRANGE · BANK 중심 맞추기",
+			"ARRANGE · BAY BANK 중심 맞추기",
 		);
 	}
 	return bankPrompt(
 		definition,
 		"MISSION 8 · INTERBAY · 7/8",
 		"두 Bay Bank 연결",
-		"선택한 두 Bay Bank를 CONNECT BANKS로 연결해 하나의 Fab을 만드세요. 연결 경로는 적용 전에 검토합니다.",
+		"현재 두 Bay Bank가 같은 중심축이므로 추가 ARRANGE 없이 아래 CONNECT BANKS를 눌러 하나의 Fab을 만들 Interbay 경로를 검토하세요.",
 		"assembly-connector.start",
 		"connect-banks",
-		"CONNECT BANKS · FAB 생성",
+		"CONNECT BANKS · FAB 만들기",
 	);
 }
 
@@ -1094,10 +1196,12 @@ function guidedBuildInterbayConnectorPrompt(
 		return connectorPrompt(
 			definition,
 			"MISSION 8 · INTERBAY · 8/8",
-			phase === "pick-source-gateway" ? "Source Bank Gateway 선택" : "Target Bank Gateway 선택",
 			phase === "pick-source-gateway"
-				? "첫 Bank의 직접 소유 Connector에서 강조된 Gateway 하나를 선택하세요."
-				: "다른 Bank에서 마주보는 강조 Gateway를 선택하세요.",
+				? "출발 Bay Bank의 Gateway 선택"
+				: "도착 Bay Bank의 Gateway 선택",
+			phase === "pick-source-gateway"
+				? "첫 Bay Bank 안의 연결 레일에서 강조된 Gateway(연결 지점) 하나를 선택하세요."
+				: "다른 Bay Bank에서 마주보는 강조 Gateway를 선택하세요.",
 			"canvas.primary-click",
 		);
 	}
@@ -1114,9 +1218,9 @@ function guidedBuildInterbayConnectorPrompt(
 		return connectorPrompt(
 			definition,
 			"MISSION 8 · INTERBAY · 8/8",
-			"Interbay corridor 조정",
-			"다른 Bank Gateway 또는 Q/E corridor side를 선택해 충돌 없는 경로를 다시 검증하세요.",
-			"assembly-connector.cycle-side",
+			"다음 Interbay 시도 확인",
+			"CONNECT BANKS 패널에서 맥동하는 다음 시도 하나를 선택하세요. 새 경로가 READY가 될 때까지 적용은 잠깁니다.",
+			null,
 		);
 	}
 	return connectorPrompt(
@@ -1124,8 +1228,8 @@ function guidedBuildInterbayConnectorPrompt(
 		"MISSION 8 · INTERBAY · 8/8",
 		phase === "applying" ? "Fab Interbay 적용 중" : "Interbay 검증 중",
 		phase === "applying"
-			? "원자적 Rail·Organization 패치가 Worker mirror에 반영되고 있습니다."
-			: "Worker가 경로·clearance·Fab 계층을 검증할 때까지 기다리세요.",
+			? "검증된 Interbay 왕복 연결과 Fab 계층을 적용하고 있습니다."
+			: "충돌 없는 Interbay 왕복 경로가 준비될 때까지 기다리세요.",
 		null,
 	);
 }
@@ -1139,13 +1243,13 @@ function guidedBuildFabLoopPrompt(
 		return bankPrompt(
 			definition,
 			"MISSION 9 · FAB LOOP · 1/3",
-			"같은 Fab의 두 Bank 선택",
+			"같은 Fab의 두 Bay Bank 선택",
 			guidance.organizationBrowserOpen
-				? "FAB ORGANIZATION 목록에서 방금 Interbay로 연결한 두 Bay Bank를 차례로 탭하세요."
-				: "조직 브라우저를 열어 같은 Fab의 두 Bay Bank를 함께 선택하세요.",
+				? "현재 선택은 그대로 두고, 같은 Fab의 Bay Bank가 2 / 2가 될 때까지 목록에서 선택하세요."
+				: "FAB ORGANIZATION 목록을 열어 같은 Fab의 두 Bay Bank를 함께 선택하세요.",
 			"organization.select",
 			guidance.organizationBrowserOpen ? null : "browse-banks",
-			guidance.organizationBrowserOpen ? null : "ASSEMBLE · 두 BANK 선택",
+			guidance.organizationBrowserOpen ? null : "BAY BANK 목록 열기 · 2개 선택",
 			2,
 		);
 	}
@@ -1156,7 +1260,7 @@ function guidedBuildFabLoopPrompt(
 		definition,
 		"MISSION 9 · FAB LOOP · 2/3",
 		"Fab 외곽 순환 추가",
-		"같은 Fab의 두 Bank를 ADD FAB LOOP로 다시 연결해 기존 Interbay와 겹치지 않는 두 번째 순환 경로를 만드세요.",
+		"아래 ADD FAB LOOP를 눌러 같은 두 Bay Bank를 다시 연결해 기존 Interbay와 겹치지 않는 두 번째 왕복 길을 만드세요.",
 		"assembly-connector.start",
 		"add-fab-loop",
 		"ADD FAB LOOP · 외곽 순환",
@@ -1171,10 +1275,10 @@ function guidedBuildFabLoopConnectorPrompt(
 		return connectorPrompt(
 			definition,
 			"MISSION 9 · FAB LOOP · 3/3",
-			phase === "pick-source-gateway" ? "Source 외곽 Gateway 선택" : "Target 외곽 Gateway 선택",
+			phase === "pick-source-gateway" ? "출발 외곽 Gateway 선택" : "도착 외곽 Gateway 선택",
 			phase === "pick-source-gateway"
-				? "첫 Bank 하위 Bay 레일에서 기존 Interbay와 떨어진 강조 Gateway를 선택하세요."
-				: "다른 Bank 하위 Bay 레일에서 마주보는 강조 Gateway를 선택하세요.",
+				? "첫 Bay Bank 하위 Bay 레일에서 기존 Interbay와 떨어진 강조 Gateway를 선택하세요."
+				: "다른 Bay Bank 하위 Bay 레일에서 마주보는 강조 Gateway를 선택하세요.",
 			"canvas.primary-click",
 		);
 	}
@@ -1191,9 +1295,9 @@ function guidedBuildFabLoopConnectorPrompt(
 		return connectorPrompt(
 			definition,
 			"MISSION 9 · FAB LOOP · 3/3",
-			"외곽 corridor 조정",
-			"다른 하위 Bay Gateway 또는 Q/E corridor side를 선택해 독립 경로를 다시 검증하세요.",
-			"assembly-connector.cycle-side",
+			"다음 외곽 경로 시도 확인",
+			"ADD FAB LOOP 패널에서 맥동하는 다음 시도 하나를 선택하세요. 새 경로가 READY가 될 때까지 적용은 잠깁니다.",
+			null,
 		);
 	}
 	return connectorPrompt(
@@ -1201,8 +1305,8 @@ function guidedBuildFabLoopConnectorPrompt(
 		"MISSION 9 · FAB LOOP · 3/3",
 		phase === "applying" ? "Fab Loop 적용 중" : "Fab Loop 검증 중",
 		phase === "applying"
-			? "원자적 Rail·Organization 패치가 Worker mirror에 반영되고 있습니다."
-			: "Worker가 경로·clearance와 양방향 복원력을 검증할 때까지 기다리세요.",
+			? "검증된 Fab 외곽 왕복 연결을 적용하고 있습니다."
+			: "기존 Interbay와 겹치지 않는 왕복 경로가 준비될 때까지 기다리세요.",
 		null,
 	);
 }
@@ -1213,42 +1317,13 @@ function guidedBuildChecksPrompt(
 ): GuidedBuildMissionPrompt {
 	const checks = evidence.checks;
 	const guidance = evidence.checksGuidance;
-	if (
-		checks.separateRailNetworkCount > 1 &&
-		guidance.networkLinkRepairAvailable &&
-		(checks.available || guidance.networkLinkRepairActive)
-	) {
-		const remaining = checks.separateRailNetworkCount;
-		if (guidance.networkLinkRepairActive) {
-			return bankPrompt(
-				definition,
-				"MISSION 10 · CHECKS · FIX",
-				guidance.networkLinkSourceSelected
-					? "연결할 다른 레일망 선택"
-					: `${remaining}개 레일망 연결`,
-				guidance.networkLinkSourceSelected
-					? "다른 레일망의 평행한 긴 직선까지 드래그해 왕복 연결 미리보기를 만든 뒤 놓으세요."
-					: "한 레일망의 긴 직선에서 다른 레일망의 평행한 긴 직선까지 드래그하세요. 두 방향 연결을 한 번에 검토·적용합니다.",
-				"canvas.primary-drag",
-			);
-		}
-		return bankPrompt(
-			definition,
-			"MISSION 10 · CHECKS · FIX",
-			`${remaining}개 레일망 연결`,
-			"보호되지 않은 독립 레일망입니다. 기존 Smart Route의 Loop Connect로 한 망씩 연결한 뒤 CHECKS를 다시 실행하세요.",
-			null,
-			"repair-networks",
-			"BUILD · 레일망 연결",
-		);
-	}
 	if (!checks.available) {
 		if (guidance.inspectionPending) {
 			return bankPrompt(
 				definition,
 				"MISSION 10 · CHECKS · 2/3",
 				"전체 프로젝트 검사 중",
-				"Worker가 현재 리비전의 Rail·Switch·Port·Equipment·Organization 진단을 완료할 때까지 기다리세요.",
+				"현재 FAB의 레일·포트·장비·조직 관계 검사가 끝날 때까지 기다리세요.",
 				null,
 			);
 		}
@@ -1256,16 +1331,16 @@ function guidedBuildChecksPrompt(
 			definition,
 			"MISSION 10 · CHECKS · 1/3",
 			"CHECKS 열기",
-			"상단 FAB CHECK 버튼이나 아래 동작으로 현재 프로젝트의 전체 검사를 시작하세요.",
+			"아래 검사 열기를 눌러 현재 FAB 전체 검사를 시작하세요.",
 			null,
 			"open-checks",
-			"INSPECT · CHECKS 열기",
+			"검사 열기",
 		);
 	}
 	if (!checks.ready) {
 		const protectedNetworkGuidance =
-			checks.separateRailNetworkCount > 1 && !guidance.networkLinkRepairAvailable
-				? " 보호된 Bay·Bank·Fab 레일은 Smart Route로 직접 바꾸지 말고 ASSEMBLE의 계층 Connector 또는 명시적 메타데이터 재할당으로 해결하세요."
+			checks.separateRailNetworkCount > 1
+				? " Bay·Bank·Fab 안의 레일은 일반 레일 연결로 바꾸지 마세요. CHECKS에서 첫 차단 문제를 선택하고 NEXT EDIT에 표시된 조직 또는 연결 편집을 따르세요."
 				: "";
 		return bankPrompt(
 			definition,
@@ -1274,7 +1349,7 @@ function guidedBuildChecksPrompt(
 			`${checks.blockingIssueCount}개 차단 이슈와 ${checks.followUpIssueCount}개 후속 이슈를 CHECKS에서 확인하고 일반 편집 명령으로 해결하세요.${protectedNetworkGuidance}`,
 			null,
 			guidance.navigatorOpen ? null : "open-checks",
-			guidance.navigatorOpen ? null : "INSPECT · CHECKS 다시 열기",
+			guidance.navigatorOpen ? null : "CHECKS 다시 열기",
 		);
 	}
 	if (!guidance.navigatorOpen) {
@@ -1285,18 +1360,56 @@ function guidedBuildChecksPrompt(
 			"현재 프로젝트 검사는 통과했습니다. CHECKS를 열어 각 도메인의 OK 결과를 확인하세요.",
 			null,
 			"open-checks",
-			"INSPECT · 통과 결과 보기",
+			"통과 결과 보기",
 		);
 	}
 	return bankPrompt(
 		definition,
 		"MISSION 10 · CHECKS · 3/3",
 		"현재 검증 결과 확인",
-		"Rail·Switch·Port·Equipment·Organization이 모두 현재 프로젝트 fingerprint에서 통과했는지 확인하세요.",
+		"CHECKS에서 '0 ISSUES'와 'ALL STATIC FAB CHECKS PASSED'가 표시되는지 확인하세요.",
 		null,
 		"confirm-checks",
-		"CHECKS · 검증 결과 확인",
+		"검사 통과 확인",
 	);
+}
+
+function guidedBuildReopenFinalCheckPrompt(
+	prompt: GuidedBuildMissionPrompt,
+	evidence: GuidedBuildEvidence,
+): GuidedBuildMissionPrompt {
+	const checks = evidence.checks;
+	const guidance = evidence.checksGuidance;
+	if (!checks.available) {
+		return Object.freeze({
+			...prompt,
+			eyebrow: "MISSION 12 · REOPEN · FINAL CHECK",
+			title: guidance.inspectionPending ? "다시 연 프로젝트 검사 중" : "다시 연 프로젝트 최종 검사",
+			objective: guidance.inspectionPending
+				? "방금 다시 연 FAB의 레일·포트·장비·조직 관계를 확인하고 있습니다."
+				: "방금 저장한 같은 프로젝트를 다시 열었습니다. 마지막 확인으로 CHECKS를 한 번 실행하세요.",
+			suggestedActionLabel: guidance.inspectionPending ? null : "다시 연 파일 검사",
+			progressPresentation: "reopen-final-check",
+		});
+	}
+	if (!checks.ready) {
+		return Object.freeze({
+			...prompt,
+			eyebrow: "MISSION 12 · REOPEN · FINAL CHECK",
+			title: "다시 연 프로젝트 문제 해결",
+			progressPresentation: "reopen-final-check",
+		});
+	}
+	return Object.freeze({
+		...prompt,
+		eyebrow: "MISSION 12 · REOPEN · FINAL CHECK",
+		title: guidance.navigatorOpen ? "다시 연 프로젝트 최종 확인" : "최종 검사 결과 검토",
+		objective: guidance.navigatorOpen
+			? "CHECKS에서 '0 ISSUES'와 'ALL STATIC FAB CHECKS PASSED'가 표시되는지 확인하세요."
+			: "다시 연 FAB의 검사가 통과했습니다. CHECKS를 열어 저장 전과 같은 결과인지 확인하세요.",
+		suggestedActionLabel: guidance.navigatorOpen ? "최종 검사 통과 확인" : "최종 결과 보기",
+		progressPresentation: "reopen-final-check",
+	});
 }
 
 function guidedBuildProjectSavePrompt(
@@ -1308,7 +1421,7 @@ function guidedBuildProjectSavePrompt(
 			definition,
 			"MISSION 11 · SAVE · WRITING",
 			"프로젝트 저장 중",
-			"Worker 직렬화와 네이티브 파일 쓰기가 완료될 때까지 기다리세요.",
+			".openfab 파일 저장이 완료될 때까지 기다리세요.",
 			null,
 		);
 	}
@@ -1316,10 +1429,10 @@ function guidedBuildProjectSavePrompt(
 		definition,
 		"MISSION 11 · SAVE",
 		"OpenFab 프로젝트 저장",
-		"기존 프로젝트 저장 명령으로 현재 canonical FAB와 운영 설정을 하나의 OpenFab 파일에 기록하세요.",
+		"현재 FAB 전체를 하나의 .openfab 파일로 저장하세요. 일부 모듈만 보관하는 청사진 저장과는 다른 전체 프로젝트 저장입니다.",
 		null,
 		"save-project",
-		"PROJECT · 저장",
+		"전체 프로젝트 저장",
 	);
 }
 
@@ -1332,7 +1445,7 @@ function guidedBuildProjectReopenPrompt(
 			definition,
 			"MISSION 12 · REOPEN · VERIFYING",
 			"저장 파일 검증 중",
-			"Worker가 파일을 검증하고 동일한 프로젝트 ID와 authored checksum을 승격할 때까지 기다리세요.",
+			"파일 내용을 확인하고 같은 FAB를 복원할 때까지 기다리세요.",
 			null,
 		);
 	}
@@ -1345,10 +1458,10 @@ function guidedBuildProjectReopenPrompt(
 		reopenedDifferentProject ? "저장한 프로젝트 다시 선택" : "저장한 프로젝트 다시 열기",
 		reopenedDifferentProject
 			? "다른 프로젝트가 열렸습니다. 이전 단계에서 저장한 동일 프로젝트 파일을 다시 선택하세요."
-			: "기존 프로젝트 열기 명령으로 방금 저장한 OpenFab 파일을 선택하세요.",
+			: "방금 저장한 OpenFab 파일을 선택하세요. 같은 FAB가 복원되면 CHECKS로 마지막 검사를 진행합니다.",
 		null,
 		"open-project",
-		"PROJECT · 열기",
+		"저장한 파일 열기",
 	);
 }
 
@@ -1415,7 +1528,7 @@ function equipmentKindComplete(
 	kind: GuidedBuildEquipmentKind,
 	evidence: GuidedBuildEquipmentKindEvidence,
 ): boolean {
-	return evidence.groupCount > 0 && evidence.portCount >= (kind === "OHB" ? 1 : 2);
+	return evidence.groupCount > 0 && evidence.largestGroupPortCount >= (kind === "OHB" ? 1 : 2);
 }
 
 function reusedLoopConditionMet(
@@ -1453,18 +1566,22 @@ function equipmentKindRepeated(
 	return evidence.groupCount >= 2 && evidence.portCount >= (kind === "OHB" ? 2 : 4);
 }
 
-function processLoopConditionMet(readiness: GuidedBuildReadinessEvidence): boolean {
+function processLoopConditionMet(
+	readiness: GuidedBuildReadinessEvidence,
+	railReuse: GuidedBuildRailReuseEvidence,
+): boolean {
 	const summary = readiness.summary;
 	return (
-		((readiness.status === "ready" && readiness.ready) ||
+		(railReuse.closedStrongComponentCount ?? 0) > 0 ||
+		(((readiness.status === "ready" && readiness.ready) ||
 			hasOnlyClosedComponentSeparationIssues(readiness)) &&
-		summary.edges > 0 &&
-		summary.closure === "closed" &&
-		summary.weakComponents >= 1 &&
-		summary.strongComponents === summary.weakComponents &&
-		summary.openTerminals === 0 &&
-		summary.physicalOpenPaths === 0 &&
-		summary.physicalStrongComponents === summary.weakComponents
+			summary.edges > 0 &&
+			summary.closure === "closed" &&
+			summary.weakComponents >= 1 &&
+			summary.strongComponents === summary.weakComponents &&
+			summary.openTerminals === 0 &&
+			summary.physicalOpenPaths === 0 &&
+			summary.physicalStrongComponents === summary.weakComponents)
 	);
 }
 
@@ -1532,7 +1649,7 @@ function guidedBuildSourceKey(evidence: GuidedBuildEvidence): string {
 		`fab-loop:${evidence.fabLoop.semanticFabCount}:${evidence.fabLoop.eligibleFabCount}:${evidence.fabLoop.resilientFabLoopCount}:${evidence.fabLoop.resilientBankPairCount}`,
 		`fab-loop-ui:${evidence.fabLoopGuidance.organizationBrowserOpen ? "browser" : "canvas"}:${evidence.fabLoopGuidance.selectedOrganizationCount}:${evidence.fabLoopGuidance.selectedBayBankCount}:${evidence.fabLoopGuidance.connectorPhase}`,
 		`checks:${evidence.checks.available ? "available" : "unavailable"}:${evidence.checks.ready ? "ready" : "blocked"}:${evidence.checks.fingerprint}:${evidence.checks.blockingIssueCount}:${evidence.checks.followUpIssueCount}:${evidence.checks.separateRailNetworkCount}`,
-		`checks-ui:${evidence.checksGuidance.navigatorOpen ? "open" : "closed"}:${evidence.checksGuidance.inspectionPending ? "pending" : "settled"}:${evidence.checksGuidance.acknowledgedFingerprint ?? "unacknowledged"}:${evidence.checksGuidance.networkLinkRepairAvailable ? "network-repair-available" : "network-repair-protected"}:${evidence.checksGuidance.networkLinkRepairActive ? "network-repair" : "no-network-repair"}:${evidence.checksGuidance.networkLinkSourceSelected ? "source" : "no-source"}`,
+		`checks-ui:${evidence.checksGuidance.navigatorOpen ? "open" : "closed"}:${evidence.checksGuidance.inspectionPending ? "pending" : "settled"}:${evidence.checksGuidance.acknowledgedFingerprint ?? "unacknowledged"}`,
 		`project:${evidence.projectPersistence.operation}:${evidence.projectPersistence.projectId}:${evidence.projectPersistence.currentChecksum}:${evidence.projectPersistence.savedChecksum}:${evidence.projectPersistence.currentOperationalConfigurationFingerprint}:${evidence.projectPersistence.savedOperationalConfigurationFingerprint}:${evidence.projectPersistence.fileReferenceAvailable ? "file" : "no-file"}:${evidence.projectPersistence.migrated ? "migrated" : "current"}:${evidence.projectPersistence.needsSave ? "needs-save" : "saved"}`,
 		`reopen:${evidence.projectPersistence.reopenExpectationProjectId ?? "no-expectation"}:${evidence.projectPersistence.reopenExpectationChecksum ?? "no-expected-checksum"}:${evidence.projectPersistence.reopenExpectationSequence}:${evidence.projectPersistence.lastOpenedProjectId ?? "never-opened"}:${evidence.projectPersistence.lastOpenedChecksum ?? "no-opened-checksum"}:${evidence.projectPersistence.lastOpenedSequence}`,
 	].join(":");

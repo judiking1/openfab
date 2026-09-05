@@ -90,14 +90,18 @@ import {
 	type Camera,
 	closureSnapRadiusMetersForZoom,
 	compileAdvancedSwitchPreviewLayout,
+	EQ_PASSIVE_SLOT_VISUAL_MIN_ZOOM,
 	gridMajorStepForZoom,
+	OHB_PASSIVE_SLOT_VISUAL_MIN_ZOOM,
 	overviewFlowMarkerBucket,
 	overviewFlowMarkerCellPixels,
 	overviewFlowMinimumRunMeters,
 	overviewPhysicalDecorationVisible,
 	overviewRailPixelWidths,
+	passivePortSlotVisualsVisible,
 	physicalFlowMarkerStride,
 	portSlotPickRadiusMeters,
+	STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM,
 	TileRenderer,
 	touchPortSlotPickRadiusMeters,
 } from "./TileRenderer";
@@ -121,6 +125,24 @@ describe("TileRenderer camera transforms", () => {
 		expect(touchPortSlotPickRadiusMeters("OHB", 8)).toBe(0.75);
 		expect(touchPortSlotPickRadiusMeters("OHB", 100)).toBeCloseTo(0.22);
 		expect(touchPortSlotPickRadiusMeters("OHB", Number.NaN)).toBe(0.48);
+	});
+
+	it("hides passive ordinary Port visuals before overview markers merge", () => {
+		expect(passivePortSlotVisualsVisible("STK", STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM - 0.001)).toBe(
+			false,
+		);
+		expect(passivePortSlotVisualsVisible("STK", STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM)).toBe(true);
+		expect(passivePortSlotVisualsVisible("EQ", EQ_PASSIVE_SLOT_VISUAL_MIN_ZOOM - 0.001)).toBe(
+			false,
+		);
+		expect(passivePortSlotVisualsVisible("EQ", EQ_PASSIVE_SLOT_VISUAL_MIN_ZOOM)).toBe(true);
+		expect(passivePortSlotVisualsVisible("OHB", OHB_PASSIVE_SLOT_VISUAL_MIN_ZOOM - 0.001)).toBe(
+			false,
+		);
+		expect(passivePortSlotVisualsVisible("OHB", OHB_PASSIVE_SLOT_VISUAL_MIN_ZOOM)).toBe(true);
+		expect(passivePortSlotVisualsVisible("STK", Number.NaN)).toBe(true);
+		expect(passivePortSlotVisualsVisible("EQ", Number.NaN)).toBe(true);
+		expect(passivePortSlotVisualsVisible("OHB", Number.NaN)).toBe(true);
 	});
 
 	it("decimates flow markers by screen spacing in whole-map overviews", () => {
@@ -809,6 +831,168 @@ describe("Static FAB organization outline rendering", () => {
 });
 
 describe("port slot rendering", () => {
+	it("draws named Guided Port instructions and dotted legal targets outside reserved tools", () => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 12, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifacts(physical, "OHB");
+		const staticContext = createRecordingContext();
+		const renderer = new TileRenderer();
+
+		renderer.render(staticContext.context, createRecordingContext().context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			portSlots: prepared.slots,
+			portSlotSpatialIndex: prepared.spatialIndex,
+			portSlotAvailability: createPreparedPortSlotAvailabilityIndex(
+				physical,
+				prepared,
+				document.portEquipment,
+			),
+			showPortSlots: true,
+			guidedPortPlacement: {
+				label: "OHB · 대표 Port 1개",
+				instruction: "강조된 합법 슬롯 하나를 클릭하세요",
+				reservedLeftPixels: 180,
+			},
+			interactionFocus: "ports",
+			ghost: null,
+			camera: { offsetX: 40, offsetY: 320, zoom: 18, rotation: 0 },
+			width: 390,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+
+		expect(staticContext.labels).toContain("OHB · 대표 Port 1개");
+		expect(staticContext.labels).toContain("강조된 합법 슬롯 하나를 클릭하세요");
+		expect(staticContext.strokes.filter((stroke) => stroke.style === "#91f3f4")).toHaveLength(1);
+		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([
+			expect.objectContaining({ role: "target" }),
+		]);
+	});
+
+	it("projects a visible three-slot Guided EQ drag span with start and end markers", () => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 18, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifacts(physical, "EQ");
+		const staticContext = createRecordingContext();
+		const renderer = new TileRenderer();
+
+		renderer.render(staticContext.context, createRecordingContext().context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			portSlots: prepared.slots,
+			portSlotSpatialIndex: prepared.spatialIndex,
+			portSlotAvailability: createPreparedPortSlotAvailabilityIndex(
+				physical,
+				prepared,
+				document.portEquipment,
+			),
+			showPortSlots: true,
+			guidedPortPlacement: {
+				label: "EQ · Port 3개를 한 번에",
+				instruction: "청록색 1에서 2까지 드래그하세요",
+				reservedLeftPixels: 180,
+				gesture: "row",
+				recommendedPortCount: 3,
+			},
+			interactionFocus: "ports",
+			ghost: null,
+			camera: { offsetX: 40, offsetY: 320, zoom: 18, rotation: 0 },
+			width: 390,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+
+		expect(staticContext.strokes.filter((stroke) => stroke.style === "#91f3f4")).toHaveLength(3);
+		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([
+			expect.objectContaining({ role: "start" }),
+			expect.objectContaining({ role: "end" }),
+		]);
+	});
+
+	it("projects a visible Guided Reuse rail selection marker", () => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 18, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const renderer = new TileRenderer();
+
+		renderer.render(createRecordingContext().context, createRecordingContext().context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			guidedRailSelection: {
+				label: "Port 포함 Loop",
+				instruction: "청록색 고리의 레일을 탭하세요",
+				reservedLeftPixels: 64,
+				reservedTopPixels: 0,
+				eligibleRailCells: new Set(Array.from({ length: 19 }, (_, x) => `${x},0`)),
+			},
+			ghost: null,
+			camera: { offsetX: 40, offsetY: 320, zoom: 18, rotation: 0 },
+			width: 390,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+
+		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([
+			expect.objectContaining({
+				role: "rail",
+				pathIndex: expect.any(Number),
+				worldX: expect.any(Number),
+				worldY: expect.any(Number),
+			}),
+		]);
+	});
+
+	it("does not project a Guided Reuse marker outside the eligible equipment Loop", () => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 18, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const renderer = new TileRenderer();
+
+		renderer.render(createRecordingContext().context, createRecordingContext().context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			guidedRailSelection: {
+				label: "Port 포함 Loop",
+				instruction: "청록색 고리의 레일을 탭하세요",
+				eligibleRailCells: new Set(["100,100"]),
+			},
+			ghost: null,
+			camera: { offsetX: 40, offsetY: 320, zoom: 18, rotation: 0 },
+			width: 390,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+
+		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([]);
+	});
+
 	it("renders EQ anchoring, snapped endpoints, and only blocked ports as errors", () => {
 		const document = new RailDocument();
 		expect(
@@ -1189,6 +1373,15 @@ describe("port slot rendering", () => {
 		};
 		const presentation = compilePortEquipmentPresentation(physical, state);
 		const renderer = new TileRenderer();
+		const portWorld = {
+			x: presentation.worldPositions[0] as number,
+			y: presentation.worldPositions[1] as number,
+		};
+		expect(renderer.hitTestPortEquipment(presentation, portWorld, TEST_CAMERA.zoom)).toMatchObject({
+			row: 0,
+			portId: 7,
+			equipmentGroupId: 11,
+		});
 		const staticContext = createRecordingContext();
 		const input = {
 			map: document.map,
@@ -1211,16 +1404,11 @@ describe("port slot rendering", () => {
 			),
 		).toBe(true);
 
-		expect(
-			renderer.hitTestPortEquipment(
-				presentation,
-				{
-					x: presentation.worldPositions[0] as number,
-					y: presentation.worldPositions[1] as number,
-				},
-				TEST_CAMERA.zoom,
-			),
-		).toMatchObject({ row: 0, portId: 7, equipmentGroupId: 11 });
+		expect(renderer.hitTestPortEquipment(presentation, portWorld, TEST_CAMERA.zoom)).toMatchObject({
+			row: 0,
+			portId: 7,
+			equipmentGroupId: 11,
+		});
 		expect(
 			renderer.hitTestPortEquipment(presentation, { x: 99, y: 99 }, TEST_CAMERA.zoom),
 		).toBeNull();
@@ -1236,6 +1424,132 @@ describe("port slot rendering", () => {
 		});
 		expect(renderer.getStats().staticRedraws).toBe(staticRedraws);
 		expect(selectedOverlay.strokes.some((stroke) => stroke.style === "#d8ffff")).toBe(true);
+	});
+
+	it("keeps a cold 50k current-presentation hit inside the input-task budget", () => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 10, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifacts(physical, "STK");
+		const row = prepared.slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL);
+		expect(row).toBeGreaterThanOrEqual(0);
+		const basePort = portSlotRecord(prepared.slots, row, 1, 1, null);
+		const groupCount = 50_000;
+		const presentation = compilePortEquipmentPresentation(physical, {
+			nextPortId: groupCount + 1,
+			nextEquipmentGroupId: groupCount + 1,
+			ports: Array.from({ length: groupCount }, (_, index) => ({
+				...basePort,
+				id: index + 1,
+				equipmentGroupId: index + 1,
+			})),
+			equipmentGroups: Array.from({ length: groupCount }, (_, index) => ({
+				id: index + 1,
+				kind: "STK" as const,
+				template: "FLEX" as const,
+				portIds: [index + 1],
+			})),
+		});
+		const renderer = new TileRenderer();
+		const world = {
+			x: presentation.worldPositions[0] as number,
+			y: presentation.worldPositions[1] as number,
+		};
+
+		const coldStartedAt = performance.now();
+		const coldHit = renderer.hitTestPortEquipment(presentation, world, TEST_CAMERA.zoom);
+		const coldMilliseconds = performance.now() - coldStartedAt;
+		const cachedStartedAt = performance.now();
+		const cachedHit = renderer.hitTestPortEquipment(presentation, world, TEST_CAMERA.zoom);
+		const cachedMilliseconds = performance.now() - cachedStartedAt;
+
+		expect(coldHit).toMatchObject({ portId: 1, equipmentGroupId: 1 });
+		expect(cachedHit).toMatchObject({ portId: 1, equipmentGroupId: 1 });
+		expect(coldMilliseconds).toBeLessThan(50);
+		expect(cachedMilliseconds).toBeLessThan(5);
+	}, 5_000);
+
+	it.each([
+		["OHB", OHB_PASSIVE_SLOT_VISUAL_MIN_ZOOM],
+		["EQ", EQ_PASSIVE_SLOT_VISUAL_MIN_ZOOM],
+	] as const)("keeps the ordinary %s target and hit test while suppressing passive overview markers", (portType, overviewThreshold) => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 8, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifacts(physical, portType);
+		const slots = prepared.slots;
+		const row = slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL);
+		expect(row).toBeGreaterThanOrEqual(0);
+		const input = {
+			map: document.map,
+			physicalPaths: physical.paths,
+			portSlots: slots,
+			portSlotSpatialIndex: prepared.spatialIndex,
+			portSlotAvailability: createPreparedPortSlotAvailabilityIndex(
+				physical,
+				prepared,
+				document.portEquipment,
+			),
+			showPortSlots: true,
+			ghost: null,
+			camera: {
+				...TEST_CAMERA,
+				zoom: overviewThreshold - 0.001,
+			},
+			width: 960,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		};
+		const renderer = new TileRenderer();
+		const overviewStatic = createRecordingContext();
+		renderer.render(overviewStatic.context, createRecordingContext().context, input);
+		expect(renderer.getStats().visiblePortSlotCandidates).toBeGreaterThan(0);
+		expect(renderer.getStats().suppressedPassivePortSlotMarkers).toBeGreaterThan(0);
+		expect(renderer.getStats()).toMatchObject({
+			renderedPassivePortSlotMarkers: 0,
+			portSlotPresentationLod: "overview",
+		});
+		expect(
+			renderer.hitTestPortSlot(
+				slots,
+				{
+					x: slots.worldPositions[row * 2] as number,
+					y: slots.worldPositions[row * 2 + 1] as number,
+				},
+				overviewThreshold - 0.001,
+			),
+		).toBe(row);
+
+		const hoverOverlay = createRecordingContext();
+		renderer.render(overviewStatic.context, hoverOverlay.context, { ...input, hoverPortSlot: row });
+		expect(hoverOverlay.strokes.some((stroke) => stroke.style === "#d8ffff")).toBe(true);
+
+		const guidedStatic = createRecordingContext();
+		renderer.render(guidedStatic.context, createRecordingContext().context, {
+			...input,
+			guidedPortPlacement: { label: "첫 Port", instruction: "ENTER" },
+		});
+		expect(renderer.getStats().renderedPassivePortSlotMarkers).toBe(0);
+		expect(renderer.getGuidedCanvasActionMarkers()).toHaveLength(1);
+
+		const detailStatic = createRecordingContext();
+		renderer.render(detailStatic.context, createRecordingContext().context, {
+			...input,
+			camera: { ...TEST_CAMERA, zoom: overviewThreshold },
+		});
+		expect(renderer.getStats()).toMatchObject({
+			suppressedPassivePortSlotMarkers: 0,
+			portSlotPresentationLod: "detail",
+		});
+		expect(renderer.getStats().renderedPassivePortSlotMarkers).toBeGreaterThan(0);
 	});
 
 	it("keeps STK accumulation overlay-only and selects the derived committed group body", () => {
@@ -1283,8 +1597,65 @@ describe("port slot rendering", () => {
 			anchorTile: null,
 			selectedTile: null,
 		};
+		const overviewStatic = createRecordingContext();
+		renderer.render(overviewStatic.context, createRecordingContext().context, {
+			...input,
+			camera: {
+				...TEST_CAMERA,
+				zoom: STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM - 0.001,
+			},
+		});
+		expect(renderer.getStats().visiblePortSlotCandidates).toBeGreaterThan(0);
+		expect(renderer.getStats()).toMatchObject({
+			visiblePortSlotMarks: 2,
+			renderedPassivePortSlotMarkers: 0,
+			suppressedPassivePortSlotMarkers: 5,
+			portSlotPresentationLod: "overview",
+		});
+		expect(
+			renderer.hitTestPortSlot(
+				slots,
+				{
+					x: slots.worldPositions[rows[0] * 2] as number,
+					y: slots.worldPositions[rows[0] * 2 + 1] as number,
+				},
+				STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM - 0.001,
+			),
+		).toBe(rows[0]);
+
+		const guidedOverviewStatic = createRecordingContext();
+		renderer.render(guidedOverviewStatic.context, createRecordingContext().context, {
+			...input,
+			camera: {
+				...TEST_CAMERA,
+				zoom: STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM - 0.001,
+			},
+			guidedPortPlacement: {
+				label: "첫 Port",
+				instruction: "ENTER",
+			},
+		});
+		expect(renderer.getStats()).toMatchObject({
+			visiblePortSlotMarks: 3,
+			renderedPassivePortSlotMarkers: 0,
+			suppressedPassivePortSlotMarkers: 4,
+			portSlotPresentationLod: "overview",
+		});
+		expect(renderer.getGuidedCanvasActionMarkers()).toHaveLength(1);
+		expect(guidedOverviewStatic.strokeRectCalls).toBe(overviewStatic.strokeRectCalls + 1);
+
 		renderer.render(staticContext.context, createRecordingContext().context, input);
-		expect(staticContext.fillRectStyles).toContain("rgba(225, 188, 91, 0.14)");
+		expect(renderer.getStats()).toMatchObject({
+			portSlotPresentationLod: "detail",
+			suppressedPassivePortSlotMarkers: 0,
+		});
+		expect(renderer.getStats().renderedPassivePortSlotMarkers).toBeGreaterThan(0);
+		expect(staticContext.fillRectStyles).not.toContain("rgba(225, 188, 91, 0.14)");
+		expect(staticContext.strokeRectCalls).toBeGreaterThan(0);
+		expect(staticContext.strokeRectStyles).toContain("rgba(225, 188, 91, 0.22)");
+		// Only the two genuinely blocked edge-adjacent rows carry a red cross; legal hollow
+		// diamonds must not be painted as rejected candidates.
+		expect(staticContext.strokes.filter((stroke) => stroke.style === "#d96f79")).toHaveLength(2);
 		const staticRedraws = renderer.getStats().staticRedraws;
 		const draftOverlay = createRecordingContext();
 		renderer.render(staticContext.context, draftOverlay.context, {
@@ -1416,6 +1787,13 @@ describe("port slot rendering", () => {
 			equipmentGroups: [{ id: 5, kind: "STK", template: "FLEX", portIds: [1, 2] }],
 		} as const;
 		const presentation = compilePortEquipmentPresentation(physical, equipmentState);
+		const stalePort = { ...ports[0], id: 99, equipmentGroupId: 99 };
+		const stalePresentation = compilePortEquipmentPresentation(physical, {
+			nextPortId: 100,
+			nextEquipmentGroupId: 100,
+			ports: [stalePort],
+			equipmentGroups: [{ id: 99, kind: "STK", template: "FLEX", portIds: [99] }],
+		});
 		const availability = createPreparedPortSlotAvailabilityIndex(
 			physical,
 			prepared,
@@ -1441,6 +1819,14 @@ describe("port slot rendering", () => {
 			selectedTile: null,
 			interactionFocus: "ports" as const,
 		};
+		const staleStatic = createRecordingContext();
+		renderer.render(staleStatic.context, createRecordingContext().context, {
+			...input,
+			portEquipmentPresentation: stalePresentation,
+		});
+		expect(
+			renderer.hitTestPortEquipment(presentation, { x: 5.5, y: 0.5 }, TEST_CAMERA.zoom),
+		).toMatchObject({ portId: 1, equipmentGroupId: 5, distanceMeters: 0 });
 
 		renderer.render(staticContext.context, selectedOverlay.context, {
 			...input,
@@ -1909,6 +2295,12 @@ describe("organization bundle ghost presentation", () => {
 			physicalPaths: fixture.physicalPaths,
 			ghost: null,
 			organizationBundlePreview: preview,
+			guidedOrganizationPlacement: {
+				reservedLeftPixels: 0,
+				reservedRightPixels: 0,
+				reservedTopPixels: 0,
+				reservedBottomPixels: 0,
+			},
 			organizationBundlePlacementGuide: {
 				sourceBounds: {
 					minX: prepared.artifact.bounds.minX - 50,
@@ -1930,8 +2322,11 @@ describe("organization bundle ghost presentation", () => {
 			selectedTile: null,
 		});
 
-		expect(overlay.labels.some((label) => label.includes("CLICK = EXACT CHECK"))).toBe(true);
+		expect(overlay.labels.some((label) => label.includes("표식을 탭해 정확 검사"))).toBe(false);
 		expect(overlay.labels).toContain("SNAP · Z CENTER");
+		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([
+			expect.objectContaining({ role: "organization-placement" }),
+		]);
 		expect(renderer.getStats()).toMatchObject({
 			ghostPathCompiles: 0,
 			organizationBundlePreviewVisibleChunks: expect.any(Number),
@@ -1939,6 +2334,58 @@ describe("organization bundle ghost presentation", () => {
 		});
 		expect(renderer.getStats().organizationBundlePreviewVisibleChunks).toBeGreaterThan(0);
 		expect(renderer.getStats().organizationBundlePreviewVisibleCells).toBeGreaterThan(0);
+	});
+
+	it("keeps a guided touch center on a shallow fitted organization ghost", () => {
+		const fixture = createOrganizationBundleGhostFixture();
+		const prepared = prepareStaticFabOrganizationBundlePlacementPreviewArtifact(fixture.bundle, 0);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		if (!prepared.valid) return;
+		const preview = planStaticFabOrganizationBundlePlacementPreview(
+			fixture.map,
+			prepared.artifact,
+			{ x: 0, y: 0 },
+		);
+		const zoom = 1.6;
+		const worldCenterX =
+			preview.anchor.x + (prepared.artifact.bounds.minX + prepared.artifact.bounds.maxX) / 2;
+		const worldCenterY =
+			preview.anchor.y + (prepared.artifact.bounds.minY + prepared.artifact.bounds.maxY) / 2;
+		const renderer = new TileRenderer();
+		renderer.render(createRecordingContext().context, createRecordingContext().context, {
+			map: fixture.map,
+			physicalPaths: fixture.physicalPaths,
+			ghost: null,
+			organizationBundlePreview: preview,
+			guidedOrganizationPlacement: {
+				reservedLeftPixels: 70,
+				reservedRightPixels: 8,
+				reservedTopPixels: 250,
+				reservedBottomPixels: 170,
+			},
+			camera: {
+				offsetX: 480 - worldCenterX * zoom,
+				offsetY: 430 - worldCenterY * zoom,
+				zoom,
+				rotation: 0,
+			},
+			width: 960,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+
+		const marker = renderer
+			.getGuidedCanvasActionMarkers()
+			.find((candidate) => candidate.role === "organization-placement");
+		expect(marker).toBeDefined();
+		expect(marker?.x).toBeGreaterThanOrEqual(70 + 26);
+		expect(marker?.x).toBeLessThanOrEqual(960 - 8 - 26);
+		expect(marker?.y).toBeGreaterThanOrEqual(250 + 26);
+		expect(marker?.y).toBeLessThanOrEqual(640 - 170 - 26);
 	});
 
 	it("renders every visible cell in a factory-scale organization ghost", () => {
@@ -2230,7 +2677,7 @@ describe("physical rail presentation rendering", () => {
 		const screenPaths = installRecordingPath2D();
 		const document = createOpenEastTerminal();
 		const physical = compilePhysicalRail(document.map);
-		const plan = planRailConstruction(document.map, { x: 20, y: 20 }, { x: 24, y: 20 });
+		const plan = planRailConstruction(document.map, { x: 1, y: 0 }, { x: 1, y: 4 });
 		const evaluation = new RailDraftEvaluator().evaluate(document.map, physical, plan);
 		expect(evaluation.valid).toBe(false);
 		const renderer = new TileRenderer();
@@ -3036,7 +3483,7 @@ describe("draft clearance rendering", () => {
 	it("draws a red capsule corridor when the shared evaluation rejects topology", () => {
 		const document = createOpenEastTerminal();
 		const physical = compilePhysicalRail(document.map);
-		const plan = planRailConstruction(document.map, { x: 20, y: 20 }, { x: 24, y: 20 });
+		const plan = planRailConstruction(document.map, { x: 1, y: 0 }, { x: 1, y: 4 });
 		const evaluation = new RailDraftEvaluator().evaluate(document.map, physical, plan);
 		expect(evaluation.valid).toBe(false);
 		expect(evaluation.envelopes?.count).toBeGreaterThan(0);

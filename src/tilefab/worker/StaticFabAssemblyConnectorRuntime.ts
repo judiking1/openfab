@@ -226,6 +226,7 @@ export function prepareStaticFabAssemblyConnectorInSession(
 			prospective.map,
 			prospective.portEquipment,
 			prospective.organizations,
+			source.relationships,
 		);
 		const incrementalChecksum = checksumRailPatchResult(snapshot.checksum, {
 			changes: plan.mutations,

@@ -19,8 +19,10 @@ export function guidedBuildInputHint(
 				return ["TOUCH DRAG", "LMB DRAG"];
 			case "organization.select":
 				return ["TAP", "ENTER / SPACE"];
+			case "selection.inspect-target":
+				return ["TAP", "ENTER / SPACE"];
 			case "command.apply":
-				return ["적용 버튼", "ENTER"];
+				return ["적용 버튼", "TAB → APPLY → ENTER"];
 			default:
 				return null;
 		}

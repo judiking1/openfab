@@ -67,7 +67,7 @@ for (const artifact of provenance.artifacts) {
 	if (payload.payloadKind !== "openfab-prepared-synthetic-fab-starter") {
 		failures.push(`synthetic artifact payload kind mismatch: ${artifact.path}`);
 	}
-	if (payload.certificationContract !== "independent-materialization-v1") {
+	if (payload.certificationContract !== "independent-materialization-v2") {
 		failures.push(`synthetic artifact certification contract mismatch: ${artifact.path}`);
 	}
 }

@@ -9,6 +9,7 @@ import type { ProductionBayBuildStepOwner } from "../core/ProductionBayModulePla
 import type { DirectedRailEdge } from "../core/RailModuleOwnership";
 import { planRailRouteBatch } from "../core/RailTemplateCatalog";
 import { ALL_DIRECTIONS, bitCount, directionBetween, moveCell } from "../core/railShape";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
 	staticFabOrganizationEdgeKey,
@@ -929,6 +930,7 @@ function createPersistenceEvidence(
 		0,
 		emptyPortEquipmentState(),
 		organizations.compilation.organizations,
+		emptyStaticFabAssemblyRelationshipState(),
 	);
 	if (
 		sourceCapture.snapshot.checksum !== organizations.authoredChecksum ||

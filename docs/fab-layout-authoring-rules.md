@@ -105,6 +105,57 @@ Worker certification, migration 계약을 함께 갖춘 뒤에만 공개할 수 
 겉으로 닫힌 사각형처럼 보이는 것은 충분하지 않다. SCC, gateway reachability, physical
 curve, clearance, port serviceability가 모두 통과해야 한다.
 
+### 4.1 계층 분리와 삭제
+
+`Detach`는 선택한 semantic 조직과 부모 사이의 관계와 그 관계를 구성하는 정확히 인증된
+connector cut만 제거하고 선택 조직의 전체 `EFFECTIVE` subtree를 보존한다. `Delete`만 선택
+조직의 배타적 소유 subtree와 그 Rail/Port/equipment 의존성을 제거할 수 있다. 두 명령은 같은
+삭제 집합이나 확인 문구를 공유하지 않는다.
+
+- attached Bay Bank는 정확히 하나의 root Fab 부모를 가질 때만 Detach 또는 Delete 후보가 된다.
+- detached Bay Bank는 Delete만 가능하다.
+- root Fab은 부모 관계가 없으므로 Detach할 수 없고, Delete만 별도 인증 대상이 된다.
+- Fab-to-Fab bridge는 미래의 explicit typed command이며 현재 Fab Detach로 추측하지 않는다.
+- 허용된 관계 cut 밖의 organization, rail module, switch, Port, equipment ownership/reference가
+  영향 범위에 들어오거나 완전한 cut이 둘 이상이면 자동 cascade하지 않고 차단한다.
+- runtime connector receipt, 이름, generic `kind`, 선택 bounds는 native reopen 뒤의 관계 identity나
+  삭제 권한이 아니다. relationship schema/producer 활성화 뒤 새로 authored되는 assembly 관계는
+  versioned typed record로 명시하고,
+  현재 DAG/Rail/exact ownership에서는 그 관계의 최신 유효성과 안전한 제거 가능성을 별도로
+  다시 증명해야 한다.
+- organization DAG는 logical hierarchy truth다. typed relationship record는 모든 DAG edge를
+  복제하지 않고, 하나의 current parent 아래에서 명시적으로 authored된 physical relationship만
+  인증한다. generic reparent나 legacy migration으로 만들어진 record 없는 DAG edge는 유효하지만
+  unmanaged이며 자동 Detach geometry를 부여하지 않는다. V1 record는 ordered participant와 그중
+  실제로 관리하는 sorted child subset을 분리하고, authored review policy를 현재 detachability나
+  삭제 권한으로 캐시하지 않는다. 정확한 계약은
+  `docs/static-fab-assembly-relationship-model-v1.md`에 고정한다.
+- target/parent module이 같은 vertex에 닿는 raw pair나 그 parent weak component는 connector
+  terminal/corridor 증명이 아니다. 한 junction에서 여러 module candidate가 생길 수 있으므로
+  directed branch/merge seam과 양쪽 semantic endpoint를 별도로 인증한다.
+- 모든 parent component가 정확히 하나의 branch-to-merge path로 선택 Bank와 canonical sibling
+  Bank를 잇고 selected incidence를 빠짐없이 소비하면 구조적 complete cut으로 기록할 수 있다.
+  이 결과만으로는 runtime Connector purpose/provenance나 제거 후 closure가 증명되지 않으므로
+  mutation, Worker, history 또는 UI Apply 권한이 아니다.
+- complete cut은 현재 source에서 다시 해석한 뒤에만 private clone에서 prospective 평가한다.
+  cut edge만 정확히 제거하고 non-cut edge를 모두 보존하며, post-cut whole-module ownership을
+  전부 재구성한다. mixed-owner/owned-unowned 재결합, `100,000`개 post-cut module 초과, 열린
+  authored/physical component, selected 또는 retained region의 불완전 module coverage, `+1`이
+  아닌 authored/physical component delta, 비어 있는 retained Fab direct membership, 깨진
+  raw/compiled Port attachment, cursor 변화는 모두 차단한다.
+- prospective 성공도 `PROSPECTIVE_BANK_DETACH_ONLY / NO_MUTATION_AUTHORITY` 증거일 뿐이다.
+  runtime purpose/provenance를 구조에서 추측하지 않는다. OpenFab은 structural equivalence를
+  relationship identity로 삼지 않고 versioned persisted relationship domain을 사용한다. 다만
+  pairwise Connector와 branched production Fab을 모두 표현하는 exact footprint 계약은 V1 model로
+  고정됐고, production type, migration, Worker/history/native-reopen evidence가 끝나기 전에는
+  mutation/UI Apply 경계를 만들지 않는다.
+- review/cancel은 project-neutral이고, Apply는 명시적이며, Apply/Undo/Redo는 각각 한 atomic
+  history event와 한 typed Worker patch로 처리한다.
+
+세부 action matrix, Worker/adoption, focus, native reopen, scale 기준은
+`docs/semantic-bank-fab-detach-delete-audit.md`에 고정한다. 해당 증거가 완료되기 전에는
+Bank/Fab destructive action을 UI에 노출하지 않는다.
+
 ## 5. 생성 archetype
 
 Archetype은 카드 조각 모음이 아니라 위 규격을 배치하는 generator policy다.

@@ -21,7 +21,12 @@ import {
 	type PortType,
 	portRecordError,
 } from "./PortRecord";
-import { buildRailModuleOwnershipIndex, type DirectedRailEdge } from "./RailModuleOwnership";
+import {
+	buildRailModuleOwnershipIndex,
+	type DirectedRailEdge,
+	type RailModuleOwnershipIndex,
+	railModuleOwnershipIndexMatchesMap,
+} from "./RailModuleOwnership";
 import {
 	ALL_DIRECTIONS,
 	type Direction,
@@ -266,6 +271,16 @@ export type PreparedStaticFabOrganizationBundleResult =
 			readonly reason: string;
 	  };
 
+/** Reuse only an ownership index identity-bound to this exact authored map generation. */
+export function resolveStaticFabOrganizationBundleCaptureOwnership(
+	map: TileMap,
+	preparedOwnership?: RailModuleOwnershipIndex,
+): RailModuleOwnershipIndex {
+	return preparedOwnership && railModuleOwnershipIndexMatchesMap(preparedOwnership, map)
+		? preparedOwnership
+		: buildRailModuleOwnershipIndex(map);
+}
+
 /**
  * Capture one or more persistent organization roots as a deterministic portable graph.
  * DIRECT includes only the requested records; EFFECTIVE additionally includes descendants.
@@ -277,6 +292,7 @@ export function captureStaticFabOrganizationBundle(
 	state: StaticFabOrganizationState,
 	requestedRootIds: readonly number[],
 	mode: StaticFabOrganizationSelectionMode = "DIRECT",
+	preparedOwnership?: RailModuleOwnershipIndex,
 ): StaticFabOrganizationBundleCaptureResult {
 	if (!Number.isSafeInteger(patchSequence) || patchSequence < 0) {
 		return captureFailure("INVALID_SOURCE", "정적 FAB patch sequence가 유효하지 않습니다");
@@ -351,7 +367,8 @@ export function captureStaticFabOrganizationBundle(
 	}
 	const resolvedEdgeKeys = new Set<string>();
 	const resolvedSwitchIds = new Set<number>();
-	const selectedModules = buildRailModuleOwnershipIndex(map).modules.filter((module) => {
+	const ownership = resolveStaticFabOrganizationBundleCaptureOwnership(map, preparedOwnership);
+	const selectedModules = ownership.modules.filter((module) => {
 		const touchesEdge = module.eraseEdges.some((edge) =>
 			selectedEdgeByKey.has(staticFabOrganizationEdgeKey(edge)),
 		);
@@ -592,7 +609,7 @@ export function captureStaticFabOrganizationBundle(
 			}),
 		});
 	});
-	const bundle: StaticFabOrganizationBundle = Object.freeze({
+	const bundleSeed: StaticFabOrganizationBundle = {
 		version: STATIC_FAB_ORGANIZATION_BUNDLE_VERSION,
 		captureMode: mode,
 		rootOrganizationIndices: Object.freeze(
@@ -606,6 +623,16 @@ export function captureStaticFabOrganizationBundle(
 		ports: Object.freeze(ports),
 		equipmentGroups: Object.freeze(equipmentGroups),
 		organizations: Object.freeze(organizations),
+	};
+	// A portable cut can remove neighboring branch context and make the canonical module grammar
+	// coalesce rail edges that were distinct modules in the source map. The bundle therefore reports
+	// the reproducible isolated payload count, while selectedModules above remains the completeness
+	// gate that proves the requested memberships align with whole authored source modules.
+	const portableMap = reconstructPortableBundleMap(bundleSeed);
+	if (typeof portableMap === "string") return captureFailure("INVALID_BUNDLE", portableMap);
+	const bundle: StaticFabOrganizationBundle = Object.freeze({
+		...bundleSeed,
+		sourceModuleCount: buildRailModuleOwnershipIndex(portableMap).modules.length,
 	});
 	const bundleError = staticFabOrganizationBundleError(bundle);
 	if (bundleError) return captureFailure("INVALID_BUNDLE", bundleError);
@@ -1011,7 +1038,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 	if (typeof reconstructed === "string") return reconstructed;
 	const ownership = buildRailModuleOwnershipIndex(reconstructed);
 	if (ownership.modules.length !== bundle.sourceModuleCount) {
-		return `조직 번들 source 모듈 수가 실제 ${ownership.modules.length}개와 일치하지 않습니다`;
+		return `조직 번들 source 모듈 수 ${bundle.sourceModuleCount}개가 복원 결과 ${ownership.modules.length}개와 일치하지 않습니다`;
 	}
 
 	const portEquipment = runtimePortEquipmentState(bundle);

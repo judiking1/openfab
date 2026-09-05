@@ -6,6 +6,7 @@ import { RailDocument } from "../core/RailDocument";
 import { DIR_E, DIR_W } from "../core/railShape";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { resolvePortAttachment } from "./PortAttachmentResolver";
+import { compilePortEquipmentPresentation } from "./PortEquipmentPresentation";
 import {
 	compileBasePortSlots,
 	compilePortSlotExclusionMask,
@@ -156,6 +157,52 @@ describe("PortSlotCompiler", () => {
 
 		expect(availability.portCount).toBe(ports.length);
 		expect(sourcePathCountReads).toBeLessThan(layout.pathIntervalRemap.sourcePathCount * 5);
+	});
+
+	it("matches fallback availability at the 600 mm boundary beyond 50 km", () => {
+		const document = straightDocument(50_010);
+		const layout = compilePhysicalRail(document.map);
+		const slots = compileBasePortSlots(layout, "EQ");
+		const row = slots.routeXs.indexOf(50_000);
+		expect(row).toBeGreaterThanOrEqual(0);
+		for (const [stationMillimeters, expectedStatus] of [
+			[99, PORT_SLOT_STATUS.PORT_CLEARANCE_CONFLICT],
+			[100, PORT_SLOT_STATUS.LEGAL],
+		] as const) {
+			const port = {
+				id: 1,
+				equipmentGroupId: 1,
+				route: {
+					kind: "CARDINAL_CELL" as const,
+					x: 50_001,
+					z: 0,
+					from: slots.routeFromDirections[row] as typeof DIR_W,
+					to: slots.routeToDirections[row] as typeof DIR_E,
+				},
+				stationMillimeters,
+				side: "CENTER" as const,
+				lateralOffsetMillimeters: 0,
+				direction: "WITH_TRAVEL" as const,
+				portType: "OHB" as const,
+				barcode: null,
+			};
+			const state: PortEquipmentState = {
+				nextPortId: 2,
+				nextEquipmentGroupId: 2,
+				ports: [port],
+				equipmentGroups: [{ id: 1, kind: "OHB", template: "SINGLE", portIds: [1] }],
+			};
+			const fallback = new PortSlotAvailabilityIndex(layout, state, "EQ");
+			const presentation = compilePortEquipmentPresentation(layout, state);
+			const reused = new PortSlotAvailabilityIndex(
+				layout,
+				state,
+				"EQ",
+				presentation.resolvedPositions,
+			);
+			expect(reused.statusFor(slots, row)).toEqual(fallback.statusFor(slots, row));
+			expect(reused.statusFor(slots, row).status).toBe(expectedStatus);
+		}
 	});
 
 	it("reserves slots between FLEX STK ports as one derived connected-run body", () => {

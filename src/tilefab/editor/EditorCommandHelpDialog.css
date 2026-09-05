@@ -13,13 +13,208 @@
 	display: grid;
 	width: min(760px, calc(100vw - 32px));
 	height: min(720px, calc(100dvh - 32px));
-	grid-template-rows: 60px 54px 30px minmax(0, 1fr);
+	grid-template-rows: 60px auto 54px 30px minmax(0, 1fr);
 	overflow: hidden;
 	border: 1px solid #405053;
 	border-radius: 6px;
 	color: #dce6e7;
 	background: #0c1213;
 	box-shadow: 0 24px 70px rgb(0 0 0 / 55%);
+}
+
+.tilefab-command-help[data-command-catalog-expanded="false"] {
+	height: auto;
+	max-height: min(720px, calc(100dvh - 32px));
+	grid-template-rows: 60px minmax(0, 1fr) auto;
+}
+
+.tilefab-command-help-intro {
+	display: grid;
+	max-height: min(300px, 42dvh);
+	gap: 8px;
+	overflow-y: auto;
+	padding: 10px 12px 0;
+	scrollbar-color: #344346 transparent;
+}
+
+.tilefab-command-help-intro-shell {
+	display: grid;
+	min-height: 0;
+}
+
+.tilefab-command-help-scroll-cue {
+	display: flex;
+	min-width: 44px;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	margin: 7px 12px 0;
+	padding: 0 12px;
+	border: 1px solid #4d7e83;
+	border-radius: 4px;
+	color: #dff8fa;
+	background: linear-gradient(180deg, #183235, #122629);
+	font-size: 10px;
+	font-weight: 720;
+	cursor: pointer;
+}
+
+.tilefab-command-help-scroll-cue[hidden] {
+	display: none;
+}
+
+.tilefab-command-help-scroll-cue:hover,
+.tilefab-command-help-scroll-cue:focus-visible {
+	border-color: #71cbd1;
+	outline: none;
+	color: #fff;
+	background: #1a383b;
+	box-shadow: 0 0 0 1px #71cbd1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.tilefab-command-help-scroll-cue svg {
+		animation: tilefab-command-help-scroll-cue 1.25s ease-in-out infinite;
+	}
+}
+
+@keyframes tilefab-command-help-scroll-cue {
+	0%,
+	100% {
+		transform: translateY(-1px);
+	}
+
+	50% {
+		transform: translateY(2px);
+	}
+}
+
+.tilefab-command-help-context {
+	display: grid;
+	gap: 9px;
+	padding: 10px;
+	border: 1px solid #40575a;
+	border-radius: 5px;
+	background: #10191a;
+}
+
+.tilefab-command-help-context > header {
+	display: grid;
+	grid-template-columns: 32px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 9px;
+}
+
+.tilefab-command-help-context > header > span {
+	display: grid;
+	width: 32px;
+	height: 32px;
+	place-items: center;
+	border-radius: 50%;
+	color: #9be8eb;
+	background: #193033;
+}
+
+.tilefab-command-help-context > header p {
+	display: grid;
+	gap: 2px;
+	margin: 0;
+}
+
+.tilefab-command-help-context > header small {
+	color: #76cbd0;
+	font-size: 9px;
+	font-weight: 760;
+}
+
+.tilefab-command-help-context > header strong {
+	font-size: 12px;
+}
+
+.tilefab-command-help-context > header button,
+.tilefab-command-help-guided button {
+	min-height: 44px;
+	padding: 0 11px;
+	border: 1px solid #4d7e83;
+	border-radius: 4px;
+	color: #dff8fa;
+	background: #1a3437;
+	font-size: 9px;
+	cursor: pointer;
+}
+
+.tilefab-command-help-context-summary {
+	margin: 0;
+	color: #aebcbd;
+	font-size: 10px;
+	line-height: 1.45;
+}
+
+.tilefab-command-help-context ol {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 6px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.tilefab-command-help-context li {
+	display: grid;
+	align-content: start;
+	gap: 4px;
+	padding: 8px;
+	border: 1px solid #2d3b3d;
+	border-radius: 4px;
+	background: #0b1213;
+}
+
+.tilefab-command-help-context li strong {
+	color: #d8c675;
+	font-size: 9px;
+}
+
+.tilefab-command-help-context li span {
+	color: #899a9c;
+	font-size: 9px;
+	line-height: 1.45;
+}
+
+.tilefab-command-help-guided {
+	display: grid;
+	grid-template-columns: 34px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 10px;
+	border: 1px solid #3e6266;
+	border-radius: 5px;
+	background: #122123;
+}
+
+.tilefab-command-help-guided > span {
+	display: grid;
+	width: 32px;
+	height: 32px;
+	place-items: center;
+	border-radius: 50%;
+	color: #9be8eb;
+	background: #193033;
+}
+
+.tilefab-command-help-guided p {
+	display: grid;
+	gap: 3px;
+	margin: 0;
+}
+
+.tilefab-command-help-guided p strong {
+	font-size: 11px;
+}
+
+.tilefab-command-help-guided p small {
+	color: #8fa1a3;
+	font-size: 9px;
 }
 
 .tilefab-command-help > header {
@@ -148,6 +343,49 @@
 	font-size: 11px;
 }
 
+.tilefab-command-help-catalog-gate {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+	margin: 12px;
+	padding: 12px;
+	border: 1px solid #344548;
+	border-radius: 5px;
+	background: #0a1011;
+}
+
+.tilefab-command-help-catalog-gate > span {
+	display: grid;
+	gap: 4px;
+}
+
+.tilefab-command-help-catalog-gate strong {
+	font-size: 11px;
+}
+
+.tilefab-command-help-catalog-gate small {
+	color: #819295;
+	font-size: 9px;
+}
+
+.tilefab-command-help-catalog-gate button {
+	min-height: 44px;
+	padding: 0 14px;
+	border: 1px solid #526366;
+	border-radius: 4px;
+	color: #d6e1e2;
+	background: #172022;
+	font-size: 10px;
+	cursor: pointer;
+}
+
+.tilefab-command-help-catalog-gate button:hover,
+.tilefab-command-help-catalog-gate button:focus-visible {
+	border-color: #71cbd1;
+	color: #effcfd;
+}
+
 .tilefab-command-help-results {
 	overflow: auto;
 	padding: 0 12px 14px;
@@ -274,7 +512,45 @@
 	.tilefab-command-help {
 		width: calc(100vw - 16px);
 		height: calc(100dvh - 16px);
-		grid-template-rows: 60px 62px 30px minmax(0, 1fr);
+		grid-template-rows: 60px auto 62px 30px minmax(0, 1fr);
+	}
+
+	.tilefab-command-help[data-command-catalog-expanded="false"] {
+		height: auto;
+		max-height: calc(100dvh - 16px);
+		grid-template-rows: 60px minmax(0, 1fr) auto;
+	}
+
+	.tilefab-command-help-guided {
+		grid-template-columns: 32px minmax(0, 1fr);
+	}
+
+	.tilefab-command-help-context > header {
+		grid-template-columns: 32px minmax(0, 1fr);
+	}
+
+	.tilefab-command-help-context > header button,
+	.tilefab-command-help-guided button {
+		grid-column: 1 / -1;
+		min-height: 44px;
+	}
+
+	.tilefab-command-help-context ol {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.tilefab-command-help-catalog-gate {
+		grid-template-columns: minmax(0, 1fr);
+		margin: 8px;
+	}
+
+	.tilefab-command-help-intro {
+		max-height: min(330px, 44dvh);
+		padding-inline: 8px;
+	}
+
+	.tilefab-command-help-scroll-cue {
+		margin-inline: 8px;
 	}
 
 	.tilefab-command-help-search {

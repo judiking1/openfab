@@ -11,6 +11,10 @@ export type EditorCommandContext =
 	| "global"
 	| "canvas"
 	| "construction"
+	| "rail-keyboard"
+	| "guided-port-keyboard"
+	| "guided-reuse-inspect"
+	| "inspect-area-keyboard"
 	| "selection"
 	| "placement"
 	| "template"
@@ -321,6 +325,20 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 		keywords: ["toggle", "selection", "선택"],
 	}),
 	command({
+		id: "selection.inspect-target",
+		group: "selection",
+		contexts: ["guided-reuse-inspect"],
+		label: "원본 Loop 항목 선택",
+		glyph: "select",
+		bindings: [
+			pointer("left", "click", "LMB"),
+			key(["Enter", "NumpadEnter", "Space"], ["ENTER / SPACE"]),
+		],
+		repeat: "once",
+		textInput: "block",
+		keywords: ["inspect", "selection", "loop", "anchor", "원본", "루프", "선택"],
+	}),
+	command({
 		id: "selection.add-area",
 		group: "selection",
 		contexts: ["selection", "canvas", "construction"],
@@ -341,6 +359,52 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 		repeat: "allow",
 		textInput: "block",
 		keywords: ["area", "marquee", "subtract", "제외"],
+	}),
+	command({
+		id: "selection.area-navigate",
+		group: "selection",
+		contexts: ["inspect-area-keyboard"],
+		label: "부분 선택 범위 이동",
+		glyph: "move",
+		bindings: [
+			key(
+				[...cameraCodes.up, ...cameraCodes.down, ...cameraCodes.left, ...cameraCodes.right],
+				["WASD / ↑↓←→"],
+			),
+		],
+		repeat: "allow",
+		textInput: "block",
+		keywords: ["area", "selection", "keyboard", "부분", "영역", "키보드"],
+	}),
+	command({
+		id: "placement.navigate",
+		group: "construction",
+		contexts: ["placement"],
+		label: "배치 고스트 이동",
+		glyph: "move",
+		bindings: [
+			key(
+				[...cameraCodes.up, ...cameraCodes.down, ...cameraCodes.left, ...cameraCodes.right],
+				["WASD / ↑↓←→"],
+			),
+		],
+		repeat: "allow",
+		textInput: "block",
+		keywords: ["placement", "ghost", "keyboard", "배치", "고스트", "이동"],
+	}),
+	command({
+		id: "placement.apply",
+		group: "construction",
+		contexts: ["placement"],
+		label: "현재 위치에 배치",
+		glyph: "apply",
+		bindings: [
+			key(["Enter", "NumpadEnter", "Space"], ["ENTER / SPACE"]),
+			key(["Enter", "NumpadEnter", "Space"], ["SHIFT", "ENTER / SPACE"], { shift: true }),
+		],
+		repeat: "once",
+		textInput: "block",
+		keywords: ["placement", "apply", "keyboard", "배치", "확정"],
 	}),
 	command({
 		id: "canvas.primary-click",
@@ -370,6 +434,22 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 		repeat: "allow",
 		textInput: "block",
 		keywords: ["mouse", "drag", "build", "드래그"],
+	}),
+	command({
+		id: "construction.endpoint-navigate",
+		group: "construction",
+		contexts: ["rail-keyboard"],
+		label: "키보드 레일 끝점 이동",
+		glyph: "move",
+		bindings: [
+			key(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"], ["← ↑ ↓ →"]),
+			key(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"], ["SHIFT", "← ↑ ↓ →"], {
+				shift: true,
+			}),
+		],
+		repeat: "allow",
+		textInput: "block",
+		keywords: ["rail", "cursor", "endpoint", "keyboard", "레일", "끝점", "키보드"],
 	}),
 	command({
 		id: "camera.pan-pointer",
@@ -688,7 +768,12 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 	command({
 		id: "equipment.navigate",
 		group: "equipment",
-		contexts: ["equipment-group-edit", "equipment-membership-eq", "equipment-membership-stk"],
+		contexts: [
+			"guided-port-keyboard",
+			"equipment-group-edit",
+			"equipment-membership-eq",
+			"equipment-membership-stk",
+		],
 		label: "포트·장비 커서 이동",
 		glyph: "move",
 		bindings: [
@@ -700,6 +785,17 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 		repeat: "allow",
 		textInput: "block",
 		keywords: ["port", "equipment", "navigate", "포트", "장비"],
+	}),
+	command({
+		id: "equipment.complete-stk",
+		group: "equipment",
+		contexts: ["guided-port-keyboard"],
+		label: "STK 그룹 확정",
+		glyph: "apply",
+		bindings: [key(["Enter", "NumpadEnter"], ["SHIFT", "ENTER"], { shift: true })],
+		repeat: "once",
+		textInput: "block",
+		keywords: ["stocker", "complete", "commit", "stocker 확정", "STK 확정"],
 	}),
 	command({
 		id: "equipment.switch-endpoint",
@@ -738,6 +834,9 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 		contexts: [
 			"arrangement",
 			"assembly-connector",
+			"rail-keyboard",
+			"guided-port-keyboard",
+			"inspect-area-keyboard",
 			"equipment-group-edit",
 			"equipment-membership-eq",
 			"equipment-membership-stk",
@@ -881,6 +980,8 @@ export function inspectEditorCommandCollisions(): readonly EditorCommandCollisio
 const EDITOR_COMMAND_CONTEXTS: readonly EditorCommandContext[] = Object.freeze([
 	"canvas",
 	"construction",
+	"rail-keyboard",
+	"guided-port-keyboard",
 	"selection",
 	"placement",
 	"template",

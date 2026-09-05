@@ -49,6 +49,10 @@ import {
 } from "../core/PortRecord";
 import { classifyRailCell } from "../core/RailCellClassification";
 import { ALL_DIRECTIONS, bitCount, moveCell, oppositeDirection } from "../core/railShape";
+import {
+	createStaticFabAssemblyRelationshipState,
+	staticFabAssemblyRelationshipStateSourceError,
+} from "../core/StaticFabAssemblyRelationship";
 import { staticFabPortSpacingConflict } from "../core/StaticFabBlueprint";
 import {
 	STATIC_FAB_ORGANIZATION_COLORS,
@@ -123,6 +127,11 @@ import {
 	type OpenFabProjectOrganizationRecord,
 	type OpenFabProjectOrganizationSection,
 } from "./OpenFabProjectOrganizations";
+import {
+	createEmptyOpenFabProjectRelationshipSection,
+	OPENFAB_RELATIONSHIP_SECTION_SCHEMA_VERSION,
+	type OpenFabProjectRelationshipSection,
+} from "./OpenFabProjectRelationships";
 
 type LegacyOperationalConfigurationStateV1 = Omit<
 	OperationalConfigurationState,
@@ -130,6 +139,12 @@ type LegacyOperationalConfigurationStateV1 = Omit<
 > & {
 	readonly schemaVersion: typeof OPERATIONAL_CONFIGURATION_LEGACY_SCHEMA_VERSION;
 };
+
+type OpenFabProjectVersionTen = Omit<OpenFabProject, "schemaVersion" | "relationships"> & {
+	readonly schemaVersion: 10;
+};
+
+type OpenFabProjectAuthoredSource = OpenFabProject | OpenFabProjectVersionTen;
 
 export const OPENFAB_PROJECT_MAX_JSON_CHARACTERS = 128 * 1024 * 1024;
 export const OPENFAB_PROJECT_MAX_RAIL_CELLS = 1_000_000;
@@ -148,7 +163,8 @@ export type OpenFabProjectParseErrorCode =
 	| "DUPLICATE_VALUE"
 	| "INVALID_RAIL"
 	| "INVALID_PORT_EQUIPMENT"
-	| "INVALID_ORGANIZATION";
+	| "INVALID_ORGANIZATION"
+	| "INVALID_RELATIONSHIP";
 
 export class OpenFabProjectParseError extends Error {
 	readonly code: OpenFabProjectParseErrorCode;
@@ -164,7 +180,7 @@ export class OpenFabProjectParseError extends Error {
 
 export interface OpenFabProjectParseResult {
 	readonly project: OpenFabProject;
-	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | null;
+	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | null;
 }
 
 export function parseOpenFabProjectJson(source: string): OpenFabProjectParseResult {
@@ -189,44 +205,137 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	const schemaVersion = expectInteger(root.schemaVersion, "$.schemaVersion");
 	if (schemaVersion === OPENFAB_PROJECT_SCHEMA_VERSION) {
-		return Object.freeze({ project: validateVersionTen(root), migratedFromVersion: null });
+		return Object.freeze({ project: validateVersionEleven(root), migratedFromVersion: null });
+	}
+	if (schemaVersion === 10) {
+		return Object.freeze({
+			project: migrateVersionTen(validateVersionTen(root)),
+			migratedFromVersion: 10,
+		});
 	}
 	if (schemaVersion === 9) {
-		return Object.freeze({ project: migrateVersionNine(root), migratedFromVersion: 9 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionNine(root)),
+			migratedFromVersion: 9,
+		});
 	}
 	if (schemaVersion === 8) {
-		return Object.freeze({ project: migrateVersionEight(root), migratedFromVersion: 8 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionEight(root)),
+			migratedFromVersion: 8,
+		});
 	}
 	if (schemaVersion === 7) {
-		return Object.freeze({ project: migrateVersionSeven(root), migratedFromVersion: 7 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionSeven(root)),
+			migratedFromVersion: 7,
+		});
 	}
 	if (schemaVersion === 6) {
-		return Object.freeze({ project: migrateVersionSix(root), migratedFromVersion: 6 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionSix(root)),
+			migratedFromVersion: 6,
+		});
 	}
 	if (schemaVersion === 5) {
-		return Object.freeze({ project: migrateVersionFive(root), migratedFromVersion: 5 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionFive(root)),
+			migratedFromVersion: 5,
+		});
 	}
 	if (schemaVersion === 4) {
-		return Object.freeze({ project: migrateVersionFour(root), migratedFromVersion: 4 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionFour(root)),
+			migratedFromVersion: 4,
+		});
 	}
 	if (schemaVersion === 3) {
-		return Object.freeze({ project: migrateVersionThree(root), migratedFromVersion: 3 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionThree(root)),
+			migratedFromVersion: 3,
+		});
 	}
 	if (schemaVersion === 2) {
-		return Object.freeze({ project: migrateVersionTwo(root), migratedFromVersion: 2 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionTwo(root)),
+			migratedFromVersion: 2,
+		});
 	}
 	if (schemaVersion === 1) {
-		return Object.freeze({ project: migrateVersionOne(root), migratedFromVersion: 1 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionOne(root)),
+			migratedFromVersion: 1,
+		});
 	}
 	if (schemaVersion === 0) {
-		return Object.freeze({ project: migrateVersionZero(root), migratedFromVersion: 0 });
+		return Object.freeze({
+			project: migrateVersionTen(migrateVersionZero(root)),
+			migratedFromVersion: 0,
+		});
 	}
 	fail("UNSUPPORTED_VERSION", "$.schemaVersion", `unsupported schema version ${schemaVersion}`);
 }
 
-export function serializeOpenFabProject(project: OpenFabProject): string {
-	const normalized = validateVersionTen(expectRecord(project, "$", "INVALID_ROOT"));
-	return `${JSON.stringify(sortJsonObjectKeys(normalized), null, "\t")}\n`;
+export function serializeOpenFabProject(
+	project: OpenFabProject,
+	maximumCharacters = OPENFAB_PROJECT_MAX_JSON_CHARACTERS,
+): string {
+	if (
+		!Number.isSafeInteger(maximumCharacters) ||
+		maximumCharacters <= 0 ||
+		maximumCharacters > OPENFAB_PROJECT_MAX_JSON_CHARACTERS
+	) {
+		throw new Error("OpenFab project serialization limit is invalid.");
+	}
+	const normalized = validateVersionEleven(expectRecord(project, "$", "INVALID_ROOT"));
+	const sorted = sortJsonObjectKeys(normalized);
+	const characterLength = prettyJsonCharacterLength(sorted) + 1;
+	if (characterLength > maximumCharacters) {
+		fail(
+			"LIMIT_EXCEEDED",
+			"$",
+			`project JSON exceeds the ${maximumCharacters}-character serialization limit`,
+		);
+	}
+	const serialized = `${JSON.stringify(sorted, null, "\t")}\n`;
+	if (serialized.length !== characterLength) {
+		throw new Error("OpenFab project serialization size preflight diverged.");
+	}
+	return serialized;
+}
+
+function prettyJsonCharacterLength(value: unknown, depth = 0): number {
+	if (value === null || typeof value === "boolean" || typeof value === "number") {
+		return JSON.stringify(value).length;
+	}
+	if (typeof value === "string") return JSON.stringify(value).length;
+	if (Array.isArray(value)) {
+		if (value.length === 0) return 2;
+		let length = 3 + depth;
+		for (let index = 0; index < value.length; index++) {
+			length += depth + 1 + prettyJsonCharacterLength(value[index], depth + 1) + 1;
+			if (index + 1 < value.length) length++;
+		}
+		return length;
+	}
+	if (typeof value === "object") {
+		const entries = Object.entries(value);
+		if (entries.length === 0) return 2;
+		let length = 3 + depth;
+		for (let index = 0; index < entries.length; index++) {
+			const [key, nested] = entries[index] as [string, unknown];
+			length +=
+				depth +
+				1 +
+				JSON.stringify(key).length +
+				2 +
+				prettyJsonCharacterLength(nested, depth + 1) +
+				1;
+			if (index + 1 < entries.length) length++;
+		}
+		return length;
+	}
+	throw new Error("OpenFab project contains a non-JSON value after validation.");
 }
 
 /**
@@ -245,7 +354,7 @@ export function parseOpenFabProjectBlueprintValue(value: unknown): OpenFabProjec
 	return record;
 }
 
-function validateVersionTen(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function validateVersionEleven(root: Readonly<Record<string, unknown>>): OpenFabProject {
 	expectExactKeys(
 		root,
 		[
@@ -258,6 +367,7 @@ function validateVersionTen(root: Readonly<Record<string, unknown>>): OpenFabPro
 			"operations",
 			"blueprints",
 			"areas",
+			"relationships",
 			"scenarios",
 			"view",
 		],
@@ -279,16 +389,65 @@ function validateVersionTen(root: Readonly<Record<string, unknown>>): OpenFabPro
 		operations: validateOperationalConfigurationSection(root.operations),
 		blueprints: validateBlueprintSectionV3(root.blueprints),
 		areas: validateOrganizationSection(root.areas),
+		relationships: validateRelationshipSection(root.relationships),
 		scenarios: validateReservedSection(root.scenarios, "$.scenarios"),
 		view: root.view === null ? null : validateView(root.view),
 	}) satisfies OpenFabProject;
+	validateAuthoredRail(project);
+	validatePortEquipment(project);
+	const source = validateOrganizations(project);
+	validateRelationships(project, source.map, source.organizations);
+	return project;
+}
+
+function migrateVersionTen(project: OpenFabProjectVersionTen): OpenFabProject {
+	return validateVersionEleven({
+		...project,
+		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		relationships: createEmptyOpenFabProjectRelationshipSection(),
+	});
+}
+
+function validateVersionTen(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
+	expectExactKeys(
+		root,
+		[
+			"kind",
+			"schemaVersion",
+			"manifest",
+			"rail",
+			"ports",
+			"equipment",
+			"operations",
+			"blueprints",
+			"areas",
+			"scenarios",
+			"view",
+		],
+		"$ v10",
+	);
+	expectLiteral(root.kind, OPENFAB_PROJECT_KIND, "$.kind");
+	expectLiteral(root.schemaVersion, 10, "$.schemaVersion");
+	const project = Object.freeze({
+		kind: OPENFAB_PROJECT_KIND,
+		schemaVersion: 10 as const,
+		manifest: validateOpenFabProjectManifest(root.manifest),
+		rail: validateRailSection(root.rail),
+		ports: validatePortSection(root.ports),
+		equipment: validateEquipmentSection(root.equipment),
+		operations: validateOperationalConfigurationSection(root.operations),
+		blueprints: validateBlueprintSectionV3(root.blueprints),
+		areas: validateOrganizationSection(root.areas),
+		scenarios: validateReservedSection(root.scenarios, "$.scenarios"),
+		view: root.view === null ? null : validateView(root.view),
+	}) satisfies OpenFabProjectVersionTen;
 	validateAuthoredRail(project);
 	validatePortEquipment(project);
 	validateOrganizations(project);
 	return project;
 }
 
-function migrateVersionNine(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionNine(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(
 		root,
 		[
@@ -309,12 +468,12 @@ function migrateVersionNine(root: Readonly<Record<string, unknown>>): OpenFabPro
 	expectLiteral(root.schemaVersion, 9, "$.schemaVersion");
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: migrateOperationalConfigurationSectionV1(root.operations),
 	});
 }
 
-function migrateVersionEight(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionEight(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(
 		root,
 		[
@@ -334,12 +493,12 @@ function migrateVersionEight(root: Readonly<Record<string, unknown>>): OpenFabPr
 	expectLiteral(root.schemaVersion, 8, "$.schemaVersion");
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 	});
 }
 
-function migrateVersionSeven(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionSeven(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(
 		root,
 		[
@@ -359,13 +518,13 @@ function migrateVersionSeven(root: Readonly<Record<string, unknown>>): OpenFabPr
 	expectLiteral(root.schemaVersion, 7, "$.schemaVersion");
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 		blueprints: migrateBlueprintSectionV2(root.blueprints),
 	});
 }
 
-function migrateVersionSix(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionSix(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(
 		root,
 		[
@@ -385,14 +544,14 @@ function migrateVersionSix(root: Readonly<Record<string, unknown>>): OpenFabProj
 	expectLiteral(root.schemaVersion, 6, "$.schemaVersion");
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 		blueprints: migrateBlueprintSectionV2(root.blueprints),
 		areas: migrateOrganizationSectionV1(root.areas),
 	});
 }
 
-function migrateVersionFive(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionFive(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(
 		root,
 		[
@@ -413,14 +572,14 @@ function migrateVersionFive(root: Readonly<Record<string, unknown>>): OpenFabPro
 	validateReservedSection(root.areas, "$.areas");
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 		blueprints: migrateBlueprintSectionV2(root.blueprints),
 		areas: createEmptyOpenFabProjectOrganizationSection(),
 	});
 }
 
-function migrateVersionFour(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionFour(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(
 		root,
 		[
@@ -441,27 +600,27 @@ function migrateVersionFour(root: Readonly<Record<string, unknown>>): OpenFabPro
 	validateReservedSection(root.areas, "$.areas");
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 		blueprints: migrateBlueprintSectionV1(root.blueprints),
 		areas: createEmptyOpenFabProjectOrganizationSection(),
 	});
 }
 
-function migrateVersionThree(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionThree(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(root, VERSION_THREE_ROOT_KEYS, "$ v3");
 	expectLiteral(root.schemaVersion, 3, "$.schemaVersion");
 	validateReservedSection(root.areas, "$.areas");
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 		blueprints: createEmptyOpenFabProjectBlueprintSection(),
 		areas: createEmptyOpenFabProjectOrganizationSection(),
 	});
 }
 
-function migrateVersionTwo(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionTwo(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(root, VERSION_THREE_ROOT_KEYS, "$ v2");
 	expectLiteral(root.schemaVersion, 2, "$.schemaVersion");
 	validateReservedSection(root.areas, "$.areas");
@@ -485,7 +644,7 @@ function migrateVersionTwo(root: Readonly<Record<string, unknown>>): OpenFabProj
 	}
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 		blueprints: createEmptyOpenFabProjectBlueprintSection(),
 		areas: createEmptyOpenFabProjectOrganizationSection(),
@@ -504,7 +663,7 @@ const VERSION_THREE_ROOT_KEYS = Object.freeze([
 	"view",
 ]);
 
-function migrateVersionOne(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionOne(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(
 		root,
 		[
@@ -528,7 +687,7 @@ function migrateVersionOne(root: Readonly<Record<string, unknown>>): OpenFabProj
 	validateReservedSection(root.scenarios, "$.scenarios");
 	return validateVersionTen({
 		...root,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 		ports: emptyPortSection(),
 		equipment: emptyEquipmentSection(),
@@ -537,7 +696,7 @@ function migrateVersionOne(root: Readonly<Record<string, unknown>>): OpenFabProj
 	});
 }
 
-function migrateVersionZero(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function migrateVersionZero(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	expectExactKeys(root, ["kind", "schemaVersion", "manifest", "rail", "view"], "$ v0");
 	const rail = expectRecord(root.rail, "$.rail");
 	expectExactKeys(
@@ -547,7 +706,7 @@ function migrateVersionZero(root: Readonly<Record<string, unknown>>): OpenFabPro
 	);
 	return validateVersionTen({
 		kind: OPENFAB_PROJECT_KIND,
-		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+		schemaVersion: 10,
 		manifest: root.manifest,
 		rail: {
 			grammar: OPENFAB_RAIL_GRAMMAR,
@@ -1552,7 +1711,7 @@ function validatePortIds(value: unknown, path: string): readonly number[] {
 	return Object.freeze(raw.map((id, index) => expectPositiveInt32(id, `${path}[${index}]`)));
 }
 
-function validatePortEquipment(project: OpenFabProject): void {
+function validatePortEquipment(project: OpenFabProjectAuthoredSource): void {
 	const error = portEquipmentStateError({
 		nextPortId: project.ports.nextPortId,
 		nextEquipmentGroupId: project.equipment.nextEquipmentGroupId,
@@ -1562,7 +1721,7 @@ function validatePortEquipment(project: OpenFabProject): void {
 	if (error) fail("INVALID_PORT_EQUIPMENT", "$.ports", error);
 }
 
-function validateAuthoredRail(project: OpenFabProject): void {
+function validateAuthoredRail(project: OpenFabProjectAuthoredSource): void {
 	const values = new Map<string, number>();
 	for (const [x, z, encoded] of project.rail.cells) values.set(coordinateKey(x, z), encoded);
 	for (const [x, z, encoded] of project.rail.cells) {
@@ -2627,6 +2786,34 @@ function migrateOrganizationSectionV1(value: unknown): OpenFabProjectOrganizatio
 	});
 }
 
+function validateRelationshipSection(value: unknown): OpenFabProjectRelationshipSection {
+	const path = "$.relationships";
+	const section = expectRecord(value, path);
+	expectExactKeys(section, ["schemaVersion", "nextRelationshipId", "records"], path);
+	expectLiteral(
+		section.schemaVersion,
+		OPENFAB_RELATIONSHIP_SECTION_SCHEMA_VERSION,
+		`${path}.schemaVersion`,
+	);
+	try {
+		const state = createStaticFabAssemblyRelationshipState({
+			nextRelationshipId: section.nextRelationshipId,
+			records: section.records,
+		});
+		return Object.freeze({
+			schemaVersion: OPENFAB_RELATIONSHIP_SECTION_SCHEMA_VERSION,
+			nextRelationshipId: state.nextRelationshipId,
+			records: state.records,
+		});
+	} catch (error) {
+		fail(
+			"INVALID_RELATIONSHIP",
+			path,
+			error instanceof Error ? error.message : "invalid assembly relationship state",
+		);
+	}
+}
+
 function containsDisallowedOrganizationDescriptionControl(value: string): boolean {
 	for (let index = 0; index < value.length; index++) {
 		const code = value.charCodeAt(index);
@@ -2635,7 +2822,10 @@ function containsDisallowedOrganizationDescriptionControl(value: string): boolea
 	return false;
 }
 
-function validateOrganizations(project: OpenFabProject): void {
+function validateOrganizations(project: OpenFabProjectAuthoredSource): {
+	readonly map: TileMap;
+	readonly organizations: StaticFabOrganizationState;
+} {
 	const hydrator = TileMap.createHydrator();
 	for (const [x, z, encoded] of project.rail.cells) hydrator.addEncodedCell(x, z, encoded);
 	for (const persisted of project.rail.advancedSwitches) {
@@ -2663,6 +2853,20 @@ function validateOrganizations(project: OpenFabProject): void {
 		organizations,
 	);
 	if (error) fail("INVALID_ORGANIZATION", "$.areas", error);
+	return Object.freeze({ map, organizations });
+}
+
+function validateRelationships(
+	project: OpenFabProject,
+	map: TileMap,
+	organizations: StaticFabOrganizationState,
+): void {
+	const relationships = {
+		nextRelationshipId: project.relationships.nextRelationshipId,
+		records: project.relationships.records,
+	};
+	const error = staticFabAssemblyRelationshipStateSourceError(map, organizations, relationships);
+	if (error) fail("INVALID_RELATIONSHIP", "$.relationships", error);
 }
 
 function validateCanonicalPositiveIds(value: unknown, path: string): readonly number[] {

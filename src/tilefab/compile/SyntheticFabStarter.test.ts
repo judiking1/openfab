@@ -848,7 +848,7 @@ describe("SyntheticFabStarter", () => {
 		expect(configurations).toBe(271);
 	}, 60_000);
 
-	it("captures ordinary schema-v10 project data without persisted starter provenance", () => {
+	it("captures ordinary schema-v11 project data without persisted starter provenance", () => {
 		const build = buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("complete-fab"));
 		const project = captureOpenFabProject(build.document, {
 			manifest: createOpenFabProjectManifest(
@@ -860,10 +860,15 @@ describe("SyntheticFabStarter", () => {
 		});
 		const json = JSON.stringify(project);
 
-		expect(project.schemaVersion).toBe(10);
+		expect(project.schemaVersion).toBe(11);
 		expect(project.rail.cells).toHaveLength(build.summary.railCells);
 		expect(project.ports.records).toHaveLength(0);
 		expect(project.equipment.records).toHaveLength(0);
+		expect(project.relationships).toEqual({
+			schemaVersion: 1,
+			nextRelationshipId: 1,
+			records: [],
+		});
 		expect(json).not.toContain("fab-block");
 		expect(json).not.toContain("interbay-spine");
 		expect(json).not.toContain("outerbay-link");

@@ -585,7 +585,7 @@ function assertWorldUnchanged(actual, expected, phase) {
 async function replaceStoredUserBlueprints(activePage, records) {
 	await activePage.evaluate(async (nextRecords) => {
 		const database = await new Promise((resolve, reject) => {
-			const request = indexedDB.open("openfab-native-projects", 3);
+			const request = indexedDB.open("openfab-native-projects", 5);
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error);
 		});
@@ -605,7 +605,7 @@ async function replaceStoredUserBlueprints(activePage, records) {
 async function readStoredUserBlueprintIds(activePage) {
 	return activePage.evaluate(async () => {
 		const database = await new Promise((resolve, reject) => {
-			const request = indexedDB.open("openfab-native-projects", 3);
+			const request = indexedDB.open("openfab-native-projects", 5);
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error);
 		});

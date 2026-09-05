@@ -20,17 +20,25 @@ const baseUrl = `http://${host}:${port}`;
 const connectorOnly = process.env.OPENFAB_SCALE_CONNECTOR_ONLY === "1";
 const semanticBayOnly = process.env.OPENFAB_SCALE_SEMANTIC_BAY_ONLY === "1";
 const bayFlowEditOnly = process.env.OPENFAB_SCALE_BAY_FLOW_EDIT_ONLY === "1";
+const placedTwinBayOnly = process.env.OPENFAB_SCALE_PLACED_TWIN_BAY_ONLY === "1";
 const coreOnly = process.env.OPENFAB_SCALE_CORE_ONLY === "1";
-if ([connectorOnly, semanticBayOnly, bayFlowEditOnly].filter(Boolean).length > 1) {
+const HIERARCHY_DUPLICATE_PREPARATION_LONG_TASK_BUDGET = Object.freeze({
+	maximumCount: 1,
+	maximumDurationMilliseconds: 60,
+	maximumUsableMilliseconds: 250,
+});
+if (
+	[connectorOnly, semanticBayOnly, bayFlowEditOnly, placedTwinBayOnly].filter(Boolean).length > 1
+) {
 	throw new Error(
-		"OPENFAB_SCALE_CONNECTOR_ONLY, OPENFAB_SCALE_SEMANTIC_BAY_ONLY, and OPENFAB_SCALE_BAY_FLOW_EDIT_ONLY are mutually exclusive.",
+		"OPENFAB_SCALE_CONNECTOR_ONLY, OPENFAB_SCALE_SEMANTIC_BAY_ONLY, OPENFAB_SCALE_BAY_FLOW_EDIT_ONLY, and OPENFAB_SCALE_PLACED_TWIN_BAY_ONLY are mutually exclusive.",
 	);
 }
-if (coreOnly && (connectorOnly || semanticBayOnly || bayFlowEditOnly)) {
+if (coreOnly && (connectorOnly || semanticBayOnly || bayFlowEditOnly || placedTwinBayOnly)) {
 	throw new Error("OPENFAB_SCALE_CORE_ONLY cannot be combined with a specialized scale-only gate.");
 }
 const requestedCounts =
-	connectorOnly || semanticBayOnly || bayFlowEditOnly
+	connectorOnly || semanticBayOnly || bayFlowEditOnly || placedTwinBayOnly
 		? []
 		: parseRequestedCounts(process.env.OPENFAB_SCALE_COUNTS);
 const chromePath = await resolveChromePath();
@@ -40,6 +48,7 @@ const results = [];
 let assemblyConnectorResult = null;
 let semanticBayDeleteResult = null;
 let bayFlowEditResult = null;
+let placedTwinBayHandoffResult = null;
 
 try {
 	await waitForServer(`${baseUrl}/`);
@@ -55,14 +64,17 @@ try {
 	for (const cellCount of requestedCounts) {
 		results.push(await runScaleScenario(browser, cellCount));
 	}
-	if (!coreOnly && !semanticBayOnly && !bayFlowEditOnly) {
+	if (!coreOnly && !semanticBayOnly && !bayFlowEditOnly && !placedTwinBayOnly) {
 		assemblyConnectorResult = await runAssemblyConnectorFirstPaintScenario(browser);
 	}
-	if (!coreOnly && !connectorOnly && !bayFlowEditOnly) {
+	if (!coreOnly && !connectorOnly && !bayFlowEditOnly && !placedTwinBayOnly) {
 		semanticBayDeleteResult = await runSemanticBayDeleteScaleScenario(browser);
 	}
-	if (!coreOnly && !connectorOnly && !semanticBayOnly) {
+	if (!coreOnly && !connectorOnly && !semanticBayOnly && !placedTwinBayOnly) {
 		bayFlowEditResult = await runBayFlowEditScaleScenario(browser);
+	}
+	if (placedTwinBayOnly || (!coreOnly && !connectorOnly && !semanticBayOnly && !bayFlowEditOnly)) {
+		placedTwinBayHandoffResult = await runPlacedTwinBayHandoffLargeMapScenario(browser);
 	}
 } finally {
 	await closeBrowserResource(browser, "browser");
@@ -79,6 +91,7 @@ await writeFile(
 			assemblyConnector: assemblyConnectorResult,
 			semanticBayDelete: semanticBayDeleteResult,
 			bayFlowEdit: bayFlowEditResult,
+			placedTwinBayHandoff: placedTwinBayHandoffResult,
 		},
 		null,
 		2,
@@ -99,8 +112,11 @@ if (assemblyConnectorResult) {
 	const overlaySummary = overlay
 		? ` | overlay ${overlay.frameCount}f ${formatMilliseconds(overlay.incrementalRenderMeanMilliseconds)} mean / ${overlay.overlayRedrawDelta} redraws / ${overlay.routePathStrokeDelta} strokes | overlay retained JS/embedder/backing ${formatBytes(overlay.retainedHeapGrowth.usedSize)}/${formatBytes(overlay.retainedHeapGrowth.embedderHeapUsedSize)}/${formatBytes(overlay.retainedHeapGrowth.backingStorageSize)}`
 		: "";
+	const recommendationSummary = assemblyConnectorResult.largeMapRecommendation
+		? `${assemblyConnectorResult.largeMapRecommendation.status}/${assemblyConnectorResult.largeMapRecommendation.attempts}`
+		: "unavailable";
 	console.log(
-		`${verdict} ${assemblyConnectorResult.cellCount.toLocaleString()} cells | ready ${formatMilliseconds(assemblyConnectorResult.readyMilliseconds)} | Activity→Assemble paint ${formatMilliseconds(assemblyConnectorResult.activityAssembleFirstPaintMilliseconds)} | NEW FAB paint ${formatMilliseconds(assemblyConnectorResult.newFab.firstPaintMilliseconds)} | NEW FAB steps ${Object.values(assemblyConnectorResult.newFab.interactionPaintMilliseconds).map(formatMilliseconds).join("/")} | NEW FAB prepare ${formatMilliseconds(assemblyConnectorResult.newFab.preparationMilliseconds)} | outline ready ${formatMilliseconds(assemblyConnectorResult.organizationOutlineReadyMilliseconds)} | outline hover ${formatMilliseconds(assemblyConnectorResult.organizationOutlineHoverPaintMilliseconds)} | outline clicks ${assemblyConnectorResult.organizationOutlineClickPaintMilliseconds.map(formatMilliseconds).join("/")} | Assemble paint ${formatMilliseconds(assemblyConnectorResult.assembleFirstPaintMilliseconds)} | fast cancel ${formatMilliseconds(assemblyConnectorResult.fastCancelMilliseconds)} | recommendation ${assemblyConnectorResult.largeMapRecommendation.status}/${assemblyConnectorResult.largeMapRecommendation.attempts} | CONNECT BAYS first paint ${formatMilliseconds(assemblyConnectorResult.firstPaintMilliseconds)} | snapshot handoff ${formatMilliseconds(assemblyConnectorResult.snapshotHandoffMilliseconds)} | snapshot ready ${formatMilliseconds(assemblyConnectorResult.snapshotReadyMilliseconds)} | terminal ready ${formatMilliseconds(assemblyConnectorResult.terminalReadyMilliseconds)} | command Long Tasks ${assemblyConnectorResult.longTasks.length}${overlaySummary}`,
+		`${verdict} ${assemblyConnectorResult.cellCount.toLocaleString()} cells | ready ${formatMilliseconds(assemblyConnectorResult.readyMilliseconds)} | Activity→Assemble paint ${formatMilliseconds(assemblyConnectorResult.activityAssembleFirstPaintMilliseconds)} | NEW FAB paint ${formatMilliseconds(assemblyConnectorResult.newFab.firstPaintMilliseconds)} | NEW FAB steps ${Object.values(assemblyConnectorResult.newFab.interactionPaintMilliseconds).map(formatMilliseconds).join("/")} | NEW FAB prepare ${formatMilliseconds(assemblyConnectorResult.newFab.preparationMilliseconds)} | outline ready ${formatMilliseconds(assemblyConnectorResult.organizationOutlineReadyMilliseconds)} | outline hover ${formatMilliseconds(assemblyConnectorResult.organizationOutlineHoverPaintMilliseconds)} | outline clicks ${assemblyConnectorResult.organizationOutlineClickPaintMilliseconds.map(formatMilliseconds).join("/")} | Assemble paint ${formatMilliseconds(assemblyConnectorResult.assembleFirstPaintMilliseconds)} | fast cancel ${formatMilliseconds(assemblyConnectorResult.fastCancelMilliseconds)} | recommendation ${recommendationSummary} | CONNECT BAYS first paint ${formatMilliseconds(assemblyConnectorResult.firstPaintMilliseconds)} | snapshot handoff ${formatMilliseconds(assemblyConnectorResult.snapshotHandoffMilliseconds)} | snapshot ready ${formatMilliseconds(assemblyConnectorResult.snapshotReadyMilliseconds)} | terminal ready ${formatMilliseconds(assemblyConnectorResult.terminalReadyMilliseconds)} | command Long Tasks ${assemblyConnectorResult.longTasks.length}${overlaySummary}`,
 	);
 	for (const failure of assemblyConnectorResult.failures) console.error(`  - ${failure}`);
 }
@@ -121,11 +137,34 @@ if (bayFlowEditResult) {
 	for (const failure of bayFlowEditResult.failures) console.error(`  - ${failure}`);
 }
 
+if (placedTwinBayHandoffResult) {
+	const verdict = placedTwinBayHandoffResult.failures.length === 0 ? "PASS" : "FAIL";
+	console.log(
+		`${verdict} ${placedTwinBayHandoffResult.cellCount.toLocaleString()} cells | placed Twin Bay handoff async commit ${placedTwinBayHandoffResult.commitObservedAsyncSync} | async redo ${placedTwinBayHandoffResult.redoObservedAsyncSync} | async duplicate ${placedTwinBayHandoffResult.duplicateCommitObservedAsyncSync} | duplicate redo ${placedTwinBayHandoffResult.duplicateRedoObservedAsyncSync} | roots ${placedTwinBayHandoffResult.rootOrganizationId},${placedTwinBayHandoffResult.duplicatedRootOrganizationId} | connector ${placedTwinBayHandoffResult.connectorHandoffReady} | Bank async ${placedTwinBayHandoffResult.connectorApplyObservedAsyncSync} | Bank duplicate usable ${placedTwinBayHandoffResult.bankDuplicateHandoffReady}/${formatMilliseconds(placedTwinBayHandoffResult.bankDuplicatePreparationMilliseconds)} (dispatch ${formatMilliseconds(placedTwinBayHandoffResult.bankDuplicateDispatchMilliseconds)}, capture ${formatMilliseconds(placedTwinBayHandoffResult.bankDuplicateCaptureMilliseconds)}, activate ${formatMilliseconds(placedTwinBayHandoffResult.bankDuplicateActivationMilliseconds)}) | prep/commit Long Tasks ${placedTwinBayHandoffResult.bankDuplicatePreparationLongTasks.map((entry) => formatMilliseconds(entry.duration)).join(",") || "0"}/${placedTwinBayHandoffResult.bankDuplicateCommitLongTasks.map((entry) => formatMilliseconds(entry.duration)).join(",") || "0"} | Bank duplicate async ${placedTwinBayHandoffResult.bankDuplicateCommitObservedAsyncSync} | Bank history ${placedTwinBayHandoffResult.bankDuplicateUndoRedoReady} | Interbay review ${placedTwinBayHandoffResult.bankConnectorHandoffReady}/${placedTwinBayHandoffResult.bankConnectorReviewProjectNeutral} | Fab async ${placedTwinBayHandoffResult.fabConnectorApplyObservedAsyncSync} | Loop review/apply ${placedTwinBayHandoffResult.fabLoopHandoffReady}/${placedTwinBayHandoffResult.fabLoopApplyObservedAsyncSync} in ${formatMilliseconds(placedTwinBayHandoffResult.fabLoopApplyMilliseconds)} | review/apply Long Tasks ${placedTwinBayHandoffResult.fabLoopReviewLaunchLongTasks.map((entry) => formatMilliseconds(entry.duration)).join(",") || "0"}/${placedTwinBayHandoffResult.fabLoopApplyLongTasks.map((entry) => formatMilliseconds(entry.duration)).join(",") || "0"} | replacement blocked ${placedTwinBayHandoffResult.fabLoopProjectReplacementBlockedDuringSync} | Loop history ${placedTwinBayHandoffResult.fabLoopHistoryReady} | CHECKS ${placedTwinBayHandoffResult.fabChecksHandoffReady}/${placedTwinBayHandoffResult.fabChecksProjectNeutral} | roots ${placedTwinBayHandoffResult.connectedBankOrganizationId},${placedTwinBayHandoffResult.duplicatedBankOrganizationId},${placedTwinBayHandoffResult.connectedFabOrganizationId} | organizations ${placedTwinBayHandoffResult.organizations}`,
+	);
+	for (const failure of placedTwinBayHandoffResult.failures) console.error(`  - ${failure}`);
+	if (
+		placedTwinBayHandoffResult.bankDuplicatePreparationLongTasks.length >
+			HIERARCHY_DUPLICATE_PREPARATION_LONG_TASK_BUDGET.maximumCount ||
+		Math.max(
+			0,
+			...placedTwinBayHandoffResult.bankDuplicatePreparationLongTasks.map(
+				(entry) => entry.duration,
+			),
+		) > HIERARCHY_DUPLICATE_PREPARATION_LONG_TASK_BUDGET.maximumDurationMilliseconds
+	) {
+		console.error(
+			`  - Bank duplicate Long Animation Frames: ${JSON.stringify(placedTwinBayHandoffResult.bankDuplicatePreparationLongAnimationFrames)}`,
+		);
+	}
+}
+
 if (
 	results.some((result) => result.failures.length > 0) ||
 	(assemblyConnectorResult?.failures.length ?? 0) > 0 ||
 	(semanticBayDeleteResult?.failures.length ?? 0) > 0 ||
-	(bayFlowEditResult?.failures.length ?? 0) > 0
+	(bayFlowEditResult?.failures.length ?? 0) > 0 ||
+	(placedTwinBayHandoffResult?.failures.length ?? 0) > 0
 ) {
 	process.exitCode = 1;
 }
@@ -134,6 +173,1553 @@ await Promise.all([
 	new Promise((resolve) => process.stderr.write("", resolve)),
 ]);
 process.exit(process.exitCode ?? 0);
+
+async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
+	const cellCount = 10_000;
+	const context = await activeBrowser.newContext({
+		viewport: { width: 1440, height: 900 },
+		deviceScaleFactor: 1,
+	});
+	await context.addInitScript(() => {
+		const state = {
+			longTaskSupported: false,
+			longTaskTakeRecordsSupported: false,
+			longTasks: [],
+			observer: null,
+			longAnimationFrameSupported: false,
+			longAnimationFrames: [],
+			longAnimationFrameObserver: null,
+		};
+		if (typeof PerformanceObserver !== "undefined") {
+			const observer = new PerformanceObserver((list) => {
+				for (const entry of list.getEntries()) {
+					state.longTasks.push({
+						startTime: entry.startTime,
+						duration: entry.duration,
+					});
+				}
+			});
+			try {
+				observer.observe({ type: "longtask", buffered: true });
+				state.longTaskSupported = true;
+				state.longTaskTakeRecordsSupported = typeof observer.takeRecords === "function";
+				state.observer = observer;
+			} catch {
+				// Unsupported browsers are rejected by the scenario assertions below.
+			}
+		}
+		if (
+			typeof PerformanceObserver !== "undefined" &&
+			PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")
+		) {
+			const observer = new PerformanceObserver((list) => {
+				for (const entry of list.getEntries()) state.longAnimationFrames.push(entry.toJSON());
+			});
+			try {
+				observer.observe({ type: "long-animation-frame", buffered: true });
+				state.longAnimationFrameSupported = true;
+				state.longAnimationFrameObserver = observer;
+			} catch {
+				// Diagnostic-only when the browser does not expose Long Animation Frame timing.
+			}
+		}
+		globalThis.__openFabHierarchyScale = state;
+	});
+	const page = await context.newPage();
+	const failures = [];
+	const result = {
+		cellCount,
+		commitObservedAsyncSync: false,
+		redoObservedAsyncSync: false,
+		duplicateCommitObservedAsyncSync: false,
+		duplicateRedoObservedAsyncSync: false,
+		connectorHandoffReady: false,
+		connectorApplyObservedAsyncSync: false,
+		bankDuplicateHandoffReady: false,
+		bankDuplicateProjectNeutral: false,
+		bankDuplicatePreparationMilliseconds: Number.POSITIVE_INFINITY,
+		bankDuplicateDispatchMilliseconds: Number.POSITIVE_INFINITY,
+		bankDuplicateCaptureMilliseconds: Number.POSITIVE_INFINITY,
+		bankDuplicateActivationMilliseconds: Number.POSITIVE_INFINITY,
+		bankDuplicateLongTaskSupported: false,
+		bankDuplicatePreparationLongTasks: [],
+		bankDuplicatePreparationLongAnimationFrames: [],
+		bankDuplicateCommitLongTasks: [],
+		bankDuplicateSurfaceProbe: null,
+		bankUndoRedoReady: false,
+		bankDuplicateCommitObservedAsyncSync: false,
+		bankDuplicateUndoRedoReady: false,
+		bankConnectorHandoffReady: false,
+		bankConnectorReviewProjectNeutral: false,
+		fabConnectorApplyObservedAsyncSync: false,
+		fabLoopHandoffReady: false,
+		fabLoopReviewProjectNeutral: false,
+		fabLoopReviewLaunchLongTasks: [],
+		fabLoopReviewLaunchLongAnimationFrames: [],
+		fabLoopApplyObservedAsyncSync: false,
+		fabLoopProjectReplacementBlockedDuringSync: false,
+		fabLoopApplyMilliseconds: Number.POSITIVE_INFINITY,
+		fabLoopApplyLongTasks: [],
+		fabLoopApplyLongAnimationFrames: [],
+		fabLoopHistoryReady: false,
+		fabLoopHistoryProbe: null,
+		fabChecksHandoffReady: false,
+		fabChecksProjectNeutral: false,
+		rootOrganizationId: "",
+		duplicatedRootOrganizationId: "",
+		connectedBankOrganizationId: "",
+		duplicatedBankOrganizationId: "",
+		connectedFabOrganizationId: "",
+		organizations: Number.NaN,
+		failures,
+	};
+	const beginHierarchyLongTaskWindow = () =>
+		page.evaluate(() => {
+			const state = globalThis.__openFabHierarchyScale;
+			if (!state) throw new Error("Hierarchy Long Task observer is unavailable.");
+			state.observer?.takeRecords?.();
+			state.longTasks = [];
+			state.longAnimationFrameObserver?.takeRecords?.();
+			state.longAnimationFrames = [];
+			return performance.now();
+		});
+	const readHierarchyLongTaskWindow = (startedAt) =>
+		page.evaluate((windowStartedAt) => {
+			const state = globalThis.__openFabHierarchyScale;
+			if (!state) throw new Error("Hierarchy Long Task observer is unavailable.");
+			for (const entry of state.observer?.takeRecords?.() ?? []) {
+				state.longTasks.push({ startTime: entry.startTime, duration: entry.duration });
+			}
+			for (const entry of state.longAnimationFrameObserver?.takeRecords?.() ?? []) {
+				state.longAnimationFrames.push(entry.toJSON());
+			}
+			return {
+				elapsedMilliseconds: performance.now() - windowStartedAt,
+				supported: state.longTaskSupported,
+				takeRecordsSupported: state.longTaskTakeRecordsSupported,
+				longTasks: state.longTasks.filter((entry) => entry.startTime >= windowStartedAt),
+				longAnimationFrameSupported: state.longAnimationFrameSupported,
+				longAnimationFrames: state.longAnimationFrames.filter(
+					(entry) => entry.startTime + entry.duration >= windowStartedAt,
+				),
+			};
+		}, startedAt);
+	const readState = () =>
+		page.evaluate(() => {
+			const app = document.querySelector('[data-testid="tilefab-app"]');
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const connectorPanel = document.querySelector(
+				'[data-testid="static-fab-assembly-connector-panel"]',
+			);
+			const readinessPanel = document.querySelector('[data-testid="rail-readiness-panel"]');
+			const api = globalThis.__tileFab;
+			const railDocument = api?.getDocument?.();
+			const editorModel = api?.getEditorModel?.();
+			const workerState = api?.getWorkerState?.();
+			const connectedFabId = Number(app?.getAttribute("data-connected-fab-id") ?? "");
+			const connectedFab = railDocument?.organizations?.records?.find(
+				(record) => record.id === connectedFabId,
+			);
+			return {
+				startupStatus: app?.getAttribute("data-startup-status") ?? "",
+				modelSyncPending: canvas?.getAttribute("data-model-sync-pending") ?? "",
+				workerStatus: canvas?.getAttribute("data-worker-status") ?? "",
+				documentCells: railDocument?.map?.size ?? Number.NaN,
+				documentOrganizations: railDocument?.organizations?.records?.length ?? Number.NaN,
+				documentSequence: railDocument?.getPatchSequence?.() ?? Number.NaN,
+				documentRevision: railDocument?.map?.getRevision?.() ?? Number.NaN,
+				modelChecksum: editorModel?.authoredChecksum ?? "",
+				modelPhysicalFingerprint: api?.getModelPhysicalFingerprint?.() ?? "",
+				workerChecksum: workerState?.checksum ?? "",
+				workerPhysicalFingerprint: canvas?.getAttribute("data-worker-physical-fingerprint") ?? "",
+				workerSequence: workerState?.sequence ?? Number.NaN,
+				workerTargetSequence: workerState?.targetSequence ?? Number.NaN,
+				workerSimulationReady: workerState?.simulationReady ?? null,
+				historyCanRedo: app?.getAttribute("data-history-can-redo") ?? "",
+				organizationBundleActive: app?.getAttribute("data-organization-bundle-active") ?? "",
+				organizationBundleSourceRootIds:
+					app?.getAttribute("data-organization-bundle-source-root-ids") ?? "",
+				placedTwinBayDuplicateHandoff:
+					app?.getAttribute("data-placed-twin-bay-duplicate-handoff") ?? "",
+				duplicatedTwinBayConnectorHandoff:
+					app?.getAttribute("data-duplicated-twin-bay-connector-handoff") ?? "",
+				assemblyConnectorPhase: app?.getAttribute("data-assembly-connector-phase") ?? "",
+				assemblyConnectorRecommendationStatus:
+					app?.getAttribute("data-assembly-connector-recommendation-status") ?? "",
+				connectedBayBankId: app?.getAttribute("data-connected-bay-bank-id") ?? "",
+				connectedBayBankDuplicateHandoff:
+					app?.getAttribute("data-connected-bay-bank-duplicate-handoff") ?? "",
+				lastPlacedBayBank: app?.getAttribute("data-last-placed-bay-bank") ?? "",
+				duplicatedBayBankConnectorHandoff:
+					app?.getAttribute("data-duplicated-bay-bank-connector-handoff") ?? "",
+				connectedFabId: app?.getAttribute("data-connected-fab-id") ?? "",
+				connectedFabRailEdges: connectedFab?.membership?.railEdges?.length ?? Number.NaN,
+				connectedFabBankIds: app?.getAttribute("data-connected-fab-bank-ids") ?? "",
+				connectedFabLoopHandoff: app?.getAttribute("data-connected-fab-loop-handoff") ?? "",
+				connectedFabResilientLoop: app?.getAttribute("data-connected-fab-resilient-loop") ?? "",
+				resilientFabChecksHandoff: app?.getAttribute("data-resilient-fab-checks-handoff") ?? "",
+				resilientFabLoopReceiptPhase:
+					app?.getAttribute("data-resilient-fab-loop-receipt-phase") ?? "",
+				resilientFabLoopReceiptId: app?.getAttribute("data-resilient-fab-loop-receipt-id") ?? "",
+				resilientFabLoopReceiptBankIds:
+					app?.getAttribute("data-resilient-fab-loop-receipt-bank-ids") ?? "",
+				duplicatedAssemblyReceiptPhase:
+					app?.getAttribute("data-duplicated-assembly-receipt-phase") ?? "",
+				duplicatedAssemblyReceiptRole:
+					app?.getAttribute("data-duplicated-assembly-receipt-role") ?? "",
+				duplicatedAssemblyReceiptSource:
+					app?.getAttribute("data-duplicated-assembly-receipt-source") ?? "",
+				duplicatedAssemblyReceiptTarget:
+					app?.getAttribute("data-duplicated-assembly-receipt-target") ?? "",
+				duplicatedAssemblyReceiptSequence:
+					app?.getAttribute("data-duplicated-assembly-receipt-sequence") ?? "",
+				assemblyConnectorHierarchyRole: connectorPanel?.getAttribute("data-hierarchy-role") ?? "",
+				assemblyConnectorPurpose: connectorPanel?.getAttribute("data-purpose") ?? "",
+				readinessStatus: readinessPanel?.getAttribute("data-status") ?? "",
+				readinessSourceRevision: readinessPanel?.getAttribute("data-source-revision") ?? "",
+				readinessSourceSequence: readinessPanel?.getAttribute("data-source-sequence") ?? "",
+				readinessSourceChecksum: readinessPanel?.getAttribute("data-source-checksum") ?? "",
+				organizationBundleCaptureMode:
+					app?.getAttribute("data-organization-bundle-capture-mode") ?? "",
+				organizationBundleRootCount: app?.getAttribute("data-organization-bundle-root-count") ?? "",
+				lastPlacedOrganizationRootId:
+					app?.getAttribute("data-last-placed-organization-root-id") ?? "",
+				lastPlacedTwinBayFingerprint:
+					app?.getAttribute("data-last-placed-twin-bay-fingerprint") ?? "",
+				organizationSelectionIds: app?.getAttribute("data-organization-selection-ids") ?? "",
+				documentNextOrganizationId: railDocument?.organizations?.nextOrganizationId ?? Number.NaN,
+				organizationGraph:
+					railDocument?.organizations?.records?.map((record) => ({
+						id: record.id,
+						kind: record.kind,
+						parents: [...(record.parentOrganizationIds ?? [])],
+					})) ?? [],
+				organizationBundlePlacementPhase:
+					canvas?.getAttribute("data-organization-bundle-placement-phase") ?? "",
+				blueprintPlacementResult: canvas?.getAttribute("data-blueprint-placement-result") ?? "",
+			};
+		});
+	try {
+		await page.goto(`${baseUrl}/?scaleFixture=${cellCount}`, {
+			waitUntil: "domcontentloaded",
+			timeout: 30_000,
+		});
+		await page.waitForFunction(
+			(expectedCells) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					app?.getAttribute("data-startup-status") === "ready" &&
+					canvas?.getAttribute("data-worker-status") === "ready" &&
+					Number(canvas.getAttribute("data-worker-cells")) === expectedCells &&
+					canvas.getAttribute("data-model-sync-pending") === "false"
+				);
+			},
+			cellCount,
+			{ timeout: 30_000 },
+		);
+		await page.getByTestId("editor-activity-assemble").click();
+		await page.getByTestId("static-fab-assemble-menu").waitFor({
+			state: "visible",
+			timeout: 10_000,
+		});
+		await page.getByTestId("production-bay-module-browser").click();
+		await page.getByTestId("production-bay-module-panel").waitFor({
+			state: "visible",
+			timeout: 10_000,
+		});
+		await page.waitForFunction(
+			() => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					app?.getAttribute("data-organization-bundle-active") === "true" &&
+					canvas?.getAttribute("data-organization-bundle-preview-state") === "candidate"
+				);
+			},
+			undefined,
+			{ timeout: 15_000 },
+		);
+		await page.getByRole("button", { name: "Close Production Bay panel" }).click();
+		await page.getByTestId("production-bay-module-panel").waitFor({ state: "hidden" });
+		const canvas = page.getByTestId("rail-canvas");
+		await canvas.focus();
+		const before = await readState();
+		assertEqual(failures, before.documentCells, cellCount, "placed Bay source cell count");
+		assertEqual(failures, before.documentOrganizations, 0, "placed Bay source organization count");
+		await page.evaluate(() => {
+			const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+			if (!(canvasElement instanceof HTMLCanvasElement)) {
+				throw new Error("Rail Canvas is unavailable for placed Bay sync observation.");
+			}
+			const state = {
+				values: [canvasElement.dataset.modelSyncPending ?? ""],
+				observer: null,
+			};
+			state.observer = new MutationObserver(() => {
+				state.values.push(canvasElement.dataset.modelSyncPending ?? "");
+			});
+			state.observer.observe(canvasElement, {
+				attributes: true,
+				attributeFilter: ["data-model-sync-pending"],
+			});
+			globalThis.__openFabPlacedBaySync = state;
+		});
+		await canvas.press("Enter");
+		await page.waitForFunction(
+			() => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-placed-twin-bay-duplicate-handoff") === "true" &&
+					Boolean(app.getAttribute("data-last-placed-twin-bay-fingerprint"))
+				);
+			},
+			undefined,
+			{ timeout: 30_000 },
+		);
+		const afterCommit = await readState();
+		const commitTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.commitObservedAsyncSync = commitTransitions.includes("true");
+		result.rootOrganizationId = afterCommit.lastPlacedOrganizationRootId;
+		result.organizations = afterCommit.documentOrganizations;
+		assertEqual(
+			failures,
+			result.commitObservedAsyncSync,
+			true,
+			"placed Bay commit crosses the large-map async derivation window",
+		);
+		assertEqual(
+			failures,
+			afterCommit.documentSequence,
+			before.documentSequence + 1,
+			"placed Bay atomic document command",
+		);
+		assertEqual(
+			failures,
+			afterCommit.documentOrganizations,
+			before.documentOrganizations + 3,
+			"placed Bay hierarchy count",
+		);
+		assertEqual(
+			failures,
+			afterCommit.organizationSelectionIds,
+			afterCommit.lastPlacedOrganizationRootId,
+			"placed Bay exact root selection",
+		);
+		assertEqual(
+			failures,
+			afterCommit.workerChecksum,
+			afterCommit.modelChecksum,
+			"placed Bay model/Worker checksum parity",
+		);
+		assertEqual(
+			failures,
+			afterCommit.workerSequence,
+			afterCommit.workerTargetSequence,
+			"placed Bay Worker sequence parity",
+		);
+		assertEqual(
+			failures,
+			afterCommit.workerSimulationReady,
+			false,
+			"placed Bay simulation remains gated",
+		);
+
+		await page.getByRole("button", { name: "실행 취소" }).click();
+		await page.waitForFunction(
+			(expectedOrganizations) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expectedOrganizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-history-can-redo") === "true" &&
+					app.getAttribute("data-placed-twin-bay-duplicate-handoff") === "false"
+				);
+			},
+			before.documentOrganizations,
+			{ timeout: 30_000 },
+		);
+		await page.evaluate(() => {
+			if (globalThis.__openFabPlacedBaySync) {
+				globalThis.__openFabPlacedBaySync.values = [];
+			}
+		});
+		await page.getByRole("button", { name: "다시 실행" }).click();
+		await page.waitForFunction(
+			(expectedRootId) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-history-can-redo") === "false" &&
+					app.getAttribute("data-placed-twin-bay-duplicate-handoff") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expectedRootId &&
+					Boolean(app.getAttribute("data-last-placed-twin-bay-fingerprint"))
+				);
+			},
+			afterCommit.lastPlacedOrganizationRootId,
+			{ timeout: 30_000 },
+		);
+		const afterRedo = await readState();
+		const redoTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.redoObservedAsyncSync = redoTransitions.includes("true");
+		assertEqual(
+			failures,
+			result.redoObservedAsyncSync,
+			true,
+			"placed Bay Redo crosses the large-map async derivation window",
+		);
+		assertEqual(
+			failures,
+			afterRedo.lastPlacedOrganizationRootId,
+			afterCommit.lastPlacedOrganizationRootId,
+			"placed Bay Redo restores root identity",
+		);
+		assertEqual(
+			failures,
+			afterRedo.lastPlacedTwinBayFingerprint,
+			afterCommit.lastPlacedTwinBayFingerprint,
+			"placed Bay Redo restores recognition fingerprint",
+		);
+		assertEqual(
+			failures,
+			afterRedo.organizationSelectionIds,
+			afterCommit.lastPlacedOrganizationRootId,
+			"placed Bay Redo restores exact root selection",
+		);
+		assertEqual(
+			failures,
+			afterRedo.workerChecksum,
+			afterRedo.modelChecksum,
+			"placed Bay Redo model/Worker checksum parity",
+		);
+
+		await page.getByTestId("ordinary-placed-twin-bay-duplicate-handoff").click();
+		await page.waitForFunction(
+			(expectedRootId) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					app?.getAttribute("data-organization-bundle-active") === "true" &&
+					app.getAttribute("data-organization-bundle-source-root-ids") === expectedRootId &&
+					canvasElement?.getAttribute("data-organization-bundle-preview-state") === "candidate"
+				);
+			},
+			afterRedo.lastPlacedOrganizationRootId,
+			{ timeout: 15_000 },
+		);
+		await page.evaluate(() => {
+			if (globalThis.__openFabPlacedBaySync) {
+				globalThis.__openFabPlacedBaySync.values = [];
+			}
+		});
+		await canvas.focus();
+		await canvas.press("Enter");
+		await page.waitForFunction(
+			(expectedOrganizations) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expectedOrganizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-duplicated-twin-bay-connector-handoff") === "true"
+				);
+			},
+			afterRedo.documentOrganizations + 3,
+			{ timeout: 30_000 },
+		);
+		const afterDuplicate = await readState();
+		const duplicateTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.duplicateCommitObservedAsyncSync = duplicateTransitions.includes("true");
+		result.duplicatedRootOrganizationId = afterDuplicate.lastPlacedOrganizationRootId;
+		result.organizations = afterDuplicate.documentOrganizations;
+		const expectedPairIds = [
+			Number(afterRedo.lastPlacedOrganizationRootId),
+			Number(afterDuplicate.lastPlacedOrganizationRootId),
+		]
+			.sort((left, right) => left - right)
+			.join(",");
+		assertEqual(
+			failures,
+			result.duplicateCommitObservedAsyncSync,
+			true,
+			"duplicated Bay commit crosses the large-map async derivation window",
+		);
+		assertEqual(
+			failures,
+			afterDuplicate.documentSequence,
+			afterRedo.documentSequence + 1,
+			"duplicated Bay atomic document command",
+		);
+		assertEqual(
+			failures,
+			afterDuplicate.documentOrganizations,
+			afterRedo.documentOrganizations + 3,
+			"duplicated Bay hierarchy count",
+		);
+		assertEqual(
+			failures,
+			afterDuplicate.organizationBundleSourceRootIds,
+			afterRedo.lastPlacedOrganizationRootId,
+			"duplicated Bay transient source identity",
+		);
+		assertEqual(
+			failures,
+			afterDuplicate.organizationSelectionIds,
+			expectedPairIds,
+			"duplicated Bay exact source/target pair selection",
+		);
+		assertEqual(
+			failures,
+			afterDuplicate.workerChecksum,
+			afterDuplicate.modelChecksum,
+			"duplicated Bay model/Worker checksum parity",
+		);
+		assertEqual(
+			failures,
+			afterDuplicate.workerSimulationReady,
+			false,
+			"duplicated Bay simulation remains gated",
+		);
+
+		await page.getByRole("button", { name: "실행 취소" }).click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-history-can-redo") === "true" &&
+					app.getAttribute("data-duplicated-twin-bay-connector-handoff") === "false" &&
+					app.getAttribute("data-organization-selection-ids") === expected.sourceRootId
+				);
+			},
+			{
+				organizations: afterRedo.documentOrganizations,
+				sourceRootId: afterRedo.lastPlacedOrganizationRootId,
+			},
+			{ timeout: 30_000 },
+		);
+		await page.evaluate(() => {
+			if (globalThis.__openFabPlacedBaySync) {
+				globalThis.__openFabPlacedBaySync.values = [];
+			}
+		});
+		await page.getByRole("button", { name: "다시 실행" }).click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-history-can-redo") === "false" &&
+					app.getAttribute("data-duplicated-twin-bay-connector-handoff") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expected.pairIds
+				);
+			},
+			{
+				organizations: afterDuplicate.documentOrganizations,
+				pairIds: expectedPairIds,
+			},
+			{ timeout: 30_000 },
+		);
+		const afterDuplicateRedo = await readState();
+		const duplicateRedoTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.duplicateRedoObservedAsyncSync = duplicateRedoTransitions.includes("true");
+		assertEqual(
+			failures,
+			result.duplicateRedoObservedAsyncSync,
+			true,
+			"duplicated Bay Redo crosses the large-map async derivation window",
+		);
+		assertEqual(
+			failures,
+			afterDuplicateRedo.lastPlacedOrganizationRootId,
+			afterDuplicate.lastPlacedOrganizationRootId,
+			"duplicated Bay Redo restores target root identity",
+		);
+		assertEqual(
+			failures,
+			afterDuplicateRedo.lastPlacedTwinBayFingerprint,
+			afterDuplicate.lastPlacedTwinBayFingerprint,
+			"duplicated Bay Redo restores target recognition fingerprint",
+		);
+		assertEqual(
+			failures,
+			afterDuplicateRedo.organizationBundleSourceRootIds,
+			afterRedo.lastPlacedOrganizationRootId,
+			"duplicated Bay Redo restores transient source identity",
+		);
+		assertEqual(
+			failures,
+			afterDuplicateRedo.workerChecksum,
+			afterDuplicateRedo.modelChecksum,
+			"duplicated Bay Redo restores model/Worker checksum parity",
+		);
+
+		const duplicatedTwinBayHandoffOwner = page.getByTestId(
+			"ordinary-duplicated-twin-bay-connector-handoff-owner",
+		);
+		const duplicatedTwinBayHandoff = page.getByTestId(
+			"ordinary-duplicated-twin-bay-connector-handoff",
+		);
+		await duplicatedTwinBayHandoffOwner.waitFor({ state: "visible", timeout: 10_000 });
+		assertEqual(
+			failures,
+			await duplicatedTwinBayHandoffOwner.count(),
+			1,
+			"large-map duplicated Twin Bay owns one raised continuation surface",
+		);
+		assertEqual(
+			failures,
+			await duplicatedTwinBayHandoffOwner.getAttribute("data-context"),
+			"duplicated-twin-bay",
+			"large-map duplicated Twin Bay continuation identifies its task context",
+		);
+		const duplicatedTwinBayHandoffBounds = await duplicatedTwinBayHandoff.boundingBox();
+		assertEqual(
+			failures,
+			(duplicatedTwinBayHandoffBounds?.height ?? 0) >= 44,
+			true,
+			"large-map duplicated Twin Bay continuation keeps a 44px target",
+		);
+		await page.getByTestId("rail-canvas").focus();
+		await page.keyboard.press("Tab");
+		assertEqual(
+			failures,
+			await duplicatedTwinBayHandoff.evaluate((element) => document.activeElement === element),
+			true,
+			"large-map duplicated Twin Bay continuation follows Canvas in natural Tab order",
+		);
+		await page.keyboard.press("Enter");
+		await page.waitForFunction(
+			() => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const panel = document.querySelector('[data-testid="static-fab-assembly-connector-panel"]');
+				return (
+					app?.getAttribute("data-organization-bundle-active") === "false" &&
+					app.getAttribute("data-assembly-connector-phase") === "ready" &&
+					app.getAttribute("data-assembly-connector-recommendation-status") === "ready" &&
+					panel?.getAttribute("data-hierarchy-role") === "BAY_TO_BANK" &&
+					panel.getAttribute("data-purpose") === "HIERARCHY_LINK"
+				);
+			},
+			undefined,
+			{ timeout: 30_000 },
+		);
+		const connectorReady = await readState();
+		result.connectorHandoffReady = true;
+		assertEqual(
+			failures,
+			connectorReady.documentSequence,
+			afterDuplicateRedo.documentSequence,
+			"large-map Connector review preserves document sequence before Apply",
+		);
+		assertEqual(
+			failures,
+			connectorReady.organizationSelectionIds,
+			expectedPairIds,
+			"large-map Connector review retains exact pair",
+		);
+		await page.evaluate(() => {
+			if (globalThis.__openFabPlacedBaySync) globalThis.__openFabPlacedBaySync.values = [];
+		});
+		await page
+			.getByTestId("static-fab-assembly-connector-panel")
+			.locator(".tilefab-assembly-connector-apply")
+			.click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-connected-bay-bank-id") === expected.bankId &&
+					app.getAttribute("data-connected-bay-bank-duplicate-handoff") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expected.bankId
+				);
+			},
+			{
+				organizations: connectorReady.documentOrganizations + 1,
+				bankId: String(connectorReady.documentNextOrganizationId),
+			},
+			{ timeout: 30_000 },
+		);
+		const connectedBank = await readState();
+		const connectorApplyTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.connectorApplyObservedAsyncSync = connectorApplyTransitions.includes("true");
+		result.bankDuplicateHandoffReady = connectedBank.connectedBayBankDuplicateHandoff === "true";
+		result.organizations = connectedBank.documentOrganizations;
+		assertEqual(
+			failures,
+			result.connectorApplyObservedAsyncSync,
+			true,
+			"connected Bank Apply crosses the large-map async derivation window",
+		);
+		assertEqual(
+			failures,
+			connectedBank.documentSequence,
+			connectorReady.documentSequence + 1,
+			"connected Bank Apply is one atomic document command",
+		);
+		assertEqual(
+			failures,
+			connectedBank.documentNextOrganizationId,
+			connectorReady.documentNextOrganizationId + 1,
+			"connected Bank Apply consumes one organization id",
+		);
+		assertEqual(
+			failures,
+			connectedBank.workerChecksum,
+			connectedBank.modelChecksum,
+			"connected Bank Apply model/Worker checksum parity",
+		);
+		assertEqual(
+			failures,
+			connectedBank.workerSimulationReady,
+			false,
+			"connected Bank Apply keeps simulation gated",
+		);
+
+		const bankDuplicateHandoff = page.getByTestId("ordinary-connected-bay-bank-duplicate-handoff");
+		result.bankDuplicateSurfaceProbe = await page.evaluate(() => {
+			const app = document.querySelector('[data-testid="tilefab-app"]');
+			const handoff = document.querySelector(
+				'[data-testid="ordinary-connected-bay-bank-duplicate-handoff"]',
+			);
+			if (!(handoff instanceof HTMLElement)) {
+				return {
+					count: 0,
+					tool: app?.getAttribute("data-editor-tool") ?? "",
+					activity: app?.getAttribute("data-editor-activity") ?? "",
+				};
+			}
+			const bounds = handoff.getBoundingClientRect();
+			const style = getComputedStyle(handoff);
+			const hit = document.elementFromPoint(
+				bounds.x + bounds.width / 2,
+				bounds.y + bounds.height / 2,
+			);
+			return {
+				count: 1,
+				tool: app?.getAttribute("data-editor-tool") ?? "",
+				activity: app?.getAttribute("data-editor-activity") ?? "",
+				visible: handoff.offsetParent !== null,
+				bounds: [bounds.x, bounds.y, bounds.width, bounds.height],
+				display: style.display,
+				visibility: style.visibility,
+				pointerEvents: style.pointerEvents,
+				hitTestId: hit?.getAttribute("data-testid") ?? "",
+				hitClass: hit?.getAttribute("class") ?? "",
+			};
+		});
+		const bankDuplicateLongTaskStartedAt = await beginHierarchyLongTaskWindow();
+		const bankDuplicateStartedAt = performance.now();
+		await bankDuplicateHandoff.click({ timeout: 90_000 });
+		result.bankDuplicateDispatchMilliseconds = performance.now() - bankDuplicateStartedAt;
+		await page.waitForFunction(
+			(expectedBankId) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					app?.getAttribute("data-organization-bundle-active") === "true" &&
+					app.getAttribute("data-organization-bundle-capture-mode") === "EFFECTIVE" &&
+					app.getAttribute("data-organization-bundle-root-count") === "1" &&
+					app.getAttribute("data-organization-bundle-source-root-ids") === expectedBankId &&
+					canvasElement?.getAttribute("data-organization-bundle-initial-accessibility") ===
+						"ready" &&
+					(canvasElement.getAttribute("data-organization-bundle-preview-state") === "candidate" ||
+						canvasElement.getAttribute("data-organization-bundle-preview-state") ===
+							"sampled-collision")
+				);
+			},
+			String(connectorReady.documentNextOrganizationId),
+			{ timeout: 15_000 },
+		);
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		const bankDuplicatePreparationPerformance = await readHierarchyLongTaskWindow(
+			bankDuplicateLongTaskStartedAt,
+		);
+		result.bankDuplicatePreparationMilliseconds =
+			bankDuplicatePreparationPerformance.elapsedMilliseconds;
+		result.bankDuplicateLongTaskSupported =
+			bankDuplicatePreparationPerformance.supported &&
+			bankDuplicatePreparationPerformance.takeRecordsSupported;
+		result.bankDuplicatePreparationLongTasks = bankDuplicatePreparationPerformance.longTasks;
+		result.bankDuplicatePreparationLongAnimationFrames =
+			bankDuplicatePreparationPerformance.longAnimationFrames;
+		assertEqual(
+			failures,
+			result.bankDuplicateLongTaskSupported,
+			true,
+			"connected Bank duplicate Long Task observation support",
+		);
+		assertAtMost(
+			failures,
+			result.bankDuplicatePreparationLongTasks.length,
+			HIERARCHY_DUPLICATE_PREPARATION_LONG_TASK_BUDGET.maximumCount,
+			"connected Bank duplicate preparation Long Task count",
+		);
+		assertAtMost(
+			failures,
+			Math.max(0, ...result.bankDuplicatePreparationLongTasks.map((entry) => entry.duration)),
+			HIERARCHY_DUPLICATE_PREPARATION_LONG_TASK_BUDGET.maximumDurationMilliseconds,
+			"connected Bank duplicate preparation maximum Long Task duration",
+		);
+		assertAtMost(
+			failures,
+			result.bankDuplicatePreparationMilliseconds,
+			HIERARCHY_DUPLICATE_PREPARATION_LONG_TASK_BUDGET.maximumUsableMilliseconds,
+			"connected Bank duplicate candidate plus two-paint usable latency",
+		);
+		const bankDuplicatePrepared = await readState();
+		result.bankDuplicateCaptureMilliseconds = await page
+			.getByTestId("rail-canvas")
+			.evaluate((canvas) => Number(canvas.dataset.organizationBundleCaptureMs));
+		result.bankDuplicateActivationMilliseconds = await page
+			.getByTestId("rail-canvas")
+			.evaluate((canvas) => Number(canvas.dataset.organizationBundleActivationMs));
+		result.bankDuplicateProjectNeutral =
+			bankDuplicatePrepared.documentSequence === connectedBank.documentSequence &&
+			bankDuplicatePrepared.modelChecksum === connectedBank.modelChecksum;
+		assertEqual(
+			failures,
+			result.bankDuplicateProjectNeutral,
+			true,
+			"connected Bank EFFECTIVE duplicate preparation is project-neutral",
+		);
+		await page.getByTestId("rail-canvas").press("Escape");
+		await page.waitForFunction(
+			(expectedBankId) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				return (
+					app?.getAttribute("data-organization-bundle-active") === "false" &&
+					app.getAttribute("data-connected-bay-bank-duplicate-handoff") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expectedBankId
+				);
+			},
+			String(connectorReady.documentNextOrganizationId),
+			{ timeout: 15_000 },
+		);
+		await page.getByRole("button", { name: "실행 취소" }).click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-history-can-redo") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expected.pairIds &&
+					app.getAttribute("data-connected-bay-bank-duplicate-handoff") === "false"
+				);
+			},
+			{ organizations: connectorReady.documentOrganizations, pairIds: expectedPairIds },
+			{ timeout: 30_000 },
+		);
+		await page.getByRole("button", { name: "다시 실행" }).click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-history-can-redo") === "false" &&
+					app.getAttribute("data-connected-bay-bank-duplicate-handoff") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expected.bankId
+				);
+			},
+			{
+				organizations: connectedBank.documentOrganizations,
+				bankId: String(connectorReady.documentNextOrganizationId),
+			},
+			{ timeout: 30_000 },
+		);
+		const bankRedone = await readState();
+		result.bankUndoRedoReady =
+			bankRedone.modelChecksum === connectedBank.modelChecksum &&
+			bankRedone.workerChecksum === bankRedone.modelChecksum;
+		assertEqual(
+			failures,
+			result.bankUndoRedoReady,
+			true,
+			"connected Bank Undo/Redo restores exact model/Worker identity",
+		);
+
+		result.connectedBankOrganizationId = connectedBank.connectedBayBankId;
+		await page.getByTestId("ordinary-connected-bay-bank-duplicate-handoff").click();
+		await page.waitForFunction(
+			(expectedBankId) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					app?.getAttribute("data-organization-bundle-active") === "true" &&
+					app.getAttribute("data-organization-bundle-capture-mode") === "EFFECTIVE" &&
+					app.getAttribute("data-organization-bundle-root-count") === "1" &&
+					app.getAttribute("data-organization-bundle-source-root-ids") === expectedBankId &&
+					canvasElement?.getAttribute("data-organization-bundle-preview-state") === "candidate"
+				);
+			},
+			connectedBank.connectedBayBankId,
+			{ timeout: 30_000 },
+		);
+		await page.evaluate(() => {
+			if (globalThis.__openFabPlacedBaySync) globalThis.__openFabPlacedBaySync.values = [];
+		});
+		const bankDuplicateCommitLongTaskStartedAt = await beginHierarchyLongTaskWindow();
+		await page.getByTestId("rail-canvas").press("Enter");
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				const placedRootId = app?.getAttribute("data-last-placed-organization-root-id") ?? "";
+				const exactPairIds = [expected.sourceBankId, placedRootId]
+					.map(Number)
+					.filter(Number.isSafeInteger)
+					.sort((left, right) => left - right)
+					.join(",");
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					placedRootId.length > 0 &&
+					app?.getAttribute("data-last-placed-bay-bank") === "true" &&
+					app.getAttribute("data-duplicated-bay-bank-connector-handoff") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === exactPairIds
+				);
+			},
+			{
+				organizations: connectedBank.documentOrganizations + 7,
+				sourceBankId: connectedBank.connectedBayBankId,
+			},
+			{ timeout: 15_000 },
+		);
+		const duplicatedBank = await readState();
+		const bankDuplicateCommitPerformance = await readHierarchyLongTaskWindow(
+			bankDuplicateCommitLongTaskStartedAt,
+		);
+		result.bankDuplicateCommitLongTasks = bankDuplicateCommitPerformance.longTasks;
+		assertEqual(
+			failures,
+			bankDuplicateCommitPerformance.supported &&
+				bankDuplicateCommitPerformance.takeRecordsSupported,
+			true,
+			"duplicated Bank commit Long Task observation support",
+		);
+		assertEqual(
+			failures,
+			result.bankDuplicateCommitLongTasks.length,
+			0,
+			"duplicated Bank commit Long Tasks",
+		);
+		const bankDuplicateTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.bankDuplicateCommitObservedAsyncSync = bankDuplicateTransitions.includes("true");
+		result.duplicatedBankOrganizationId = duplicatedBank.lastPlacedOrganizationRootId;
+		result.organizations = duplicatedBank.documentOrganizations;
+		const bankPairIds = [
+			Number(connectedBank.connectedBayBankId),
+			Number(duplicatedBank.lastPlacedOrganizationRootId),
+		]
+			.sort((left, right) => left - right)
+			.join(",");
+		assertEqual(
+			failures,
+			result.bankDuplicateCommitObservedAsyncSync,
+			true,
+			"duplicated Bank commit crosses the large-map async derivation window",
+		);
+		assertEqual(
+			failures,
+			duplicatedBank.documentSequence,
+			bankRedone.documentSequence + 1,
+			"duplicated Bank is one atomic document command",
+		);
+		assertEqual(
+			failures,
+			duplicatedBank.documentOrganizations,
+			bankRedone.documentOrganizations + 7,
+			"duplicated Bank retains the exact seven-record hierarchy",
+		);
+		assertEqual(
+			failures,
+			duplicatedBank.organizationSelectionIds,
+			bankPairIds,
+			"duplicated Bank selects the exact source/target pair",
+		);
+		assertEqual(
+			failures,
+			duplicatedBank.workerChecksum,
+			duplicatedBank.modelChecksum,
+			"duplicated Bank model/Worker checksum parity",
+		);
+		assertEqual(
+			failures,
+			duplicatedBank.workerSimulationReady,
+			false,
+			"duplicated Bank keeps simulation gated",
+		);
+
+		await page.getByRole("button", { name: "실행 취소" }).click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-history-can-redo") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expected.bankId &&
+					app.getAttribute("data-duplicated-bay-bank-connector-handoff") === "false"
+				);
+			},
+			{
+				organizations: bankRedone.documentOrganizations,
+				bankId: connectedBank.connectedBayBankId,
+			},
+			{ timeout: 60_000 },
+		);
+		await page.evaluate(() => {
+			if (globalThis.__openFabPlacedBaySync) globalThis.__openFabPlacedBaySync.values = [];
+		});
+		await page.getByRole("button", { name: "다시 실행" }).click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-history-can-redo") === "false" &&
+					app.getAttribute("data-last-placed-organization-root-id") === expected.targetBankId &&
+					app.getAttribute("data-last-placed-bay-bank") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expected.pairIds &&
+					app.getAttribute("data-duplicated-bay-bank-connector-handoff") === "true"
+				);
+			},
+			{
+				organizations: duplicatedBank.documentOrganizations,
+				targetBankId: duplicatedBank.lastPlacedOrganizationRootId,
+				pairIds: bankPairIds,
+			},
+			{ timeout: 60_000 },
+		);
+		const duplicatedBankRedone = await readState();
+		const bankDuplicateRedoTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.bankDuplicateUndoRedoReady =
+			bankDuplicateRedoTransitions.includes("true") &&
+			duplicatedBankRedone.modelChecksum === duplicatedBank.modelChecksum &&
+			duplicatedBankRedone.workerChecksum === duplicatedBankRedone.modelChecksum;
+		assertEqual(
+			failures,
+			result.bankDuplicateUndoRedoReady,
+			true,
+			"duplicated Bank Undo/Redo restores exact identity through async sync",
+		);
+
+		await page.getByTestId("rail-canvas").press("Escape");
+		await page.waitForFunction(
+			(expectedPairIds) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				return (
+					app?.getAttribute("data-organization-bundle-active") === "false" &&
+					app.getAttribute("data-organization-selection-ids") === expectedPairIds &&
+					app.getAttribute("data-duplicated-bay-bank-connector-handoff") === "true"
+				);
+			},
+			bankPairIds,
+			{ timeout: 30_000 },
+		);
+		const beforeBankConnector = await readState();
+		await page.getByTestId("ordinary-duplicated-bay-bank-connector-handoff").click();
+		await page.waitForFunction(
+			() => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const panel = document.querySelector('[data-testid="static-fab-assembly-connector-panel"]');
+				return (
+					app?.getAttribute("data-assembly-connector-phase") === "ready" &&
+					panel?.getAttribute("data-hierarchy-role") === "BANK_TO_FAB" &&
+					panel.getAttribute("data-purpose") === "HIERARCHY_LINK"
+				);
+			},
+			undefined,
+			{ timeout: 60_000 },
+		);
+		const bankConnectorReady = await readState();
+		result.bankConnectorHandoffReady = true;
+		result.bankConnectorReviewProjectNeutral =
+			bankConnectorReady.documentSequence === beforeBankConnector.documentSequence &&
+			bankConnectorReady.modelChecksum === beforeBankConnector.modelChecksum &&
+			bankConnectorReady.organizationSelectionIds === bankPairIds &&
+			bankConnectorReady.assemblyConnectorHierarchyRole === "BANK_TO_FAB" &&
+			bankConnectorReady.assemblyConnectorPurpose === "HIERARCHY_LINK";
+		assertEqual(
+			failures,
+			result.bankConnectorReviewProjectNeutral,
+			true,
+			"duplicated Bank Interbay review is project-neutral before Apply",
+		);
+		await page.evaluate(() => {
+			if (globalThis.__openFabPlacedBaySync) globalThis.__openFabPlacedBaySync.values = [];
+		});
+		const expectedFabId = String(bankConnectorReady.documentNextOrganizationId);
+		await page
+			.getByTestId("static-fab-assembly-connector-panel")
+			.locator(".tilefab-assembly-connector-apply")
+			.click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-connected-fab-id") === expected.fabId &&
+					app.getAttribute("data-connected-fab-bank-ids") === expected.bankIds &&
+					app.getAttribute("data-connected-fab-loop-handoff") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expected.fabId
+				);
+			},
+			{
+				organizations: bankConnectorReady.documentOrganizations + 1,
+				fabId: expectedFabId,
+				bankIds: bankPairIds,
+			},
+			{ timeout: 60_000 },
+		);
+		const connectedFab = await readState();
+		const fabConnectorApplyTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.fabConnectorApplyObservedAsyncSync = fabConnectorApplyTransitions.includes("true");
+		result.connectedFabOrganizationId = connectedFab.connectedFabId;
+		result.fabLoopHandoffReady = connectedFab.connectedFabLoopHandoff === "true";
+		result.organizations = connectedFab.documentOrganizations;
+		assertEqual(
+			failures,
+			result.fabConnectorApplyObservedAsyncSync,
+			true,
+			"connected Fab Apply crosses the large-map async derivation window",
+		);
+		assertEqual(
+			failures,
+			connectedFab.documentSequence,
+			bankConnectorReady.documentSequence + 1,
+			"connected Fab Apply is one atomic document command",
+		);
+		assertEqual(
+			failures,
+			connectedFab.documentNextOrganizationId,
+			bankConnectorReady.documentNextOrganizationId + 1,
+			"connected Fab Apply consumes one organization id",
+		);
+		assertEqual(
+			failures,
+			connectedFab.workerChecksum,
+			connectedFab.modelChecksum,
+			"connected Fab Apply model/Worker checksum parity",
+		);
+		assertEqual(
+			failures,
+			connectedFab.workerPhysicalFingerprint,
+			connectedFab.modelPhysicalFingerprint,
+			"connected Fab Apply model/Worker physical parity",
+		);
+		assertEqual(
+			failures,
+			connectedFab.workerSimulationReady,
+			false,
+			"connected Fab Apply keeps simulation gated",
+		);
+
+		const fabLoopHandoff = page.getByTestId("ordinary-connected-fab-loop-handoff");
+		await fabLoopHandoff.waitFor({ state: "visible", timeout: 10_000 });
+		assertEqual(
+			failures,
+			await fabLoopHandoff.evaluate((element) => document.activeElement === element),
+			true,
+			"connected Fab Apply focuses the exact Loop continuation",
+		);
+		const fabLoopReviewLaunchStartedAt = await beginHierarchyLongTaskWindow();
+		await fabLoopHandoff.click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const panel = document.querySelector('[data-testid="static-fab-assembly-connector-panel"]');
+				return (
+					app?.getAttribute("data-assembly-connector-phase") === "ready" &&
+					app.getAttribute("data-organization-selection-ids") === expected.fabId &&
+					panel?.getAttribute("data-hierarchy-role") === "BANK_TO_FAB" &&
+					panel.getAttribute("data-purpose") === "FAB_LOOP"
+				);
+			},
+			{ fabId: expectedFabId },
+			{ timeout: 60_000 },
+		);
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		const fabLoopReviewLaunchPerformance = await readHierarchyLongTaskWindow(
+			fabLoopReviewLaunchStartedAt,
+		);
+		result.fabLoopReviewLaunchLongTasks = fabLoopReviewLaunchPerformance.longTasks;
+		result.fabLoopReviewLaunchLongAnimationFrames =
+			fabLoopReviewLaunchPerformance.longAnimationFrames;
+		assertEqual(
+			failures,
+			fabLoopReviewLaunchPerformance.supported &&
+				fabLoopReviewLaunchPerformance.takeRecordsSupported,
+			true,
+			"Fab Loop review launch Long Task observation support",
+		);
+		assertEqual(
+			failures,
+			result.fabLoopReviewLaunchLongTasks.length,
+			0,
+			"Fab Loop review launch Long Tasks",
+		);
+		const fabLoopReady = await readState();
+		result.fabLoopReviewProjectNeutral =
+			fabLoopReady.documentSequence === connectedFab.documentSequence &&
+			fabLoopReady.modelChecksum === connectedFab.modelChecksum &&
+			fabLoopReady.organizationSelectionIds === expectedFabId &&
+			fabLoopReady.assemblyConnectorHierarchyRole === "BANK_TO_FAB" &&
+			fabLoopReady.assemblyConnectorPurpose === "FAB_LOOP";
+		assertEqual(
+			failures,
+			result.fabLoopReviewProjectNeutral,
+			true,
+			"large-map Fab Loop review is project-neutral before Apply",
+		);
+
+		await page.evaluate(() => {
+			if (globalThis.__openFabPlacedBaySync) globalThis.__openFabPlacedBaySync.values = [];
+		});
+		const fabLoopLongTaskStartedAt = await beginHierarchyLongTaskWindow();
+		await page
+			.getByTestId("static-fab-assembly-connector-panel")
+			.locator(".tilefab-assembly-connector-apply")
+			.click();
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="rail-canvas"]')
+					?.getAttribute("data-model-sync-pending") === "true",
+			undefined,
+			{ timeout: 10_000 },
+		);
+		result.fabLoopProjectReplacementBlockedDuringSync = await page.evaluate(() => {
+			const create = document.querySelector('button[aria-label="새 프로젝트"]');
+			const open = document.querySelector('button[aria-label="프로젝트 열기"]');
+			return (
+				create instanceof HTMLButtonElement &&
+				create.disabled &&
+				open instanceof HTMLButtonElement &&
+				open.disabled
+			);
+		});
+		assertEqual(
+			failures,
+			result.fabLoopProjectReplacementBlockedDuringSync,
+			true,
+			"Fab Loop pending derivation blocks New/Open project replacement",
+		);
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const documentState = globalThis.__tileFab?.getDocument?.();
+				return (
+					documentState?.getPatchSequence?.() === expected.sequence &&
+					documentState?.organizations?.records?.length === expected.organizations &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					app?.getAttribute("data-organization-selection-ids") === expected.fabId &&
+					app.getAttribute("data-connected-fab-loop-handoff") === "false" &&
+					app.getAttribute("data-connected-fab-resilient-loop") === "true" &&
+					app.getAttribute("data-resilient-fab-checks-handoff") === "true" &&
+					app.getAttribute("data-resilient-fab-loop-receipt-phase") === "applied" &&
+					app.getAttribute("data-resilient-fab-loop-receipt-id") === expected.fabId &&
+					app.getAttribute("data-resilient-fab-loop-receipt-bank-ids") === expected.bankIds
+				);
+			},
+			{
+				sequence: fabLoopReady.documentSequence + 1,
+				organizations: fabLoopReady.documentOrganizations,
+				fabId: expectedFabId,
+				bankIds: bankPairIds,
+			},
+			{ timeout: 60_000 },
+		);
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		const fabLoopApplyPerformance = await readHierarchyLongTaskWindow(fabLoopLongTaskStartedAt);
+		const loopApplied = await readState();
+		const fabLoopApplyTransitions = await page.evaluate(
+			() => globalThis.__openFabPlacedBaySync?.values ?? [],
+		);
+		result.fabLoopApplyObservedAsyncSync = fabLoopApplyTransitions.includes("true");
+		result.fabLoopApplyMilliseconds = fabLoopApplyPerformance.elapsedMilliseconds;
+		result.fabLoopApplyLongTasks = fabLoopApplyPerformance.longTasks;
+		result.fabLoopApplyLongAnimationFrames = fabLoopApplyPerformance.longAnimationFrames;
+		result.fabChecksHandoffReady = loopApplied.resilientFabChecksHandoff === "true";
+		assertEqual(
+			failures,
+			fabLoopApplyPerformance.supported && fabLoopApplyPerformance.takeRecordsSupported,
+			true,
+			"Fab Loop Apply Long Task observation support",
+		);
+		assertEqual(failures, result.fabLoopApplyLongTasks.length, 0, "Fab Loop Apply Long Tasks");
+		assertEqual(
+			failures,
+			result.fabLoopApplyObservedAsyncSync,
+			true,
+			"Fab Loop Apply crosses the large-map async derivation window",
+		);
+		assertEqual(
+			failures,
+			loopApplied.documentSequence,
+			fabLoopReady.documentSequence + 1,
+			"Fab Loop Apply is one atomic document command",
+		);
+		assertEqual(
+			failures,
+			loopApplied.documentOrganizations,
+			fabLoopReady.documentOrganizations,
+			"Fab Loop Apply keeps organization count",
+		);
+		assertEqual(
+			failures,
+			loopApplied.documentNextOrganizationId,
+			fabLoopReady.documentNextOrganizationId,
+			"Fab Loop Apply keeps organization allocator cursor",
+		);
+		assertEqual(
+			failures,
+			loopApplied.connectedFabRailEdges > fabLoopReady.connectedFabRailEdges,
+			true,
+			"Fab Loop Apply adds exact direct Fab rail edges",
+		);
+		assertEqual(
+			failures,
+			loopApplied.workerChecksum,
+			loopApplied.modelChecksum,
+			"Fab Loop Apply model/Worker checksum parity",
+		);
+		assertEqual(
+			failures,
+			loopApplied.workerPhysicalFingerprint,
+			loopApplied.modelPhysicalFingerprint,
+			"Fab Loop Apply model/Worker physical parity",
+		);
+		assertEqual(
+			failures,
+			loopApplied.workerSimulationReady,
+			false,
+			"Fab Loop Apply keeps simulation gated",
+		);
+
+		const checksHandoff = page.getByTestId("ordinary-resilient-fab-checks-handoff");
+		await checksHandoff.waitFor({ state: "visible", timeout: 10_000 });
+		assertEqual(
+			failures,
+			await checksHandoff.evaluate((element) => document.activeElement === element),
+			true,
+			"Fab Loop Apply focuses the exact CHECKS continuation",
+		);
+		await page.getByRole("button", { name: "실행 취소" }).click();
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					canvasElement.getAttribute("data-worker-checksum") === expected.checksum &&
+					app?.getAttribute("data-history-can-redo") === "true" &&
+					app.getAttribute("data-organization-selection-ids") === expected.fabId &&
+					app.getAttribute("data-connected-fab-loop-handoff") === "true" &&
+					app.getAttribute("data-connected-fab-resilient-loop") === "false" &&
+					app.getAttribute("data-resilient-fab-checks-handoff") === "false" &&
+					app.getAttribute("data-resilient-fab-loop-receipt-phase") === "undone"
+				);
+			},
+			{ fabId: expectedFabId, checksum: fabLoopReady.modelChecksum },
+			{ timeout: 60_000 },
+		);
+		const loopUndone = await readState();
+		assertEqual(
+			failures,
+			loopUndone.modelChecksum,
+			fabLoopReady.modelChecksum,
+			"Fab Loop Undo restores exact pre-Loop model identity",
+		);
+		await page.getByTestId("rail-canvas").focus();
+		await page.keyboard.press("Meta+Shift+z");
+		await page.waitForFunction(
+			(expected) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvasElement = document.querySelector('[data-testid="rail-canvas"]');
+				const model = globalThis.__tileFab?.getEditorModel?.();
+				return (
+					model?.authoredChecksum === expected.checksum &&
+					canvasElement?.getAttribute("data-model-sync-pending") === "false" &&
+					canvasElement.getAttribute("data-worker-status") === "ready" &&
+					canvasElement.getAttribute("data-worker-checksum") === expected.checksum &&
+					app?.getAttribute("data-history-can-redo") === "false" &&
+					app.getAttribute("data-organization-selection-ids") === expected.fabId &&
+					app.getAttribute("data-connected-fab-resilient-loop") === "true" &&
+					app.getAttribute("data-resilient-fab-checks-handoff") === "true" &&
+					app.getAttribute("data-resilient-fab-loop-receipt-phase") === "applied"
+				);
+			},
+			{
+				checksum: loopApplied.modelChecksum,
+				fabId: expectedFabId,
+			},
+			{ timeout: 60_000 },
+		);
+		const loopRedone = await readState();
+		result.fabLoopHistoryProbe = {
+			modelChecksum: loopRedone.modelChecksum === loopApplied.modelChecksum,
+			workerChecksum: loopRedone.workerChecksum === loopApplied.workerChecksum,
+			physicalParity: loopRedone.workerPhysicalFingerprint === loopRedone.modelPhysicalFingerprint,
+			receiptBankIds: loopRedone.resilientFabLoopReceiptBankIds === bankPairIds,
+		};
+		result.fabLoopHistoryReady =
+			result.fabLoopHistoryProbe.modelChecksum &&
+			result.fabLoopHistoryProbe.workerChecksum &&
+			result.fabLoopHistoryProbe.physicalParity &&
+			result.fabLoopHistoryProbe.receiptBankIds;
+		assertEqual(
+			failures,
+			result.fabLoopHistoryReady,
+			true,
+			"Fab Loop Undo/Redo restores exact model, Worker, physical, and pair identity",
+		);
+
+		await checksHandoff.click();
+		const checksPanel = page.getByTestId("rail-readiness-panel");
+		await checksPanel.waitFor({ state: "visible", timeout: 10_000 });
+		await page.waitForFunction(
+			(expectedSequence) => {
+				const panel = document.querySelector('[data-testid="rail-readiness-panel"]');
+				return (
+					panel?.getAttribute("data-status") !== "checking" &&
+					panel?.getAttribute("data-source-sequence") === expectedSequence
+				);
+			},
+			String(loopRedone.documentSequence),
+			{ timeout: 60_000 },
+		);
+		const checksOpened = await readState();
+		result.fabChecksProjectNeutral =
+			checksOpened.documentSequence === loopRedone.documentSequence &&
+			checksOpened.documentRevision === loopRedone.documentRevision &&
+			checksOpened.modelChecksum === loopRedone.modelChecksum &&
+			checksOpened.readinessSourceSequence === String(loopRedone.documentSequence) &&
+			checksOpened.readinessSourceRevision === String(loopRedone.documentRevision) &&
+			checksOpened.readinessSourceChecksum === loopRedone.modelChecksum;
+		assertEqual(
+			failures,
+			result.fabChecksProjectNeutral,
+			true,
+			"Fab CHECKS opens against the exact current project without mutation",
+		);
+		assertEqual(
+			failures,
+			await page.getByTestId("rail-status-message").getAttribute("aria-live"),
+			"off",
+			"Fab CHECKS owns the live-status channel",
+		);
+		assertEqual(
+			failures,
+			await page
+				.getByTestId("static-fab-navigator-tab-checks")
+				.evaluate((element) => document.activeElement === element),
+			true,
+			"Fab CHECKS focuses its active navigator tab",
+		);
+		assertEqual(
+			failures,
+			await checksHandoff.isHidden(),
+			true,
+			"Fab CHECKS hides duplicate handoff",
+		);
+		await checksPanel.getByRole("button", { name: "정적 FAB 검사 패널 닫기" }).click();
+		await checksPanel.waitFor({ state: "hidden", timeout: 10_000 });
+		await page.waitForFunction(
+			() =>
+				document.activeElement?.getAttribute("data-testid") ===
+				"ordinary-resilient-fab-checks-handoff",
+			undefined,
+			{ timeout: 10_000 },
+		);
+		result.organizations = loopRedone.documentOrganizations;
+	} catch (error) {
+		const diagnosticState = await readState().catch(() => null);
+		failures.push(
+			`${error instanceof Error ? error.message : String(error)} | state ${JSON.stringify(diagnosticState)}`,
+		);
+	} finally {
+		await page
+			.evaluate(() => {
+				globalThis.__openFabPlacedBaySync?.observer?.disconnect?.();
+				globalThis.__openFabHierarchyScale?.observer?.disconnect?.();
+				globalThis.__openFabHierarchyScale?.longAnimationFrameObserver?.disconnect?.();
+			})
+			.catch(() => undefined);
+		await closeBrowserResource(page, "placed Twin Bay large-map page");
+		await closeBrowserResource(context, "placed Twin Bay large-map context");
+	}
+	return result;
+}
 
 async function runAssemblyConnectorFirstPaintScenario(activeBrowser) {
 	const budget = RAIL_ASSEMBLY_CONNECTOR_SCALE_BUDGET;
@@ -854,6 +2440,7 @@ async function runAssemblyConnectorFirstPaintScenario(activeBrowser) {
 			activityAssembleProbe.baseline,
 			organizationOutlineMetrics,
 			"organization outline adoption",
+			{ maximumStaticRedrawDelta: 1 },
 		);
 		result.newFab = await exerciseNewFabProfileScaleGate(page, budget, result.failures);
 		await page.keyboard.press("Escape");
@@ -1059,6 +2646,7 @@ async function runAssemblyConnectorFirstPaintScenario(activeBrowser) {
 			activityAssembleProbe.baseline,
 			organizationCanvasSelection.after,
 			"complete organization outline activity",
+			{ maximumStaticRedrawDelta: 1 },
 		);
 		assertAssemblyOrganizationAuthoredUnchanged(
 			result.failures,
@@ -1312,6 +2900,7 @@ async function runAssemblyConnectorFirstPaintScenario(activeBrowser) {
 			page,
 			budget,
 			result.failures,
+			directory,
 		);
 		await selectAssemblyConnectorScaleBays(page);
 
@@ -1355,11 +2944,11 @@ async function runAssemblyConnectorFirstPaintScenario(activeBrowser) {
 			};
 		});
 		for (const [label, actual, expected] of [
-			["panel aria-keyshortcuts", initialPanelContract.shortcuts, "Q E Escape Enter"],
+			["panel aria-keyshortcuts", initialPanelContract.shortcuts, "Q E Escape"],
 			["source placeholder value", initialPanelContract.sourceValue, ""],
-			["source placeholder label", initialPanelContract.sourcePlaceholder, "SELECT GATEWAY"],
+			["source placeholder label", initialPanelContract.sourcePlaceholder, "연결점 선택"],
 			["target placeholder value", initialPanelContract.targetValue, ""],
-			["target placeholder label", initialPanelContract.targetPlaceholder, "SELECT GATEWAY"],
+			["target placeholder label", initialPanelContract.targetPlaceholder, "연결점 선택"],
 			["target placeholder disabled", initialPanelContract.targetDisabled, true],
 			["Cancel aria-keyshortcuts", initialPanelContract.cancelShortcuts, "Escape"],
 			["Apply aria-keyshortcuts", initialPanelContract.applyShortcuts, "Enter"],
@@ -1371,23 +2960,34 @@ async function runAssemblyConnectorFirstPaintScenario(activeBrowser) {
 				const button = document.querySelector(`button[aria-label="${label}"]`);
 				return button instanceof HTMLButtonElement && button.disabled;
 			};
-			const activityDisabled = (activity) => {
+			const activityBlocked = (activity) => {
 				const button = document.querySelector(`[data-testid="editor-activity-${activity}"]`);
-				return button instanceof HTMLButtonElement && button.disabled;
+				return (
+					button instanceof HTMLButtonElement &&
+					button.disabled === false &&
+					button.getAttribute("aria-disabled") === "true" &&
+					button.getAttribute("data-availability") === "blocked"
+				);
 			};
 			return {
 				assembleDisabled: disabled("FAB 조립"),
-				mapDisabled: disabled("FAB 전체 지도"),
-				activityBuildDisabled: activityDisabled("build"),
-				activityAssembleDisabled: activityDisabled("assemble"),
-				activityEquipDisabled: activityDisabled("equip"),
-				activityInspectDisabled: activityDisabled("inspect"),
+				activityBuildBlocked: activityBlocked("build"),
+				activityAssembleBlocked: activityBlocked("assemble"),
+				activityEquipBlocked: activityBlocked("equip"),
+				activityInspectBlocked: activityBlocked("inspect"),
 				undoDisabled: disabled("실행 취소"),
 				clearDisabled: disabled("전체 삭제"),
 				assembleMenus: document.querySelectorAll('[data-testid="static-fab-assemble-menu"]').length,
 				ordinaryInspectors: document.querySelectorAll(
 					'[data-testid="rail-area-selection-inspector"], [data-testid="port-equipment-inspector"], [data-testid="rail-inspector"], [data-testid="advanced-switch-inspector"]',
 				).length,
+				retiredMapOwners: document.querySelectorAll(
+					'.tilefab-commands button[aria-label="FAB 전체 지도"]',
+				).length,
+				retiredOrganizationOwners: document.querySelectorAll(
+					'.tilefab-commands button[aria-label^="FAB 조직"]',
+				).length,
+				navigatorPanels: document.querySelectorAll("#tilefab-fab-navigator").length,
 			};
 		});
 		for (const [surface, disabled] of Object.entries(result.exclusiveTaskSurfaces).filter(([key]) =>
@@ -1395,6 +2995,47 @@ async function runAssemblyConnectorFirstPaintScenario(activeBrowser) {
 		)) {
 			assertEqual(result.failures, disabled, true, `Connector blocks ${surface}`);
 		}
+		for (const [surface, blocked] of Object.entries(result.exclusiveTaskSurfaces).filter(([key]) =>
+			key.endsWith("Blocked"),
+		)) {
+			assertEqual(result.failures, blocked, true, `Connector explains blocked ${surface}`);
+		}
+		const activityBeforeBlockedAttempt = await page
+			.getByTestId("tilefab-app")
+			.getAttribute("data-editor-activity");
+		const blockedReasonFragment = "적용하거나 Esc로 취소한 뒤 활동을 바꾸세요";
+		await page.getByTestId("editor-activity-build").click({ force: true });
+		await page.waitForFunction(
+			(expected) =>
+				(
+					document.querySelector(".tilefab-statusbar > span[aria-live]")?.textContent ?? ""
+				).includes(expected),
+			blockedReasonFragment,
+			{ timeout: 10_000 },
+		);
+		assertEqual(
+			result.failures,
+			await page.getByTestId("tilefab-app").getAttribute("data-editor-activity"),
+			activityBeforeBlockedAttempt,
+			"Connector blocks pointer Activity activation",
+		);
+		const blockedInspectActivity = page.getByTestId("editor-activity-inspect");
+		await blockedInspectActivity.focus();
+		await page.keyboard.press("Enter");
+		assertEqual(
+			result.failures,
+			await page.getByTestId("tilefab-app").getAttribute("data-editor-activity"),
+			activityBeforeBlockedAttempt,
+			"Connector blocks keyboard Activity activation",
+		);
+		assertEqual(
+			result.failures,
+			((await page.locator(".tilefab-statusbar > span[aria-live]").textContent()) ?? "").includes(
+				blockedReasonFragment,
+			),
+			true,
+			"Connector announces blocked Activity reason",
+		);
 		assertEqual(
 			result.failures,
 			result.exclusiveTaskSurfaces.assembleMenus,
@@ -1406,6 +3047,24 @@ async function runAssemblyConnectorFirstPaintScenario(activeBrowser) {
 			result.exclusiveTaskSurfaces.ordinaryInspectors,
 			0,
 			"Connector hides ordinary inspectors",
+		);
+		assertEqual(
+			result.failures,
+			result.exclusiveTaskSurfaces.retiredMapOwners,
+			0,
+			"Connector does not restore the retired Map launcher",
+		);
+		assertEqual(
+			result.failures,
+			result.exclusiveTaskSurfaces.retiredOrganizationOwners,
+			0,
+			"Connector does not restore the retired Organization launcher",
+		);
+		assertEqual(
+			result.failures,
+			result.exclusiveTaskSurfaces.navigatorPanels,
+			0,
+			"Connector closes the Navigator surface",
 		);
 		result.fastSelectionSnapshotStatus = await page
 			.locator('[data-testid="tilefab-app"]')
@@ -1876,7 +3535,7 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 		() =>
 			document
 				.querySelector('.tilefab-assembly-connector-side-option[aria-pressed="true"]')
-				?.textContent?.trim() === "LEFT",
+				?.textContent?.trim() === "왼쪽 · LEFT",
 	);
 	const ePhase = await waitForTerminalPhase();
 	assertEqual(failures, ePhase, "ready", "Connector focused-select E selects LEFT readiness");
@@ -1886,7 +3545,7 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 		() =>
 			document
 				.querySelector('.tilefab-assembly-connector-side-option[aria-pressed="true"]')
-				?.textContent?.trim() === "AUTO",
+				?.textContent?.trim() === "자동 · AUTO",
 	);
 	const qPhase = await waitForTerminalPhase();
 	assertEqual(failures, qPhase, "ready", "Connector focused-select Q restores AUTO readiness");
@@ -1948,7 +3607,7 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 				source[0].top < target[0].top &&
 				target[0].top < side[0].top &&
 				summary &&
-				side[0].top < summary.top &&
+				summary.top < source[0].top &&
 				cancel &&
 				apply &&
 				cancel.left < apply.left,
@@ -2018,10 +3677,9 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 	);
 
-	const timingSummary = panel.locator("details > summary").first();
-	await timingSummary.waitFor({ state: "visible" });
-	await timingSummary.focus();
-	await page.keyboard.press("Escape");
+	const closeAfterResponsiveAudit = panel.locator(".tilefab-assembly-connector-cancel");
+	await closeAfterResponsiveAudit.waitFor({ state: "visible" });
+	await closeAfterResponsiveAudit.click();
 	await panel.waitFor({ state: "hidden" });
 	await page.waitForFunction(
 		() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
@@ -2056,7 +3714,7 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 		cells: Number(element.dataset.workerCells),
 	}));
 	const applyStartedAt = await browserNow();
-	await panel.locator('[data-gateway="source"] select').focus();
+	await panel.locator(".tilefab-assembly-connector-apply").focus();
 	await page.keyboard.press("Enter");
 	await panel.waitFor({ state: "hidden" });
 	await waitForMatrixCondition(
@@ -2119,10 +3777,11 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 			const restoredChecksum = target?.dataset.workerChecksum?.split(":") ?? [];
 			const sourceChecksum = source.checksum.split(":");
 			const restoredExceptMonotonicOrganizationCursor =
-				restoredChecksum.length === 9 &&
-				sourceChecksum.length === 9 &&
-				restoredChecksum.every((field, index) => index === 6 || field === sourceChecksum[index]) &&
-				Number.parseInt(restoredChecksum[6], 16) > Number.parseInt(sourceChecksum[6], 16);
+				restoredChecksum.length === 12 &&
+				sourceChecksum.length === 12 &&
+				restoredChecksum[0] === "00000002" &&
+				restoredChecksum.every((field, index) => index === 7 || field === sourceChecksum[index]) &&
+				Number.parseInt(restoredChecksum[7], 16) > Number.parseInt(sourceChecksum[7], 16);
 			return (
 				target?.dataset.workerStatus === "ready" &&
 				Number(target.dataset.workerSequence) === source.sequence + 1 &&
@@ -2618,8 +4277,7 @@ async function runSemanticBayDeleteScaleScenario(activeBrowser) {
 			"Semantic Bay simulation gate",
 		);
 
-		await activateEditorActivity(page, "assemble");
-		await page.locator('button[aria-label^="FAB 조직 ("]').click();
+		await openStaticFabNavigatorTab(page, "organizations");
 		const organizationLibrary = page.getByTestId("static-fab-organization-library");
 		await organizationLibrary.waitFor({ state: "visible" });
 		const detachedBay = organizationLibrary.locator('[data-organization-id="1"]');
@@ -3257,7 +4915,6 @@ async function runSemanticBayDeleteScaleScenario(activeBrowser) {
 			0,
 			"Semantic Bay live Workers after apply",
 		);
-
 		Object.assign(
 			result,
 			await measureBayCommandRetainedHeap(
@@ -3270,7 +4927,6 @@ async function runSemanticBayDeleteScaleScenario(activeBrowser) {
 				"Semantic Bay",
 			),
 		);
-
 		const postGcDiagnostics = await readSemanticBayScaleDiagnostics(page, {
 			commandStartedAt: commandProbe.startedAt,
 			commandEndedAt: certifiedAt,
@@ -3645,8 +5301,7 @@ async function runBayFlowEditScaleScenario(activeBrowser) {
 			"Bay Flow Edit source physical fingerprint",
 		);
 
-		await activateEditorActivity(page, "assemble");
-		await page.locator('button[aria-label^="FAB 조직 ("]').click();
+		await openStaticFabNavigatorTab(page, "organizations");
 		const organizationLibrary = page.getByTestId("static-fab-organization-library");
 		await organizationLibrary.waitFor({ state: "visible" });
 		const detachedBay = organizationLibrary.locator(
@@ -4978,7 +6633,13 @@ async function readAssemblyOrganizationCanvasMetrics(activePage) {
 	});
 }
 
-function assertAssemblyOrganizationSourceUnchanged(failures, before, after, label) {
+function assertAssemblyOrganizationSourceUnchanged(
+	failures,
+	before,
+	after,
+	label,
+	{ maximumStaticRedrawDelta = 0 } = {},
+) {
 	for (const [field, actual, expected] of [
 		["model generation", after.modelGeneration, before.modelGeneration],
 		["authored checksum", after.authoredChecksum, before.authoredChecksum],
@@ -4996,7 +6657,6 @@ function assertAssemblyOrganizationSourceUnchanged(failures, before, after, labe
 			before.workerPhysicalFingerprint,
 		],
 		["Worker physical paths", after.workerPhysicalPaths, before.workerPhysicalPaths],
-		["Canvas static redraws", after.staticRedraws, before.staticRedraws],
 		["physical artifact bindings", after.physicalBindings, before.physicalBindings],
 		[
 			"physical presentation builds",
@@ -5021,6 +6681,14 @@ function assertAssemblyOrganizationSourceUnchanged(failures, before, after, labe
 	]) {
 		assertEqual(failures, actual, expected, `${label} ${field}`);
 	}
+	const staticRedrawDelta = after.staticRedraws - before.staticRedraws;
+	assertAtLeast(failures, staticRedrawDelta, 0, `${label} Canvas static redraw delta`);
+	assertAtMost(
+		failures,
+		staticRedrawDelta,
+		maximumStaticRedrawDelta,
+		`${label} Canvas static redraw delta`,
+	);
 }
 
 function assertAssemblyOrganizationAuthoredUnchanged(failures, before, after, label) {
@@ -5038,7 +6706,7 @@ function assertAssemblyOrganizationAuthoredUnchanged(failures, before, after, la
 }
 
 async function selectAssemblyConnectorScaleBays(activePage) {
-	await activePage.locator('button[aria-label^="FAB 조직 ("]').click();
+	await openStaticFabNavigatorTab(activePage, "organizations");
 	await activePage.locator('[data-testid="static-fab-organization-library"]').waitFor({
 		state: "visible",
 	});
@@ -5057,7 +6725,12 @@ async function selectAssemblyConnectorScaleBays(activePage) {
 	return connect;
 }
 
-async function exerciseLargeMapConnectorManualRecommendationPolicy(activePage, budget, failures) {
+async function exerciseLargeMapConnectorManualRecommendationPolicy(
+	activePage,
+	budget,
+	failures,
+	directory,
+) {
 	const panel = activePage.getByTestId("static-fab-assembly-connector-panel");
 	const baseline = await activePage.evaluate(() => {
 		const canvas = document.querySelector('[data-testid="rail-canvas"]');
@@ -5123,6 +6796,153 @@ async function exerciseLargeMapConnectorManualRecommendationPolicy(activePage, b
 	]) {
 		assertEqual(failures, actual, expected, `100k+ manual recommendation policy ${label}`);
 	}
+	await activePage.setViewportSize({ width: 390, height: 844 });
+	await panel.locator('[data-gateway="source"] select').selectOption("0");
+	await panel.locator('[data-gateway="target"] select').selectOption("0");
+	await waitForStaticFabAssemblyConnectorRecoveryTarget(
+		activePage,
+		"side-left",
+		budget.terminalReadyMilliseconds,
+	);
+
+	const responsiveRecoveryAudits = [];
+	for (const viewport of [
+		{ width: 390, height: 844 },
+		{ width: 760, height: 900 },
+		{ width: 1440, height: 900 },
+	]) {
+		await activePage.setViewportSize(viewport);
+		await activePage.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		const audit = await panel.evaluate((element) => {
+			const guided = [...element.querySelectorAll("[data-guided-target]")];
+			const target = guided[0];
+			const apply = element.querySelector(".tilefab-assembly-connector-apply");
+			const feedback = element.querySelector(".tilefab-assembly-connector-feedback");
+			const prompt = element.querySelector(".tilefab-assembly-connector-recovery-prompt");
+			const targetRect = target?.getBoundingClientRect();
+			const centerX = targetRect ? targetRect.left + targetRect.width / 2 : -1;
+			const centerY = targetRect ? targetRect.top + targetRect.height / 2 : -1;
+			const hit = centerX >= 0 && centerY >= 0 ? document.elementFromPoint(centerX, centerY) : null;
+			const panelRect = element.getBoundingClientRect();
+			return {
+				phase: element.getAttribute("data-phase") ?? "",
+				recoveryTarget: element.getAttribute("data-recovery-target") ?? "",
+				guidedCount: guided.length,
+				targetEnabled: target instanceof HTMLButtonElement && !target.disabled,
+				targetWidth: targetRect?.width ?? 0,
+				targetHeight: targetRect?.height ?? 0,
+				targetCenterVisible:
+					centerX >= 0 && centerX <= innerWidth && centerY >= 0 && centerY <= innerHeight,
+				targetCenterHit:
+					target instanceof HTMLElement &&
+					hit instanceof Node &&
+					(target === hit || target.contains(hit)),
+				applyDisabled: apply instanceof HTMLButtonElement && apply.disabled,
+				feedbackRole: feedback?.getAttribute("role") ?? "",
+				feedbackLive: feedback?.getAttribute("aria-live") ?? "",
+				promptText: prompt?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+				documentWidth: document.documentElement.scrollWidth,
+				viewportWidth: document.documentElement.clientWidth,
+				panelWidth: panelRect.width,
+				panelHeight: panelRect.height,
+			};
+		});
+		responsiveRecoveryAudits.push({ viewport, ...audit });
+		for (const [label, actual, expected] of [
+			["phase", audit.phase, "rejected"],
+			["recovery target", audit.recoveryTarget, "side-left"],
+			["guided target count", audit.guidedCount, 1],
+			["guided target enabled", audit.targetEnabled, true],
+			["guided target center visible", audit.targetCenterVisible, true],
+			["guided target center hit-test", audit.targetCenterHit, true],
+			["Apply locked", audit.applyDisabled, true],
+			["feedback role", audit.feedbackRole, "alert"],
+			["feedback aria-live", audit.feedbackLive, "assertive"],
+			["horizontal document overflow", audit.documentWidth <= audit.viewportWidth + 1, true],
+			["source-relative recovery copy", audit.promptText.includes("출발 진행 방향을 기준"), true],
+		]) {
+			assertEqual(
+				failures,
+				actual,
+				expected,
+				`100k+ rejected recovery ${viewport.width}px ${label}`,
+			);
+		}
+		assertAtLeast(
+			failures,
+			audit.targetWidth,
+			44,
+			`100k+ rejected recovery ${viewport.width}px target width`,
+		);
+		assertAtLeast(
+			failures,
+			audit.targetHeight,
+			44,
+			`100k+ rejected recovery ${viewport.width}px target height`,
+		);
+		await activePage.screenshot({
+			path: path.join(directory, `rejected-recovery-${viewport.width}x${viewport.height}.png`),
+			fullPage: true,
+		});
+	}
+
+	const recoveryChain = ["side-left"];
+	await panel.locator(".tilefab-assembly-connector-side-option[data-guided-target]").click();
+	await waitForStaticFabAssemblyConnectorRecoveryTarget(
+		activePage,
+		"side-right",
+		budget.terminalReadyMilliseconds,
+	);
+	recoveryChain.push("side-right");
+	await panel.locator(".tilefab-assembly-connector-side-option[data-guided-target]").click();
+	await waitForStaticFabAssemblyConnectorRecoveryTarget(
+		activePage,
+		"target-next",
+		budget.terminalReadyMilliseconds,
+	);
+	recoveryChain.push("target-next");
+	await panel.locator('[data-gateway="target"] [data-guided-target]').click();
+	await waitForStaticFabAssemblyConnectorRecoveryTarget(
+		activePage,
+		"side-left",
+		budget.terminalReadyMilliseconds,
+	);
+	recoveryChain.push("side-left");
+
+	const afterRecovery = await activePage.evaluate(() => {
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		const documentModel = globalThis.__tileFab?.getDocument?.();
+		const apply = document.querySelector(".tilefab-assembly-connector-apply");
+		return {
+			modelGeneration: Number(canvas?.dataset.modelGeneration),
+			workerSequence: Number(canvas?.dataset.workerSequence),
+			workerRevision: Number(canvas?.dataset.workerRevision),
+			workerChecksum: canvas?.dataset.workerChecksum ?? "",
+			workerCells: Number(canvas?.dataset.workerCells),
+			documentRevision: Number(documentModel?.map?.getRevision?.()),
+			documentPatchSequence: Number(documentModel?.getPatchSequence?.()),
+			applyDisabled: apply instanceof HTMLButtonElement && apply.disabled,
+		};
+	});
+	for (const [label, actual, expected] of [
+		["model generation", afterRecovery.modelGeneration, baseline.modelGeneration],
+		["Worker sequence", afterRecovery.workerSequence, baseline.workerSequence],
+		["Worker revision", afterRecovery.workerRevision, baseline.workerRevision],
+		["Worker checksum", afterRecovery.workerChecksum, baseline.workerChecksum],
+		["Worker cells", afterRecovery.workerCells, baseline.workerCells],
+		["authored revision", afterRecovery.documentRevision, baseline.documentRevision],
+		[
+			"authored patch sequence",
+			afterRecovery.documentPatchSequence,
+			baseline.documentPatchSequence,
+		],
+		["Apply remains locked", afterRecovery.applyDisabled, true],
+	]) {
+		assertEqual(failures, actual, expected, `100k+ rejected recovery ${label}`);
+	}
+
 	await panel.locator(".tilefab-assembly-connector-cancel").click();
 	await panel.waitFor({ state: "hidden" });
 	return {
@@ -5131,7 +6951,24 @@ async function exerciseLargeMapConnectorManualRecommendationPolicy(activePage, b
 		snapshotStatus: metrics.snapshotStatus,
 		sourceCells: metrics.sourceCells,
 		phase: metrics.phase,
+		responsiveRecoveryAudits,
+		recoveryChain,
 	};
+}
+
+async function waitForStaticFabAssemblyConnectorRecoveryTarget(activePage, target, timeout) {
+	await activePage.waitForFunction(
+		(expectedTarget) => {
+			const panel = document.querySelector('[data-testid="static-fab-assembly-connector-panel"]');
+			return (
+				panel?.getAttribute("data-phase") === "rejected" &&
+				panel.getAttribute("data-recovery-target") === expectedTarget &&
+				panel.querySelectorAll("[data-guided-target]").length === 1
+			);
+		},
+		target,
+		{ timeout },
+	);
 }
 
 async function runScaleScenario(activeBrowser, cellCount) {
@@ -5183,6 +7020,7 @@ async function runScaleScenario(activeBrowser, cellCount) {
 	let membershipMetrics = {};
 	let patternMetrics = {};
 	let blueprintMetrics = {};
+	let editorMetrics = {};
 	let readyMilliseconds = Number.POSITIVE_INFINITY;
 	let retainedHeapGrowthBytes = Number.POSITIVE_INFINITY;
 	let membershipRetainedHeapGrowth = {
@@ -5271,7 +7109,7 @@ async function runScaleScenario(activeBrowser, cellCount) {
 
 		patternMetrics = await exercisePatternPreview(page);
 		timeline.push({ label: "pattern-preview", at: await page.evaluate(() => performance.now()) });
-		await exerciseEditor(page);
+		editorMetrics = await exerciseEditor(page);
 		timeline.push({ label: "editor-workflow", at: await page.evaluate(() => performance.now()) });
 		arrangementMetrics = await exerciseArrangementScalePage(
 			context,
@@ -5424,12 +7262,7 @@ async function runScaleScenario(activeBrowser, cellCount) {
 			budget.visiblePortSlots,
 			"visible port slot candidates",
 		);
-		assertEqual(
-			failures,
-			interactionMetrics.selectedModuleSource === "" ? "missing" : "selected",
-			"selected",
-			"module selection",
-		);
+		assertEqual(failures, editorMetrics.moduleSelection, "selected", "module selection");
 		assertEqual(
 			failures,
 			interactionMetrics.railPresentationMode,
@@ -5848,6 +7681,7 @@ async function runScaleScenario(activeBrowser, cellCount) {
 		membershipMetrics,
 		blueprintMetrics,
 		patternMetrics,
+		editorMetrics,
 		longTasks,
 		timeline,
 		consoleErrors,
@@ -6664,9 +8498,18 @@ async function exerciseEditor(page) {
 	const centerY = box.y + box.height / 2;
 	const cell = 38;
 
+	await activateEditorActivity(page, "inspect");
 	await canvas.focus();
-	await page.keyboard.press("v");
 	await page.mouse.click(centerX + cell * 0.5, centerY + cell * 0.5);
+	await page.waitForFunction(
+		() =>
+			(document
+				.querySelector('[data-testid="rail-canvas"]')
+				?.getAttribute("data-selected-module-source") ?? "") !== "",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	const selected = await readCanvasMetrics(page);
 	await clickActivityCommand(page, "build", "레일 건설");
 	await page.mouse.move(centerX + cell * 2.5, centerY + cell * 0.5);
 	await page.mouse.down();
@@ -6687,6 +8530,11 @@ async function exerciseEditor(page) {
 	await page.mouse.down({ button: "right" });
 	await page.mouse.move(centerX + 48, centerY + 32, { steps: 8 });
 	await page.mouse.up({ button: "right" });
+	return {
+		moduleSelection: selected.selectedModuleSource === "" ? "missing" : "selected",
+		selectedModuleSource: selected.selectedModuleSource,
+		selectedModuleCells: Number(selected.selectedModuleCells),
+	};
 }
 
 async function exerciseFactoryScaleBlueprintPreview(page, readyTimeoutMilliseconds) {
@@ -6702,7 +8550,8 @@ async function exerciseFactoryScaleBlueprintPreview(page, readyTimeoutMillisecon
 	const selectedAt = await page.evaluate(() => performance.now());
 	const selectedCells = Number(await inspector.getAttribute("data-cell-count"));
 	await page.keyboard.press("Control+c");
-	await page.getByText("MULTI-PLACE ON", { exact: true }).waitFor({ state: "visible" });
+	const repeatStatus = page.getByTestId("area-stamp-multi-place-status");
+	await repeatStatus.waitFor({ state: "visible" });
 	const copiedAt = await page.evaluate(() => performance.now());
 	const centerX = box.x + box.width / 2;
 	const centerY = box.y + box.height / 2;
@@ -6717,8 +8566,10 @@ async function exerciseFactoryScaleBlueprintPreview(page, readyTimeoutMillisecon
 		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 	);
 	const preview = await readCanvasMetrics(page);
-	const active = await page.getByText("MULTI-PLACE ON", { exact: true }).isVisible();
+	const active = await repeatStatus.isVisible();
 	const generationBeforePlacement = Number(preview.modelGeneration);
+	const workerSequenceBeforePlacement = Number(preview.workerSequence);
+	const workerTargetSequenceBeforePlacement = Number(preview.workerTargetSequence);
 	const pathsBeforePlacement = Number(preview.physicalPaths);
 	const clickStartedAt = performance.now();
 	await page.mouse.click(centerX, centerY - 140);
@@ -6745,18 +8596,51 @@ async function exerciseFactoryScaleBlueprintPreview(page, readyTimeoutMillisecon
 		const status = await page.locator(".tilefab-statusbar").innerText();
 		throw new Error(`Factory blueprint placement ${placementOutcome}: ${status}`);
 	}
-	await page.waitForFunction(
-		(expectedGeneration) => {
-			const target = document.querySelector('[data-testid="rail-canvas"]');
-			return (
-				target?.dataset.modelSyncPending === "false" &&
-				target.dataset.workerStatus === "ready" &&
-				Number(target.dataset.modelGeneration) === expectedGeneration
+	await page
+		.waitForFunction(
+			(expected) => {
+				const target = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					target?.dataset.modelSyncPending === "false" &&
+					target.dataset.workerStatus === "ready" &&
+					Number(target.dataset.modelGeneration) === expected.generation &&
+					Number(target.dataset.workerSequence) === expected.workerSequence &&
+					Number(target.dataset.workerTargetSequence) === expected.workerTargetSequence
+				);
+			},
+			{
+				generation: generationBeforePlacement + 1,
+				workerSequence: workerSequenceBeforePlacement + 1,
+				workerTargetSequence: workerTargetSequenceBeforePlacement + 1,
+			},
+			{ timeout: readyTimeoutMilliseconds },
+		)
+		.catch(async (error) => {
+			const diagnostics = await readCanvasMetrics(page);
+			const status = await page
+				.locator(".tilefab-statusbar")
+				.innerText()
+				.catch(() => "");
+			throw new Error(
+				`Factory blueprint placement mirror did not settle: ${JSON.stringify({
+					expectedGeneration: generationBeforePlacement + 1,
+					expectedWorkerSequence: workerSequenceBeforePlacement + 1,
+					expectedWorkerTargetSequence: workerTargetSequenceBeforePlacement + 1,
+					modelGeneration: diagnostics.modelGeneration,
+					modelSyncPending: diagnostics.modelSyncPending,
+					workerStatus: diagnostics.workerStatus,
+					workerSequence: diagnostics.workerSequence,
+					workerTargetSequence: diagnostics.workerTargetSequence,
+					workerRevision: diagnostics.workerRevision,
+					workerTargetRevision: diagnostics.workerTargetRevision,
+					physicalPaths: diagnostics.physicalPaths,
+					blueprintPlacementPending: diagnostics.blueprintPlacementPending,
+					blueprintPlacementResult: diagnostics.blueprintPlacementResult,
+					status,
+				})}`,
+				{ cause: error },
 			);
-		},
-		generationBeforePlacement + 1,
-		{ timeout: readyTimeoutMilliseconds },
-	);
+		});
 	const placementReadyMilliseconds = performance.now() - placementStartedAt;
 	const placed = await readCanvasMetrics(page);
 	const placementResult = placed.blueprintPlacementResult;
@@ -6785,7 +8669,7 @@ async function exerciseFactoryScaleBlueprintPreview(page, readyTimeoutMillisecon
 		Number(afterUndo.modelGeneration) === generationBeforePlacement + 2;
 	await canvas.focus();
 	await page.keyboard.press("Control+v");
-	await page.getByText("MULTI-PLACE ON", { exact: true }).waitFor({ state: "visible" });
+	await repeatStatus.waitFor({ state: "visible" });
 	await page.mouse.click(centerX, centerY - 140);
 	const pendingUndoObserved =
 		(await canvas.getAttribute("data-blueprint-placement-pending")) === "true";
@@ -6824,7 +8708,7 @@ async function exerciseFactoryScaleBlueprintPreview(page, readyTimeoutMillisecon
 		{ timeout: readyTimeoutMilliseconds },
 	);
 	const cancelledMetrics = await readCanvasMetrics(page);
-	const cancelled = !(await page.getByText("MULTI-PLACE ON", { exact: true }).isVisible());
+	const cancelled = !(await repeatStatus.isVisible());
 	return {
 		skipped: false,
 		selectMilliseconds: selectedAt - startedAt,
@@ -6882,7 +8766,7 @@ async function exercisePatternPreview(page) {
 					const next = element.dataset.staticRedraws;
 					stableFrames = next === previous ? stableFrames + 1 : 0;
 					previous = next;
-					if (stableFrames >= 4) resolve();
+					if (stableFrames >= 12) resolve();
 					else requestAnimationFrame(sample);
 				};
 				requestAnimationFrame(sample);
@@ -6900,8 +8784,10 @@ async function exercisePatternPreview(page) {
 		const canvas = document.querySelector('[data-testid="rail-canvas"]');
 		const panel = document.querySelector('[data-testid="template-placement-feedback"]');
 		const announcement = panel?.querySelector('[aria-live="polite"]');
+		const descriptions = new Set((canvas?.getAttribute("aria-describedby") ?? "").split(/\s+/));
 		return (
-			canvas?.getAttribute("aria-describedby") === panel?.id &&
+			panel?.id !== undefined &&
+			descriptions.has(panel.id) &&
 			panel?.getAttribute("aria-label") === "패턴 배치 판정" &&
 			/ENTRY|EXIT|ORIGIN/.test(announcement?.textContent ?? "") &&
 			(announcement?.textContent ?? "").includes("Reserved")
@@ -6914,8 +8800,9 @@ async function exercisePatternPreview(page) {
 		const canvas = document.querySelector('[data-testid="rail-canvas"]');
 		const panel = document.querySelector('[data-testid="template-placement-feedback"]');
 		const announcement = panel?.querySelector('[aria-live="polite"]');
+		const descriptions = new Set((canvas?.getAttribute("aria-describedby") ?? "").split(/\s+/));
 		return (
-			canvas?.hasAttribute("aria-describedby") === false &&
+			(panel?.id === undefined || !descriptions.has(panel.id)) &&
 			panel?.hidden === true &&
 			(panel?.querySelector("strong")?.textContent ?? "") === "" &&
 			(panel?.querySelector("p")?.textContent ?? "") === "" &&
@@ -7174,6 +9061,14 @@ async function exerciseEqMembershipWorkflow(
 	const initialDerivationMilliseconds = placed.modelDerivationWorkerMs;
 	await onFixtureReady();
 
+	const moreActions = page.getByTestId("port-equipment-more-actions");
+	await moreActions.locator(":scope > summary").click();
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="port-equipment-more-actions"]')?.hasAttribute("open"),
+		undefined,
+		{ timeout: readyTimeoutMilliseconds },
+	);
 	const editMembership = page.getByTestId("edit-port-equipment-membership");
 	await editMembership.click();
 	await page.waitForFunction(
@@ -7703,6 +9598,32 @@ async function activityCommandButton(page, activity, accessibleName) {
 	return command;
 }
 
+async function openStaticFabNavigatorTab(page, tab) {
+	if (!["map", "organizations", "checks"].includes(tab)) {
+		throw new Error(`Unknown FAB Navigator tab: ${String(tab)}.`);
+	}
+	const app = page.getByTestId("tilefab-app");
+	const launcher = await activityCommandButton(page, "inspect", "FAB 내비게이터");
+	if ((await app.getAttribute("data-navigator-tab")) === "") {
+		await launcher.click();
+		await page.locator("#tilefab-fab-navigator").waitFor({ state: "visible" });
+	}
+	if ((await app.getAttribute("data-navigator-tab")) !== tab) {
+		await page.getByTestId(`static-fab-navigator-tab-${tab}`).click();
+	}
+	await page.waitForFunction(
+		(expectedTab) =>
+			document.querySelector('[data-testid="tilefab-app"]')?.getAttribute("data-navigator-tab") ===
+			expectedTab,
+		tab,
+		{ timeout: 10_000 },
+	);
+	await page
+		.locator(`#tilefab-fab-navigator-panel-${tab}[role="tabpanel"]:not([hidden])`)
+		.waitFor({ state: "visible", timeout: 10_000 });
+	return launcher;
+}
+
 async function clickActivityCommand(page, activity, accessibleName) {
 	const command = await activityCommandButton(page, activity, accessibleName);
 	await command.click();
@@ -7860,11 +9781,14 @@ function parseRequestedCounts(value) {
 
 function startPreviewServer() {
 	const vite = path.join(root, "node_modules", "vite", "bin", "vite.js");
-	const child = spawn(
-		process.execPath,
-		[vite, "preview", "--host", host, "--port", String(port), "--strictPort"],
-		{ cwd: root, stdio: ["ignore", "pipe", "pipe"] },
-	);
+	const serverArguments =
+		process.env.OPENFAB_SCALE_DEV_SERVER === "1"
+			? [vite, "--host", host, "--port", String(port), "--strictPort"]
+			: [vite, "preview", "--host", host, "--port", String(port), "--strictPort"];
+	const child = spawn(process.execPath, serverArguments, {
+		cwd: root,
+		stdio: ["ignore", "pipe", "pipe"],
+	});
 	child.stderr.on("data", (chunk) => process.stderr.write(chunk));
 	return child;
 }

@@ -23,6 +23,10 @@ import {
 	resolvePortAttachmentWithSourceIndex,
 } from "./PortAttachmentResolver";
 import {
+	type PortEquipmentResolvedPositionCapability,
+	visitPortEquipmentResolvedPositions,
+} from "./PortEquipmentResolvedPositions";
+import {
 	DEFAULT_ENVELOPE_CHUNK_SIZE_METERS,
 	RailEnvelopeSpatialIndex,
 	type RailEnvelopeSpatialIndexSnapshot,
@@ -110,6 +114,7 @@ export interface PortSlotSpatialIndexSnapshot {
 	readonly slotIndices: Uint32Array;
 }
 
+/** Already-resolved immutable positions that can seed live occupancy without resolving ports twice. */
 export interface PortSlotBounds {
 	readonly minX: number;
 	readonly minZ: number;
@@ -273,7 +278,8 @@ function findPortSlotSpatialChunk(coordinates: Int32Array, x: number, z: number)
 
 interface ExistingResolvedPort {
 	readonly port: PortRecord;
-	readonly attachment: ResolvedPortAttachment;
+	readonly worldXMeters: number;
+	readonly worldZMeters: number;
 }
 
 export interface PortSlotAvailabilityResult {
@@ -347,14 +353,14 @@ export class PortSlotAvailabilityIndex {
 		layout: CompiledPhysicalLayout,
 		state: PortEquipmentState,
 		portType: PortType = "OHB",
+		resolvedPositions?: PortEquipmentResolvedPositionCapability,
 	) {
 		this.sourceLayout = layout;
 		this.revision = layout.revision;
 		this.portType = portType;
 		this.sourceState = state;
-		const existingPorts = resolveExistingPorts(layout, state);
-		this.portCount = existingPorts.length;
-		this.existingPortIndex = indexExistingPorts(existingPorts);
+		this.portCount = state.ports.length;
+		this.existingPortIndex = indexExistingPorts(layout, state, resolvedPositions);
 		this.stkBodySweeps = new StkBodySweepIndex(layout, state, portType === "STK");
 	}
 
@@ -367,6 +373,20 @@ export class PortSlotAvailabilityIndex {
 	}
 
 	statusFor(
+		slots: CompiledPortSlots,
+		row: number,
+		ignoredPortId = 0,
+		ignoredEquipmentGroupId = 0,
+	): PortSlotAvailabilityResult {
+		return this.statusForAdvisoryDiscovery(slots, row, ignoredPortId, ignoredEquipmentGroupId);
+	}
+
+	/**
+	 * Fast dynamic-only probe for optional UI discovery. A prepared subclass deliberately bypasses
+	 * its per-row tamper proof here; any candidate must still pass statusFor through the canonical
+	 * selector before the UI may advertise it as actionable.
+	 */
+	statusForAdvisoryDiscovery(
 		slots: CompiledPortSlots,
 		row: number,
 		ignoredPortId = 0,
@@ -1025,33 +1045,49 @@ function writeResolution(
 	yawRadians[row] = resolution.yawRadians;
 }
 
-function resolveExistingPorts(
+function indexExistingPorts(
 	layout: CompiledPhysicalLayout,
 	state: PortEquipmentState,
-): readonly ExistingResolvedPort[] {
+	resolvedPositions?: PortEquipmentResolvedPositionCapability,
+): ReadonlyMap<string, readonly ExistingResolvedPort[]> {
+	const mutable = new Map<string, ExistingResolvedPort[]>();
+	if (resolvedPositions) {
+		visitPortEquipmentResolvedPositions(
+			resolvedPositions,
+			layout,
+			state,
+			(_row, port, worldXMeters, worldZMeters) => {
+				appendExistingPort(mutable, port, worldXMeters, worldZMeters);
+			},
+		);
+		return mutable;
+	}
 	const sourceIndex = createPortAttachmentSourceIndex(layout);
-	return state.ports.map((port) => {
+	for (let row = 0; row < state.ports.length; row++) {
+		const port = state.ports[row];
+		if (!port) throw new Error(`Missing port availability row ${row}.`);
 		const attachment = resolvePortAttachmentWithSourceIndex(layout, port, sourceIndex);
 		if (!attachment.ok) {
 			throw new Error(
 				`Port ${port.id} attachment is invalid (${attachment.code}): ${attachment.message}`,
 			);
 		}
-		return { port, attachment };
-	});
-}
-
-function indexExistingPorts(
-	ports: readonly ExistingResolvedPort[],
-): ReadonlyMap<string, readonly ExistingResolvedPort[]> {
-	const mutable = new Map<string, ExistingResolvedPort[]>();
-	for (const port of ports) {
-		const key = metricBucketKey(port.attachment.worldXMeters, port.attachment.worldZMeters);
-		const bucket = mutable.get(key);
-		if (bucket) bucket.push(port);
-		else mutable.set(key, [port]);
+		appendExistingPort(mutable, port, attachment.worldXMeters, attachment.worldZMeters);
 	}
 	return mutable;
+}
+
+function appendExistingPort(
+	mutable: Map<string, ExistingResolvedPort[]>,
+	port: PortRecord,
+	worldXMeters: number,
+	worldZMeters: number,
+): void {
+	const resolved = { port, worldXMeters, worldZMeters };
+	const key = metricBucketKey(worldXMeters, worldZMeters);
+	const bucket = mutable.get(key);
+	if (bucket) bucket.push(resolved);
+	else mutable.set(key, [resolved]);
 }
 
 function findPortConflict(
@@ -1069,6 +1105,26 @@ function findPortConflict(
 	const bucketZ = Math.floor(worldZMeters / EXISTING_PORT_BUCKET_METERS);
 	const routeKey = portRouteIdentityKey(route);
 	const minimumSpacingMeters = minimumSpacingMillimeters / 1_000;
+	// An exact authored slot is authoritative over a merely nearby clearance conflict. Checking the
+	// owning bucket first also avoids eight irrelevant neighbor probes for dense imported rows.
+	const owningBucket = index.get(`${bucketX}:${bucketZ}`);
+	if (owningBucket) {
+		for (const existing of owningBucket) {
+			if (
+				existing.port.id === ignoredPortId ||
+				existing.port.equipmentGroupId === ignoredEquipmentGroupId
+			) {
+				continue;
+			}
+			if (
+				portRouteIdentityKey(existing.port.route) === routeKey &&
+				existing.port.stationMillimeters === stationMillimeters &&
+				existing.port.side === side
+			) {
+				return { port: existing.port, occupied: true };
+			}
+		}
+	}
 	for (let deltaZ = -1; deltaZ <= 1; deltaZ++) {
 		for (let deltaX = -1; deltaX <= 1; deltaX++) {
 			const bucket = index.get(`${bucketX + deltaX}:${bucketZ + deltaZ}`);
@@ -1085,8 +1141,8 @@ function findPortConflict(
 					existing.port.stationMillimeters === stationMillimeters &&
 					existing.port.side === side;
 				const distance = Math.hypot(
-					existing.attachment.worldXMeters - worldXMeters,
-					existing.attachment.worldZMeters - worldZMeters,
+					existing.worldXMeters - worldXMeters,
+					existing.worldZMeters - worldZMeters,
 				);
 				if (sameSlot || distance < minimumSpacingMeters - DISTANCE_EPSILON_METERS) {
 					return { port: existing.port, occupied: sameSlot };

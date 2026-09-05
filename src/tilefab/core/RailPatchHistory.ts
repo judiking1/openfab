@@ -4,6 +4,11 @@ import { operationalConfigurationPatchTransitionFingerprint } from "./Operationa
 import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
 import type { PortRecord } from "./PortRecord";
 import type { RailHistoryOriginKind, RailPatchEvent } from "./RailDocument";
+import {
+	checksumStaticFabAssemblyRelationshipRecord,
+	type StaticFabAssemblyRelationshipRecordV1,
+	staticFabAssemblyRelationshipTransitionFootprint,
+} from "./StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationRecord } from "./StaticFabOrganization";
 import { staticFabOrganizationFingerprint } from "./StaticFabOrganizationFingerprint";
 
@@ -11,6 +16,9 @@ export interface RailMirrorHistoryLedgerEntry {
 	readonly originKind: RailHistoryOriginKind;
 	readonly forwardFingerprint: string;
 	readonly reverseFingerprint: string;
+	readonly relationshipEdgeReferences: number;
+	readonly relationshipOwnerIds: number;
+	readonly relationshipCanonicalBytes: number;
 }
 
 export interface RailMirrorHistoryLedger {
@@ -18,7 +26,7 @@ export interface RailMirrorHistoryLedger {
 	readonly redo: readonly RailMirrorHistoryLedgerEntry[];
 }
 
-export type RailPatchTransition = Pick<
+type RailPatchTransitionBase = Pick<
 	RailPatchEvent,
 	| "changes"
 	| "switchChanges"
@@ -31,12 +39,23 @@ export type RailPatchTransition = Pick<
 	| "operationalConfigurationPatch"
 >;
 
+export type RailPatchTransition = RailPatchTransitionBase &
+	Partial<
+		Pick<
+			RailPatchEvent,
+			"relationshipChanges" | "relationshipNextIdBefore" | "relationshipNextIdAfter"
+		>
+	>;
+
 export const EMPTY_RAIL_MIRROR_HISTORY_LEDGER: RailMirrorHistoryLedger = Object.freeze({
 	undo: Object.freeze([]),
 	redo: Object.freeze([]),
 });
 
 export const RAIL_MIRROR_HISTORY_ENTRY_LIMIT = 100_000;
+export const RAIL_MIRROR_HISTORY_RELATIONSHIP_EDGE_REFERENCE_LIMIT = 4_000_000;
+export const RAIL_MIRROR_HISTORY_RELATIONSHIP_OWNER_ID_LIMIT = 4_000_000;
+export const RAIL_MIRROR_HISTORY_RELATIONSHIP_CANONICAL_BYTE_LIMIT = 128 * 1024 * 1024;
 
 export function appendBoundedRailHistoryEntry<T>(
 	history: T[],
@@ -86,8 +105,9 @@ export function railPatchTransitionFingerprint(
 	transition: RailPatchTransition,
 	reverse = false,
 ): string {
+	const relationshipChanges = transition.relationshipChanges ?? [];
 	const checksum = new OrderedTypedChecksum();
-	checksum.addStrings(["OPENFAB_RAIL_PATCH_TRANSITION_V4"]);
+	checksum.addStrings(["OPENFAB_RAIL_PATCH_TRANSITION_V5"]);
 	checksum.addNumbers([transition.changes.length]);
 	for (const mutation of transition.changes) {
 		checksum.addNumbers([
@@ -120,6 +140,12 @@ export function railPatchTransitionFingerprint(
 		checksum.addNumbers([mutation.id]);
 		addOrganizationRecord(checksum, reverse ? mutation.after : mutation.before);
 		addOrganizationRecord(checksum, reverse ? mutation.before : mutation.after);
+	}
+	checksum.addNumbers([relationshipChanges.length]);
+	for (const mutation of relationshipChanges) {
+		checksum.addNumbers([mutation.id]);
+		addAssemblyRelationshipRecord(checksum, reverse ? mutation.after : mutation.before);
+		addAssemblyRelationshipRecord(checksum, reverse ? mutation.before : mutation.after);
 	}
 	checksum.addNumbers(transition.organizationImpactAuthorizations ?? []);
 	checksum.addString(
@@ -131,13 +157,14 @@ export function railPatchTransitionFingerprint(
 	return checksum.digest();
 }
 
-/** Same V4 fingerprint contract with caller-controlled event-loop checkpoints. */
+/** Same V5 fingerprint contract with caller-controlled event-loop checkpoints. */
 export async function railPatchTransitionFingerprintCooperatively(
 	transition: RailPatchTransition,
 	checkpoint: () => Promise<void>,
 	operationBudget = 128,
 	reverse = false,
 ): Promise<string> {
+	const relationshipChanges = transition.relationshipChanges ?? [];
 	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0) {
 		throw new RangeError("Rail patch fingerprint operation budget must be positive.");
 	}
@@ -149,7 +176,7 @@ export async function railPatchTransitionFingerprintCooperatively(
 		await checkpoint();
 	};
 	const checksum = new OrderedTypedChecksum();
-	checksum.addStrings(["OPENFAB_RAIL_PATCH_TRANSITION_V4"]);
+	checksum.addStrings(["OPENFAB_RAIL_PATCH_TRANSITION_V5"]);
 	checksum.addNumbers([transition.changes.length]);
 	for (const mutation of transition.changes) {
 		checksum.addNumbers([
@@ -186,6 +213,13 @@ export async function railPatchTransitionFingerprintCooperatively(
 		checksum.addNumbers([mutation.id]);
 		addOrganizationRecord(checksum, reverse ? mutation.after : mutation.before);
 		addOrganizationRecord(checksum, reverse ? mutation.before : mutation.after);
+		await consumeOperation();
+	}
+	checksum.addNumbers([relationshipChanges.length]);
+	for (const mutation of relationshipChanges) {
+		checksum.addNumbers([mutation.id]);
+		addAssemblyRelationshipRecord(checksum, reverse ? mutation.after : mutation.before);
+		addAssemblyRelationshipRecord(checksum, reverse ? mutation.before : mutation.after);
 		await consumeOperation();
 	}
 	checksum.addNumbers(transition.organizationImpactAuthorizations ?? []);
@@ -203,10 +237,16 @@ export function createRailMirrorHistoryLedgerEntry(
 	originKind: RailHistoryOriginKind,
 	transition: RailPatchTransition,
 ): RailMirrorHistoryLedgerEntry {
+	const footprint = staticFabAssemblyRelationshipTransitionFootprint(
+		transition.relationshipChanges ?? [],
+	);
 	return Object.freeze({
 		originKind,
 		forwardFingerprint: railPatchTransitionFingerprint(transition),
 		reverseFingerprint: railPatchTransitionFingerprint(transition, true),
+		relationshipEdgeReferences: footprint.edgeReferenceCount,
+		relationshipOwnerIds: footprint.ownerIdCount,
+		relationshipCanonicalBytes: footprint.canonicalByteCount,
 	});
 }
 
@@ -217,6 +257,9 @@ export async function createRailMirrorHistoryLedgerEntryCooperatively(
 	checkpoint: () => Promise<void>,
 	operationBudget = 128,
 ): Promise<RailMirrorHistoryLedgerEntry> {
+	const footprint = staticFabAssemblyRelationshipTransitionFootprint(
+		transition.relationshipChanges ?? [],
+	);
 	const forwardFingerprint = await railPatchTransitionFingerprintCooperatively(
 		transition,
 		checkpoint,
@@ -228,7 +271,14 @@ export async function createRailMirrorHistoryLedgerEntryCooperatively(
 		operationBudget,
 		true,
 	);
-	return Object.freeze({ originKind, forwardFingerprint, reverseFingerprint });
+	return Object.freeze({
+		originKind,
+		forwardFingerprint,
+		reverseFingerprint,
+		relationshipEdgeReferences: footprint.edgeReferenceCount,
+		relationshipOwnerIds: footprint.ownerIdCount,
+		relationshipCanonicalBytes: footprint.canonicalByteCount,
+	});
 }
 
 export function copyRailMirrorHistoryLedger(
@@ -242,10 +292,12 @@ export function copyRailMirrorHistoryLedger(
 	) {
 		throw new Error("Rail mirror history ledger is malformed or exceeds its entry budget.");
 	}
-	return Object.freeze({
+	const copied = Object.freeze({
 		undo: Object.freeze(Array.from(ledger.undo, copyLedgerEntry)),
 		redo: Object.freeze(Array.from(ledger.redo, copyLedgerEntry)),
 	});
+	assertRailMirrorHistoryRelationshipBudget(copied);
+	return copied;
 }
 
 function copyLedgerEntry(entry: RailMirrorHistoryLedgerEntry): RailMirrorHistoryLedgerEntry {
@@ -254,11 +306,57 @@ function copyLedgerEntry(entry: RailMirrorHistoryLedgerEntry): RailMirrorHistory
 		!entry ||
 		!isRailHistoryOriginKind(rawOriginKind) ||
 		!/^[0-9a-f]{8}:[0-9a-f]{8}$/.test(entry.forwardFingerprint) ||
-		!/^[0-9a-f]{8}:[0-9a-f]{8}$/.test(entry.reverseFingerprint)
+		!/^[0-9a-f]{8}:[0-9a-f]{8}$/.test(entry.reverseFingerprint) ||
+		!isNonNegativeSafeInteger(entry.relationshipEdgeReferences) ||
+		!isNonNegativeSafeInteger(entry.relationshipOwnerIds) ||
+		!isNonNegativeSafeInteger(entry.relationshipCanonicalBytes)
 	) {
 		throw new Error("Rail mirror history ledger entry is malformed.");
 	}
 	return Object.freeze({ ...entry, originKind: rawOriginKind });
+}
+
+export function trimRailMirrorHistoryRelationshipBudget<T extends RailMirrorHistoryLedgerEntry>(
+	undo: T[],
+	redo: T[],
+): void {
+	while (!railMirrorHistoryRelationshipBudgetFits(undo, redo)) {
+		if (undo.length > 0) undo.shift();
+		else if (redo.length > 0) redo.shift();
+		else break;
+	}
+}
+
+function assertRailMirrorHistoryRelationshipBudget(ledger: RailMirrorHistoryLedger): void {
+	if (!railMirrorHistoryRelationshipBudgetFits(ledger.undo, ledger.redo)) {
+		throw new Error("Rail mirror history relationship payload exceeds its aggregate budget.");
+	}
+}
+
+function railMirrorHistoryRelationshipBudgetFits(
+	undo: readonly RailMirrorHistoryLedgerEntry[],
+	redo: readonly RailMirrorHistoryLedgerEntry[],
+): boolean {
+	let edges = 0;
+	let owners = 0;
+	let bytes = 0;
+	for (const entry of [...undo, ...redo]) {
+		edges += entry.relationshipEdgeReferences;
+		owners += entry.relationshipOwnerIds;
+		bytes += entry.relationshipCanonicalBytes;
+		if (
+			edges > RAIL_MIRROR_HISTORY_RELATIONSHIP_EDGE_REFERENCE_LIMIT ||
+			owners > RAIL_MIRROR_HISTORY_RELATIONSHIP_OWNER_ID_LIMIT ||
+			bytes > RAIL_MIRROR_HISTORY_RELATIONSHIP_CANONICAL_BYTE_LIMIT
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+	return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function addAdvancedSwitchRecord(
@@ -340,4 +438,16 @@ function addOrganizationRecord(
 	}
 	const fingerprint = staticFabOrganizationFingerprint(record);
 	checksum.addNumbers([1, fingerprint.xor, fingerprint.sum]);
+}
+
+function addAssemblyRelationshipRecord(
+	checksum: OrderedTypedChecksum,
+	record: StaticFabAssemblyRelationshipRecordV1 | null,
+): void {
+	if (!record) {
+		checksum.addNumbers([0]);
+		return;
+	}
+	checksum.addNumbers([1]);
+	checksum.addString(checksumStaticFabAssemblyRelationshipRecord(record));
 }

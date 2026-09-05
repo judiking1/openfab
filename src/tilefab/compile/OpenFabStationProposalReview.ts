@@ -34,6 +34,10 @@ import {
 	type PortSide,
 	type PortType,
 } from "../core/PortRecord";
+import {
+	emptyStaticFabAssemblyRelationshipState,
+	type StaticFabAssemblyRelationshipStateV1,
+} from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import { checksumRailMap } from "../worker/RailMirrorChecksum";
@@ -145,6 +149,7 @@ export interface OpenFabStationProposalReviewSource {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships?: StaticFabAssemblyRelationshipStateV1;
 	readonly patchSequence: number;
 }
 
@@ -299,12 +304,14 @@ interface ReadyReviewSource {
 	readonly sourceMap: TileMap;
 	readonly sourcePortEquipment: PortEquipmentState;
 	readonly sourceOrganizations: StaticFabOrganizationState;
+	readonly sourceRelationships: StaticFabAssemblyRelationshipStateV1;
 	readonly sourceChecksum: string;
 	readonly sourceRevision: number;
 	readonly sourcePatchSequence: number;
 	readonly sourceNextPortId: number;
 	readonly sourceNextEquipmentGroupId: number;
 	readonly sourceNextOrganizationId: number;
+	readonly sourceNextRelationshipId: number;
 	readonly plan: PortEquipmentMutationPlan;
 	readonly reviewFingerprint: string;
 }
@@ -394,6 +401,7 @@ export function evaluateOpenFabStationProposalReview(
 				sourceSnapshot.stable.map,
 				sourceSnapshot.stable.portEquipment,
 				sourceSnapshot.stable.organizations,
+				sourceSnapshot.stable.relationships,
 			);
 			physical = compilePhysicalRail(sourceSnapshot.stable.map);
 		} catch {
@@ -580,12 +588,16 @@ export function evaluateOpenFabStationProposalReview(
 				sourceMap: sourceSnapshot.stable.map,
 				sourcePortEquipment: sourceSnapshot.stable.portEquipment,
 				sourceOrganizations: sourceSnapshot.stable.organizations,
+				sourceRelationships: sourceSnapshot.stable.relationships ?? EMPTY_REVIEW_RELATIONSHIPS,
 				sourceChecksum,
 				sourceRevision: sourceSnapshot.revision,
 				sourcePatchSequence: sourceSnapshot.stable.patchSequence,
 				sourceNextPortId: sourceSnapshot.stable.portEquipment.nextPortId,
 				sourceNextEquipmentGroupId: sourceSnapshot.stable.portEquipment.nextEquipmentGroupId,
 				sourceNextOrganizationId: sourceSnapshot.stable.organizations.nextOrganizationId,
+				sourceNextRelationshipId: (
+					sourceSnapshot.stable.relationships ?? EMPTY_REVIEW_RELATIONSHIPS
+				).nextRelationshipId,
 				plan: preparedPlan,
 				reviewFingerprint,
 			}),
@@ -636,6 +648,7 @@ export function planReviewedOpenFabStationProposalBatch(
 			sourceSnapshot.stable.map,
 			sourceSnapshot.stable.portEquipment,
 			sourceSnapshot.stable.organizations,
+			sourceSnapshot.stable.relationships,
 		);
 	} catch {
 		return invalidReviewedBatch(source, "Reviewed station proposal source is invalid.");
@@ -1206,11 +1219,14 @@ function reviewSourceStillMatches(
 		ready.sourceMap === source.map &&
 		ready.sourcePortEquipment === source.portEquipment &&
 		ready.sourceOrganizations === source.organizations &&
+		ready.sourceRelationships === (source.relationships ?? EMPTY_REVIEW_RELATIONSHIPS) &&
 		ready.sourceRevision === snapshot.revision &&
 		ready.sourcePatchSequence === source.patchSequence &&
 		ready.sourceNextPortId === source.portEquipment.nextPortId &&
 		ready.sourceNextEquipmentGroupId === source.portEquipment.nextEquipmentGroupId &&
-		ready.sourceNextOrganizationId === source.organizations.nextOrganizationId
+		ready.sourceNextOrganizationId === source.organizations.nextOrganizationId &&
+		ready.sourceNextRelationshipId ===
+			(source.relationships ?? EMPTY_REVIEW_RELATIONSHIPS).nextRelationshipId
 	);
 }
 
@@ -1632,16 +1648,24 @@ function objectIsFrozen(value: unknown): value is object {
 
 function snapshotReviewSource(value: unknown): ReviewSourceSnapshot | null {
 	try {
-		if (!isRecord(value) || !hasExactKeys(value, REVIEW_SOURCE_KEYS)) return null;
+		if (
+			!isRecord(value) ||
+			(!hasExactKeys(value, REVIEW_SOURCE_KEYS) &&
+				!hasExactKeys(value, REVIEW_SOURCE_KEYS_WITH_RELATIONSHIPS))
+		) {
+			return null;
+		}
 		const map = value.map;
 		const portEquipment = value.portEquipment;
 		const organizations = value.organizations;
+		const relationships = value.relationships ?? EMPTY_REVIEW_RELATIONSHIPS;
 		const patchSequence = value.patchSequence;
 		if (
 			!isRecord(map) ||
 			typeof map.getRevision !== "function" ||
 			!isRecord(portEquipment) ||
 			!isRecord(organizations) ||
+			!isRecord(relationships) ||
 			!Number.isSafeInteger(patchSequence) ||
 			(patchSequence as number) < 0
 		) {
@@ -1655,6 +1679,7 @@ function snapshotReviewSource(value: unknown): ReviewSourceSnapshot | null {
 				map: map as unknown as TileMap,
 				portEquipment: portEquipment as unknown as PortEquipmentState,
 				organizations: organizations as unknown as StaticFabOrganizationState,
+				relationships: relationships as unknown as StaticFabAssemblyRelationshipStateV1,
 				patchSequence: patchSequence as number,
 			}),
 			revision,
@@ -1793,6 +1818,10 @@ const OPENFAB_STATION_PROPOSAL_REJECT_REASONS = Object.freeze([
 const REVIEW_SOURCE_KEYS = Object.freeze(
 	["map", "organizations", "patchSequence", "portEquipment"].sort(),
 );
+const REVIEW_SOURCE_KEYS_WITH_RELATIONSHIPS = Object.freeze(
+	[...REVIEW_SOURCE_KEYS, "relationships"].sort(),
+);
+const EMPTY_REVIEW_RELATIONSHIPS = emptyStaticFabAssemblyRelationshipState();
 const REVIEW_ARTIFACT_KEYS = Object.freeze(
 	[
 		"issueCount",

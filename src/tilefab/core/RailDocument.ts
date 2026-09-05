@@ -65,6 +65,7 @@ import {
 	createRailMirrorHistoryLedgerEntryCooperatively,
 	type RailMirrorHistoryLedger,
 	type RailMirrorHistoryLedgerEntry,
+	trimRailMirrorHistoryRelationshipBudget,
 } from "./RailPatchHistory";
 import {
 	consumeReviewedPortEquipmentApply,
@@ -89,6 +90,21 @@ import {
 	isIssuedStaticFabAssemblyConnectorPlan,
 	isStaticFabAssemblyConnectorPlanIssuedFor,
 } from "./StaticFabAssemblyConnectorCertification";
+import {
+	applyStaticFabAssemblyRelationshipMutations,
+	assertStaticFabAssemblyRelationshipStateSource,
+	copyStaticFabAssemblyRelationshipRecord,
+	copyStaticFabAssemblyRelationshipState,
+	emptyStaticFabAssemblyRelationshipState,
+	isCanonicalStaticFabAssemblyRelationshipState,
+	reverseStaticFabAssemblyRelationshipMutations,
+	type StaticFabAssemblyRelationshipMutationV1,
+	type StaticFabAssemblyRelationshipStateV1,
+} from "./StaticFabAssemblyRelationship";
+import {
+	assertStaticFabAssemblyRelationshipActivation,
+	type ValidatedStaticFabAssemblyRelationshipActivation,
+} from "./StaticFabAssemblyRelationshipActivation";
 import {
 	assertStaticFabBayFlowEditAppliedProjection,
 	STATIC_FAB_BAY_FLOW_EDIT_KIND,
@@ -185,6 +201,9 @@ export interface RailPatchEvent {
 	organizationChanges: readonly StaticFabOrganizationMutation[];
 	organizationNextIdBefore: number;
 	organizationNextIdAfter: number;
+	relationshipChanges: readonly StaticFabAssemblyRelationshipMutationV1[];
+	relationshipNextIdBefore: number;
+	relationshipNextIdAfter: number;
 	/** Compact operational state delta; absent on physical/static authoring-only patches. */
 	operationalConfigurationPatch?: OperationalConfigurationPatch | null;
 	/** Exact protected organization IDs authorized by a certified existing-ID relocation. */
@@ -253,6 +272,9 @@ interface HistoryEntry {
 	organizationChanges: readonly StaticFabOrganizationMutation[];
 	organizationNextIdBefore: number;
 	organizationNextIdAfter: number;
+	relationshipChanges: readonly StaticFabAssemblyRelationshipMutationV1[];
+	relationshipNextIdBefore: number;
+	relationshipNextIdAfter: number;
 	organizationImpactAuthorizations: readonly number[];
 	operationalConfigurationPatch: OperationalConfigurationPatch | null;
 	staticFabAssemblyConnectorEvidence: StaticFabAssemblyConnectorHistoryEvidence | null;
@@ -265,6 +287,7 @@ export class RailDocument {
 	private currentMap = new TileMap();
 	private currentPortEquipment = emptyPortEquipmentState();
 	private currentOrganizations = emptyStaticFabOrganizationState();
+	private currentRelationships = emptyStaticFabAssemblyRelationshipState();
 	private currentOperationalConfiguration = emptyOperationalConfigurationState();
 	private organizationImpactIndex = new StaticFabOrganizationImpactIndex();
 	private undoStack: HistoryEntry[] = [];
@@ -291,6 +314,10 @@ export class RailDocument {
 		return this.currentOperationalConfiguration;
 	}
 
+	get relationships(): StaticFabAssemblyRelationshipStateV1 {
+		return this.currentRelationships;
+	}
+
 	staticFabOrganizationOwnersForMembership(
 		membership: StaticFabOrganizationMembership,
 		kind: StaticFabOrganizationKind | null = null,
@@ -305,6 +332,7 @@ export class RailDocument {
 		portEquipment: PortEquipmentState = emptyPortEquipmentState(),
 		organizations: StaticFabOrganizationState = emptyStaticFabOrganizationState(),
 		operationalConfiguration: OperationalConfigurationState = emptyOperationalConfigurationState(),
+		relationships: StaticFabAssemblyRelationshipStateV1 = emptyStaticFabAssemblyRelationshipState(),
 	): RailDocument {
 		if (!Number.isSafeInteger(patchSequence) || patchSequence < 0) {
 			throw new Error("Loaded rail patch sequence must be a non-negative safe integer.");
@@ -314,12 +342,18 @@ export class RailDocument {
 		document.currentPortEquipment = copyPortEquipmentState(portEquipment);
 		assertPortEquipmentLayout(map, document.currentPortEquipment);
 		document.currentOrganizations = copyStaticFabOrganizationState(organizations);
+		document.currentRelationships = copyStaticFabAssemblyRelationshipState(relationships);
 		document.currentOperationalConfiguration =
 			copyOperationalConfigurationState(operationalConfiguration);
 		assertStaticFabOrganizationState(
 			map,
 			document.currentPortEquipment,
 			document.currentOrganizations,
+		);
+		assertStaticFabAssemblyRelationshipStateSource(
+			map,
+			document.currentOrganizations,
+			document.currentRelationships,
 		);
 		document.organizationImpactIndex.synchronize(document.currentOrganizations);
 		document.legacyCustomEquipment = captureLegacyCustomEquipmentBaseline(
@@ -330,10 +364,11 @@ export class RailDocument {
 	}
 
 	/**
-	 * Activate startup state whose equipment and organization semantics were checked cooperatively.
+	 * Activate startup state whose equipment, organization, and relationship semantics were checked.
 	 *
-	 * Both opaque activations are identity-bound to the exact authored generations, so this path can
-	 * adopt frozen state without copying or synchronously walking every port, group, or organization.
+	 * Opaque activations bind the exact authored generations. Non-empty relationships require their
+	 * completed proof; canonical empty state has no cross-source claims. Validate before consuming
+	 * the organization impact index so a rejected attempt cannot spend another domain's evidence.
 	 */
 	static fromCooperativelyValidatedMap(
 		map: TileMap,
@@ -343,7 +378,21 @@ export class RailDocument {
 		portEquipmentActivation: ValidatedPortEquipmentActivation,
 		organizationActivation: ValidatedStaticFabOrganizationActivation,
 		operationalConfiguration: OperationalConfigurationState = emptyOperationalConfigurationState(),
+		relationships: StaticFabAssemblyRelationshipStateV1 = emptyStaticFabAssemblyRelationshipState(),
+		relationshipActivation?: ValidatedStaticFabAssemblyRelationshipActivation,
 	): RailDocument {
+		if (!isCanonicalStaticFabAssemblyRelationshipState(relationships)) {
+			throw new Error("문서 활성화에는 canonical 조립 관계 generation이 필요합니다");
+		}
+		if (relationships.records.length > 0 || relationshipActivation !== undefined) {
+			assertStaticFabAssemblyRelationshipActivation(
+				relationshipActivation,
+				map,
+				portEquipment,
+				organizations,
+				relationships,
+			);
+		}
 		if (!Number.isSafeInteger(patchSequence) || patchSequence < 0) {
 			throw new Error("Loaded rail patch sequence must be a non-negative safe integer.");
 		}
@@ -352,6 +401,8 @@ export class RailDocument {
 			map,
 			portEquipment,
 		);
+		const currentOperationalConfiguration =
+			copyOperationalConfigurationState(operationalConfiguration);
 		const organizationImpactIndex = consumeStaticFabOrganizationImpactIndex(
 			organizationActivation,
 			map,
@@ -362,8 +413,8 @@ export class RailDocument {
 		document.currentMap = map;
 		document.currentPortEquipment = portEquipment;
 		document.currentOrganizations = organizations;
-		document.currentOperationalConfiguration =
-			copyOperationalConfigurationState(operationalConfiguration);
+		document.currentRelationships = relationships;
+		document.currentOperationalConfiguration = currentOperationalConfiguration;
 		document.organizationImpactIndex = organizationImpactIndex;
 		document.legacyCustomEquipment = legacyCustomEquipment;
 		document.patchSequence = patchSequence;
@@ -392,6 +443,10 @@ export class RailDocument {
 	private pushUndoEntry(entry: HistoryEntry): void {
 		appendBoundedRailHistoryEntry(this.undoStack, entry);
 		this.redoStack = [];
+		const projected = this.undoStack.map((candidate) => candidate.mirrorHistoryEntry);
+		trimRailMirrorHistoryRelationshipBudget(projected, []);
+		const overflow = this.undoStack.length - projected.length;
+		if (overflow > 0) this.undoStack.splice(0, overflow);
 	}
 
 	getLastCommandError(): string | null {
@@ -773,6 +828,7 @@ export class RailDocument {
 				plan.portMutations,
 				plan.equipmentGroupMutations,
 				source.organizations.nextOrganizationId,
+				source.relationships.nextRelationshipId,
 				cooperative.checkTime,
 			);
 			cooperative.assertCurrent();
@@ -840,6 +896,12 @@ export class RailDocument {
 				entry.organizationChanges,
 				entry.organizationNextIdBefore,
 				entry.organizationNextIdAfter,
+				[],
+				undefined,
+				null,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
 			);
 			await options.preparePatch?.(event, cooperative.checkTime);
 			cooperative.assertCurrent();
@@ -1727,6 +1789,7 @@ export class RailDocument {
 		if (!entry) return false;
 		const baseRevision = this.map.getRevision();
 		const organizationNextIdBefore = this.organizations.nextOrganizationId;
+		const relationshipNextIdBefore = this.relationships.nextRelationshipId;
 		let operationalConfigurationPatch: OperationalConfigurationPatch | null = null;
 		try {
 			operationalConfigurationPatch = entry.operationalConfigurationPatch
@@ -1748,6 +1811,9 @@ export class RailDocument {
 				staticFabBayFlowEditTransitionValidation(entry, "target", "source"),
 				staticFabAssemblyConnectorTransitionValidation(entry),
 				operationalConfigurationPatch,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
 			);
 		} catch (error) {
 			return this.rejectCommand(error, "마지막 편집을 되돌릴 수 없습니다");
@@ -1755,6 +1821,7 @@ export class RailDocument {
 		this.undoStack.pop();
 		this.redoStack.push(entry);
 		const organizationNextIdAfter = this.organizations.nextOrganizationId;
+		const relationshipNextIdAfter = this.relationships.nextRelationshipId;
 		this.emit(
 			"undo",
 			baseRevision,
@@ -1768,6 +1835,9 @@ export class RailDocument {
 			entry.organizationImpactAuthorizations,
 			entry.kind,
 			operationalConfigurationPatch,
+			reverseStaticFabAssemblyRelationshipMutations(entry.relationshipChanges),
+			relationshipNextIdBefore,
+			relationshipNextIdAfter,
 		);
 		return true;
 	}
@@ -1778,6 +1848,7 @@ export class RailDocument {
 		if (!entry) return false;
 		const baseRevision = this.map.getRevision();
 		const organizationNextIdBefore = this.organizations.nextOrganizationId;
+		const relationshipNextIdBefore = this.relationships.nextRelationshipId;
 		let operationalConfigurationPatch: OperationalConfigurationPatch | null = null;
 		try {
 			operationalConfigurationPatch = entry.operationalConfigurationPatch
@@ -1799,6 +1870,9 @@ export class RailDocument {
 				staticFabBayFlowEditTransitionValidation(entry, "source", "target"),
 				staticFabAssemblyConnectorTransitionValidation(entry),
 				operationalConfigurationPatch,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
 			);
 		} catch (error) {
 			return this.rejectCommand(error, "편집을 다시 실행할 수 없습니다");
@@ -1806,6 +1880,7 @@ export class RailDocument {
 		this.redoStack.pop();
 		this.undoStack.push(entry);
 		const organizationNextIdAfter = this.organizations.nextOrganizationId;
+		const relationshipNextIdAfter = this.relationships.nextRelationshipId;
 		this.emit(
 			"redo",
 			baseRevision,
@@ -1819,6 +1894,9 @@ export class RailDocument {
 			entry.organizationImpactAuthorizations,
 			entry.kind,
 			operationalConfigurationPatch,
+			entry.relationshipChanges,
+			relationshipNextIdBefore,
+			relationshipNextIdAfter,
 		);
 		return true;
 	}
@@ -1831,6 +1909,7 @@ export class RailDocument {
 			this.portEquipment.ports.length === 0 &&
 			this.portEquipment.equipmentGroups.length === 0 &&
 			this.organizations.records.length === 0 &&
+			this.relationships.records.length === 0 &&
 			operationalConfigurationIsEffectivelyEmpty(this.operationalConfiguration)
 		) {
 			return false;
@@ -1859,6 +1938,12 @@ export class RailDocument {
 			before: record,
 			after: null,
 		}));
+		const relationshipChanges = this.relationships.records.map((record) => ({
+			id: record.id,
+			before: record,
+			after: null,
+		}));
+		const relationshipNextId = this.relationships.nextRelationshipId;
 		const emptyOperational = emptyOperationalConfigurationState();
 		const operationalPlan = planOperationalConfigurationReplacement(
 			this.operationalConfiguration,
@@ -1885,6 +1970,9 @@ export class RailDocument {
 			null,
 			null,
 			operationalPlan?.patch ?? null,
+			relationshipChanges,
+			relationshipNextId,
+			relationshipNextId,
 		);
 		this.applyChanges(
 			entry.changes,
@@ -1899,6 +1987,9 @@ export class RailDocument {
 			null,
 			null,
 			entry.operationalConfigurationPatch,
+			entry.relationshipChanges,
+			entry.relationshipNextIdBefore,
+			entry.relationshipNextIdAfter,
 		);
 		this.pushUndoEntry(entry);
 		this.emit(
@@ -1914,6 +2005,9 @@ export class RailDocument {
 			[],
 			undefined,
 			entry.operationalConfigurationPatch,
+			entry.relationshipChanges,
+			relationshipNextId,
+			this.relationships.nextRelationshipId,
 		);
 		return true;
 	}
@@ -1936,6 +2030,9 @@ export class RailDocument {
 		staticFabBayFlowEditValidation: StaticFabBayFlowEditTransitionValidation | null = null,
 		staticFabAssemblyConnectorEvidence: StaticFabAssemblyConnectorHistoryEvidence | null = null,
 		operationalConfigurationPatch: OperationalConfigurationPatch | null = null,
+		relationshipChanges: readonly StaticFabAssemblyRelationshipMutationV1[] = [],
+		relationshipNextIdBefore = this.currentRelationships.nextRelationshipId,
+		relationshipNextIdAfter = relationshipNextIdBefore,
 	): void {
 		if (!canonicalPositiveInt32Ids(organizationImpactAuthorizations)) {
 			throw new Error("정적 FAB 조직 보호 인증 ID가 canonical하지 않습니다");
@@ -1964,6 +2061,9 @@ export class RailDocument {
 		const effectiveOrganizationChanges = reverse
 			? reverseStaticFabOrganizationMutations(organizationChanges)
 			: organizationChanges;
+		const effectiveRelationshipChanges = reverse
+			? reverseStaticFabAssemblyRelationshipMutations(relationshipChanges)
+			: relationshipChanges;
 		if (
 			staticFabBayFlowEditValidation &&
 			(effectiveChanges.length === 0 ||
@@ -2005,6 +2105,10 @@ export class RailDocument {
 			this.currentOrganizations.nextOrganizationId,
 			reverse ? organizationNextIdBefore : organizationNextIdAfter,
 		);
+		const effectiveRelationshipNextId = Math.max(
+			this.currentRelationships.nextRelationshipId,
+			reverse ? relationshipNextIdBefore : relationshipNextIdAfter,
+		);
 		const nextMap = this.currentMap;
 		const nextOrganizations =
 			effectiveOrganizationChanges.length > 0 ||
@@ -2034,6 +2138,15 @@ export class RailDocument {
 					operationalConfigurationPatch,
 				)
 			: this.currentOperationalConfiguration;
+		const nextRelationships =
+			effectiveRelationshipChanges.length > 0 ||
+			effectiveRelationshipNextId !== this.currentRelationships.nextRelationshipId
+				? applyStaticFabAssemblyRelationshipMutations(
+						this.currentRelationships,
+						effectiveRelationshipChanges,
+						effectiveRelationshipNextId,
+					)
+				: this.currentRelationships;
 		assertPortEquipmentLayout(resolvedNextMap, nextPortEquipment);
 		const affectedOrganizations = staticFabOrganizationImpactsForPatch(
 			this.organizationImpactIndex,
@@ -2093,9 +2206,17 @@ export class RailDocument {
 		) {
 			assertStaticFabOrganizationState(resolvedNextMap, nextPortEquipment, nextOrganizations);
 		}
+		if (this.currentRelationships.records.length > 0 || nextRelationships.records.length > 0) {
+			assertStaticFabAssemblyRelationshipStateSource(
+				resolvedNextMap,
+				nextOrganizations,
+				nextRelationships,
+			);
+		}
 		this.currentMap = resolvedNextMap;
 		this.currentPortEquipment = nextPortEquipment;
 		this.currentOrganizations = nextOrganizations;
+		this.currentRelationships = nextRelationships;
 		this.currentOperationalConfiguration = nextOperationalConfiguration;
 		this.organizationImpactIndex.synchronize(nextOrganizations);
 	}
@@ -2113,6 +2234,9 @@ export class RailDocument {
 		organizationImpactAuthorizations: readonly number[] = [],
 		historyOriginKind?: RailHistoryOriginKind,
 		operationalConfigurationPatch: OperationalConfigurationPatch | null = null,
+		relationshipChanges: readonly StaticFabAssemblyRelationshipMutationV1[] = [],
+		relationshipNextIdBefore = this.currentRelationships.nextRelationshipId,
+		relationshipNextIdAfter = relationshipNextIdBefore,
 	): void {
 		this.publishPatchEvent(
 			createRailPatchEvent(
@@ -2130,6 +2254,9 @@ export class RailDocument {
 				organizationImpactAuthorizations,
 				historyOriginKind,
 				operationalConfigurationPatch,
+				relationshipChanges,
+				relationshipNextIdBefore,
+				relationshipNextIdAfter,
 			),
 		);
 	}
@@ -2168,6 +2295,9 @@ function createRailPatchEvent(
 	organizationImpactAuthorizations: readonly number[] = [],
 	historyOriginKind?: RailHistoryOriginKind,
 	operationalConfigurationPatch: OperationalConfigurationPatch | null = null,
+	relationshipChanges: readonly StaticFabAssemblyRelationshipMutationV1[] = [],
+	relationshipNextIdBefore = 1,
+	relationshipNextIdAfter = relationshipNextIdBefore,
 ): RailPatchEvent {
 	return Object.freeze({
 		sequence,
@@ -2181,6 +2311,17 @@ function createRailPatchEvent(
 		organizationChanges: Object.freeze([...organizationChanges]),
 		organizationNextIdBefore,
 		organizationNextIdAfter,
+		relationshipChanges: Object.freeze(
+			relationshipChanges.map((change) =>
+				Object.freeze({
+					id: change.id,
+					before: change.before ? copyStaticFabAssemblyRelationshipRecord(change.before) : null,
+					after: change.after ? copyStaticFabAssemblyRelationshipRecord(change.after) : null,
+				}),
+			),
+		),
+		relationshipNextIdBefore,
+		relationshipNextIdAfter,
 		organizationImpactAuthorizations: Object.freeze([...organizationImpactAuthorizations]),
 		operationalConfigurationPatch,
 		...(historyOriginKind ? { historyOriginKind } : {}),
@@ -2247,6 +2388,7 @@ interface RailDocumentPortEquipmentSource {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly operationalConfiguration: OperationalConfigurationState;
 	readonly revision: number;
 	readonly mutationGeneration: number;
@@ -2273,6 +2415,7 @@ function captureRailDocumentPortEquipmentSource(
 		map: document.map,
 		portEquipment: document.portEquipment,
 		organizations: document.organizations,
+		relationships: document.relationships,
 		operationalConfiguration: document.operationalConfiguration,
 		revision: document.map.getRevision(),
 		mutationGeneration: document.map.getMutationGeneration(),
@@ -2310,6 +2453,7 @@ function createRailDocumentCommitCooperativeController(
 			document.map !== source.map ||
 			document.portEquipment !== source.portEquipment ||
 			document.organizations !== source.organizations ||
+			document.relationships !== source.relationships ||
 			document.operationalConfiguration !== source.operationalConfiguration ||
 			document.getPatchSequence() !== source.patchSequence ||
 			source.map.getRevision() !== source.revision ||
@@ -2338,6 +2482,7 @@ async function createPortEquipmentHistoryEntryCooperatively(
 	portChanges: readonly PortMutation[],
 	equipmentGroupChanges: readonly EquipmentGroupMutation[],
 	organizationNextId: number,
+	relationshipNextId: number,
 	checkpoint: () => Promise<void>,
 	operationBudget = 128,
 ): Promise<HistoryEntry> {
@@ -2382,6 +2527,9 @@ async function createPortEquipmentHistoryEntryCooperatively(
 		organizationChanges: Object.freeze([]) as readonly StaticFabOrganizationMutation[],
 		organizationNextIdBefore: organizationNextId,
 		organizationNextIdAfter: organizationNextId,
+		relationshipChanges: Object.freeze([]) as readonly StaticFabAssemblyRelationshipMutationV1[],
+		relationshipNextIdBefore: relationshipNextId,
+		relationshipNextIdAfter: relationshipNextId,
 		organizationImpactAuthorizations: Object.freeze([]) as readonly number[],
 		operationalConfigurationPatch: null,
 		staticFabAssemblyConnectorEvidence: null,
@@ -2464,6 +2612,9 @@ function createHistoryEntry(
 	staticFabBayFlowEditEvidence: StaticFabBayFlowEditHistoryEvidence | null = null,
 	staticFabAssemblyConnectorEvidence: StaticFabAssemblyConnectorHistoryEvidence | null = null,
 	operationalConfigurationPatch: OperationalConfigurationPatch | null = null,
+	relationshipChanges: readonly StaticFabAssemblyRelationshipMutationV1[] = [],
+	relationshipNextIdBefore = 1,
+	relationshipNextIdAfter = relationshipNextIdBefore,
 ): HistoryEntry {
 	const transition = Object.freeze({
 		kind,
@@ -2511,6 +2662,17 @@ function createHistoryEntry(
 		),
 		organizationNextIdBefore,
 		organizationNextIdAfter,
+		relationshipChanges: Object.freeze(
+			relationshipChanges.map((change) =>
+				Object.freeze({
+					id: change.id,
+					before: change.before ? copyStaticFabAssemblyRelationshipRecord(change.before) : null,
+					after: change.after ? copyStaticFabAssemblyRelationshipRecord(change.after) : null,
+				}),
+			),
+		),
+		relationshipNextIdBefore,
+		relationshipNextIdAfter,
 		organizationImpactAuthorizations: Object.freeze([...organizationImpactAuthorizations]),
 		operationalConfigurationPatch,
 		staticFabAssemblyConnectorEvidence,

@@ -13,6 +13,7 @@ function props(
 		placementPending: false,
 		onRequestChange: vi.fn(),
 		onClose: vi.fn(),
+		onCancel: vi.fn(),
 		onFocusCanvas: vi.fn(),
 		...overrides,
 	};
@@ -29,6 +30,8 @@ describe("ProductionBayModulePanel", () => {
 		expect(markup).not.toContain('aria-modal="true"');
 		expect(markup).toContain("LIVE GHOST READY");
 		expect(markup).toContain("LMB place · R rotate · Esc cancel");
+		expect(markup).toContain('aria-label="Close Production Bay panel"');
+		expect(markup).toMatch(/tilefab-production-bay-cancel[^>]*>CANCEL<\/button>/);
 		expect(markup).toContain("CANVAS");
 	});
 

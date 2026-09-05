@@ -47,6 +47,7 @@ import { RailDocument } from "../core/RailDocument";
 import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
 import { issueReviewedPortEquipmentApply } from "../core/ReviewedPortEquipmentApplyCertification";
 import { DIR_E, DIR_S, DIR_W } from "../core/railShape";
+import { createStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import { createStaticFabBlueprintTemplate } from "../core/StaticFabBlueprint";
 import {
 	compareDirectedRailEdges,
@@ -289,7 +290,9 @@ describe("RailWorkerBridge", () => {
 				(error: unknown) => error,
 			);
 			await vi.advanceTimersByTimeAsync(30_000);
-			expect(await outcome).toMatchObject({ message: expect.stringMatching(/timed out/i) });
+			expect(await outcome).toMatchObject({
+				message: expect.stringMatching(/timed out/i),
+			});
 			const recovered = await bridge.waitUntilReady(readyExpectation(document));
 			expect(recovered).toMatchObject({ status: "ready", epoch: 2 });
 			expect(workers).toHaveLength(2);
@@ -348,10 +351,14 @@ describe("RailWorkerBridge", () => {
 			const controller = new AbortController();
 			const pendingOutline = bridge.captureCurrentOrganizationOutline(controller.signal);
 			await expect(bridge.captureCurrentOrganizationOutline()).rejects.toThrow(/bounded capacity/i);
-			await expect(bridge.captureCurrentSnapshot()).resolves.toMatchObject({ sequence: 0 });
+			await expect(bridge.captureCurrentSnapshot()).resolves.toMatchObject({
+				sequence: 0,
+			});
 
 			controller.abort();
-			await expect(pendingOutline).rejects.toMatchObject({ name: "AbortError" });
+			await expect(pendingOutline).rejects.toMatchObject({
+				name: "AbortError",
+			});
 			expect(
 				document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 12, y: 0 })),
 			).toBe(true);
@@ -360,7 +367,11 @@ describe("RailWorkerBridge", () => {
 
 			expect(workers).toHaveLength(1);
 			expect(worker.terminated).toBe(false);
-			expect(bridge.getState()).toMatchObject({ status: "ready", epoch: 1, sequence: 1 });
+			expect(bridge.getState()).toMatchObject({
+				status: "ready",
+				epoch: 1,
+				sequence: 1,
+			});
 			bridge.dispose();
 		} finally {
 			vi.useRealTimers();
@@ -385,7 +396,12 @@ describe("RailWorkerBridge", () => {
 		expect(snapshot).toMatchObject({
 			sequence: document.getPatchSequence(),
 			revision: document.map.getRevision(),
-			checksum: checksumRailMap(document.map, document.portEquipment, document.organizations),
+			checksum: checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
 		});
 		expect(snapshot.xs).toBeInstanceOf(Int32Array);
 		expect(
@@ -395,6 +411,7 @@ describe("RailWorkerBridge", () => {
 				document.getPatchSequence(),
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 			),
 		).toBe(true);
 		expect(
@@ -404,8 +421,51 @@ describe("RailWorkerBridge", () => {
 				document.getPatchSequence(),
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 			),
 		).toBe(false);
+		bridge.dispose();
+	});
+
+	it("binds the exact relationship cursor through sync state and snapshot handoff", async () => {
+		const empty = new RailDocument();
+		const relationships = createStaticFabAssemblyRelationshipState({
+			nextRelationshipId: 7,
+			records: [],
+		});
+		const document = RailDocument.fromLoadedMap(
+			empty.map,
+			empty.getPatchSequence(),
+			empty.portEquipment,
+			empty.organizations,
+			empty.operationalConfiguration,
+			relationships,
+		);
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => new InProcessRailWorker(),
+		);
+
+		const ready = await bridge.waitUntilReady(readyExpectation(document));
+		expect(ready).toMatchObject({
+			targetAssemblyRelationships: 0,
+			targetAssemblyRelationshipNextId: 7,
+			assemblyRelationships: 0,
+			assemblyRelationshipNextId: 7,
+		});
+		const snapshot = await bridge.captureCurrentSnapshot();
+		expect(snapshot.relationships.nextRelationshipId).toBe(7);
+		expect(
+			consumeRailMirrorSnapshotCaptureAuthority(
+				snapshot,
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(true);
 		bridge.dispose();
 	});
 
@@ -477,7 +537,11 @@ describe("RailWorkerBridge", () => {
 			await expect(aborted).rejects.toMatchObject({ name: "AbortError" });
 			await vi.advanceTimersByTimeAsync(30_000);
 			const recovered = await bridge.waitUntilReady(readyExpectation(document));
-			expect(recovered).toMatchObject({ status: "ready", epoch: 2, simulationReady: false });
+			expect(recovered).toMatchObject({
+				status: "ready",
+				epoch: 2,
+				simulationReady: false,
+			});
 			expect(workers).toHaveLength(2);
 			expect(blockedWorker.terminated).toBe(true);
 		} finally {
@@ -575,10 +639,16 @@ describe("RailWorkerBridge", () => {
 			await flushWorkerMessages();
 			await vi.advanceTimersByTimeAsync(30_000);
 			for (const outcome of await Promise.all(outcomes)) {
-				expect(outcome).toMatchObject({ message: expect.stringMatching(/timed out/i) });
+				expect(outcome).toMatchObject({
+					message: expect.stringMatching(/timed out/i),
+				});
 			}
 			const recovered = await bridge.waitUntilReady(readyExpectation(document));
-			expect(recovered).toMatchObject({ status: "ready", epoch: 2, simulationReady: false });
+			expect(recovered).toMatchObject({
+				status: "ready",
+				epoch: 2,
+				simulationReady: false,
+			});
 			expect(workers).toHaveLength(2);
 			expect(blockedWorker.terminated).toBe(true);
 		} finally {
@@ -614,10 +684,17 @@ describe("RailWorkerBridge", () => {
 				document.commit(planRailConstruction(document.map, { x: 8, y: 0 }, { x: 12, y: 0 })),
 			).toBe(true);
 			await expect(pending).rejects.toThrow(/stale|changed/i);
-			expect(bridge.getState()).toMatchObject({ status: "syncing", simulationReady: false });
+			expect(bridge.getState()).toMatchObject({
+				status: "syncing",
+				simulationReady: false,
+			});
 			await vi.advanceTimersByTimeAsync(30_000);
 			const recovered = await bridge.waitUntilReady(readyExpectation(document));
-			expect(recovered).toMatchObject({ status: "ready", epoch: 2, simulationReady: false });
+			expect(recovered).toMatchObject({
+				status: "ready",
+				epoch: 2,
+				simulationReady: false,
+			});
 			expect(workers).toHaveLength(2);
 			expect(blockedWorker.terminated).toBe(true);
 		} finally {
@@ -682,7 +759,11 @@ describe("RailWorkerBridge", () => {
 		await expect(bridge.captureCurrentSnapshot()).rejects.toThrow(/stale|malformed/i);
 		const recovered = await bridge.waitUntilReady(readyExpectation(document));
 
-		expect(recovered).toMatchObject({ status: "ready", epoch: 2, simulationReady: false });
+		expect(recovered).toMatchObject({
+			status: "ready",
+			epoch: 2,
+			simulationReady: false,
+		});
 		expect(workers).toHaveLength(2);
 		expect(failedWorker.terminated).toBe(true);
 		bridge.dispose();
@@ -710,7 +791,11 @@ describe("RailWorkerBridge", () => {
 		await expect(bridge.captureCurrentSnapshot()).rejects.toThrow(/stale|malformed/i);
 		const recovered = await bridge.waitUntilReady(readyExpectation(document));
 
-		expect(recovered).toMatchObject({ status: "ready", epoch: 2, simulationReady: false });
+		expect(recovered).toMatchObject({
+			status: "ready",
+			epoch: 2,
+			simulationReady: false,
+		});
 		expect(workers).toHaveLength(2);
 		expect(failedWorker.terminated).toBe(true);
 		bridge.dispose();
@@ -857,7 +942,10 @@ describe("RailWorkerBridge", () => {
 		expect(port.lastOrganizationCoordinateCount).toBe(0);
 		expect(port.mirror.organizationState.records[1]).toMatchObject({
 			parentOrganizationIds: [1],
-			properties: { description: "Photo process production bay", color: "AMBER" },
+			properties: {
+				description: "Photo process production bay",
+				color: "AMBER",
+			},
 		});
 		expect(port.mirror.organizationState.records[1]?.membership).toBe(membershipBefore);
 		expect(port.mirror.getPhysicalPublication().current.buffers).toBe(physicalBefore);
@@ -1253,7 +1341,7 @@ describe("RailWorkerBridge", () => {
 			previousPhysicalFingerprint: before.physicalFingerprint,
 			migrationAvailable: false,
 		});
-		expect(port.typedPatchTransferCount).toBe(100);
+		expect(port.typedPatchTransferCount).toBe(163);
 		bridge.dispose();
 	});
 
@@ -1300,8 +1388,12 @@ describe("RailWorkerBridge", () => {
 		expect(events.at(-1)).toBe(preparedEvent);
 		expect(checkpoints).toBeGreaterThan(0);
 		const ready = await bridge.waitUntilReady(readyExpectation(document));
-		expect(ready).toMatchObject({ status: "ready", ports: 1, equipmentGroups: 1 });
-		expect(worker.typedPatchTransferCount).toBe(100);
+		expect(ready).toMatchObject({
+			status: "ready",
+			ports: 1,
+			equipmentGroups: 1,
+		});
+		expect(worker.typedPatchTransferCount).toBe(163);
 		expect(worker.syncCount).toBe(1);
 		expect(worker.mirror.captureSnapshot()).toEqual(
 			captureRailMirrorSnapshot(
@@ -1342,7 +1434,7 @@ describe("RailWorkerBridge", () => {
 			physicalFingerprint: baseline.physicalFingerprint,
 		});
 		expect(port.messageCount).toBe(baselineMessageCount + 1);
-		expect(port.typedPatchTransferCount).toBe(100);
+		expect(port.typedPatchTransferCount).toBe(163);
 		expect(port.syncCount).toBe(1);
 		expect(port.mirror.captureSnapshot()).toEqual(
 			captureRailMirrorSnapshot(
@@ -1578,6 +1670,7 @@ describe("RailWorkerBridge", () => {
 			validated.map,
 			validated.portEquipment,
 			validated.organizations,
+			validated.relationships,
 		);
 		expect(privateSnapshot).not.toBeNull();
 		expect(privateSnapshot?.encoded[0]).toBe(expectedFirstCell);
@@ -1608,6 +1701,7 @@ describe("RailWorkerBridge", () => {
 				validated.document.map,
 				validated.document.portEquipment,
 				validated.document.organizations,
+				validated.document.relationships,
 			),
 		).not.toBeNull();
 		expect(tokenReads).toBe(1);
@@ -1617,6 +1711,7 @@ describe("RailWorkerBridge", () => {
 				validated.document.map,
 				validated.document.portEquipment,
 				validated.document.organizations,
+				validated.document.relationships,
 			),
 		).toBeNull();
 	});
@@ -1809,6 +1904,32 @@ describe("RailWorkerBridge", () => {
 		bridge.dispose();
 	});
 
+	it("snapshot-recovers when an acknowledgement carries forged relationship identity", async () => {
+		const document = new RailDocument();
+		const port = new InProcessRailWorker();
+		const states: RailWorkerBridgeState[] = [];
+		const bridge = new RailWorkerBridge(
+			document,
+			(state) => states.push(state),
+			() => port,
+		);
+		await bridge.waitUntilReady(readyExpectation(document));
+		port.corruptAssemblyRelationshipIdentityNextPatch = true;
+
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
+		).toBe(true);
+		await flushWorkerMessages(6);
+
+		expect(
+			states.some(
+				(state) => state.status === "desynced" && state.message?.includes("static entity identity"),
+			),
+		).toBe(true);
+		expect(port.syncCount).toBe(2);
+		bridge.dispose();
+	});
+
 	it("resolves the activation gate only for the expected authored and physical identity", async () => {
 		const document = new RailDocument();
 		expect(
@@ -1832,7 +1953,10 @@ describe("RailWorkerBridge", () => {
 			revision: snapshot.revision,
 		};
 		const ready = await bridge.waitUntilReady(expectation);
-		expect(ready).toMatchObject({ status: "ready", checksum: snapshot.checksum });
+		expect(ready).toMatchObject({
+			status: "ready",
+			checksum: snapshot.checksum,
+		});
 		expect(railWorkerStateMatchesReadyExpectation(ready, expectation)).toBe(true);
 		for (const stale of [
 			{ ...ready, targetChecksum: "forged-target" },
@@ -1989,7 +2113,7 @@ describe("RailWorkerBridge", () => {
 			sequence: 0,
 			revision: 0,
 		});
-		expect(port.typedSnapshotTransferCount).toBe(42);
+		expect(port.typedSnapshotTransferCount).toBe(73);
 
 		expect(
 			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
@@ -2018,7 +2142,7 @@ describe("RailWorkerBridge", () => {
 			migrationToSequence: 1,
 		});
 		expect(port.physicalLayout.revision).toBe(document.map.getRevision());
-		expect(port.typedPatchTransferCount).toBe(100);
+		expect(port.typedPatchTransferCount).toBe(163);
 		const stateCountBeforeDuplicate = states.length;
 		port.replayLastAcknowledgement();
 		await flushWorkerMessages();
@@ -2225,7 +2349,7 @@ describe("RailWorkerBridge", () => {
 			switches: 1,
 			physicalAdvancedSwitchCount: 1,
 		});
-		expect(port.typedPatchTransferCount).toBe(100);
+		expect(port.typedPatchTransferCount).toBe(163);
 		bridge.dispose();
 	});
 
@@ -2478,6 +2602,8 @@ async function createValidatedStartupSnapshotFixture(cellCount: number): Promise
 		validated.organizations,
 		portEquipmentActivation,
 		organizationActivation,
+		undefined,
+		validated.relationships,
 	);
 	return Object.freeze({ document, authority: validated.authority });
 }
@@ -2515,6 +2641,7 @@ class InProcessRailWorker implements RailWorkerPort {
 	corruptMigrationSourceNextPatch = false;
 	corruptMigrationSourceCountNextPatch = false;
 	corruptOrganizationCursorNextPatch = false;
+	corruptAssemblyRelationshipIdentityNextPatch = false;
 	omitMigrationNextPatch = false;
 	internalErrorNextPatch = false;
 	internalErrorNextSnapshotCapture = false;
@@ -2618,7 +2745,8 @@ class InProcessRailWorker implements RailWorkerPort {
 					deliveredMessage.epoch !== this.activeEpoch ||
 					deliveredMessage.expectedSequence !== state.sequence ||
 					deliveredMessage.expectedRevision !== state.revision ||
-					deliveredMessage.expectedChecksum !== state.checksum
+					deliveredMessage.expectedChecksum !== state.checksum ||
+					deliveredMessage.expectedNextRelationshipId !== state.assemblyRelationshipNextId
 				) {
 					this.emit({
 						type: "RAIL_SNAPSHOT_CAPTURE_FAILED",
@@ -2703,7 +2831,9 @@ class InProcessRailWorker implements RailWorkerPort {
 				}
 				const outlineTransfers = staticFabOrganizationOutlineTransfers(outline);
 				this.organizationOutlineTransferCount = outlineTransfers.length;
-				const deliveredOutline = structuredClone(outline, { transfer: outlineTransfers });
+				const deliveredOutline = structuredClone(outline, {
+					transfer: outlineTransfers,
+				});
 				this.emit({
 					type: "STATIC_FAB_ORGANIZATION_OUTLINE_CAPTURED",
 					epoch: deliveredMessage.epoch,
@@ -2776,15 +2906,28 @@ class InProcessRailWorker implements RailWorkerPort {
 				? { ...railState, revision: railState.revision + 1 }
 				: railState;
 			if (this.corruptAuthoredSequenceNextPatch) {
-				acknowledgedRail = { ...acknowledgedRail, sequence: railState.sequence + 1 };
+				acknowledgedRail = {
+					...acknowledgedRail,
+					sequence: railState.sequence + 1,
+				};
 			}
 			if (this.corruptOrganizationCursorNextPatch) {
 				const checksum = RailChecksumAccumulator.fromDigest(acknowledgedRail.checksum);
 				checksum.setOrganizationNextId(checksum.organizationNextId + 1);
 				acknowledgedRail = { ...acknowledgedRail, checksum: checksum.digest() };
 			}
+			if (this.corruptAssemblyRelationshipIdentityNextPatch) {
+				acknowledgedRail = {
+					...acknowledgedRail,
+					assemblyRelationships: acknowledgedRail.assemblyRelationships + 1,
+					assemblyRelationshipNextId: acknowledgedRail.assemblyRelationshipNextId + 1,
+				};
+			}
 			let acknowledgedPhysical = this.corruptPhysicalRevisionNextPatch
-				? { ...physicalState, physicalRevision: physicalState.physicalRevision + 1 }
+				? {
+						...physicalState,
+						physicalRevision: physicalState.physicalRevision + 1,
+					}
 				: physicalState;
 			if (this.corruptMigrationSourceNextPatch) {
 				acknowledgedPhysical = {
@@ -2799,7 +2942,10 @@ class InProcessRailWorker implements RailWorkerPort {
 				};
 			}
 			if (this.omitMigrationNextPatch) {
-				acknowledgedPhysical = { ...acknowledgedPhysical, migrationAvailable: false };
+				acknowledgedPhysical = {
+					...acknowledgedPhysical,
+					migrationAvailable: false,
+				};
 			}
 			if (this.corruptAuthoredRevisionNextPatch) {
 				acknowledgedPhysical = {
@@ -2848,6 +2994,7 @@ class InProcessRailWorker implements RailWorkerPort {
 			this.corruptMigrationSourceNextPatch = false;
 			this.corruptMigrationSourceCountNextPatch = false;
 			this.corruptOrganizationCursorNextPatch = false;
+			this.corruptAssemblyRelationshipIdentityNextPatch = false;
 			this.omitMigrationNextPatch = false;
 			this.emit({
 				type: "RAIL_PATCH_APPLIED",
@@ -2908,8 +3055,18 @@ function createSemanticOrganizationDocument(): Readonly<{
 }> {
 	const document = new RailDocument();
 	const segments = [
-		{ start: { x: 0, y: 0 }, end: { x: 12, y: 0 }, min: { x: -1, y: -1 }, max: { x: 13, y: 1 } },
-		{ start: { x: 12, y: 0 }, end: { x: 12, y: 12 }, min: { x: 11, y: -1 }, max: { x: 13, y: 13 } },
+		{
+			start: { x: 0, y: 0 },
+			end: { x: 12, y: 0 },
+			min: { x: -1, y: -1 },
+			max: { x: 13, y: 1 },
+		},
+		{
+			start: { x: 12, y: 0 },
+			end: { x: 12, y: 12 },
+			min: { x: 11, y: -1 },
+			max: { x: 13, y: 13 },
+		},
 		{
 			start: { x: 12, y: 12 },
 			end: { x: 24, y: 12 },
@@ -3027,6 +3184,7 @@ function readyExpectation(document: RailDocument) {
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	).snapshot;
 	return {
 		checksum: snapshot.checksum,
@@ -3155,7 +3313,13 @@ function certifiedOhbPlan(document: RailDocument) {
 	const port = Object.freeze({
 		id: portId,
 		equipmentGroupId,
-		route: Object.freeze({ kind: "CARDINAL_CELL", x: 1, z: 0, from: DIR_W, to: DIR_E }),
+		route: Object.freeze({
+			kind: "CARDINAL_CELL",
+			x: 1,
+			z: 0,
+			from: DIR_W,
+			to: DIR_E,
+		}),
 		stationMillimeters: 500,
 		side: "LEFT",
 		lateralOffsetMillimeters: 700,

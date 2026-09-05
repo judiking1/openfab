@@ -53,14 +53,14 @@ describe("EditorActivityRail", () => {
 	it("keeps ready activities enabled and exposes their task descriptions", () => {
 		const markup = renderToStaticMarkup(<EditorActivityRail {...props()} />);
 
-		expect(markup).toContain("Direct rail construction and repair");
-		expect(markup).toContain("Fab, Bank, Bay, and blueprint assembly");
-		expect(markup).toContain("Port-first OHB, EQ, and STK authoring");
-		expect(markup).toContain("Select, edit, validate, and understand authored truth");
+		expect(markup).toContain("레일 만들기와 수정");
+		expect(markup).toContain("Bay·Fab 조립과 청사진");
+		expect(markup).toContain("Port부터 OHB·EQ·STK 배치");
+		expect(markup).toContain("선택·편집·검사");
 		expect(markup).not.toContain(' disabled="');
 	});
 
-	it("makes a blocked activity natively disabled with a visible and accessible reason", () => {
+	it("keeps a blocked activity focusable with a visible and accessible reason", () => {
 		const markup = renderToStaticMarkup(
 			<EditorActivityRail
 				{...props({
@@ -75,8 +75,9 @@ describe("EditorActivityRail", () => {
 		);
 
 		expect(markup).toMatch(
-			/data-testid="editor-activity-assemble"[^>]*data-availability="blocked"[^>]*aria-label="ASSEMBLE:[^"]*Unavailable: Apply or cancel the active Connector first\."[^>]*disabled/,
+			/data-testid="editor-activity-assemble"[^>]*data-availability="blocked"[^>]*aria-label="ASSEMBLE:[^"]*Unavailable: Apply or cancel the active Connector first\."[^>]*aria-disabled="true"/,
 		);
+		expect(markup).not.toMatch(/data-testid="editor-activity-assemble"[^>]* disabled/);
 		expect(markup).toContain("Apply or cancel the active Connector first.");
 		expect(markup).toMatch(/data-testid="editor-activity-build"[^>]*data-availability="ready"/);
 	});
@@ -87,7 +88,7 @@ describe("EditorActivityRail", () => {
 		);
 
 		expect(markup.match(/data-availability="blocked"/g)).toHaveLength(4);
-		expect(markup.match(/ disabled=""/g)).toHaveLength(4);
+		expect(markup.match(/aria-disabled="true"/g)).toHaveLength(4);
 		expect(markup.match(/Finish the active command first\./g)?.length).toBeGreaterThanOrEqual(4);
 	});
 
@@ -131,5 +132,26 @@ describe("EditorActivityRail", () => {
 		expect(guidedBuild).not.toContain('data-testid="editor-activity-inspect"');
 		expect(transitioning).toContain('data-testid="editor-activity-inspect"');
 		expect(transitioning).toMatch(/data-testid="editor-activity-inspect"[^>]*aria-pressed="true"/);
+	});
+
+	it("marks the next Guided activity without changing the active activity", () => {
+		const markup = renderToStaticMarkup(
+			<EditorActivityRail
+				{...props({
+					activeActivity: "build",
+					guidedTargetActivity: "equip",
+					guidedTargetDescriptionId: "guided-next-action",
+					visibleActivities: ["build", "equip"],
+				})}
+			/>,
+		);
+
+		expect(markup).toMatch(
+			/data-testid="editor-activity-equip"[^>]*data-guided-target="true"[^>]*aria-describedby="guided-next-action"[^>]*aria-pressed="false"/,
+		);
+		expect(markup).toMatch(/data-testid="editor-activity-build"[^>]*aria-pressed="true"/);
+		expect(markup).not.toMatch(/data-testid="editor-activity-build"[^>]*data-guided-target/);
+		expect(markup).not.toContain("지금 선택");
+		expect(markup).toContain("Port부터 OHB·EQ·STK 배치");
 	});
 });

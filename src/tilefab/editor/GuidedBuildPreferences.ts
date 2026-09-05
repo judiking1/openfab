@@ -64,6 +64,18 @@ export function recordGuidedBuildEntryChoice(
 	});
 }
 
+/**
+ * Project evidence must remain live while a minimized guide can be resumed.
+ * Transient panel guidance may stop with the panel, but discarding canonical evidence here would
+ * make the resume affordance report an earlier mission than the one the user just minimized.
+ */
+export function guidedBuildNeedsProjectEvidence(
+	guidedBuildOpen: boolean,
+	preferences: GuidedBuildPreferences | null,
+): boolean {
+	return guidedBuildOpen || preferences?.lastEntryChoice === "guided";
+}
+
 export function acknowledgeGuidedBuildNavigation(
 	preferences: GuidedBuildPreferences | null,
 ): GuidedBuildPreferences {

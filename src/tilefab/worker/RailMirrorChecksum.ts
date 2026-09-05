@@ -3,6 +3,7 @@ import {
 	type AdvancedSwitchRecord,
 	advancedSwitchRecordError,
 } from "../core/AdvancedSwitch";
+import { createCooperativeTask } from "../core/CooperativeTask";
 import {
 	type EquipmentGroupMutation,
 	type EquipmentGroupRecord,
@@ -12,6 +13,14 @@ import {
 import { type PortMutation, type PortRecord, portRecordError } from "../core/PortRecord";
 import type { RailMutation } from "../core/paint";
 import { bitCount } from "../core/railShape";
+import {
+	checksumStaticFabAssemblyRelationshipRecord,
+	checksumStaticFabAssemblyRelationshipRecordSteps,
+	emptyStaticFabAssemblyRelationshipState,
+	type StaticFabAssemblyRelationshipMutationV1,
+	type StaticFabAssemblyRelationshipRecordV1,
+	type StaticFabAssemblyRelationshipStateV1,
+} from "../core/StaticFabAssemblyRelationship";
 import {
 	emptyStaticFabOrganizationState,
 	type StaticFabOrganizationMembership,
@@ -39,6 +48,11 @@ import {
 	validatePortEquipmentSnapshotShape,
 } from "./PortEquipmentSoA";
 import {
+	createStaticFabAssemblyRelationshipSnapshot,
+	hydrateStaticFabAssemblyRelationshipSnapshot,
+	type StaticFabAssemblyRelationshipSnapshot,
+} from "./StaticFabAssemblyRelationshipSoA";
+import {
 	cachedStaticFabOrganizationMembershipFingerprint,
 	cacheStaticFabOrganizationMembershipFingerprint,
 	composeStaticFabOrganizationFingerprint,
@@ -65,6 +79,7 @@ export interface RailMirrorSnapshot {
 	switchRecords: AdvancedSwitchRecordFieldsSoA;
 	portEquipment: PortEquipmentSnapshot;
 	organizations: StaticFabOrganizationSnapshot;
+	relationships: StaticFabAssemblyRelationshipSnapshot;
 	checksum: string;
 }
 
@@ -90,6 +105,9 @@ export interface RailChecksumPatchInput {
 	readonly organizationChanges: readonly StaticFabOrganizationMutation[];
 	readonly organizationNextIdBefore: number;
 	readonly organizationNextIdAfter: number;
+	readonly relationshipChanges?: readonly StaticFabAssemblyRelationshipMutationV1[];
+	readonly relationshipNextIdBefore?: number;
+	readonly relationshipNextIdAfter?: number;
 }
 
 interface RailMirrorSnapshotCaptureAuthority {
@@ -97,11 +115,14 @@ interface RailMirrorSnapshotCaptureAuthority {
 	readonly sequence: number;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
+	readonly relationshipSnapshot?: StaticFabAssemblyRelationshipSnapshot;
 	readonly checksum: string;
 }
 
 const capturedSnapshotAuthorities = new WeakMap<object, RailMirrorSnapshotCaptureAuthority>();
 const pendingSnapshotCaptureHandoffs = new WeakMap<object, RailMirrorSnapshotCaptureAuthority>();
+const EMPTY_CAPTURE_RELATIONSHIPS = emptyStaticFabAssemblyRelationshipState();
 
 const HASH_SEED_A = 0x811c9dc5;
 const HASH_SEED_B = 0x9e3779b9;
@@ -117,23 +138,31 @@ export class RailChecksumAccumulator {
 	private currentEquipmentGroups = 0;
 	private currentOrganizations = 0;
 	private currentOrganizationNextId = 1;
+	private currentAssemblyRelationships = 0;
+	private currentAssemblyRelationshipNextId = 1;
 
 	static fromDigest(digest: string): RailChecksumAccumulator {
 		const fields = digest.split(":");
-		if (fields.length !== 9 || fields.some((field) => !/^[0-9a-f]{8}$/.test(field))) {
+		if (
+			fields.length !== 12 ||
+			fields[0] !== "00000002" ||
+			fields.some((field) => !/^[0-9a-f]{8}$/.test(field))
+		) {
 			throw new Error(`Invalid rail checksum digest ${digest}.`);
 		}
 		const values = fields.map((field) => Number.parseInt(field, 16) >>> 0);
 		const accumulator = new RailChecksumAccumulator();
-		accumulator.currentCells = values[0] as number;
-		accumulator.currentEdges = values[1] as number;
-		accumulator.currentSwitches = values[2] as number;
-		accumulator.currentPorts = values[3] as number;
-		accumulator.currentEquipmentGroups = values[4] as number;
-		accumulator.currentOrganizations = values[5] as number;
-		accumulator.setOrganizationNextId(values[6] as number);
-		accumulator.xorHash = values[7] as number;
-		accumulator.sumHash = values[8] as number;
+		accumulator.currentCells = values[1] as number;
+		accumulator.currentEdges = values[2] as number;
+		accumulator.currentSwitches = values[3] as number;
+		accumulator.currentPorts = values[4] as number;
+		accumulator.currentEquipmentGroups = values[5] as number;
+		accumulator.currentOrganizations = values[6] as number;
+		accumulator.setOrganizationNextId(values[7] as number);
+		accumulator.currentAssemblyRelationships = values[8] as number;
+		accumulator.setAssemblyRelationshipNextId(values[9] as number);
+		accumulator.xorHash = values[10] as number;
+		accumulator.sumHash = values[11] as number;
 		return accumulator;
 	}
 
@@ -165,6 +194,14 @@ export class RailChecksumAccumulator {
 		return this.currentOrganizationNextId;
 	}
 
+	get assemblyRelationshipCount(): number {
+		return this.currentAssemblyRelationships;
+	}
+
+	get assemblyRelationshipNextId(): number {
+		return this.currentAssemblyRelationshipNextId;
+	}
+
 	setOrganizationNextId(nextOrganizationId: number): void {
 		assertOrganizationNextId(nextOrganizationId, "organization ID cursor");
 		this.currentOrganizationNextId = nextOrganizationId;
@@ -185,6 +222,25 @@ export class RailChecksumAccumulator {
 			);
 		}
 		this.currentOrganizationNextId = nextOrganizationIdAfter;
+	}
+
+	setAssemblyRelationshipNextId(nextRelationshipId: number): void {
+		assertOrganizationNextId(nextRelationshipId, "assembly relationship ID cursor");
+		this.currentAssemblyRelationshipNextId = nextRelationshipId;
+	}
+
+	applyAssemblyRelationshipNextId(
+		nextRelationshipIdBefore: number,
+		nextRelationshipIdAfter: number,
+	): void {
+		assertOrganizationNextId(nextRelationshipIdBefore, "assembly relationship ID cursor before");
+		assertOrganizationNextId(nextRelationshipIdAfter, "assembly relationship ID cursor after");
+		if (this.currentAssemblyRelationshipNextId !== nextRelationshipIdBefore) {
+			throw new Error(
+				`Assembly relationship ID cursor checksum mismatch: expected ${this.currentAssemblyRelationshipNextId}, received ${nextRelationshipIdBefore}.`,
+			);
+		}
+		this.currentAssemblyRelationshipNextId = nextRelationshipIdAfter;
 	}
 
 	addCell(x: number, y: number, encoded: number): void {
@@ -314,6 +370,46 @@ export class RailChecksumAccumulator {
 		if (mutation.after) this.addOrganization(mutation.after);
 	}
 
+	addAssemblyRelationship(record: StaticFabAssemblyRelationshipRecordV1): void {
+		const fingerprint = assemblyRelationshipRecordFingerprint(record);
+		this.xorHash = (this.xorHash ^ fingerprint.xor) >>> 0;
+		this.sumHash = (this.sumHash + fingerprint.sum) >>> 0;
+		this.currentAssemblyRelationships++;
+		if (record.id >= this.currentAssemblyRelationshipNextId) {
+			this.setAssemblyRelationshipNextId(record.id + 1);
+		}
+	}
+
+	async addAssemblyRelationshipCooperatively(
+		record: StaticFabAssemblyRelationshipRecordV1,
+		checkpoint: () => Promise<void>,
+		operationBudget = 256,
+	): Promise<void> {
+		const task = createCooperativeTask(checksumStaticFabAssemblyRelationshipRecordSteps(record));
+		while (!task.done) {
+			task.step(operationBudget);
+			await checkpoint();
+		}
+		const fingerprint = assemblyRelationshipDigestFingerprint(task.finish());
+		this.xorHash = (this.xorHash ^ fingerprint.xor) >>> 0;
+		this.sumHash = (this.sumHash + fingerprint.sum) >>> 0;
+		this.currentAssemblyRelationships++;
+		if (record.id >= this.currentAssemblyRelationshipNextId)
+			this.setAssemblyRelationshipNextId(record.id + 1);
+	}
+
+	removeAssemblyRelationship(record: StaticFabAssemblyRelationshipRecordV1): void {
+		const fingerprint = assemblyRelationshipRecordFingerprint(record);
+		this.xorHash = (this.xorHash ^ fingerprint.xor) >>> 0;
+		this.sumHash = (this.sumHash - fingerprint.sum) >>> 0;
+		this.currentAssemblyRelationships--;
+	}
+
+	applyAssemblyRelationshipMutation(mutation: StaticFabAssemblyRelationshipMutationV1): void {
+		if (mutation.before) this.removeAssemblyRelationship(mutation.before);
+		if (mutation.after) this.addAssemblyRelationship(mutation.after);
+	}
+
 	clone(): RailChecksumAccumulator {
 		const clone = new RailChecksumAccumulator();
 		clone.xorHash = this.xorHash;
@@ -325,6 +421,8 @@ export class RailChecksumAccumulator {
 		clone.currentEquipmentGroups = this.currentEquipmentGroups;
 		clone.currentOrganizations = this.currentOrganizations;
 		clone.currentOrganizationNextId = this.currentOrganizationNextId;
+		clone.currentAssemblyRelationships = this.currentAssemblyRelationships;
+		clone.currentAssemblyRelationshipNextId = this.currentAssemblyRelationshipNextId;
 		return clone;
 	}
 
@@ -351,6 +449,7 @@ export class RailChecksumAccumulator {
 
 	digest(): string {
 		return [
+			2,
 			this.currentCells,
 			this.currentEdges,
 			this.currentSwitches,
@@ -358,6 +457,8 @@ export class RailChecksumAccumulator {
 			this.currentEquipmentGroups,
 			this.currentOrganizations,
 			this.currentOrganizationNextId,
+			this.currentAssemblyRelationships,
+			this.currentAssemblyRelationshipNextId,
 			this.xorHash,
 			this.sumHash,
 		]
@@ -371,6 +472,7 @@ export function captureRailMirrorSnapshot(
 	sequence: number,
 	portEquipment: PortEquipmentState = emptyPortEquipmentState(),
 	organizations: StaticFabOrganizationState = emptyStaticFabOrganizationState(),
+	relationships: StaticFabAssemblyRelationshipStateV1 = EMPTY_CAPTURE_RELATIONSHIPS,
 ): RailMirrorSnapshotCapture {
 	const xs = new Int32Array(map.size);
 	const ys = new Int32Array(map.size);
@@ -403,6 +505,9 @@ export function captureRailMirrorSnapshot(
 	const organizationSnapshot = createStaticFabOrganizationSnapshot(organizations);
 	for (const record of organizations.records) checksum.addOrganization(record);
 	checksum.setOrganizationNextId(organizations.nextOrganizationId);
+	const relationshipSnapshot = createStaticFabAssemblyRelationshipSnapshot(relationships);
+	for (const record of relationships.records) checksum.addAssemblyRelationship(record);
+	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 	const snapshot: RailMirrorSnapshot = {
 		sequence,
 		revision: map.getRevision(),
@@ -414,11 +519,20 @@ export function captureRailMirrorSnapshot(
 		switchRecords,
 		portEquipment: portEquipmentSnapshot,
 		organizations: organizationSnapshot,
+		relationships: relationshipSnapshot,
 		checksum: checksum.digest(),
 	};
 	capturedSnapshotAuthorities.set(
 		snapshot,
-		Object.freeze({ map, sequence, portEquipment, organizations, checksum: snapshot.checksum }),
+		Object.freeze({
+			map,
+			sequence,
+			portEquipment,
+			organizations,
+			relationships,
+			relationshipSnapshot: snapshot.relationships,
+			checksum: snapshot.checksum,
+		}),
 	);
 	return { snapshot, checksum };
 }
@@ -432,6 +546,7 @@ export function issueRailMirrorSnapshotCaptureHandoff(
 	sequence: number,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	checksum: string,
 ): RailMirrorSnapshotCaptureHandoff {
 	if (!Number.isSafeInteger(sequence) || sequence < 0) {
@@ -444,14 +559,16 @@ export function issueRailMirrorSnapshotCaptureHandoff(
 		accumulator.portCount !== portEquipment.ports.length ||
 		accumulator.equipmentGroupCount !== portEquipment.equipmentGroups.length ||
 		accumulator.organizationCount !== organizations.records.length ||
-		accumulator.organizationNextId !== organizations.nextOrganizationId
+		accumulator.organizationNextId !== organizations.nextOrganizationId ||
+		accumulator.assemblyRelationshipCount !== relationships.records.length ||
+		accumulator.assemblyRelationshipNextId !== relationships.nextRelationshipId
 	) {
 		throw new Error("Rail snapshot handoff checksum counters do not match the live source.");
 	}
 	const token = Object.freeze({});
 	pendingSnapshotCaptureHandoffs.set(
 		token,
-		Object.freeze({ map, sequence, portEquipment, organizations, checksum }),
+		Object.freeze({ map, sequence, portEquipment, organizations, relationships, checksum }),
 	);
 	return Object.freeze({ token });
 }
@@ -468,7 +585,10 @@ export function adoptRailMirrorSnapshotCaptureHandoff(
 	const authority = pendingSnapshotCaptureHandoffs.get(token);
 	pendingSnapshotCaptureHandoffs.delete(token);
 	if (!authority || !snapshotMatchesCaptureHandoff(snapshot, authority)) return false;
-	capturedSnapshotAuthorities.set(snapshot, authority);
+	capturedSnapshotAuthorities.set(
+		snapshot,
+		Object.freeze({ ...authority, relationshipSnapshot: snapshot.relationships }),
+	);
 	return true;
 }
 
@@ -488,6 +608,7 @@ export function consumeRailMirrorSnapshotCaptureAuthority(
 	sequence: number,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): boolean {
 	const authority = capturedSnapshotAuthorities.get(snapshot);
 	capturedSnapshotAuthorities.delete(snapshot);
@@ -496,13 +617,16 @@ export function consumeRailMirrorSnapshotCaptureAuthority(
 		authority.sequence === sequence &&
 		authority.portEquipment === portEquipment &&
 		authority.organizations === organizations &&
+		authority.relationships === relationships &&
+		authority.relationshipSnapshot === snapshot.relationships &&
 		authority.checksum === snapshot.checksum &&
 		snapshot.sequence === sequence &&
 		snapshot.revision === map.getRevision() &&
 		snapshot.nextAdvancedSwitchId === map.getAdvancedSwitchIdCursor() &&
 		snapshot.portEquipment.nextPortId === portEquipment.nextPortId &&
 		snapshot.portEquipment.nextEquipmentGroupId === portEquipment.nextEquipmentGroupId &&
-		snapshot.organizations.nextOrganizationId === organizations.nextOrganizationId
+		snapshot.organizations.nextOrganizationId === organizations.nextOrganizationId &&
+		snapshot.relationships.nextRelationshipId === relationships.nextRelationshipId
 	);
 }
 
@@ -524,6 +648,7 @@ function snapshotMatchesCaptureHandoff(
 			authority.portEquipment.nextEquipmentGroupId !==
 				snapshot.portEquipment.nextEquipmentGroupId ||
 			authority.organizations.nextOrganizationId !== snapshot.organizations.nextOrganizationId ||
+			authority.relationships.nextRelationshipId !== snapshot.relationships.nextRelationshipId ||
 			snapshot.sequence !== authority.sequence ||
 			snapshot.checksum !== authority.checksum ||
 			!isTransferableTypedArray(snapshot.xs, Int32Array) ||
@@ -544,10 +669,12 @@ function snapshotMatchesCaptureHandoff(
 		);
 		validatePortEquipmentSnapshotShape(snapshot.portEquipment);
 		validateStaticFabOrganizationSnapshotStructure(snapshot.organizations);
+		const relationships = hydrateStaticFabAssemblyRelationshipSnapshot(snapshot.relationships);
 		return (
 			snapshot.portEquipment.portIds.length === checksum.portCount &&
 			snapshot.portEquipment.equipmentGroupIds.length === checksum.equipmentGroupCount &&
-			snapshot.organizations.organizationIds.length === checksum.organizationCount
+			snapshot.organizations.organizationIds.length === checksum.organizationCount &&
+			relationships.records.length === checksum.assemblyRelationshipCount
 		);
 	} catch {
 		return false;
@@ -561,6 +688,10 @@ export function checksumRailPatchResult(
 ): string {
 	const checksum = RailChecksumAccumulator.fromDigest(sourceChecksum);
 	checksum.applyOrganizationNextId(patch.organizationNextIdBefore, patch.organizationNextIdAfter);
+	const relationshipNextIdBefore =
+		patch.relationshipNextIdBefore ?? checksum.assemblyRelationshipNextId;
+	const relationshipNextIdAfter = patch.relationshipNextIdAfter ?? relationshipNextIdBefore;
+	checksum.applyAssemblyRelationshipNextId(relationshipNextIdBefore, relationshipNextIdAfter);
 	for (const change of patch.changes) checksum.applyMutation(change);
 	for (const change of patch.switchChanges) checksum.applySwitchMutation(change);
 	for (const change of patch.portChanges) checksum.applyPortMutation(change);
@@ -568,6 +699,9 @@ export function checksumRailPatchResult(
 		checksum.applyEquipmentGroupMutation(change);
 	}
 	for (const change of patch.organizationChanges) checksum.applyOrganizationMutation(change);
+	for (const change of patch.relationshipChanges ?? []) {
+		checksum.applyAssemblyRelationshipMutation(change);
+	}
 	return checksum.digest();
 }
 
@@ -589,6 +723,10 @@ export async function checksumRailPatchResultCooperatively(
 	};
 	const checksum = RailChecksumAccumulator.fromDigest(sourceChecksum);
 	checksum.applyOrganizationNextId(patch.organizationNextIdBefore, patch.organizationNextIdAfter);
+	const relationshipNextIdBefore =
+		patch.relationshipNextIdBefore ?? checksum.assemblyRelationshipNextId;
+	const relationshipNextIdAfter = patch.relationshipNextIdAfter ?? relationshipNextIdBefore;
+	checksum.applyAssemblyRelationshipNextId(relationshipNextIdBefore, relationshipNextIdAfter);
 	for (const change of patch.changes) {
 		checksum.applyMutation(change);
 		await consumeOperation();
@@ -609,6 +747,10 @@ export async function checksumRailPatchResultCooperatively(
 		checksum.applyOrganizationMutation(change);
 		await consumeOperation();
 	}
+	for (const change of patch.relationshipChanges ?? []) {
+		checksum.applyAssemblyRelationshipMutation(change);
+		await consumeOperation();
+	}
 	await checkpoint();
 	return checksum.digest();
 }
@@ -617,6 +759,7 @@ export function checksumRailMap(
 	map: TileMap,
 	portEquipment: PortEquipmentState = emptyPortEquipmentState(),
 	organizations: StaticFabOrganizationState = emptyStaticFabOrganizationState(),
+	relationships: StaticFabAssemblyRelationshipStateV1 = emptyStaticFabAssemblyRelationshipState(),
 ): string {
 	const checksum = new RailChecksumAccumulator();
 	map.forEachRail((x, y, _rail, encoded) => checksum.addCell(x, y, encoded));
@@ -625,6 +768,8 @@ export function checksumRailMap(
 	for (const group of portEquipment.equipmentGroups) checksum.addEquipmentGroup(group);
 	for (const record of organizations.records) checksum.addOrganization(record);
 	checksum.setOrganizationNextId(organizations.nextOrganizationId);
+	for (const record of relationships.records) checksum.addAssemblyRelationship(record);
+	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 	return checksum.digest();
 }
 
@@ -634,6 +779,7 @@ export async function checksumRailMapCooperatively(
 	organizations: StaticFabOrganizationState,
 	checkpoint: () => Promise<void>,
 	operationBudget = 128,
+	relationships: StaticFabAssemblyRelationshipStateV1 = emptyStaticFabAssemblyRelationshipState(),
 ): Promise<string> {
 	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0) {
 		throw new RangeError("Rail map checksum operation budget must be positive.");
@@ -666,6 +812,11 @@ export async function checksumRailMapCooperatively(
 		await consumeOperation();
 	}
 	checksum.setOrganizationNextId(organizations.nextOrganizationId);
+	for (const record of relationships.records) {
+		checksum.addAssemblyRelationship(record);
+		await consumeOperation();
+	}
+	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 	await checkpoint();
 	return checksum.digest();
 }
@@ -678,6 +829,7 @@ export function checksumRailMapDiagnostic(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationIssueSourceState,
+	relationships: StaticFabAssemblyRelationshipStateV1 = emptyStaticFabAssemblyRelationshipState(),
 ): string {
 	const checksum = new RailChecksumAccumulator();
 	map.forEachRail((x, y, _rail, encoded) => checksum.addCell(x, y, encoded));
@@ -686,6 +838,8 @@ export function checksumRailMapDiagnostic(
 	for (const group of portEquipment.equipmentGroups) checksum.addEquipmentGroup(group);
 	for (const record of organizations.records) checksum.addDiagnosticOrganization(record);
 	checksum.setDiagnosticOrganizationNextId(organizations.nextOrganizationId);
+	for (const record of relationships.records) checksum.addAssemblyRelationship(record);
+	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 	return checksum.digest();
 }
 
@@ -729,6 +883,9 @@ export function checksumRailMirrorSnapshot(snapshot: RailMirrorSnapshot): string
 	const organizations = hydrateStaticFabOrganizationSnapshot(snapshot.organizations);
 	for (const record of organizations.records) checksum.addOrganization(record);
 	checksum.setOrganizationNextId(organizations.nextOrganizationId);
+	const relationships = hydrateStaticFabAssemblyRelationshipSnapshot(snapshot.relationships);
+	for (const record of relationships.records) checksum.addAssemblyRelationship(record);
+	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 	return checksum.digest();
 }
 
@@ -779,6 +936,9 @@ export function checksumRailMirrorSnapshotDiagnostic(snapshot: RailMirrorSnapsho
 	const organizations = hydrateStaticFabOrganizationDiagnosticSnapshot(snapshot.organizations);
 	for (const record of organizations.records) checksum.addDiagnosticOrganization(record);
 	checksum.setDiagnosticOrganizationNextId(organizations.nextOrganizationId);
+	const relationships = hydrateStaticFabAssemblyRelationshipSnapshot(snapshot.relationships);
+	for (const record of relationships.records) checksum.addAssemblyRelationship(record);
+	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 	return checksum.digest();
 }
 
@@ -869,6 +1029,23 @@ function hashEquipmentGroup(record: EquipmentGroupRecord, seed: number): number 
 		hash = mixString(hash, record.recipe ?? "");
 	} else hash = mixString(hash, record.template);
 	return finalizeHash(hash);
+}
+
+function assemblyRelationshipRecordFingerprint(record: StaticFabAssemblyRelationshipRecordV1): {
+	readonly xor: number;
+	readonly sum: number;
+} {
+	return assemblyRelationshipDigestFingerprint(checksumStaticFabAssemblyRelationshipRecord(record));
+}
+
+function assemblyRelationshipDigestFingerprint(digest: string): {
+	readonly xor: number;
+	readonly sum: number;
+} {
+	return Object.freeze({
+		xor: finalizeHash(mixString(HASH_SEED_A ^ 0x4153524c, digest)),
+		sum: finalizeHash(mixString(HASH_SEED_B ^ 0x4153524c, digest)),
+	});
 }
 
 async function hashOrganizationMembershipCooperatively(

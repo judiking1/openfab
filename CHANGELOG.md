@@ -6,6 +6,26 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Guided Build groups the existing journey into Quick Start, Equip, Reuse, and Advanced FAB
+  chapters, with clearer pause/resume, Help, keyboard focus, and recovery through ordinary commands.
+- Ordinary Rail and Port authoring, Assembly handoffs, Checks, and project menus provide clearer
+  keyboard feedback and compact layouts while preserving the same atomic edit and Undo/Redo paths.
+- Native project schema v11 preserves explicit assembly relationship state and allocator cursors
+  through save/load, history, and Worker synchronization. Older projects migrate to empty
+  relationship state; automatic relationship producers and Detach remain disabled.
+- Relationship snapshot hydration and checksums run in cancellable bounded steps. Final document
+  adoption reuses completed relationship validation, and whole-map copying retains less memory.
+
+### Fixed
+
+- Native Save cancellation preserves the pending user action and exposes a truthful retry path.
+- Guided and ordinary FAB editing retain exact selection, placement, and recovery context through
+  Bay/Bank/Fab duplication, connection, Undo/Redo, and native reopen.
+- Asynchronous startup rejects an existing document edited after validation, including an
+  edit/rollback cycle, without reverting the user's newer state.
+
 ## [0.1.0] - 2026-08-29
 
 ### Added

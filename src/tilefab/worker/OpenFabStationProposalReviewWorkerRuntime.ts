@@ -67,7 +67,7 @@ const DRAFT_FINGERPRINT = /^openfab-station-proposal-review-draft:v1:[0-9a-f]{8}
 const EVALUATION_FINGERPRINT =
 	/^openfab-station-proposal-review-evaluation-snapshot:v1:[0-9a-f]{8}:[0-9a-f]{8}$/;
 const REVIEW_FINGERPRINT = /^openfab-station-proposal-review:v1:[0-9a-f]{8}:[0-9a-f]{8}$/;
-const RAIL_CHECKSUM = /^(?:[0-9a-f]{8}:){8}[0-9a-f]{8}$/;
+const RAIL_CHECKSUM = /^(?:[0-9a-f]{8}:){11}[0-9a-f]{8}$/;
 const preparedResponseTransfers = new WeakMap<object, readonly ArrayBuffer[]>();
 
 interface RequestCorrelation {
@@ -221,6 +221,7 @@ export class OpenFabStationProposalReviewWorkerSession {
 			map: document.map,
 			portEquipment: document.portEquipment,
 			organizations: document.organizations,
+			relationships: document.relationships,
 			patchSequence: document.getPatchSequence(),
 		});
 		let evaluation: OpenFabStationProposalReviewEvaluation;

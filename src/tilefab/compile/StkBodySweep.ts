@@ -84,15 +84,21 @@ export class StkBodySweepIndex {
 		includeExistingPortStations = true,
 	) {
 		this.revision = layout.revision;
-		const stkGroupIds = new Set(
-			state.equipmentGroups.filter((group) => group.kind === "STK").map((group) => group.id),
-		);
+		const stkGroups = state.equipmentGroups.filter((group) => group.kind === "STK");
+		if (stkGroups.length === 0 && !includeExistingPortStations) {
+			this.equipmentGroupByPortId = new Map();
+			this.runByRouteKey = EMPTY_RAIL_RUNS;
+			this.sweepIntervalsByRun = EMPTY_SWEEP_INTERVALS_BY_RUN;
+			this.existingPortStationsByRun = EMPTY_EXISTING_PORT_STATIONS_BY_RUN;
+			this.sweeps = EMPTY_STK_BODY_SWEEPS;
+			return;
+		}
+		const stkGroupIds = new Set(stkGroups.map((group) => group.id));
 		this.equipmentGroupByPortId = new Map(
 			state.ports
 				.filter((port) => stkGroupIds.has(port.equipmentGroupId))
 				.map((port) => [port.id, port.equipmentGroupId] as const),
 		);
-		const stkGroups = state.equipmentGroups.filter((group) => group.kind === "STK");
 		if (stkGroups.length === 0 && (!includeExistingPortStations || state.ports.length === 0)) {
 			this.runByRouteKey = EMPTY_RAIL_RUNS;
 			this.sweepIntervalsByRun = EMPTY_SWEEP_INTERVALS_BY_RUN;

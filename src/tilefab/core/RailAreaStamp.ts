@@ -1078,17 +1078,17 @@ function compiledRailAreaStampPose(
 			return freezeEdge(pose.reverseFlow ? { from: to, to: from } : { from, to });
 		}),
 	);
-	const cells = Object.freeze(uniqueEdgeCells(edges).map(freezeCell));
+	// Pose edges already own frozen endpoints. Reuse those cells across the footprint and states
+	// instead of retaining two more coordinate objects per cell in the clipboard's pose cache.
+	const cells = Object.freeze(uniqueEdgeCells(edges));
 	const encodedByCell = encodedStatesForEdges(edges);
 	const states = Object.freeze(
-		[...encodedByCell.entries()]
-			.map(([key, encoded]) =>
-				Object.freeze({
-					offset: freezeCell(cellFromKey(key)),
-					encoded,
-				}),
-			)
-			.sort((left, right) => compareCells(left.offset, right.offset)),
+		cells.map((offset) =>
+			Object.freeze({
+				offset,
+				encoded: encodedByCell.get(cellKey(offset.x, offset.y)) as number,
+			}),
+		),
 	);
 	const bounds = cellBounds(cells);
 	const firstEdge = edges[0];

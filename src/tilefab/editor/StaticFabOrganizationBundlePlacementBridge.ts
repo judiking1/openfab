@@ -1,4 +1,5 @@
 import type { PortEquipmentState } from "../core/EquipmentGroup";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import {
 	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES,
@@ -62,6 +63,7 @@ export interface StaticFabOrganizationBundlePlacementLiveState {
 	readonly patchSequence: number;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 export interface ValidatedStaticFabOrganizationBundlePlacement {
@@ -109,7 +111,9 @@ export class StaticFabOrganizationBundlePlacementBridge {
 			sourceState.portEquipment.nextEquipmentGroupId !==
 				input.snapshot.portEquipment.nextEquipmentGroupId ||
 			sourceState.organizations.nextOrganizationId !==
-				input.snapshot.organizations.nextOrganizationId
+				input.snapshot.organizations.nextOrganizationId ||
+			sourceState.relationships.nextRelationshipId !==
+				input.snapshot.relationships.nextRelationshipId
 		) {
 			return Promise.reject(
 				new Error("Organization-bundle placement snapshot is stale before Worker planning."),
@@ -122,6 +126,7 @@ export class StaticFabOrganizationBundlePlacementBridge {
 				sourceState.patchSequence,
 				sourceState.portEquipment,
 				sourceState.organizations,
+				sourceState.relationships,
 			)
 		) {
 			return Promise.reject(
@@ -213,6 +218,7 @@ export class StaticFabOrganizationBundlePlacementBridge {
 					liveState.map === sourceState.map &&
 					liveState.portEquipment === sourceState.portEquipment &&
 					liveState.organizations === sourceState.organizations &&
+					liveState.relationships === sourceState.relationships &&
 					liveState.map.getRevision() === input.snapshot.revision &&
 					liveState.patchSequence === input.snapshot.sequence;
 				let adoptedPlan: StaticFabOrganizationBundlePlacementPlan | null = null;

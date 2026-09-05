@@ -19,7 +19,7 @@ import {
 	openFabFabProfilePlanFingerprint,
 } from "./OpenFabFabProfile";
 
-export const OPENFAB_FAB_PREPARED_PROJECT_VERSION = 1 as const;
+export const OPENFAB_FAB_PREPARED_PROJECT_VERSION = 2 as const;
 export const OPENFAB_FAB_PREPARED_PROJECT_KIND = "openfab-fab-prepared-project" as const;
 export const OPENFAB_FAB_PREPARED_PROJECT_IDENTITY_KIND =
 	"openfab-fab-prepared-project-identity" as const;
@@ -392,7 +392,7 @@ export function normalizeOpenFabFabPreparedProjectIdentity(
 		countValues.openTerminals !== 0 ||
 		countValues.strongComponents !== 1
 	) {
-		throw new Error("OpenFab prepared-project exact counts violate the v1 contract.");
+		throw new Error("OpenFab prepared-project exact counts violate the v2 contract.");
 	}
 	for (const key of BOUNDS_KEYS) {
 		if (!Number.isSafeInteger(value.bounds[key])) {

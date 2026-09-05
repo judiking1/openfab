@@ -133,7 +133,7 @@ export function ContextualBlueprintSaveDialog({
 				tabIndex={-1}
 				aria-modal="true"
 				aria-labelledby="tilefab-contextual-save-title"
-				aria-describedby="tilefab-contextual-save-summary"
+				aria-describedby="tilefab-contextual-save-summary tilefab-contextual-save-project-note"
 				aria-busy={busy}
 				data-testid="contextual-blueprint-save-dialog"
 				data-source-kind={source.kind}
@@ -166,6 +166,14 @@ export function ContextualBlueprintSaveDialog({
 							: ""}
 					</span>
 				</div>
+				<p
+					id="tilefab-contextual-save-project-note"
+					className="tilefab-contextual-save-project-note"
+					data-testid="blueprint-project-distinction"
+				>
+					청사진은 선택 구조를 다시 배치하기 위한 재사용 항목입니다. 전체 FAB 파일은 상단의{" "}
+					<strong>프로젝트 저장 (.openfab)</strong>을 사용하세요.
+				</p>
 
 				<form onSubmit={submit}>
 					<div className="tilefab-contextual-save-fields">
@@ -218,8 +226,8 @@ export function ContextualBlueprintSaveDialog({
 							<DestinationOption
 								active={draft.destination === "project"}
 								icon={<LibraryBig size={15} />}
-								label="PROJECT"
-								detail="WITH PROJECT"
+								label="THIS PROJECT"
+								detail="PROJECT BLUEPRINTS"
 								testId="contextual-save-project"
 								disabled={busy}
 								onChoose={() => onDestination("project")}
@@ -305,7 +313,7 @@ export function ContextualBlueprintSaveDialog({
 							{busy
 								? "SAVING"
 								: draft.destination === "project"
-									? "SAVE TO PROJECT"
+									? "ADD TO PROJECT BLUEPRINTS"
 									: "SAVE TO MY LIBRARY"}
 							<kbd>⌘/CTRL S</kbd>
 						</button>

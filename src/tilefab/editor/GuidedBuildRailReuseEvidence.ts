@@ -8,6 +8,10 @@ import { type Cell, cellKey, decodeRailCell, encodeRailCell, type TileMap } from
 export interface GuidedBuildRailReuseEvidence {
 	readonly weakComponentCount: number;
 	readonly networkLinkSupportedComponentCount: number;
+	/** Presentation evidence that explains why a bent first attempt has not completed Mission 2. */
+	readonly longestStraightRunMeters?: number;
+	/** Closed, strongly connected components that can advance practice while drafts remain elsewhere. */
+	readonly closedStrongComponentCount?: number;
 	readonly repeatedComponentKindCount: number;
 	readonly repeatedComponentCopyCount: number;
 }
@@ -15,6 +19,8 @@ export interface GuidedBuildRailReuseEvidence {
 export const EMPTY_GUIDED_BUILD_RAIL_REUSE_EVIDENCE: GuidedBuildRailReuseEvidence = Object.freeze({
 	weakComponentCount: 0,
 	networkLinkSupportedComponentCount: 0,
+	longestStraightRunMeters: 0,
+	closedStrongComponentCount: 0,
 	repeatedComponentKindCount: 0,
 	repeatedComponentCopyCount: 0,
 });
@@ -29,14 +35,25 @@ export function analyzeGuidedBuildRailReuse(map: TileMap): GuidedBuildRailReuseE
 		rails.set(cellKey(x, y), Object.freeze({ x, y, encoded }));
 	});
 	const components = collectWeakComponents(rails);
-	const networkLinkSupportedComponentCount = components.reduce(
-		(count, component) => count + (componentHasNetworkLinkRun(component) ? 1 : 0),
+	const runEvidence = components.map(analyzeComponentStraightRuns);
+	const networkLinkSupportedComponentCount = runEvidence.reduce(
+		(count, evidence) => count + (evidence.networkLinkSupported ? 1 : 0),
+		0,
+	);
+	const longestStraightRunMeters = runEvidence.reduce(
+		(longest, evidence) => Math.max(longest, evidence.longestStraightRunMeters),
+		0,
+	);
+	const closedStrongComponentCount = components.reduce(
+		(count, component) => count + (componentHasClosedStrongFlow(component, rails) ? 1 : 0),
 		0,
 	);
 	if (components.length < 2) {
 		return Object.freeze({
 			weakComponentCount: components.length,
 			networkLinkSupportedComponentCount,
+			longestStraightRunMeters,
+			closedStrongComponentCount,
 			repeatedComponentKindCount: 0,
 			repeatedComponentCopyCount: 0,
 		});
@@ -56,12 +73,72 @@ export function analyzeGuidedBuildRailReuse(map: TileMap): GuidedBuildRailReuseE
 	return Object.freeze({
 		weakComponentCount: components.length,
 		networkLinkSupportedComponentCount,
+		longestStraightRunMeters,
+		closedStrongComponentCount,
 		repeatedComponentKindCount,
 		repeatedComponentCopyCount,
 	});
 }
 
-function componentHasNetworkLinkRun(component: readonly EncodedRailCell[]): boolean {
+function componentHasClosedStrongFlow(
+	component: readonly EncodedRailCell[],
+	rails: ReadonlyMap<string, EncodedRailCell>,
+): boolean {
+	if (component.length === 0) return false;
+	const keys = new Set(component.map((cell) => cellKey(cell.x, cell.y)));
+	for (const cell of component) {
+		const rail = decodeRailCell(cell.encoded);
+		if (rail.incoming === 0 || rail.outgoing === 0) return false;
+		for (const direction of ALL_DIRECTIONS) {
+			const incoming = (rail.incoming & direction) !== 0;
+			const outgoing = (rail.outgoing & direction) !== 0;
+			if (!incoming && !outgoing) continue;
+			const neighborCell = moveCell(cell, direction);
+			const neighbor = rails.get(cellKey(neighborCell.x, neighborCell.y));
+			if (!neighbor || !keys.has(cellKey(neighbor.x, neighbor.y))) return false;
+			const neighborRail = decodeRailCell(neighbor.encoded);
+			const opposite = oppositeDirection(direction);
+			if (incoming && (neighborRail.outgoing & opposite) === 0) return false;
+			if (outgoing && (neighborRail.incoming & opposite) === 0) return false;
+		}
+	}
+	return (
+		directedReachCount(component[0] as EncodedRailCell, rails, keys, false) === keys.size &&
+		directedReachCount(component[0] as EncodedRailCell, rails, keys, true) === keys.size
+	);
+}
+
+function directedReachCount(
+	start: EncodedRailCell,
+	rails: ReadonlyMap<string, EncodedRailCell>,
+	componentKeys: ReadonlySet<string>,
+	reverse: boolean,
+): number {
+	const visited = new Set<string>();
+	const stack: EncodedRailCell[] = [start];
+	while (stack.length > 0) {
+		const current = stack.pop() as EncodedRailCell;
+		const currentKey = cellKey(current.x, current.y);
+		if (visited.has(currentKey)) continue;
+		visited.add(currentKey);
+		const currentRail = decodeRailCell(current.encoded);
+		const directions = reverse ? currentRail.incoming : currentRail.outgoing;
+		for (const direction of ALL_DIRECTIONS) {
+			if ((directions & direction) === 0) continue;
+			const nextCell = moveCell(current, direction);
+			const nextKey = cellKey(nextCell.x, nextCell.y);
+			if (!componentKeys.has(nextKey)) continue;
+			const next = rails.get(nextKey);
+			if (next) stack.push(next);
+		}
+	}
+	return visited.size;
+}
+
+function analyzeComponentStraightRuns(component: readonly EncodedRailCell[]): Readonly<{
+	networkLinkSupported: boolean;
+	longestStraightRunMeters: number;
+}> {
 	const coordinatesByRun = new Map<string, number[]>();
 	for (const cell of component) {
 		const rail = decodeRailCell(cell.encoded);
@@ -84,17 +161,21 @@ function componentHasNetworkLinkRun(component: readonly EncodedRailCell[]): bool
 	}
 	const minimumCellCount =
 		RAIL_NETWORK_LINK_JUNCTION_SPACING_METERS + RAIL_NETWORK_LINK_RUN_END_SUPPORT_METERS * 2 + 1;
+	let networkLinkSupported = false;
+	let longestStraightRunMeters = 0;
 	for (const coordinates of coordinatesByRun.values()) {
 		coordinates.sort((left, right) => left - right);
 		let consecutive = 0;
 		let previous = Number.NEGATIVE_INFINITY;
 		for (const coordinate of coordinates) {
 			consecutive = coordinate === previous + 1 ? consecutive + 1 : 1;
-			if (consecutive >= minimumCellCount) return true;
+			// N interior straight cells span N + 1 authored one-meter edges.
+			longestStraightRunMeters = Math.max(longestStraightRunMeters, consecutive + 1);
+			if (consecutive >= minimumCellCount) networkLinkSupported = true;
 			previous = coordinate;
 		}
 	}
-	return false;
+	return Object.freeze({ networkLinkSupported, longestStraightRunMeters });
 }
 
 function collectWeakComponents(

@@ -66,6 +66,17 @@ export interface PortAttachmentSourceIndex {
 	rows(route: PortRouteIdentity): Int32Array | null;
 }
 
+const sourceIndexLayoutIdentities = new WeakMap<object, object>();
+const layoutIdentities = new WeakMap<object, object>();
+
+function exactLayoutIdentity(layout: CompiledPhysicalLayout): object {
+	const existing = layoutIdentities.get(layout);
+	if (existing) return existing;
+	const identity = Object.freeze({});
+	layoutIdentities.set(layout, identity);
+	return identity;
+}
+
 interface MappedStation {
 	readonly pathIndex: number;
 	readonly station: number;
@@ -119,12 +130,23 @@ export function createPortAttachmentSourceIndex(
 	const rowsByKey = new Map(
 		[...mutable].map(([key, rows]) => [key, Int32Array.from(rows)] as const),
 	);
-	return Object.freeze({
+	const index = Object.freeze({
 		sourcePathCount: layout.pathIntervalRemap.sourcePathCount,
 		sourceRemap: layout.pathIntervalRemap,
 		rows: (route: PortRouteIdentity): Int32Array | null =>
 			rowsByKey.get(portRouteIdentityKey(route)) ?? null,
 	});
+	sourceIndexLayoutIdentities.set(index, exactLayoutIdentity(layout));
+	return index;
+}
+
+/** Exact runtime provenance for source indexes reused by capability-producing compilers. */
+export function portAttachmentSourceIndexMatchesLayout(
+	index: PortAttachmentSourceIndex,
+	layout: CompiledPhysicalLayout,
+): boolean {
+	const layoutIdentity = layoutIdentities.get(layout);
+	return layoutIdentity !== undefined && sourceIndexLayoutIdentities.get(index) === layoutIdentity;
 }
 
 /** Resolve with a project-wide O(1) source index while preserving ambiguity diagnostics. */

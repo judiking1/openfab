@@ -440,6 +440,9 @@ function bayFlowEditFixture(): BayFlowEditFixture {
 		organizationChanges: plan.organizationMutations,
 		organizationNextIdBefore: plan.nextOrganizationIdBefore,
 		organizationNextIdAfter: plan.nextOrganizationIdAfter,
+		relationshipChanges: [],
+		relationshipNextIdBefore: 1,
+		relationshipNextIdAfter: 1,
 		organizationImpactAuthorizations: plan.organizationImpactAuthorizations,
 	}) satisfies RailPatchEvent;
 	return Object.freeze({
@@ -612,6 +615,13 @@ function reverseEvent(
 		})),
 		organizationNextIdBefore: event.organizationNextIdAfter,
 		organizationNextIdAfter: event.organizationNextIdBefore,
+		relationshipChanges: event.relationshipChanges.map((change) => ({
+			...change,
+			before: change.after,
+			after: change.before,
+		})),
+		relationshipNextIdBefore: event.relationshipNextIdAfter,
+		relationshipNextIdAfter: event.relationshipNextIdBefore,
 		organizationImpactAuthorizations: event.organizationImpactAuthorizations,
 		historyOriginKind: STATIC_FAB_BAY_FLOW_EDIT_KIND,
 	});

@@ -6,6 +6,7 @@ import { PATH_SOURCE_IDENTITY_KIND } from "./CompoundPhysicalPath";
 import { PATH_KIND } from "./PhysicalPathCompiler";
 import type { CompiledPhysicalLayout } from "./PhysicalRailCompiler";
 import { metersToMillimeters, resolvePortAttachmentAtSourcePath } from "./PortAttachmentResolver";
+import type { PortEquipmentResolvedPositionCapability } from "./PortEquipmentResolvedPositions";
 import {
 	type CompiledPortSlots,
 	compileBasePortSlots,
@@ -222,8 +223,9 @@ class BoundPreparedPortSlotAvailabilityIndex
 		layout: CompiledPhysicalLayout,
 		state: PortEquipmentState,
 		artifacts: PortSlotPreparedArtifacts,
+		resolvedPositions?: PortEquipmentResolvedPositionCapability,
 	) {
-		super(layout, state, artifacts.portType);
+		super(layout, state, artifacts.portType, resolvedPositions);
 		this.artifacts = artifacts;
 	}
 
@@ -317,11 +319,12 @@ export function createPreparedPortSlotAvailabilityIndex(
 	layout: CompiledPhysicalLayout,
 	artifacts: PortSlotPreparedArtifacts,
 	state: PortEquipmentState,
+	resolvedPositions?: PortEquipmentResolvedPositionCapability,
 ): PreparedPortSlotAvailabilityIndex {
 	if (!portSlotPreparedArtifactsHaveExactSourceLayout(artifacts, layout)) {
 		throw new Error("Prepared port slot availability does not share the physical-layout identity.");
 	}
-	return new BoundPreparedPortSlotAvailabilityIndex(layout, state, artifacts);
+	return new BoundPreparedPortSlotAvailabilityIndex(layout, state, artifacts, resolvedPositions);
 }
 
 /**

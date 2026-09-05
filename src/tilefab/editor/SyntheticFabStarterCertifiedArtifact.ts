@@ -12,27 +12,29 @@ import {
 import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import { staticFabOrganizationBundleError } from "../core/StaticFabOrganizationBundle";
 import { staticFabOrganizationBundleFingerprint } from "../core/StaticFabOrganizationBundlePlacement";
+import type { RailMirrorSnapshot } from "../worker/RailMirrorChecksum";
+import { validateStaticFabAssemblyRelationshipSnapshotStructure } from "../worker/StaticFabAssemblyRelationshipSoA";
 import {
 	preparedSyntheticFabStarterMatchesIndependentPreparation,
 	preparedSyntheticFabStarterMatchesRequest,
 	preparedSyntheticFabStarterMaterializationFingerprint,
 } from "./SyntheticFabStarterBridge";
 
-export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_SCHEMA_VERSION = 1 as const;
-export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "large-fab-60.default.v1" as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_SCHEMA_VERSION = 2 as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "large-fab-60.default.v2" as const;
 export const PAIRED_CIRCULATION_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"paired-circulation-fab-52.default.v2" as const;
-export const FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "full-fab-52.default.v1" as const;
+	"paired-circulation-fab-52.default.v3" as const;
+export const FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "full-fab-52.default.v2" as const;
 export const CENTRAL_SPINE_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"central-spine-fab-24.default.v1" as const;
+	"central-spine-fab-24.default.v2" as const;
 export const PARALLEL_HALL_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"parallel-hall-fab-12.default.v1" as const;
-export const PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "production-fab-60.default.v1" as const;
+	"parallel-hall-fab-12.default.v2" as const;
+export const PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "production-fab-60.default.v2" as const;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_TYPED_ARRAY_BYTES = 2 * 1024 * 1024;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_SOURCE_BYTES =
 	SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES + 64 * 1024;
-export const SYNTHETIC_FAB_STARTER_CERTIFICATION_ATTESTATION_SCHEMA_VERSION = 2 as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFICATION_ATTESTATION_SCHEMA_VERSION = 3 as const;
 
 export type SyntheticFabStarterCertifiedArtifactId =
 	| typeof SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID
@@ -43,7 +45,7 @@ export type SyntheticFabStarterCertifiedArtifactId =
 	| typeof PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID;
 
 const CERTIFIED_PAYLOAD_KIND = "openfab-prepared-synthetic-fab-starter" as const;
-const CERTIFICATION_CONTRACT = "independent-materialization-v1" as const;
+const CERTIFICATION_CONTRACT = "independent-materialization-v2" as const;
 const MAXIMUM_SERIALIZED_DEPTH = 32;
 const MAXIMUM_SERIALIZED_NODES = 650_000;
 const MAXIMUM_SERIALIZED_STRING_BYTES = 2 * 1024 * 1024;
@@ -393,7 +395,7 @@ function collectPreparedTypedViews(value: unknown): Map<string, ArrayBufferView>
 
 function preparedTypedArrayFingerprint(prepared: PreparedSyntheticFabStarter): string {
 	const checksum = new OrderedTypedChecksum();
-	checksum.addStrings(["synthetic-fab-transferred-typed-arrays-v1"]);
+	checksum.addStrings(["synthetic-fab-transferred-typed-arrays-v2"]);
 	checksum.addViews([...collectPreparedTypedViews(prepared).values()]);
 	return checksum.digest();
 }
@@ -403,7 +405,7 @@ async function preparedTypedArrayFingerprintCooperatively(
 	checkpoint: () => Promise<void>,
 ): Promise<string> {
 	const checksum = new OrderedTypedChecksum();
-	checksum.addStrings(["synthetic-fab-transferred-typed-arrays-v1"]);
+	checksum.addStrings(["synthetic-fab-transferred-typed-arrays-v2"]);
 	await checksum.addViewsCooperatively(
 		[...collectPreparedTypedViews(prepared).values()],
 		checkpoint,
@@ -733,7 +735,9 @@ function assertCertifiedPreparedContract(
 		prepared.geometry === null &&
 		prepared.summary.bayCount === request.parameters.bayCount &&
 		prepared.summary.openTerminals === 0 &&
-		prepared.summary.strongComponents === 1;
+		prepared.summary.strongComponents === 1 &&
+		prepared.snapshot.relationships.nextRelationshipId === 1 &&
+		prepared.snapshot.relationships.relationshipIds.length === 0;
 	if (!commonContract) {
 		throw new Error("Prepared starter does not satisfy shared certification invariants.");
 	}
@@ -1172,6 +1176,7 @@ function assertSnapshotShape(value: unknown): void {
 			"switchRecords",
 			"portEquipment",
 			"organizations",
+			"relationships",
 			"checksum",
 		],
 		"Rail mirror snapshot",
@@ -1192,6 +1197,9 @@ function assertSnapshotShape(value: unknown): void {
 	assertOwnedTypedArray(switches.movementMasks, Uint8Array, "Switch movement masks");
 	assertPortEquipmentShape(snapshot.portEquipment);
 	assertOrganizationShape(snapshot.organizations);
+	validateStaticFabAssemblyRelationshipSnapshotStructure(
+		snapshot.relationships as RailMirrorSnapshot["relationships"],
+	);
 }
 
 function assertPortEquipmentShape(value: unknown): void {
@@ -1681,7 +1689,7 @@ function assertArtifactSize(payloadBytes: number, typedArrayBytes: number): void
 
 function checksumPayload(payloadText: string): string {
 	const checksum = new OrderedTypedChecksum();
-	checksum.addStrings(["synthetic-fab-certified-payload-v1", payloadText]);
+	checksum.addStrings(["synthetic-fab-certified-payload-v2", payloadText]);
 	return checksum.digest();
 }
 
@@ -1697,7 +1705,7 @@ function checksumCertification(
 ): string {
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([
-		"synthetic-fab-certified-evidence-v1",
+		"synthetic-fab-certified-evidence-v2",
 		input.artifactId,
 		CERTIFICATION_CONTRACT,
 		input.requestFingerprint,

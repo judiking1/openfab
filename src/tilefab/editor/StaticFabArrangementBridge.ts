@@ -11,6 +11,7 @@ import {
 	staticFabArrangementCommandFingerprint,
 } from "../core/StaticFabArrangementCommand";
 import type { StaticFabArrangementPlan } from "../core/StaticFabArrangementPlan";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import {
@@ -41,6 +42,7 @@ export interface StaticFabArrangementLiveState {
 	readonly patchSequence: number;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 export interface StaticFabArrangementSessionInput {
@@ -70,6 +72,7 @@ interface SessionSourceBinding {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly getCurrentState: () => StaticFabArrangementLiveState;
 	readonly identity: StaticFabArrangementSessionSourceIdentity;
 }
@@ -130,6 +133,7 @@ export class StaticFabArrangementBridge {
 				live.patchSequence,
 				live.portEquipment,
 				live.organizations,
+				live.relationships,
 			)
 		) {
 			throw new Error("Static FAB arrangement snapshot lacks current authored capture authority.");
@@ -139,6 +143,7 @@ export class StaticFabArrangementBridge {
 			map: live.map,
 			portEquipment: live.portEquipment,
 			organizations: live.organizations,
+			relationships: live.relationships,
 			getCurrentState: input.getCurrentState,
 			identity: sourceIdentityFromSnapshot(input.snapshot),
 		});
@@ -620,6 +625,7 @@ function sessionSourceMatchesLiveState(source: SessionSourceBinding): boolean {
 		live.map === source.map &&
 		live.portEquipment === source.portEquipment &&
 		live.organizations === source.organizations &&
+		live.relationships === source.relationships &&
 		sourceIdentityMatchesLiveState(source.identity, live)
 	);
 }

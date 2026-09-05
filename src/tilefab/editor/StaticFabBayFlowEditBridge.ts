@@ -1,4 +1,5 @@
 import type { PortEquipmentState } from "../core/EquipmentGroup";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import type {
 	StaticFabBayFlowEditIntent,
 	StaticFabBayFlowEditPlan,
@@ -43,6 +44,7 @@ export interface StaticFabBayFlowEditLiveState {
 	readonly patchSequence: number;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 export interface StaticFabBayFlowEditInput {
@@ -117,6 +119,7 @@ export class StaticFabBayFlowEditBridge {
 				source.patchSequence,
 				source.portEquipment,
 				source.organizations,
+				source.relationships,
 			)
 		) {
 			return Promise.reject(
@@ -500,6 +503,7 @@ function readSourceBindingLiveState(
 	return live.map === binding.source.map &&
 		live.portEquipment === binding.source.portEquipment &&
 		live.organizations === binding.source.organizations &&
+		live.relationships === binding.source.relationships &&
 		sourceIdentityMatchesLiveState(binding.sourceIdentity, live)
 		? live
 		: null;

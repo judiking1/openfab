@@ -29,4 +29,17 @@ describe("TileFabCameraZoom", () => {
 		).toBe(false);
 		expect(camera).toEqual(before);
 	});
+
+	it("preserves manual zoom direction below the interactive minimum", () => {
+		const camera: Camera = { offsetX: 24, offsetY: 36, zoom: 0.25, rotation: 0 };
+		const anchor = { x: 100, y: 80 };
+
+		expect(applyTileFabCameraZoom(camera, 0.8, anchor, { minimum: 1, maximum: 96 })).toBe(false);
+		expect(camera).toEqual({ offsetX: 24, offsetY: 36, zoom: 0.25, rotation: 0 });
+
+		expect(applyTileFabCameraZoom(camera, 1.25, anchor, { minimum: 1, maximum: 96 })).toBe(true);
+		expect(camera.zoom).toBeCloseTo(0.3125);
+		expect((anchor.x - camera.offsetX) / camera.zoom).toBeCloseTo((100 - 24) / 0.25);
+		expect((anchor.y - camera.offsetY) / camera.zoom).toBeCloseTo((80 - 36) / 0.25);
+	});
 });

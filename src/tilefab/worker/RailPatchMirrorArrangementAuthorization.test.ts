@@ -184,6 +184,9 @@ function exactRelocationFixture(): ExactRelocationFixture {
 			organizationChanges: plan.organizationMutations,
 			organizationNextIdBefore: plan.nextOrganizationIdBefore,
 			organizationNextIdAfter: plan.nextOrganizationIdAfter,
+			relationshipChanges: [],
+			relationshipNextIdBefore: 1,
+			relationshipNextIdAfter: 1,
 			organizationImpactAuthorizations: plan.organizationImpactAuthorizations,
 		}),
 	};

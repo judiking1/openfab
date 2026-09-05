@@ -1,11 +1,11 @@
 import { EQUIPMENT_GROUP_KINDS, type PortEquipmentState } from "../core/EquipmentGroup";
 import { PORT_TYPES } from "../core/PortRecord";
 import type { CompiledPhysicalLayout } from "./PhysicalRailCompiler";
+import type { PortAttachmentSourceIndex } from "./PortAttachmentResolver";
 import {
-	createPortAttachmentSourceIndex,
-	type PortAttachmentSourceIndex,
-	resolvePortAttachmentWithSourceIndex,
-} from "./PortAttachmentResolver";
+	compilePortEquipmentResolvedPositionCapability,
+	type PortEquipmentResolvedPositionCapability,
+} from "./PortEquipmentResolvedPositions";
 import { type StkBodySweep, StkBodySweepIndex } from "./StkBodySweep";
 
 export const PORT_EQUIPMENT_GROUP_PRESENTATION_MODE = {
@@ -22,6 +22,8 @@ export const PORT_EQUIPMENT_BODY_FACE_KIND = {
 export interface CompiledPortEquipmentPresentation {
 	readonly revision: number;
 	readonly count: number;
+	/** Exact runtime-only positions shared with live availability; never serialized or rendered. */
+	readonly resolvedPositions: PortEquipmentResolvedPositionCapability;
 	readonly portIds: Int32Array;
 	readonly equipmentGroupIds: Int32Array;
 	readonly portTypes: Uint8Array;
@@ -470,7 +472,6 @@ export function compilePortEquipmentPresentation(
 	attachmentSourceIndex?: PortAttachmentSourceIndex,
 ): CompiledPortEquipmentPresentation {
 	const count = state.ports.length;
-	let sourceIndex = attachmentSourceIndex ?? null;
 	const portIds = new Int32Array(count);
 	const equipmentGroupIds = new Int32Array(count);
 	const portTypes = new Uint8Array(count);
@@ -480,29 +481,25 @@ export function compilePortEquipmentPresentation(
 	const yawRadians = new Float32Array(count);
 	const barcodes = new Array<string | null>(count);
 	const portRowById = new Map<number, number>();
-	for (let row = 0; row < count; row++) {
-		const port = state.ports[row];
-		if (!port) throw new Error(`Missing port presentation row ${row}.`);
-		sourceIndex ??= createPortAttachmentSourceIndex(layout);
-		const resolution = resolvePortAttachmentWithSourceIndex(layout, port, sourceIndex);
-		if (!resolution.ok) {
-			throw new Error(
-				`Port ${port.id} attachment is invalid (${resolution.code}): ${resolution.message}`,
-			);
-		}
-		portIds[row] = port.id;
-		equipmentGroupIds[row] = port.equipmentGroupId;
-		portTypes[row] = PORT_TYPES.indexOf(port.portType);
-		railPositions[row * 2] = resolution.railXMeters;
-		railPositions[row * 2 + 1] = resolution.railZMeters;
-		worldPositions[row * 2] = resolution.worldXMeters;
-		worldPositions[row * 2 + 1] = resolution.worldZMeters;
-		tangents[row * 2] = resolution.tangentX;
-		tangents[row * 2 + 1] = resolution.tangentZ;
-		yawRadians[row] = resolution.yawRadians;
-		barcodes[row] = port.barcode;
-		portRowById.set(port.id, row);
-	}
+	const resolvedPositions = compilePortEquipmentResolvedPositionCapability(
+		layout,
+		state,
+		(row, port, resolution) => {
+			portIds[row] = port.id;
+			equipmentGroupIds[row] = port.equipmentGroupId;
+			portTypes[row] = PORT_TYPES.indexOf(port.portType);
+			railPositions[row * 2] = resolution.railXMeters;
+			railPositions[row * 2 + 1] = resolution.railZMeters;
+			worldPositions[row * 2] = resolution.worldXMeters;
+			worldPositions[row * 2 + 1] = resolution.worldZMeters;
+			tangents[row * 2] = resolution.tangentX;
+			tangents[row * 2 + 1] = resolution.tangentZ;
+			yawRadians[row] = resolution.yawRadians;
+			barcodes[row] = port.barcode;
+			portRowById.set(port.id, row);
+		},
+		attachmentSourceIndex,
+	);
 	const equipmentGroupCount = state.equipmentGroups.length;
 	const groupIds = new Int32Array(equipmentGroupCount);
 	const groupKinds = new Uint8Array(equipmentGroupCount);
@@ -702,9 +699,10 @@ export function compilePortEquipmentPresentation(
 					? PORT_EQUIPMENT_BODY_FACE_KIND.WITH_SECTION_TANGENT
 					: PORT_EQUIPMENT_BODY_FACE_KIND.AGAINST_SECTION_TANGENT;
 	}
-	return Object.freeze({
+	const presentation = Object.freeze({
 		revision: layout.revision,
 		count,
+		resolvedPositions,
 		portIds,
 		equipmentGroupIds,
 		portTypes,
@@ -735,6 +733,7 @@ export function compilePortEquipmentPresentation(
 		bodySectionPortRows,
 		portBodyFaceKinds,
 	});
+	return presentation;
 }
 
 function indexStkSweepsByGroup(

@@ -7,6 +7,7 @@ import {
 	acknowledgeGuidedBuildNavigation,
 	createGuidedBuildPreferences,
 	graduateGuidedBuildPractice,
+	guidedBuildNeedsProjectEvidence,
 	parseGuidedBuildPreferences,
 	recordGuidedBuildEntryChoice,
 } from "./GuidedBuildPreferences";
@@ -68,6 +69,16 @@ describe("GuidedBuildPreferences", () => {
 		expect(graduated.graduatedProjectId).toBe("project-guided");
 		expect(() => graduateGuidedBuildPractice(graduated, " ")).toThrow(TypeError);
 	});
+
+	it("keeps canonical mission evidence live while a minimized guide remains resumable", () => {
+		const guided = recordGuidedBuildEntryChoice(createGuidedBuildPreferences(), "guided");
+		const exited = recordGuidedBuildEntryChoice(guided, "dismissed");
+
+		expect(guidedBuildNeedsProjectEvidence(true, null)).toBe(true);
+		expect(guidedBuildNeedsProjectEvidence(false, guided)).toBe(true);
+		expect(guidedBuildNeedsProjectEvidence(false, exited)).toBe(false);
+		expect(guidedBuildNeedsProjectEvidence(false, null)).toBe(false);
+	});
 });
 
 describe("evaluateGuidedBuildFirstRun", () => {
@@ -78,8 +89,14 @@ describe("evaluateGuidedBuildFirstRun", () => {
 		});
 	});
 
+	it("opens a recovery-aware start choice for a safe empty session", () => {
+		expect(evaluateGuidedBuildFirstRun(evidence({ hasRecoveryProject: true }))).toEqual({
+			action: "open",
+			reason: "FIRST_SAFE_EMPTY_SESSION_WITH_RECOVERY",
+		});
+	});
+
 	it.each([
-		["recovery", { hasRecoveryProject: true }, "RECOVERY_AVAILABLE"],
 		["recent project", { recentProjectCount: 1 }, "RETURNING_PROJECTS_AVAILABLE"],
 		["authored content", { authoredRecordCount: 1 }, "AUTHORED_PROJECT_ACTIVE"],
 		["blocking editor", { blockingSurfaceOpen: true }, "BLOCKING_SURFACE_ACTIVE"],

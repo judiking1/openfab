@@ -9,6 +9,7 @@ import {
 	buildRailModuleOwnershipIndex,
 	type DirectedRailEdge,
 	type RailModuleOwnership,
+	railModuleOwnershipIndexMatchesMap,
 } from "./RailModuleOwnership";
 import {
 	defaultRailTemplateParameters,
@@ -26,12 +27,13 @@ import {
 	captureStaticFabOrganizationBundle,
 	materializeStaticFabOrganizationBundle,
 	prepareStaticFabOrganizationBundle,
+	resolveStaticFabOrganizationBundleCaptureOwnership,
 	type StaticFabOrganizationBundle,
 	type StaticFabOrganizationBundleQuarterTurns,
 	staticFabOrganizationBundleError,
 	transformStaticFabOrganizationBundle,
 } from "./StaticFabOrganizationBundle";
-import type { Cell } from "./TileMap";
+import { type Cell, encodeRailCell } from "./TileMap";
 
 describe("StaticFabOrganizationBundle", () => {
 	it("captures DIRECT multi-root bundles deterministically regardless of root input order", () => {
@@ -77,6 +79,84 @@ describe("StaticFabOrganizationBundle", () => {
 			"Factory Root",
 			"Bay Root",
 		]);
+	});
+
+	it("reuses an exact source-bound ownership index without changing the portable bundle", () => {
+		const fixture = longBayFixture();
+		const state = organizationState([
+			organizationRecord(10, "AREA", "Factory Root", [], [fixture.modules[0]]),
+			organizationRecord(20, "BAY", "Bay Root", [10], [fixture.modules[1]]),
+		]);
+		const ordinary = captureStaticFabOrganizationBundle(
+			fixture.document.map,
+			fixture.document.portEquipment,
+			fixture.document.getPatchSequence(),
+			state,
+			[10],
+			"EFFECTIVE",
+		);
+		const prepared = captureStaticFabOrganizationBundle(
+			fixture.document.map,
+			fixture.document.portEquipment,
+			fixture.document.getPatchSequence(),
+			state,
+			[10],
+			"EFFECTIVE",
+			buildRailModuleOwnershipIndex(fixture.document.map),
+		);
+
+		expect(ordinary.valid, ordinary.reason).toBe(true);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		if (!ordinary.valid || !prepared.valid) return;
+		expect(prepared.bundle).toEqual(ordinary.bundle);
+		expect(prepared.sourceBounds).toEqual(ordinary.sourceBounds);
+	});
+
+	it("accepts only an ownership index bound to the exact map generation", () => {
+		const fixture = longBayFixture();
+		const matching = buildRailModuleOwnershipIndex(fixture.document.map);
+		expect(resolveStaticFabOrganizationBundleCaptureOwnership(fixture.document.map, matching)).toBe(
+			matching,
+		);
+
+		const foreign = buildRailModuleOwnershipIndex(longBayFixture().document.map);
+		const rebuiltForeign = resolveStaticFabOrganizationBundleCaptureOwnership(
+			fixture.document.map,
+			foreign,
+		);
+		expect(rebuiltForeign).not.toBe(foreign);
+		expect(railModuleOwnershipIndexMatchesMap(rebuiltForeign, fixture.document.map)).toBe(true);
+
+		const stale = buildRailModuleOwnershipIndex(fixture.document.map);
+		expect(
+			fixture.document.map.setEncoded(
+				10_000,
+				10_000,
+				encodeRailCell({ incoming: DIR_W, outgoing: DIR_E }),
+			),
+		).toBe(true);
+		const rebuiltStale = resolveStaticFabOrganizationBundleCaptureOwnership(
+			fixture.document.map,
+			stale,
+		);
+		expect(rebuiltStale).not.toBe(stale);
+		expect(railModuleOwnershipIndexMatchesMap(rebuiltStale, fixture.document.map)).toBe(true);
+
+		const aba = buildRailModuleOwnershipIndex(fixture.document.map);
+		const checkpoint = fixture.document.map.createMutationCheckpoint();
+		const before = fixture.document.map.getEncoded(20_000, 20_000);
+		const after = encodeRailCell({ incoming: DIR_W, outgoing: DIR_E });
+		const mutation = Object.freeze({ x: 20_000, y: 20_000, before, after });
+		const revisionBeforeAba = fixture.document.map.getRevision();
+		expect(fixture.document.map.applyAtomicMutations([mutation], [])).toBe(true);
+		fixture.document.map.rollbackAtomicMutations([mutation], [], checkpoint);
+		expect(fixture.document.map.getRevision()).toBe(revisionBeforeAba);
+		const rebuiltAba = resolveStaticFabOrganizationBundleCaptureOwnership(
+			fixture.document.map,
+			aba,
+		);
+		expect(rebuiltAba).not.toBe(aba);
+		expect(railModuleOwnershipIndexMatchesMap(rebuiltAba, fixture.document.map)).toBe(true);
 	});
 
 	it("rejects an oversized root request before resolving or sorting organization IDs", () => {

@@ -65,8 +65,8 @@ describe("StaticFabArrangementResponseValidator", () => {
 		);
 		ticket.prospectiveChecksum = checksumRailMap(prospective);
 
-		expect(ticket.sourceChecksum.split(":"), ticket.sourceChecksum).toHaveLength(9);
-		expect(ticket.prospectiveChecksum.split(":"), ticket.prospectiveChecksum).toHaveLength(9);
+		expect(ticket.sourceChecksum.split(":"), ticket.sourceChecksum).toHaveLength(12);
+		expect(ticket.prospectiveChecksum.split(":"), ticket.prospectiveChecksum).toHaveLength(12);
 		expect(staticFabArrangementPreparedShapeError(value)).toBeNull();
 	});
 

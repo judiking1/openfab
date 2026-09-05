@@ -151,6 +151,13 @@ try {
 	result.header.compact = await readHeaderEvidence(page, "compact");
 	result.compact = await readViewportEvidence(page, guidedPanel);
 	result.compact.checks = await exerciseChecksSurface(page, guidedPanel, "compact");
+	await guidedPanel.getByRole("button", { name: "Guided Build 종료", exact: true }).click();
+	await guidedPanel.waitFor({ state: "hidden" });
+	result.navigator = {
+		compact: await exerciseProductionNavigatorSurface(page, "compact"),
+	};
+	await page.setViewportSize({ width: 1440, height: 900 });
+	result.navigator.desktop = await exerciseProductionNavigatorSurface(page, "desktop");
 	assertEqual(result.consoleErrors.length, 0, "console error count");
 	assertEqual(result.pageErrors.length, 0, "page error count");
 	assertEqual(result.failedRequests.length, 0, "failed request count");
@@ -177,6 +184,93 @@ try {
 }
 
 process.exit(result.status === "PASS" ? 0 : 1);
+
+async function exerciseProductionNavigatorSurface(activePage, label) {
+	const app = activePage.getByTestId("tilefab-app");
+	const before = await readProductionNavigatorIdentity(activePage);
+	const inspectActivity = activePage.getByTestId("editor-activity-inspect");
+	if ((await app.getAttribute("data-editor-activity")) !== "inspect") {
+		await inspectActivity.click();
+	}
+	await activePage.waitForFunction(
+		() =>
+			document
+				.querySelector('[data-testid="tilefab-app"]')
+				?.getAttribute("data-editor-activity") === "inspect",
+	);
+	const launcher = activePage.getByRole("button", { name: "FAB 내비게이터", exact: true });
+	await launcher.waitFor({ state: "visible" });
+	assertEqual(
+		await activePage.locator('.tilefab-commands button[aria-label="FAB 전체 지도"]').count(),
+		0,
+		`${label} retired Map header owner`,
+	);
+	assertEqual(
+		await activePage.locator('.tilefab-commands button[aria-label^="FAB 조직"]').count(),
+		0,
+		`${label} retired Organization header owner`,
+	);
+	assertEqual(
+		await activePage.getByTestId("rail-readiness-toggle").count(),
+		1,
+		`${label} top Checks owner`,
+	);
+	await launcher.focus();
+	await launcher.press("Enter");
+	const navigator = activePage.getByTestId("static-fab-navigator-panel");
+	await navigator.waitFor({ state: "visible" });
+	await assertProductionNavigatorOwnedPanel(activePage, "map", label);
+	await activePage.getByTestId("static-fab-navigator-tab-organizations").click();
+	const organizationLibrary = activePage.getByTestId("static-fab-organization-library");
+	await organizationLibrary.waitFor({ state: "visible" });
+	await assertProductionNavigatorOwnedPanel(activePage, "organizations", label);
+	await organizationLibrary
+		.getByRole("button", { name: "FAB 조직 라이브러리 닫기", exact: true })
+		.click();
+	await organizationLibrary.waitFor({ state: "hidden" });
+	await activePage.waitForFunction(
+		() => document.activeElement?.getAttribute("aria-label") === "FAB 내비게이터",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	assertEqual(await launcher.getAttribute("aria-expanded"), "false", `${label} Navigator close`);
+	assertEqual(
+		JSON.stringify(await readProductionNavigatorIdentity(activePage)),
+		JSON.stringify(before),
+		`${label} Navigator project and Worker identity`,
+	);
+	const viewport = activePage.viewportSize();
+	const launcherBounds = await launcher.boundingBox();
+	if (!viewport || !launcherBounds) throw new Error(`${label}: Navigator bounds are unavailable.`);
+	assertRectWithinViewport(launcherBounds, viewport, `${label} Navigator launcher`);
+	return { before, launcherBounds, focusReturned: true, mapOwned: true, organizationsOwned: true };
+}
+
+async function assertProductionNavigatorOwnedPanel(activePage, tab, label) {
+	const tabId = `tilefab-fab-navigator-tab-${tab}`;
+	const panelId = `tilefab-fab-navigator-panel-${tab}`;
+	const tabButton = activePage.locator(`#${tabId}`);
+	assertEqual(await tabButton.getAttribute("aria-selected"), "true", `${label} ${tab} active tab`);
+	assertEqual(await tabButton.getAttribute("aria-controls"), panelId, `${label} ${tab} ownership`);
+	const panel = activePage.locator(`#${panelId}[role="tabpanel"]:not([hidden])`);
+	await panel.waitFor({ state: "visible" });
+	assertEqual(await panel.count(), 1, `${label} ${tab} active panel count`);
+	assertEqual(
+		await panel.getAttribute("aria-labelledby"),
+		tabId,
+		`${label} ${tab} active panel label`,
+	);
+}
+
+async function readProductionNavigatorIdentity(activePage) {
+	return activePage.getByTestId("rail-canvas").evaluate((canvas) => ({
+		projectId: canvas.dataset.projectId ?? "",
+		projectDirty: canvas.dataset.projectDirty ?? "",
+		authoredCells: canvas.dataset.authoredCells ?? "",
+		authoredEdges: canvas.dataset.authoredEdges ?? "",
+		workerSimulationReady: canvas.dataset.workerSimulationReady ?? "",
+	}));
+}
 
 async function exerciseChecksSurface(activePage, guidedPanel, label) {
 	const checksToggle = activePage.getByTestId("rail-readiness-toggle");
@@ -235,12 +329,14 @@ async function exerciseChecksSurface(activePage, guidedPanel, label) {
 }
 
 async function readGuidedProgressiveSurface(activePage, label) {
-	const progress = activePage.getByRole("progressbar", { name: "Guided Build 진행률" });
+	const progress = activePage.getByRole("progressbar", {
+		name: "Guided Build 전체 미션 진행률",
+	});
 	assertEqual(await progress.getAttribute("value"), "1", `${label} current mission progress`);
 	assertEqual(await progress.getAttribute("max"), "12", `${label} mission count`);
 	assertEqual(
 		await progress.getAttribute("aria-valuetext"),
-		"1 / 12 · 캔버스 익히기",
+		"전체 미션 1/12 · 캔버스 익히기",
 		`${label} accessible mission progress`,
 	);
 	assertEqual(
@@ -313,11 +409,13 @@ async function advanceToFirstRailSurface(activePage, guidedPanel) {
 	);
 	const constructionBar = activePage.getByTestId("rail-buildbar");
 	assertEqual(await constructionBar.count(), 0, "First Rail single-option construction deferral");
-	const progress = activePage.getByRole("progressbar", { name: "Guided Build 진행률" });
+	const progress = activePage.getByRole("progressbar", {
+		name: "Guided Build 전체 미션 진행률",
+	});
 	assertEqual(await progress.getAttribute("value"), "2", "First Rail current mission progress");
 	assertEqual(
 		await progress.getAttribute("aria-valuetext"),
-		"2 / 12 · 첫 단방향 레일",
+		"전체 미션 2/12 · 첫 단방향 레일",
 		"First Rail accessible mission progress",
 	);
 	assertEqual(
@@ -415,38 +513,45 @@ async function readHeaderEvidence(activePage, label) {
 		}
 	}
 	if (label !== "compact") {
-		for (const command of [
+		const requiredCommands = [
 			"FAB 프리셋",
-			"프로젝트 열기",
-			"프로젝트 저장",
 			"실행 취소",
 			"다시 실행",
 			"2D 편집 뷰",
 			"전체 보기",
-			"명령·단축키",
-		]) {
+			"도움말·가이드",
+		];
+		if (label !== "medium") {
+			requiredCommands.splice(1, 0, "프로젝트 열기", "프로젝트 저장");
+		}
+		for (const command of requiredCommands) {
 			if (!evidence.commands.includes(command)) {
 				throw new Error(`${label}: required topbar command is hidden: ${command}`);
 			}
 		}
-		for (const command of [
+		if (
+			label === "medium" &&
+			!evidence.commands.some((command) => command.startsWith("프로젝트 메뉴 ·"))
+		) {
+			throw new Error("medium: Project menu does not own the responsive file-command route");
+		}
+		const duplicateCommands = [
 			"새 프로젝트",
 			"FAB 조립",
+			"FAB 전체 지도",
 			"다른 이름으로 저장",
 			"물리 레일 외형",
 			"전체 삭제",
-		]) {
+		];
+		if (label === "medium") duplicateCommands.push("프로젝트 열기", "프로젝트 저장");
+		for (const command of duplicateCommands) {
 			if (evidence.commands.includes(command)) {
 				throw new Error(`${label}: duplicate topbar command is still visible: ${command}`);
 			}
 		}
-		const mapVisible = evidence.commands.includes("FAB 전체 지도");
-		const organizationsVisible = evidence.commands.some((command) =>
-			command.startsWith("FAB 조직"),
-		);
-		const wideNotebook = label === "desktop" || label === "notebook";
-		assertEqual(mapVisible, wideNotebook, `${label} Map command visibility`);
-		assertEqual(organizationsVisible, wideNotebook, `${label} Organization command visibility`);
+		if (evidence.commands.some((command) => command.startsWith("FAB 조직"))) {
+			throw new Error(`${label}: duplicate Organization command is still visible`);
+		}
 	}
 	return evidence;
 }

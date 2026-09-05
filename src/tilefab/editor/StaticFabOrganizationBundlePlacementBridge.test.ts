@@ -520,12 +520,14 @@ function placementInput(): {
 				document.getPatchSequence(),
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 			).snapshot,
 			getCurrentState: () => ({
 				map: document.map,
 				patchSequence: document.getPatchSequence(),
 				portEquipment: document.portEquipment,
 				organizations: document.organizations,
+				relationships: document.relationships,
 			}),
 		},
 	};

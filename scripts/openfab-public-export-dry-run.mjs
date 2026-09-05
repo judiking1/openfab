@@ -77,12 +77,7 @@ try {
 	await run("pnpm", ["run", "check:release-identity"], temporaryRoot);
 	await run("pnpm", ["run", "check:dependency-licenses"], temporaryRoot);
 	await run("pnpm", ["run", "check:fixture-provenance"], temporaryRoot);
-	await run(
-		"pnpm",
-		["run", "check:authoring"],
-		temporaryRoot,
-		withoutEnvironmentKeys("OPENFAB_GUIDED_ACCEPTANCE_ONLY", "OPENFAB_AUTHORING_PORT"),
-	);
+	await run("pnpm", ["run", "check:authoring"], temporaryRoot, fullAuthoringEnvironment());
 	await run("pnpm", ["run", "check:public-bundle"], temporaryRoot);
 	await run("pnpm", ["run", "test:live-demo"], temporaryRoot);
 	await capture("git", ["diff", "--quiet"], temporaryRoot);
@@ -133,9 +128,15 @@ async function run(command, args, cwd, env = process.env) {
 	});
 }
 
-function withoutEnvironmentKeys(...keys) {
+function fullAuthoringEnvironment() {
 	const environment = { ...process.env };
-	for (const key of keys) delete environment[key];
+	// A clean export must exercise the whole journey even when launched from a diagnostic shell.
+	// Keep browser selection and ordinary configuration, but remove every narrow acceptance scope.
+	for (const key of Object.keys(environment)) {
+		if (key === "OPENFAB_AUTHORING_PORT" || (key.startsWith("OPENFAB_") && key.endsWith("_ONLY"))) {
+			delete environment[key];
+		}
+	}
 	return environment;
 }
 

@@ -6,7 +6,7 @@ import type {
 import type { StaticFabSemanticBayMutationWorkerTicket } from "../core/StaticFabSemanticBayMutationCertification";
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
 
-export const STATIC_FAB_SEMANTIC_BAY_MUTATION_PROTOCOL_VERSION = 1 as const;
+export const STATIC_FAB_SEMANTIC_BAY_MUTATION_PROTOCOL_VERSION = 2 as const;
 export const STATIC_FAB_SEMANTIC_BAY_MUTATION_MAX_RESPONSE_TEXT = 4_096;
 export const STATIC_FAB_SEMANTIC_BAY_MUTATION_MAX_RAIL_MUTATIONS = 65_536;
 export const STATIC_FAB_SEMANTIC_BAY_MUTATION_MAX_SWITCH_MUTATIONS = 4_096;

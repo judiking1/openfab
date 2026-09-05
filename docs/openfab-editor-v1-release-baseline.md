@@ -94,11 +94,13 @@ more Process Loops, and typed gateways.
 | `PROCESS_LOOP` | Close one directed Process Loop | continuity, flow, closure, local validation | continuation, rotate/side choice, undo |
 | `PORTS` | Add representative OHB, EQ, and STK ports | port-first placement, facing, access, grouping | current Equip bindings only when needed |
 | `REUSE_LOOP` | Duplicate the completed Process Loop | selection, copy, repeat placement, alignment | copy/paste or duplicate, rotate |
-| `BAY` | Form one semantic Bay from its shell and internal loops | hierarchy, ownership, gateways | Assemble selection and Bay action |
+| `BAY` | Place one default Twin Bay and inspect its Bay, Process Loop, and Gateway hierarchy | hierarchy, ownership, gateways | default Twin Bay placement |
 | `BAY_BANK` | Duplicate and arrange Bays into one Bank | array-like repetition, spacing, group ownership | repeat duplicate, arrange |
 | `INTERBAY` | Connect compatible Bay Banks into one Fab | typed branch/merge gateways, Fab-owned outbound/return flow | Connect Banks and corridor choice |
 | `FAB_LOOP` | Complete the outer Fab circulation | whole-Fab flow, reachability, no open terminal | contextual construction actions |
-| `VERIFY_SAVE` | Pass checks, resolve one issue, save and reopen | scoped evidence, repair, native persistence | Checks, Save, Open |
+| `CHECKS` | Confirm the whole FAB is ready; repair only when an issue exists | visible `0 ISSUES`, current-source evidence, contextual repair | Checks, Next Edit |
+| `SAVE` | Save the complete FAB as one native project | whole-project persistence, blueprint distinction | Save `.openfab` |
+| `REOPEN` | Open that exact project and pass one fresh final check | exact reopen receipt, fresh session acknowledgement | Open, final Checks |
 
 Time is a usability target, not a correctness shortcut. The journey must not weaken graph,
 clearance, organization, port, persistence, or Worker validation to fit 15 minutes.
@@ -116,9 +118,9 @@ Guided Build is state-based, not a prerecorded click script.
   currently useful shortcut.
 - Invalid work receives normal editor validation and a concrete repair route; the tutorial never
   bypasses or patches project data directly.
-- Tutorial preferences and acknowledgement state are user-interface data accessed through a
-  platform port. They are not serialized organization, rail, equipment, scenario, or renderer
-  truth.
+- Persisted navigation preference is user-interface data accessed through a platform port. CHECKS
+  acknowledgement and exact reopen receipts are session-local UI evidence. None is serialized as
+  organization, rail, equipment, scenario, or renderer truth.
 - A mission evaluator is platform-independent. React presents its immutable result and calls
   ordinary editor commands.
 
@@ -182,6 +184,12 @@ After Editor v1 acceptance:
 3. start a clean public history and tag the first feedback release `v0.1.0` there;
 4. publish a web demo from that exact public source, then tag `v1.0.0` only after its final audit;
 5. make the public repository the canonical product line for `1.x`, `2.x`, and `3.x`.
+
+The clean preview checkpoint is now public at <https://github.com/judiking1/openfab>: parentless
+source commit `d2e42b83327171f7e564298ce33128de37cf8651`, annotated tag `v0.1.0`, and exact-source demo
+<https://judiking1.github.io/openfab/>. This satisfies the preview-publication step, not the
+`v1.0.0` acceptance gate. Collect real-user feedback and repeat the full audit before promoting the
+release line.
 
 Do not mirror the private Git history. Do not carry local reference files, actual `.map` data,
 review-only input files, absolute private paths, credentials, diagnostic dumps, or internal notes.

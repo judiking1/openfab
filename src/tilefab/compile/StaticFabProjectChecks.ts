@@ -12,6 +12,7 @@ import {
 } from "../core/PortEquipmentLayoutValidator";
 import type { PortRecord } from "../core/PortRecord";
 import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import {
 	collectStaticFabOrganizationIssues,
 	type StaticFabOrganizationIssue,
@@ -267,12 +268,21 @@ export function deriveStaticFabProjectChecksSnapshot(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationIssueSourceState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	physical: CompiledPhysicalLayout,
 	readiness: RailProjectReadiness,
 	source: StaticFabProjectChecksSourceIdentity,
 	attachmentSourceIndex: PortAttachmentSourceIndex = createPortAttachmentSourceIndex(physical),
 ): StaticFabProjectChecksSnapshot {
-	assertSourceIdentity(map, portEquipment, organizations, physical, readiness, source);
+	assertSourceIdentity(
+		map,
+		portEquipment,
+		organizations,
+		relationships,
+		physical,
+		readiness,
+		source,
+	);
 	const issueByKey = new Map<string, MutableIssue>();
 	const projectBounds = mapProjectBounds(map);
 	const portsById = new Map(portEquipment.ports.map((port) => [port.id, port] as const));
@@ -1270,6 +1280,7 @@ function assertSourceIdentity(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationIssueSourceState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	physical: CompiledPhysicalLayout,
 	readiness: RailProjectReadiness,
 	source: StaticFabProjectChecksSourceIdentity,
@@ -1301,7 +1312,7 @@ function assertSourceIdentity(
 	}
 	let actualChecksum: string;
 	try {
-		actualChecksum = checksumRailMapDiagnostic(map, portEquipment, organizations);
+		actualChecksum = checksumRailMapDiagnostic(map, portEquipment, organizations, relationships);
 	} catch (error) {
 		throw new Error("Static FAB project checks source content cannot be checksummed.", {
 			cause: error,

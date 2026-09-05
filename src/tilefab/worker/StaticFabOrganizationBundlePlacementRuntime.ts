@@ -154,6 +154,7 @@ export function prepareStaticFabOrganizationBundlePlacement(
 			prospectiveMap,
 			prospectiveEquipment,
 			prospectiveOrganizations,
+			source.relationships,
 		);
 		prospectiveNextAdvancedSwitchId = prospectiveMap.getAdvancedSwitchIdCursor();
 		prospectiveNextPortId = prospectiveEquipment.nextPortId;

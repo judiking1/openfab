@@ -13,9 +13,12 @@ export interface EditorActivityRailProps {
 	readonly blockedReason?: string | null;
 	readonly controls?: Readonly<Partial<Record<EditorActivity, string>>>;
 	readonly expanded?: Readonly<Partial<Record<EditorActivity, boolean>>>;
+	readonly guidedTargetActivity?: EditorActivity | null;
+	readonly guidedTargetDescriptionId?: string;
 	readonly label?: string;
 	readonly visibleActivities?: readonly EditorActivity[];
 	readonly onActivityChange: (activity: EditorActivity, trigger: HTMLButtonElement) => void;
+	readonly onBlockedActivityAttempt?: (activity: EditorActivity, reason: string) => void;
 }
 
 const READY: EditorActivityAvailability = { state: "ready" };
@@ -26,9 +29,12 @@ export function EditorActivityRail({
 	blockedReason,
 	controls,
 	expanded,
+	guidedTargetActivity = null,
+	guidedTargetDescriptionId,
 	label = "Editor activities",
 	visibleActivities,
 	onActivityChange,
+	onBlockedActivityAttempt,
 }: EditorActivityRailProps): React.ReactElement {
 	const visibleActivitySet = visibleActivities ? new Set(visibleActivities) : null;
 	const visibleDefinitions = EDITOR_ACTIVITY_DEFINITIONS.filter(
@@ -62,15 +68,26 @@ export function EditorActivityRail({
 						className="tilefab-editor-activity-button"
 						data-testid={`editor-activity-${definition.id}`}
 						data-activity={definition.id}
+						data-guided-action-id={`activity:${definition.id}`}
 						data-active={definition.id === activeActivity}
+						data-guided-target={definition.id === guidedTargetActivity || undefined}
 						data-availability={activityAvailability.state}
 						aria-label={accessibleLabel}
+						aria-describedby={
+							definition.id === guidedTargetActivity ? guidedTargetDescriptionId : undefined
+						}
 						aria-pressed={definition.id === activeActivity}
 						aria-controls={controls?.[definition.id]}
 						aria-expanded={expanded?.[definition.id]}
-						disabled={blocked}
+						aria-disabled={blocked || undefined}
 						title={status}
-						onClick={(event) => onActivityChange(definition.id, event.currentTarget)}
+						onClick={(event) => {
+							if (blocked) {
+								onBlockedActivityAttempt?.(definition.id, activityAvailability.reason);
+								return;
+							}
+							onActivityChange(definition.id, event.currentTarget);
+						}}
 					>
 						<span className="tilefab-editor-activity-icon" aria-hidden="true">
 							<EditorActivityIcon activity={definition.id} />

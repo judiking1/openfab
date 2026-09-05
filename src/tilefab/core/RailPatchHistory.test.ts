@@ -5,10 +5,13 @@ import {
 	createRailMirrorHistoryLedgerEntry,
 	createRailMirrorHistoryLedgerEntryCooperatively,
 	RAIL_MIRROR_HISTORY_ENTRY_LIMIT,
+	RAIL_MIRROR_HISTORY_RELATIONSHIP_CANONICAL_BYTE_LIMIT,
 	type RailMirrorHistoryLedgerEntry,
 	railPatchTransitionFingerprint,
 	railPatchTransitionFingerprintCooperatively,
+	trimRailMirrorHistoryRelationshipBudget,
 } from "./RailPatchHistory";
+import type { StaticFabAssemblyRelationshipRecordV1 } from "./StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationRecord } from "./StaticFabOrganization";
 import {
 	cachedStaticFabOrganizationMembershipFingerprint,
@@ -22,6 +25,9 @@ const ENTRY: RailMirrorHistoryLedgerEntry = Object.freeze({
 	originKind: "build",
 	forwardFingerprint: "00000000:00000000",
 	reverseFingerprint: "00000000:00000000",
+	relationshipEdgeReferences: 0,
+	relationshipOwnerIds: 0,
+	relationshipCanonicalBytes: 0,
 });
 
 describe("RailPatchHistory", () => {
@@ -90,6 +96,82 @@ describe("RailPatchHistory", () => {
 			),
 		).toEqual(createRailMirrorHistoryLedgerEntry("build", transition));
 		expect(checkpoints).toBe(3);
+	});
+
+	it("fingerprints exact relationship records while excluding their monotonic cursor", async () => {
+		const relationship = relationshipRecord();
+		const transition = {
+			changes: [],
+			switchChanges: [],
+			portChanges: [],
+			equipmentGroupChanges: [],
+			organizationChanges: [],
+			organizationNextIdBefore: 1,
+			organizationNextIdAfter: 1,
+			organizationImpactAuthorizations: [],
+			relationshipChanges: [{ id: relationship.id, before: null, after: relationship }],
+			relationshipNextIdBefore: 1,
+			relationshipNextIdAfter: 2,
+		};
+		const changedCursor = {
+			...transition,
+			relationshipNextIdBefore: 17,
+			relationshipNextIdAfter: 19,
+		};
+		const changedParent = {
+			...transition,
+			relationshipChanges: [
+				{
+					id: relationship.id,
+					before: null,
+					after: { ...relationship, parentOrganizationId: 3 },
+				},
+			],
+		};
+
+		expect(railPatchTransitionFingerprint(changedCursor)).toBe(
+			railPatchTransitionFingerprint(transition),
+		);
+		expect(railPatchTransitionFingerprint(changedParent)).not.toBe(
+			railPatchTransitionFingerprint(transition),
+		);
+		expect(await railPatchTransitionFingerprintCooperatively(transition, async () => {}, 1)).toBe(
+			railPatchTransitionFingerprint(transition),
+		);
+		const ledger = createRailMirrorHistoryLedgerEntry("clear", transition);
+		expect(ledger.relationshipEdgeReferences).toBeGreaterThan(0);
+		expect(ledger.relationshipOwnerIds).toBeGreaterThan(0);
+		expect(ledger.relationshipCanonicalBytes).toBeGreaterThan(0);
+	});
+
+	it("rejects malformed aggregate footprints and evicts whole oldest entries", () => {
+		const oversized = Object.freeze({
+			...ENTRY,
+			relationshipCanonicalBytes: RAIL_MIRROR_HISTORY_RELATIONSHIP_CANONICAL_BYTE_LIMIT + 1,
+		});
+		expect(() => copyRailMirrorHistoryLedger({ undo: [oversized], redo: [] })).toThrow(
+			"aggregate budget",
+		);
+		expect(() =>
+			copyRailMirrorHistoryLedger({
+				undo: [{ ...ENTRY, relationshipOwnerIds: -1 }],
+				redo: [],
+			}),
+		).toThrow("entry is malformed");
+
+		const first = {
+			...ENTRY,
+			forwardFingerprint: "00000001:00000001",
+			relationshipCanonicalBytes: 70 * 1024 * 1024,
+		};
+		const second = {
+			...ENTRY,
+			forwardFingerprint: "00000002:00000002",
+			relationshipCanonicalBytes: 70 * 1024 * 1024,
+		};
+		const undo = [first, second];
+		trimRailMirrorHistoryRelationshipBudget(undo, []);
+		expect(undo).toEqual([second]);
 	});
 
 	it("reuses a validated immutable membership digest for metadata history", () => {
@@ -261,5 +343,61 @@ function organizationTransition(
 		organizationNextIdBefore: 2,
 		organizationNextIdAfter: 2,
 		organizationImpactAuthorizations: [],
+	};
+}
+
+function relationshipRecord(): StaticFabAssemblyRelationshipRecordV1 {
+	return {
+		id: 1,
+		hierarchyRole: "BAY_TO_BANK",
+		purpose: "HIERARCHY_LINK",
+		parentOrganizationId: 1,
+		participantOrganizationIds: [2],
+		managedChildOrganizationIds: [2],
+		reviewPolicy: "AUTHORING_NON_DETACHABLE",
+		connectionGroups: [
+			{
+				ordinal: 0,
+				legs: [
+					{
+						ordinal: 0,
+						directionRole: "CONTACT",
+						exclusiveCutEdges: [],
+						endpointSupports: [],
+						seamContacts: [
+							{
+								role: "CONTACT",
+								incidences: [
+									{
+										incidence: "INCOMING",
+										binding: {
+											kind: "WITNESS",
+											scopedEdge: {
+												edge: { from: { x: -1, y: 0 }, to: { x: 0, y: 0 } },
+												scope: { kind: "PARENT_DIRECT" },
+											},
+										},
+									},
+									{
+										incidence: "OUTGOING",
+										binding: {
+											kind: "WITNESS",
+											scopedEdge: {
+												edge: { from: { x: 0, y: 0 }, to: { x: 0, y: 1 } },
+												scope: {
+													kind: "PARTICIPANT_EFFECTIVE",
+													participantIndex: 0,
+													directOwnerOrganizationIds: [2],
+												},
+											},
+										},
+									},
+								],
+							},
+						],
+					},
+				],
+			},
+		],
 	};
 }

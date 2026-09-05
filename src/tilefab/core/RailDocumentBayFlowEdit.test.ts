@@ -180,6 +180,7 @@ function certifiedDocumentFixture(
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	if (
 		!consumeRailMirrorSnapshotCaptureAuthority(
@@ -188,6 +189,7 @@ function certifiedDocumentFixture(
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		)
 	) {
 		throw new Error("Expected direct Bay flow fixture capture authority.");

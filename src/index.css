@@ -222,12 +222,6 @@ button {
 	button[aria-label="FAB 프리셋"],
 :where(.tilefab-app[data-guided-build-active="true"])
 	.tilefab-commands
-	button[aria-label="FAB 전체 지도"],
-:where(.tilefab-app[data-guided-build-active="true"])
-	.tilefab-commands
-	button[aria-label^="FAB 조직"],
-:where(.tilefab-app[data-guided-build-active="true"])
-	.tilefab-commands
 	button[aria-label="프로젝트 열기"],
 :where(.tilefab-app[data-guided-build-active="true"])
 	.tilefab-commands
@@ -256,6 +250,11 @@ button {
 	color: #9ba7a9;
 	background: transparent;
 	cursor: pointer;
+}
+
+.tilefab-icon-button[data-touch-target="true"] {
+	width: 44px;
+	height: 44px;
 }
 
 .tilefab-icon-button:hover:not(:disabled),
@@ -704,14 +703,7 @@ button {
 	}
 }
 
-@media (max-width: 1000px) {
-	.tilefab-commands button[aria-label="FAB 전체 지도"],
-	.tilefab-commands button[aria-label^="FAB 조직"] {
-		display: none;
-	}
-}
-
-@media (max-width: 860px) {
+@media (max-width: 960px) {
 	.tilefab-topbar {
 		grid-template-columns: 34px minmax(140px, 1fr) auto auto;
 	}
@@ -722,8 +714,60 @@ button {
 
 	.tilefab-brand > span:last-child,
 	.tilefab-commands button[aria-label="다른 이름으로 저장"],
-	.tilefab-commands button[aria-label="전체 보기"],
 	.tilefab-commands button[aria-label="물리 레일 외형"] {
+		display: none;
+	}
+}
+
+@media (min-width: 651px) and (max-width: 960px) {
+	.tilefab-commands .tilefab-icon-button {
+		width: 44px;
+		height: 44px;
+	}
+
+	.tilefab-commands .tilefab-view-switch {
+		height: 46px;
+		padding: 0;
+	}
+
+	.tilefab-commands .tilefab-view-switch button {
+		min-width: 44px;
+		height: 44px;
+	}
+}
+
+@media (max-width: 960px) {
+	/* Project owns duplicate start/file paths while the tablet header prioritizes editing. */
+	.tilefab-commands button[aria-label="프로젝트 열기"],
+	.tilefab-commands button[aria-label="프로젝트 저장"] {
+		display: none;
+	}
+
+	/* A paused Guide keeps template choice behind explicit exit and prioritizes resume. */
+	:where(.tilefab-app[data-guided-build-resume="true"])
+		.tilefab-commands
+		button[aria-label="FAB 프리셋"] {
+		display: none;
+	}
+}
+
+@media (max-width: 860px) {
+	/* The workspace camera strip owns Fit only while it is visible. */
+	.tilefab-commands button[aria-label="전체 보기"] {
+		display: none;
+	}
+}
+
+@media (max-width: 760px) {
+	/* A paused Guide is a recovery choice, not a second full editing toolbar. */
+	:where(.tilefab-app[data-guided-build-resume="true"])
+		.tilefab-commands
+		button[aria-label="실행 취소"],
+	:where(.tilefab-app[data-guided-build-resume="true"])
+		.tilefab-commands
+		button[aria-label="다시 실행"],
+	:where(.tilefab-app[data-guided-build-resume="true"]) .tilefab-commands .tilefab-view-switch,
+	:where(.tilefab-app[data-guided-build-resume="true"]) .tilefab-commands .tilefab-separator {
 		display: none;
 	}
 }
@@ -745,12 +789,17 @@ button {
 	.tilefab-separator,
 	.tilefab-commands button[aria-label="새 프로젝트"],
 	.tilefab-commands button[aria-label="FAB 조립"],
-	.tilefab-commands button[aria-label="FAB 전체 지도"],
-	.tilefab-commands button[aria-label^="FAB 조직"],
 	.tilefab-commands button[aria-label="프로젝트 열기"],
 	.tilefab-commands button[aria-label="프로젝트 저장"],
 	.tilefab-commands button[aria-label="다시 실행"],
 	.tilefab-commands button[aria-label="전체 삭제"] {
+		display: none;
+	}
+
+	:where(.tilefab-app[data-guided-build-resume="true"])
+		.tilefab-commands
+		button[aria-label="실행 취소"],
+	:where(.tilefab-app[data-guided-build-resume="true"]) .tilefab-commands .tilefab-view-switch {
 		display: none;
 	}
 
@@ -816,5 +865,24 @@ button {
 	.tilefab-statusbar > span:nth-last-child(2),
 	.tilefab-statusbar > span:last-child {
 		display: none;
+	}
+
+	.tilefab-statusbar[data-guided-build-current="first-rail"]:has(
+			.tilefab-status-preview:not(:empty)
+		)
+		> span:nth-child(2),
+	.tilefab-app:has(.tilefab-canvas[data-ordinary-rail-pointer-preview="true"])
+		.tilefab-statusbar
+		> span:nth-child(2) {
+		display: none;
+	}
+
+	.tilefab-statusbar[data-guided-build-current="first-rail"] .tilefab-status-preview:not(:empty),
+	.tilefab-app:has(.tilefab-canvas[data-ordinary-rail-pointer-preview="true"])
+		.tilefab-statusbar
+		.tilefab-status-preview:not(:empty) {
+		display: block;
+		max-width: none;
+		color: #9ce8ec;
 	}
 }

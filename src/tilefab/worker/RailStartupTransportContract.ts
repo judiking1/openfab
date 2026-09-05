@@ -398,6 +398,42 @@ const ADJACENCY_VIEWS = {
 	targets: Uint32Array,
 } as const satisfies ViewSchema;
 
+const ASSEMBLY_RELATIONSHIP_RECORD_VIEWS = {
+	hierarchyRoles: Uint8Array,
+	purposes: Uint8Array,
+	parentOrganizationIds: Int32Array,
+	reviewPolicies: Uint8Array,
+	participantOffsets: Uint32Array,
+	participantOrganizationIds: Int32Array,
+	managedChildOffsets: Uint32Array,
+	managedChildOrganizationIds: Int32Array,
+	connectionGroupOffsets: Uint32Array,
+	groupLegOffsets: Uint32Array,
+	legDirectionRoles: Uint8Array,
+	legExclusiveCutEdgeOffsets: Uint32Array,
+	exclusiveCutEdgeScopedIndexes: Uint32Array,
+	legEndpointSupportOffsets: Uint32Array,
+	endpointSupportScopedIndexes: Uint32Array,
+	endpointAdjacentExclusiveCutEdgeIndexes: Uint32Array,
+	endpointPositions: Uint8Array,
+	legSeamContactOffsets: Uint32Array,
+	seamRoles: Uint8Array,
+	seamIncidenceOffsets: Uint32Array,
+	incidenceDirections: Uint8Array,
+	incidenceBindingKinds: Uint8Array,
+	incidenceExclusiveCutEdgeIndexes: Uint32Array,
+	incidenceWitnessScopedEdgeIndexes: Uint32Array,
+	edgeCoordinates: Int32Array,
+} as const satisfies ViewSchema;
+
+const ASSEMBLY_RELATIONSHIP_SCOPED_EDGE_VIEWS = {
+	edgeIndexes: Uint32Array,
+	scopeKinds: Uint8Array,
+	participantIndexes: Int8Array,
+	directOwnerOffsets: Uint32Array,
+	directOwnerOrganizationIds: Int32Array,
+} as const satisfies ViewSchema;
+
 interface CaptureState {
 	readonly buffers: ArrayBuffer[];
 	readonly views: ArrayBufferView[];
@@ -435,6 +471,7 @@ interface RailStartupTransportAdoptionBinding {
 	readonly switchRecords: RailStartupTransport["snapshot"]["switchRecords"];
 	readonly portEquipment: RailStartupTransport["snapshot"]["portEquipment"];
 	readonly organizations: RailStartupTransport["snapshot"]["organizations"];
+	readonly relationships: RailStartupTransport["snapshot"]["relationships"];
 }
 
 const railStartupTransportAdoptionBindings = new WeakMap<
@@ -461,7 +498,8 @@ export function consumeRailStartupTransportAdoptionAuthority(
 		binding.switchIds === snapshot.switchIds &&
 		binding.switchRecords === snapshot.switchRecords &&
 		binding.portEquipment === snapshot.portEquipment &&
-		binding.organizations === snapshot.organizations
+		binding.organizations === snapshot.organizations &&
+		binding.relationships === snapshot.relationships
 	);
 }
 
@@ -916,6 +954,7 @@ export async function adoptRailStartupTransportCooperatively<
 			switchRecords: value.snapshot.switchRecords,
 			portEquipment: value.snapshot.portEquipment,
 			organizations: value.snapshot.organizations,
+			relationships: value.snapshot.relationships,
 		}),
 	);
 	return Object.freeze({ value, authority: Object.freeze({ token }) });
@@ -1050,6 +1089,7 @@ function captureSnapshot(snapshot: RailStartupPayload["snapshot"], state: Captur
 			"switchRecords",
 			"portEquipment",
 			"organizations",
+			"relationships",
 			"checksum",
 		],
 		"startup snapshot",
@@ -1099,6 +1139,27 @@ function captureSnapshot(snapshot: RailStartupPayload["snapshot"], state: Captur
 		["names", "descriptions"],
 		ORGANIZATION_RECORD_VIEWS,
 		"organization records",
+		state,
+	);
+	const relationships = snapshot.relationships;
+	assertExactRecord(
+		relationships,
+		["schemaVersion", "nextRelationshipId", "relationshipIds", "records"],
+		"assembly relationship snapshot",
+	);
+	captureView(relationships.relationshipIds, Int32Array, "assembly relationship ids", state);
+	captureRecordViews(
+		relationships.records,
+		["scopedEdges"],
+		ASSEMBLY_RELATIONSHIP_RECORD_VIEWS,
+		"assembly relationship records",
+		state,
+	);
+	captureRecordViews(
+		relationships.records.scopedEdges,
+		[],
+		ASSEMBLY_RELATIONSHIP_SCOPED_EDGE_VIEWS,
+		"assembly relationship scoped edges",
 		state,
 	);
 }

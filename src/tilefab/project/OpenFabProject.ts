@@ -41,6 +41,10 @@ import {
 	type RailMirrorSnapshot,
 } from "../worker/RailMirrorChecksum";
 import {
+	createStaticFabAssemblyRelationshipSnapshot,
+	hydrateStaticFabAssemblyRelationshipSnapshot,
+} from "../worker/StaticFabAssemblyRelationshipSoA";
+import {
 	createStaticFabOrganizationSnapshot,
 	hydrateStaticFabOrganizationSnapshot,
 } from "../worker/StaticFabOrganizationSoA";
@@ -54,9 +58,14 @@ import {
 	createStaticFabOrganizationStateFromOpenFabProjectSection,
 	type OpenFabProjectOrganizationSection,
 } from "./OpenFabProjectOrganizations";
+import {
+	captureOpenFabProjectRelationshipSection,
+	createStaticFabAssemblyRelationshipStateFromOpenFabProjectSection,
+	type OpenFabProjectRelationshipSection,
+} from "./OpenFabProjectRelationships";
 
 export const OPENFAB_PROJECT_KIND = "openfab/tilefab-project" as const;
-export const OPENFAB_PROJECT_SCHEMA_VERSION = 10 as const;
+export const OPENFAB_PROJECT_SCHEMA_VERSION = 11 as const;
 export const OPENFAB_RAIL_GRAMMAR = "directed-cardinal-1m-v1" as const;
 export const OPENFAB_RAIL_CELL_ENCODING = "incoming-low-outgoing-high-v1" as const;
 export const OPENFAB_RAIL_CELL_SIZE_MILLIMETERS = 1_000 as const;
@@ -169,6 +178,7 @@ export interface OpenFabProject {
 	readonly operations: OperationalConfigurationState;
 	readonly blueprints: OpenFabProjectBlueprintSection;
 	readonly areas: OpenFabProjectOrganizationSection;
+	readonly relationships: OpenFabProjectRelationshipSection;
 	readonly scenarios: OpenFabProjectReservedSection;
 	readonly view: OpenFabProjectView | null;
 }
@@ -211,6 +221,7 @@ export function captureOpenFabProject(
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot,
 		options,
 	);
@@ -250,6 +261,7 @@ export function captureOpenFabProjectFromRailSnapshot(
 	}
 	advancedSwitches.sort((left, right) => left.id - right.id);
 	const portEquipment = hydratePortEquipmentSnapshot(snapshot.portEquipment);
+	const relationships = hydrateStaticFabAssemblyRelationshipSnapshot(snapshot.relationships);
 
 	return Object.freeze({
 		kind: OPENFAB_PROJECT_KIND,
@@ -276,6 +288,7 @@ export function captureOpenFabProjectFromRailSnapshot(
 		areas: captureOpenFabProjectOrganizationSection(
 			hydrateStaticFabOrganizationSnapshot(snapshot.organizations),
 		),
+		relationships: captureOpenFabProjectRelationshipSection(relationships),
 		scenarios: createReservedSection(),
 		view: options.view ? copyProjectView(options.view) : null,
 	});
@@ -331,6 +344,11 @@ export function createRailSnapshotFromOpenFabProject(project: OpenFabProject): R
 	const organizations = createStaticFabOrganizationStateFromOpenFabProjectSection(project.areas);
 	for (const record of organizations.records) checksum.addOrganization(record);
 	checksum.setOrganizationNextId(organizations.nextOrganizationId);
+	const relationships = createStaticFabAssemblyRelationshipStateFromOpenFabProjectSection(
+		project.relationships,
+	);
+	for (const record of relationships.records) checksum.addAssemblyRelationship(record);
+	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 
 	return {
 		sequence: rail.patchSequence,
@@ -343,6 +361,7 @@ export function createRailSnapshotFromOpenFabProject(project: OpenFabProject): R
 		switchRecords,
 		portEquipment: createPortEquipmentSnapshot(portEquipment),
 		organizations: createStaticFabOrganizationSnapshot(organizations),
+		relationships: createStaticFabAssemblyRelationshipSnapshot(relationships),
 		checksum: checksum.digest(),
 	};
 }

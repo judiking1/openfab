@@ -192,10 +192,14 @@ export function railConstructionApplicability(
 			: applicability("invalid-anchor", context.reason);
 	}
 	if (!item.requiresOpenTerminal) {
-		if (map.edgeCount === 0 || anchor !== null) {
-			return applicability("ready", "레일 경로의 끝점을 드래그하세요");
-		}
-		return applicability("anchor-required", "기존 레일에서 이어 그릴 시작점을 선택하세요");
+		return applicability(
+			"ready",
+			anchor
+				? "선택한 시작점에서 끝점을 드래그하세요"
+				: map.edgeCount === 0
+					? "빈 곳에서 시작해 레일 경로의 끝점을 드래그하세요"
+					: "기존 열린 끝 또는 다른 빈 곳에서 새 경로를 시작할 수 있습니다",
+		);
 	}
 	if (!anchor) {
 		return applicability("anchor-required", "진행 방향의 열린 끝점을 먼저 선택하세요");

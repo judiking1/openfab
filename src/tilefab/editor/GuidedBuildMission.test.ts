@@ -4,9 +4,11 @@ import {
 	GUIDED_BUILD_FOUNDATION_MISSIONS,
 	type GuidedBuildEvidence,
 	guidedBuildHidesExpertSelectionInspectors,
+	guidedBuildHidesOrganizationSelectionConstructionBar,
 	guidedBuildHidesPracticeHandoffConstructionBar,
 	guidedBuildOrganizationArrangementSelectionMode,
 	guidedBuildOrganizationPlacementIsHierarchyDuplicate,
+	guidedBuildOrganizationPlacementIsSingleCommit,
 	guidedBuildPortPlacementRetainsSelection,
 	guidedBuildRevealedActivities,
 	guidedBuildRevealedEquipmentToolIds,
@@ -15,15 +17,51 @@ import {
 	guidedBuildRevealsConstructionBar,
 	guidedBuildRevealsErase,
 	guidedBuildRevealsRouteBendControls,
+	guidedBuildSelectionCopyPlacementIsSingleCommit,
 	guidedBuildShouldAddOrganizationTap,
+	guidedBuildSuggestedActionActivity,
 	guidedBuildSuggestedActionClearsOrganizationPlacement,
 	guidedBuildSuggestedActionClearsPortSelection,
 	guidedBuildSuggestedActionSuppressesBayConfiguration,
+	guidedBuildTargetActivity,
 	guidedBuildTreatsPrimaryTouchAsPan,
 	guidedBuildUsesCompactOrganizationPicker,
+	guidedBuildVisibleOrganizationSelectionCount,
 } from "./GuidedBuildMission";
 
 describe("GuidedBuildMission", () => {
+	it("maps each guided action family to the activity that should be highlighted", () => {
+		expect(guidedBuildSuggestedActionActivity(null)).toBeNull();
+		expect(guidedBuildSuggestedActionActivity("build")).toBe("build");
+		expect(guidedBuildSuggestedActionActivity("ohb")).toBe("equip");
+		expect(guidedBuildSuggestedActionActivity("eq")).toBe("equip");
+		expect(guidedBuildSuggestedActionActivity("stk")).toBe("equip");
+		expect(guidedBuildSuggestedActionActivity("inspect")).toBe("inspect");
+		expect(guidedBuildSuggestedActionActivity("save-project")).toBe("inspect");
+		expect(guidedBuildSuggestedActionActivity("select-connected")).toBe("assemble");
+		expect(guidedBuildSuggestedActionActivity("add-bay")).toBe("assemble");
+	});
+
+	it("targets the mission owner when no suggested action can lead back from an Expert detour", () => {
+		const firstRail = evaluateGuidedBuildFoundation(evidence({ navigationAcknowledged: true }));
+		const ports = evaluateGuidedBuildFoundation(
+			evidence({
+				navigationAcknowledged: true,
+				authoredRevision: 1,
+				readiness: readyReadiness("closed-loop"),
+				railReuse: linkSupportedRailReuse(),
+			}),
+		);
+
+		expect(firstRail.currentMissionId).toBe("first-rail");
+		expect(
+			firstRail.missions.find((mission) => mission.status === "current")?.prompt.suggestedAction,
+		).toBeNull();
+		expect(guidedBuildTargetActivity(firstRail)).toBe("build");
+		expect(ports.currentMissionId).toBe("ports");
+		expect(guidedBuildTargetActivity(ports)).toBe("equip");
+	});
+
 	it("publishes one immutable ordered learning slice", () => {
 		expect(GUIDED_BUILD_FOUNDATION_MISSIONS.map((mission) => mission.id)).toEqual([
 			"orient",
@@ -104,9 +142,9 @@ describe("GuidedBuildMission", () => {
 		]);
 		expect(evaluation.missions[1]?.prompt.progressCue).toEqual({
 			label: "첫 실습",
-			value: "연결 가능한 직선 0 / 1",
+			value: "가장 긴 직선 0 / 15 m",
 			instruction:
-				"터치는 빈 곳을 누른 채, 마우스는 LMB를 누른 채 가로 또는 세로로 15칸 이상 끌고 놓으세요. 이 직선이 나중에 Loop Connect의 두 분기를 지지합니다.",
+				"빈 곳 어디에서든 터치는 누른 채, 마우스는 LMB를 누른 채 가로 또는 세로로 15 m 이상 끌고 놓으세요. 이 직선은 그대로 유지하고, 다음 단계에서 레일 화살표가 향하는 끝부터 Loop를 닫습니다.",
 		});
 		expect(Object.isFrozen(evaluation.missions[1]?.prompt.progressCue)).toBe(true);
 	});
@@ -155,7 +193,7 @@ describe("GuidedBuildMission", () => {
 			label: "Loop 상태",
 			value: "열린 끝 2개 · 목표 0개",
 			instruction:
-				"공간이 부족하면 −로 축소하세요. 첫 15칸 이상 직선을 유지한 채 주황색 끝에서 나머지 세 변을 이어 시작점에 닫으세요.",
+				"공간이 부족하면 −로 축소하세요. 첫 15칸 이상 직선을 유지한 채 레일 화살표가 향하는 주황색 열린 끝에서 먼저 바깥으로 최소 6칸 뻗고, 나머지 두 변을 이어 시작점에 닫으세요.",
 		});
 	});
 
@@ -168,6 +206,7 @@ describe("GuidedBuildMission", () => {
 				railReuse: {
 					weakComponentCount: 1,
 					networkLinkSupportedComponentCount: 0,
+					longestStraightRunMeters: 5,
 					repeatedComponentKindCount: 0,
 					repeatedComponentCopyCount: 0,
 				},
@@ -175,9 +214,45 @@ describe("GuidedBuildMission", () => {
 		);
 
 		expect(evaluation.currentMissionId).toBe("first-rail");
-		expect(evaluation.missions[1]?.prompt.progressCue).toMatchObject({
-			value: "연결 가능한 직선 0 / 1",
+		expect(evaluation.missions[1]?.prompt.progressCue).toEqual({
+			label: "다시 그려도 안전해요",
+			value: "가장 긴 직선 5 / 15 m · 전체 5 m",
+			instruction:
+				"꺾인 길이의 합이 아니라 한 방향의 연속 직선이 목표입니다. 주황색 열린 끝을 같은 방향으로 늘리거나, 다른 빈 곳에서 15 m 직선을 새로 그리세요. 연습 초안은 남겨도 되며 START FAB에서 새 프로젝트로 넘어갑니다.",
 		});
+	});
+
+	it("advances after one supported closed loop even when an earlier open practice draft remains", () => {
+		const readiness = openRailReadiness("closed-loop-plus-open-draft");
+		const evaluation = evaluateGuidedBuildFoundation(
+			evidence({
+				navigationAcknowledged: true,
+				authoredRevision: 3,
+				readiness: {
+					...readiness,
+					summary: {
+						...readiness.summary,
+						edges: 48,
+						weakComponents: 2,
+						strongComponents: 3,
+						openTerminals: 2,
+						physicalOpenPaths: 1,
+						physicalStrongComponents: 2,
+					},
+				},
+				railReuse: {
+					weakComponentCount: 2,
+					networkLinkSupportedComponentCount: 1,
+					longestStraightRunMeters: 17,
+					closedStrongComponentCount: 1,
+					repeatedComponentKindCount: 0,
+					repeatedComponentCopyCount: 0,
+				},
+			}),
+		);
+
+		expect(evaluation.currentMissionId).toBe("ports");
+		expect(evaluation.missions[2]?.status).toBe("complete");
 	});
 
 	it("advances from exact closed-loop readiness into adaptive port-first guidance", () => {
@@ -216,7 +291,7 @@ describe("GuidedBuildMission", () => {
 				label: "Port-first 진행",
 				value: "OHB 0/1 · EQ 0/2 · STK 0/2",
 				instruction:
-					"표식이 작으면 왼쪽 아래 +로 확대하고, 레일 옆 청록 원 하나를 탭하세요. 레일 흐름이 Port와 OHB 방향을 정합니다.",
+					"왼쪽의 강조된 OHB · 단일 Port를 선택하세요. 캔버스 포커스에서 방향키로 슬롯을 고르고 Enter로 배치하거나, 점선 고리가 있는 청록 슬롯을 클릭하세요.",
 			},
 		});
 		expect(
@@ -295,6 +370,54 @@ describe("GuidedBuildMission", () => {
 		expect(Object.isFrozen(guidedBuildRevealedRailConstructionCatalogIds(complete))).toBe(true);
 	});
 
+	it("hides unrelated construction chrome only while Guided hierarchy selection owns the next action", () => {
+		const selectBay = evaluateGuidedBuildFoundation(evidence(completedThroughTwinBay()));
+		const duplicateBay = evaluateGuidedBuildFoundation(
+			evidence({
+				...completedThroughTwinBay(),
+				bayBankGuidance: {
+					...bankGuidance(),
+					selectedOrganizationCount: 1,
+					selectedTwinBayCount: 1,
+				},
+			}),
+		);
+
+		expect(guidedBuildHidesOrganizationSelectionConstructionBar(selectBay)).toBe(true);
+		expect(guidedBuildHidesOrganizationSelectionConstructionBar(duplicateBay)).toBe(false);
+	});
+
+	it("makes only the mission-owned hierarchy placements single-commit", () => {
+		expect(guidedBuildOrganizationPlacementIsSingleCommit("bay", "canvas.primary-click")).toBe(
+			true,
+		);
+		expect(guidedBuildOrganizationPlacementIsSingleCommit("bay-bank", "canvas.primary-click")).toBe(
+			true,
+		);
+		expect(guidedBuildOrganizationPlacementIsSingleCommit("interbay", "canvas.primary-click")).toBe(
+			true,
+		);
+		expect(guidedBuildOrganizationPlacementIsSingleCommit("bay-bank", null)).toBe(false);
+		expect(
+			guidedBuildOrganizationPlacementIsSingleCommit("reuse-loop", "canvas.primary-click"),
+		).toBe(false);
+	});
+
+	it("ends Guided Reuse selection-copy placement after one commit", () => {
+		expect(
+			guidedBuildSelectionCopyPlacementIsSingleCommit(true, "reuse-loop", "selection-copy"),
+		).toBe(true);
+		expect(
+			guidedBuildSelectionCopyPlacementIsSingleCommit(false, "reuse-loop", "selection-copy"),
+		).toBe(false);
+		expect(guidedBuildSelectionCopyPlacementIsSingleCommit(true, "bay", "selection-copy")).toBe(
+			false,
+		);
+		expect(guidedBuildSelectionCopyPlacementIsSingleCommit(true, "reuse-loop", "recent")).toBe(
+			false,
+		);
+	});
+
 	it("guides OHB then EQ then STK from canonical group membership", () => {
 		const base = {
 			navigationAcknowledged: true,
@@ -327,7 +450,7 @@ describe("GuidedBuildMission", () => {
 			label: "Port-first 진행",
 			value: "OHB 1/1 · EQ 0/2 · STK 0/2",
 			instruction:
-				"표식이 작으면 +로 확대하고, 같은 직선 레일 위 청록 CENTER 표식 두 개를 한 번에 드래그하세요.",
+				"강조된 EQ · Port를 선택하세요. 캔버스에서 Enter로 시작을 고른 뒤 방향키와 Enter로 끝을 확정하거나, 청록색 1 시작에서 2 끝까지 드래그하세요.",
 		});
 		expect(guidedBuildRevealedEquipmentToolIds(afterOhb)).toEqual(["eq"]);
 		expect(
@@ -339,12 +462,45 @@ describe("GuidedBuildMission", () => {
 			label: "Port-first 진행",
 			value: "OHB 1/1 · EQ 2/2 · STK 0/2",
 			instruction:
-				"표식이 작으면 +로 확대하고, 같은 흐름의 황금색 마름모 CENTER 표식 두 개를 차례로 탭하세요.",
+				"왼쪽의 강조된 STK · 입출고 Port를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 STK 생성을 누르세요.",
 		});
 		expect(guidedBuildRevealedEquipmentToolIds(afterEq)).toEqual(["stk"]);
 		expect(afterPorts.complete).toBe(false);
 		expect(afterPorts.currentMissionId).toBe("reuse-loop");
 		expect(guidedBuildRevealedEquipmentToolIds(afterPorts)).toEqual(["ohb", "eq", "stk"]);
+	});
+
+	it("requires both Guided STK Ports to belong to one canonical group", () => {
+		const base = {
+			navigationAcknowledged: true,
+			authoredRevision: 4,
+			readiness: readyReadiness("closed-loop"),
+			railReuse: linkSupportedRailReuse(),
+			equipment: {
+				OHB: { groupCount: 1, portCount: 1, largestGroupPortCount: 1 },
+				EQ: { groupCount: 1, portCount: 2, largestGroupPortCount: 2 },
+				STK: { groupCount: 2, portCount: 2, largestGroupPortCount: 1 },
+			},
+		};
+		const splitStk = evaluateGuidedBuildFoundation(evidence(base));
+		const completeStk = evaluateGuidedBuildFoundation(
+			evidence({
+				...base,
+				equipment: {
+					...base.equipment,
+					STK: { groupCount: 1, portCount: 2, largestGroupPortCount: 2 },
+				},
+			}),
+		);
+
+		expect(splitStk.currentMissionId).toBe("ports");
+		expect(
+			splitStk.missions.find((mission) => mission.definition.id === "ports")?.prompt,
+		).toMatchObject({
+			suggestedAction: "stk",
+			progressCue: { value: "OHB 1/1 · EQ 2/2 · STK 1/2" },
+		});
+		expect(completeStk.currentMissionId).toBe("reuse-loop");
 	});
 
 	it("clears a stale Port inspector only for Guided Port and Reuse Loop handoffs", () => {
@@ -386,6 +542,13 @@ describe("GuidedBuildMission", () => {
 		expect(guidedBuildUsesCompactOrganizationPicker(true, "fab-loop")).toBe(true);
 		expect(guidedBuildUsesCompactOrganizationPicker(true, "bay")).toBe(false);
 		expect(guidedBuildUsesCompactOrganizationPicker(false, "bay-bank")).toBe(false);
+	});
+
+	it("counts only rows visible in the Guided hierarchy picker", () => {
+		expect(guidedBuildVisibleOrganizationSelectionCount(true, [11, 12], [21])).toBe(0);
+		expect(guidedBuildVisibleOrganizationSelectionCount(true, [11, 12, 21], [21])).toBe(1);
+		expect(guidedBuildVisibleOrganizationSelectionCount(true, [21, 22], [21, 22])).toBe(2);
+		expect(guidedBuildVisibleOrganizationSelectionCount(false, [11, 12], [21])).toBeNull();
 	});
 
 	it("suppresses the Expert Bay configurator only for the Guided default Twin Bay action", () => {
@@ -461,7 +624,9 @@ describe("GuidedBuildMission", () => {
 		).toMatchObject({
 			title: "Port 포함 Loop 선택",
 			objective: "원본 Loop의 레일이나 OHB·EQ·STK 하나를 먼저 탭하세요.",
-			primaryCommandId: "selection.connected",
+			rationale:
+				"이 미션은 Port까지 보존하는 닫힌 Loop 전체 복제를 연습합니다. 일반 편집에서는 드래그 상자에 닿은 일부 레일 모듈도 닫히지 않아도 그대로 복제할 수 있습니다.",
+			primaryCommandId: "selection.inspect-target",
 			suggestedAction: "inspect",
 			suggestedActionLabel: "INSPECT · Port 포함 Loop 탭",
 		});
@@ -478,7 +643,7 @@ describe("GuidedBuildMission", () => {
 			copy.missions.find((mission) => mission.definition.id === "reuse-loop")?.prompt,
 		).toMatchObject({
 			title: "Port 포함 Loop 복제",
-			objective: "선택한 레일과 OHB·EQ·STK를 함께 복사해 반복 배치 미리보기를 시작하세요.",
+			objective: "선택한 레일과 OHB·EQ·STK를 함께 복사해 1회 배치 미리보기를 시작하세요.",
 			primaryCommandId: "selection.copy",
 			suggestedAction: "copy-selection",
 			suggestedActionLabel: "COPY · Port 포함 Loop 복제",
@@ -488,7 +653,7 @@ describe("GuidedBuildMission", () => {
 		).toMatchObject({
 			title: "Port 포함 Loop 배치",
 			objective:
-				"공간이 부족하면 −로 축소한 뒤, 기존 Loop와 겹치지 않는 정렬된 위치에 레일과 OHB·EQ·STK 복제 미리보기를 배치하세요.",
+				"공간이 부족하면 −로 축소한 뒤, 기존 Loop와 겹치지 않는 정렬된 위치에 레일과 OHB·EQ·STK 복제 미리보기를 한 번 배치하세요.",
 			primaryCommandId: "canvas.primary-click",
 			suggestedAction: null,
 		});
@@ -542,7 +707,7 @@ describe("GuidedBuildMission", () => {
 			railOnlyCopy.missions.find((mission) => mission.definition.id === "reuse-loop")?.prompt,
 		).toMatchObject({
 			title: "Port 포함 Loop 선택",
-			primaryCommandId: "selection.connected",
+			primaryCommandId: "selection.inspect-target",
 		});
 		expect(repeated.complete).toBe(false);
 		expect(repeated.currentMissionId).toBe("bay");
@@ -611,7 +776,7 @@ describe("GuidedBuildMission", () => {
 			{
 				title: "기본 Twin Bay 배치",
 				objective:
-					"−로 Twin Bay 전체가 보일 때까지 축소한 뒤, 캔버스의 빈 곳을 탭해 미리보기를 배치하세요.",
+					"청록색 Twin Bay 미리보기의 ‘여기를 탭’ 표식을 눌러 현재 위치에 배치하세요. 표식이 보이지 않으면 −로 한 번 축소하세요.",
 				primaryCommandId: "canvas.primary-click",
 			},
 		);
@@ -713,13 +878,17 @@ describe("GuidedBuildMission", () => {
 			suggestedAction: "duplicate-bay",
 		});
 		expect(
-			place.missions.find((mission) => mission.definition.id === "bay-bank")?.prompt
-				.primaryCommandId,
-		).toBe("canvas.primary-click");
+			place.missions.find((mission) => mission.definition.id === "bay-bank")?.prompt,
+		).toMatchObject({
+			title: "복제 Twin Bay 배치",
+			objective:
+				"원본 옆 청록색 복제 미리보기의 ‘여기를 탭’ 표식을 눌러 현재 위치에 배치하세요. 직접 옮기면 가까운 X/Z 중심축에 스냅됩니다.",
+			primaryCommandId: "canvas.primary-click",
+		});
 		expect(
 			twoOffset.missions.find((mission) => mission.definition.id === "bay-bank")?.prompt,
 		).toMatchObject({
-			title: "Bay 중심 정렬",
+			title: "Twin Bay 중심 정렬",
 			primaryCommandId: "arrangement.start",
 		});
 		const pairPrompt = evaluateGuidedBuildFoundation(
@@ -736,7 +905,8 @@ describe("GuidedBuildMission", () => {
 		).missions.find((mission) => mission.definition.id === "bay-bank")?.prompt;
 		expect(pairPrompt).toMatchObject({
 			title: "Twin Bay 두 개 선택",
-			objective: "FAB ORGANIZATION 목록에서 원본과 복제 Twin Bay를 차례로 탭하세요.",
+			objective:
+				"원본 Twin Bay는 이미 선택되어 있습니다(✓). 체크가 없는 복제 Twin Bay 하나만 탭해 2 / 2로 만드세요.",
 			organizationSelectionTargetCount: 2,
 		});
 		expect(guidedBuildShouldAddOrganizationTap(pairPrompt ?? null, [11], 12)).toBe(true);
@@ -752,7 +922,9 @@ describe("GuidedBuildMission", () => {
 		expect(
 			connect.missions.find((mission) => mission.definition.id === "bay-bank")?.prompt,
 		).toMatchObject({
-			title: "두 Production Bay 연결",
+			title: "두 Twin Bay 연결",
+			objective:
+				"현재 두 Twin Bay가 같은 중심축이므로 추가 ARRANGE 없이 아래 CONNECT BAYS를 눌러 하나의 Bay Bank를 만들 연결 경로를 검토하세요.",
 			primaryCommandId: "assembly-connector.start",
 		});
 		expect(
@@ -776,6 +948,12 @@ describe("GuidedBuildMission", () => {
 					selectedOrganizationCount: 1,
 					selectedBayBankCount: 1,
 				}),
+			}),
+		);
+		const place = evaluateGuidedBuildFoundation(
+			evidence({
+				...base,
+				interbayGuidance: interbayGuidance({ placementActive: true }),
 			}),
 		);
 		const arrange = evaluateGuidedBuildFoundation(
@@ -847,9 +1025,18 @@ describe("GuidedBuildMission", () => {
 			title: "Bay Bank 전체 계층 복제",
 			suggestedAction: "duplicate-bank",
 		});
+		expect(
+			place.missions.find((mission) => mission.definition.id === "interbay")?.prompt,
+		).toMatchObject({
+			title: "복제 Bay Bank 배치",
+			objective:
+				"원본 옆 청록색 복제 Bay Bank 미리보기의 ‘여기를 탭’ 표식을 눌러 현재 위치에 배치하세요. 직접 옮기면 가까운 X/Z 중심축에 스냅됩니다.",
+			primaryCommandId: "canvas.primary-click",
+		});
 		expect(pairPrompt).toMatchObject({
 			title: "Bay Bank 두 개 선택",
-			objective: "FAB ORGANIZATION 목록에서 원본과 복제 Bay Bank를 차례로 탭하세요.",
+			objective:
+				"원본 Bay Bank는 이미 선택되어 있습니다(✓). 체크가 없는 복제 Bay Bank 하나만 탭해 2 / 2로 만드세요.",
 			organizationSelectionTargetCount: 2,
 		});
 		expect(
@@ -862,6 +1049,8 @@ describe("GuidedBuildMission", () => {
 			connect.missions.find((mission) => mission.definition.id === "interbay")?.prompt,
 		).toMatchObject({
 			title: "두 Bay Bank 연결",
+			objective:
+				"현재 두 Bay Bank가 같은 중심축이므로 추가 ARRANGE 없이 아래 CONNECT BANKS를 눌러 하나의 Fab을 만들 Interbay 경로를 검토하세요.",
 			suggestedAction: "connect-banks",
 		});
 		expect(
@@ -873,6 +1062,47 @@ describe("GuidedBuildMission", () => {
 		});
 		expect(complete.complete).toBe(false);
 		expect(complete.currentMissionId).toBe("fab-loop");
+	});
+
+	it("routes rejected Arrangement recovery to the existing Cancel owner", () => {
+		const twinBase = completedThroughTwinBay();
+		const bankBase = completedThroughBayBank();
+		const twinRejected = evaluateGuidedBuildFoundation(
+			evidence({
+				...twinBase,
+				bay: { semanticBayCount: 2, twinProductionBayCount: 2, directProcessLoopCount: 4 },
+				bayBank: bankEvidence({ twinProductionBayCount: 2, detachedTwinBayCount: 2 }),
+				bayBankGuidance: bankGuidance({
+					selectedOrganizationCount: 2,
+					selectedTwinBayCount: 2,
+					arrangementPhase: "rejected",
+				}),
+			}),
+		);
+		const bankRejected = evaluateGuidedBuildFoundation(
+			evidence({
+				...bankBase,
+				interbay: interbayEvidence({ semanticBayBankCount: 2, detachedBayBankCount: 2 }),
+				interbayGuidance: interbayGuidance({
+					selectedOrganizationCount: 2,
+					selectedBayBankCount: 2,
+					arrangementPhase: "rejected",
+				}),
+			}),
+		);
+
+		expect(
+			twinRejected.missions.find((mission) => mission.definition.id === "bay-bank")?.prompt,
+		).toMatchObject({
+			title: "현재 정렬 적용 불가",
+			primaryCommandId: "command.cancel",
+		});
+		expect(
+			bankRejected.missions.find((mission) => mission.definition.id === "interbay")?.prompt,
+		).toMatchObject({
+			title: "현재 정렬 적용 불가",
+			primaryCommandId: "command.cancel",
+		});
 	});
 
 	it("guides a second same-Fab route and completes only from bidirectional resilience", () => {
@@ -908,7 +1138,7 @@ describe("GuidedBuildMission", () => {
 		expect(
 			select.missions.find((mission) => mission.definition.id === "fab-loop")?.prompt,
 		).toMatchObject({
-			title: "같은 Fab의 두 Bank 선택",
+			title: "같은 Fab의 두 Bay Bank 선택",
 			suggestedAction: "browse-banks",
 			organizationSelectionTargetCount: 2,
 		});
@@ -1003,66 +1233,7 @@ describe("GuidedBuildMission", () => {
 		expect(complete.currentMissionId).toBe("project-save");
 	});
 
-	it("guides disconnected practice Loops through the ordinary two-way network link", () => {
-		const base = completedThroughFabLoop();
-		const precheck = evaluateGuidedBuildFoundation(
-			evidence({
-				...base,
-				checks: checksEvidence({ separateRailNetworkCount: 3 }),
-			}),
-		).missions.find((mission) => mission.definition.id === "checks")?.prompt;
-		const start = evaluateGuidedBuildFoundation(
-			evidence({
-				...base,
-				checks: checksEvidence({
-					available: true,
-					blockingIssueCount: 1,
-					followUpIssueCount: 2,
-					separateRailNetworkCount: 3,
-				}),
-				checksGuidance: checksGuidance({ navigatorOpen: true }),
-			}),
-		).missions.find((mission) => mission.definition.id === "checks")?.prompt;
-		const source = evaluateGuidedBuildFoundation(
-			evidence({
-				...base,
-				checks: checksEvidence({ separateRailNetworkCount: 3 }),
-				checksGuidance: checksGuidance({ networkLinkRepairActive: true }),
-			}),
-		).missions.find((mission) => mission.definition.id === "checks")?.prompt;
-		const target = evaluateGuidedBuildFoundation(
-			evidence({
-				...base,
-				checks: checksEvidence({ separateRailNetworkCount: 2 }),
-				checksGuidance: checksGuidance({
-					networkLinkRepairActive: true,
-					networkLinkSourceSelected: true,
-				}),
-			}),
-		).missions.find((mission) => mission.definition.id === "checks")?.prompt;
-
-		expect(precheck).toMatchObject({
-			title: "CHECKS 열기",
-			suggestedAction: "open-checks",
-			suggestedActionLabel: "INSPECT · CHECKS 열기",
-		});
-		expect(start).toMatchObject({
-			title: "3개 레일망 연결",
-			suggestedAction: "repair-networks",
-			suggestedActionLabel: "BUILD · 레일망 연결",
-		});
-		expect(source).toMatchObject({
-			title: "3개 레일망 연결",
-			primaryCommandId: "canvas.primary-drag",
-			suggestedAction: null,
-		});
-		expect(target).toMatchObject({
-			title: "연결할 다른 레일망 선택",
-			primaryCommandId: "canvas.primary-drag",
-		});
-	});
-
-	it("does not offer Smart Route repair for organization-protected rail networks", () => {
+	it("hands organization-protected rail findings back to CHECKS-owned repair", () => {
 		const prompt = evaluateGuidedBuildFoundation(
 			evidence({
 				...completedThroughFabLoop(),
@@ -1072,10 +1243,7 @@ describe("GuidedBuildMission", () => {
 					followUpIssueCount: 2,
 					separateRailNetworkCount: 3,
 				}),
-				checksGuidance: checksGuidance({
-					navigatorOpen: true,
-					networkLinkRepairAvailable: false,
-				}),
+				checksGuidance: checksGuidance({ navigatorOpen: true }),
 			}),
 		).missions.find((mission) => mission.definition.id === "checks")?.prompt;
 
@@ -1083,8 +1251,8 @@ describe("GuidedBuildMission", () => {
 			title: "차단 이슈 해결",
 			suggestedAction: null,
 		});
-		expect(prompt?.objective).toContain("보호된 Bay·Bank·Fab 레일");
-		expect(prompt?.objective).toContain("ASSEMBLE의 계층 Connector");
+		expect(prompt?.objective).toContain("Bay·Bank·Fab 안의 레일");
+		expect(prompt?.objective).toContain("NEXT EDIT");
 	});
 
 	it("uses native save and exact same-project reopen receipts before resuming", () => {
@@ -1151,11 +1319,18 @@ describe("GuidedBuildMission", () => {
 				projectPersistence: reopenedProjectEvidence(),
 			}),
 		);
+		const reopenedBeforeFreshChecks = evaluateGuidedBuildFoundation(
+			evidence({
+				...completedThroughFabLoop(),
+				projectPersistence: reopenedProjectEvidence(),
+			}),
+		);
 
 		expect(unsaved.currentMissionId).toBe("project-save");
 		expect(unsaved.missions.at(-2)?.prompt).toMatchObject({
 			title: "OpenFab 프로젝트 저장",
 			suggestedAction: "save-project",
+			suggestedActionLabel: "전체 프로젝트 저장",
 		});
 		expect(saving.missions.at(-2)?.prompt).toMatchObject({
 			title: "프로젝트 저장 중",
@@ -1174,6 +1349,19 @@ describe("GuidedBuildMission", () => {
 		expect(openedBeforeExpectation.complete).toBe(false);
 		expect(wrongProject.complete).toBe(false);
 		expect(wrongProject.missions.at(-1)?.prompt.title).toBe("저장한 프로젝트 다시 선택");
+		expect(reopenedBeforeFreshChecks.currentMissionId).toBe("checks");
+		expect(
+			reopenedBeforeFreshChecks.missions.find((mission) => mission.definition.id === "checks")
+				?.prompt,
+		).toMatchObject({
+			eyebrow: "MISSION 12 · REOPEN · FINAL CHECK",
+			title: "다시 연 프로젝트 최종 검사",
+			objective:
+				"방금 저장한 같은 프로젝트를 다시 열었습니다. 마지막 확인으로 CHECKS를 한 번 실행하세요.",
+			suggestedAction: "open-checks",
+			suggestedActionLabel: "다시 연 파일 검사",
+			progressPresentation: "reopen-final-check",
+		});
 		expect(reopened.complete).toBe(true);
 		expect(reopened.currentMissionId).toBeNull();
 	});
@@ -1516,9 +1704,6 @@ function checksGuidance(
 		navigatorOpen: false,
 		inspectionPending: false,
 		acknowledgedFingerprint: null,
-		networkLinkRepairAvailable: true,
-		networkLinkRepairActive: false,
-		networkLinkSourceSelected: false,
 		...overrides,
 	};
 }
@@ -1575,6 +1760,10 @@ function equipmentEvidence(
 	const kind = (name: "OHB" | "EQ" | "STK") => ({
 		groupCount: overrides[name]?.[0] ?? 0,
 		portCount: overrides[name]?.[1] ?? 0,
+		largestGroupPortCount:
+			(overrides[name]?.[0] ?? 0) > 0
+				? Math.ceil((overrides[name]?.[1] ?? 0) / (overrides[name]?.[0] ?? 1))
+				: 0,
 	});
 	return { OHB: kind("OHB"), EQ: kind("EQ"), STK: kind("STK") };
 }

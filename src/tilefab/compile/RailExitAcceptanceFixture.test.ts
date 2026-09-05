@@ -72,9 +72,9 @@ describe("RailExitAcceptanceFixture", () => {
 			paths: firstPhysical.paths.pathCount,
 		}).toEqual({
 			authored:
-				"00000081:00000082:00000000:00000000:00000000:00000000:00000001:a939a593:0a0c27d3",
+				"00000002:00000081:00000082:00000000:00000000:00000000:00000000:00000001:00000000:00000001:a939a593:0a0c27d3",
 			physical: "4850a154:671d0662",
-			readiness: "310a1c01:cbc59330",
+			readiness: "95fc18a1:04d22cf2",
 			cells: 129,
 			edges: 130,
 			paths: 129,

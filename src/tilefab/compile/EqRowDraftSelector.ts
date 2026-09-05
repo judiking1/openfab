@@ -6,6 +6,7 @@ import {
 	type CompiledPortSlots,
 	PORT_SLOT_STATUS,
 	type PortSlotAvailabilityIndex,
+	type PortSlotSpatialIndexSnapshot,
 } from "./PortSlotCompiler";
 
 export { EQ_PORT_PITCHES_MILLIMETERS } from "../core/EquipmentGroup";
@@ -73,6 +74,95 @@ export function eqRowDraftCandidatesFromSlotIndex(
 		if (row !== null) target.push(row);
 	}
 	return target;
+}
+
+/**
+ * Project whether the current compiled/occupied world contains one immediately completable EQ row.
+ *
+ * The ordinary OHB -> EQ handoff must not infer readiness from a global legal-slot count: two
+ * isolated CENTER slots cannot satisfy one EQ. The Worker-prepared spatial index resolves only the
+ * active pitch-sized neighborhood for each possible anchor and stops at the first valid span. The
+ * exact selector below remains the final authority, so UI discovery cannot promise a placement the
+ * canonical planner rejects.
+ */
+export function hasAvailableEqRowDraftSpan(
+	slots: CompiledPortSlots,
+	spatialIndex: PortSlotSpatialIndexSnapshot,
+	availability: PortSlotAvailabilityIndex,
+	pitchMillimeters: number,
+): boolean {
+	if (
+		slots.portType !== "EQ" ||
+		availability.portType !== "EQ" ||
+		slots.revision !== availability.revision ||
+		spatialIndex.slotCount !== slots.count ||
+		!isEqPitch(pitchMillimeters)
+	) {
+		return false;
+	}
+	const pitchCells = pitchMillimeters / 1_000;
+	if (slots.legalCount < pitchCells + 1) return false;
+	for (let anchorRow = 0; anchorRow < slots.count; anchorRow += 1) {
+		if ((slots.statuses[anchorRow] as number) !== PORT_SLOT_STATUS.LEGAL) continue;
+		const travel = moveCell({ x: 0, y: 0 }, slots.routeToDirections[anchorRow] as Direction);
+		const anchorX = slots.routeXs[anchorRow] as number;
+		const anchorZ = slots.routeZs[anchorRow] as number;
+		const anchorWorldX = slots.worldPositions[anchorRow * 2] as number;
+		const anchorWorldZ = slots.worldPositions[anchorRow * 2 + 1] as number;
+		// Reject detached rows with one endpoint lookup before doing any live occupancy work. This
+		// keeps discovery bounded for imported catalogs containing many individually legal islands.
+		const targetRow = exactLegalEqRouteRow(
+			slots,
+			spatialIndex,
+			anchorRow,
+			anchorX + travel.x * pitchCells,
+			anchorZ + travel.y * pitchCells,
+			anchorWorldX + travel.x * pitchCells,
+			anchorWorldZ + travel.y * pitchCells,
+		);
+		if (targetRow === null) continue;
+		if (
+			availability.statusForAdvisoryDiscovery(slots, anchorRow).status !== PORT_SLOT_STATUS.LEGAL
+		) {
+			continue;
+		}
+		if (
+			exactLegalEqRouteRow(
+				slots,
+				spatialIndex,
+				anchorRow,
+				anchorX,
+				anchorZ,
+				anchorWorldX,
+				anchorWorldZ,
+			) !== anchorRow
+		) {
+			continue;
+		}
+		const continuityRows = [anchorRow];
+		for (let step = 1; step < pitchCells; step += 1) {
+			const row = exactLegalEqRouteRow(
+				slots,
+				spatialIndex,
+				anchorRow,
+				anchorX + travel.x * step,
+				anchorZ + travel.y * step,
+				anchorWorldX + travel.x * step,
+				anchorWorldZ + travel.y * step,
+			);
+			if (row === null) break;
+			continuityRows.push(row);
+		}
+		if (continuityRows.length !== pitchCells) continue;
+		continuityRows.push(targetRow);
+		if (
+			selectEqRowDraft(slots, availability, anchorRow, targetRow, continuityRows, pitchMillimeters)
+				.valid
+		) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /** Select one deterministic centerline EQ port row over an uninterrupted cardinal rail lane. */
@@ -376,4 +466,56 @@ function isSlotRow(slots: CompiledPortSlots, row: number): boolean {
 
 function routeCellKey(x: number, z: number): string {
 	return `${x}:${z}`;
+}
+
+function exactLegalEqRouteRow(
+	slots: CompiledPortSlots,
+	spatialIndex: PortSlotSpatialIndexSnapshot,
+	identityRow: number,
+	x: number,
+	z: number,
+	worldX: number,
+	worldZ: number,
+): number | null {
+	const chunk = findEqSpatialChunk(
+		spatialIndex.chunkCoordinates,
+		Math.floor(worldX / spatialIndex.chunkSizeMeters),
+		Math.floor(worldZ / spatialIndex.chunkSizeMeters),
+	);
+	if (chunk < 0) return null;
+	let match = -1;
+	const start = spatialIndex.chunkOffsets[chunk] as number;
+	const end = spatialIndex.chunkOffsets[chunk + 1] as number;
+	for (let position = start; position < end; position += 1) {
+		const row = spatialIndex.slotIndices[position] as number;
+		if (
+			(slots.statuses[row] as number) !== PORT_SLOT_STATUS.LEGAL ||
+			(slots.routeXs[row] as number) !== x ||
+			(slots.routeZs[row] as number) !== z ||
+			(slots.sides[row] as number) !== (slots.sides[identityRow] as number) ||
+			(slots.routeFromDirections[row] as number) !==
+				(slots.routeFromDirections[identityRow] as number) ||
+			(slots.routeToDirections[row] as number) !== (slots.routeToDirections[identityRow] as number)
+		) {
+			continue;
+		}
+		if (match !== -1) return null;
+		match = row;
+	}
+	return match === -1 ? null : match;
+}
+
+function findEqSpatialChunk(coordinates: Int32Array, x: number, z: number): number {
+	let low = 0;
+	let high = coordinates.length / 2 - 1;
+	while (low <= high) {
+		const middle = (low + high) >>> 1;
+		const offset = middle * 2;
+		const middleX = coordinates[offset] as number;
+		const middleZ = coordinates[offset + 1] as number;
+		if (middleX === x && middleZ === z) return middle;
+		if (middleZ < z || (middleZ === z && middleX < x)) low = middle + 1;
+		else high = middle - 1;
+	}
+	return -1;
 }

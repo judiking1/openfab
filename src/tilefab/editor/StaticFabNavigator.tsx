@@ -1,5 +1,5 @@
-import { ListChecks, Map as MapIcon, Maximize2, Network } from "lucide-react";
-import { type KeyboardEvent, type PointerEvent, useEffect, useId, useRef } from "react";
+import { Boxes, ListChecks, Map as MapIcon, Maximize2, Network } from "lucide-react";
+import { type KeyboardEvent, type PointerEvent, useEffect, useRef } from "react";
 import type {
 	StaticFabOrganizationColor,
 	StaticFabOrganizationKind,
@@ -48,12 +48,15 @@ interface StaticFabNavigatorProps {
 	readonly organizationMode: "DIRECT" | "EFFECTIVE";
 	readonly issues: readonly StaticFabNavigatorIssueMarker[];
 	readonly totalIssueCount: number;
+	readonly equipmentGroupCount: number;
+	readonly equipmentActionDisabled: boolean;
 	readonly unavailableMessage?: string | null;
 	readonly focusedIssueId: string | null;
 	readonly getViewportBounds: () => StaticFabMinimapWorldBounds | null;
 	readonly onTabChange: (tab: StaticFabNavigatorTab) => void;
 	readonly onCenterWorld: (x: number, y: number) => void;
 	readonly onFitAll: () => void;
+	readonly onInspectEquipment: () => void;
 }
 
 const ORGANIZATION_COLORS: Readonly<Record<StaticFabOrganizationColor, string>> = Object.freeze({
@@ -75,14 +78,16 @@ export function StaticFabNavigator({
 	organizationMode,
 	issues,
 	totalIssueCount,
+	equipmentGroupCount,
+	equipmentActionDisabled,
 	unavailableMessage,
 	focusedIssueId,
 	getViewportBounds,
 	onTabChange,
 	onCenterWorld,
 	onFitAll,
+	onInspectEquipment,
 }: StaticFabNavigatorProps): React.ReactElement {
-	const navigatorId = useId();
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const backingRef = useRef<HTMLCanvasElement | null>(null);
 	const transformRef = useRef<StaticFabMinimapTransform | null>(null);
@@ -93,6 +98,10 @@ export function StaticFabNavigator({
 
 	useEffect(() => {
 		const frame = requestAnimationFrame(() => {
+			const active = document.activeElement;
+			if (active instanceof HTMLElement && active.matches('[data-guided-target="true"]')) {
+				return;
+			}
 			document
 				.querySelector<HTMLButtonElement>(`[data-testid="static-fab-navigator-tab-${tab}"]`)
 				?.focus();
@@ -325,8 +334,6 @@ export function StaticFabNavigator({
 			<div className="tilefab-navigator-tabs" role="tablist" aria-label="FAB 내비게이터 보기">
 				<NavigatorTabButton
 					active={tab === "map"}
-					id={`${navigatorId}-tab-map`}
-					controlsId={`${navigatorId}-panel`}
 					tabId="map"
 					label="MAP"
 					icon={<MapIcon size={14} />}
@@ -334,8 +341,6 @@ export function StaticFabNavigator({
 				/>
 				<NavigatorTabButton
 					active={tab === "organizations"}
-					id={`${navigatorId}-tab-organizations`}
-					controlsId={`${navigatorId}-panel`}
 					tabId="organizations"
 					label="ORGANIZATIONS"
 					count={model?.organizations.length ?? 0}
@@ -344,8 +349,6 @@ export function StaticFabNavigator({
 				/>
 				<NavigatorTabButton
 					active={tab === "checks"}
-					id={`${navigatorId}-tab-checks`}
-					controlsId={`${navigatorId}-panel`}
 					tabId="checks"
 					label="CHECKS"
 					count={totalIssueCount}
@@ -354,62 +357,113 @@ export function StaticFabNavigator({
 				/>
 			</div>
 			<div
-				className="tilefab-navigator-map"
-				role="tabpanel"
-				id={`${navigatorId}-panel`}
-				aria-labelledby={`${navigatorId}-tab-${tab}`}
+				className="tilefab-navigator-body"
+				{...(tab === "map"
+					? {
+							role: "tabpanel" as const,
+							id: navigatorPanelId("map"),
+							"aria-labelledby": navigatorTabId("map"),
+						}
+					: { role: "region" as const, "aria-label": "FAB 공통 미니맵" })}
 			>
-				{model ? (
-					<canvas
-						ref={canvasRef}
-						className="tilefab-navigator-canvas"
-						data-testid="static-fab-minimap"
-						tabIndex={0}
-						aria-label="FAB 미니맵. 클릭 또는 드래그로 이동하고 Enter로 전체 맵을 맞춥니다"
-						onKeyDown={handleKeyDown}
-						onPointerDown={(event) => {
-							if (event.button !== 0) return;
-							event.currentTarget.setPointerCapture(event.pointerId);
-							queueCenter(event);
-						}}
-						onPointerMove={(event) => {
-							if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-							queueCenter(event);
-						}}
-						onPointerUp={(event) => {
-							if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-								event.currentTarget.releasePointerCapture(event.pointerId);
+				{tab === "map" ? (
+					<nav className="tilefab-navigator-tasks" aria-label="FAB에서 찾을 항목">
+						<button type="button" onClick={() => onTabChange("checks")}>
+							<ListChecks size={14} aria-hidden="true" />
+							<span>
+								<strong>문제 찾기</strong>
+								<small>{preparing ? "검사 중" : `${totalIssueCount.toLocaleString()}건`}</small>
+							</span>
+						</button>
+						<button type="button" onClick={() => onTabChange("organizations")}>
+							<Network size={14} aria-hidden="true" />
+							<span>
+								<strong>FAB 구조</strong>
+								<small>{model?.organizations.length.toLocaleString() ?? "0"}개</small>
+							</span>
+						</button>
+						<button
+							type="button"
+							disabled={equipmentActionDisabled}
+							title={
+								equipmentActionDisabled ? "프로젝트와 편집 명령이 준비된 뒤 사용하세요" : undefined
 							}
-						}}
-					/>
-				) : (
-					<div className="tilefab-navigator-empty">
-						{preparing ? "PREPARING OVERVIEW" : (unavailableMessage ?? "EMPTY MAP")}
-					</div>
-				)}
-				<button
-					type="button"
-					className="tilefab-navigator-fit"
-					title="전체 FAB 맞추기"
-					aria-label="전체 FAB 맞추기"
-					onClick={onFitAll}
-				>
-					<Maximize2 size={14} />
-				</button>
+							onClick={onInspectEquipment}
+						>
+							<Boxes size={14} aria-hidden="true" />
+							<span>
+								<strong>{equipmentGroupCount > 0 ? "장비 보기" : "Port 추가하기"}</strong>
+								<small>
+									{equipmentGroupCount > 0
+										? `${equipmentGroupCount.toLocaleString()}개`
+										: "배치된 장비 없음"}
+								</small>
+							</span>
+						</button>
+					</nav>
+				) : null}
+				<div className="tilefab-navigator-map">
+					{model ? (
+						<canvas
+							ref={canvasRef}
+							className="tilefab-navigator-canvas"
+							data-testid="static-fab-minimap"
+							tabIndex={0}
+							aria-label="FAB 미니맵. 클릭 또는 드래그로 이동하고 Enter로 전체 맵을 맞춥니다"
+							onKeyDown={handleKeyDown}
+							onPointerDown={(event) => {
+								if (event.button !== 0) return;
+								event.currentTarget.setPointerCapture(event.pointerId);
+								queueCenter(event);
+							}}
+							onPointerMove={(event) => {
+								if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+								queueCenter(event);
+							}}
+							onPointerUp={(event) => {
+								if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+									event.currentTarget.releasePointerCapture(event.pointerId);
+								}
+							}}
+						/>
+					) : (
+						<div className="tilefab-navigator-empty">
+							{preparing ? "PREPARING OVERVIEW" : (unavailableMessage ?? "EMPTY MAP")}
+						</div>
+					)}
+					<button
+						type="button"
+						className="tilefab-navigator-fit"
+						title="전체 FAB 맞추기"
+						aria-label="전체 FAB 맞추기"
+						onClick={onFitAll}
+					>
+						<Maximize2 size={14} />
+					</button>
+				</div>
+				<footer className="tilefab-navigator-footer">
+					<span>{model ? `${model.railCellCount.toLocaleString()} CELLS` : "NO RAIL"}</span>
+					<span>{model ? `${model.organizations.length.toLocaleString()} ORGS` : "0 ORGS"}</span>
+					<span>{totalIssueCount.toLocaleString()} ISSUES</span>
+				</footer>
 			</div>
-			<footer className="tilefab-navigator-footer">
-				<span>{model ? `${model.railCellCount.toLocaleString()} CELLS` : "NO RAIL"}</span>
-				<span>{model ? `${model.organizations.length.toLocaleString()} ORGS` : "0 ORGS"}</span>
-				<span>{totalIssueCount.toLocaleString()} ISSUES</span>
-			</footer>
+			{(["map", "organizations", "checks"] as const)
+				.filter((candidate) => candidate !== tab)
+				.map((candidate) => (
+					<div
+						key={candidate}
+						id={navigatorPanelId(candidate)}
+						role="tabpanel"
+						aria-labelledby={navigatorTabId(candidate)}
+						hidden
+					/>
+				))}
 		</div>
 	);
 }
 
 function NavigatorTabButton({
 	active,
-	id,
-	controlsId,
 	tabId,
 	label,
 	count,
@@ -417,8 +471,6 @@ function NavigatorTabButton({
 	onClick,
 }: Readonly<{
 	active: boolean;
-	id: string;
-	controlsId: string;
 	tabId: StaticFabNavigatorTab;
 	label: string;
 	count?: number;
@@ -428,10 +480,10 @@ function NavigatorTabButton({
 	return (
 		<button
 			type="button"
-			id={id}
+			id={navigatorTabId(tabId)}
 			className="tilefab-navigator-tab"
 			role="tab"
-			aria-controls={controlsId}
+			aria-controls={navigatorPanelId(tabId)}
 			data-testid={`static-fab-navigator-tab-${tabId}`}
 			data-navigator-tab-id={tabId}
 			aria-selected={active}
@@ -445,6 +497,14 @@ function NavigatorTabButton({
 			{count === undefined ? null : <small className="tilefab-navigator-tab-count">{count}</small>}
 		</button>
 	);
+}
+
+function navigatorTabId(tab: StaticFabNavigatorTab): string {
+	return `tilefab-fab-navigator-tab-${tab}`;
+}
+
+function navigatorPanelId(tab: StaticFabNavigatorTab): string {
+	return `tilefab-fab-navigator-panel-${tab}`;
 }
 
 function createIssueMarkerOverlayKey(issues: readonly StaticFabNavigatorIssueMarker[]): string {

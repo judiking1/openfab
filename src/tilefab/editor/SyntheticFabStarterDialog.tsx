@@ -836,7 +836,7 @@ export function SyntheticFabStarterDialog({
 							{busy
 								? "정적 레일 프로젝트를 활성화하고 검증하는 중입니다. 생성 취소를 사용할 수 있습니다."
 								: previewIdle
-									? "프리셋 사양과 도식이 준비되었습니다. 생성 또는 반복 배치를 선택하면 OpenFab 검증 레일을 불러옵니다."
+									? "프리셋 사양과 도식이 준비되었습니다. 새 프로젝트 또는 현재 FAB에 1회 배치를 선택하면 OpenFab 검증 레일을 불러옵니다."
 									: previewPending
 										? certifiedPreviewPending
 											? "빌드 시 검증된 OpenFab 합성 레일 아티팩트를 불러오는 중입니다."
@@ -903,7 +903,7 @@ export function SyntheticFabStarterDialog({
 								onClick={place}
 							>
 								<Stamp size={16} />
-								{busy ? "PREPARING" : previewPending ? "LOADING" : "START REPEAT PLACEMENT"}
+								{busy ? "PREPARING" : previewPending ? "LOADING" : "PLACE ONCE"}
 							</button>
 						) : null}
 					</div>

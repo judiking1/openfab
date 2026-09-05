@@ -65,6 +65,11 @@ describe("RailConstructionCatalog", () => {
 		expect(
 			document.commit(planRailConstruction(document.map, { x: -3, y: 0 }, { x: 0, y: 0 })),
 		).toBe(true);
+		expect(railConstructionApplicability(document.map, "route", null)).toMatchObject({
+			state: "ready",
+			ready: true,
+			reason: "기존 열린 끝 또는 다른 빈 곳에서 새 경로를 시작할 수 있습니다",
+		});
 		expect(
 			railConstructionApplicability(document.map, "advanced-switch", { x: 0, y: 0 }),
 		).toMatchObject({ state: "ready", ready: true });

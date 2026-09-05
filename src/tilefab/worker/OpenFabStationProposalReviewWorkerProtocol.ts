@@ -4,7 +4,7 @@ import type { OpenFabStationProposalReviewDraftSnapshot } from "./OpenFabStation
 import type { OpenFabStationProposalReviewedPlanArtifact } from "./OpenFabStationProposalReviewedPlanArtifact";
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
 
-export const OPENFAB_STATION_PROPOSAL_REVIEW_WORKER_PROTOCOL_VERSION = 1 as const;
+export const OPENFAB_STATION_PROPOSAL_REVIEW_WORKER_PROTOCOL_VERSION = 2 as const;
 export const OPENFAB_STATION_PROPOSAL_REVIEW_WORKER_MAX_ERROR_MESSAGE_LENGTH = 112;
 
 export const OPENFAB_STATION_PROPOSAL_REVIEW_WORKER_ERROR_CODES = Object.freeze([

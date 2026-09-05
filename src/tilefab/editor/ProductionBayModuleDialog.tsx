@@ -18,6 +18,7 @@ interface ProductionBayModulePanelProps {
 	readonly placementPending: boolean;
 	readonly onRequestChange: (request: ProductionBayModuleCatalogRequest) => void;
 	readonly onClose: () => void;
+	readonly onCancel: () => void;
 	readonly onFocusCanvas: () => void;
 }
 
@@ -88,6 +89,7 @@ export function ProductionBayModulePanel({
 	placementPending,
 	onRequestChange,
 	onClose,
+	onCancel,
 	onFocusCanvas,
 }: ProductionBayModulePanelProps): React.ReactElement {
 	const titleId = useId();
@@ -311,7 +313,7 @@ export function ProductionBayModulePanel({
 					</strong>
 					<small>{error ?? "LMB place · R rotate · Esc cancel"}</small>
 				</span>
-				<button type="button" className="tilefab-production-bay-cancel" onClick={onClose}>
+				<button type="button" className="tilefab-production-bay-cancel" onClick={onCancel}>
 					CANCEL
 				</button>
 				<button

@@ -414,6 +414,8 @@ describe("RailPatchMirror", () => {
 			ports: 0,
 			equipmentGroups: 0,
 			organizations: 0,
+			assemblyRelationships: 0,
+			assemblyRelationshipNextId: 1,
 			operationalConfigurationRevision: 0,
 			operationalConfigurationFingerprint: checksumOperationalConfigurationState(
 				emptyOperationalConfigurationState(),
@@ -1616,6 +1618,9 @@ describe("RailPatchMirror", () => {
 			organizationChanges: [{ id: unrelatedBay.id, before: null, after: unrelatedBay }],
 			organizationNextIdBefore: 2,
 			organizationNextIdAfter: 3,
+			relationshipChanges: [],
+			relationshipNextIdBefore: 1,
+			relationshipNextIdAfter: 1,
 		};
 
 		expect(() => mirror.applyPatch(patch)).toThrow("AREA-1");
@@ -1659,12 +1664,20 @@ describe("RailPatchMirror", () => {
 
 function emptyOrganizationPatch(): Pick<
 	RailPatchEvent,
-	"organizationChanges" | "organizationNextIdBefore" | "organizationNextIdAfter"
+	| "organizationChanges"
+	| "organizationNextIdBefore"
+	| "organizationNextIdAfter"
+	| "relationshipChanges"
+	| "relationshipNextIdBefore"
+	| "relationshipNextIdAfter"
 > {
 	return {
 		organizationChanges: [],
 		organizationNextIdBefore: 1,
 		organizationNextIdAfter: 1,
+		relationshipChanges: [],
+		relationshipNextIdBefore: 1,
+		relationshipNextIdAfter: 1,
 	};
 }
 

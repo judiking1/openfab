@@ -1,6 +1,7 @@
 import { validateAdvancedSwitchTopology } from "../core/AdvancedSwitch";
 import type { PortEquipmentState } from "../core/EquipmentGroup";
 import { RailDocument } from "../core/RailDocument";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { StaticFabOrganizationDiagnosticState } from "../core/StaticFabOrganizationIssues";
 import { TileMap } from "../core/TileMap";
@@ -14,6 +15,7 @@ import {
 	checksumRailMirrorSnapshotDiagnostic,
 	type RailMirrorSnapshot,
 } from "./RailMirrorChecksum";
+import { hydrateStaticFabAssemblyRelationshipSnapshot } from "./StaticFabAssemblyRelationshipSoA";
 import {
 	hydrateStaticFabOrganizationDiagnosticSnapshot,
 	hydrateStaticFabOrganizationSnapshot,
@@ -24,6 +26,7 @@ export interface RailMirrorDiagnosticSource {
 	readonly sequence: number;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationDiagnosticState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 /**
@@ -71,6 +74,7 @@ export function hydrateRailMirrorSnapshotDiagnosticSource(
 		sequence: snapshot.sequence,
 		portEquipment: hydratePortEquipmentSnapshotRecords(snapshot.portEquipment),
 		organizations: hydrateStaticFabOrganizationDiagnosticSnapshot(snapshot.organizations),
+		relationships: hydrateStaticFabAssemblyRelationshipSnapshot(snapshot.relationships),
 	});
 }
 
@@ -93,5 +97,7 @@ export function hydrateRailMirrorSnapshotDocument(snapshot: RailMirrorSnapshot):
 		source.sequence,
 		source.portEquipment,
 		organizations,
+		undefined,
+		source.relationships,
 	);
 }

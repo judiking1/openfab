@@ -38,6 +38,11 @@ import {
 	type RailModuleOwnershipIndex,
 } from "../core/RailModuleOwnership";
 import {
+	type StaticFabAssemblyRelationshipStateV1,
+	staticFabAssemblyRelationshipRecordEquals,
+} from "../core/StaticFabAssemblyRelationship";
+import { validateStaticFabAssemblyRelationshipActivation } from "../core/StaticFabAssemblyRelationshipActivation";
+import {
 	type StaticFabOrganizationState,
 	staticFabOrganizationRecordEquals,
 } from "../core/StaticFabOrganization";
@@ -84,6 +89,12 @@ export interface RailEditorStartupModel {
 	readonly operationalConfiguration: OperationalConfigurationState;
 	/** Immutable authored generation paired with every derived buffer in this model. */
 	readonly map: TileMap;
+	/** Immutable authored equipment generation paired with the same physical layout. */
+	readonly portEquipment: PortEquipmentState;
+	/** Immutable authored organization generation paired with the same ownership index. */
+	readonly organizations: StaticFabOrganizationState;
+	/** Immutable authored relationship generation paired with the same mirror checksum. */
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly authoredChecksum: string;
 	readonly ownership: RailModuleOwnershipIndex;
 	readonly analysis: RailNetworkAnalysis;
@@ -154,6 +165,7 @@ interface RailStartupMirrorSnapshotAuthority {
 	readonly map: TileMap;
 	readonly portEquipment: RailDocument["portEquipment"];
 	readonly organizations: RailDocument["organizations"];
+	readonly relationships: RailDocument["relationships"];
 	readonly sequence: number;
 	readonly revision: number;
 	readonly mutationGeneration: number;
@@ -162,6 +174,7 @@ interface RailStartupMirrorSnapshotAuthority {
 	readonly nextPortId: number;
 	readonly nextEquipmentGroupId: number;
 	readonly nextOrganizationId: number;
+	readonly nextRelationshipId: number;
 	readonly snapshotValidationAuthority: ValidatedRailStartupSnapshotAuthority;
 }
 
@@ -224,6 +237,7 @@ export async function prepareRailEditorStartupCandidate(
 				authority.map,
 				authority.portEquipment,
 				authority.organizations,
+				authority.relationships,
 			);
 			if (!mirrorSnapshot) {
 				throw new Error("Rail startup mirror snapshot authority is missing, foreign, or stale.");
@@ -331,7 +345,7 @@ async function activateRailEditorStartupInternal(
 		checkCancelled,
 		RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
 	);
-	const { map, portEquipment, organizations } = snapshotActivation;
+	const { map, portEquipment, organizations, relationships } = snapshotActivation;
 	let releasedSnapshot: RailMirrorSnapshot | null = null;
 	if (!retainMirrorSnapshotAuthority) {
 		releasedSnapshot = releaseValidatedRailStartupSnapshotForFullValidation(
@@ -339,6 +353,7 @@ async function activateRailEditorStartupInternal(
 			map,
 			portEquipment,
 			organizations,
+			relationships,
 		);
 		if (releasedSnapshot === null) {
 			throw new Error("Rail startup snapshot release authority is missing, foreign, or stale.");
@@ -355,6 +370,7 @@ async function activateRailEditorStartupInternal(
 			map,
 			portEquipment,
 			organizations,
+			relationships,
 			yieldIfNeeded,
 			checkCancelled,
 		);
@@ -362,6 +378,8 @@ async function activateRailEditorStartupInternal(
 	const publishedMap = publicationDocument?.map ?? map;
 	const publishedPortEquipment = publicationDocument?.portEquipment ?? portEquipment;
 	const publishedOrganizations = publicationDocument?.organizations ?? organizations;
+	const publishedRelationships = publicationDocument?.relationships ?? relationships;
+	const publicationMutationGeneration = publishedMap.getMutationGeneration();
 	await yieldIfNeeded(true);
 	currentPhase = "ownership-activation";
 	bindValidatedCompiledPhysicalLayoutSource(derivedBuffers.physical, publishedMap);
@@ -396,7 +414,31 @@ async function activateRailEditorStartupInternal(
 		RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
 	);
 	await yieldIfNeeded();
+	currentPhase = "relationship-activation";
+	const relationshipActivation = await validateStaticFabAssemblyRelationshipActivation(
+		publishedMap,
+		publishedPortEquipment,
+		publishedOrganizations,
+		publishedRelationships,
+		ownership,
+		organizationActivation,
+		yieldIfNeeded,
+		RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
+	);
+	await yieldIfNeeded();
 	currentPhase = "document-publication";
+	if (
+		publicationDocument &&
+		(publicationDocument.map !== publishedMap ||
+			publicationDocument.portEquipment !== publishedPortEquipment ||
+			publicationDocument.organizations !== publishedOrganizations ||
+			publicationDocument.relationships !== publishedRelationships ||
+			publicationDocument.getPatchSequence() !== snapshotActivation.sequence ||
+			publishedMap.getRevision() !== snapshotActivation.revision ||
+			publishedMap.getMutationGeneration() !== publicationMutationGeneration)
+	) {
+		throw new Error("Rail startup publication document changed during activation.");
+	}
 	const operationalConfiguration =
 		sourceOperationalConfiguration ??
 		publicationDocument?.operationalConfiguration ??
@@ -420,6 +462,8 @@ async function activateRailEditorStartupInternal(
 			portEquipmentActivation,
 			organizationActivation,
 			operationalConfiguration,
+			relationships,
+			relationshipActivation,
 		);
 	checkCancelled();
 	const finalSlice = Math.max(0, scheduler.now() - sliceStartedAt);
@@ -432,6 +476,9 @@ async function activateRailEditorStartupInternal(
 			document,
 			operationalConfiguration: document.operationalConfiguration,
 			map: publishedMap,
+			portEquipment: publishedPortEquipment,
+			organizations: publishedOrganizations,
+			relationships: publishedRelationships,
 			authoredChecksum: derivedBuffers.authoredChecksum,
 			ownership,
 			analysis: derivedBuffers.analysis,
@@ -457,6 +504,7 @@ async function activateRailEditorStartupInternal(
 				map,
 				portEquipment,
 				organizations,
+				relationships,
 				sequence: snapshotActivation.sequence,
 				revision: snapshotActivation.revision,
 				mutationGeneration: snapshotActivation.mutationGeneration,
@@ -465,6 +513,7 @@ async function activateRailEditorStartupInternal(
 				nextPortId: snapshotActivation.nextPortId,
 				nextEquipmentGroupId: snapshotActivation.nextEquipmentGroupId,
 				nextOrganizationId: snapshotActivation.nextOrganizationId,
+				nextRelationshipId: snapshotActivation.nextRelationshipId,
 				snapshotValidationAuthority: snapshotActivation.authority,
 			}),
 		);
@@ -478,12 +527,14 @@ async function validateRailStartupPublicationDocumentCooperatively(
 	hydratedMap: TileMap,
 	hydratedPortEquipment: PortEquipmentState,
 	hydratedOrganizations: StaticFabOrganizationState,
+	hydratedRelationships: StaticFabAssemblyRelationshipStateV1,
 	checkpoint: () => Promise<void>,
 	checkCancelled: () => void,
 ): Promise<void> {
 	const map = document.map;
 	const portEquipment = document.portEquipment;
 	const organizations = document.organizations;
+	const relationships = document.relationships;
 	const sequence = document.getPatchSequence();
 	const mutationGeneration = map.getMutationGeneration();
 	if (
@@ -498,7 +549,9 @@ async function validateRailStartupPublicationDocumentCooperatively(
 		portEquipment.ports.length !== hydratedPortEquipment.ports.length ||
 		portEquipment.equipmentGroups.length !== hydratedPortEquipment.equipmentGroups.length ||
 		organizations.nextOrganizationId !== hydratedOrganizations.nextOrganizationId ||
-		organizations.records.length !== hydratedOrganizations.records.length
+		organizations.records.length !== hydratedOrganizations.records.length ||
+		relationships.nextRelationshipId !== hydratedRelationships.nextRelationshipId ||
+		relationships.records.length !== hydratedRelationships.records.length
 	) {
 		throw new Error("Rail startup publication document does not match the validated snapshot.");
 	}
@@ -547,11 +600,23 @@ async function validateRailStartupPublicationDocumentCooperatively(
 		}
 		if ((index & 127) === 127) await checkpoint();
 	}
+	for (let index = 0; index < relationships.records.length; index++) {
+		if (
+			!staticFabAssemblyRelationshipRecordEquals(
+				relationships.records[index],
+				hydratedRelationships.records[index],
+			)
+		) {
+			throw new Error("Rail startup publication relationships differ from the validated snapshot.");
+		}
+		if ((index & 127) === 127) await checkpoint();
+	}
 	checkCancelled();
 	if (
 		document.map !== map ||
 		document.portEquipment !== portEquipment ||
 		document.organizations !== organizations ||
+		document.relationships !== relationships ||
 		document.getPatchSequence() !== sequence ||
 		map.getRevision() !== snapshot.revision ||
 		map.getMutationGeneration() !== mutationGeneration
@@ -574,6 +639,7 @@ function consumeStartupMirrorSnapshotAuthority(
 		model.document.map !== authority.map ||
 		model.document.portEquipment !== authority.portEquipment ||
 		model.document.organizations !== authority.organizations ||
+		model.document.relationships !== authority.relationships ||
 		model.document.getPatchSequence() !== authority.sequence ||
 		authority.map.getRevision() !== authority.revision ||
 		authority.map.getMutationGeneration() !== authority.mutationGeneration ||
@@ -581,7 +647,8 @@ function consumeStartupMirrorSnapshotAuthority(
 		model.authoredChecksum !== authority.checksum ||
 		authority.portEquipment.nextPortId !== authority.nextPortId ||
 		authority.portEquipment.nextEquipmentGroupId !== authority.nextEquipmentGroupId ||
-		authority.organizations.nextOrganizationId !== authority.nextOrganizationId
+		authority.organizations.nextOrganizationId !== authority.nextOrganizationId ||
+		authority.relationships.nextRelationshipId !== authority.nextRelationshipId
 	) {
 		throw new Error("Rail startup mirror snapshot authority is missing, foreign, or stale.");
 	}
@@ -842,6 +909,7 @@ async function adoptStartupBuffers(
 			switchRecords: sourceSnapshot.switchRecords,
 			portEquipment: sourceSnapshot.portEquipment,
 			organizations: sourceSnapshot.organizations,
+			relationships: sourceSnapshot.relationships,
 			checksum: sourceSnapshot.checksum,
 		},
 		analysis: payload.analysis.value,

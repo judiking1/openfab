@@ -69,6 +69,10 @@ beforeAll(() => {
 describe("OpenFabFabPreparedProjectArtifact", () => {
 	it("rebinds a manifest-neutral source while hiding its transferable snapshot", () => {
 		const fixture = transferableFixture();
+		expect(OPENFAB_FAB_PREPARED_PROJECT_VERSION).toBe(2);
+		expect(OPENFAB_FAB_PREPARED_PROJECT_PROTOCOL_VERSION).toBe(2);
+		expect(fixture.prepared.version).toBe(2);
+		expect(fixture.attestation.version).toBe(2);
 		const prepared = rebindTransferableOpenFabFabPreparedProject(
 			fixture.prepared,
 			fixture.attestation,
@@ -147,6 +151,19 @@ describe("OpenFabFabPreparedProjectArtifact", () => {
 				bankRepetitionAxis: "NORTH_SOUTH",
 			}),
 		).toThrow(/profile/i);
+	});
+
+	it("rejects a relationship-producing prepared source before producer activation", () => {
+		const fixture = transferableFixture();
+		(
+			fixture.prepared.snapshot.relationships as unknown as {
+				nextRelationshipId: number;
+			}
+		).nextRelationshipId = 2;
+
+		expect(() =>
+			rebindTransferableOpenFabFabPreparedProject(fixture.prepared, fixture.attestation, PROFILE),
+		).toThrow(/producer-free/i);
 	});
 
 	it.each([

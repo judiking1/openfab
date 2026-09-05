@@ -19,7 +19,10 @@ export interface GuidedBuildFirstRunEvidence {
 }
 
 export type GuidedBuildFirstRunDecision =
-	| { readonly action: "open"; readonly reason: "FIRST_SAFE_EMPTY_SESSION" }
+	| {
+			readonly action: "open";
+			readonly reason: "FIRST_SAFE_EMPTY_SESSION" | "FIRST_SAFE_EMPTY_SESSION_WITH_RECOVERY";
+	  }
 	| { readonly action: "wait"; readonly reason: GuidedBuildFirstRunWaitReason }
 	| { readonly action: "suppress"; readonly reason: GuidedBuildFirstRunSuppressReason };
 
@@ -34,7 +37,6 @@ export type GuidedBuildFirstRunSuppressReason =
 	| "ALREADY_CONSIDERED"
 	| "PREFERENCES_UNAVAILABLE"
 	| "ENTRY_ALREADY_CHOSEN"
-	| "RECOVERY_AVAILABLE"
 	| "RETURNING_PROJECTS_AVAILABLE"
 	| "AUTHORED_PROJECT_ACTIVE"
 	| "BLOCKING_SURFACE_ACTIVE"
@@ -59,7 +61,6 @@ export function evaluateGuidedBuildFirstRun(
 	if (!evidence.recentLookupComplete || !evidence.recoveryLookupComplete) {
 		return decision("wait", "PROJECT_METADATA_PENDING");
 	}
-	if (evidence.hasRecoveryProject) return decision("suppress", "RECOVERY_AVAILABLE");
 	if (evidence.recentProjectCount > 0) {
 		return decision("suppress", "RETURNING_PROJECTS_AVAILABLE");
 	}
@@ -74,7 +75,12 @@ export function evaluateGuidedBuildFirstRun(
 	if (evidence.scaleAcceptanceActive) {
 		return decision("suppress", "SCALE_ACCEPTANCE_ACTIVE");
 	}
-	return decision("open", "FIRST_SAFE_EMPTY_SESSION");
+	return decision(
+		"open",
+		evidence.hasRecoveryProject
+			? "FIRST_SAFE_EMPTY_SESSION_WITH_RECOVERY"
+			: "FIRST_SAFE_EMPTY_SESSION",
+	);
 }
 
 function decision<

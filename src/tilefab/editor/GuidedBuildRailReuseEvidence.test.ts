@@ -22,6 +22,8 @@ describe("analyzeGuidedBuildRailReuse", () => {
 		expect(analyzeGuidedBuildRailReuse(document.map)).toEqual({
 			weakComponentCount: 2,
 			networkLinkSupportedComponentCount: 0,
+			longestStraightRunMeters: 8,
+			closedStrongComponentCount: 2,
 			repeatedComponentKindCount: 1,
 			repeatedComponentCopyCount: 2,
 		});
@@ -44,6 +46,8 @@ describe("analyzeGuidedBuildRailReuse", () => {
 		expect(analyzeGuidedBuildRailReuse(map)).toEqual({
 			weakComponentCount: 2,
 			networkLinkSupportedComponentCount: 0,
+			longestStraightRunMeters: 12,
+			closedStrongComponentCount: 2,
 			repeatedComponentKindCount: 0,
 			repeatedComponentCopyCount: 0,
 		});
@@ -57,6 +61,8 @@ describe("analyzeGuidedBuildRailReuse", () => {
 		expect(analyzeGuidedBuildRailReuse(map)).toEqual({
 			weakComponentCount: 2,
 			networkLinkSupportedComponentCount: 0,
+			longestStraightRunMeters: 0,
+			closedStrongComponentCount: 0,
 			repeatedComponentKindCount: 0,
 			repeatedComponentCopyCount: 0,
 		});
@@ -69,6 +75,24 @@ describe("analyzeGuidedBuildRailReuse", () => {
 		expect(analyzeGuidedBuildRailReuse(document.map)).toEqual({
 			weakComponentCount: 1,
 			networkLinkSupportedComponentCount: 1,
+			longestStraightRunMeters: 15,
+			closedStrongComponentCount: 1,
+			repeatedComponentKindCount: 0,
+			repeatedComponentCopyCount: 0,
+		});
+	});
+
+	it("recognizes a detached 15 m open draft as valid first-rail support", () => {
+		const document = new RailDocument();
+		const plan = planRailConstruction(document.map, { x: 0, y: 0 }, { x: 15, y: 0 });
+		expect(plan.valid).toBe(true);
+		expect(document.commit(plan)).toBe(true);
+
+		expect(analyzeGuidedBuildRailReuse(document.map)).toEqual({
+			weakComponentCount: 1,
+			networkLinkSupportedComponentCount: 1,
+			longestStraightRunMeters: 15,
+			closedStrongComponentCount: 0,
 			repeatedComponentKindCount: 0,
 			repeatedComponentCopyCount: 0,
 		});

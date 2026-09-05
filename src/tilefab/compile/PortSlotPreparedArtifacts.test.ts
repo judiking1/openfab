@@ -3,10 +3,16 @@ import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import { DIR_E, DIR_W } from "../core/railShape";
 import { encodeRailCell, TileMap } from "../core/TileMap";
+import { createRailEquipmentScaleProbeDocument } from "../worker/RailStartupFixture";
 import { collectTransferableBuffers } from "../worker/TransferableBuffers";
 import { PATH_INTERVAL_MAPPING_KIND } from "./CompoundPhysicalPath";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
-import { PORT_SLOT_STATUS, PortSlotSpatialIndex } from "./PortSlotCompiler";
+import { compilePortEquipmentPresentation } from "./PortEquipmentPresentation";
+import {
+	PORT_SLOT_STATUS,
+	PortSlotAvailabilityIndex,
+	PortSlotSpatialIndex,
+} from "./PortSlotCompiler";
 import {
 	adoptAndValidatePortSlotPreparedArtifactCatalogCooperatively,
 	checksumPortSlotPreparedArtifactCatalog,
@@ -221,6 +227,49 @@ describe("PortSlotPreparedArtifacts", () => {
 				document.portEquipment,
 			),
 		).toThrow("physical-layout identity");
+	});
+
+	it("reuses exact resolved port positions through an unforgeable source capability", () => {
+		const document = createRailEquipmentScaleProbeDocument(8);
+		const layout = compilePhysicalRail(document.map);
+		const artifacts = compilePortSlotPreparedArtifactCatalog(layout).EQ;
+		const presentation = compilePortEquipmentPresentation(layout, document.portEquipment);
+		const availability = createPreparedPortSlotAvailabilityIndex(
+			layout,
+			artifacts,
+			document.portEquipment,
+			presentation.resolvedPositions,
+		);
+		const row = artifacts.slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL);
+		expect(row).toBeGreaterThanOrEqual(0);
+		const fallback = new PortSlotAvailabilityIndex(layout, document.portEquipment, "EQ");
+		expect(availability.statusFor(artifacts.slots, row)).toEqual(
+			fallback.statusFor(artifacts.slots, row),
+		);
+
+		presentation.worldPositions[0] += 100;
+		const afterRenderMutation = createPreparedPortSlotAvailabilityIndex(
+			layout,
+			artifacts,
+			document.portEquipment,
+			presentation.resolvedPositions,
+		);
+		expect(afterRenderMutation.statusFor(artifacts.slots, row)).toEqual(
+			fallback.statusFor(artifacts.slots, row),
+		);
+		expect(() =>
+			createPreparedPortSlotAvailabilityIndex(layout, artifacts, document.portEquipment, {
+				...presentation.resolvedPositions,
+			}),
+		).toThrow("not certified");
+		expect(() =>
+			createPreparedPortSlotAvailabilityIndex(
+				layout,
+				artifacts,
+				{ ...document.portEquipment, ports: [...document.portEquipment.ports] },
+				presentation.resolvedPositions,
+			),
+		).toThrow("not certified");
 	});
 
 	it("validates every prepared STK span row before deriving a body conflict", () => {

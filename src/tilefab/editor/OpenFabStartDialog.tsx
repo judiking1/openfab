@@ -1,28 +1,38 @@
-import { Check, Factory, GraduationCap, MousePointer2, X } from "lucide-react";
+import { Check, Factory, FolderClock, GraduationCap, MousePointer2, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef } from "react";
 
 export interface OpenFabStartDialogProps {
 	readonly busy?: boolean;
 	readonly returnFocus?: HTMLElement | null;
+	readonly recovery?: Readonly<{
+		readonly projectName: string;
+		readonly totalCount: number;
+	}> | null;
 	readonly onGuidedBuild: () => void;
 	readonly onVerifiedTemplate: () => void;
 	readonly onBlankCanvas: () => void;
+	readonly onResumeRecovery?: () => void;
+	readonly onReviewRecovery?: () => void;
 	readonly onClose: () => void;
 }
 
 export function OpenFabStartDialog({
 	busy = false,
 	returnFocus = null,
+	recovery = null,
 	onGuidedBuild,
 	onVerifiedTemplate,
 	onBlankCanvas,
+	onResumeRecovery,
+	onReviewRecovery,
 	onClose,
 }: OpenFabStartDialogProps): React.ReactElement {
 	const dialogRef = useRef<HTMLElement | null>(null);
 	const guidedButtonRef = useRef<HTMLButtonElement | null>(null);
+	const recoveryButtonRef = useRef<HTMLButtonElement | null>(null);
 
 	useEffect(() => {
-		guidedButtonRef.current?.focus({ preventScroll: true });
+		(recoveryButtonRef.current ?? guidedButtonRef.current)?.focus({ preventScroll: true });
 		return () => returnFocus?.focus({ preventScroll: true });
 	}, [returnFocus]);
 
@@ -88,9 +98,35 @@ export function OpenFabStartDialog({
 					</button>
 				</header>
 				<p id="openfab-start-description">
-					처음이라면 Guided Build로 첫 정적 FAB를 완성하세요. 같은 프로젝트와 편집 명령으로 레일부터
-					검증·저장까지 이어집니다.
+					{recovery
+						? "저장되지 않은 작업의 로컬 복구본이 있습니다. 이어서 열거나 새 FAB를 시작하세요. 새로 시작해도 복구본은 자동으로 삭제되지 않습니다."
+						: "처음이라면 Guided Build로 첫 정적 FAB를 완성하세요. 같은 프로젝트와 편집 명령으로 레일부터 검증·저장까지 이어집니다."}
 				</p>
+				{recovery && onResumeRecovery && onReviewRecovery ? (
+					<section className="tilefab-openfab-start-recovery" aria-label="복구본 이어하기">
+						<FolderClock size={20} />
+						<span>
+							<strong>복구본 이어하기</strong>
+							<small>
+								“{recovery.projectName}” · 최신 복구본 · 전체 {recovery.totalCount.toLocaleString()}
+								개
+							</small>
+						</span>
+						<div>
+							<button
+								ref={recoveryButtonRef}
+								type="button"
+								disabled={busy}
+								onClick={onResumeRecovery}
+							>
+								최신 복구본 이어하기
+							</button>
+							<button type="button" disabled={busy} onClick={onReviewRecovery}>
+								다른 복구본 보기
+							</button>
+						</div>
+					</section>
+				) : null}
 				<div className="tilefab-openfab-start-options">
 					<button
 						ref={guidedButtonRef}

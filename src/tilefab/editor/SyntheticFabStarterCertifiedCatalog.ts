@@ -357,17 +357,17 @@ const SHIPPED_ARTIFACT_SOURCE_IMPORTERS: Readonly<
 	Record<SyntheticFabStarterCertifiedArtifactId, ShippedArtifactSourceImporter>
 > = Object.freeze({
 	[SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID]: () =>
-		import("../generated/synthetic-fab-presets/large-fab-60.default.v1.json?raw"),
+		import("../generated/synthetic-fab-presets/large-fab-60.default.v2.json?raw"),
 	[PAIRED_CIRCULATION_FAB_STARTER_CERTIFIED_ARTIFACT_ID]: () =>
-		import("../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v2.json?raw"),
+		import("../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v3.json?raw"),
 	[FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID]: () =>
-		import("../generated/synthetic-fab-presets/full-fab-52.default.v1.json?raw"),
+		import("../generated/synthetic-fab-presets/full-fab-52.default.v2.json?raw"),
 	[PARALLEL_HALL_FAB_STARTER_CERTIFIED_ARTIFACT_ID]: () =>
-		import("../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v1.json?raw"),
+		import("../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v2.json?raw"),
 	[CENTRAL_SPINE_FAB_STARTER_CERTIFIED_ARTIFACT_ID]: () =>
-		import("../generated/synthetic-fab-presets/central-spine-fab-24.default.v1.json?raw"),
+		import("../generated/synthetic-fab-presets/central-spine-fab-24.default.v2.json?raw"),
 	[PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID]: () =>
-		import("../generated/synthetic-fab-presets/production-fab-60.default.v1.json?raw"),
+		import("../generated/synthetic-fab-presets/production-fab-60.default.v2.json?raw"),
 });
 
 function metadata(

@@ -132,7 +132,7 @@ describe("StkDraftSelector", () => {
 		expect(selection.canComplete, selection.reason).toBe(true);
 	});
 
-	it("rejects a sparse FLEX span that crosses an existing STK reservation", () => {
+	it("rejects a sparse FLEX span that crosses an existing equipment reservation", () => {
 		const document = straightDocument();
 		const physical = compilePhysicalRail(document.map);
 		const slots = compilePortSlotPreparedArtifactCatalog(physical).STK.slots;
@@ -164,7 +164,46 @@ describe("StkDraftSelector", () => {
 
 		expect(selection.valid).toBe(false);
 		expect(selection.canComplete).toBe(false);
-		expect(selection.reason).toContain("STK-1 예약 구간");
+		expect(selection.reason).toBe(
+			"선택한 Port 사이가 기존 장비 그룹 #1의 Port 구간을 가로지릅니다",
+		);
+	});
+
+	it("does not mislabel an OHB Port interval as an existing STK reservation", () => {
+		const document = straightDocument();
+		const physical = compilePhysicalRail(document.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).STK.slots;
+		const occupied: PortEquipmentState = {
+			nextPortId: 2,
+			nextEquipmentGroupId: 2,
+			ports: [
+				{
+					id: 1,
+					equipmentGroupId: 1,
+					route: { kind: "CARDINAL_CELL", x: 4, z: 0, from: DIR_W, to: DIR_E },
+					stationMillimeters: 500,
+					side: "LEFT",
+					lateralOffsetMillimeters: 1_000,
+					direction: "WITH_TRAVEL",
+					portType: "OHB",
+					barcode: "OHB-1-P01",
+				},
+			],
+			equipmentGroups: [{ id: 1, kind: "OHB", template: "SINGLE", portIds: [1] }],
+		};
+
+		const selection = evaluateStkDraftSelection(
+			slots,
+			new PortSlotAvailabilityIndex(physical, occupied, "STK"),
+			[rowAt(slots, 2, 0), rowAt(slots, 6, 0)],
+			"FLEX",
+		);
+
+		expect(selection.valid).toBe(false);
+		expect(selection.reason).toBe(
+			"선택한 Port 사이가 기존 장비 그룹 #1의 Port 구간을 가로지릅니다",
+		);
+		expect(selection.reason).not.toContain("STK-1");
 	});
 
 	it("can reselect the source STK group without ignoring other groups", () => {
@@ -240,7 +279,7 @@ describe("StkDraftSelector", () => {
 
 		expect(selection.valid).toBe(false);
 		expect(selection.canComplete).toBe(false);
-		expect(selection.reason).toContain("STK-7 예약 구간");
+		expect(selection.reason).toContain("장비 그룹 #7의 Port 구간");
 	});
 
 	it("names the existing FLEX group selected directly as a new STK port", () => {
@@ -281,7 +320,7 @@ describe("StkDraftSelector", () => {
 		);
 
 		expect(selection.valid).toBe(false);
-		expect(selection.reason).toBe("이미 STK 포트 #1이 이 슬롯을 사용하고 있습니다");
+		expect(selection.reason).toBe("이미 Port #1이 이 슬롯을 사용하고 있습니다");
 	});
 
 	it("completes one FLEX group across perpendicular rails and distant Bays", () => {

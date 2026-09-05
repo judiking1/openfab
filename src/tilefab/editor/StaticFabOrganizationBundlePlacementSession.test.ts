@@ -11,7 +11,10 @@ import {
 	captureStaticFabOrganizationBundle,
 	type StaticFabOrganizationBundle,
 } from "../core/StaticFabOrganizationBundle";
-import { StaticFabOrganizationBundlePlacementSession } from "./StaticFabOrganizationBundlePlacementSession";
+import {
+	organizationBundleOutsideMapPlacementAnchors,
+	StaticFabOrganizationBundlePlacementSession,
+} from "./StaticFabOrganizationBundlePlacementSession";
 
 describe("StaticFabOrganizationBundlePlacementSession", () => {
 	it("prepares an untrusted bundle once and exposes immutable placement metadata", () => {
@@ -61,6 +64,7 @@ describe("StaticFabOrganizationBundlePlacementSession", () => {
 		const initial = new StaticFabOrganizationBundlePlacementSession(mutableBundleFixture(), {
 			label: "Reusable Bay",
 			origin: "selection-copy",
+			sourceRootOrganizationIds: [19],
 		});
 		const clockwise = initial.rotate(1);
 		const upsideDown = clockwise.rotate(1);
@@ -99,6 +103,8 @@ describe("StaticFabOrganizationBundlePlacementSession", () => {
 		expect(counterClockwise.bundle).toBe(initial.bundle);
 		expect(clockwise.label).toBe(initial.label);
 		expect(clockwise.origin).toBe(initial.origin);
+		expect(clockwise.sourceRootOrganizationIds).toEqual([19]);
+		expect(Object.isFrozen(clockwise.sourceRootOrganizationIds)).toBe(true);
 	});
 
 	it("derives an integer bundle origin that keeps every rotation centered on the pointer", () => {
@@ -129,10 +135,13 @@ describe("StaticFabOrganizationBundlePlacementSession", () => {
 			label: "Aligned Bay Copy",
 			origin: "selection-copy",
 			sourceBounds: { minX: 10, minY: -20, maxX: 15, maxY: -20 },
+			sourceRootOrganizationIds: [7],
 		});
 
 		expect(session.sourceBounds).toEqual({ minX: 10, minY: -20, maxX: 15, maxY: -20 });
 		expect(Object.isFrozen(session.sourceBounds)).toBe(true);
+		expect(session.sourceRootOrganizationIds).toEqual([7]);
+		expect(Object.isFrozen(session.sourceRootOrganizationIds)).toBe(true);
 		const [right, left, below, above] = session.adjacentPlacementAnchors();
 		expect(right).toEqual({ x: 24, y: -20 });
 		expect(left).toEqual({ x: -4, y: -20 });
@@ -155,6 +164,32 @@ describe("StaticFabOrganizationBundlePlacementSession", () => {
 
 		const rotated = session.rotate(1);
 		expect(rotated.sourceBounds).toEqual(session.sourceBounds);
+		expect(rotated.sourceRootOrganizationIds).toEqual(session.sourceRootOrganizationIds);
+	});
+
+	it("offers four frozen, gapped candidates outside a non-empty map for source-free presets", () => {
+		const placementBounds = { minX: -2, minY: -1, maxX: 8, maxY: 5 };
+		const candidates = organizationBundleOutsideMapPlacementAnchors(
+			{ minX: -10, minY: 20, maxX: 30, maxY: 60 },
+			placementBounds,
+		);
+
+		expect(candidates).toEqual([
+			{ x: 41, y: 38 },
+			{ x: -27, y: 38 },
+			{ x: 7, y: 70 },
+			{ x: 7, y: 6 },
+		]);
+		expect(Object.isFrozen(candidates)).toBe(true);
+		expect(candidates.every(Object.isFrozen)).toBe(true);
+		expect(organizationBundleOutsideMapPlacementAnchors(null, placementBounds)).toEqual([]);
+		expect(
+			organizationBundleOutsideMapPlacementAnchors(
+				{ minX: 0, minY: 0, maxX: 0, maxY: 0 },
+				placementBounds,
+				-1,
+			),
+		).toEqual([]);
 	});
 
 	it("rejects invalid untrusted bundles, orientations, labels, and rotation deltas", () => {
@@ -191,6 +226,22 @@ describe("StaticFabOrganizationBundlePlacementSession", () => {
 					sourceBounds: { minX: 2, minY: 0, maxX: 1, maxY: 1 },
 				}),
 		).toThrow(/source bounds/);
+		expect(
+			() =>
+				new StaticFabOrganizationBundlePlacementSession(mutableBundleFixture(), {
+					label: "Invalid source roots",
+					origin: "selection-copy",
+					sourceRootOrganizationIds: [1, 1],
+				}),
+		).toThrow(/source root IDs/);
+		expect(
+			() =>
+				new StaticFabOrganizationBundlePlacementSession(mutableBundleFixture(), {
+					label: "Invalid source root",
+					origin: "selection-copy",
+					sourceRootOrganizationIds: [0],
+				}),
+		).toThrow(/source root IDs/);
 
 		const session = new StaticFabOrganizationBundlePlacementSession(mutableBundleFixture(), {
 			label: "Valid",

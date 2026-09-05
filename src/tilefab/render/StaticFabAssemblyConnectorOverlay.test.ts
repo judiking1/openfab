@@ -237,6 +237,40 @@ describe("Static FAB Assembly Connector Canvas overlay", () => {
 		);
 		expect(rejectedContext.fillRectStyles).toContain("rgba(255, 69, 82, 0.22)");
 	});
+
+	it("flips target and ready labels inward when their preferred side crosses the viewport", () => {
+		installPath2D();
+		const map = new TileMap();
+		const source = gateway("source", 8, 0, DIR_E, "x");
+		const target = gateway("target", 18, 4, DIR_W, "x");
+		const overlayContext = recordingContext();
+
+		new TileRenderer().render(recordingContext().context, overlayContext.context, {
+			...renderInput(map, null),
+			staticFabAssemblyConnectorOverlay: connectorOverlay({
+				phase: "ready",
+				gateways: [source, target],
+				sourceGatewayId: source.id,
+				targetGatewayId: target.id,
+				plan: connectorPlan(true, source, target),
+			}),
+		});
+
+		for (const label of ["TARGET · W", "CONNECTOR READY"]) {
+			const draw = overlayContext.labelDraws.find((candidate) => candidate.label === label);
+			expect(draw).toBeDefined();
+			expect((draw?.x ?? 400) + label.length * 6).toBeLessThanOrEqual(394);
+		}
+		const sourceDraw = overlayContext.labelDraws.find(
+			(candidate) => candidate.label === "SOURCE · E",
+		);
+		const targetDraw = overlayContext.labelDraws.find(
+			(candidate) => candidate.label === "TARGET · W",
+		);
+		expect((sourceDraw?.x ?? 400) + "SOURCE · E".length * 6).toBeLessThanOrEqual(
+			targetDraw?.x ?? 0,
+		);
+	});
 });
 
 function renderInput(
@@ -413,12 +447,14 @@ function maximumRouteConnectorPlan(
 function recordingContext(): {
 	readonly context: CanvasRenderingContext2D;
 	readonly labels: string[];
+	readonly labelDraws: Array<{ label: string; x: number; y: number }>;
 	readonly arcRadii: number[];
 	readonly fillRectStyles: string[];
 	readonly strokes: Array<{ style: string; width: number }>;
 	readonly transforms: number[][];
 } {
 	const labels: string[] = [];
+	const labelDraws: Array<{ label: string; x: number; y: number }> = [];
 	const arcRadii: number[] = [];
 	const fillRectStyles: string[] = [];
 	const strokes: Array<{ style: string; width: number }> = [];
@@ -426,7 +462,10 @@ function recordingContext(): {
 	const target: Record<PropertyKey, unknown> = {
 		canvas: { width: 400, height: 320 },
 		measureText: (value: string) => ({ width: value.length * 6 }),
-		fillText: (value: string) => labels.push(value),
+		fillText: (value: string, x: number, y: number) => {
+			labels.push(value);
+			labelDraws.push({ label: value, x, y });
+		},
 		arc: (_x: number, _y: number, radius: number) => arcRadii.push(radius),
 		fillRect: () => fillRectStyles.push(String(target.fillStyle ?? "")),
 		transform: (...values: number[]) => transforms.push(values),
@@ -448,6 +487,7 @@ function recordingContext(): {
 			},
 		}) as unknown as CanvasRenderingContext2D,
 		labels,
+		labelDraws,
 		arcRadii,
 		fillRectStyles,
 		strokes,

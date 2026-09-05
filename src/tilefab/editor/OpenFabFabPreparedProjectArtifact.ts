@@ -21,6 +21,10 @@ import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import type { OpenFabProjectManifest } from "../project/OpenFabProject";
 import { validateOpenFabProjectManifest } from "../project/OpenFabProjectCodec";
 import { RailChecksumAccumulator, type RailMirrorSnapshot } from "../worker/RailMirrorChecksum";
+import {
+	staticFabAssemblyRelationshipSnapshotTransfers,
+	validateStaticFabAssemblyRelationshipSnapshotStructure,
+} from "../worker/StaticFabAssemblyRelationshipSoA";
 
 const PREPARED_PROJECT_KEYS = Object.freeze([
 	"kind",
@@ -41,6 +45,7 @@ const SNAPSHOT_KEYS = Object.freeze([
 	"switchRecords",
 	"portEquipment",
 	"organizations",
+	"relationships",
 	"checksum",
 ] as const);
 const SWITCH_RECORD_KEYS = Object.freeze([
@@ -350,7 +355,9 @@ function validateSnapshotEnvelope(
 		digest.portCount !== 0 ||
 		digest.equipmentGroupCount !== 0 ||
 		digest.organizationCount !== identity.counts.organizationRecords ||
-		digest.organizationNextId !== identity.nextOrganizationId
+		digest.organizationNextId !== identity.nextOrganizationId ||
+		digest.assemblyRelationshipCount !== 0 ||
+		digest.assemblyRelationshipNextId !== 1
 	) {
 		throw new Error("Prepared OpenFab Fab project checksum counters do not match its identity.");
 	}
@@ -399,6 +406,14 @@ function validateV1ColumnLengths(
 		throw new Error("Prepared OpenFab Fab project port/equipment columns violate the v1 contract.");
 	}
 	const organizations = snapshot.organizations;
+	if (
+		snapshot.relationships.nextRelationshipId !== 1 ||
+		snapshot.relationships.relationshipIds.length !== 0
+	) {
+		throw new Error(
+			"Prepared OpenFab Fab project relationships violate the producer-free contract.",
+		);
+	}
 	const records = organizations.records;
 	const organizationCount = identity.counts.organizationRecords;
 	if (
@@ -486,6 +501,7 @@ function collectExpectedViews(snapshotValue: unknown): readonly ExpectedView[] {
 	const ports = snapshot.portEquipment.ports;
 	const groups = snapshot.portEquipment.equipmentGroups;
 	const organizations = snapshot.organizations.records;
+	validateStaticFabAssemblyRelationshipSnapshotStructure(snapshot.relationships);
 	return [
 		view(snapshot.xs, Int32Array, "rail xs"),
 		view(snapshot.ys, Int32Array, "rail ys"),
@@ -515,6 +531,9 @@ function collectExpectedViews(snapshotValue: unknown): readonly ExpectedView[] {
 		view(organizations.advancedSwitchIds, Int32Array, "organization switch ids"),
 		view(organizations.equipmentGroupOffsets, Uint32Array, "organization equipment offsets"),
 		view(organizations.equipmentGroupIds, Int32Array, "organization equipment ids"),
+		...staticFabAssemblyRelationshipSnapshotTransfers(snapshot.relationships).map((buffer, index) =>
+			view(new Uint8Array(buffer), Uint8Array, `relationship buffer ${index}`),
+		),
 	];
 }
 
@@ -551,6 +570,9 @@ function deepFreezeSnapshotContainers(snapshot: RailMirrorSnapshot): void {
 	// Do not enumerate/freeze row arrays or typed buffers on main; the transferred source is private.
 	Object.freeze(snapshot.organizations.records);
 	Object.freeze(snapshot.organizations);
+	Object.freeze(snapshot.relationships.records.scopedEdges);
+	Object.freeze(snapshot.relationships.records);
+	Object.freeze(snapshot.relationships);
 	Object.freeze(snapshot);
 }
 

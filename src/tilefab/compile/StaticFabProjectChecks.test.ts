@@ -4,6 +4,10 @@ import { analyzeRailNetwork } from "../core/network";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import { DIR_E, DIR_W } from "../core/railShape";
+import {
+	createStaticFabAssemblyRelationshipState,
+	emptyStaticFabAssemblyRelationshipState,
+} from "../core/StaticFabAssemblyRelationship";
 import { emptyStaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { StaticFabOrganizationDiagnosticState } from "../core/StaticFabOrganizationIssues";
 import type { TileMap } from "../core/TileMap";
@@ -47,6 +51,55 @@ describe("StaticFabProjectChecks", () => {
 		expect(checks.issues).toEqual([]);
 		expect(checks.locationCount).toBe(0);
 		expect(Object.isFrozen(checks)).toBe(true);
+	});
+
+	it("binds the authored relationship allocator generation into diagnostic source identity", () => {
+		const document = closedLoopDocument();
+		const equipment = emptyPortEquipmentState();
+		const organizations = emptyStaticFabOrganizationState();
+		const relationships = createStaticFabAssemblyRelationshipState({
+			nextRelationshipId: 7,
+			records: [],
+		});
+		const checksum = checksumRailMap(document.map, equipment, organizations, relationships);
+		const physical = compilePhysicalRail(document.map, document.map.getRevision());
+		const readiness = createRailProjectReadiness(
+			analyzeRailNetwork(document.map),
+			physical,
+			checksum,
+		);
+		const source: StaticFabProjectChecksSourceIdentity = Object.freeze({
+			revision: document.map.getRevision(),
+			checksum,
+			sequence: 3,
+			nextAdvancedSwitchId: document.map.getAdvancedSwitchIdCursor(),
+			nextPortId: equipment.nextPortId,
+			nextEquipmentGroupId: equipment.nextEquipmentGroupId,
+			nextOrganizationId: organizations.nextOrganizationId,
+		});
+
+		expect(() =>
+			deriveStaticFabProjectChecksSnapshot(
+				document.map,
+				equipment,
+				organizations,
+				relationships,
+				physical,
+				readiness,
+				source,
+			),
+		).not.toThrow();
+		expect(() =>
+			deriveStaticFabProjectChecksSnapshot(
+				document.map,
+				equipment,
+				organizations,
+				emptyStaticFabAssemblyRelationshipState(),
+				physical,
+				readiness,
+				source,
+			),
+		).toThrow(/source content checksum is stale/i);
 	});
 
 	it("surfaces an unreachable port and its equipment consequence with complete locations", () => {
@@ -438,6 +491,7 @@ describe("StaticFabProjectChecks", () => {
 				document.map,
 				malformed,
 				organizations,
+				emptyStaticFabAssemblyRelationshipState(),
 				physical,
 				readiness,
 				source,
@@ -472,6 +526,7 @@ describe("StaticFabProjectChecks", () => {
 				document.map,
 				foreignEquipment,
 				organizations,
+				emptyStaticFabAssemblyRelationshipState(),
 				physical,
 				readiness,
 				source,
@@ -538,6 +593,7 @@ describe("StaticFabProjectChecks", () => {
 				document.map,
 				equipment,
 				organizations,
+				emptyStaticFabAssemblyRelationshipState(),
 				foreignPhysical,
 				readiness,
 				source,
@@ -548,6 +604,7 @@ describe("StaticFabProjectChecks", () => {
 				document.map,
 				equipment,
 				organizations,
+				emptyStaticFabAssemblyRelationshipState(),
 				structuredClone(foreignPhysical),
 				readiness,
 				source,
@@ -772,6 +829,7 @@ function deriveFixture(map: TileMap, equipment: PortEquipmentState, sequence: nu
 			map,
 			equipment,
 			organizations,
+			emptyStaticFabAssemblyRelationshipState(),
 			physical,
 			readiness,
 			source,
@@ -804,6 +862,7 @@ function deriveOrganizationFixture(
 			map,
 			equipment,
 			organizations,
+			emptyStaticFabAssemblyRelationshipState(),
 			physical,
 			readiness,
 			source,

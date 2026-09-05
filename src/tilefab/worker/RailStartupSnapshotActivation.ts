@@ -1,4 +1,8 @@
 import type { PortEquipmentState } from "../core/EquipmentGroup";
+import {
+	assertStaticFabAssemblyRelationshipStateSource,
+	type StaticFabAssemblyRelationshipStateV1,
+} from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import { TileMap } from "../core/TileMap";
 import {
@@ -17,6 +21,7 @@ import {
 	type RailStartupTransportAdoptionAuthority,
 } from "./RailStartupTransportContract";
 import { railMirrorSnapshotTransfers } from "./railMirrorProtocol";
+import { createStaticFabAssemblyRelationshipSnapshotHydrator } from "./StaticFabAssemblyRelationshipSoA";
 import { createStaticFabOrganizationSnapshotHydrator } from "./StaticFabOrganizationSoA";
 import { isTransferableTypedArray } from "./TransferableTypedArray";
 
@@ -29,6 +34,7 @@ export interface ValidatedRailStartupSnapshotActivation {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly authority: ValidatedRailStartupSnapshotAuthority;
 	readonly sequence: number;
 	readonly revision: number;
@@ -38,6 +44,7 @@ export interface ValidatedRailStartupSnapshotActivation {
 	readonly nextPortId: number;
 	readonly nextEquipmentGroupId: number;
 	readonly nextOrganizationId: number;
+	readonly nextRelationshipId: number;
 }
 
 interface ValidatedRailStartupSnapshotBinding {
@@ -49,9 +56,11 @@ interface ValidatedRailStartupSnapshotBinding {
 	readonly switchRecords: RailMirrorSnapshot["switchRecords"];
 	readonly portEquipmentSnapshot: RailMirrorSnapshot["portEquipment"];
 	readonly organizationSnapshot: RailMirrorSnapshot["organizations"];
+	readonly relationshipSnapshot: RailMirrorSnapshot["relationships"];
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly sequence: number;
 	readonly revision: number;
 	readonly mutationGeneration: number;
@@ -60,12 +69,14 @@ interface ValidatedRailStartupSnapshotBinding {
 	readonly nextPortId: number;
 	readonly nextEquipmentGroupId: number;
 	readonly nextOrganizationId: number;
+	readonly nextRelationshipId: number;
 	readonly cellCount: number;
 	readonly edgeCount: number;
 	readonly switchCount: number;
 	readonly portCount: number;
 	readonly equipmentGroupCount: number;
 	readonly organizationCount: number;
+	readonly relationshipCount: number;
 }
 
 const validatedRailStartupSnapshotBindings = new WeakMap<
@@ -176,6 +187,20 @@ export async function validateAndHydrateRailStartupSnapshotCooperatively(
 		await checkpoint();
 	}
 	checksum.setOrganizationNextId(organizations.nextOrganizationId);
+	const relationshipHydrator = createStaticFabAssemblyRelationshipSnapshotHydrator(
+		snapshot.relationships,
+	);
+	while (!relationshipHydrator.done) {
+		const operations = relationshipHydrator.step(operationBudget);
+		if (operations === 0) throw new Error("Relationship startup hydration made no progress.");
+		await checkpoint();
+	}
+	const relationships = relationshipHydrator.finish();
+	for (const record of relationships.records) {
+		await checksum.addAssemblyRelationshipCooperatively(record, checkpoint, operationBudget);
+		await checkpoint();
+	}
+	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 	const actualChecksum = checksum.digest();
 	if (actualChecksum !== snapshot.checksum) {
 		throw new Error(
@@ -183,6 +208,7 @@ export async function validateAndHydrateRailStartupSnapshotCooperatively(
 		);
 	}
 	const map = mapHydrator.finish(snapshot.revision, snapshot.nextAdvancedSwitchId);
+	assertStaticFabAssemblyRelationshipStateSource(map, organizations, relationships);
 	const token = Object.freeze({});
 	validatedRailStartupSnapshotBindings.set(
 		token,
@@ -195,9 +221,11 @@ export async function validateAndHydrateRailStartupSnapshotCooperatively(
 			switchRecords: snapshot.switchRecords,
 			portEquipmentSnapshot: snapshot.portEquipment,
 			organizationSnapshot: snapshot.organizations,
+			relationshipSnapshot: snapshot.relationships,
 			map,
 			portEquipment,
 			organizations,
+			relationships,
 			sequence: snapshot.sequence,
 			revision: snapshot.revision,
 			mutationGeneration: map.getMutationGeneration(),
@@ -206,18 +234,21 @@ export async function validateAndHydrateRailStartupSnapshotCooperatively(
 			nextPortId: snapshot.portEquipment.nextPortId,
 			nextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 			nextOrganizationId: snapshot.organizations.nextOrganizationId,
+			nextRelationshipId: snapshot.relationships.nextRelationshipId,
 			cellCount: checksum.cellCount,
 			edgeCount: checksum.edgeCount,
 			switchCount: checksum.switchCount,
 			portCount: checksum.portCount,
 			equipmentGroupCount: checksum.equipmentGroupCount,
 			organizationCount: checksum.organizationCount,
+			relationshipCount: checksum.assemblyRelationshipCount,
 		}),
 	);
 	return Object.freeze({
 		map,
 		portEquipment,
 		organizations,
+		relationships,
 		authority: Object.freeze({ token }),
 		sequence: snapshot.sequence,
 		revision: snapshot.revision,
@@ -227,6 +258,7 @@ export async function validateAndHydrateRailStartupSnapshotCooperatively(
 		nextPortId: snapshot.portEquipment.nextPortId,
 		nextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 		nextOrganizationId: snapshot.organizations.nextOrganizationId,
+		nextRelationshipId: snapshot.relationships.nextRelationshipId,
 	});
 }
 
@@ -240,6 +272,7 @@ export function releaseValidatedRailStartupSnapshotForFullValidation(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): RailMirrorSnapshot | null {
 	const token = authority.token;
 	const binding = validatedRailStartupSnapshotBindings.get(token);
@@ -253,9 +286,11 @@ export function releaseValidatedRailStartupSnapshotForFullValidation(
 		binding.switchRecords === binding.snapshot.switchRecords &&
 		binding.portEquipmentSnapshot === binding.snapshot.portEquipment &&
 		binding.organizationSnapshot === binding.snapshot.organizations &&
+		binding.relationshipSnapshot === binding.snapshot.relationships &&
 		binding.map === map &&
 		binding.portEquipment === portEquipment &&
 		binding.organizations === organizations &&
+		binding.relationships === relationships &&
 		binding.sequence === binding.snapshot.sequence &&
 		binding.revision === binding.snapshot.revision &&
 		binding.revision === map.getRevision() &&
@@ -269,12 +304,15 @@ export function releaseValidatedRailStartupSnapshotForFullValidation(
 		binding.nextEquipmentGroupId === portEquipment.nextEquipmentGroupId &&
 		binding.nextOrganizationId === binding.snapshot.organizations.nextOrganizationId &&
 		binding.nextOrganizationId === organizations.nextOrganizationId &&
+		binding.nextRelationshipId === binding.snapshot.relationships.nextRelationshipId &&
+		binding.nextRelationshipId === relationships.nextRelationshipId &&
 		binding.cellCount === map.size &&
 		binding.edgeCount === map.edgeCount &&
 		binding.switchCount === map.advancedSwitchCount &&
 		binding.portCount === portEquipment.ports.length &&
 		binding.equipmentGroupCount === portEquipment.equipmentGroups.length &&
-		binding.organizationCount === organizations.records.length
+		binding.organizationCount === organizations.records.length &&
+		binding.relationshipCount === relationships.records.length
 	) {
 		return binding.snapshot;
 	}

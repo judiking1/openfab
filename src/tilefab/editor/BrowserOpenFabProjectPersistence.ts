@@ -7,8 +7,19 @@ import type {
 	OpenFabProjectIdentityProvider,
 	OpenFabProjectMetadataStore,
 	OpenFabRecentProject,
+	OpenFabRecoveryCleanupPlan,
+	OpenFabRecoveryCleanupRequest,
+	OpenFabRecoveryCleanupResult,
 	OpenFabRecoveryProject,
+	OpenFabRecoveryProjectInventory,
+	OpenFabRecoveryProjectInventoryRequest,
+	OpenFabRecoveryProjectSummary,
 } from "../project/OpenFabProjectPorts";
+import {
+	planOpenFabRecoveryCleanup,
+	recoveryCleanupPlansEqual,
+	recoveryProjectSummariesEqual,
+} from "../project/OpenFabRecoveryCleanup";
 import {
 	compareOpenFabUserBlueprintRecords,
 	copyOpenFabUserBlueprintRecord,
@@ -53,13 +64,15 @@ import {
 import { consumePreparedUserBlueprintLibraryRestore } from "./OpenFabUserBlueprintLibraryRestoreBridge";
 
 const DATABASE_NAME = "openfab-native-projects";
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 5;
 const HANDLE_STORE = "file-handles";
 const RECENT_STORE = "recent-projects";
 const RECOVERY_STORE = "recovery-projects";
+const RECOVERY_SUMMARY_STORE = "recovery-project-summaries";
 const USER_BLUEPRINT_STORE = "user-blueprints";
 const USER_BLUEPRINT_QUICK_SLOT_INDEX = "quick-slot";
 const MAX_RECENT_PROJECTS = 12;
+const MAX_VISIBLE_RECOVERY_PROJECTS = 12;
 const DATABASE_BLOCKED_FALLBACK_MILLISECONDS = 1_000;
 const USER_BLUEPRINT_LEGACY_SCAN_RECORD_LIMIT =
 	OPENFAB_USER_BLUEPRINT_MAX_RECORDS + OPENFAB_USER_BLUEPRINT_MAX_REJECTED_DIAGNOSTICS * 2;
@@ -83,6 +96,7 @@ export interface BrowserProjectDatabasePort {
 		maximumRecords: number,
 	): Promise<BrowserProjectDatabaseScanResult>;
 	put(storeName: string, value: unknown): Promise<void>;
+	putMany(records: readonly BrowserProjectDatabaseStoreValue[]): Promise<void>;
 	insertIfCapacity(
 		storeName: string,
 		value: unknown,
@@ -113,6 +127,20 @@ export interface BrowserProjectDatabasePort {
 		prevalidated?: boolean,
 	): Promise<BrowserProjectDatabaseReplaceAllStatus>;
 	delete(storeName: string, key: IDBValidKey): Promise<void>;
+	deleteMany(records: readonly BrowserProjectDatabaseStoreKey[]): Promise<void>;
+	deleteRecoveriesIfSummariesUnchanged(
+		expected: readonly OpenFabRecoveryProjectSummary[],
+	): Promise<"removed" | "conflict">;
+}
+
+export interface BrowserProjectDatabaseStoreValue {
+	readonly storeName: string;
+	readonly value: unknown;
+}
+
+export interface BrowserProjectDatabaseStoreKey {
+	readonly storeName: string;
+	readonly key: IDBValidKey;
 }
 
 export type BrowserProjectDatabaseConflictPredicate = (storedValue: unknown) => boolean;
@@ -449,18 +477,87 @@ export class BrowserOpenFabProjectPersistence
 		}
 	}
 
-	async loadLatestRecovery(): Promise<OpenFabRecoveryProject | null> {
-		const records = await this.database.getAll<OpenFabRecoveryProject>(RECOVERY_STORE);
-		const latest = records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-		return latest ? copyRecoveryProject(latest) : null;
+	async listRecovery(
+		request: OpenFabRecoveryProjectInventoryRequest = {},
+	): Promise<OpenFabRecoveryProjectInventory> {
+		const offset = parseRecoveryInventoryOffset(request.offset);
+		const stored = await this.database.getAll<unknown>(RECOVERY_SUMMARY_STORE);
+		const summaries = stored
+			.map(parseRecoveryProjectSummary)
+			.filter((summary): summary is OpenFabRecoveryProjectSummary => summary !== null)
+			.sort(
+				(left, right) =>
+					right.updatedAt.localeCompare(left.updatedAt) ||
+					left.projectId.localeCompare(right.projectId),
+			);
+		const latest = summaries[0] ? copyRecoveryProjectSummary(summaries[0]) : null;
+		const records = Object.freeze(
+			summaries
+				.slice(offset, offset + MAX_VISIBLE_RECOVERY_PROJECTS)
+				.map(copyRecoveryProjectSummary),
+		);
+		return Object.freeze({
+			latest,
+			records,
+			totalCount: summaries.length,
+			offset,
+			pageSize: MAX_VISIBLE_RECOVERY_PROJECTS,
+			truncated: offset > 0 || offset + records.length < summaries.length,
+		});
+	}
+
+	async loadRecovery(projectId: string): Promise<OpenFabRecoveryProject | null> {
+		const stored = await this.database.get<unknown>(RECOVERY_STORE, projectId);
+		return parseRecoveryProject(stored);
+	}
+
+	async loadRecoverySummary(projectId: string): Promise<OpenFabRecoveryProjectSummary | null> {
+		const stored = await this.database.get<unknown>(RECOVERY_SUMMARY_STORE, projectId);
+		return parseRecoveryProjectSummary(stored);
 	}
 
 	async putRecovery(project: OpenFabRecoveryProject): Promise<void> {
-		await this.database.put(RECOVERY_STORE, copyRecoveryProject(project));
+		const copied = copyRecoveryProject(project);
+		await this.database.putMany([
+			Object.freeze({ storeName: RECOVERY_STORE, value: copied }),
+			Object.freeze({
+				storeName: RECOVERY_SUMMARY_STORE,
+				value: summarizeRecoveryProject(copied),
+			}),
+		]);
 	}
 
 	async removeRecovery(projectId: string): Promise<void> {
-		await this.database.delete(RECOVERY_STORE, projectId);
+		await this.database.deleteMany([
+			Object.freeze({ storeName: RECOVERY_STORE, key: projectId }),
+			Object.freeze({ storeName: RECOVERY_SUMMARY_STORE, key: projectId }),
+		]);
+	}
+
+	async prepareRecoveryCleanup(
+		request: OpenFabRecoveryCleanupRequest,
+	): Promise<OpenFabRecoveryCleanupPlan> {
+		const stored = await this.database.getAll<unknown>(RECOVERY_SUMMARY_STORE);
+		const summaries = stored
+			.map(parseRecoveryProjectSummary)
+			.filter((summary): summary is OpenFabRecoveryProjectSummary => summary !== null);
+		return planOpenFabRecoveryCleanup(summaries, request);
+	}
+
+	async applyRecoveryCleanup(
+		plan: OpenFabRecoveryCleanupPlan,
+	): Promise<OpenFabRecoveryCleanupResult> {
+		const current = await this.prepareRecoveryCleanup({
+			retainedProjectCount: plan.retainedProjectCount,
+			protectedProjectIds: plan.protectedProjectIds,
+		});
+		if (!recoveryCleanupPlansEqual(plan, current)) {
+			return Object.freeze({ status: "conflict", removedCount: 0 });
+		}
+		const status = await this.database.deleteRecoveriesIfSummariesUnchanged(plan.candidates);
+		return status === "removed"
+			? Object.freeze({ status, removedCount: plan.removableCount })
+			: Object.freeze({ status, removedCount: 0 });
 	}
 
 	async list(signal?: AbortSignal): Promise<readonly OpenFabUserBlueprintRecord[]> {
@@ -1323,6 +1420,34 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 		await this.request(storeName, "readwrite", (store) => store.put(value));
 	}
 
+	async putMany(records: readonly BrowserProjectDatabaseStoreValue[]): Promise<void> {
+		if (records.length === 0) return;
+		const database = await this.open();
+		if (!database) throw new BrowserProjectDatabaseUnavailableError();
+		await new Promise<void>((resolve, reject) => {
+			const transaction = database.transaction(
+				[...new Set(records.map((record) => record.storeName))],
+				"readwrite",
+			);
+			let explicitError: Error | null = null;
+			for (const record of records) {
+				const request = transaction.objectStore(record.storeName).put(record.value);
+				request.onerror = () => {
+					explicitError = request.error ?? new Error("IndexedDB multi-store put failed.");
+				};
+			}
+			transaction.oncomplete = () => resolve();
+			transaction.onerror = () =>
+				reject(
+					explicitError ?? transaction.error ?? new Error("IndexedDB multi-store put failed."),
+				);
+			transaction.onabort = () =>
+				reject(
+					explicitError ?? transaction.error ?? new Error("IndexedDB multi-store put aborted."),
+				);
+		});
+	}
+
 	async insertIfCapacity(
 		storeName: string,
 		value: unknown,
@@ -1727,6 +1852,101 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 		await this.request(storeName, "readwrite", (store) => store.delete(key));
 	}
 
+	async deleteMany(records: readonly BrowserProjectDatabaseStoreKey[]): Promise<void> {
+		if (records.length === 0) return;
+		const database = await this.open();
+		if (!database) throw new BrowserProjectDatabaseUnavailableError();
+		await new Promise<void>((resolve, reject) => {
+			const transaction = database.transaction(
+				[...new Set(records.map((record) => record.storeName))],
+				"readwrite",
+			);
+			let explicitError: Error | null = null;
+			for (const record of records) {
+				const request = transaction.objectStore(record.storeName).delete(record.key);
+				request.onerror = () => {
+					explicitError = request.error ?? new Error("IndexedDB multi-store delete failed.");
+				};
+			}
+			transaction.oncomplete = () => resolve();
+			transaction.onerror = () =>
+				reject(
+					explicitError ?? transaction.error ?? new Error("IndexedDB multi-store delete failed."),
+				);
+			transaction.onabort = () =>
+				reject(
+					explicitError ?? transaction.error ?? new Error("IndexedDB multi-store delete aborted."),
+				);
+		});
+	}
+
+	async deleteRecoveriesIfSummariesUnchanged(
+		expected: readonly OpenFabRecoveryProjectSummary[],
+	): Promise<"removed" | "conflict"> {
+		if (expected.length === 0) return "removed";
+		const expectedById = new Map(expected.map((summary) => [summary.projectId, summary] as const));
+		if (expectedById.size !== expected.length) {
+			throw new TypeError("Recovery cleanup candidates must have unique project ids.");
+		}
+		const database = await this.open();
+		if (!database) throw new BrowserProjectDatabaseUnavailableError();
+		return new Promise((resolve, reject) => {
+			const transaction = database.transaction(
+				[RECOVERY_SUMMARY_STORE, RECOVERY_STORE],
+				"readwrite",
+			);
+			const summaryStore = transaction.objectStore(RECOVERY_SUMMARY_STORE);
+			const payloadStore = transaction.objectStore(RECOVERY_STORE);
+			const cursorRequest = summaryStore.openCursor();
+			let explicitError: Error | null = null;
+			let matched = 0;
+			let status: "removed" | "conflict" = "conflict";
+			cursorRequest.onsuccess = () => {
+				const cursor = cursorRequest.result;
+				if (cursor) {
+					const projectId =
+						isObjectRecord(cursor.value) && typeof cursor.value.projectId === "string"
+							? cursor.value.projectId
+							: null;
+					const expectedSummary = projectId ? expectedById.get(projectId) : undefined;
+					if (expectedSummary) {
+						const current = parseRecoveryProjectSummary(cursor.value);
+						if (!current || !recoveryProjectSummariesEqual(expectedSummary, current)) return;
+						matched += 1;
+					}
+					cursor.continue();
+					return;
+				}
+				if (matched !== expected.length) return;
+				for (const summary of expected) {
+					const deleteSummary = summaryStore.delete(summary.projectId);
+					deleteSummary.onerror = () => {
+						explicitError =
+							deleteSummary.error ?? new Error("IndexedDB recovery summary cleanup failed.");
+					};
+					const deletePayload = payloadStore.delete(summary.projectId);
+					deletePayload.onerror = () => {
+						explicitError =
+							deletePayload.error ?? new Error("IndexedDB recovery payload cleanup failed.");
+					};
+				}
+				status = "removed";
+			};
+			cursorRequest.onerror = () => {
+				explicitError = cursorRequest.error ?? new Error("IndexedDB recovery cleanup scan failed.");
+			};
+			transaction.oncomplete = () => resolve(status);
+			transaction.onerror = () =>
+				reject(
+					explicitError ?? transaction.error ?? new Error("IndexedDB recovery cleanup failed."),
+				);
+			transaction.onabort = () =>
+				reject(
+					explicitError ?? transaction.error ?? new Error("IndexedDB recovery cleanup aborted."),
+				);
+		});
+	}
+
 	private async request<Value>(
 		storeName: string,
 		mode: IDBTransactionMode,
@@ -1784,6 +2004,21 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 				}
 				if (!database.objectStoreNames.contains(RECOVERY_STORE)) {
 					database.createObjectStore(RECOVERY_STORE, { keyPath: "projectId" });
+				}
+				const recoverySummaryStore = database.objectStoreNames.contains(RECOVERY_SUMMARY_STORE)
+					? request.transaction?.objectStore(RECOVERY_SUMMARY_STORE)
+					: database.createObjectStore(RECOVERY_SUMMARY_STORE, { keyPath: "projectId" });
+				const recoveryPayloadStore = request.transaction?.objectStore(RECOVERY_STORE);
+				if (recoverySummaryStore && recoveryPayloadStore) {
+					const recoveryCursor = recoveryPayloadStore.openCursor();
+					recoveryCursor.onsuccess = () => {
+						const cursor = recoveryCursor.result;
+						if (!cursor) return;
+						const project = parseRecoveryProject(cursor.value);
+						if (project) recoverySummaryStore.put(summarizeRecoveryProject(project));
+						cursor.continue();
+					};
+					recoveryCursor.onerror = () => request.transaction?.abort();
 				}
 				const userBlueprintStore = database.objectStoreNames.contains(USER_BLUEPRINT_STORE)
 					? request.transaction?.objectStore(USER_BLUEPRINT_STORE)
@@ -2364,4 +2599,80 @@ function copyRecentProject(project: OpenFabRecentProject): OpenFabRecentProject 
 
 function copyRecoveryProject(project: OpenFabRecoveryProject): OpenFabRecoveryProject {
 	return Object.freeze({ ...project });
+}
+
+function copyRecoveryProjectSummary(
+	project: OpenFabRecoveryProjectSummary,
+): OpenFabRecoveryProjectSummary {
+	return Object.freeze({
+		projectId: project.projectId,
+		name: project.name,
+		updatedAt: project.updatedAt,
+		authoredChecksum: project.authoredChecksum,
+		jsonCharacters: project.jsonCharacters,
+	});
+}
+
+function parseRecoveryProjectIdentity(
+	value: unknown,
+): Omit<OpenFabRecoveryProjectSummary, "jsonCharacters"> | null {
+	if (
+		!isObjectRecord(value) ||
+		typeof value.projectId !== "string" ||
+		value.projectId.length === 0 ||
+		typeof value.name !== "string" ||
+		value.name.length === 0 ||
+		typeof value.updatedAt !== "string" ||
+		value.updatedAt.length === 0 ||
+		typeof value.authoredChecksum !== "string" ||
+		value.authoredChecksum.length === 0
+	) {
+		return null;
+	}
+	return Object.freeze({
+		projectId: value.projectId,
+		name: value.name,
+		updatedAt: value.updatedAt,
+		authoredChecksum: value.authoredChecksum,
+	});
+}
+
+function parseRecoveryProjectSummary(value: unknown): OpenFabRecoveryProjectSummary | null {
+	const identity = parseRecoveryProjectIdentity(value);
+	if (
+		!identity ||
+		!isObjectRecord(value) ||
+		!Number.isSafeInteger(value.jsonCharacters) ||
+		(value.jsonCharacters as number) < 0
+	) {
+		return null;
+	}
+	return copyRecoveryProjectSummary({
+		...identity,
+		jsonCharacters: value.jsonCharacters as number,
+	});
+}
+
+function parseRecoveryProject(value: unknown): OpenFabRecoveryProject | null {
+	const identity = parseRecoveryProjectIdentity(value);
+	if (!identity || !isObjectRecord(value) || typeof value.json !== "string") return null;
+	return Object.freeze({ ...identity, json: value.json });
+}
+
+function summarizeRecoveryProject(project: OpenFabRecoveryProject): OpenFabRecoveryProjectSummary {
+	return copyRecoveryProjectSummary({
+		projectId: project.projectId,
+		name: project.name,
+		updatedAt: project.updatedAt,
+		authoredChecksum: project.authoredChecksum,
+		jsonCharacters: project.json.length,
+	});
+}
+
+function parseRecoveryInventoryOffset(value: number | undefined): number {
+	if (value === undefined) return 0;
+	if (!Number.isSafeInteger(value) || value < 0) {
+		throw new TypeError("Recovery inventory offset must be a non-negative safe integer.");
+	}
+	return value;
 }

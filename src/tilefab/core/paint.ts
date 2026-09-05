@@ -145,7 +145,7 @@ export function planRailPath(map: RailMapReader, cells: readonly Cell[]): RailCo
 	return evaluateRoute(map, cells, bend);
 }
 
-/** Template-only escape hatch: only a self-closed route may start a detached component. */
+/** Validate that a catalog root is self-closed before applying the ordinary route rules. */
 export function planClosedRailPathComponent(
 	map: RailMapReader,
 	cells: readonly Cell[],
@@ -174,7 +174,7 @@ export function planClosedRailPathComponent(
 		firstDirection === null || firstDirection === DIR_E || firstDirection === DIR_W
 			? "horizontal-first"
 			: "vertical-first";
-	return evaluateRoute(map, cells, bend, true);
+	return evaluateRoute(map, cells, bend);
 }
 
 export function planRailErase(map: RailMapReader, cells: readonly Cell[]): RailErasePlan {
@@ -315,7 +315,6 @@ function evaluateRoute(
 	map: RailMapReader,
 	cells: readonly Cell[],
 	bend: Exclude<BendPreference, "auto">,
-	allowDisconnectedClosedComponent = false,
 ): RailConstructionPlan {
 	const overlay = new Map<string, RailMutation>();
 	const conflicts = new Map<string, Cell>();
@@ -346,19 +345,6 @@ function evaluateRoute(
 	};
 
 	if (cells.length < 2) reason = "시작점을 잡고 한 칸 이상 드래그하세요";
-	if (
-		!allowDisconnectedClosedComponent &&
-		map.edgeCount > 0 &&
-		!cells.some((cell) => map.hasRail(cell.x, cell.y))
-	) {
-		fail(
-			"disconnected",
-			"기존 네트워크에서 시작하거나 기존 레일에 연결해야 합니다",
-			cells[0] as Cell,
-			cells.at(-1) as Cell,
-		);
-	}
-
 	for (let index = 0; index < cells.length - 1; index++) {
 		const from = cells[index] as Cell;
 		const to = cells[index + 1] as Cell;

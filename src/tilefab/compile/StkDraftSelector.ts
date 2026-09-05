@@ -88,7 +88,7 @@ export function evaluateStkDraftSelection(
 		if (slotAvailability.status !== PORT_SLOT_STATUS.LEGAL) {
 			const reason =
 				slotAvailability.status === PORT_SLOT_STATUS.PORT_OCCUPIED
-					? `이미 STK 포트 #${slotAvailability.conflictingPortId}이 이 슬롯을 사용하고 있습니다`
+					? `이미 Port #${slotAvailability.conflictingPortId}이 이 슬롯을 사용하고 있습니다`
 					: slotAvailability.status === PORT_SLOT_STATUS.PORT_CLEARANCE_CONFLICT
 						? `기존 포트 ${slotAvailability.conflictingPortId}와의 최소 간격이 부족합니다`
 						: slotAvailability.status === PORT_SLOT_STATUS.EQUIPMENT_BODY_CONFLICT
@@ -138,7 +138,7 @@ export function evaluateStkDraftSelection(
 		return invalid(
 			template,
 			rows,
-			`선택한 포트 사이가 기존 STK-${conflictingEquipmentGroupId} 예약 구간을 가로지릅니다`,
+			`선택한 Port 사이가 기존 장비 그룹 #${conflictingEquipmentGroupId}의 Port 구간을 가로지릅니다`,
 		);
 	}
 

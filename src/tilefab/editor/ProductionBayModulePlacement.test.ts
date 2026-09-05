@@ -3,6 +3,7 @@ import {
 	certifyProductionBayModuleCatalogRequest,
 	defaultProductionBayModuleCatalogRequest,
 } from "../compile/ProductionBayModuleCatalog";
+import { recognizeProductionBayModule } from "../core/ProductionBayModuleRecognition";
 import { RailDocument } from "../core/RailDocument";
 import { captureRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import type {
@@ -70,6 +71,30 @@ describe("Production Bay organization-bundle placement", () => {
 			"AISLE",
 			"AISLE",
 		]);
+		const placedBay = document.organizations.records.find((record) => record.kind === "BAY");
+		if (!placedBay) throw new Error("Expected the placed Production Bay root.");
+		const placedRecognition = recognizeProductionBayModule(
+			document.map,
+			document.organizations,
+			placedBay.id,
+		);
+		expect(placedRecognition.valid).toBe(true);
+		if (!placedRecognition.valid) throw new Error(placedRecognition.reason);
+		const processLoopIds = Object.values(
+			placedRecognition.recognition.processLoopOrganizationIdsByLoopId,
+		).sort((left, right) => left - right);
+		expect(processLoopIds).toHaveLength(2);
+		expect(
+			document.organizations.records
+				.filter((record) => processLoopIds.includes(record.id))
+				.map((record) => ({
+					kind: record.kind,
+					parentOrganizationIds: record.parentOrganizationIds,
+				})),
+		).toEqual([
+			{ kind: "AISLE", parentOrganizationIds: [placedBay.id] },
+			{ kind: "AISLE", parentOrganizationIds: [placedBay.id] },
+		]);
 
 		expect(document.undo()).toBe(true);
 		expect(document.getPatchSequence()).toBe(2);
@@ -79,6 +104,16 @@ describe("Production Bay organization-bundle placement", () => {
 		expect(document.getPatchSequence()).toBe(3);
 		expect(document.map.edgeCount).toBe(placedEdgeCount);
 		expect(documentChecksum(document)).toBe(placedChecksum);
+		const redoneRecognition = recognizeProductionBayModule(
+			document.map,
+			document.organizations,
+			placedBay.id,
+		);
+		expect(redoneRecognition.valid).toBe(true);
+		if (!redoneRecognition.valid) throw new Error(redoneRecognition.reason);
+		expect(redoneRecognition.recognition.authoredProjectionFingerprint).toBe(
+			placedRecognition.recognition.authoredProjectionFingerprint,
+		);
 	});
 
 	it("supports detached repeat placement with fresh identities and rejects overlap atomically", async () => {
@@ -141,12 +176,14 @@ function placementInput(
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot,
 		getCurrentState: () => ({
 			map: document.map,
 			patchSequence: document.getPatchSequence(),
 			portEquipment: document.portEquipment,
 			organizations: document.organizations,
+			relationships: document.relationships,
 		}),
 	};
 }
@@ -157,5 +194,6 @@ function documentChecksum(document: RailDocument): string {
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	).snapshot.checksum;
 }

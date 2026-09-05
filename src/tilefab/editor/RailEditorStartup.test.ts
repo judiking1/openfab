@@ -8,15 +8,21 @@ import {
 	copyOperationalConfigurationState,
 	emptyOperationalConfigurationState,
 } from "../core/OperationalConfiguration";
+import { createPortEquipmentMutationPlan } from "../core/PortEquipmentPlan";
+import type { PortRecord } from "../core/PortRecord";
+import { createRailAreaSelection } from "../core/RailAreaSelection";
 import { RailDocument } from "../core/RailDocument";
 import {
 	buildRailModuleOwnershipIndex,
 	railModuleOwnershipIndexMatchesMap,
 } from "../core/RailModuleOwnership";
+import type { Direction } from "../core/railShape";
 import {
 	compareDirectedRailEdges,
 	type StaticFabOrganizationState,
 } from "../core/StaticFabOrganization";
+import { planCreateStaticFabOrganizationFromSelection } from "../core/StaticFabOrganizationPlan";
+import { createStaticFabSelection } from "../core/StaticFabSelection";
 import { TileMap } from "../core/TileMap";
 import { checksumPhysicalRailRenderArtifacts } from "../render/PhysicalRailRenderArtifacts";
 import { captureRailMirrorSnapshot, type RailMirrorSnapshot } from "../worker/RailMirrorChecksum";
@@ -116,9 +122,74 @@ describe("activateRailEditorStartup", () => {
 
 		expect(activation.model.document).toBe(publicationDocument);
 		expect(activation.model.map).toBe(publicationDocument.map);
+		expect(activation.model.portEquipment).toBe(publicationDocument.portEquipment);
+		expect(activation.model.organizations).toBe(publicationDocument.organizations);
 		expect(
 			railModuleOwnershipIndexMatchesMap(activation.model.ownership, publicationDocument.map),
 		).toBe(true);
+
+		const publishedPortEquipment = activation.model.portEquipment;
+		const rail = publicationDocument.map.getRail(1, 0);
+		const port: PortRecord = {
+			id: 1,
+			equipmentGroupId: 1,
+			route: {
+				kind: "CARDINAL_CELL",
+				x: 1,
+				z: 0,
+				from: rail.incoming as 0 | Direction,
+				to: rail.outgoing as 0 | Direction,
+			},
+			stationMillimeters: 500,
+			side: "CENTER",
+			lateralOffsetMillimeters: 0,
+			direction: "WITH_TRAVEL",
+			portType: "OHB",
+			barcode: null,
+		};
+		expect(
+			publicationDocument.commitPortEquipment(
+				createPortEquipmentMutationPlan(
+					"place-ohb",
+					publicationDocument.map.getRevision(),
+					publicationDocument.getPatchSequence(),
+					[{ id: 1, before: null, after: port }],
+					[
+						{
+							id: 1,
+							before: null,
+							after: { id: 1, kind: "OHB", template: "SINGLE", portIds: [1] },
+						},
+					],
+				),
+			),
+		).toBe(true);
+		expect(publicationDocument.portEquipment).not.toBe(publishedPortEquipment);
+		expect(activation.model.portEquipment).toBe(publishedPortEquipment);
+		expect(activation.model.portEquipment.ports).toHaveLength(0);
+
+		const publishedOrganizations = activation.model.organizations;
+		const ownership = buildRailModuleOwnershipIndex(publicationDocument.map);
+		const selection = createStaticFabSelection(
+			createRailAreaSelection(ownership, { x: -1, y: -1 }, { x: 1_026, y: 1 }),
+			publicationDocument.portEquipment,
+			publicationDocument.getPatchSequence(),
+			[],
+		);
+		const organizationPlan = planCreateStaticFabOrganizationFromSelection(
+			publicationDocument.map,
+			ownership,
+			publicationDocument.portEquipment,
+			publicationDocument.getPatchSequence(),
+			publicationDocument.organizations,
+			selection,
+			"Published-generation guard",
+		);
+		expect(organizationPlan.valid, organizationPlan.reason).toBe(true);
+		expect(publicationDocument.commitOrganization(organizationPlan)).toBe(true);
+		expect(publicationDocument.organizations).not.toBe(publishedOrganizations);
+		expect(activation.model.organizations).toBe(publishedOrganizations);
+		expect(activation.model.organizations.records).toHaveLength(0);
 	});
 
 	it("preserves publication-document operations while re-deriving from a static mirror snapshot", async () => {

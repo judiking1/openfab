@@ -6,6 +6,7 @@ import {
 	updateOpenFabProjectBlueprint,
 } from "../project/OpenFabBlueprintLibrary";
 import { OPENFAB_PROJECT_MAX_JSON_CHARACTERS } from "../project/OpenFabProjectCodec";
+import type { OpenFabRecoveryProjectSummary } from "../project/OpenFabProjectPorts";
 import {
 	createOpenFabUserBlueprintRecord,
 	OPENFAB_USER_BLUEPRINT_DIAGNOSTIC_FILE_EXTENSION,
@@ -32,6 +33,8 @@ import {
 	type BrowserProjectDatabaseInsertStatus,
 	type BrowserProjectDatabasePort,
 	type BrowserProjectDatabaseReplaceStatus,
+	type BrowserProjectDatabaseStoreKey,
+	type BrowserProjectDatabaseStoreValue,
 } from "./BrowserOpenFabProjectPersistence";
 
 describe("BrowserOpenFabProjectPersistence", () => {
@@ -93,8 +96,9 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		expect(file.content()).toBe("second");
 	});
 
-	it("sorts and caps recents while retaining the latest crash recovery", async () => {
-		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+	it("sorts and caps recents while listing recovery summaries without reading payloads", async () => {
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
 		for (let index = 0; index < 14; index++) {
 			await persistence.putRecent({
 				projectId: `project-${index}`,
@@ -103,23 +107,219 @@ describe("BrowserOpenFabProjectPersistence", () => {
 				authoredChecksum: `checksum-${index}`,
 				reference: null,
 			});
+			await persistence.putRecovery({
+				projectId: `recovery-${index}`,
+				name: `Recovered FAB ${index}`,
+				updatedAt: `2026-07-18T01:00:${String(index).padStart(2, "0")}.000Z`,
+				authoredChecksum: `recovery-checksum-${index}`,
+				json: `{"payload":${index}}`,
+			});
 		}
-		await persistence.putRecovery({
-			projectId: "project-recovery",
-			name: "Recovered FAB",
-			updatedAt: "2026-07-18T01:00:00.000Z",
-			authoredChecksum: "recovery-checksum",
-			json: "{}",
-		});
 
 		const recents = await persistence.listRecent();
 		expect(recents).toHaveLength(12);
 		expect(recents[0]?.projectId).toBe("project-13");
 		expect(recents.at(-1)?.projectId).toBe("project-2");
-		expect(await persistence.loadLatestRecovery()).toMatchObject({
-			projectId: "project-recovery",
-			json: "{}",
+		const recovery = await persistence.listRecovery();
+		expect(recovery).toMatchObject({
+			totalCount: 14,
+			offset: 0,
+			pageSize: 12,
+			truncated: true,
 		});
+		expect(recovery.latest?.projectId).toBe("recovery-13");
+		expect(recovery.records).toHaveLength(12);
+		expect(recovery.records[0]?.projectId).toBe("recovery-13");
+		expect(recovery.records.at(-1)?.projectId).toBe("recovery-2");
+		expect(recovery.records[0]).not.toHaveProperty("json");
+		expect(database.getAllStoreNames).toContain("recovery-project-summaries");
+		expect(database.getAllStoreNames).not.toContain("recovery-projects");
+		expect(await persistence.loadRecoverySummary("recovery-7")).toEqual({
+			projectId: "recovery-7",
+			name: "Recovered FAB 7",
+			updatedAt: "2026-07-18T01:00:07.000Z",
+			authoredChecksum: "recovery-checksum-7",
+			jsonCharacters: '{"payload":7}'.length,
+		});
+		expect(await persistence.loadRecovery("recovery-7")).toMatchObject({
+			projectId: "recovery-7",
+			json: '{"payload":7}',
+		});
+		const olderRecovery = await persistence.listRecovery({ offset: 12 });
+		expect(olderRecovery).toMatchObject({
+			totalCount: 14,
+			offset: 12,
+			pageSize: 12,
+			truncated: true,
+		});
+		expect(olderRecovery.latest?.projectId).toBe("recovery-13");
+		expect(olderRecovery.records.map(({ projectId }) => projectId)).toEqual([
+			"recovery-1",
+			"recovery-0",
+		]);
+		await expect(persistence.listRecovery({ offset: -1 })).rejects.toThrow("offset");
+		await persistence.removeRecovery("recovery-13");
+		expect(await persistence.loadRecovery("recovery-13")).toBeNull();
+		expect(await persistence.listRecovery()).toMatchObject({ totalCount: 13, truncated: true });
+	});
+
+	it("migrates v3 recovery payloads into the lightweight summary inventory", async () => {
+		const factory = new IDBFactory();
+		vi.stubGlobal("indexedDB", factory);
+		const legacy = await openLegacyRecoveryDatabase(factory, {
+			projectId: "legacy-recovery",
+			name: "Legacy Recovery",
+			updatedAt: "2026-07-18T01:00:00.000Z",
+			authoredChecksum: "legacy-checksum",
+			json: '{"legacy":true}',
+		});
+		legacy.close();
+		const persistence = new BrowserOpenFabProjectPersistence();
+
+		expect(await persistence.listRecovery()).toEqual({
+			latest: {
+				projectId: "legacy-recovery",
+				name: "Legacy Recovery",
+				updatedAt: "2026-07-18T01:00:00.000Z",
+				authoredChecksum: "legacy-checksum",
+				jsonCharacters: '{"legacy":true}'.length,
+			},
+			records: [
+				{
+					projectId: "legacy-recovery",
+					name: "Legacy Recovery",
+					updatedAt: "2026-07-18T01:00:00.000Z",
+					authoredChecksum: "legacy-checksum",
+					jsonCharacters: '{"legacy":true}'.length,
+				},
+			],
+			totalCount: 1,
+			offset: 0,
+			pageSize: 12,
+			truncated: false,
+		});
+		expect(await persistence.loadRecovery("legacy-recovery")).toMatchObject({
+			json: '{"legacy":true}',
+		});
+	});
+
+	it("previews and atomically removes only cleanup candidates", async () => {
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		for (let index = 0; index < 6; index++) {
+			await persistence.putRecovery({
+				projectId: `cleanup-${index}`,
+				name: `Cleanup ${index}`,
+				updatedAt: `2026-07-18T01:00:0${index}.000Z`,
+				authoredChecksum: `cleanup-checksum-${index}`,
+				json: `{"payload":"${"x".repeat(index + 1)}"}`,
+			});
+		}
+
+		const plan = await persistence.prepareRecoveryCleanup({
+			retainedProjectCount: 2,
+			protectedProjectIds: ["cleanup-1"],
+		});
+
+		expect(plan).toMatchObject({ totalCount: 6, retainedCount: 3, removableCount: 3 });
+		expect(plan.candidates.map(({ projectId }) => projectId)).toEqual([
+			"cleanup-3",
+			"cleanup-2",
+			"cleanup-0",
+		]);
+		expect(await persistence.applyRecoveryCleanup(plan)).toEqual({
+			status: "removed",
+			removedCount: 3,
+		});
+		expect((await persistence.listRecovery()).records.map(({ projectId }) => projectId)).toEqual([
+			"cleanup-5",
+			"cleanup-4",
+			"cleanup-1",
+		]);
+		expect(await persistence.loadRecovery("cleanup-3")).toBeNull();
+	});
+
+	it("leaves every cleanup candidate intact when its preview becomes stale", async () => {
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		for (let index = 0; index < 4; index++) {
+			await persistence.putRecovery({
+				projectId: `stale-${index}`,
+				name: `Stale ${index}`,
+				updatedAt: `2026-07-18T01:00:0${index}.000Z`,
+				authoredChecksum: `stale-checksum-${index}`,
+				json: `{"payload":${index}}`,
+			});
+		}
+		const plan = await persistence.prepareRecoveryCleanup({ retainedProjectCount: 1 });
+		await persistence.putRecovery({
+			projectId: "stale-1",
+			name: "Stale 1 changed",
+			updatedAt: "2026-07-18T02:00:00.000Z",
+			authoredChecksum: "stale-checksum-changed",
+			json: '{"payload":"changed"}',
+		});
+
+		expect(await persistence.applyRecoveryCleanup(plan)).toEqual({
+			status: "conflict",
+			removedCount: 0,
+		});
+		expect((await persistence.listRecovery()).totalCount).toBe(4);
+		for (let index = 0; index < 4; index++) {
+			expect(await persistence.loadRecovery(`stale-${index}`)).not.toBeNull();
+		}
+	});
+
+	it("atomically aborts when a cleanup candidate changes after the final replan", async () => {
+		let replacement: OpenFabRecoveryProjectSummary | null = null;
+		const database: MemoryProjectDatabase = new MemoryProjectDatabase({
+			beforeRecoveryCleanup: () => {
+				if (replacement) database.overwriteRecoverySummaryForTest(replacement);
+			},
+		});
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		for (let index = 0; index < 3; index++) {
+			await persistence.putRecovery({
+				projectId: `atomic-${index}`,
+				name: `Atomic ${index}`,
+				updatedAt: `2026-07-18T01:00:0${index}.000Z`,
+				authoredChecksum: `atomic-checksum-${index}`,
+				json: `{"payload":${index}}`,
+			});
+		}
+		const plan = await persistence.prepareRecoveryCleanup({ retainedProjectCount: 1 });
+		const firstCandidate = plan.candidates[0];
+		if (!firstCandidate) throw new Error("expected an atomic cleanup candidate");
+		replacement = Object.freeze({ ...firstCandidate, name: "Changed during cleanup" });
+
+		expect(await persistence.applyRecoveryCleanup(plan)).toEqual({
+			status: "conflict",
+			removedCount: 0,
+		});
+		expect((await persistence.listRecovery()).totalCount).toBe(3);
+		for (let index = 0; index < 3; index++) {
+			expect(await persistence.loadRecovery(`atomic-${index}`)).not.toBeNull();
+		}
+	});
+
+	it("rolls back a recovery payload when its summary cannot commit", async () => {
+		const factory = new IDBFactory();
+		vi.stubGlobal("indexedDB", factory);
+		const constrained = await openConstrainedRecoveryDatabase(factory);
+		constrained.close();
+		const persistence = new BrowserOpenFabProjectPersistence();
+
+		await expect(
+			persistence.putRecovery({
+				projectId: "conflicting-recovery",
+				name: "Duplicate Recovery",
+				updatedAt: "2026-07-18T02:00:00.000Z",
+				authoredChecksum: "conflicting-checksum",
+				json: '{"must":"rollback"}',
+			}),
+		).rejects.toMatchObject({ name: "ConstraintError" });
+		expect(await persistence.loadRecovery("conflicting-recovery")).toBeNull();
+		expect(await persistence.listRecovery()).toMatchObject({ totalCount: 1 });
 	});
 
 	it("rejects oversized files before reading their text", async () => {
@@ -229,6 +429,18 @@ describe("BrowserOpenFabProjectPersistence", () => {
 			writable: false,
 			reopenable: false,
 		});
+	});
+
+	it("treats native save chooser AbortError as a cancellation without retaining a file handle", async () => {
+		const savePicker = vi.fn(async () => {
+			throw new DOMException("user cancelled", "AbortError");
+		});
+		vi.stubGlobal("window", { showSaveFilePicker: savePicker });
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+
+		await expect(persistence.chooseSave("Cancelled FAB", '{"revision":1}')).resolves.toBeNull();
+		expect(savePicker).toHaveBeenCalledOnce();
+		await expect(persistence.listRecent()).resolves.toEqual([]);
 	});
 
 	it("persists, sorts, defensively reads, and removes cross-project user blueprints", async () => {
@@ -1305,11 +1517,13 @@ describe("BrowserOpenFabProjectPersistence", () => {
 
 class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 	private readonly stores = new Map<string, Map<IDBValidKey, unknown>>();
+	readonly getAllStoreNames: string[] = [];
 	private readonly rejectHandleWrites: boolean;
 	private rejectUserBlueprintOperations: boolean;
 	private readonly afterUserBlueprintPut: (() => void) | undefined;
 	private readonly afterUserBlueprintDelete: (() => void) | undefined;
 	private readonly enforceUniqueUserBlueprintQuickSlots: boolean;
+	private readonly beforeRecoveryCleanup: (() => void) | undefined;
 
 	constructor(
 		options: {
@@ -1318,6 +1532,7 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 			readonly afterUserBlueprintPut?: () => void;
 			readonly afterUserBlueprintDelete?: () => void;
 			readonly enforceUniqueUserBlueprintQuickSlots?: boolean;
+			readonly beforeRecoveryCleanup?: () => void;
 		} = {},
 	) {
 		this.rejectHandleWrites = options.rejectHandleWrites ?? false;
@@ -1326,6 +1541,7 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 		this.afterUserBlueprintDelete = options.afterUserBlueprintDelete;
 		this.enforceUniqueUserBlueprintQuickSlots =
 			options.enforceUniqueUserBlueprintQuickSlots ?? false;
+		this.beforeRecoveryCleanup = options.beforeRecoveryCleanup;
 	}
 
 	async get<Value>(storeName: string, key: IDBValidKey): Promise<Value | null> {
@@ -1335,6 +1551,7 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 
 	async getAll<Value>(storeName: string, count?: number): Promise<Value[]> {
 		this.rejectUnavailableUserBlueprintOperation(storeName);
+		this.getAllStoreNames.push(storeName);
 		const values = [...this.store(storeName).values()];
 		return (count === undefined ? values : values.slice(0, count)) as Value[];
 	}
@@ -1375,6 +1592,16 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 		}
 		this.store(storeName).set(key, value);
 		if (storeName === "user-blueprints") this.afterUserBlueprintPut?.();
+	}
+
+	async putMany(records: readonly BrowserProjectDatabaseStoreValue[]): Promise<void> {
+		const snapshots = this.snapshotStores(records.map(({ storeName }) => storeName));
+		try {
+			for (const { storeName, value } of records) await this.put(storeName, value);
+		} catch (error) {
+			this.restoreStores(snapshots);
+			throw error;
+		}
 	}
 
 	async insertIfCapacity(
@@ -1552,6 +1779,42 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 		if (storeName === "user-blueprints") this.afterUserBlueprintDelete?.();
 	}
 
+	async deleteMany(records: readonly BrowserProjectDatabaseStoreKey[]): Promise<void> {
+		const snapshots = this.snapshotStores(records.map(({ storeName }) => storeName));
+		try {
+			for (const { storeName, key } of records) await this.delete(storeName, key);
+		} catch (error) {
+			this.restoreStores(snapshots);
+			throw error;
+		}
+	}
+
+	async deleteRecoveriesIfSummariesUnchanged(
+		expected: readonly OpenFabRecoveryProjectSummary[],
+	): Promise<"removed" | "conflict"> {
+		this.beforeRecoveryCleanup?.();
+		const summaries = this.store("recovery-project-summaries");
+		for (const candidate of expected) {
+			const current = summaries.get(candidate.projectId);
+			if (JSON.stringify(current) !== JSON.stringify(candidate)) return "conflict";
+		}
+		const snapshots = this.snapshotStores(["recovery-project-summaries", "recovery-projects"]);
+		try {
+			for (const candidate of expected) {
+				summaries.delete(candidate.projectId);
+				this.store("recovery-projects").delete(candidate.projectId);
+			}
+			return "removed";
+		} catch (error) {
+			this.restoreStores(snapshots);
+			throw error;
+		}
+	}
+
+	overwriteRecoverySummaryForTest(summary: OpenFabRecoveryProjectSummary): void {
+		this.store("recovery-project-summaries").set(summary.projectId, summary);
+	}
+
 	setRejectUserBlueprintOperations(reject: boolean): void {
 		this.rejectUserBlueprintOperations = reject;
 	}
@@ -1569,6 +1832,18 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 			this.stores.set(name, store);
 		}
 		return store;
+	}
+
+	private snapshotStores(
+		storeNames: readonly string[],
+	): ReadonlyMap<string, Map<IDBValidKey, unknown>> {
+		return new Map(
+			[...new Set(storeNames)].map((storeName) => [storeName, new Map(this.store(storeName))]),
+		);
+	}
+
+	private restoreStores(snapshots: ReadonlyMap<string, Map<IDBValidKey, unknown>>): void {
+		for (const [storeName, snapshot] of snapshots) this.stores.set(storeName, new Map(snapshot));
 	}
 }
 
@@ -1787,12 +2062,59 @@ async function openLegacyUserBlueprintDatabase(factory: IDBFactory): Promise<IDB
 	});
 }
 
+async function openLegacyRecoveryDatabase(
+	factory: IDBFactory,
+	recovery: Readonly<Record<string, unknown>>,
+): Promise<IDBDatabase> {
+	return new Promise((resolve, reject) => {
+		const request = factory.open("openfab-native-projects", 3);
+		request.onupgradeneeded = () => {
+			const store = request.result.createObjectStore("recovery-projects", {
+				keyPath: "projectId",
+			});
+			store.put(recovery);
+		};
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => reject(request.error);
+	});
+}
+
 async function openCurrentUserBlueprintDatabase(factory: IDBFactory): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
 		const request = factory.open("openfab-native-projects", 3);
 		request.onupgradeneeded = () => {
 			const store = request.result.createObjectStore("user-blueprints", { keyPath: "id" });
 			store.createIndex("quick-slot", "quickSlot", { unique: true });
+		};
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => reject(request.error);
+	});
+}
+
+async function openConstrainedRecoveryDatabase(factory: IDBFactory): Promise<IDBDatabase> {
+	return new Promise((resolve, reject) => {
+		const request = factory.open("openfab-native-projects", 4);
+		request.onupgradeneeded = () => {
+			const payloads = request.result.createObjectStore("recovery-projects", {
+				keyPath: "projectId",
+			});
+			const summaries = request.result.createObjectStore("recovery-project-summaries", {
+				keyPath: "projectId",
+			});
+			summaries.createIndex("test-unique-name", "name", { unique: true });
+			summaries.put({
+				projectId: "existing-recovery",
+				name: "Duplicate Recovery",
+				updatedAt: "2026-07-18T01:00:00.000Z",
+				authoredChecksum: "existing-checksum",
+			});
+			payloads.put({
+				projectId: "existing-recovery",
+				name: "Duplicate Recovery",
+				updatedAt: "2026-07-18T01:00:00.000Z",
+				authoredChecksum: "existing-checksum",
+				json: '{"existing":true}',
+			});
 		};
 		request.onsuccess = () => resolve(request.result);
 		request.onerror = () => reject(request.error);

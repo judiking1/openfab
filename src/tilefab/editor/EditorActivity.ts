@@ -9,6 +9,13 @@ export const EDITOR_ACTIVITIES = ["build", "assemble", "equip", "inspect"] as co
 
 export type EditorActivity = (typeof EDITOR_ACTIVITIES)[number];
 
+export function editorActivityCanvasLabel(activity: EditorActivity): string {
+	if (activity === "build") return "단방향 AMHS 레일 건설 캔버스";
+	if (activity === "assemble") return "정적 FAB 조립 및 조직 편집 캔버스";
+	if (activity === "equip") return "정적 FAB Port 및 장비 편집 캔버스";
+	return "정적 FAB 선택 및 검사 캔버스";
+}
+
 export interface EditorActivityDefinition {
 	readonly id: EditorActivity;
 	readonly label: string;
@@ -19,22 +26,22 @@ export const EDITOR_ACTIVITY_DEFINITIONS = [
 	{
 		id: "build",
 		label: "BUILD",
-		description: "Direct rail construction and repair",
+		description: "레일 만들기와 수정",
 	},
 	{
 		id: "assemble",
 		label: "ASSEMBLE",
-		description: "Fab, Bank, Bay, and blueprint assembly",
+		description: "Bay·Fab 조립과 청사진",
 	},
 	{
 		id: "equip",
 		label: "EQUIP",
-		description: "Port-first OHB, EQ, and STK authoring",
+		description: "Port부터 OHB·EQ·STK 배치",
 	},
 	{
 		id: "inspect",
 		label: "INSPECT",
-		description: "Select, edit, validate, and understand authored truth",
+		description: "선택·편집·검사",
 	},
 ] as const satisfies readonly EditorActivityDefinition[];
 

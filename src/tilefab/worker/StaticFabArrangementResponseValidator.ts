@@ -54,7 +54,7 @@ const MAX_ORGANIZATION_GROUP_REFERENCES =
 	STATIC_FAB_ARRANGEMENT_MAX_EQUIPMENT_GROUPS * STATIC_FAB_ORGANIZATION_KINDS.length * 2;
 const RECORD_ID_CURSOR_MAX = PORT_RECORD_MAX_ID + 1;
 const ORDERED_FINGERPRINT_PATTERN = /^[0-9a-f]{8}:[0-9a-f]{8}$/;
-const RAIL_CHECKSUM_PATTERN = /^(?:[0-9a-f]{8}:){8}[0-9a-f]{8}$/;
+const RAIL_CHECKSUM_PATTERN = /^(?:[0-9a-f]{8}:){11}[0-9a-f]{8}$/;
 
 /**
  * Bounded structural and semantic contract for data received from the disposable arrangement

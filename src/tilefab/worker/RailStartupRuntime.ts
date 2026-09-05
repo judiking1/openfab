@@ -76,6 +76,7 @@ export function compileRailStartup(
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		),
 	);
 	const authoredChecksum = snapshotMeasurement.value.snapshot.checksum;

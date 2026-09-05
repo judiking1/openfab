@@ -19,6 +19,8 @@ import { EditorInputCue } from "./EditorInputCue";
 import {
 	cycleConnectorSide,
 	parseConnectorCandidateIndex,
+	type StaticFabAssemblyConnectorRecoveryTarget,
+	staticFabAssemblyConnectorRecoveryPrompt,
 } from "./StaticFabAssemblyConnectorPanelHelpers";
 
 export type StaticFabAssemblyConnectorPanelPhase =
@@ -72,6 +74,10 @@ export interface StaticFabAssemblyConnectorPanelProps {
 	readonly conflictCount: number;
 	readonly issueCode: string | null;
 	readonly timings: StaticFabAssemblyConnectorPanelTimings | null;
+	readonly recoveryTarget: StaticFabAssemblyConnectorRecoveryTarget | null;
+	readonly recoveryAutomaticRecommendationAttempts: number;
+	readonly guidedApplyActionId?: string | null;
+	readonly guidedApplyDescriptionId?: string;
 	readonly onSelectSource: (index: number) => void;
 	readonly onSelectTarget: (index: number) => void;
 	readonly onCycleSource: (step: -1 | 1) => void;
@@ -102,6 +108,10 @@ export function StaticFabAssemblyConnectorPanel({
 	conflictCount,
 	issueCode,
 	timings,
+	recoveryTarget,
+	recoveryAutomaticRecommendationAttempts,
+	guidedApplyActionId = null,
+	guidedApplyDescriptionId,
 	onSelectSource,
 	onSelectTarget,
 	onCycleSource,
@@ -114,20 +124,42 @@ export function StaticFabAssemblyConnectorPanel({
 	const statusId = useId();
 	const sourceSelectId = useId();
 	const targetSelectId = useId();
+	const recoveryDescriptionId = useId();
 	const sourceSelectRef = useRef<HTMLSelectElement>(null);
+	const recoveryTargetRef = useRef<HTMLButtonElement>(null);
 	const focusedForOpenRef = useRef(false);
 
 	const applying = phase === "applying";
 	const sourceLocked = applying || sourceCandidates.length === 0;
+	const recoveryPrompt =
+		phase === "rejected"
+			? staticFabAssemblyConnectorRecoveryPrompt(
+					recoveryTarget,
+					recoveryAutomaticRecommendationAttempts,
+				)
+			: null;
+	const recoveryTargetToReveal = recoveryPrompt?.target ?? null;
 	useEffect(() => {
 		if (phase === "idle") {
 			focusedForOpenRef.current = false;
 			return;
 		}
 		if (focusedForOpenRef.current || sourceLocked) return;
-		focusedForOpenRef.current = true;
-		sourceSelectRef.current?.focus({ preventScroll: true });
+		const frame = window.requestAnimationFrame(() => {
+			const sourceSelect = sourceSelectRef.current;
+			if (!sourceSelect?.isConnected || sourceSelect.disabled) return;
+			focusedForOpenRef.current = true;
+			sourceSelect.focus({ preventScroll: true });
+		});
+		return () => window.cancelAnimationFrame(frame);
 	}, [phase, sourceLocked]);
+	useEffect(() => {
+		if (!recoveryTargetToReveal) return;
+		const frame = window.requestAnimationFrame(() => {
+			recoveryTargetRef.current?.scrollIntoView({ block: "center", inline: "nearest" });
+		});
+		return () => window.cancelAnimationFrame(frame);
+	}, [recoveryTargetToReveal]);
 
 	if (phase === "idle") return null;
 
@@ -139,7 +171,6 @@ export function StaticFabAssemblyConnectorPanel({
 	const status = panelStatus(phase, conflictCount, issueCode);
 	const feedback = reason ?? defaultFeedback(phase, hierarchyRole, purpose);
 	const childLabel = hierarchyRole === "BAY_TO_BANK" ? "BAY" : "BANK";
-
 	return (
 		<section
 			className="tilefab-assembly-connector"
@@ -147,9 +178,10 @@ export function StaticFabAssemblyConnectorPanel({
 			data-phase={phase}
 			data-hierarchy-role={hierarchyRole}
 			data-purpose={purpose}
+			data-recovery-target={recoveryPrompt?.target ?? ""}
 			aria-labelledby={titleId}
 			aria-describedby={statusId}
-			aria-keyshortcuts="Q E Escape Enter"
+			aria-keyshortcuts="Q E Escape"
 			aria-busy={busy}
 			onKeyDownCapture={(event) => {
 				if (event.key === "Escape") {
@@ -181,7 +213,12 @@ export function StaticFabAssemblyConnectorPanel({
 					result !== null
 				) {
 					const target = event.target;
-					if (target instanceof Element && target.closest("button, summary")) return;
+					if (
+						target instanceof Element &&
+						target.closest("button, select, input, textarea, summary, [role='button']")
+					) {
+						return;
+					}
 					event.preventDefault();
 					event.stopPropagation();
 					onApply();
@@ -193,13 +230,13 @@ export function StaticFabAssemblyConnectorPanel({
 					<Network size={18} />
 				</span>
 				<span className="tilefab-assembly-connector-heading">
-					<small>FAB ASSEMBLY</small>
+					<small>FAB 조립 · ASSEMBLY</small>
 					<strong id={titleId}>
 						{purpose === "FAB_LOOP"
-							? "ADD FAB LOOP"
+							? "FAB 외곽 루프 추가 · ADD FAB LOOP"
 							: hierarchyRole === "BAY_TO_BANK"
-								? "CONNECT BAYS"
-								: "CONNECT BANKS"}
+								? "TWIN BAY 연결 · CONNECT BAYS"
+								: "BAY BANK 연결 · CONNECT BANKS"}
 					</strong>
 				</span>
 				<span className="tilefab-assembly-connector-phase" data-phase={phase}>
@@ -211,16 +248,19 @@ export function StaticFabAssemblyConnectorPanel({
 			<div className="tilefab-assembly-connector-gateways">
 				<GatewaySelector
 					kind="source"
-					label="SOURCE GATEWAY"
+					label="출발 연결점 · SOURCE"
 					selectId={sourceSelectId}
 					bayName={sourceBayName}
-					fallbackLabel={`SELECT A ${childLabel} GATEWAY`}
+					fallbackLabel={`${childLabel} 출발 연결점 선택`}
 					gatewayLabel={sourceGatewayLabel}
 					candidates={sourceCandidates}
 					candidateIndex={sourceCandidateIndex}
 					selectedValue={selectedSourceValue}
 					disabled={sourceLocked}
 					selectRef={sourceSelectRef}
+					guidedNext={recoveryPrompt?.target === "source-next"}
+					recoveryDescriptionId={recoveryDescriptionId}
+					guidedRef={recoveryTargetRef}
 					onSelect={onSelectSource}
 					onCycle={onCycleSource}
 				/>
@@ -231,15 +271,18 @@ export function StaticFabAssemblyConnectorPanel({
 
 				<GatewaySelector
 					kind="target"
-					label="TARGET GATEWAY"
+					label="도착 연결점 · TARGET"
 					selectId={targetSelectId}
 					bayName={targetBayName}
-					fallbackLabel={`SELECT A ${childLabel} GATEWAY`}
+					fallbackLabel={`${childLabel} 도착 연결점 선택`}
 					gatewayLabel={targetGatewayLabel}
 					candidates={targetCandidates}
 					candidateIndex={targetCandidateIndex}
 					selectedValue={selectedTargetValue}
 					disabled={targetLocked}
+					guidedNext={recoveryPrompt?.target === "target-next"}
+					recoveryDescriptionId={recoveryDescriptionId}
+					guidedRef={recoveryTargetRef}
 					onSelect={onSelectTarget}
 					onCycle={onCycleTarget}
 				/>
@@ -248,12 +291,28 @@ export function StaticFabAssemblyConnectorPanel({
 			<fieldset
 				className="tilefab-assembly-connector-side"
 				disabled={sideLocked}
-				aria-label="Connector corridor side"
+				aria-label="연결 경로 방향"
 			>
-				<legend>CORRIDOR SIDE</legend>
-				<SideButton active={side === null} label="AUTO" side={null} onSide={onSide} />
-				<SideButton active={side === "left"} label="LEFT" side="left" onSide={onSide} />
-				<SideButton active={side === "right"} label="RIGHT" side="right" onSide={onSide} />
+				<legend>경로 방향 · SIDE</legend>
+				<SideButton active={side === null} label="자동 · AUTO" side={null} onSide={onSide} />
+				<SideButton
+					active={side === "left"}
+					label="왼쪽 · LEFT"
+					side="left"
+					guided={recoveryPrompt?.target === "side-left"}
+					recoveryDescriptionId={recoveryDescriptionId}
+					guidedRef={recoveryTargetRef}
+					onSide={onSide}
+				/>
+				<SideButton
+					active={side === "right"}
+					label="오른쪽 · RIGHT"
+					side="right"
+					guided={recoveryPrompt?.target === "side-right"}
+					recoveryDescriptionId={recoveryDescriptionId}
+					guidedRef={recoveryTargetRef}
+					onSide={onSide}
+				/>
 			</fieldset>
 
 			<div className="tilefab-assembly-connector-status">
@@ -261,8 +320,8 @@ export function StaticFabAssemblyConnectorPanel({
 				<div
 					id={statusId}
 					className="tilefab-assembly-connector-feedback"
-					role="status"
-					aria-live="polite"
+					role={phase === "rejected" ? "alert" : "status"}
+					aria-live={phase === "rejected" ? "assertive" : "polite"}
 					aria-atomic="true"
 					data-rejected={phase === "rejected"}
 				>
@@ -270,6 +329,16 @@ export function StaticFabAssemblyConnectorPanel({
 					<span>
 						<strong>{status}</strong>
 						<small className="tilefab-assembly-connector-reason">{feedback}</small>
+						{recoveryPrompt ? (
+							<small
+								id={recoveryDescriptionId}
+								className="tilefab-assembly-connector-recovery-prompt"
+							>
+								<strong>{recoveryPrompt.eyebrow}</strong>
+								<span>{recoveryPrompt.instruction}</span>
+								<em>새 경로가 READY가 될 때까지 적용은 잠깁니다.</em>
+							</small>
+						) : null}
 					</span>
 					{conflictCount > 0 && issueCode !== "ALREADY_CONNECTED" ? (
 						<em>
@@ -289,22 +358,28 @@ export function StaticFabAssemblyConnectorPanel({
 					style={CONTROL_SIZE}
 					aria-keyshortcuts="Escape"
 					disabled={phase === "applying"}
+					data-guided-target={recoveryPrompt?.target === "cancel" || undefined}
+					aria-describedby={recoveryPrompt?.target === "cancel" ? recoveryDescriptionId : undefined}
+					ref={recoveryPrompt?.target === "cancel" ? recoveryTargetRef : undefined}
 					onClick={onCancel}
 				>
 					<X size={16} aria-hidden="true" />
-					CANCEL
+					취소 · CANCEL
 					<kbd>ESC</kbd>
 				</button>
 				<button
 					type="button"
 					className="tilefab-assembly-connector-apply"
 					style={CONTROL_SIZE}
+					data-guided-action-id={guidedApplyActionId ?? undefined}
+					data-guided-target={guidedApplyActionId ? "true" : undefined}
+					aria-describedby={guidedApplyActionId ? guidedApplyDescriptionId : undefined}
 					aria-keyshortcuts="Enter"
 					disabled={phase !== "ready" || result === null}
 					onClick={onApply}
 				>
 					<Check size={16} aria-hidden="true" />
-					APPLY
+					적용 · APPLY
 					<kbd>ENTER</kbd>
 				</button>
 			</footer>
@@ -323,6 +398,9 @@ interface GatewaySelectorProps {
 	readonly candidateIndex: number | null;
 	readonly selectedValue: string;
 	readonly disabled: boolean;
+	readonly guidedNext: boolean;
+	readonly recoveryDescriptionId: string;
+	readonly guidedRef: Ref<HTMLButtonElement>;
 	readonly selectRef?: Ref<HTMLSelectElement>;
 	readonly onSelect: (index: number) => void;
 	readonly onCycle: (step: -1 | 1) => void;
@@ -339,6 +417,9 @@ function GatewaySelector({
 	candidateIndex,
 	selectedValue,
 	disabled,
+	guidedNext,
+	recoveryDescriptionId,
+	guidedRef,
 	selectRef,
 	onSelect,
 	onCycle,
@@ -358,7 +439,7 @@ function GatewaySelector({
 					type="button"
 					className="tilefab-assembly-connector-cycle"
 					style={ICON_CONTROL_SIZE}
-					aria-label={`Previous ${kind} gateway`}
+					aria-label={`${kind === "source" ? "이전 출발" : "이전 도착"} 연결점`}
 					disabled={disabled || candidates.length < 2}
 					onClick={() => onCycle(-1)}
 				>
@@ -379,7 +460,9 @@ function GatewaySelector({
 						if (index !== null) onSelect(index);
 					}}
 				>
-					<option value="">{candidates.length === 0 ? "NO GATEWAYS" : "SELECT GATEWAY"}</option>
+					<option value="">
+						{candidates.length === 0 ? "연결점 없음 · NO GATEWAYS" : "연결점 선택"}
+					</option>
 					{candidates.map((candidate, index) => (
 						<option key={candidate.id} value={index} disabled={candidate.disabled}>
 							{candidate.label}
@@ -391,15 +474,22 @@ function GatewaySelector({
 					type="button"
 					className="tilefab-assembly-connector-cycle"
 					style={ICON_CONTROL_SIZE}
-					aria-label={`Next ${kind} gateway`}
-					disabled={disabled || candidates.length < 2}
+					aria-label={`${kind === "source" ? "다음 출발" : "다음 도착"} 연결점`}
+					disabled={
+						disabled ||
+						candidates.length === 0 ||
+						(candidateIndex !== null && candidates.length < 2)
+					}
+					data-guided-target={guidedNext || undefined}
+					aria-describedby={guidedNext ? recoveryDescriptionId : undefined}
+					ref={guidedNext ? guidedRef : undefined}
 					onClick={() => onCycle(1)}
 				>
 					<ChevronRight size={18} aria-hidden="true" />
 				</button>
 			</div>
 			<small className="tilefab-assembly-connector-gateway-detail">
-				{gatewayLabel ?? selected?.detail ?? "Choose a highlighted gateway band on the map."}
+				{gatewayLabel ?? selected?.detail ?? "지도에서 강조된 연결점 띠를 선택하세요."}
 			</small>
 		</div>
 	);
@@ -439,16 +529,30 @@ interface SideButtonProps {
 	readonly active: boolean;
 	readonly label: string;
 	readonly side: RailModuleSide | null;
+	readonly guided?: boolean;
+	readonly recoveryDescriptionId?: string;
+	readonly guidedRef?: Ref<HTMLButtonElement>;
 	readonly onSide: (side: RailModuleSide | null) => void;
 }
 
-function SideButton({ active, label, side, onSide }: SideButtonProps): React.ReactElement {
+function SideButton({
+	active,
+	label,
+	side,
+	guided = false,
+	recoveryDescriptionId,
+	guidedRef,
+	onSide,
+}: SideButtonProps): React.ReactElement {
 	return (
 		<button
 			type="button"
 			className="tilefab-assembly-connector-side-option"
 			style={CONTROL_SIZE}
 			data-active={active}
+			data-guided-target={guided || undefined}
+			aria-describedby={guided ? recoveryDescriptionId : undefined}
+			ref={guided ? guidedRef : undefined}
 			aria-pressed={active}
 			onClick={() => onSide(side)}
 		>
@@ -463,19 +567,21 @@ function ConnectorResult({
 	readonly result: StaticFabAssemblyConnectorPanelResult;
 }): React.ReactElement {
 	const parentKind = result.hierarchyRole === "BAY_TO_BANK" ? "BANK" : "FAB";
-	const parentLabel = `${result.parentAction === "create" ? "CREATE" : "EXTEND"} ${parentKind}`;
+	const parentLabel = `${parentKind} ${result.parentAction === "create" ? "생성" : "확장"} · ${
+		result.parentAction === "create" ? "CREATE" : "EXTEND"
+	} ${parentKind}`;
 	return (
-		<dl className="tilefab-assembly-connector-result" aria-label="Certified connection result">
+		<dl className="tilefab-assembly-connector-result" aria-label="Worker 인증 연결 결과">
 			<div>
-				<dt>OUTBOUND</dt>
+				<dt>가는 길 · OUTBOUND</dt>
 				<dd>{formatMeters(result.outboundLengthMeters)}</dd>
 			</div>
 			<div>
-				<dt>RETURN</dt>
+				<dt>오는 길 · RETURN</dt>
 				<dd>{formatMeters(result.returnLengthMeters)}</dd>
 			</div>
 			<div>
-				<dt>PATCH</dt>
+				<dt>변경량 · PATCH</dt>
 				<dd>
 					{result.railChangeCount.toLocaleString()} RAIL ·{" "}
 					{result.organizationChangeCount.toLocaleString()} ORG
@@ -484,10 +590,10 @@ function ConnectorResult({
 			<div data-parent-action={result.parentAction}>
 				<dt>
 					{result.purpose === "FAB_LOOP"
-						? "FAB LOOP"
+						? "외곽 순환 · FAB LOOP"
 						: result.hierarchyRole === "BAY_TO_BANK"
-							? "BAY BANK"
-							: "FAB INTERBAY"}
+							? "BAY BANK 생성"
+							: "FAB 연결 · INTERBAY"}
 				</dt>
 				<dd>
 					{parentLabel}
@@ -544,22 +650,20 @@ function panelStatus(
 ): string {
 	switch (phase) {
 		case "idle":
-			return "CONNECT BAYS";
+			return "연결 준비";
 		case "pick-source-gateway":
-			return "PICK SOURCE";
+			return "출발 선택";
 		case "pick-target-gateway":
-			return "PICK TARGET";
+			return "도착 선택";
 		case "verifying":
-			return "VERIFYING";
+			return "검증 중";
 		case "ready":
-			return "READY";
+			return "적용 준비 · READY";
 		case "rejected":
-			if (issueCode === "ALREADY_CONNECTED") return "ALREADY CONNECTED";
-			return conflictCount > 0
-				? `${conflictCount.toLocaleString()} CONFLICT${conflictCount === 1 ? "" : "S"}`
-				: "NOT READY";
+			if (issueCode === "ALREADY_CONNECTED") return "이미 연결됨";
+			return conflictCount > 0 ? `충돌 ${conflictCount.toLocaleString()}건` : "적용 불가";
 		case "applying":
-			return "APPLYING";
+			return "적용 중";
 	}
 }
 
@@ -568,7 +672,7 @@ function defaultFeedback(
 	hierarchyRole: StaticFabAssemblyConnectorHierarchyRole,
 	purpose: StaticFabAssemblyConnectorPurpose,
 ): string {
-	const child = hierarchyRole === "BAY_TO_BANK" ? "Production Bays" : "Bay Banks";
+	const child = hierarchyRole === "BAY_TO_BANK" ? "Twin Bay" : "Bay Bank";
 	const parent =
 		purpose === "FAB_LOOP"
 			? "Fab outer circulation"
@@ -577,23 +681,23 @@ function defaultFeedback(
 				: "Fab Interbay";
 	switch (phase) {
 		case "idle":
-			return `Select two ${child} to begin.`;
+			return `${child} 두 개를 선택해 시작하세요.`;
 		case "pick-source-gateway":
 			return purpose === "FAB_LOOP"
-				? "Pick an outer source gateway below the selected Bank."
-				: "Select a highlighted source gateway.";
+				? "선택한 Bay Bank 바깥쪽의 출발 연결점을 고르세요."
+				: "강조된 출발 연결점을 고르세요.";
 		case "pick-target-gateway":
 			return purpose === "FAB_LOOP"
-				? "Pick a facing outer target gateway below the other Bank."
-				: "Select a highlighted target gateway.";
+				? "다른 Bay Bank의 마주 보는 바깥쪽 도착 연결점을 고르세요."
+				: "강조된 도착 연결점을 고르세요.";
 		case "verifying":
-			return `Checking route, clearance, and ${parent} hierarchy.`;
+			return `경로·여유 공간·${parent} 계층을 Worker가 확인하고 있습니다.`;
 		case "ready":
-			return "Certified atomic connection ready.";
+			return "가는 길·오는 길과 변경량을 확인한 뒤 적용하세요.";
 		case "rejected":
-			return "Try another gateway pair or side. No map changes applied.";
+			return "다른 연결점 조합이나 경로 방향을 시도하세요. 지도는 아직 바뀌지 않았습니다.";
 		case "applying":
-			return "Applying atomic connection.";
+			return "인증된 연결을 한 번의 실행 취소 단위로 적용하고 있습니다.";
 	}
 }
 

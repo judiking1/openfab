@@ -464,6 +464,7 @@ function startSession(
 			current.patchSequence,
 			current.portEquipment,
 			current.organizations,
+			current.relationships,
 		).snapshot,
 		getCurrentState,
 	});
@@ -475,5 +476,6 @@ function liveState(document: RailDocument): StaticFabArrangementLiveState {
 		patchSequence: document.getPatchSequence(),
 		portEquipment: document.portEquipment,
 		organizations: document.organizations,
+		relationships: document.relationships,
 	};
 }

@@ -801,7 +801,7 @@ describe("OpenFabStationProposalReviewWorkerSession", () => {
 			checksum: request.snapshot.checksum,
 		});
 		const inputTransfers = collectEvaluateRequestTransfers(request);
-		expect(inputTransfers).toHaveLength(94);
+		expect(inputTransfers).toHaveLength(125);
 		expect(new Set(inputTransfers).size).toBe(inputTransfers.length);
 
 		const deliveredRequest = structuredClone(request, { transfer: inputTransfers });
@@ -1078,12 +1078,14 @@ async function prepareEvaluatedReadyPermit() {
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	const handoff = issueRailMirrorSnapshotCaptureHandoff(
 		document.map,
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 		sourceCapture.snapshot.checksum,
 	);
 	const snapshotTransfers = requireArrayBuffers(

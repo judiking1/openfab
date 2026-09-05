@@ -182,6 +182,25 @@ describe("StaticFabAssemblyConnectorRuntime", () => {
 		);
 	});
 
+	it("keeps the DIFFERENT_FABS compact rejection code valid at the Worker boundary", () => {
+		const prepared = prepareStaticFabAssemblyConnector(
+			connectorRequest(interbayFixture, interbayFixture.intent, 84),
+		);
+		if (!prepared.plan) throw new Error("Expected one exact Interbay plan.");
+		const differentFabs = {
+			...prepared,
+			plan: {
+				...prepared.plan,
+				assemblyConnector: {
+					...prepared.plan.assemblyConnector,
+					issueCode: "DIFFERENT_FABS",
+				},
+			},
+		};
+
+		expect(staticFabAssemblyConnectorPreparedShapeError(differentFabs)).toBeNull();
+	});
+
 	it("rejects malformed intent before planning and a forged valid intent fingerprint", () => {
 		const malformed = {
 			...fixture.intent,

@@ -21,6 +21,7 @@ const result = {
 	physicalFingerprint: "",
 	firstBytes: 0,
 	secondBytes: 0,
+	recoveryCleanupRemoved: 0,
 };
 
 try {
@@ -41,10 +42,68 @@ try {
 
 	await page.waitForTimeout(2_000);
 	await page.reload({ waitUntil: "domcontentloaded" });
-	await page.getByRole("button", { name: "복구" }).waitFor({ state: "visible" });
+	const recoveryOffer = page.getByRole("region", { name: /별도 복구본/ });
+	const restoreRecovery = recoveryOffer.getByRole("button", {
+		name: "현재 프로젝트를 교체해 복구",
+		exact: true,
+	});
+	await restoreRecovery.waitFor({ state: "visible" });
+	assertIncludes(
+		await recoveryOffer.innerText(),
+		"복구하면 현재 'Untitled FAB' 프로젝트를 교체합니다",
+		"recovery offer names the current project replacement",
+	);
 	await page.waitForTimeout(2_000);
-	await page.getByRole("button", { name: "복구" }).click();
-	await waitForReady(page, 5);
+	await buildFiveMeterRail(page);
+	const competing = await readProjectMetrics(page);
+	assertEqual(competing.projectDirty, "true", "competing current project dirty state");
+	if (competing.projectId === authored.projectId) {
+		throw new Error("Crash-recovery guard did not start from a distinct current project.");
+	}
+	assertEqual(
+		await recoveryOffer.getAttribute("data-recovery-project-id"),
+		authored.projectId,
+		"recovery offer remains bound to the interrupted project",
+	);
+	const offeredRecovery = await readRecoveryRecord(page, authored.projectId);
+	assertEqual(offeredRecovery?.projectId, authored.projectId, "recovery envelope project id");
+	assertEqual(
+		offeredRecovery ? JSON.parse(offeredRecovery.json).manifest.id : null,
+		authored.projectId,
+		"recovery payload project id",
+	);
+	await restoreRecovery.click();
+	const recoveryGuard = page.getByRole("dialog", {
+		name: "현재 프로젝트를 저장한 뒤 복구할까요?",
+		exact: true,
+	});
+	await recoveryGuard.waitFor({ state: "visible" });
+	assertIncludes(
+		await recoveryGuard.innerText(),
+		"현재 'Untitled FAB' 프로젝트를 'Untitled FAB' 복구본으로 교체합니다",
+		"dirty-project recovery guard explains replacement",
+	);
+	await recoveryGuard.getByRole("button", { name: "취소", exact: true }).click();
+	await recoveryGuard.waitFor({ state: "hidden" });
+	await page.waitForFunction(
+		() => document.activeElement?.textContent?.trim() === "현재 프로젝트를 교체해 복구",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	assertEqual(
+		await restoreRecovery.evaluate((element) => element === document.activeElement),
+		true,
+		"recovery guard cancel restores the recovery action",
+	);
+	assertEqual(
+		await recoveryOffer.getAttribute("data-recovery-project-id"),
+		authored.projectId,
+		"recovery offer remains stable after guard cancel",
+	);
+	await restoreRecovery.click();
+	await recoveryGuard.waitFor({ state: "visible" });
+	await recoveryGuard.getByRole("button", { name: "저장하지 않고 복구", exact: true }).click();
+	await waitForBoundProject(page, authored.projectId, 5);
 	const recovered = await readProjectMetrics(page);
 	assertBoundIdentity(recovered, authored, "crash recovery");
 	assertEqual(recovered.projectDirty, "true", "recovered project remains unsaved");
@@ -89,6 +148,69 @@ try {
 	await page.getByText(/기존 프로젝트 유지/).waitFor({ state: "visible" });
 	const afterInvalid = await readProjectMetrics(page);
 	assertBoundIdentity(afterInvalid, authored, "malformed-file rollback");
+
+	await seedIsolatedRecoveryCleanupInventory(page, 55);
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await waitForReady(page, 0);
+	const cleanupRecoveryOffer = page.getByRole("region", { name: /별도 복구본/ });
+	await cleanupRecoveryOffer.waitFor({ state: "visible" });
+	assertEqual(
+		await cleanupRecoveryOffer.getAttribute("data-recovery-count"),
+		"55",
+		"seeded recovery inventory count",
+	);
+	await cleanupRecoveryOffer.getByRole("button", { name: "목록 55개", exact: true }).click();
+	const cleanupTrigger = cleanupRecoveryOffer.getByRole("button", {
+		name: "오래된 복구본 정리",
+		exact: true,
+	});
+	await cleanupTrigger.click();
+	const cleanupDialog = page.getByRole("dialog", {
+		name: "오래된 복구본을 정리할까요?",
+		exact: true,
+	});
+	await cleanupDialog.waitFor({ state: "visible" });
+	assertEqual(
+		await cleanupDialog.getAttribute("data-removable-count"),
+		"5",
+		"recovery cleanup removable count",
+	);
+	assertEqual(
+		await cleanupDialog.getAttribute("data-retained-count"),
+		"50",
+		"recovery cleanup retained count",
+	);
+	await cleanupDialog.getByRole("button", { name: "취소", exact: true }).click();
+	await cleanupDialog.waitFor({ state: "hidden" });
+	await page.waitForFunction(
+		() => document.activeElement?.textContent?.trim() === "오래된 복구본 정리",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	assertEqual(
+		await cleanupTrigger.evaluate((element) => element === document.activeElement),
+		true,
+		"recovery cleanup cancel restores the cleanup action",
+	);
+	assertEqual(
+		await cleanupRecoveryOffer.getAttribute("data-recovery-count"),
+		"55",
+		"recovery cleanup cancel preserves every candidate",
+	);
+	await cleanupTrigger.click();
+	await cleanupDialog.waitFor({ state: "visible" });
+	await cleanupDialog.getByRole("button", { name: "오래된 복구본 영구 삭제", exact: true }).click();
+	await cleanupDialog.waitFor({ state: "hidden" });
+	await page.waitForFunction(
+		() => document.querySelector(".tilefab-recovery")?.getAttribute("data-recovery-count") === "50",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	const cleanupStores = await readRecoveryStoreCounts(page);
+	assertEqual(cleanupStores.payloads, 50, "recovery cleanup payload count");
+	assertEqual(cleanupStores.summaries, 50, "recovery cleanup summary count");
+	assertEqual(cleanupStores.oldestProjectId, "cleanup-seed-5", "recovery cleanup retention floor");
+	result.recoveryCleanupRemoved = 5;
 
 	result.status = "PASS";
 	result.authoredChecksum = authored.workerChecksum;
@@ -189,6 +311,25 @@ async function waitForReady(activePage, physicalPaths) {
 	);
 }
 
+async function waitForBoundProject(activePage, projectId, physicalPaths) {
+	await activePage.waitForFunction(
+		(expected) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const app = document.querySelector(".tilefab-app");
+			return (
+				canvas?.dataset.startupStatus === "ready" &&
+				canvas.dataset.workerStatus === "ready" &&
+				canvas.dataset.modelSyncPending === "false" &&
+				app?.dataset.projectOperation === "idle" &&
+				canvas.dataset.projectId === expected.projectId &&
+				canvas.dataset.physicalPaths === String(expected.physicalPaths)
+			);
+		},
+		{ projectId, physicalPaths },
+		{ timeout: 10_000 },
+	);
+}
+
 async function waitForProjectOperation(activePage, operation) {
 	await activePage.waitForFunction(
 		(expected) => document.querySelector(".tilefab-app")?.dataset.projectOperation === expected,
@@ -207,6 +348,103 @@ async function readProjectMetrics(activePage) {
 		workerPhysicalFingerprint: canvas.dataset.workerPhysicalFingerprint ?? "",
 		workerSimulationReady: canvas.dataset.workerSimulationReady ?? "",
 	}));
+}
+
+async function seedIsolatedRecoveryCleanupInventory(activePage, count) {
+	await activePage.evaluate(async (recordCount) => {
+		const database = await new Promise((resolve, reject) => {
+			const request = indexedDB.open("openfab-native-projects", 5);
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		try {
+			await new Promise((resolve, reject) => {
+				const transaction = database.transaction(
+					["recovery-projects", "recovery-project-summaries"],
+					"readwrite",
+				);
+				const payloads = transaction.objectStore("recovery-projects");
+				const summaries = transaction.objectStore("recovery-project-summaries");
+				payloads.clear();
+				summaries.clear();
+				for (let index = 0; index < recordCount; index++) {
+					const json = JSON.stringify({ seed: index, payload: "x".repeat(index + 1) });
+					const summary = {
+						projectId: `cleanup-seed-${index}`,
+						name: `Cleanup seed ${index}`,
+						updatedAt: `2026-07-18T01:${String(index).padStart(2, "0")}:00.000Z`,
+						authoredChecksum: `cleanup-seed-checksum-${index}`,
+						jsonCharacters: json.length,
+					};
+					payloads.put({ ...summary, json });
+					summaries.put(summary);
+				}
+				transaction.oncomplete = () => resolve();
+				transaction.onerror = () => reject(transaction.error);
+				transaction.onabort = () => reject(transaction.error);
+			});
+		} finally {
+			database.close();
+		}
+	}, count);
+}
+
+async function readRecoveryStoreCounts(activePage) {
+	return activePage.evaluate(async () => {
+		const database = await new Promise((resolve, reject) => {
+			const request = indexedDB.open("openfab-native-projects", 5);
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		try {
+			return await new Promise((resolve, reject) => {
+				const transaction = database.transaction(
+					["recovery-projects", "recovery-project-summaries"],
+					"readonly",
+				);
+				const payloadRequest = transaction.objectStore("recovery-projects").count();
+				const summaryStore = transaction.objectStore("recovery-project-summaries");
+				const summaryRequest = summaryStore.count();
+				const summariesRequest = summaryStore.getAll();
+				transaction.oncomplete = () => {
+					const ordered = summariesRequest.result.sort(
+						(left, right) =>
+							right.updatedAt.localeCompare(left.updatedAt) ||
+							left.projectId.localeCompare(right.projectId),
+					);
+					resolve({
+						payloads: payloadRequest.result,
+						summaries: summaryRequest.result,
+						oldestProjectId: ordered.at(-1)?.projectId ?? null,
+					});
+				};
+				transaction.onerror = () => reject(transaction.error);
+				transaction.onabort = () => reject(transaction.error);
+			});
+		} finally {
+			database.close();
+		}
+	});
+}
+
+async function readRecoveryRecord(activePage, projectId) {
+	return activePage.evaluate(async (id) => {
+		const request = indexedDB.open("openfab-native-projects");
+		const database = await new Promise((resolve, reject) => {
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		try {
+			const transaction = database.transaction("recovery-projects", "readonly");
+			const read = transaction.objectStore("recovery-projects").get(id);
+			return await new Promise((resolve, reject) => {
+				read.onsuccess = () => resolve(read.result ?? null);
+				read.onerror = () => reject(read.error);
+			});
+		} finally {
+			database.close();
+		}
+	}, projectId);
 }
 
 function assertBoundIdentity(actual, expected, phase) {
@@ -233,6 +471,14 @@ function assertEqual(actual, expected, label) {
 	if (actual !== expected) {
 		throw new Error(
 			`${label}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
+		);
+	}
+}
+
+function assertIncludes(actual, expected, label) {
+	if (!actual.includes(expected)) {
+		throw new Error(
+			`${label}: expected ${JSON.stringify(actual)} to include ${JSON.stringify(expected)}`,
 		);
 	}
 }

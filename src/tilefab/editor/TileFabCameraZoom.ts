@@ -26,7 +26,13 @@ export function applyTileFabCameraZoom(
 	) {
 		return false;
 	}
-	const nextZoom = Math.min(bounds.maximum, Math.max(bounds.minimum, camera.zoom * factor));
+	const scaledZoom = camera.zoom * factor;
+	const nextZoom =
+		scaledZoom < camera.zoom
+			? camera.zoom <= bounds.minimum
+				? camera.zoom
+				: Math.max(bounds.minimum, scaledZoom)
+			: Math.min(bounds.maximum, scaledZoom);
 	if (nextZoom === camera.zoom) return false;
 	camera.offsetX = anchor.x - ((anchor.x - camera.offsetX) / camera.zoom) * nextZoom;
 	camera.offsetY = anchor.y - ((anchor.y - camera.offsetY) / camera.zoom) * nextZoom;

@@ -1,6 +1,7 @@
 import {
 	deriveStaticFabOrganizationSemanticRoles,
 	type StaticFabOrganizationRecord,
+	type StaticFabOrganizationSemanticRole,
 	type StaticFabOrganizationState,
 	staticFabOrganizationParentIds,
 } from "./StaticFabOrganization";
@@ -28,7 +29,7 @@ export const EMPTY_STATIC_FAB_OUTER_CIRCULATION_ANALYSIS: StaticFabOuterCirculat
 export function analyzeStaticFabOuterCirculation(
 	organizations: StaticFabOrganizationState,
 ): StaticFabOuterCirculationAnalysis {
-	const hierarchy = circulationHierarchy(organizations);
+	const hierarchy = createStaticFabOuterCirculationIndex(organizations);
 	let eligibleFabCount = 0;
 	let resilientFabLoopCount = 0;
 	let resilientBankPairCount = 0;
@@ -69,7 +70,27 @@ export function staticFabBankPairHasResilientCirculation(
 	targetBankOrganizationId: number,
 ): boolean {
 	if (sourceBankOrganizationId === targetBankOrganizationId) return false;
-	const hierarchy = circulationHierarchy(organizations);
+	const hierarchy = createStaticFabOuterCirculationIndex(organizations);
+	return staticFabBankPairHasResilientCirculationInIndex(
+		hierarchy,
+		fabOrganizationId,
+		sourceBankOrganizationId,
+		targetBankOrganizationId,
+	);
+}
+
+/**
+ * Query one pair against a source-bound hierarchy index. UI selection paths build the index once
+ * when authored organizations change, then keep the click/render path proportional to the selected
+ * Fab subtree rather than the complete project record count.
+ */
+export function staticFabBankPairHasResilientCirculationInIndex(
+	hierarchy: StaticFabOuterCirculationIndex,
+	fabOrganizationId: number,
+	sourceBankOrganizationId: number,
+	targetBankOrganizationId: number,
+): boolean {
+	if (sourceBankOrganizationId === targetBankOrganizationId) return false;
 	if (!hierarchy.fabs.some((fab) => fab.id === fabOrganizationId)) return false;
 	const directBankIds = new Set(
 		directSemanticBanks(fabOrganizationId, hierarchy).map((bank) => bank.id),
@@ -88,16 +109,40 @@ export function staticFabBankPairHasResilientCirculation(
 	);
 }
 
-interface CirculationHierarchy {
-	readonly roles: ReadonlyMap<number, "FAB" | "BAY_BANK" | "BAY" | "PROCESS_LOOP">;
+/** True only when the pair is the complete direct semantic-Bank set below this Fab. */
+export function staticFabHasExactDirectBankPairInIndex(
+	hierarchy: StaticFabOuterCirculationIndex,
+	fabOrganizationId: number,
+	sourceBankOrganizationId: number,
+	targetBankOrganizationId: number,
+): boolean {
+	if (sourceBankOrganizationId === targetBankOrganizationId) return false;
+	const directBankIds = directSemanticBanks(fabOrganizationId, hierarchy).map((bank) => bank.id);
+	return (
+		directBankIds.length === 2 &&
+		directBankIds.includes(sourceBankOrganizationId) &&
+		directBankIds.includes(targetBankOrganizationId)
+	);
+}
+
+export interface StaticFabOuterCirculationIndex {
+	readonly source: StaticFabOrganizationState;
+	readonly roles: ReadonlyMap<number, StaticFabOrganizationSemanticRole>;
 	readonly fabs: readonly StaticFabOrganizationRecord[];
 	readonly recordsById: ReadonlyMap<number, StaticFabOrganizationRecord>;
 	readonly childrenByParentId: ReadonlyMap<number, readonly StaticFabOrganizationRecord[]>;
 }
 
-function circulationHierarchy(organizations: StaticFabOrganizationState): CirculationHierarchy {
-	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
-	const recordsById = new Map(organizations.records.map((record) => [record.id, record]));
+export function createStaticFabOuterCirculationIndex(
+	organizations: StaticFabOrganizationState,
+	roles: ReadonlyMap<
+		number,
+		StaticFabOrganizationSemanticRole
+	> = deriveStaticFabOrganizationSemanticRoles(organizations),
+	recordsById: ReadonlyMap<number, StaticFabOrganizationRecord> = new Map(
+		organizations.records.map((record) => [record.id, record]),
+	),
+): StaticFabOuterCirculationIndex {
 	const childrenByParentId = new Map<number, StaticFabOrganizationRecord[]>();
 	for (const record of organizations.records) {
 		for (const parentId of staticFabOrganizationParentIds(record)) {
@@ -107,16 +152,19 @@ function circulationHierarchy(organizations: StaticFabOrganizationState): Circul
 		}
 	}
 	return Object.freeze({
+		source: organizations,
 		roles,
 		fabs: Object.freeze(organizations.records.filter((record) => roles.get(record.id) === "FAB")),
 		recordsById,
-		childrenByParentId,
+		childrenByParentId: new Map(
+			[...childrenByParentId].map(([parentId, children]) => [parentId, Object.freeze(children)]),
+		),
 	});
 }
 
 function directSemanticBanks(
 	fabOrganizationId: number,
-	hierarchy: CirculationHierarchy,
+	hierarchy: StaticFabOuterCirculationIndex,
 ): readonly StaticFabOrganizationRecord[] {
 	return Object.freeze(
 		(hierarchy.childrenByParentId.get(fabOrganizationId) ?? []).filter(
@@ -132,7 +180,7 @@ interface DirectedVertexEdge {
 
 function effectiveRailEdges(
 	rootId: number,
-	hierarchy: CirculationHierarchy,
+	hierarchy: StaticFabOuterCirculationIndex,
 ): readonly DirectedVertexEdge[] {
 	const edges = new Map<string, DirectedVertexEdge>();
 	forEachHierarchyRecord(rootId, hierarchy, (record) => {
@@ -147,7 +195,7 @@ function effectiveRailEdges(
 
 function effectiveRailVertices(
 	rootId: number,
-	hierarchy: CirculationHierarchy,
+	hierarchy: StaticFabOuterCirculationIndex,
 ): ReadonlySet<string> {
 	const vertices = new Set<string>();
 	forEachHierarchyRecord(rootId, hierarchy, (record) => {
@@ -161,7 +209,7 @@ function effectiveRailVertices(
 
 function forEachHierarchyRecord(
 	rootId: number,
-	hierarchy: CirculationHierarchy,
+	hierarchy: StaticFabOuterCirculationIndex,
 	visit: (record: StaticFabOrganizationRecord) => void,
 ): void {
 	const visited = new Set<number>();
@@ -181,7 +229,7 @@ function bankPairHasResilientCirculation(
 	fabEdges: readonly DirectedVertexEdge[],
 	leftBankId: number,
 	rightBankId: number,
-	hierarchy: CirculationHierarchy,
+	hierarchy: StaticFabOuterCirculationIndex,
 ): boolean {
 	const leftVertices = effectiveRailVertices(leftBankId, hierarchy);
 	const rightVertices = effectiveRailVertices(rightBankId, hierarchy);

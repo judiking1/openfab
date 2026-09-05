@@ -92,6 +92,7 @@ export function prepareSyntheticFabStarter(
 			build.document.getPatchSequence(),
 			build.document.portEquipment,
 			build.document.organizations,
+			build.document.relationships,
 		).snapshot,
 		placementBundle: placement?.bundle ?? null,
 		placementBundleFingerprint: placement?.fingerprint ?? null,

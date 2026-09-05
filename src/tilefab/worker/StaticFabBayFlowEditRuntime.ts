@@ -63,7 +63,12 @@ export function hydrateStaticFabBayFlowEditSession(
 	snapshot: RailMirrorSnapshot,
 ): StaticFabBayFlowEditRuntimeSession {
 	const source = hydrateRailMirrorSnapshotDocument(snapshot);
-	const sourceChecksum = checksumRailMap(source.map, source.portEquipment, source.organizations);
+	const sourceChecksum = checksumRailMap(
+		source.map,
+		source.portEquipment,
+		source.organizations,
+		source.relationships,
+	);
 	if (sourceChecksum !== snapshot.checksum) {
 		throw new Error("Bay flow edit source checksum diverged after hydration.");
 	}
@@ -365,11 +370,13 @@ export function prepareStaticFabBayFlowEditInSession(
 				prospectiveMap,
 				prospectiveEquipment,
 				prospectiveOrganizations,
+				source.relationships,
 			);
 			const plannerProspectiveChecksum = checksumRailMap(
 				plannerProspective.map,
 				plannerProspective.portEquipment,
 				plannerProspective.organizations,
+				source.relationships,
 			);
 			const incrementalChecksum = checksumRailPatchResult(sourceIdentity.checksum, {
 				changes: plan.mutations,

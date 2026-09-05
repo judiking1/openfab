@@ -78,6 +78,7 @@ export function prepareStaticFabOrganizationOverview(
 		source.map,
 		source.portEquipment,
 		source.organizations,
+		source.relationships,
 		physical,
 		readiness,
 		{

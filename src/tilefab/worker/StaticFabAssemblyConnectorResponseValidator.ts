@@ -338,6 +338,7 @@ function connectorIssueCode(value: unknown): value is StaticFabAssemblyConnector
 		value === "ANCHOR_OUTSIDE_ORGANIZATION" ||
 		value === "AMBIGUOUS_GATEWAY_OWNERSHIP" ||
 		value === "DIFFERENT_BANKS" ||
+		value === "DIFFERENT_FABS" ||
 		value === "HIERARCHY_INVALID" ||
 		value === "ALREADY_CONNECTED" ||
 		value === "ROUTE_INVALID" ||
