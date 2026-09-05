@@ -1,3 +1,48 @@
+.tilefab-bay-flow-identity {
+	display: grid;
+	min-width: 0;
+	align-content: start;
+	gap: 4px;
+	margin: 0;
+}
+
+.tilefab-bay-flow-identity > strong,
+.tilefab-bay-flow-topology-card > strong {
+	color: #a8bfbb;
+	font-size: 10px;
+	letter-spacing: 0.035em;
+}
+
+.tilefab-bay-flow-identity > span,
+.tilefab-bay-flow-topology-card > small {
+	min-width: 0;
+	color: #b9c9c6;
+	font-size: 11px;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-bay-flow-topology-card {
+	display: grid;
+	grid-template-columns: 16px minmax(0, 1fr);
+	min-width: 0;
+	align-content: start;
+	align-items: center;
+	gap: 6px;
+	padding: 8px;
+	border: 1px solid #30413f;
+	border-radius: 4px;
+	background: #101817;
+}
+
+.tilefab-bay-flow-topology-card > svg {
+	color: #9dd7c6;
+}
+
+.tilefab-bay-flow-topology-card > small {
+	grid-column: 1 / -1;
+}
+
 .tilefab-assemble-semantic-bay {
 	display: grid;
 	gap: 5px;
@@ -530,6 +575,7 @@
 		display: none;
 	}
 
+	.tilefab-bay-flow-details,
 	.tilefab-semantic-bay-impact-grid,
 	.tilefab-semantic-bay-evidence-grid {
 		grid-template-columns: minmax(0, 1fr);

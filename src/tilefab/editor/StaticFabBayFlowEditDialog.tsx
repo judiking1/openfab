@@ -277,7 +277,7 @@ function FlowReview({
 					</small>
 				</article>
 			</div>
-			<div className="tilefab-semantic-bay-bounded-details">
+			<div className="tilefab-semantic-bay-bounded-details tilefab-bay-flow-details">
 				<BoundedValues
 					label="PROCESS LOOPS"
 					values={review.processLoopOrganizationIds.map((id) => `ORG ${id}`)}
@@ -309,8 +309,8 @@ function WorkerEvidence({
 				<small>{certified ? "EXACT · SOURCE-BOUND" : "NOT CERTIFIED"}</small>
 			</header>
 			<div className="tilefab-semantic-bay-evidence-grid">
-				<article>
-					<ShieldCheck size={16} />
+				<article className="tilefab-bay-flow-topology-card">
+					<ShieldCheck size={16} aria-hidden="true" />
 					<strong>AUTHORED</strong>
 					<small>
 						{source.authoredCellCount.toLocaleString()} cells ·{" "}
@@ -318,8 +318,8 @@ function WorkerEvidence({
 						{source.authoredComponentCount} weak / {source.authoredStrongComponentCount} SCC
 					</small>
 				</article>
-				<article>
-					<ShieldCheck size={16} />
+				<article className="tilefab-bay-flow-topology-card">
+					<ShieldCheck size={16} aria-hidden="true" />
 					<strong>PHYSICAL</strong>
 					<small>
 						{source.physicalPathCount.toLocaleString()} paths · {source.physicalComponentCount} weak
@@ -345,7 +345,7 @@ function BoundedValues({
 	const visible = values.slice(0, STATIC_FAB_BAY_FLOW_EDIT_DETAIL_LIMIT);
 	const omitted = Math.max(0, total - visible.length);
 	return (
-		<p>
+		<p className="tilefab-bay-flow-identity">
 			<strong>{label}</strong>
 			<span>
 				{visible.length > 0 ? visible.join(", ") : "NONE"}

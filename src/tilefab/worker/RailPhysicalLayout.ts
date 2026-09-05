@@ -4715,7 +4715,7 @@ function* validateExpectedSyntheticGeometrySteps(
 			for (let axis = 0; axis < 4; axis++) {
 				yield;
 				if (
-					!nearlyEqual(
+					!equalsEncodedFloat32(
 						paths.bounds[pathIndex * 4 + axis] as number,
 						segment.geometry.bounds[axis] as number,
 					)
@@ -4776,11 +4776,11 @@ function* validateExpectedSyntheticGeometrySteps(
 			for (let point = 0; point < segment.geometry.distances.length; point++) {
 				yield;
 				if (
-					!nearlyEqual(
+					!equalsEncodedFloat32(
 						paths.positions[(pointStart + point) * 2] as number,
 						segment.geometry.positions[point * 2] as number,
 					) ||
-					!nearlyEqual(
+					!equalsEncodedFloat32(
 						paths.positions[(pointStart + point) * 2 + 1] as number,
 						segment.geometry.positions[point * 2 + 1] as number,
 					) ||
@@ -4907,6 +4907,11 @@ function* validatePathAggregateSteps(paths: CompiledPhysicalLayout["paths"]): Ge
 
 function nearlyEqual(left: number, right: number): boolean {
 	return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= 1e-5;
+}
+
+/** Compare the canonical wire representation, whose ULP grows with world coordinates. */
+function equalsEncodedFloat32(actual: number, derived: number): boolean {
+	return Number.isFinite(actual) && Number.isFinite(derived) && actual === Math.fround(derived);
 }
 
 function validateOffsets(

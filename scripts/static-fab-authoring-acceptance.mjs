@@ -23139,7 +23139,156 @@ async function dispatchBayFlowRedo(page, responsive, source, label) {
 	await page.keyboard.press("Meta+Shift+z");
 }
 
-async function openCertifiedBayFlowEditReview(
+async function observeBayFlowDialogPaint(page) {
+	await page.evaluate(() => {
+		const app = document.querySelector('[data-testid="tilefab-app"]');
+		const events = [];
+		const longTasks = [];
+		let clickAt = null;
+		let frame = 0;
+		let frameId = 0;
+		let signature = "";
+		const read = () => {
+			const dialog = document.querySelector('[data-testid="bay-flow-edit-dialog"]');
+			return {
+				mounted: dialog !== null,
+				phase: dialog?.getAttribute("data-phase") ?? null,
+				focus: document.activeElement?.getAttribute("data-testid") ?? null,
+				snapshot: app?.getAttribute("data-bay-flow-edit-snapshot-status") ?? null,
+				firstPaint: app?.getAttribute("data-bay-flow-edit-first-paint-ms") ?? null,
+				handoff: app?.getAttribute("data-bay-flow-edit-snapshot-handoff-ms") ?? null,
+			};
+		};
+		const record = (type) => {
+			if (clickAt === null || events.length >= 48) return;
+			events.push({ type, afterClickMilliseconds: performance.now() - clickAt, frame, ...read() });
+		};
+		const nextFrame = () => {
+			frame++;
+			record("animation-frame");
+			if (frame < 4) frameId = requestAnimationFrame(nextFrame);
+		};
+		const clicked = (event) => {
+			if (clickAt !== null || !(event.target instanceof Element)) return;
+			if (
+				!event.target.closest(
+					'[data-testid="assemble-edit-selected-bay-alternating"], [data-testid="assemble-edit-selected-bay-co-rotating"]',
+				)
+			)
+				return;
+			clickAt = performance.now();
+			record("click");
+			frameId = requestAnimationFrame(nextFrame);
+		};
+		const focused = () => record("focus");
+		const observer = new MutationObserver(() => {
+			const next = JSON.stringify(read());
+			if (next !== signature) {
+				signature = next;
+				record("dom");
+			}
+			const dialog = document.querySelector('[data-testid="bay-flow-edit-dialog"]');
+			if (dialog) observer.observe(dialog, { attributes: true, attributeFilter: ["data-phase"] });
+		});
+		observer.observe(document.body, { childList: true });
+		if (app)
+			observer.observe(app, {
+				attributes: true,
+				attributeFilter: [
+					"data-bay-flow-edit-snapshot-status",
+					"data-bay-flow-edit-first-paint-ms",
+					"data-bay-flow-edit-snapshot-handoff-ms",
+				],
+			});
+		const collectLongTasks = (entries) => {
+			if (clickAt === null) return;
+			for (const entry of entries) {
+				if (entry.startTime >= clickAt && longTasks.length < 16) {
+					longTasks.push({
+						afterClickMilliseconds: entry.startTime - clickAt,
+						duration: entry.duration,
+					});
+				}
+			}
+		};
+		const performanceObserver = new PerformanceObserver((list) =>
+			collectLongTasks(list.getEntries()),
+		);
+		performanceObserver.observe({ type: "longtask", buffered: false });
+		document.addEventListener("click", clicked, true);
+		document.addEventListener("focusin", focused, true);
+		globalThis.__openfabStopBayFlowPaintObservation = () => {
+			collectLongTasks(performanceObserver.takeRecords());
+			performanceObserver.disconnect();
+			observer.disconnect();
+			cancelAnimationFrame(frameId);
+			document.removeEventListener("click", clicked, true);
+			document.removeEventListener("focusin", focused, true);
+			delete globalThis.__openfabStopBayFlowPaintObservation;
+			return { clickObserved: clickAt !== null, events, longTasks, final: read() };
+		};
+	});
+}
+
+async function openCertifiedBayFlowEditReview(page, target, options) {
+	await observeBayFlowDialogPaint(page);
+	let outcome = "failed";
+	try {
+		const review = await verifyCertifiedBayFlowEditReview(page, target, options);
+		outcome = "passed";
+		return review;
+	} finally {
+		const observation = await page.evaluate(() =>
+			globalThis.__openfabStopBayFlowPaintObservation(),
+		);
+		if (outcome === "failed") {
+			console.error(
+				"Bay flow paint observation:",
+				JSON.stringify({ label: options.label, ...observation }),
+			);
+		}
+		await writeFile(
+			path.join(
+				artifactRoot,
+				`bay-flow-paint-${options.label.replace(/[^a-zA-Z0-9-]/g, "-")}.json`,
+			),
+			JSON.stringify({ label: options.label, outcome, ...observation }, null, 2),
+		);
+	}
+}
+
+async function assertBayFlowReviewTextLayout(dialog, label) {
+	const rows = await dialog
+		.locator(".tilefab-semantic-bay-bounded-details p, .tilefab-semantic-bay-evidence-grid article")
+		.evaluateAll((elements) =>
+			elements.map((element) => {
+				const heading = element.querySelector("strong");
+				const value = element.querySelector("span, small");
+				if (!heading || !value) throw new Error("Bay flow review label/value is missing.");
+				const bounds = element.getBoundingClientRect();
+				const headingBounds = heading.getBoundingClientRect();
+				const valueBounds = value.getBoundingClientRect();
+				const range = document.createRange();
+				range.selectNodeContents(value);
+				return {
+					label: heading.textContent,
+					verticalGap: valueBounds.top - headingBounds.bottom,
+					overflow: Math.max(0, element.scrollWidth - element.clientWidth),
+					textOutsideRow: [...range.getClientRects()].some(
+						(rect) => rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5,
+					),
+				};
+			}),
+		);
+	assertEqual(rows.length, 4, `${label} complete Bay flow review rows`);
+	for (const row of rows) {
+		assertAtLeast(row.verticalGap, 2, `${label} ${row.label} label/value separation`);
+		assertEqual(row.overflow, 0, `${label} ${row.label} row overflow`);
+		assertEqual(row.textOutsideRow, false, `${label} ${row.label} text containment`);
+	}
+}
+
+async function verifyCertifiedBayFlowEditReview(
 	page,
 	target,
 	{
@@ -23316,6 +23465,7 @@ async function openCertifiedBayFlowEditReview(
 	);
 	const cancel = page.getByTestId("bay-flow-edit-cancel");
 	const apply = page.getByTestId("bay-flow-edit-apply");
+	await assertBayFlowReviewTextLayout(dialog, label);
 	if (responsive) await assertNarrowBayFlowDialogLayout(page, dialog, cancel, apply, label);
 	await connectorEvidence.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, connectorEvidence);

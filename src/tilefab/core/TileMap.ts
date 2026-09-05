@@ -191,7 +191,27 @@ export class TileMap {
 				if (map.getAdvancedSwitch(record.id)) {
 					throw new Error(`Rail snapshot contains duplicate advanced switch id ${record.id}.`);
 				}
-				map.setAdvancedSwitch(record);
+				// The map is private until finish. Preflight one bounded footprint, then insert
+				// without cloning every switch/claim map as ordinary editable mutations must.
+				const next = copyAdvancedSwitch(record);
+				const claimedCells = deriveAdvancedSwitchGeometry(next).claimedCells;
+				for (const cell of claimedCells) {
+					const ownerId = map.advancedSwitchClaims.get(cellKey(cell.x, cell.y));
+					if (ownerId !== undefined && ownerId !== next.id) {
+						throw new Error(
+							`Advanced switch ${next.id} overlaps switch ${ownerId} at ${cell.x},${cell.y}.`,
+						);
+					}
+				}
+				const nextId = Math.max(map.nextAdvancedSwitchId, next.id + 1);
+				const cursorWillChange = nextId !== map.nextAdvancedSwitchId;
+				map.assertCanAdvanceMutationGeneration(cursorWillChange ? 2 : 1);
+				map.advancedSwitches.set(next.id, next);
+				for (const cell of claimedCells)
+					map.advancedSwitchClaims.set(cellKey(cell.x, cell.y), next.id);
+				map.nextAdvancedSwitchId = nextId;
+				map.revision++;
+				map.advanceMutationGeneration(cursorWillChange ? 2 : 1);
 			},
 			finish(revision: number, nextAdvancedSwitchId = map.nextAdvancedSwitchId): TileMap {
 				assertOpen();
