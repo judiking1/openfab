@@ -281,8 +281,11 @@ describe("StaticFabOrganizationBundle", () => {
 		expect(staticFabOrganizationBundleError({ version: 1 })).toContain("최상위 필드");
 
 		const forged = mutableBundle(captureSingleOrganizationBundle());
+		expect(staticFabOrganizationBundleError(forged)).toBeNull();
 		forged.sourceModuleCount++;
 		expect(staticFabOrganizationBundleError(forged)).toContain("source 모듈 수");
+		forged.sourceModuleCount--;
+		expect(staticFabOrganizationBundleError(forged)).toBeNull();
 	});
 
 	it("rejects unknown fields at every portable JSON nesting boundary", () => {

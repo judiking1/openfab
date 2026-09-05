@@ -29515,6 +29515,7 @@ async function exerciseOrdinaryPlacedTwinBayDuplicateHandoff(
 		4,
 		`ordinary Twin Bay duplicate local bounds ${viewportLabel}`,
 	);
+	await exerciseNearCenterPlacementPan(page, viewportLabel);
 	const duplicateGeometry = await readRailGeometry(page);
 	const duplicatePointer = await moveOrganizationBundleGhostToCandidate(page, [
 		{
@@ -38786,7 +38787,9 @@ async function centerWorld(page, world) {
 		const point = await screenPointForWorld(page, world);
 		const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 		const delta = { x: center.x - point.x, y: center.y - point.y };
-		if (Math.abs(delta.x) <= 2 && Math.abs(delta.y) <= 2) return;
+		// A secondary drag shorter than 3 px is a cancel click in the editor. A target
+		// already inside that radius is centered enough; callers locate exact world input separately.
+		if (Math.hypot(delta.x, delta.y) <= 3) return;
 		const step = {
 			x: Math.max(-box.width * 0.3, Math.min(box.width * 0.3, delta.x)),
 			y: Math.max(-box.height * 0.3, Math.min(box.height * 0.3, delta.y)),
@@ -38797,6 +38800,40 @@ async function centerWorld(page, world) {
 		await page.mouse.up({ button: "right" });
 	}
 	throw new Error(`Could not center world point ${world.x},${world.y}.`);
+}
+
+async function exerciseNearCenterPlacementPan(page, label) {
+	const before = await readMetrics(page);
+	for (const residual of [
+		{ x: 2.5, y: 0 },
+		{ x: 0, y: 2.5 },
+		{ x: 2.1, y: 2.1 },
+	]) {
+		const target = await page.evaluate((delta) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const camera = window.__tileFab?.camera;
+			if (!canvas || !camera) return null;
+			const box = canvas.getBoundingClientRect();
+			return {
+				x: (box.width / 2 - delta.x - camera.offsetX) / camera.zoom,
+				y: (box.height / 2 - delta.y - camera.offsetY) / camera.zoom,
+			};
+		}, residual);
+		if (!target) throw new Error("Cannot read current camera for near-center pan regression.");
+		await centerWorld(page, target);
+		const after = await readMetrics(page);
+		assertProjectUnchanged(after, before, `near-center duplicate pan ${label}`);
+		assertEqual(
+			after.organizationBundleActive,
+			"true",
+			`near-center duplicate remains active ${label}`,
+		);
+		assertEqual(
+			after.organizationBundleSourceRootIds,
+			before.organizationBundleSourceRootIds,
+			`near-center duplicate retains source ${label}`,
+		);
+	}
 }
 
 async function ensureWorldPointVisible(page, world) {

@@ -48,6 +48,7 @@ import {
 	staticFabOrganizationEdgeKey,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
+	staticFabOrganizationRailOwnershipIndex,
 	staticFabOrganizationStateError,
 } from "./StaticFabOrganization";
 import type { StaticFabOrganizationSelectionMode } from "./StaticFabOrganizationSelection";
@@ -1036,7 +1037,8 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 
 	const reconstructed = reconstructPortableBundleMap(bundle);
 	if (typeof reconstructed === "string") return reconstructed;
-	const ownership = buildRailModuleOwnershipIndex(reconstructed);
+	// Reuse this exact reconstructed source partition during organization validation below.
+	const ownership = staticFabOrganizationRailOwnershipIndex(reconstructed);
 	if (ownership.modules.length !== bundle.sourceModuleCount) {
 		return `조직 번들 source 모듈 수 ${bundle.sourceModuleCount}개가 복원 결과 ${ownership.modules.length}개와 일치하지 않습니다`;
 	}
