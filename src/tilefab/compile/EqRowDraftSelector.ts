@@ -104,6 +104,14 @@ export function hasAvailableEqRowDraftSpan(
 	if (slots.legalCount < pitchCells + 1) return false;
 	for (let anchorRow = 0; anchorRow < slots.count; anchorRow += 1) {
 		if ((slots.statuses[anchorRow] as number) !== PORT_SLOT_STATUS.LEGAL) continue;
+		// Occupied anchors cannot start a row. Reject them before probing physical continuity;
+		// an empty factory instead benefits from the cheap endpoint rejection below.
+		if (
+			availability.portCount > 0 &&
+			availability.statusForAdvisoryDiscovery(slots, anchorRow).status !== PORT_SLOT_STATUS.LEGAL
+		) {
+			continue;
+		}
 		const travel = moveCell({ x: 0, y: 0 }, slots.routeToDirections[anchorRow] as Direction);
 		const anchorX = slots.routeXs[anchorRow] as number;
 		const anchorZ = slots.routeZs[anchorRow] as number;
@@ -122,6 +130,7 @@ export function hasAvailableEqRowDraftSpan(
 		);
 		if (targetRow === null) continue;
 		if (
+			availability.portCount === 0 &&
 			availability.statusForAdvisoryDiscovery(slots, anchorRow).status !== PORT_SLOT_STATUS.LEGAL
 		) {
 			continue;

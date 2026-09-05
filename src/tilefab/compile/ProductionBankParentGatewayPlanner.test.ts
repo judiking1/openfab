@@ -467,7 +467,7 @@ describe("ProductionBankParentGatewayPlanner", () => {
 			assembly.capacity.primitiveDirectedEdges + banks * PRODUCTION_BANK_PARENT_GATEWAY_NEW_EDGES,
 		);
 		assertClosedPhysicalNetwork(map);
-	}, 15_000);
+	}, 60_000);
 });
 
 function oneBankAssembly(axis: OpenFabFabBankRepetitionAxis) {

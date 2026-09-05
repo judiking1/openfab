@@ -1,4 +1,4 @@
-import type { PortEquipmentState } from "../core/EquipmentGroup";
+import { isCanonicalPortEquipmentState, type PortEquipmentState } from "../core/EquipmentGroup";
 import {
 	type CardinalPortRoute,
 	OPENFAB_MINIMUM_PORT_SPACING_MILLIMETERS,
@@ -8,7 +8,6 @@ import {
 	type PortRecord,
 	type PortSide,
 	type PortType,
-	portRouteIdentityKey,
 } from "../core/PortRecord";
 import { type Direction, moveCell, oppositeDirection } from "../core/railShape";
 import { cellKey } from "../core/TileMap";
@@ -16,15 +15,15 @@ import { type CompiledPathIntervalRemap, PATH_SOURCE_IDENTITY_KIND } from "./Com
 import { PATH_KIND } from "./PhysicalPathCompiler";
 import type { CompiledPhysicalLayout } from "./PhysicalRailCompiler";
 import {
-	createPortAttachmentSourceIndex,
 	metersToMillimeters,
 	type ResolvedPortAttachment,
 	resolvePortAttachmentAtSourcePath,
-	resolvePortAttachmentWithSourceIndex,
 } from "./PortAttachmentResolver";
 import {
+	bindPortEquipmentResolvedPositionIndex,
+	compilePortEquipmentResolvedPositionCapability,
 	type PortEquipmentResolvedPositionCapability,
-	visitPortEquipmentResolvedPositions,
+	type PortEquipmentResolvedPositionIndex,
 } from "./PortEquipmentResolvedPositions";
 import {
 	DEFAULT_ENVELOPE_CHUNK_SIZE_METERS,
@@ -276,12 +275,6 @@ function findPortSlotSpatialChunk(coordinates: Int32Array, x: number, z: number)
 	return -1;
 }
 
-interface ExistingResolvedPort {
-	readonly port: PortRecord;
-	readonly worldXMeters: number;
-	readonly worldZMeters: number;
-}
-
 export interface PortSlotAvailabilityResult {
 	readonly status: PortSlotStatus;
 	readonly conflictingPortId: number;
@@ -335,13 +328,13 @@ export class PortSlotRailClearanceIndex {
 // Bay-to-Bay Connector. This remains a hard allocation ceiling rather than scaling with input size.
 export const PORT_SLOT_MAX_ROWS = 204_096;
 export const PORT_SLOT_SPATIAL_CHUNK_METERS = 32;
-const EXISTING_PORT_BUCKET_METERS = 1;
 const LOCAL_OWNING_RAIL_WINDOW_METERS = 0.75;
 const DISTANCE_EPSILON_METERS = 1e-6;
 
 /** Dynamic port conflicts stay separate from the physical slot catalog. */
 export class PortSlotAvailabilityIndex {
-	private readonly existingPortIndex: ReadonlyMap<string, readonly ExistingResolvedPort[]>;
+	private readonly existingPortIndex: PortEquipmentResolvedPositionIndex;
+	private readonly indexedPorts: readonly PortRecord[];
 	private readonly stkBodySweeps: StkBodySweepIndex;
 	private readonly sourceLayout: CompiledPhysicalLayout;
 	private readonly sourceState: PortEquipmentState;
@@ -360,7 +353,12 @@ export class PortSlotAvailabilityIndex {
 		this.portType = portType;
 		this.sourceState = state;
 		this.portCount = state.ports.length;
-		this.existingPortIndex = indexExistingPorts(layout, state, resolvedPositions);
+		this.indexedPorts = isCanonicalPortEquipmentState(state) ? state.ports : state.ports.slice();
+		this.existingPortIndex = bindPortEquipmentResolvedPositionIndex(
+			resolvedPositions ?? compilePortEquipmentResolvedPositionCapability(layout, state),
+			layout,
+			state,
+		);
 		this.stkBodySweeps = new StkBodySweepIndex(layout, state, portType === "STK");
 	}
 
@@ -415,6 +413,7 @@ export class PortSlotAvailabilityIndex {
 		};
 		const conflict = findPortConflict(
 			this.existingPortIndex,
+			this.indexedPorts,
 			route,
 			slots.stationMillimeters[row] as number,
 			PORT_SIDES[slots.sides[row] as number] as PortSide,
@@ -1045,53 +1044,9 @@ function writeResolution(
 	yawRadians[row] = resolution.yawRadians;
 }
 
-function indexExistingPorts(
-	layout: CompiledPhysicalLayout,
-	state: PortEquipmentState,
-	resolvedPositions?: PortEquipmentResolvedPositionCapability,
-): ReadonlyMap<string, readonly ExistingResolvedPort[]> {
-	const mutable = new Map<string, ExistingResolvedPort[]>();
-	if (resolvedPositions) {
-		visitPortEquipmentResolvedPositions(
-			resolvedPositions,
-			layout,
-			state,
-			(_row, port, worldXMeters, worldZMeters) => {
-				appendExistingPort(mutable, port, worldXMeters, worldZMeters);
-			},
-		);
-		return mutable;
-	}
-	const sourceIndex = createPortAttachmentSourceIndex(layout);
-	for (let row = 0; row < state.ports.length; row++) {
-		const port = state.ports[row];
-		if (!port) throw new Error(`Missing port availability row ${row}.`);
-		const attachment = resolvePortAttachmentWithSourceIndex(layout, port, sourceIndex);
-		if (!attachment.ok) {
-			throw new Error(
-				`Port ${port.id} attachment is invalid (${attachment.code}): ${attachment.message}`,
-			);
-		}
-		appendExistingPort(mutable, port, attachment.worldXMeters, attachment.worldZMeters);
-	}
-	return mutable;
-}
-
-function appendExistingPort(
-	mutable: Map<string, ExistingResolvedPort[]>,
-	port: PortRecord,
-	worldXMeters: number,
-	worldZMeters: number,
-): void {
-	const resolved = { port, worldXMeters, worldZMeters };
-	const key = metricBucketKey(worldXMeters, worldZMeters);
-	const bucket = mutable.get(key);
-	if (bucket) bucket.push(resolved);
-	else mutable.set(key, [resolved]);
-}
-
 function findPortConflict(
-	index: ReadonlyMap<string, readonly ExistingResolvedPort[]>,
+	index: PortEquipmentResolvedPositionIndex,
+	ports: readonly PortRecord[],
 	route: CardinalPortRoute,
 	stationMillimeters: number,
 	side: PortSide,
@@ -1101,51 +1056,33 @@ function findPortConflict(
 	ignoredPortId: number,
 	ignoredEquipmentGroupId: number,
 ): { readonly port: PortRecord; readonly occupied: boolean } | null {
-	const bucketX = Math.floor(worldXMeters / EXISTING_PORT_BUCKET_METERS);
-	const bucketZ = Math.floor(worldZMeters / EXISTING_PORT_BUCKET_METERS);
-	const routeKey = portRouteIdentityKey(route);
+	const bucketX = Math.floor(worldXMeters);
+	const bucketZ = Math.floor(worldZMeters);
 	const minimumSpacingMeters = minimumSpacingMillimeters / 1_000;
 	// An exact authored slot is authoritative over a merely nearby clearance conflict. Checking the
 	// owning bucket first also avoids eight irrelevant neighbor probes for dense imported rows.
-	const owningBucket = index.get(`${bucketX}:${bucketZ}`);
-	if (owningBucket) {
-		for (const existing of owningBucket) {
-			if (
-				existing.port.id === ignoredPortId ||
-				existing.port.equipmentGroupId === ignoredEquipmentGroupId
-			) {
-				continue;
-			}
-			if (
-				portRouteIdentityKey(existing.port.route) === routeKey &&
-				existing.port.stationMillimeters === stationMillimeters &&
-				existing.port.side === side
-			) {
-				return { port: existing.port, occupied: true };
-			}
-		}
+	for (let row = index.firstRow(bucketX, bucketZ); row >= 0; row = index.nextRow(row)) {
+		const port = ports[row] as PortRecord;
+		if (port.id === ignoredPortId || port.equipmentGroupId === ignoredEquipmentGroupId) continue;
+		if (sameCardinalSlot(port, route, stationMillimeters, side)) return { port, occupied: true };
 	}
 	for (let deltaZ = -1; deltaZ <= 1; deltaZ++) {
 		for (let deltaX = -1; deltaX <= 1; deltaX++) {
-			const bucket = index.get(`${bucketX + deltaX}:${bucketZ + deltaZ}`);
-			if (!bucket) continue;
-			for (const existing of bucket) {
-				if (
-					existing.port.id === ignoredPortId ||
-					existing.port.equipmentGroupId === ignoredEquipmentGroupId
-				) {
+			for (
+				let row = index.firstRow(bucketX + deltaX, bucketZ + deltaZ);
+				row >= 0;
+				row = index.nextRow(row)
+			) {
+				const port = ports[row] as PortRecord;
+				if (port.id === ignoredPortId || port.equipmentGroupId === ignoredEquipmentGroupId)
 					continue;
-				}
-				const sameSlot =
-					portRouteIdentityKey(existing.port.route) === routeKey &&
-					existing.port.stationMillimeters === stationMillimeters &&
-					existing.port.side === side;
+				const sameSlot = sameCardinalSlot(port, route, stationMillimeters, side);
 				const distance = Math.hypot(
-					existing.worldXMeters - worldXMeters,
-					existing.worldZMeters - worldZMeters,
+					index.worldX(row) - worldXMeters,
+					index.worldZ(row) - worldZMeters,
 				);
 				if (sameSlot || distance < minimumSpacingMeters - DISTANCE_EPSILON_METERS) {
-					return { port: existing.port, occupied: sameSlot };
+					return { port, occupied: sameSlot };
 				}
 			}
 		}
@@ -1270,8 +1207,22 @@ function pointSegmentDistance(
 	return Math.hypot(px - (x0 + dx * amount), py - (y0 + dy * amount));
 }
 
-function metricBucketKey(x: number, z: number): string {
-	return `${Math.floor(x / EXISTING_PORT_BUCKET_METERS)}:${Math.floor(z / EXISTING_PORT_BUCKET_METERS)}`;
+function sameCardinalSlot(
+	port: PortRecord,
+	route: CardinalPortRoute,
+	stationMillimeters: number,
+	side: PortSide,
+): boolean {
+	const existing = port.route;
+	return (
+		existing.kind === "CARDINAL_CELL" &&
+		existing.x === route.x &&
+		existing.z === route.z &&
+		existing.from === route.from &&
+		existing.to === route.to &&
+		port.stationMillimeters === stationMillimeters &&
+		port.side === side
+	);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

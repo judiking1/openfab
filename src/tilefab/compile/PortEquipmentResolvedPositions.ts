@@ -23,6 +23,32 @@ interface ResolvedPositionRecord {
 	readonly portIds: Int32Array;
 	readonly worldPositions: Float64Array;
 	readonly mutableSourceSnapshots: readonly PortRecord[] | null;
+	readonly spatialIndex: PortEquipmentResolvedPositionIndex;
+}
+
+/** Read-only 1 m buckets over exact positions; private buffers never cross this boundary. */
+export interface PortEquipmentResolvedPositionIndex {
+	firstRow(bucketX: number, bucketZ: number): number;
+	nextRow(row: number): number;
+	worldX(row: number): number;
+	worldZ(row: number): number;
+}
+
+function compileSpatialIndex(worldPositions: Float64Array): PortEquipmentResolvedPositionIndex {
+	const firstRows = new Map<string, number>();
+	const nextRows = new Int32Array(worldPositions.length / 2);
+	// Reverse insertion preserves authored order inside each bucket without per-bucket arrays.
+	for (let row = nextRows.length - 1; row >= 0; row--) {
+		const key = `${Math.floor(worldPositions[row * 2] as number)}:${Math.floor(worldPositions[row * 2 + 1] as number)}`;
+		nextRows[row] = firstRows.get(key) ?? -1;
+		firstRows.set(key, row);
+	}
+	return Object.freeze({
+		firstRow: (bucketX: number, bucketZ: number) => firstRows.get(`${bucketX}:${bucketZ}`) ?? -1,
+		nextRow: (row: number) => nextRows[row] ?? -1,
+		worldX: (row: number) => worldPositions[row * 2] as number,
+		worldZ: (row: number) => worldPositions[row * 2 + 1] as number,
+	});
 }
 
 const resolvedPositionRecords = new WeakMap<object, ResolvedPositionRecord>();
@@ -85,6 +111,7 @@ export function compilePortEquipmentResolvedPositionCapability(
 			stateIdentity: exactSourceIdentity(state, resolvedPositionStateIdentities),
 			portIds,
 			worldPositions,
+			spatialIndex: compileSpatialIndex(worldPositions),
 			mutableSourceSnapshots:
 				mutableSourceSnapshots === null ? null : Object.freeze(mutableSourceSnapshots),
 		}),
@@ -102,6 +129,36 @@ export function visitPortEquipmentResolvedPositions(
 	state: PortEquipmentState,
 	consume: (row: number, port: PortRecord, worldX: number, worldZ: number) => void,
 ): void {
+	const record = certifiedRecord(capability, layout, state);
+	for (let row = 0; row < state.ports.length; row++) {
+		const port = assertMatchingPort(record, state, row);
+		consume(
+			row,
+			port,
+			record.worldPositions[row * 2] as number,
+			record.worldPositions[row * 2 + 1] as number,
+		);
+	}
+}
+
+/** Bind in O(1) for an immutable canonical generation; mutable sources still require every row. */
+export function bindPortEquipmentResolvedPositionIndex(
+	capability: PortEquipmentResolvedPositionCapability,
+	layout: CompiledPhysicalLayout,
+	state: PortEquipmentState,
+): PortEquipmentResolvedPositionIndex {
+	const record = certifiedRecord(capability, layout, state);
+	if (record.mutableSourceSnapshots !== null) {
+		for (let row = 0; row < state.ports.length; row++) assertMatchingPort(record, state, row);
+	}
+	return record.spatialIndex;
+}
+
+function certifiedRecord(
+	capability: PortEquipmentResolvedPositionCapability,
+	layout: CompiledPhysicalLayout,
+	state: PortEquipmentState,
+): ResolvedPositionRecord {
 	const record = resolvedPositionRecords.get(capability);
 	if (
 		!record ||
@@ -116,21 +173,22 @@ export function visitPortEquipmentResolvedPositions(
 	) {
 		throw new Error("Resolved Port position capability has an invalid private shape.");
 	}
-	for (let row = 0; row < state.ports.length; row++) {
-		const port = state.ports[row];
-		const snapshot = record.mutableSourceSnapshots?.[row];
-		if (
-			!port ||
-			(record.portIds[row] as number) !== port.id ||
-			(snapshot !== undefined && !portRecordEquals(snapshot, port))
-		) {
-			throw new Error(`Resolved Port position row ${row} no longer matches the authored Port.`);
-		}
-		consume(
-			row,
-			port,
-			record.worldPositions[row * 2] as number,
-			record.worldPositions[row * 2 + 1] as number,
-		);
+	return record;
+}
+
+function assertMatchingPort(
+	record: ResolvedPositionRecord,
+	state: PortEquipmentState,
+	row: number,
+): PortRecord {
+	const port = state.ports[row];
+	const snapshot = record.mutableSourceSnapshots?.[row];
+	if (
+		!port ||
+		(record.portIds[row] as number) !== port.id ||
+		(snapshot !== undefined && !portRecordEquals(snapshot, port))
+	) {
+		throw new Error(`Resolved Port position row ${row} no longer matches the authored Port.`);
 	}
+	return port;
 }

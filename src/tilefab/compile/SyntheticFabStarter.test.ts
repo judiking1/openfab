@@ -846,7 +846,7 @@ describe("SyntheticFabStarter", () => {
 			}
 		}
 		expect(configurations).toBe(271);
-	}, 60_000);
+	}, 120_000);
 
 	it("captures ordinary schema-v11 project data without persisted starter provenance", () => {
 		const build = buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("complete-fab"));

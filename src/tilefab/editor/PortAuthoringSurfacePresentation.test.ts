@@ -9,7 +9,7 @@ describe("portAuthoringSurfacePresentation", () => {
 			toolDescription: "레일 옆 원 · 클릭 또는 드래그",
 			buildbarTitle: "OHB PORT",
 			instruction:
-				"배치 가능 12곳 · 현재 대상: 클릭 또는 방향키/WASD 이동 후 Enter로 1개 배치 · 같은 레일을 드래그하면 행 배치",
+				"배치 가능 12곳 · 클릭 또는 Enter: 1개 · 방향키/WASD: 대상 이동 · 같은 레일 드래그: 행 배치",
 			configurationAvailable: true,
 			prerequisiteAction: null,
 		});

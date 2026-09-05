@@ -83,7 +83,6 @@ export class PortEquipmentSpatialIndex {
 	private readonly presentation: CompiledPortEquipmentPresentation;
 	private readonly chunks: ReadonlyMap<string, Uint32Array>;
 	private readonly groupChunks: ReadonlyMap<string, Uint32Array>;
-	private readonly candidates: number[] = [];
 	private readonly groupCandidates: number[] = [];
 	private readonly groupVisitStamps: Uint32Array;
 	private groupVisitGeneration = 0;
@@ -149,38 +148,36 @@ export class PortEquipmentSpatialIndex {
 		) {
 			return null;
 		}
-		this.candidates.length = 0;
 		const minChunkX = Math.floor((worldX - radiusMeters) / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		const maxChunkX = Math.floor((worldX + radiusMeters) / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		const minChunkZ = Math.floor((worldZ - radiusMeters) / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		const maxChunkZ = Math.floor((worldZ + radiusMeters) / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
+		let nearestRow = -1;
+		let nearestDistance = radiusMeters;
 		for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
 			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
 				const rows = this.chunks.get(`${chunkX}:${chunkZ}`);
 				if (!rows) continue;
 				for (let index = 0; index < rows.length; index++) {
-					this.candidates.push(rows[index] as number);
+					const row = rows[index] as number;
+					const dx = (this.presentation.worldPositions[row * 2] as number) - worldX;
+					const dz = (this.presentation.worldPositions[row * 2 + 1] as number) - worldZ;
+					if (Math.abs(dx) > nearestDistance || Math.abs(dz) > nearestDistance) continue;
+					// Preserve hypot's numeric range for diagonal offsets without its cost on an axis.
+					const distance = dx === 0 ? Math.abs(dz) : dz === 0 ? Math.abs(dx) : Math.hypot(dx, dz);
+					if (distance > nearestDistance) continue;
+					if (
+						distance === nearestDistance &&
+						nearestRow >= 0 &&
+						(this.presentation.portIds[row] as number) >
+							(this.presentation.portIds[nearestRow] as number)
+					) {
+						continue;
+					}
+					nearestRow = row;
+					nearestDistance = distance;
 				}
 			}
-		}
-		let nearestRow = -1;
-		let nearestDistance = radiusMeters;
-		for (const row of this.candidates) {
-			const distance = Math.hypot(
-				(this.presentation.worldPositions[row * 2] as number) - worldX,
-				(this.presentation.worldPositions[row * 2 + 1] as number) - worldZ,
-			);
-			if (distance > nearestDistance) continue;
-			if (
-				distance === nearestDistance &&
-				nearestRow >= 0 &&
-				(this.presentation.portIds[row] as number) >
-					(this.presentation.portIds[nearestRow] as number)
-			) {
-				continue;
-			}
-			nearestRow = row;
-			nearestDistance = distance;
 		}
 		if (nearestRow < 0) return null;
 		return Object.freeze({

@@ -4883,10 +4883,9 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			);
 			for (const copy of [
 				"배치 가능",
-				"현재 대상",
-				"방향키/WASD",
-				"Enter로 1개 배치",
-				"드래그하면 행 배치",
+				"클릭 또는 Enter: 1개",
+				"방향키/WASD: 대상 이동",
+				"같은 레일 드래그: 행 배치",
 			]) {
 				assertIncludes(firstPortInstruction, copy, `${viewport.label} OHB buildbar owns ${copy}`);
 			}
@@ -5432,10 +5431,9 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			const ohbInstructionText = (await ohbInstruction.innerText()).trim();
 			for (const copy of [
 				`배치 가능 ${ohbOverview.legalPortSlots.toLocaleString("ko-KR")}곳`,
-				"현재 대상",
-				"방향키/WASD",
-				"Enter로 1개 배치",
-				"드래그하면 행 배치",
+				"클릭 또는 Enter: 1개",
+				"방향키/WASD: 대상 이동",
+				"같은 레일 드래그: 행 배치",
 			]) {
 				assertIncludes(ohbInstructionText, copy, `${viewport.label} OHB overview copy ${copy}`);
 			}
@@ -12430,7 +12428,7 @@ async function exerciseGuidedPortHandoffRegression(
 		const ordinaryPortBuildbarText = await ordinaryPortBuildbar.innerText();
 		if (
 			!ordinaryPortBuildbarText.includes("배치 가능") ||
-			!ordinaryPortBuildbarText.includes("현재 대상")
+			!ordinaryPortBuildbarText.includes("방향키/WASD: 대상 이동")
 		) {
 			throw new Error(
 				`Ordinary OHB buildbar does not explain its available slots and current target: ${ordinaryPortBuildbarText}.`,
@@ -12456,7 +12454,11 @@ async function exerciseGuidedPortHandoffRegression(
 			const responsiveOhbInstruction = await ordinaryPortBuildbar
 				.locator(".tilefab-port-authoring-instruction")
 				.innerText();
-			for (const copy of ["방향키/WASD", "Enter로 1개 배치", "드래그하면 행 배치"]) {
+			for (const copy of [
+				"클릭 또는 Enter: 1개",
+				"방향키/WASD: 대상 이동",
+				"같은 레일 드래그: 행 배치",
+			]) {
 				assertIncludes(
 					responsiveOhbInstruction,
 					copy,

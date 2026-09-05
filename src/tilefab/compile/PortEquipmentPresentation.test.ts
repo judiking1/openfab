@@ -25,6 +25,32 @@ import {
 import { compilePortEquipmentShellPresentation } from "./PortEquipmentShellPresentation";
 
 describe("PortEquipmentPresentation", () => {
+	it("keeps radius boundaries and stable ID ties when picking directly across chunks", () => {
+		const document = new RailDocument();
+		const empty = compilePortEquipmentPresentation(
+			compilePhysicalRail(document.map),
+			document.portEquipment,
+		);
+		const presentation = {
+			...empty,
+			count: 3,
+			portIds: Int32Array.of(41, 7, 99),
+			equipmentGroupIds: Int32Array.of(1, 2, 3),
+			worldPositions: Float32Array.of(15, 0, 17, 0, 16, 3),
+		};
+		const index = new PortEquipmentSpatialIndex(presentation);
+		for (let repeat = 0; repeat < 2; repeat++) {
+			expect(index.nearest(16, 0, 1)).toMatchObject({ row: 1, portId: 7, distanceMeters: 1 });
+			expect(index.nearest(16, 0, 0.999)).toBeNull();
+			expect(index.nearest(15, 0, 0.001)).toMatchObject({ portId: 41, distanceMeters: 0 });
+			expect(index.nearest(16, 1, Math.SQRT2)).toMatchObject({
+				portId: 7,
+				distanceMeters: Math.SQRT2,
+			});
+			expect(index.nearest(16, 1, Math.SQRT2 - 0.001)).toBeNull();
+		}
+	});
+
 	it("does not index factory-wide physical routes when no ports require attachment", () => {
 		const document = new RailDocument();
 		expect(

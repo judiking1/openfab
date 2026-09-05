@@ -19,6 +19,42 @@ import {
 } from "./PortSlotCompiler";
 
 describe("PortSlotCompiler", () => {
+	it("skips physical attachment indexing for empty ports while rejecting foreign empty proofs", () => {
+		const document = straightDocument(8);
+		const layout = compilePhysicalRail(document.map);
+		const state = document.portEquipment;
+		const guardedLayout = new Proxy(layout, {
+			get(target, property, receiver) {
+				if (property === "pathIntervalRemap") throw new Error("Unexpected full attachment index");
+				return Reflect.get(target, property, receiver);
+			},
+		});
+		const presentation = compilePortEquipmentPresentation(guardedLayout, state);
+		expect(new PortSlotAvailabilityIndex(guardedLayout, state, "EQ").portCount).toBe(0);
+		expect(
+			new PortSlotAvailabilityIndex(guardedLayout, state, "EQ", presentation.resolvedPositions)
+				.portCount,
+		).toBe(0);
+		expect(
+			() =>
+				new PortSlotAvailabilityIndex(guardedLayout, state, "EQ", {
+					...presentation.resolvedPositions,
+				}),
+		).toThrow("not certified");
+		expect(
+			() => new PortSlotAvailabilityIndex(layout, state, "EQ", presentation.resolvedPositions),
+		).toThrow("not certified");
+		expect(
+			() =>
+				new PortSlotAvailabilityIndex(
+					guardedLayout,
+					{ ...state },
+					"EQ",
+					presentation.resolvedPositions,
+				),
+		).toThrow("not certified");
+	});
+
 	it("emits deterministic OHB left/right stations and excludes unsafe approaches", () => {
 		const document = straightDocument(6);
 		const layout = compilePhysicalRail(document.map);

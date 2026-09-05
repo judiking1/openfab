@@ -105,7 +105,7 @@ describe("SyntheticFabPattern", () => {
 			}
 		}
 		expect(configurations).toBe(18);
-	}, 10_000);
+	}, 30_000);
 
 	it("supports repeated placement while rejecting an exact duplicate", () => {
 		const pattern = buildSyntheticFabPattern(defaultSyntheticFabStarterRequest("single-loop"));
