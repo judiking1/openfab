@@ -4199,6 +4199,8 @@ async function recoverOrdinaryStkFromOccupiedStart(page, baseline, label) {
 	});
 	if (!occupied) throw new Error(`${label}: missing OHB-occupied STK fixture candidate.`);
 	await ensureWorldPointVisible(page, occupied);
+	// Settle the preceding tool/Canvas frames so this single move must paint its own target.
+	await page.waitForTimeout(140);
 	await moveToWorld(page, occupied);
 	await canvas.focus();
 	await page.waitForFunction(
@@ -29472,6 +29474,7 @@ async function exerciseOrdinaryPlacedTwinBayDuplicateHandoff(
 				app.getAttribute("data-organization-bundle-source-root-ids") === expectedRootId &&
 				app.getAttribute("data-organization-selection-ids") === expectedRootId &&
 				Boolean(canvasElement?.getAttribute("data-organization-bundle-source-bounds")) &&
+				canvasElement?.getAttribute("data-organization-bundle-initial-accessibility") === "ready" &&
 				(canvasElement?.getAttribute("data-organization-bundle-preview-state") === "candidate" ||
 					canvasElement?.getAttribute("data-organization-bundle-preview-state") ===
 						"sampled-collision") &&
@@ -29481,7 +29484,7 @@ async function exerciseOrdinaryPlacedTwinBayDuplicateHandoff(
 		placed.lastPlacedOrganizationRootId,
 		{ timeout: 10_000 },
 	);
-	const duplicatePrepared = await readMetrics(page);
+	let duplicatePrepared = await readMetrics(page);
 	assertProjectUnchanged(
 		duplicatePrepared,
 		redone,
@@ -29502,24 +29505,47 @@ async function exerciseOrdinaryPlacedTwinBayDuplicateHandoff(
 		placed.lastPlacedOrganizationRootId,
 		`ordinary Twin Bay duplicate tracks source root outside portable bundle ${viewportLabel}`,
 	);
-	if (activationKind === "pointer") {
-		const [duplicateAnchorX, duplicateAnchorY] = parseIntegerTuple(
-			duplicatePrepared.organizationBundlePreviewAnchor,
-			2,
-			`ordinary Twin Bay duplicate preview anchor ${viewportLabel}`,
-		);
-		const [localMinX, localMinY, localMaxX, localMaxY] = parseIntegerTuple(
-			duplicatePrepared.organizationBundleLocalBounds,
-			4,
-			`ordinary Twin Bay duplicate local bounds ${viewportLabel}`,
-		);
-		const duplicatePointer = {
+	const [duplicateAnchorX, duplicateAnchorY] = parseIntegerTuple(
+		duplicatePrepared.organizationBundlePreviewAnchor,
+		2,
+		`ordinary Twin Bay duplicate preview anchor ${viewportLabel}`,
+	);
+	const [localMinX, localMinY, localMaxX, localMaxY] = parseIntegerTuple(
+		duplicatePrepared.organizationBundleLocalBounds,
+		4,
+		`ordinary Twin Bay duplicate local bounds ${viewportLabel}`,
+	);
+	const duplicateGeometry = await readRailGeometry(page);
+	const duplicatePointer = await moveOrganizationBundleGhostToCandidate(page, [
+		{
 			x: Math.ceil((duplicateAnchorX * 2 + localMinX + localMaxX + 1) / 2) - 1,
 			y: Math.ceil((duplicateAnchorY * 2 + localMinY + localMaxY + 1) / 2) - 1,
-		};
+		},
+		{
+			x: (duplicateGeometry.bounds?.maxX ?? 0) + 100,
+			y: (duplicateGeometry.bounds?.maxY ?? 0) + 50,
+		},
+		{
+			x: (duplicateGeometry.bounds?.minX ?? 0) - 100,
+			y: (duplicateGeometry.bounds?.minY ?? 0) - 50,
+		},
+	]);
+	duplicatePrepared = await readMetrics(page);
+	assertProjectUnchanged(
+		duplicatePrepared,
+		redone,
+		`ordinary Twin Bay collision-free duplicate preparation ${viewportLabel}`,
+	);
+	assertEqual(
+		duplicatePrepared.organizationBundlePreviewState,
+		"candidate",
+		`ordinary Twin Bay duplicate commits only an exact candidate ${viewportLabel}`,
+	);
+	if (activationKind === "pointer") {
 		const duplicatePoint = await screenPointForWorld(page, offsetCellCenter(duplicatePointer));
 		await page.mouse.click(duplicatePoint.x, duplicatePoint.y);
 	} else {
+		await canvas.focus();
 		await canvas.press(activationKind === "space" ? "Space" : "Enter");
 	}
 	const duplicated = await waitForWorker(

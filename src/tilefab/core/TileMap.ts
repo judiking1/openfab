@@ -6,6 +6,7 @@ import {
 	copyAdvancedSwitch,
 	deriveAdvancedSwitchGeometry,
 } from "./AdvancedSwitch";
+import { stableSortSteps } from "./CooperativeSort";
 import { bitCount } from "./railShape";
 
 /**
@@ -507,6 +508,67 @@ export class TileMap {
 				const y = cy * CHUNK_SIZE + Math.floor(index / CHUNK_SIZE);
 				visit(x, y, decodeRailCell(encoded), encoded);
 			}
+		}
+	}
+
+	/** Traverse at most 32 storage cells per step, including empty cells in sparse chunks. */
+	railTraversalSteps(
+		visit: (x: number, y: number, rail: RailCell, encoded: number) => void,
+	): Generator<void, void> {
+		const chunks = this.chunks;
+		const steps = function* (): Generator<void, void> {
+			for (const [key, chunk] of chunks) {
+				const [cx, cy] = key.split(",").map(Number) as [number, number];
+				for (let index = 0; index < CHUNK_AREA; index++) {
+					const encoded = chunk[index] as number;
+					if (encoded !== 0) {
+						const x = cx * CHUNK_SIZE + (index % CHUNK_SIZE);
+						const y = cy * CHUNK_SIZE + Math.floor(index / CHUNK_SIZE);
+						visit(x, y, decodeRailCell(encoded), encoded);
+					}
+					if ((index + 1) % 32 === 0) yield;
+				}
+			}
+		};
+		return this.guardTraversalGeneration(steps(), this.revision, this.mutationGeneration);
+	}
+
+	/** Collect and order switch IDs in bounded steps before visiting their immutable records. */
+	advancedSwitchTraversalSteps(
+		visit: (switchRecord: AdvancedSwitchRecord) => void,
+	): Generator<void, void> {
+		const switches = this.advancedSwitches;
+		const steps = function* (): Generator<void, void> {
+			const ids: number[] = [];
+			for (const id of switches.keys()) {
+				ids.push(id);
+				yield;
+			}
+			yield* stableSortSteps(ids, (left, right) => left - right);
+			for (const id of ids) {
+				visit(switches.get(id) as AdvancedSwitchRecord);
+				yield;
+			}
+		};
+		return this.guardTraversalGeneration(steps(), this.revision, this.mutationGeneration);
+	}
+
+	private *guardTraversalGeneration(
+		steps: Generator<void, void>,
+		revision: number,
+		mutationGeneration: number,
+	): Generator<void, void> {
+		const assertStableSource = (): void => {
+			if (this.revision !== revision || this.mutationGeneration !== mutationGeneration) {
+				throw new Error("TileMap changed during cooperative source traversal.");
+			}
+		};
+		while (true) {
+			assertStableSource();
+			const next = steps.next();
+			assertStableSource();
+			if (next.done) return;
+			yield;
 		}
 	}
 

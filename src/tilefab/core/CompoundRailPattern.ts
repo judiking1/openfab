@@ -1,3 +1,5 @@
+import { stableSortSteps, synchronousSortSteps } from "./CooperativeSort";
+import { completeCooperativeSteps } from "./CooperativeTask";
 import { ALL_DIRECTIONS, bitCount, type Direction, moveCell, oppositeDirection } from "./railShape";
 import { type Cell, cellKey, type RailCell } from "./TileMap";
 
@@ -35,49 +37,69 @@ interface CompoundCandidate extends CompoundRailPattern {
 export function collectCompoundRailPatterns(
 	index: ReadonlyMap<string, CompoundRailEntry>,
 ): CompoundRailPattern[] {
+	return completeCooperativeSteps(collectCompoundRailPatternSteps(index, false));
+}
+
+/** Shared semantic recognition with bounded candidate scans, ordering, and chain traversal. */
+export function* collectCompoundRailPatternSteps(
+	index: ReadonlyMap<string, CompoundRailEntry>,
+	cooperative = true,
+): Generator<void, CompoundRailPattern[]> {
+	const sort = cooperative ? stableSortSteps : synchronousSortSteps;
 	const candidates: CompoundCandidate[] = [];
 	for (const entry of index.values()) {
+		if (cooperative) yield;
 		if (!isCurve(entry.type)) continue;
 		const next = connectedSuccessor(index, entry);
 		if (!next) continue;
-
 		if (isCurve(next.type)) {
 			candidates.push(createCandidate(entry, next, [entry.cell, next.cell], false));
 			continue;
 		}
-
 		if (next.type !== "LINEAR") continue;
 		const last = connectedSuccessor(index, next);
 		if (!last || !isCurve(last.type)) continue;
 		candidates.push(createCandidate(entry, last, [entry.cell, next.cell, last.cell], true));
 	}
-
-	const candidateTailKeys = new Set(candidates.map((candidate) => candidate.lastKey));
-	const candidateByFirstKey = new Map(
-		candidates.map((candidate) => [candidate.firstKey, candidate] as const),
-	);
+	const candidateTailKeys = new Set<string>();
+	const candidateByFirstKey = new Map<string, CompoundCandidate>();
+	for (const candidate of candidates) {
+		candidateTailKeys.add(candidate.lastKey);
+		candidateByFirstKey.set(candidate.firstKey, candidate);
+		if (cooperative) yield;
+	}
 	const orderedCandidates: CompoundCandidate[] = [];
 	const visitedCandidates = new Set<string>();
-	const walkChain = (start: CompoundCandidate): void => {
+	const walkChain = function* (start: CompoundCandidate): Generator<void, void> {
 		let current: CompoundCandidate | undefined = start;
 		while (current && !visitedCandidates.has(current.firstKey)) {
 			visitedCandidates.add(current.firstKey);
 			orderedCandidates.push(current);
 			current = candidateByFirstKey.get(current.lastKey);
+			if (cooperative) yield;
 		}
 	};
 	const compareCandidates = (left: CompoundCandidate, right: CompoundCandidate): number =>
 		compareCells(left.from, right.from) || left.type.localeCompare(right.type);
-	for (const root of candidates
-		.filter((candidate) => !candidateTailKeys.has(candidate.firstKey))
-		.sort(compareCandidates)) {
-		walkChain(root);
+	const roots: CompoundCandidate[] = [];
+	for (const candidate of candidates) {
+		if (!candidateTailKeys.has(candidate.firstKey)) roots.push(candidate);
+		if (cooperative) yield;
 	}
-	for (const cycleStart of [...candidates].sort(compareCandidates)) walkChain(cycleStart);
-
+	yield* sort(roots, compareCandidates);
+	for (const root of roots) {
+		yield* walkChain(root);
+		if (cooperative) yield;
+	}
+	yield* sort(candidates, compareCandidates);
+	for (const cycleStart of candidates) {
+		yield* walkChain(cycleStart);
+		if (cooperative) yield;
+	}
 	const consumed = new Set<string>();
 	const patterns: CompoundRailPattern[] = [];
 	for (const candidate of orderedCandidates) {
+		if (cooperative) yield;
 		if (candidate.cells.some((cell) => consumed.has(cellKey(cell.x, cell.y)))) continue;
 		for (const cell of candidate.cells) consumed.add(cellKey(cell.x, cell.y));
 		patterns.push({

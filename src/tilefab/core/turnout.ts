@@ -3,6 +3,8 @@ import {
 	advancedSwitchRecordError,
 	deriveAdvancedSwitchGeometry,
 } from "./AdvancedSwitch";
+import { stableSortSteps, synchronousSortSteps } from "./CooperativeSort";
+import { completeCooperativeSteps } from "./CooperativeTask";
 import {
 	ALL_DIRECTIONS,
 	bitCount,
@@ -162,12 +164,24 @@ export function turnoutFootprintAt(
 }
 
 export function collectTurnoutFootprints(map: TileMap): TurnoutFootprint[] {
+	return completeCooperativeSteps(collectTurnoutFootprintSteps(map, false));
+}
+
+/** Scan sparse rail storage and order authored turnouts without a whole-input blocking step. */
+export function* collectTurnoutFootprintSteps(
+	map: TileMap,
+	cooperative = true,
+): Generator<void, TurnoutFootprint[]> {
+	const sort = cooperative ? stableSortSteps : synchronousSortSteps;
 	const footprints: TurnoutFootprint[] = [];
-	map.forEachRail((x, y, rail) => {
+	const visit = (x: number, y: number, rail: RailCell): void => {
 		const footprint = turnoutFootprintAt({ x, y }, rail);
 		if (footprint) footprints.push(footprint);
-	});
-	return footprints.sort(compareFootprints);
+	};
+	if (cooperative) yield* map.railTraversalSteps(visit);
+	else map.forEachRail(visit);
+	yield* sort(footprints, compareFootprints);
+	return footprints;
 }
 
 /** Collect only turnouts close enough to be affected by a pending local edit. */

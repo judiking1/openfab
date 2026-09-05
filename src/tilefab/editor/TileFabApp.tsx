@@ -16994,6 +16994,9 @@ export default function TileFabApp(): React.ReactElement {
 					nextKeyboard,
 					eqSelection ? { legal: eqSelection.valid, reason: eqSelection.reason } : undefined,
 				);
+				// Presentation also updates hoverPortSlotRef; its equality check below no longer
+				// detects this move. Paint the new keyboard target and its readout explicitly.
+				scheduleRender();
 				setStatus(`${portType} Enter 대상 · 포인터가 가리키는 슬롯으로 이동했습니다`);
 			}
 			if (hoverPortSlotRef.current !== nextPortSlot) {

@@ -6,8 +6,14 @@ import {
 import {
 	type CompoundRailEntry,
 	type CompoundRailPattern,
-	collectCompoundRailPatterns,
+	collectCompoundRailPatternSteps,
 } from "./CompoundRailPattern";
+import { stableSortSteps, synchronousSortSteps } from "./CooperativeSort";
+import {
+	type CooperativeTask,
+	completeCooperativeSteps,
+	createCooperativeTask,
+} from "./CooperativeTask";
 import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
 import {
 	planRailErase,
@@ -34,7 +40,7 @@ import {
 	type RailCell,
 	type TileMap,
 } from "./TileMap";
-import { collectTurnoutFootprints, TURNOUT_KIND, type TurnoutFootprint } from "./turnout";
+import { collectTurnoutFootprintSteps, TURNOUT_KIND, type TurnoutFootprint } from "./turnout";
 
 export type RailModuleKind =
 	| "straight"
@@ -280,6 +286,61 @@ interface IndexedRailEntry {
 
 /** Build a revision-bound semantic module index from authored TileMap truth only. */
 export function buildRailModuleOwnershipIndex(map: TileMap): RailModuleOwnershipIndex {
+	const revision = map.getRevision();
+	const mutationGeneration = map.getMutationGeneration();
+	const assertStableSource = ownershipSourceGuard(map, revision, mutationGeneration);
+	return completeCooperativeSteps(
+		buildRailModuleOwnershipSteps(map, revision, assertStableSource, false),
+	);
+}
+
+/** Independently compile the authored module partition without an unbounded source walk. */
+export function createRailModuleOwnershipIndexCompiler(
+	map: TileMap,
+): CooperativeTask<RailModuleOwnershipIndex> {
+	const revision = map.getRevision();
+	const mutationGeneration = map.getMutationGeneration();
+	const assertStableSource = ownershipSourceGuard(map, revision, mutationGeneration);
+	const task = createCooperativeTask(
+		buildRailModuleOwnershipSteps(map, revision, assertStableSource, true),
+	);
+	return {
+		get done() {
+			return task.done;
+		},
+		step(operationBudget = 128) {
+			assertStableSource();
+			const operations = task.step(operationBudget);
+			assertStableSource();
+			return operations;
+		},
+		finish() {
+			assertStableSource();
+			return task.finish();
+		},
+	};
+}
+
+function ownershipSourceGuard(
+	map: TileMap,
+	revision: number,
+	mutationGeneration: number,
+): () => void {
+	return () => {
+		if (map.getRevision() !== revision || map.getMutationGeneration() !== mutationGeneration) {
+			throw new Error("Rail module ownership source changed during cooperative compilation.");
+		}
+	};
+}
+
+function* buildRailModuleOwnershipSteps(
+	map: TileMap,
+	revision: number,
+	assertStableSource: () => void,
+	cooperative: boolean,
+): Generator<void, RailModuleOwnershipIndex> {
+	const sort = cooperative ? stableSortSteps : synchronousSortSteps;
+	assertStableSource();
 	const modules: RailModuleOwnership[] = [];
 	const candidatesByCell = new Map<string, RailModuleOwnership[]>();
 	const modulesByKey = new Map<string, RailModuleOwnership>();
@@ -299,43 +360,51 @@ export function buildRailModuleOwnershipIndex(map: TileMap): RailModuleOwnership
 		for (const edge of module.eraseEdges) claimedEdgeKeys.add(directedEdgeKey(edge));
 	};
 
-	map.forEachAdvancedSwitch((record) => {
+	const visitSwitch = (record: AdvancedSwitchRecord): void => {
 		const geometry = deriveAdvancedSwitchGeometry(record);
 		for (const cell of geometry.claimedCells) advancedOwnedCells.add(cellKey(cell.x, cell.y));
-		const owned = advancedSwitchModule(map.getRevision(), record);
+		const owned = advancedSwitchModule(revision, record);
 		register(owned, geometry.claimedCells);
 		claim(owned);
-	});
+	};
+	if (cooperative) yield* map.advancedSwitchTraversalSteps(visitSwitch);
+	else map.forEachAdvancedSwitch(visitSwitch);
 
 	const entries = new Map<string, IndexedRailEntry>();
-	map.forEachRail((x, y, rail) => {
+	const visitRail = (x: number, y: number, rail: RailCell): void => {
 		const key = cellKey(x, y);
 		if (advancedOwnedCells.has(key)) return;
 		entries.set(key, { cell: { x, y }, rail, type: classifyRailCell(rail) });
-	});
+	};
+	if (cooperative) yield* map.railTraversalSteps(visitRail);
+	else map.forEachRail(visitRail);
 
-	for (const footprint of collectTurnoutFootprints(map)) {
+	for (const footprint of yield* collectTurnoutFootprintSteps(map, cooperative)) {
+		if (cooperative) yield;
 		if (advancedOwnedCells.has(cellKey(footprint.cell.x, footprint.cell.y))) continue;
-		const owned = turnoutModule(map.getRevision(), footprint);
+		const owned = turnoutModule(revision, footprint);
 		register(owned, footprint.reservedCells);
 		claim(owned);
 	}
 
 	const compoundIndex = new Map<string, CompoundRailEntry>();
 	for (const [key, entry] of entries) {
+		if (cooperative) yield;
 		if (entry.type === "LINEAR" || entry.type === "LEFT_CURVE" || entry.type === "RIGHT_CURVE") {
 			compoundIndex.set(key, { cell: entry.cell, rail: entry.rail, type: entry.type });
 		}
 	}
 	const consumed = new Set<string>();
-	for (const pattern of collectCompoundRailPatterns(compoundIndex)) {
+	for (const pattern of yield* collectCompoundRailPatternSteps(compoundIndex, cooperative)) {
+		if (cooperative) yield;
 		for (const cell of pattern.cells) consumed.add(cellKey(cell.x, cell.y));
-		const module = compoundModule(map.getRevision(), pattern);
+		const module = compoundModule(revision, pattern);
 		register(module, terminalBoundaryAliases(entries, module));
 		claim(module);
 	}
 
 	for (const entry of entries.values()) {
+		if (cooperative) yield;
 		if (
 			consumed.has(cellKey(entry.cell.x, entry.cell.y)) ||
 			(entry.type !== "LEFT_CURVE" && entry.type !== "RIGHT_CURVE")
@@ -343,25 +412,34 @@ export function buildRailModuleOwnershipIndex(map: TileMap): RailModuleOwnership
 			continue;
 		}
 		consumed.add(cellKey(entry.cell.x, entry.cell.y));
-		const module = turnModule(map.getRevision(), entry);
+		const module = turnModule(revision, entry);
 		register(module, terminalBoundaryAliases(entries, module));
 		claim(module);
 	}
 
-	for (const module of straightModules(map.getRevision(), entries, claimedEdgeKeys))
+	for (const module of yield* straightModuleSteps(
+		revision,
+		entries,
+		claimedEdgeKeys,
+		cooperative,
+	)) {
 		register(module);
+		if (cooperative) yield;
+	}
 
-	modules.sort(compareModules);
+	yield* sort(modules, compareModules);
 	for (const candidates of candidatesByCell.values()) {
-		candidates.sort((left, right) => ownershipPriority(left) - ownershipPriority(right));
+		yield* sort(candidates, (left, right) => ownershipPriority(left) - ownershipPriority(right));
 		Object.freeze(candidates);
+		if (cooperative) yield;
 	}
 	const index = createOwnershipIndex(
-		map.getRevision(),
+		revision,
 		Object.freeze(modules),
 		candidatesByCell,
 		modulesByKey,
 	);
+	assertStableSource();
 	bindOwnershipIndexSource(index, map);
 	return index;
 }
@@ -1122,13 +1200,16 @@ function turnModule(revision: number, entry: IndexedRailEntry): RailModuleOwners
 	});
 }
 
-function straightModules(
+function* straightModuleSteps(
 	revision: number,
 	entries: ReadonlyMap<string, IndexedRailEntry>,
 	claimedEdgeKeys: ReadonlySet<string>,
-): RailModuleOwnership[] {
+	cooperative: boolean,
+): Generator<void, RailModuleOwnership[]> {
+	const sort = cooperative ? stableSortSteps : synchronousSortSteps;
 	const eligible = new Map<string, DirectedRailEdge>();
 	for (const entry of entries.values()) {
+		if (cooperative) yield;
 		if (entry.type === "INVALID") continue;
 		for (const direction of ALL_DIRECTIONS) {
 			if ((entry.rail.outgoing & direction) === 0) continue;
@@ -1146,11 +1227,20 @@ function straightModules(
 			if (!claimedEdgeKeys.has(key)) eligible.set(key, edge);
 		}
 	}
-	const ordered = [...eligible.values()].sort(compareEdges);
-	const byStart = new Map(ordered.map((edge) => [directedEdgeStartKey(edge), edge] as const));
+	const ordered: DirectedRailEdge[] = [];
+	for (const edge of eligible.values()) {
+		ordered.push(edge);
+		if (cooperative) yield;
+	}
+	yield* sort(ordered, compareEdges);
+	const byStart = new Map<string, DirectedRailEdge>();
+	for (const edge of ordered) {
+		byStart.set(directedEdgeStartKey(edge), edge);
+		if (cooperative) yield;
+	}
 	const visited = new Set<string>();
 	const chains: DirectedRailEdge[][] = [];
-	const walk = (start: DirectedRailEdge): void => {
+	const walk = function* (start: DirectedRailEdge): Generator<void, void> {
 		const chain: DirectedRailEdge[] = [];
 		let current: DirectedRailEdge | undefined = start;
 		while (current && !visited.has(directedEdgeKey(current))) {
@@ -1159,19 +1249,23 @@ function straightModules(
 			visited.add(directedEdgeKey(current));
 			chain.push(current);
 			current = byStart.get(`${cellKey(current.to.x, current.to.y)}:${direction}`);
+			if (cooperative) yield;
 		}
 		if (chain.length > 0) chains.push(chain);
 	};
-	for (const edge of ordered.filter(
-		(candidate) => !hasStraightEdgePredecessor(byStart, candidate),
-	)) {
-		walk(edge);
+	for (const edge of ordered) {
+		if (!hasStraightEdgePredecessor(byStart, edge)) yield* walk(edge);
+		if (cooperative) yield;
 	}
-	for (const edge of ordered) walk(edge);
+	for (const edge of ordered) {
+		yield* walk(edge);
+		if (cooperative) yield;
+	}
 
 	const modules: RailModuleOwnership[] = [];
 	for (const chain of chains) {
 		for (let offset = 0; offset < chain.length; offset += 5) {
+			if (cooperative) yield;
 			const chunk = chain.slice(offset, offset + 5);
 			const first = chunk[0] as DirectedRailEdge;
 			const last = chunk.at(-1) as DirectedRailEdge;
