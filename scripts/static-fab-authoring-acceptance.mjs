@@ -5,6 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { chromium } from "playwright-core";
+import { verifyWrappedTextLineCount, wrappedTextLineCount } from "./browser-text-layout.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactRoot = path.join(root, "artifacts", "static-fab-authoring");
@@ -98,6 +99,7 @@ try {
 	await mkdir(artifactRoot, { recursive: true });
 	await waitForServer(`${baseUrl}/`);
 	browser = await launchBrowserWithRetry();
+	recordStep("browser-text-line-measurement", await verifyWrappedTextLineCount(browser));
 	if (process.env.OPENFAB_STATIC_FAB_ISSUE_RECHECK_ACCEPTANCE_ONLY === "1") {
 		const staticFabIssueRecheck = await exerciseStaticFabIssueInspectorRecheck(browser);
 		recordStep("static-fab-issue-inspector-recheck", staticFabIssueRecheck);
@@ -4882,7 +4884,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 				`${viewport.label} Canvas marker solely owns the current OHB target identity`,
 			);
 			for (const copy of [
-				"배치 가능",
+				"포트 후보",
 				"클릭 또는 Enter: 1개",
 				"방향키/WASD: 대상 이동",
 				"같은 레일 드래그: 행 배치",
@@ -5137,7 +5139,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			);
 			await assertOrdinaryPortKeyboardTargetVisible(page, `${viewport.label} first EQ start`);
 			for (const copy of [
-				"배치 가능",
+				"포트 후보",
 				"포인터: 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그",
 				"키보드: 흰 테두리 1 시작을 방향키/WASD로 이동 → Enter",
 				"Esc 종료",
@@ -5430,7 +5432,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			);
 			const ohbInstructionText = (await ohbInstruction.innerText()).trim();
 			for (const copy of [
-				`배치 가능 ${ohbOverview.legalPortSlots.toLocaleString("ko-KR")}곳`,
+				`포트 후보 ${ohbOverview.legalPortSlots.toLocaleString("ko-KR")}곳`,
 				"클릭 또는 Enter: 1개",
 				"방향키/WASD: 대상 이동",
 				"같은 레일 드래그: 행 배치",
@@ -5552,7 +5554,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			);
 			const eqInstructionText = (await eqInstruction.innerText()).trim();
 			for (const copy of [
-				`배치 가능 ${eqOverview.legalPortSlots.toLocaleString("ko-KR")}곳`,
+				`포트 후보 ${eqOverview.legalPortSlots.toLocaleString("ko-KR")}곳`,
 				"포인터: 청록색 CENTER",
 				"놓지 않고 드래그",
 				"키보드: 흰 테두리 1 시작",
@@ -12427,7 +12429,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		const ordinaryPortBuildbarText = await ordinaryPortBuildbar.innerText();
 		if (
-			!ordinaryPortBuildbarText.includes("배치 가능") ||
+			!ordinaryPortBuildbarText.includes("포트 후보") ||
 			!ordinaryPortBuildbarText.includes("방향키/WASD: 대상 이동")
 		) {
 			throw new Error(
@@ -12759,7 +12761,7 @@ async function exerciseGuidedPortHandoffRegression(
 						.locator(".tilefab-port-authoring-instruction")
 						.innerText();
 					for (const copy of [
-						"배치 가능",
+						"포트 후보",
 						"포인터: 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그",
 						"키보드: 흰 테두리 1 시작을 방향키/WASD로 이동 → Enter",
 						"Esc 종료",
@@ -36777,26 +36779,6 @@ async function assertLocatorInsideViewport(page, locator) {
 			`Active control is clipped or occluded: ${JSON.stringify({ box, viewport, visibility })}.`,
 		);
 	}
-}
-
-async function wrappedTextLineCount(locator) {
-	return locator.evaluate((element) => {
-		const range = document.createRange();
-		range.selectNodeContents(element);
-		const lineTops = new Set(
-			Array.from(range.getClientRects())
-				.filter((rect) => rect.width > 0 && rect.height > 0)
-				.map((rect) => Math.round(rect.top * 2) / 2),
-		);
-		if (lineTops.size > 0) return lineTops.size;
-		const style = getComputedStyle(element);
-		const lineHeight = Number.parseFloat(style.lineHeight);
-		const verticalPadding =
-			Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
-		return Number.isFinite(lineHeight) && lineHeight > 0
-			? Math.max(1, Math.round((element.clientHeight - verticalPadding) / lineHeight))
-			: 1;
-	});
 }
 
 async function assertOrdinaryPortToolDensity(

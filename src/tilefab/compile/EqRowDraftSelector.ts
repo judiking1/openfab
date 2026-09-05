@@ -103,6 +103,10 @@ export function hasAvailableEqRowDraftSpan(
 	const pitchCells = pitchMillimeters / 1_000;
 	if (slots.legalCount < pitchCells + 1) return false;
 	for (let anchorRow = 0; anchorRow < slots.count; anchorRow += 1) {
+		if (availability.portCount > 0) {
+			anchorRow = availability.nextPotentiallyAvailableRowForAdvisoryDiscovery(slots, anchorRow);
+			if (anchorRow < 0) break;
+		}
 		if ((slots.statuses[anchorRow] as number) !== PORT_SLOT_STATUS.LEGAL) continue;
 		// Occupied anchors cannot start a row. Reject them before probing physical continuity;
 		// an empty factory instead benefits from the cheap endpoint rejection below.

@@ -82,6 +82,7 @@ const PORT_EQUIPMENT_SPATIAL_CHUNK_METERS = 16;
 export class PortEquipmentSpatialIndex {
 	private readonly presentation: CompiledPortEquipmentPresentation;
 	private readonly chunks: ReadonlyMap<string, Uint32Array>;
+	private readonly pickChunks: ReadonlyMap<string, Uint32Array>;
 	private readonly groupChunks: ReadonlyMap<string, Uint32Array>;
 	private readonly groupCandidates: number[] = [];
 	private readonly groupVisitStamps: Uint32Array;
@@ -104,6 +105,27 @@ export class PortEquipmentSpatialIndex {
 		this.chunks = new Map(
 			[...mutable.entries()].map(([key, rows]) => [key, Uint32Array.from(rows)] as const),
 		);
+		const pickChunks = new Map<string, Uint32Array>();
+		for (const [key, rows] of this.chunks) {
+			const representatives = new Map<string, number>();
+			for (const row of rows) {
+				const position = `${presentation.worldPositions[row * 2]}:${presentation.worldPositions[row * 2 + 1]}`;
+				const previous = representatives.get(position);
+				if (
+					previous === undefined ||
+					(presentation.portIds[row] as number) <= (presentation.portIds[previous] as number)
+				) {
+					representatives.set(position, row);
+				}
+			}
+			if (representatives.size === rows.length) pickChunks.set(key, rows);
+			else {
+				// Coincident markers always resolve to this stable-ID winner at every query position.
+				// Keep all source rows for rendering/group selection and preserve traversal tie order.
+				pickChunks.set(key, Uint32Array.from(representatives.values()).sort());
+			}
+		}
+		this.pickChunks = pickChunks;
 		const mutableGroups = new Map<string, number[]>();
 		for (let sectionRow = 0; sectionRow < presentation.bodySectionCount; sectionRow++) {
 			const offset = sectionRow * 4;
@@ -156,7 +178,7 @@ export class PortEquipmentSpatialIndex {
 		let nearestDistance = radiusMeters;
 		for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
 			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-				const rows = this.chunks.get(`${chunkX}:${chunkZ}`);
+				const rows = this.pickChunks.get(`${chunkX}:${chunkZ}`);
 				if (!rows) continue;
 				for (let index = 0; index < rows.length; index++) {
 					const row = rows[index] as number;

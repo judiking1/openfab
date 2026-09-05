@@ -7,6 +7,7 @@ export function ordinaryEqKeyboardTargetLabel(phase: OrdinaryEqKeyboardPhase): s
 	return phase === "choose-end" ? "키보드 2 끝 · ENTER" : "키보드 1 시작 · ENTER";
 }
 
+/** The catalog count does not include current occupancy or a complete row's continuity proof. */
 export function ordinaryEqAuthoringInstruction(
 	phase: OrdinaryEqKeyboardPhase,
 	legalSlotCount: number,
@@ -14,7 +15,7 @@ export function ordinaryEqAuthoringInstruction(
 	if (phase === "choose-end") {
 		return "1 시작 고정 · 키보드: 방향키/WASD로 2 끝 이동 → Enter로 행 확정 · Esc로 행 선택 취소";
 	}
-	return `배치 가능 ${legalSlotCount.toLocaleString("ko-KR")}곳 · 포인터: 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그 · 키보드: 흰 테두리 1 시작을 방향키/WASD로 이동 → Enter · Esc 종료`;
+	return `포트 후보 ${legalSlotCount.toLocaleString("ko-KR")}곳 · 포인터: 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그 · 키보드: 흰 테두리 1 시작을 방향키/WASD로 이동 → Enter · Esc 종료`;
 }
 
 export interface OrdinaryEqExitPresentation {

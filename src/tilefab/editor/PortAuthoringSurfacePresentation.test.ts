@@ -9,7 +9,7 @@ describe("portAuthoringSurfacePresentation", () => {
 			toolDescription: "레일 옆 원 · 클릭 또는 드래그",
 			buildbarTitle: "OHB PORT",
 			instruction:
-				"배치 가능 12곳 · 클릭 또는 Enter: 1개 · 방향키/WASD: 대상 이동 · 같은 레일 드래그: 행 배치",
+				"포트 후보 12곳 · 클릭 또는 Enter: 1개 · 방향키/WASD: 대상 이동 · 같은 레일 드래그: 행 배치",
 			configurationAvailable: true,
 			prerequisiteAction: null,
 		});
@@ -17,7 +17,7 @@ describe("portAuthoringSurfacePresentation", () => {
 
 	it("distinguishes EQ and STK target vocabulary", () => {
 		expect(portAuthoringSurfacePresentation("EQ", 2, 2).instruction).toBe(
-			"배치 가능 2곳 · 같은 직선 레일을 따라 2개 이상 드래그",
+			"포트 후보 2곳 · 같은 직선 레일을 따라 2개 이상 드래그",
 		);
 		expect(portAuthoringSurfacePresentation("STK", 3, 3).instruction).toBe(
 			"금색 ◇ CENTER 3개 · STK에 연결할 Port 슬롯을 선택한 뒤 STK 생성",

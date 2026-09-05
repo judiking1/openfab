@@ -1464,11 +1464,20 @@ describe("port slot rendering", () => {
 		const cachedStartedAt = performance.now();
 		const cachedHit = renderer.hitTestPortEquipment(presentation, world, TEST_CAMERA.zoom);
 		const cachedMilliseconds = performance.now() - cachedStartedAt;
+		const movedStartedAt = performance.now();
+		const movedHit = renderer.hitTestPortEquipment(
+			presentation,
+			{ x: world.x + 0.01, y: world.y + 0.01 },
+			TEST_CAMERA.zoom,
+		);
+		const movedMilliseconds = performance.now() - movedStartedAt;
 
 		expect(coldHit).toMatchObject({ portId: 1, equipmentGroupId: 1 });
 		expect(cachedHit).toMatchObject({ portId: 1, equipmentGroupId: 1 });
+		expect(movedHit).toMatchObject({ portId: 1, equipmentGroupId: 1 });
 		expect(coldMilliseconds).toBeLessThan(50);
 		expect(cachedMilliseconds).toBeLessThan(5);
+		expect(movedMilliseconds).toBeLessThan(5);
 	}, 5_000);
 
 	it.each([

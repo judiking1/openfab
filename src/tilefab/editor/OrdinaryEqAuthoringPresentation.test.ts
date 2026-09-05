@@ -9,7 +9,7 @@ import {
 describe("ordinaryEqAuthoringInstruction", () => {
 	it("separates the keyboard start action from the pointer drag contract", () => {
 		const instruction = ordinaryEqAuthoringInstruction("choose-slot", 1_234);
-		expect(instruction).toContain("배치 가능 1,234곳");
+		expect(instruction).toContain("포트 후보 1,234곳");
 		expect(instruction).toContain(
 			"포인터: 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그",
 		);

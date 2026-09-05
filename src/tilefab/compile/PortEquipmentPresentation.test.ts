@@ -25,6 +25,28 @@ import {
 import { compilePortEquipmentShellPresentation } from "./PortEquipmentShellPresentation";
 
 describe("PortEquipmentPresentation", () => {
+	it("keeps every render row while resolving coincident picks by stable ID at different positions", () => {
+		const document = new RailDocument();
+		const empty = compilePortEquipmentPresentation(
+			compilePhysicalRail(document.map),
+			document.portEquipment,
+		);
+		const index = new PortEquipmentSpatialIndex({
+			...empty,
+			count: 6,
+			portIds: Int32Array.of(41, 19, 7, 19, 3, 19),
+			equipmentGroupIds: Int32Array.of(1, 2, 3, 4, 5, 6),
+			worldPositions: Float32Array.of(15, 0, 16, 1, 15, 0, 16, 1, 17, 0, 16, 1),
+		});
+		expect(index.query({ minX: 14, minZ: -1, maxX: 18, maxZ: 2 }).sort((a, b) => a - b)).toEqual([
+			0, 1, 2, 3, 4, 5,
+		]);
+		expect(index.nearest(15, 0, 0.01)).toMatchObject({ row: 2, portId: 7, equipmentGroupId: 3 });
+		expect(index.nearest(16, 1, 0.01)).toMatchObject({ row: 5, portId: 19, equipmentGroupId: 6 });
+		expect(index.nearest(16, 0.9, 0.2)).toMatchObject({ row: 5, portId: 19 });
+		expect(index.nearest(16, 0, 1)).toMatchObject({ row: 4, portId: 3, distanceMeters: 1 });
+	});
+
 	it("keeps radius boundaries and stable ID ties when picking directly across chunks", () => {
 		const document = new RailDocument();
 		const empty = compilePortEquipmentPresentation(

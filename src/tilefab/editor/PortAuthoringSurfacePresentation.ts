@@ -14,6 +14,7 @@ export interface PortAuthoringPrerequisiteAction {
 	readonly ariaLabel: "BUILD로 이동해 직선 레일 만들기";
 }
 
+/** Counts describe rail-compatible candidates; live occupancy is reported for the current target. */
 export function portAuthoringSurfacePresentation(
 	portType: PortType,
 	slotCount: number,
@@ -44,7 +45,7 @@ export function portAuthoringSurfacePresentation(
 			buildbarTitle: "OHB PORT",
 			instruction:
 				legalSlotCount > 0
-					? `배치 가능 ${count}곳 · 클릭 또는 Enter: 1개 · 방향키/WASD: 대상 이동 · 같은 레일 드래그: 행 배치`
+					? `포트 후보 ${count}곳 · 클릭 또는 Enter: 1개 · 방향키/WASD: 대상 이동 · 같은 레일 드래그: 행 배치`
 					: slotCount === 0
 						? "배치 가능 슬롯 없음 · 먼저 직선 레일을 만드세요"
 						: "배치 가능 슬롯 없음 · 양끝 터미널 안전 구간을 제외하고 내부 직선 슬롯이 생길 때까지 레일을 더 늘리세요",
@@ -59,7 +60,7 @@ export function portAuthoringSurfacePresentation(
 			buildbarTitle: "EQ PORT ROW",
 			instruction:
 				legalSlotCount > 0
-					? `배치 가능 ${count}곳 · 같은 직선 레일을 따라 2개 이상 드래그`
+					? `포트 후보 ${count}곳 · 같은 직선 레일을 따라 2개 이상 드래그`
 					: "배치 가능 슬롯 없음 · 연속된 직선 레일을 먼저 만드세요",
 			configurationAvailable,
 			prerequisiteAction,

@@ -19,6 +19,58 @@ import {
 } from "./PortSlotCompiler";
 
 describe("PortSlotCompiler", () => {
+	it("skips exact occupied candidates but leaves clearance rejection to live availability", () => {
+		const document = straightDocument(8);
+		const layout = compilePhysicalRail(document.map);
+		const slots = compileBasePortSlots(layout, "EQ");
+		const legal = Array.from(slots.statuses).flatMap((status, row) =>
+			status === PORT_SLOT_STATUS.LEGAL ? [row] : [],
+		);
+		const first = legal[0] as number;
+		const second = legal[1] as number;
+		const third = legal[2] as number;
+		const ports = [
+			portSlotRecord(slots, first, 1, 1, null),
+			portSlotRecord(slots, second, 2, 1, null),
+		];
+		const state: PortEquipmentState = {
+			nextPortId: 3,
+			nextEquipmentGroupId: 2,
+			ports,
+			equipmentGroups: [
+				{ id: 1, kind: "EQ", pitchMillimeters: 1_000, recipe: null, portIds: [1, 2] },
+			],
+		};
+		const availability = new PortSlotAvailabilityIndex(layout, state, "EQ");
+		expect(availability.nextPotentiallyAvailableRowForAdvisoryDiscovery(slots, 0)).toBe(third);
+		expect(availability.nextPotentiallyAvailableRowForAdvisoryDiscovery(slots, second)).toBe(third);
+		expect(availability.nextPotentiallyAvailableRowForAdvisoryDiscovery(slots, slots.count)).toBe(
+			-1,
+		);
+		expect(() => availability.nextPotentiallyAvailableRowForAdvisoryDiscovery(slots, -1)).toThrow(
+			RangeError,
+		);
+		expect(() =>
+			availability.nextPotentiallyAvailableRowForAdvisoryDiscovery(
+				{ ...slots, revision: slots.revision + 1 },
+				0,
+			),
+		).toThrow("stale");
+		const shifted = new PortSlotAvailabilityIndex(
+			layout,
+			{
+				...state,
+				ports: ports.map((port) => ({
+					...port,
+					stationMillimeters: port.stationMillimeters + 100,
+				})),
+			},
+			"EQ",
+		);
+		expect(shifted.nextPotentiallyAvailableRowForAdvisoryDiscovery(slots, 0)).toBe(first);
+		expect(shifted.statusFor(slots, first).status).toBe(PORT_SLOT_STATUS.PORT_CLEARANCE_CONFLICT);
+	});
+
 	it("skips physical attachment indexing for empty ports while rejecting foreign empty proofs", () => {
 		const document = straightDocument(8);
 		const layout = compilePhysicalRail(document.map);

@@ -370,6 +370,53 @@ export class PortSlotAvailabilityIndex {
 		return this.sourceLayout === layout;
 	}
 
+	/**
+	 * Skip definitely occupied physical candidates without allocating a route/result per row.
+	 * A returned row is only a possibility: clearance, body exclusion, and prepared-slot proof
+	 * still belong to statusFor/the final selector. A bucket-boundary miss is also only a possibility.
+	 */
+	nextPotentiallyAvailableRowForAdvisoryDiscovery(
+		slots: CompiledPortSlots,
+		startRow: number,
+	): number {
+		if (slots.revision !== this.revision || slots.portType !== this.portType) {
+			throw new Error("Port slot availability is stale for the compiled slot catalog.");
+		}
+		if (!Number.isInteger(startRow) || startRow < 0 || startRow > slots.count) {
+			throw new RangeError(`Port slot row ${startRow} is outside the compiled slot buffer.`);
+		}
+		const index = this.existingPortIndex;
+		const ports = this.indexedPorts;
+		for (let row = startRow; row < slots.count; row++) {
+			if (slots.statuses[row] !== PORT_SLOT_STATUS.LEGAL) continue;
+			const bucketX = Math.floor(slots.worldPositions[row * 2] as number);
+			const bucketZ = Math.floor(slots.worldPositions[row * 2 + 1] as number);
+			let occupied = false;
+			for (
+				let existing = index.firstRow(bucketX, bucketZ);
+				existing >= 0;
+				existing = index.nextRow(existing)
+			) {
+				if (
+					sameCardinalSlot(
+						ports[existing] as PortRecord,
+						slots.routeXs[row] as number,
+						slots.routeZs[row] as number,
+						slots.routeFromDirections[row] as Direction,
+						slots.routeToDirections[row] as Direction,
+						slots.stationMillimeters[row] as number,
+						PORT_SIDES[slots.sides[row] as number] as PortSide,
+					)
+				) {
+					occupied = true;
+					break;
+				}
+			}
+			if (!occupied) return row;
+		}
+		return -1;
+	}
+
 	statusFor(
 		slots: CompiledPortSlots,
 		row: number,
@@ -1064,7 +1111,8 @@ function findPortConflict(
 	for (let row = index.firstRow(bucketX, bucketZ); row >= 0; row = index.nextRow(row)) {
 		const port = ports[row] as PortRecord;
 		if (port.id === ignoredPortId || port.equipmentGroupId === ignoredEquipmentGroupId) continue;
-		if (sameCardinalSlot(port, route, stationMillimeters, side)) return { port, occupied: true };
+		if (sameCardinalSlot(port, route.x, route.z, route.from, route.to, stationMillimeters, side))
+			return { port, occupied: true };
 	}
 	for (let deltaZ = -1; deltaZ <= 1; deltaZ++) {
 		for (let deltaX = -1; deltaX <= 1; deltaX++) {
@@ -1076,7 +1124,15 @@ function findPortConflict(
 				const port = ports[row] as PortRecord;
 				if (port.id === ignoredPortId || port.equipmentGroupId === ignoredEquipmentGroupId)
 					continue;
-				const sameSlot = sameCardinalSlot(port, route, stationMillimeters, side);
+				const sameSlot = sameCardinalSlot(
+					port,
+					route.x,
+					route.z,
+					route.from,
+					route.to,
+					stationMillimeters,
+					side,
+				);
 				const distance = Math.hypot(
 					index.worldX(row) - worldXMeters,
 					index.worldZ(row) - worldZMeters,
@@ -1209,17 +1265,20 @@ function pointSegmentDistance(
 
 function sameCardinalSlot(
 	port: PortRecord,
-	route: CardinalPortRoute,
+	x: number,
+	z: number,
+	from: CardinalPortRoute["from"],
+	to: CardinalPortRoute["to"],
 	stationMillimeters: number,
 	side: PortSide,
 ): boolean {
 	const existing = port.route;
 	return (
 		existing.kind === "CARDINAL_CELL" &&
-		existing.x === route.x &&
-		existing.z === route.z &&
-		existing.from === route.from &&
-		existing.to === route.to &&
+		existing.x === x &&
+		existing.z === z &&
+		existing.from === from &&
+		existing.to === to &&
 		port.stationMillimeters === stationMillimeters &&
 		port.side === side
 	);
