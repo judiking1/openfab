@@ -94,13 +94,28 @@ export class PortEquipmentSpatialIndex {
 	constructor(presentation: CompiledPortEquipmentPresentation) {
 		this.presentation = presentation;
 		const mutable = new Map<string, number[]>();
+		// Consecutive markers usually share a chunk; avoid rebuilding its key for every row.
+		let lastChunkX = Number.NaN;
+		let lastChunkZ = Number.NaN;
+		let lastRows: number[] | undefined;
 		for (let row = 0; row < presentation.count; row++) {
-			const x = presentation.worldPositions[row * 2] as number;
-			const z = presentation.worldPositions[row * 2 + 1] as number;
-			const key = spatialChunkKey(x, z);
-			const rows = mutable.get(key);
-			if (rows) rows.push(row);
-			else mutable.set(key, [row]);
+			const x = Math.floor(
+				(presentation.worldPositions[row * 2] as number) / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS,
+			);
+			const z = Math.floor(
+				(presentation.worldPositions[row * 2 + 1] as number) / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS,
+			);
+			if (x !== lastChunkX || z !== lastChunkZ || lastRows === undefined) {
+				const key = `${x}:${z}`;
+				lastRows = mutable.get(key);
+				if (lastRows === undefined) {
+					lastRows = [];
+					mutable.set(key, lastRows);
+				}
+				lastChunkX = x;
+				lastChunkZ = z;
+			}
+			lastRows.push(row);
 		}
 		this.chunks = new Map(
 			[...mutable.entries()].map(([key, rows]) => [key, Uint32Array.from(rows)] as const),
@@ -108,14 +123,25 @@ export class PortEquipmentSpatialIndex {
 		const pickChunks = new Map<string, Uint32Array>();
 		for (const [key, rows] of this.chunks) {
 			const representatives = new Map<string, number>();
+			let lastX = Number.NaN;
+			let lastZ = Number.NaN;
+			let lastPosition = "";
+			let lastWinner: number | undefined;
 			for (const row of rows) {
-				const position = `${presentation.worldPositions[row * 2]}:${presentation.worldPositions[row * 2 + 1]}`;
-				const previous = representatives.get(position);
+				const x = presentation.worldPositions[row * 2] as number;
+				const z = presentation.worldPositions[row * 2 + 1] as number;
+				if (x !== lastX || z !== lastZ) {
+					lastPosition = `${x}:${z}`;
+					lastWinner = representatives.get(lastPosition);
+					lastX = x;
+					lastZ = z;
+				}
 				if (
-					previous === undefined ||
-					(presentation.portIds[row] as number) <= (presentation.portIds[previous] as number)
+					lastWinner === undefined ||
+					(presentation.portIds[row] as number) <= (presentation.portIds[lastWinner] as number)
 				) {
-					representatives.set(position, row);
+					lastWinner = row;
+					representatives.set(lastPosition, row);
 				}
 			}
 			if (representatives.size === rows.length) pickChunks.set(key, rows);
@@ -839,10 +865,6 @@ function writeGroupGeometry(
 	bounds[groupRow * 4 + 1] = centerZ - extentZ;
 	bounds[groupRow * 4 + 2] = centerX + extentX;
 	bounds[groupRow * 4 + 3] = centerZ + extentZ;
-}
-
-function spatialChunkKey(x: number, z: number): string {
-	return `${Math.floor(x / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS)}:${Math.floor(z / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS)}`;
 }
 
 function hasFinitePortEquipmentBounds(bounds: PortEquipmentBounds): boolean {

@@ -4254,6 +4254,27 @@ async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
 			await waitForLegalPortSlots(page);
 			const stkBefore = await readMetrics(page);
 			await canvas.focus();
+			// A global legal-slot count can still describe the preceding tool. Act only after the
+			// actual STK keyboard target and selected FLEX template are rendered and ready.
+			await page.waitForFunction(
+				() => {
+					const app = document.querySelector('[data-testid="tilefab-app"]');
+					const canvas = document.querySelector('[data-testid="rail-canvas"]');
+					const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+					return (
+						app?.getAttribute("data-editor-tool") === "stk" &&
+						app.getAttribute("data-stk-draft-template") === "FLEX" &&
+						app.getAttribute("data-stk-draft-rows") === "0" &&
+						canvas?.getAttribute("data-guided-port-keyboard") === "STK" &&
+						marker?.getAttribute("data-port-type") === "STK" &&
+						marker.getAttribute("data-legal") === "true" &&
+						marker.getBoundingClientRect().width > 0 &&
+						document.activeElement === canvas
+					);
+				},
+				undefined,
+				{ timeout: 10_000 },
+			);
 			await canvas.press("Enter");
 			await page.waitForFunction(
 				() =>
@@ -4314,6 +4335,39 @@ async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
 					workerSequence: completed.workerSequence,
 				}),
 			);
+		} catch (error) {
+			const state = await page
+				?.evaluate(() => {
+					const app = document.querySelector('[data-testid="tilefab-app"]');
+					const canvas = document.querySelector('[data-testid="rail-canvas"]');
+					const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+					return {
+						tool: app?.getAttribute("data-editor-tool"),
+						template: app?.getAttribute("data-stk-draft-template"),
+						rows: app?.getAttribute("data-stk-draft-rows"),
+						canComplete: app?.getAttribute("data-stk-draft-can-complete"),
+						keyboardType: canvas?.getAttribute("data-guided-port-keyboard"),
+						keyboardRow: canvas?.getAttribute("data-guided-port-keyboard-row"),
+						markerType: marker?.getAttribute("data-port-type"),
+						markerLegal: marker?.getAttribute("data-legal"),
+						focused: document.activeElement?.getAttribute("data-testid"),
+						readout: document.querySelector('[data-testid="guided-port-keyboard-readout"]')
+							?.textContent,
+						status: document.querySelector(".tilefab-statusbar")?.textContent,
+					};
+				})
+				.catch(() => null);
+			console.error(
+				"Ordinary hierarchy failure state",
+				JSON.stringify({ viewport: viewport.label, state }),
+			);
+			await page
+				?.screenshot({
+					path: path.join(artifactRoot, `ordinary-hierarchy-failure-${viewport.label}.png`),
+					fullPage: true,
+				})
+				.catch(() => undefined);
+			throw error;
 		} finally {
 			await closeBrowserResource(page, `ordinary hierarchy ${viewport.label} page`);
 			await closeBrowserResource(context, `ordinary hierarchy ${viewport.label} context`);
