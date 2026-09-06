@@ -21,21 +21,21 @@ import {
 } from "./SyntheticFabStarterBridge";
 import { freezeSyntheticFabStarterContainers } from "./SyntheticFabStarterContainers";
 
-export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_SCHEMA_VERSION = 2 as const;
-export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "large-fab-60.default.v2" as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_SCHEMA_VERSION = 3 as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "large-fab-60.default.v3" as const;
 export const PAIRED_CIRCULATION_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"paired-circulation-fab-52.default.v3" as const;
-export const FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "full-fab-52.default.v2" as const;
+	"paired-circulation-fab-52.default.v4" as const;
+export const FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "full-fab-52.default.v3" as const;
 export const CENTRAL_SPINE_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"central-spine-fab-24.default.v2" as const;
+	"central-spine-fab-24.default.v3" as const;
 export const PARALLEL_HALL_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"parallel-hall-fab-12.default.v2" as const;
-export const PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "production-fab-60.default.v2" as const;
+	"parallel-hall-fab-12.default.v3" as const;
+export const PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "production-fab-60.default.v3" as const;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_TYPED_ARRAY_BYTES = 2 * 1024 * 1024;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_SOURCE_BYTES =
 	SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES + 64 * 1024;
-export const SYNTHETIC_FAB_STARTER_CERTIFICATION_ATTESTATION_SCHEMA_VERSION = 3 as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFICATION_ATTESTATION_SCHEMA_VERSION = 4 as const;
 
 export type SyntheticFabStarterCertifiedArtifactId =
 	| typeof SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID

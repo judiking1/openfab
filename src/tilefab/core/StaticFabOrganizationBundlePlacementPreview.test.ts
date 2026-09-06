@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	ADVANCED_SWITCH_ALL_MOVEMENTS,
-	deriveAdvancedSwitchGeometry,
 	type AdvancedSwitchRecord,
+	deriveAdvancedSwitchGeometry,
 } from "./AdvancedSwitch";
 import { DIR_E, DIR_S, DIR_W, directionBetween } from "./railShape";
 import { compareDirectedRailEdges } from "./StaticFabOrganization";
@@ -319,7 +319,8 @@ describe("StaticFabOrganizationBundlePlacementPreview", () => {
 });
 
 type MutableLineBundle = {
-	version: 1;
+	version: 2;
+	relationships: { nextRelationshipId: 1; records: [] };
 	captureMode: "DIRECT";
 	rootOrganizationIndices: number[];
 	sourceModuleCount: number;
@@ -358,7 +359,8 @@ type MutableLineBundle = {
 
 function lineBundle(edgeCount: number, withEquipment: boolean): MutableLineBundle {
 	return {
-		version: 1,
+		version: 2,
+		relationships: { nextRelationshipId: 1, records: [] },
 		captureMode: "DIRECT",
 		rootOrganizationIndices: [0],
 		sourceModuleCount: Math.ceil(edgeCount / 5),
@@ -428,7 +430,8 @@ function fiftyThousandCellMap(): TileMap {
 
 function dispersedStkBundle(): StaticFabOrganizationBundle {
 	return {
-		version: 1,
+		version: 2,
+		relationships: { nextRelationshipId: 1, records: [] },
 		captureMode: "DIRECT",
 		rootOrganizationIndices: [0],
 		sourceModuleCount: 2,
@@ -503,7 +506,8 @@ function advancedSwitchPortBundle(): StaticFabOrganizationBundle {
 	}
 	const railEdges = [...edgesByKey.values()].sort(compareDirectedRailEdges);
 	return {
-		version: 1,
+		version: 2,
+		relationships: { nextRelationshipId: 1, records: [] },
 		captureMode: "DIRECT",
 		rootOrganizationIndices: [0],
 		sourceModuleCount: 1,

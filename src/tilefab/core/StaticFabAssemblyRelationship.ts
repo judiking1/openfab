@@ -553,6 +553,13 @@ export function staticFabAssemblyRelationshipStateShapeError(
 	return completeCooperativeSteps(relationshipStateShapeSteps(state, maximumCanonicalBytes));
 }
 
+/** Reuse the exact shape grammar at cooperatively scheduled portable decode boundaries. */
+export function* staticFabAssemblyRelationshipStateShapeErrorSteps(
+	state: StaticFabAssemblyRelationshipStateV1,
+): Generator<void, string | null> {
+	return yield* relationshipStateShapeSteps(state);
+}
+
 /** Adopt only a deeply immutable graph, checking every nested value before it is read. */
 export function* adoptStaticFabAssemblyRelationshipStateSteps(
 	state: StaticFabAssemblyRelationshipStateV1,

@@ -13,7 +13,9 @@ import {
 } from "./rail-scale-budgets.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const artifactRoot = path.join(root, "artifacts", "rail-scale");
+const artifactRoot = path.resolve(
+	process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR ?? path.join(root, "artifacts", "rail-scale"),
+);
 const port = Number(process.env.OPENFAB_SCALE_PORT ?? 5199);
 const host = "127.0.0.1";
 const baseUrl = `http://${host}:${port}`;
@@ -8496,11 +8498,30 @@ async function exerciseEditor(page) {
 	if (!box) throw new Error("Rail canvas has no interaction bounds.");
 	const centerX = box.x + box.width / 2;
 	const centerY = box.y + box.height / 2;
-	const cell = 38;
-
 	await activateEditorActivity(page, "inspect");
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
+	const camera = await readCanvasMetrics(page);
+	if (camera.cameraRotation !== "0") {
+		throw new Error("Editor scale workflow requires top-view rotation 0.");
+	}
+	const cell = numberMetric(camera, "cameraZoom");
+	const originX = box.x + numberMetric(camera, "cameraOffsetX");
+	const originY = box.y + numberMetric(camera, "cameraOffsetY");
+	// Equipment editing may frame its selection. Project the original bare fixture cell through
+	// the current camera; the later OHB/EQ fixtures occupy the rail farther along this row.
+	const railPoint = { x: originX + cell * 0.5, y: originY + cell * 0.5 };
+	if (
+		railPoint.x <= box.x ||
+		railPoint.x >= box.x + box.width ||
+		railPoint.y <= box.y ||
+		railPoint.y >= box.y + box.height
+	) {
+		throw new Error("The editor scale fixture's first rail row is outside the current viewport.");
+	}
 	await canvas.focus();
-	await page.mouse.click(centerX + cell * 0.5, centerY + cell * 0.5);
+	await page.mouse.click(railPoint.x, railPoint.y);
 	await page.waitForFunction(
 		() =>
 			(document

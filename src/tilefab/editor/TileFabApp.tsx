@@ -1046,7 +1046,7 @@ import { SimulationResidentScenarioSourceReviewCard } from "./SimulationResident
 import { SimulationScenarioRunAuthorizationCard } from "./SimulationScenarioRunAuthorizationCard";
 import { SimulationScenarioSourceReviewCard } from "./SimulationScenarioSourceReviewCard";
 import { useLiveSimulationReadiness } from "./useLiveSimulationReadiness";
-import { StaticFabOrganizationBundlePlacementBridge } from "./StaticFabOrganizationBundlePlacementBridge";
+import type { StaticFabOrganizationBundlePlacementBridge } from "./StaticFabOrganizationBundlePlacementBridge";
 import {
 	organizationBundleOutsideMapPlacementAnchors,
 	StaticFabOrganizationBundlePlacementSession,
@@ -7728,6 +7728,7 @@ export default function TileFabApp(): React.ReactElement {
 
 		try {
 			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const { StaticFabOrganizationBundlePlacementBridge } = await import("./StaticFabOrganizationBundlePlacementBridge");
 			if (
 				requestId !== blueprintPlacementRequestRef.current ||
 				session !== organizationBundlePlacementSessionRef.current
@@ -20860,7 +20861,7 @@ export default function TileFabApp(): React.ReactElement {
 			document.map,
 			document.portEquipment,
 			document.getPatchSequence(),
-				document.organizations,
+				document.organizations, document.relationships,
 				rootIds,
 				captureMode,
 				editorModelRef.current.ownership,

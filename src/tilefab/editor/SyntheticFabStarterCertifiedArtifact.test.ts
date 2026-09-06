@@ -9,11 +9,11 @@ import {
 	prepareSyntheticFabStarter,
 } from "../compile/SyntheticFabStarterPreview";
 import { captureStaticFabOrganizationBundle } from "../core/StaticFabOrganizationBundle";
-import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v2.json?raw";
-import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v2.json?raw";
-import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v3.json?raw";
-import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v2.json?raw";
-import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v2.json?raw";
+import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v3.json?raw";
+import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v3.json?raw";
+import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v4.json?raw";
+import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v3.json?raw";
+import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v3.json?raw";
 import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
 import { SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION } from "../worker/SyntheticFabStarterCertifiedArtifactProtocol";
 import {
@@ -76,11 +76,11 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 	it("matches the checked-in deterministic public synthetic artifact", () => {
 		expect(JSON.parse(generatedArtifactSource)).toEqual(artifact);
 		expect(artifact).toMatchObject({
-			schemaVersion: 2,
-			artifactId: "large-fab-60.default.v2",
+			schemaVersion: 3,
+			artifactId: "large-fab-60.default.v3",
 			certificationContract: "independent-materialization-v2",
 		});
-		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION).toBe(3);
+		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION).toBe(4);
 		expect(artifact.typedArrayByteLength).toBeGreaterThan(0);
 		expect(artifact.payloadByteLength).toBeLessThan(
 			SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES,
@@ -154,6 +154,7 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 			document.portEquipment,
 			document.getPatchSequence(),
 			document.organizations,
+			document.relationships,
 			selectedBayIds,
 			"DIRECT",
 		);
@@ -171,8 +172,8 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 		if (!transferable) throw new Error("Expected transferable Parallel Hall hydration.");
 		expect(isSyntheticFabStarterCertificationEvidence(transferable.attestation)).toBe(false);
 		expect(transferable.attestation).toMatchObject({
-			schemaVersion: 3,
-			artifactSchemaVersion: 2,
+			schemaVersion: 4,
+			artifactSchemaVersion: 3,
 		});
 
 		const rebound = rebindSyntheticFabStarterCertificationEvidence(

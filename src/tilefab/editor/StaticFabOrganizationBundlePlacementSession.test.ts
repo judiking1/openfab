@@ -290,6 +290,7 @@ function capturedBundleFixture(): StaticFabOrganizationBundle {
 		document.portEquipment,
 		document.getPatchSequence(),
 		organizations,
+		document.relationships,
 		[1],
 		"DIRECT",
 	);

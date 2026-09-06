@@ -93,6 +93,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			destination.portEquipment,
 			destination.getPatchSequence(),
 			destination.organizations,
+			destination.relationships,
 			bundle,
 			{ x: 20, y: 20 },
 			0,
@@ -137,6 +138,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			destination.portEquipment,
 			destination.getPatchSequence(),
 			destination.organizations,
+			destination.relationships,
 			sourceBundle(),
 			{ x: -30, y: 18 },
 			0,
@@ -157,6 +159,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			destination.portEquipment,
 			destination.getPatchSequence(),
 			destination.organizations,
+			destination.relationships,
 			bundle,
 			anchor,
 			1,
@@ -168,6 +171,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				destination.portEquipment,
 				destination.getPatchSequence(),
 				destination.organizations,
+				destination.relationships,
 				bundle,
 				anchor,
 				1,
@@ -184,6 +188,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			sourceNextPortId: snapshot.portEquipment.nextPortId,
 			sourceNextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 			sourceNextOrganizationId: destination.organizations.nextOrganizationId,
+			sourceNextRelationshipId: destination.relationships.nextRelationshipId,
 			bundleFingerprint: staticFabOrganizationBundleFingerprint(bundle),
 			anchor,
 			quarterTurns: 1 as const,
@@ -196,6 +201,9 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				organizationChanges: workerPlan.organizationMutations,
 				organizationNextIdBefore: workerPlan.nextOrganizationIdBefore,
 				organizationNextIdAfter: workerPlan.nextOrganizationIdAfter,
+				relationshipChanges: workerPlan.relationshipMutations,
+				relationshipNextIdBefore: workerPlan.nextRelationshipIdBefore,
+				relationshipNextIdAfter: workerPlan.nextRelationshipIdAfter,
 			}),
 			prospectiveNextAdvancedSwitchId: nextCursor(
 				snapshot.nextAdvancedSwitchId,
@@ -210,6 +218,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				workerPlan.equipmentGroupMutations,
 			),
 			prospectiveNextOrganizationId: workerPlan.nextOrganizationIdAfter,
+			prospectiveNextRelationshipId: workerPlan.nextRelationshipIdAfter,
 		});
 		const expectedProspectiveChecksum = ticket.prospectiveChecksum;
 		const mismatchedPermit = issueStaticFabOrganizationBundlePlacementPermit(
@@ -217,6 +226,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			destination.portEquipment,
 			destination.getPatchSequence(),
 			destination.organizations,
+			destination.relationships,
 			bundle,
 			anchor,
 			1,
@@ -236,6 +246,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				destination.map,
 				destination.portEquipment,
 				destination.organizations,
+				destination.relationships,
 			),
 		).toBeNull();
 		expect(
@@ -247,6 +258,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				destination.map,
 				destination.portEquipment,
 				destination.organizations,
+				destination.relationships,
 			),
 		).toBeNull();
 
@@ -259,6 +271,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				destination.map,
 				destination.portEquipment,
 				destination.organizations,
+				destination.relationships,
 			),
 		).toBeNull();
 		const adopted = adoptStaticFabOrganizationBundlePlacementWorkerPlan(
@@ -269,6 +282,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			destination.map,
 			destination.portEquipment,
 			destination.organizations,
+			destination.relationships,
 		);
 		expect(adopted).not.toBeNull();
 		expect(
@@ -280,6 +294,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				destination.map,
 				destination.portEquipment,
 				destination.organizations,
+				destination.relationships,
 			),
 		).toBeNull();
 		if (!adopted) throw new Error("Expected the Worker plan to be adopted.");
@@ -300,6 +315,7 @@ function adoptedWorkerPlan(
 		document.portEquipment,
 		document.getPatchSequence(),
 		document.organizations,
+		document.relationships,
 		bundle,
 		anchor,
 		quarterTurns,
@@ -311,6 +327,7 @@ function adoptedWorkerPlan(
 			document.portEquipment,
 			document.getPatchSequence(),
 			document.organizations,
+			document.relationships,
 			bundle,
 			anchor,
 			quarterTurns,
@@ -326,6 +343,9 @@ function adoptedWorkerPlan(
 		organizationChanges: workerPlan.organizationMutations,
 		organizationNextIdBefore: workerPlan.nextOrganizationIdBefore,
 		organizationNextIdAfter: workerPlan.nextOrganizationIdAfter,
+		relationshipChanges: workerPlan.relationshipMutations,
+		relationshipNextIdBefore: workerPlan.nextRelationshipIdBefore,
+		relationshipNextIdAfter: workerPlan.nextRelationshipIdAfter,
 	});
 	const adopted = adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 		permit,
@@ -339,6 +359,7 @@ function adoptedWorkerPlan(
 			sourceNextPortId: snapshot.portEquipment.nextPortId,
 			sourceNextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 			sourceNextOrganizationId: document.organizations.nextOrganizationId,
+			sourceNextRelationshipId: document.relationships.nextRelationshipId,
 			bundleFingerprint: staticFabOrganizationBundleFingerprint(bundle),
 			anchor,
 			quarterTurns,
@@ -358,11 +379,13 @@ function adoptedWorkerPlan(
 				workerPlan.equipmentGroupMutations,
 			),
 			prospectiveNextOrganizationId: workerPlan.nextOrganizationIdAfter,
+			prospectiveNextRelationshipId: workerPlan.nextRelationshipIdAfter,
 		},
 		prospectiveChecksum,
 		document.map,
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	if (!adopted) throw new Error("Worker plan adoption failed.");
 	return adopted;
@@ -419,6 +442,7 @@ function sourceBundle() {
 		source.portEquipment,
 		source.getPatchSequence(),
 		organizations,
+		source.relationships,
 		[1],
 		"DIRECT",
 	);

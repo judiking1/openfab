@@ -8,7 +8,9 @@ import { chromium } from "playwright-core";
 import { createServer } from "vite";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const artifactRoot = path.join(root, "artifacts", "openfab-project");
+const artifactRoot = path.resolve(
+	process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR ?? path.join(root, "artifacts", "openfab-project"),
+);
 const port = Number(process.env.OPENFAB_PROJECT_PORT ?? 5201);
 const host = "127.0.0.1";
 const baseUrl = `http://${host}:${port}`;

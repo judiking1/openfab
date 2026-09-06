@@ -16,7 +16,7 @@ import {
 	type StaticFabOrganizationBundle,
 } from "../core/StaticFabOrganizationBundle";
 
-export const OPENFAB_BLUEPRINT_SECTION_SCHEMA_VERSION = 3 as const;
+export const OPENFAB_BLUEPRINT_SECTION_SCHEMA_VERSION = 4 as const;
 export const OPENFAB_BLUEPRINT_KIND_RAIL_AREA = "RAIL_AREA" as const;
 export const OPENFAB_BLUEPRINT_KIND_STATIC_FAB = "STATIC_FAB" as const;
 export const OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION = "STATIC_FAB_ORGANIZATION" as const;

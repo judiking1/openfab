@@ -24,6 +24,16 @@ import { copyPortRecord, type PortMutation, type PortRecord } from "./PortRecord
 import { type RailConstructionPlan, type RailMutation, railMutationTopologyError } from "./paint";
 import { directionBetween, oppositeDirection } from "./railShape";
 import {
+	applyStaticFabAssemblyRelationshipMutations,
+	checksumStaticFabAssemblyRelationshipRecord,
+	checksumStaticFabAssemblyRelationshipRecordSteps,
+	copyStaticFabAssemblyRelationshipRecord,
+	remapStaticFabAssemblyRelationshipRecord,
+	type StaticFabAssemblyRelationshipMutationV1,
+	type StaticFabAssemblyRelationshipStateV1,
+	staticFabAssemblyRelationshipStateSourceError,
+} from "./StaticFabAssemblyRelationship";
+import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
@@ -58,6 +68,7 @@ export interface StaticFabOrganizationBundlePlacementMetadata {
 	readonly portCount: number;
 	readonly equipmentGroupCount: number;
 	readonly organizationCount: number;
+	readonly relationshipCount: number;
 	readonly widthMeters: number;
 	readonly heightMeters: number;
 	readonly organizationNames: readonly string[];
@@ -79,6 +90,7 @@ export interface StaticFabOrganizationBundlePlacementWorkerTicket
 	readonly sourceNextPortId: number;
 	readonly sourceNextEquipmentGroupId: number;
 	readonly sourceNextOrganizationId: number;
+	readonly sourceNextRelationshipId: number;
 	readonly bundleFingerprint: string;
 	readonly anchor: Cell;
 	readonly quarterTurns: StaticFabOrganizationBundleQuarterTurns;
@@ -87,6 +99,7 @@ export interface StaticFabOrganizationBundlePlacementWorkerTicket
 	readonly prospectiveNextPortId: number;
 	readonly prospectiveNextEquipmentGroupId: number;
 	readonly prospectiveNextOrganizationId: number;
+	readonly prospectiveNextRelationshipId: number;
 }
 
 /**
@@ -101,11 +114,14 @@ export interface StaticFabOrganizationBundlePlacementPermit {
 export type StaticFabOrganizationBundlePlacementPlan = RailConstructionPlan & {
 	readonly basePatchSequence: number;
 	readonly nextOrganizationIdBefore: number;
+	readonly nextRelationshipIdBefore: number;
 	readonly nextOrganizationIdAfter: number;
 	readonly switchMutations: readonly AdvancedSwitchMutation[];
 	readonly portMutations: readonly PortMutation[];
 	readonly equipmentGroupMutations: readonly EquipmentGroupMutation[];
 	readonly organizationMutations: readonly StaticFabOrganizationMutation[];
+	readonly relationshipMutations: readonly StaticFabAssemblyRelationshipMutationV1[];
+	readonly nextRelationshipIdAfter: number;
 	readonly organizationBundle: StaticFabOrganizationBundlePlacementMetadata;
 };
 
@@ -113,6 +129,7 @@ export interface StaticFabOrganizationBundlePlacementProspectiveState {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 export interface StaticFabOrganizationBundlePlacementPlanningResult {
@@ -128,6 +145,7 @@ interface StaticFabOrganizationBundlePlacementSource {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly sourceChecksum: string | null;
 }
 
@@ -139,6 +157,7 @@ interface StaticFabOrganizationBundlePlacementPermitSource
 	readonly sourceNextPortId: number;
 	readonly sourceNextEquipmentGroupId: number;
 	readonly sourceNextOrganizationId: number;
+	readonly sourceNextRelationshipId: number;
 	readonly bundleFingerprint: string;
 	readonly anchor: Cell;
 	readonly quarterTurns: StaticFabOrganizationBundleQuarterTurns;
@@ -170,12 +189,14 @@ export function isStaticFabOrganizationBundlePlacementPlanIssuedFor(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): boolean {
 	const source = issuedPlans.get(plan);
 	return (
 		source?.map === map &&
 		source.portEquipment === portEquipment &&
-		source.organizations === organizations
+		source.organizations === organizations &&
+		source.relationships === relationships
 	);
 }
 
@@ -184,12 +205,14 @@ export function isCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): boolean {
 	const certification = certifiedPlans.get(plan);
 	return (
 		certification?.map === map &&
 		certification.portEquipment === portEquipment &&
 		certification.organizations === organizations &&
+		certification.relationships === relationships &&
 		plan.baseRevision === map.getRevision() &&
 		certification.planFingerprint === staticFabOrganizationBundlePlacementFingerprint(plan)
 	);
@@ -201,6 +224,7 @@ export function consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFo
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): boolean {
 	if (
 		!isCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
@@ -208,6 +232,7 @@ export function consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFo
 			map,
 			portEquipment,
 			organizations,
+			relationships,
 		)
 	) {
 		return false;
@@ -227,6 +252,7 @@ export function issueStaticFabOrganizationBundlePlacementPermit(
 	portEquipment: PortEquipmentState,
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	bundleInput: unknown,
 	anchor: Cell,
 	quarterTurns: StaticFabOrganizationBundleQuarterTurns,
@@ -255,6 +281,7 @@ export function issueStaticFabOrganizationBundlePlacementPermit(
 			map,
 			portEquipment,
 			organizations,
+			relationships,
 			sourceChecksum,
 			baseRevision: map.getRevision(),
 			basePatchSequence,
@@ -262,6 +289,7 @@ export function issueStaticFabOrganizationBundlePlacementPermit(
 			sourceNextPortId: portEquipment.nextPortId,
 			sourceNextEquipmentGroupId: portEquipment.nextEquipmentGroupId,
 			sourceNextOrganizationId: organizations.nextOrganizationId,
+			sourceNextRelationshipId: relationships.nextRelationshipId,
 			bundleFingerprint,
 			anchor: Object.freeze({ x: anchor.x, y: anchor.y }),
 			quarterTurns,
@@ -289,6 +317,7 @@ export function adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): StaticFabOrganizationBundlePlacementPlan | null {
 	const source = pendingWorkerPermits.get(permit);
 	pendingWorkerPermits.delete(permit);
@@ -300,10 +329,12 @@ export function adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 			source.map !== map ||
 			source.portEquipment !== portEquipment ||
 			source.organizations !== organizations ||
+			source.relationships !== relationships ||
 			map.getRevision() !== source.baseRevision ||
 			plan.baseRevision !== source.baseRevision ||
 			plan.basePatchSequence !== source.basePatchSequence ||
 			plan.nextOrganizationIdBefore !== source.sourceNextOrganizationId ||
+			plan.nextRelationshipIdBefore !== source.sourceNextRelationshipId ||
 			ticket.sourceRevision !== source.baseRevision ||
 			ticket.sourcePatchSequence !== source.basePatchSequence ||
 			ticket.sourceChecksum !== source.sourceChecksum ||
@@ -311,6 +342,8 @@ export function adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 			ticket.sourceNextPortId !== source.sourceNextPortId ||
 			ticket.sourceNextEquipmentGroupId !== source.sourceNextEquipmentGroupId ||
 			ticket.sourceNextOrganizationId !== source.sourceNextOrganizationId ||
+			ticket.sourceNextRelationshipId !== source.sourceNextRelationshipId ||
+			relationships.nextRelationshipId !== source.sourceNextRelationshipId ||
 			map.getAdvancedSwitchIdCursor() !== source.sourceNextAdvancedSwitchId ||
 			portEquipment.nextPortId !== source.sourceNextPortId ||
 			portEquipment.nextEquipmentGroupId !== source.sourceNextEquipmentGroupId ||
@@ -328,6 +361,9 @@ export function adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 			ticket.prospectiveNextEquipmentGroupId !==
 				nextRecordCursor(source.sourceNextEquipmentGroupId, plan.equipmentGroupMutations) ||
 			ticket.prospectiveNextOrganizationId !== plan.nextOrganizationIdAfter ||
+			ticket.prospectiveNextRelationshipId !== plan.nextRelationshipIdAfter ||
+			plan.nextRelationshipIdAfter !==
+				nextRecordCursor(source.sourceNextRelationshipId, plan.relationshipMutations) ||
 			ticket.validationLevel !== "exact" ||
 			typeof expectedProspectiveChecksum !== "string" ||
 			expectedProspectiveChecksum.length === 0 ||
@@ -349,6 +385,7 @@ export function adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 			map,
 			portEquipment,
 			organizations,
+			relationships,
 			sourceChecksum: source.sourceChecksum,
 		});
 		issuedPlans.set(adoptedPlan, issuedSource);
@@ -421,6 +458,8 @@ export function staticFabOrganizationBundlePlacementFingerprint(
 		plan.basePatchSequence,
 		plan.nextOrganizationIdBefore,
 		plan.nextOrganizationIdAfter,
+		plan.nextRelationshipIdBefore,
+		plan.nextRelationshipIdAfter,
 		plan.valid ? 1 : 0,
 	]);
 	checksum.addNumbers(
@@ -430,6 +469,18 @@ export function staticFabOrganizationBundlePlacementFingerprint(
 	addPortMutationsToChecksum(checksum, plan.portMutations);
 	addEquipmentGroupMutationsToChecksum(checksum, plan.equipmentGroupMutations);
 	addOrganizationMutationsToChecksum(checksum, plan.organizationMutations);
+	checksum.addNumbers([plan.relationshipMutations.length]);
+	for (const mutation of plan.relationshipMutations) {
+		checksum.addNumbers([
+			mutation.id,
+			mutation.before === null ? 0 : 1,
+			mutation.after === null ? 0 : 1,
+		]);
+		if (mutation.before)
+			checksum.addString(checksumStaticFabAssemblyRelationshipRecord(mutation.before));
+		if (mutation.after)
+			checksum.addString(checksumStaticFabAssemblyRelationshipRecord(mutation.after));
+	}
 	checksum.addStrings([
 		plan.organizationBundle.collisionPolicy,
 		...plan.organizationBundle.organizationNames,
@@ -444,6 +495,7 @@ export function staticFabOrganizationBundlePlacementFingerprint(
 		plan.organizationBundle.portCount,
 		plan.organizationBundle.equipmentGroupCount,
 		plan.organizationBundle.organizationCount,
+		plan.organizationBundle.relationshipCount,
 		plan.organizationBundle.widthMeters,
 		plan.organizationBundle.heightMeters,
 	]);
@@ -502,6 +554,15 @@ function copyWorkerPlacementPlan(
 				}),
 			),
 		),
+		relationshipMutations: Object.freeze(
+			plan.relationshipMutations.map((mutation) =>
+				Object.freeze({
+					id: mutation.id,
+					before: mutation.before ? copyStaticFabAssemblyRelationshipRecord(mutation.before) : null,
+					after: mutation.after ? copyStaticFabAssemblyRelationshipRecord(mutation.after) : null,
+				}),
+			),
+		),
 		conflicts: Object.freeze(plan.conflicts.map((cell) => Object.freeze({ x: cell.x, y: cell.y }))),
 		organizationBundle: Object.freeze({
 			...plan.organizationBundle,
@@ -534,6 +595,7 @@ export function planStaticFabOrganizationBundlePlacement(
 	portEquipment: PortEquipmentState,
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	bundleInput: unknown,
 	anchor: Cell,
 	quarterTurns: StaticFabOrganizationBundleQuarterTurns,
@@ -544,6 +606,7 @@ export function planStaticFabOrganizationBundlePlacement(
 		portEquipment,
 		basePatchSequence,
 		organizations,
+		relationships,
 		bundleInput,
 		anchor,
 		quarterTurns,
@@ -560,6 +623,7 @@ export function planStaticFabOrganizationBundlePlacementWithProspectiveState(
 	portEquipment: PortEquipmentState,
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	bundleInput: unknown,
 	anchor: Cell,
 	quarterTurns: StaticFabOrganizationBundleQuarterTurns,
@@ -571,6 +635,7 @@ export function planStaticFabOrganizationBundlePlacementWithProspectiveState(
 		portEquipment,
 		basePatchSequence,
 		organizations,
+		relationships,
 		bundleInput,
 		anchor,
 		quarterTurns,
@@ -585,15 +650,30 @@ function planStaticFabOrganizationBundlePlacementInternal(
 	portEquipment: PortEquipmentState,
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	bundleInput: unknown,
 	anchor: Cell,
 	quarterTurns: StaticFabOrganizationBundleQuarterTurns,
 	sourceChecksum: string | null,
 	capture?: ProspectiveStateCapture,
 ): StaticFabOrganizationBundlePlacementPlan {
-	const sourceError = sourceStateError(map, portEquipment, basePatchSequence, organizations);
+	const sourceError = sourceStateError(
+		map,
+		portEquipment,
+		basePatchSequence,
+		organizations,
+		relationships,
+	);
 	if (sourceError) {
-		return invalidPlan(map, basePatchSequence, organizations, anchor, quarterTurns, sourceError);
+		return invalidPlan(
+			map,
+			basePatchSequence,
+			organizations,
+			relationships,
+			anchor,
+			quarterTurns,
+			sourceError,
+		);
 	}
 	const preparedBundle = prepareStaticFabOrganizationBundle(bundleInput);
 	if (!preparedBundle.valid) {
@@ -601,6 +681,7 @@ function planStaticFabOrganizationBundlePlacementInternal(
 			map,
 			basePatchSequence,
 			organizations,
+			relationships,
 			anchor,
 			quarterTurns,
 			`조직 청사진이 유효하지 않습니다 · ${preparedBundle.reason}`,
@@ -619,6 +700,7 @@ function planStaticFabOrganizationBundlePlacementInternal(
 			map,
 			basePatchSequence,
 			organizations,
+			relationships,
 			anchor,
 			quarterTurns,
 			caughtMessage(error, "조직 청사진 좌표를 변환할 수 없습니다"),
@@ -631,6 +713,7 @@ function planStaticFabOrganizationBundlePlacementInternal(
 			map,
 			basePatchSequence,
 			organizations,
+			relationships,
 			anchor,
 			quarterTurns,
 			rail.reason,
@@ -641,12 +724,19 @@ function planStaticFabOrganizationBundlePlacementInternal(
 
 	let records: InstantiatedPortableRecords;
 	try {
-		records = instantiatePortableRecords(map, portEquipment, organizations, materialized);
+		records = instantiatePortableRecords(
+			map,
+			portEquipment,
+			organizations,
+			relationships,
+			materialized,
+		);
 	} catch (error) {
 		return invalidPlan(
 			map,
 			basePatchSequence,
 			organizations,
+			relationships,
 			anchor,
 			quarterTurns,
 			caughtMessage(error, "조직 청사진 ID를 할당할 수 없습니다"),
@@ -661,6 +751,7 @@ function planStaticFabOrganizationBundlePlacementInternal(
 			map,
 			basePatchSequence,
 			organizations,
+			relationships,
 			anchor,
 			quarterTurns,
 			`조직 청사진 레일 topology가 유효하지 않습니다 · ${topologyError}`,
@@ -693,16 +784,29 @@ function planStaticFabOrganizationBundlePlacementInternal(
 			prospectiveOrganizations,
 		);
 		if (organizationError) throw new Error(organizationError);
+		const prospectiveRelationships = applyStaticFabAssemblyRelationshipMutations(
+			relationships,
+			records.relationshipMutations,
+			records.nextRelationshipIdAfter,
+		);
+		const relationshipError = staticFabAssemblyRelationshipStateSourceError(
+			prospectiveMap,
+			prospectiveOrganizations,
+			prospectiveRelationships,
+		);
+		if (relationshipError) throw new Error(relationshipError);
 		prospectiveState = Object.freeze({
 			map: prospectiveMap,
 			portEquipment: prospectiveEquipment,
 			organizations: prospectiveOrganizations,
+			relationships: prospectiveRelationships,
 		});
 	} catch (error) {
 		return invalidPlan(
 			map,
 			basePatchSequence,
 			organizations,
+			relationships,
 			anchor,
 			quarterTurns,
 			`조직 청사진 최종 상태가 유효하지 않습니다 · ${caughtMessage(error, "unknown validation error")}`,
@@ -722,6 +826,9 @@ function planStaticFabOrganizationBundlePlacementInternal(
 		portMutations: records.portMutations,
 		equipmentGroupMutations: records.equipmentGroupMutations,
 		organizationMutations: records.organizationMutations,
+		relationshipMutations: records.relationshipMutations,
+		nextRelationshipIdBefore: relationships.nextRelationshipId,
+		nextRelationshipIdAfter: records.nextRelationshipIdAfter,
 		nextOrganizationIdBefore: organizations.nextOrganizationId,
 		nextOrganizationIdAfter: records.nextOrganizationIdAfter,
 		valid: true,
@@ -734,7 +841,10 @@ function planStaticFabOrganizationBundlePlacementInternal(
 		bend: "horizontal-first" as const,
 		organizationBundle: placementMetadata(materialized, records.organizationNames),
 	} satisfies StaticFabOrganizationBundlePlacementPlan);
-	issuedPlans.set(plan, Object.freeze({ map, portEquipment, organizations, sourceChecksum }));
+	issuedPlans.set(
+		plan,
+		Object.freeze({ map, portEquipment, organizations, relationships, sourceChecksum }),
+	);
 	return plan;
 }
 
@@ -834,6 +944,8 @@ interface InstantiatedPortableRecords {
 	readonly portMutations: readonly PortMutation[];
 	readonly equipmentGroupMutations: readonly EquipmentGroupMutation[];
 	readonly organizationMutations: readonly StaticFabOrganizationMutation[];
+	readonly relationshipMutations: readonly StaticFabAssemblyRelationshipMutationV1[];
+	readonly nextRelationshipIdAfter: number;
 	readonly nextOrganizationIdAfter: number;
 	readonly organizationNames: readonly string[];
 }
@@ -842,6 +954,7 @@ function instantiatePortableRecords(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	bundle: MaterializedStaticFabOrganizationBundle,
 ): InstantiatedPortableRecords {
 	const switchIds = allocateSwitchIds(map, bundle.advancedSwitches.length);
@@ -959,11 +1072,32 @@ function instantiatePortableRecords(
 			return Object.freeze({ id, before: null, after });
 		}),
 	);
+	const nextRelationshipIdAfter =
+		relationships.nextRelationshipId + bundle.relationships.records.length;
+	if (nextRelationshipIdAfter > 0x7fff_ffff)
+		throw new Error("조립 관계 ID를 안전하게 할당할 수 없습니다");
+	const localOrganizationIds = new Map(
+		organizationIds.map((id, index) => [index + 1, id] as const),
+	);
+	const relationshipMutations = Object.freeze(
+		bundle.relationships.records.map((record, index) => {
+			const id = relationships.nextRelationshipId + index;
+			const after = remapStaticFabAssemblyRelationshipRecord(record, {
+				relationshipId: id,
+				organizationIds: localOrganizationIds,
+				quarterTurns: 0,
+				offset: { x: 0, y: 0 },
+			});
+			return Object.freeze({ id, before: null, after });
+		}),
+	);
 	return Object.freeze({
 		switchMutations,
 		portMutations,
 		equipmentGroupMutations,
 		organizationMutations,
+		relationshipMutations,
+		nextRelationshipIdAfter,
 		nextOrganizationIdAfter: organizations.nextOrganizationId + organizationIds.length,
 		organizationNames,
 	});
@@ -1042,6 +1176,7 @@ function sourceStateError(
 	portEquipment: PortEquipmentState,
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): string | null {
 	if (!Number.isSafeInteger(basePatchSequence) || basePatchSequence < 0) {
 		return "조직 청사진 patch sequence가 유효하지 않습니다";
@@ -1049,13 +1184,15 @@ function sourceStateError(
 	const equipmentError = portEquipmentLayoutError(map, portEquipment);
 	if (equipmentError) return `현재 포트/장비 상태가 유효하지 않습니다 · ${equipmentError}`;
 	const organizationError = staticFabOrganizationStateError(map, portEquipment, organizations);
-	return organizationError ? `현재 조직 상태가 유효하지 않습니다 · ${organizationError}` : null;
+	if (organizationError) return `현재 조직 상태가 유효하지 않습니다 · ${organizationError}`;
+	return staticFabAssemblyRelationshipStateSourceError(map, organizations, relationships);
 }
 
 function invalidPlan(
 	map: TileMap,
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	anchor: Cell,
 	quarterTurns: StaticFabOrganizationBundleQuarterTurns,
 	reason: string,
@@ -1072,6 +1209,9 @@ function invalidPlan(
 		portMutations: Object.freeze([]),
 		equipmentGroupMutations: Object.freeze([]),
 		organizationMutations: Object.freeze([]),
+		relationshipMutations: Object.freeze([]),
+		nextRelationshipIdBefore: relationships.nextRelationshipId,
+		nextRelationshipIdAfter: relationships.nextRelationshipId,
 		nextOrganizationIdBefore: organizations.nextOrganizationId,
 		nextOrganizationIdAfter: organizations.nextOrganizationId,
 		valid: false,
@@ -1096,6 +1236,7 @@ function invalidPlan(
 					portCount: 0,
 					equipmentGroupCount: 0,
 					organizationCount: 0,
+					relationshipCount: 0,
 					widthMeters: 0,
 					heightMeters: 0,
 					organizationNames: Object.freeze([]),
@@ -1117,6 +1258,7 @@ function placementMetadata(
 		portCount: bundle.ports.length,
 		equipmentGroupCount: bundle.equipmentGroups.length,
 		organizationCount: bundle.organizations.length,
+		relationshipCount: bundle.relationships.records.length,
 		widthMeters: bundle.widthMeters,
 		heightMeters: bundle.heightMeters,
 		organizationNames: Object.freeze([...organizationNames]),
@@ -1182,6 +1324,14 @@ function* addStaticFabOrganizationBundleToChecksumSteps(
 		} else {
 			checksum.addStrings([group.template]);
 		}
+		yield;
+	}
+	checksum.addNumbers([
+		bundle.relationships.nextRelationshipId,
+		bundle.relationships.records.length,
+	]);
+	for (const relationship of bundle.relationships.records) {
+		checksum.addStrings([yield* checksumStaticFabAssemblyRelationshipRecordSteps(relationship)]);
 		yield;
 	}
 	checksum.addNumbers([bundle.organizations.length]);

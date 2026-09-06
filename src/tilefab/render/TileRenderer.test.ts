@@ -61,6 +61,7 @@ import {
 	resolveRailTemplateCompositionSnap,
 } from "../core/RailTemplateCompositionGuide";
 import { DIR_E, DIR_S, type Direction, oppositeDirection } from "../core/railShape";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
 	emptyStaticFabOrganizationState,
@@ -2668,6 +2669,7 @@ describe("organization bundle ghost presentation", () => {
 			source.portEquipment,
 			source.getPatchSequence(),
 			organizations,
+			source.relationships,
 			[1],
 			"DIRECT",
 		);
@@ -3950,6 +3952,7 @@ function createOrganizationBundleGhostFixture(): Readonly<{
 		equipment,
 		source.getPatchSequence(),
 		organizations,
+		source.relationships,
 		[1],
 		"DIRECT",
 	);
@@ -3962,6 +3965,7 @@ function createOrganizationBundleGhostFixture(): Readonly<{
 		emptyPortEquipmentState(),
 		target.getPatchSequence(),
 		emptyStaticFabOrganizationState(),
+		emptyStaticFabAssemblyRelationshipState(),
 		capture.bundle,
 		{ x: 0, y: 0 },
 		0,

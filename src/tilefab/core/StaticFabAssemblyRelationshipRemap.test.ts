@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCooperativeTask } from "./CooperativeTask";
+import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import {
 	copyStaticFabAssemblyRelationshipRecord,
 	remapStaticFabAssemblyRelationshipRecord,
@@ -9,6 +9,7 @@ import {
 	type StaticFabAssemblyScopedEdgeV1,
 	staticFabAssemblyRelationshipStateShapeError,
 } from "./StaticFabAssemblyRelationship";
+import { assertStaticFabOrganizationBundleRelationshipBudgetSteps } from "./StaticFabOrganizationBundleRelationships";
 
 describe("cooperative assembly relationship remapping", () => {
 	it("remaps one maximum-size relation without a whole-record validation/copy step", () => {
@@ -59,6 +60,53 @@ describe("cooperative assembly relationship remapping", () => {
 		expect(
 			required(required(record.connectionGroups[0]).legs[0]).exclusiveCutEdges[0]?.edge.from,
 		).toEqual({ x: 0, y: 0 });
+	});
+
+	it("counts portable aliases and support references before copying the maximum record", () => {
+		const record = attachment(STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD - 8);
+		const state = { nextRelationshipId: 2, records: [record] };
+		const task = createCooperativeTask(
+			assertStaticFabOrganizationBundleRelationshipBudgetSteps(state, 2),
+		);
+		let slices = 0;
+		while (!task.done) {
+			expect(task.step(64)).toBeLessThanOrEqual(64);
+			slices++;
+		}
+		task.finish();
+		expect(slices).toBeGreaterThan(1_000);
+		const extraAlias = structuredClone(record);
+		const leg = required(required(extraAlias.connectionGroups[0]).legs[0]);
+		const contact = required(leg.seamContacts[0]);
+		(contact.incidences as unknown[]).push({
+			incidence: "INCOMING",
+			binding: { kind: "EXCLUSIVE_CUT_EDGE", exclusiveCutEdgeIndex: 0 },
+		});
+		expect(() =>
+			completeCooperativeSteps(
+				assertStaticFabOrganizationBundleRelationshipBudgetSteps(
+					{ nextRelationshipId: 2, records: [extraAlias] },
+					2,
+				),
+			),
+		).toThrow(/레일 참조/);
+		const overflowOwners = structuredClone(attachment(5));
+		const ownerLeg = required(required(overflowOwners.connectionGroups[0]).legs[0]);
+		for (const scoped of ownerLeg.exclusiveCutEdges) {
+			(scoped as { scope: unknown }).scope = {
+				kind: "PARTICIPANT_EFFECTIVE",
+				participantIndex: 0,
+				directOwnerOrganizationIds: new Array(65_537).fill(2),
+			};
+		}
+		expect(() =>
+			completeCooperativeSteps(
+				assertStaticFabOrganizationBundleRelationshipBudgetSteps(
+					{ nextRelationshipId: 2, records: [overflowOwners] },
+					2,
+				),
+			),
+		).toThrow(/소유자 참조/);
 	});
 
 	it("recanonicalizes every direct owner and rejects a missing or colliding descendant mapping", () => {

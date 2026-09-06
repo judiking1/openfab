@@ -13,6 +13,7 @@ import {
 	type RailModuleOwnership,
 } from "../core/RailModuleOwnership";
 import { planRailRouteBatch } from "../core/RailTemplateCatalog";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationState,
@@ -102,6 +103,7 @@ export function certifyProductionBayModule(
 		emptyEquipment,
 		0,
 		organizations,
+		emptyStaticFabAssemblyRelationshipState(),
 		[1],
 		"EFFECTIVE",
 	);

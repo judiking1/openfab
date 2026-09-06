@@ -135,6 +135,7 @@ function starterPlacementBundle(build: ReturnType<typeof buildSyntheticFabStarte
 		build.document.portEquipment,
 		build.document.getPatchSequence(),
 		build.document.organizations,
+		build.document.relationships,
 		rootIds,
 		"EFFECTIVE",
 	);

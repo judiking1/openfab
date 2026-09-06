@@ -23,6 +23,7 @@ import {
 	staticFabAssemblyConnectorIntentFingerprint,
 	staticFabAssemblyConnectorPlanFingerprint,
 } from "../core/StaticFabAssemblyConnectorCertification";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	deriveStaticFabOrganizationSemanticRoles,
 	emptyStaticFabOrganizationState,
@@ -413,6 +414,7 @@ function exactFabLoopFixture(): ExactFixture {
 	);
 	if (!planning.plan.valid || !planning.prospectiveState) throw new Error(planning.plan.reason);
 	const fixture = Object.freeze({
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		...planning.prospectiveState,
 		patchSequence: interbay.patchSequence + 1,
 	});
@@ -439,6 +441,7 @@ function applyFirstValidPlanning(
 	);
 	if (!planning.plan.valid || !planning.prospectiveState) throw new Error(planning.plan.reason);
 	return Object.freeze({
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		...planning.prospectiveState,
 		patchSequence: fixture.patchSequence + 1,
 	});
@@ -512,6 +515,7 @@ function placeOneOhb(fixture: FixtureState): FixtureState {
 		);
 		if (!plan.valid || !document.commitPortEquipment(plan)) continue;
 		return Object.freeze({
+			relationships: emptyStaticFabAssemblyRelationshipState(),
 			map: document.map,
 			portEquipment: document.portEquipment,
 			organizations: document.organizations,
@@ -543,6 +547,7 @@ function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }
 		defaultProductionBayModuleCatalogRequest("single-production-bay"),
 	);
 	let fixture: FixtureState = {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		map: new TileMap(),
 		portEquipment: emptyPortEquipmentState(),
 		organizations: emptyStaticFabOrganizationState(),
@@ -554,6 +559,7 @@ function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }
 			fixture.portEquipment,
 			fixture.patchSequence,
 			fixture.organizations,
+			fixture.relationships,
 			artifact.organizationBundle,
 			anchor,
 			0,

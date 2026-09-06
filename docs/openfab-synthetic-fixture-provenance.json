@@ -1,55 +1,73 @@
 {
-	"schemaVersion": 1,
-	"classification": "INDEPENDENT_SYNTHETIC_CODE_GENERATED",
-	"generatorCommand": "npm run generate:certified-presets",
-	"externalInputFiles": [],
-	"attestations": {
-		"containsImportedFactoryCoordinates": false,
-		"containsCustomerOrCompanyIdentifiers": false,
-		"containsOperationalRecords": false
-	},
-	"commonGeneratorSources": [
-		"scripts/generate-synthetic-fab-certified-presets.mjs",
-		"src/tilefab/compile/SyntheticFabStarter.ts",
-		"src/tilefab/compile/SyntheticFabStarterPreview.ts",
-		"src/tilefab/editor/SyntheticFabStarterCertifiedArtifact.ts"
-	],
-	"artifacts": [
-		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/central-spine-fab-24.default.v2.json",
-			"artifactId": "central-spine-fab-24.default.v2",
-			"sha256": "841bb806a2e200f920e392a327178904f0f8f7b05d073e5c46ed64c0f8f76c7c",
-			"profileSource": "src/tilefab/compile/CentralSpineFabAssemblyPlan.ts"
-		},
-		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/full-fab-52.default.v2.json",
-			"artifactId": "full-fab-52.default.v2",
-			"sha256": "5353d3d24daddf758548f385f9e9fa3ba32314540c6354cd6d7789db587ef533",
-			"profileSource": "src/tilefab/compile/FullFabAssemblyPlan.ts"
-		},
-		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/large-fab-60.default.v2.json",
-			"artifactId": "large-fab-60.default.v2",
-			"sha256": "553813b293a42c728e8181cd269ed53e25787901d4739a1313368b27b834a226",
-			"profileSource": "src/tilefab/compile/SyntheticFabTopologySpec.ts"
-		},
-		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/paired-circulation-fab-52.default.v3.json",
-			"artifactId": "paired-circulation-fab-52.default.v3",
-			"sha256": "d92c50a90519502e374d26f2db695a030cfcb47ab9b4bf750cbdca46b53f7bb8",
-			"profileSource": "src/tilefab/compile/PairedCirculationFabAssemblyPlan.ts"
-		},
-		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/parallel-hall-fab-12.default.v2.json",
-			"artifactId": "parallel-hall-fab-12.default.v2",
-			"sha256": "f67235e32502fc3e2b256182b291ac7a4a82cac75ef9fa5b60aa026bd8cf4398",
-			"profileSource": "src/tilefab/compile/ParallelHallFabAssemblyPlan.ts"
-		},
-		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/production-fab-60.default.v2.json",
-			"artifactId": "production-fab-60.default.v2",
-			"sha256": "2ef986c34eb06fb06f33a781ea126e1f52ad5bbd93d6187a9e564c3ffdf68317",
-			"profileSource": "src/tilefab/compile/ProductionFabAssemblyPlan.ts"
-		}
-	]
+  "schemaVersion": 2,
+  "classification": "INDEPENDENT_SYNTHETIC_CODE_GENERATED",
+  "generatorCommand": "npm run generate:certified-presets",
+  "externalInputFiles": [],
+  "attestations": {
+    "containsImportedFactoryCoordinates": false,
+    "containsCustomerOrCompanyIdentifiers": false,
+    "containsOperationalRecords": false
+  },
+  "commonGeneratorSources": [
+    "scripts/generate-synthetic-fab-certified-presets.mjs",
+    "src/tilefab/compile/SyntheticFabStarter.ts",
+    "src/tilefab/compile/SyntheticFabStarterPreview.ts",
+    "src/tilefab/editor/SyntheticFabStarterCertifiedArtifact.ts"
+  ],
+  "artifacts": [
+    {
+      "path": "src/tilefab/generated/synthetic-fab-presets/central-spine-fab-24.default.v3.json",
+      "artifactId": "central-spine-fab-24.default.v3",
+      "sha256": "ed9b58b4233c4cc6f0c1f8d89a568eb0109438a31b1228f44a24f1d569c6e2c3",
+      "profileSource": "src/tilefab/compile/CentralSpineFabAssemblyPlan.ts"
+    },
+    {
+      "path": "src/tilefab/generated/synthetic-fab-presets/full-fab-52.default.v3.json",
+      "artifactId": "full-fab-52.default.v3",
+      "sha256": "b0970bd7cadebb11450d6bc18dd8e474cb494362f4de9c293d330306730961d5",
+      "profileSource": "src/tilefab/compile/FullFabAssemblyPlan.ts"
+    },
+    {
+      "path": "src/tilefab/generated/synthetic-fab-presets/large-fab-60.default.v3.json",
+      "artifactId": "large-fab-60.default.v3",
+      "sha256": "3b3b6bc3e00bbac772c10bbc5c31cea54f4a707e016b009dfaf6f4df7a189dd0",
+      "profileSource": "src/tilefab/compile/SyntheticFabTopologySpec.ts"
+    },
+    {
+      "path": "src/tilefab/generated/synthetic-fab-presets/paired-circulation-fab-52.default.v4.json",
+      "artifactId": "paired-circulation-fab-52.default.v4",
+      "sha256": "5dabd2014015c8e67dff22587c5f2026515fde09492cedb7c7e4f7c19f846ea0",
+      "profileSource": "src/tilefab/compile/PairedCirculationFabAssemblyPlan.ts"
+    },
+    {
+      "path": "src/tilefab/generated/synthetic-fab-presets/parallel-hall-fab-12.default.v3.json",
+      "artifactId": "parallel-hall-fab-12.default.v3",
+      "sha256": "68a9a295163b0d9419419c283b4c4f9c50c8b6b1c2d5874b82284e113d7945b0",
+      "profileSource": "src/tilefab/compile/ParallelHallFabAssemblyPlan.ts"
+    },
+    {
+      "path": "src/tilefab/generated/synthetic-fab-presets/production-fab-60.default.v3.json",
+      "artifactId": "production-fab-60.default.v3",
+      "sha256": "ddf3185ff94b24d53e552f4fada2f49aa686c19b7179564d897a173618283d7b",
+      "profileSource": "src/tilefab/compile/ProductionFabAssemblyPlan.ts"
+    }
+  ],
+  "historicalMigrationFixtures": [
+    {
+      "path": "src/tilefab/project/fixtures/legacy-organization-library-v1.json",
+      "kind": "USER_BLUEPRINT_LIBRARY_V1",
+      "sha256": "b47ed371af09f5dc439df49d55c2460654fa83b81c223219479a5dab204b06dd",
+      "sourceRevision": "e8f8b94970223711ba6fecbc9293dd529c8e6eb1",
+      "fixtureSource": "src/tilefab/project/OpenFabUserBlueprintLibrary.test.ts",
+      "description": "Fixed synthetic AREA/Bay/OHB fixture captured through the pre-migration V1 codec, with JSON whitespace formatted for this repository; original field values and canonical V1 fingerprint are preserved. No external layout or operational data."
+    },
+    {
+      "path": "src/tilefab/project/fixtures/legacy-organization-blueprint-v1.json",
+      "kind": "USER_BLUEPRINT_RECORD_V1",
+      "sha256": "b36aba8b33b8e11f9f24ebc5adfee46975c43b41f428c0c1e82e058336e1069f",
+      "sourceRevision": "e8f8b94970223711ba6fecbc9293dd529c8e6eb1",
+      "fixtureSource": "src/tilefab/project/OpenFabUserBlueprintLibrary.test.ts",
+      "description": "Fixed synthetic AREA/Bay/OHB fixture captured through the pre-migration V1 codec, with JSON whitespace formatted for this repository; original field values and canonical V1 fingerprint are preserved. No external layout or operational data."
+    }
+  ]
 }

@@ -40,7 +40,7 @@ describe("OpenFabUserBlueprintLibraryBundle", () => {
 		expect(parsed.records.map(({ id }) => id)).toEqual(["a-record", "z-record"]);
 		expect(parsed.recordCount).toBe(2);
 		expect(parsed.aggregateEdgeCount).toBe(8);
-		expect(parsed.fingerprint).toMatch(/^ofubl1-[0-9a-f]{8}:[0-9a-f]{8}$/);
+		expect(parsed.fingerprint).toMatch(/^ofubl2-[0-9a-f]{8}:[0-9a-f]{8}$/);
 		expect(serializeOpenFabUserBlueprintLibraryBundle(parsed)).toBe(json);
 		expect(Object.isFrozen(parsed.records)).toBe(true);
 	});

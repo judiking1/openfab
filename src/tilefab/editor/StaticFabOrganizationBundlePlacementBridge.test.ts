@@ -300,6 +300,7 @@ describe("StaticFabOrganizationBundlePlacementBridge", () => {
 				document.map,
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 			),
 		).toBe(true);
 		expect(
@@ -562,6 +563,7 @@ function sourceBundle(): StaticFabOrganizationBundle {
 		source.portEquipment,
 		source.getPatchSequence(),
 		organizations,
+		source.relationships,
 		[1],
 		"DIRECT",
 	);

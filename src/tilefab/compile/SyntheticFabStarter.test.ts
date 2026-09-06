@@ -885,7 +885,7 @@ describe("SyntheticFabStarter", () => {
 		});
 		const json = JSON.stringify(project);
 
-		expect(project.schemaVersion).toBe(11);
+		expect(project.schemaVersion).toBe(12);
 		expect(project.rail.cells).toHaveLength(build.summary.railCells);
 		expect(project.ports.records).toHaveLength(0);
 		expect(project.equipment.records).toHaveLength(0);

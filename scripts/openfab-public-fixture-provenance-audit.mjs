@@ -18,7 +18,11 @@ const { stdout } = await execFileAsync("git", ["ls-files", "-z"], {
 });
 const trackedFiles = stdout.split("\0").filter(Boolean).sort();
 const tracked = new Set(trackedFiles);
-const declaredPaths = new Set(provenance.artifacts.map((artifact) => artifact.path));
+const declaredPaths = new Set(
+	[...provenance.artifacts, ...provenance.historicalMigrationFixtures].map(
+		(artifact) => artifact.path,
+	),
+);
 const dataBearingFiles = trackedFiles.filter(isPublicDataBearingFile);
 const failures = [];
 
@@ -72,11 +76,44 @@ for (const artifact of provenance.artifacts) {
 	}
 }
 
+for (const fixture of provenance.historicalMigrationFixtures) {
+	if (!tracked.has(fixture.fixtureSource))
+		failures.push(`historical fixture source is not tracked: ${fixture.fixtureSource}`);
+	try {
+		const bytes = await readFile(path.join(root, fixture.path));
+		totalBytes += bytes.byteLength;
+		if (createHash("sha256").update(bytes).digest("hex") !== fixture.sha256)
+			failures.push(`historical fixture checksum drift: ${fixture.path}`);
+		const payload = JSON.parse(bytes.toString("utf8"));
+		const records = fixture.kind === "USER_BLUEPRINT_LIBRARY_V1" ? payload.records : [payload];
+		if (
+			payload.schemaVersion !== 1 ||
+			!Array.isArray(records) ||
+			records.length !== 1 ||
+			records.some(
+				(record) =>
+					record.schemaVersion !== 1 ||
+					record.blueprint?.bundle?.version !== 1 ||
+					Object.hasOwn(record.blueprint.bundle, "relationships"),
+			)
+		) {
+			failures.push(
+				`historical fixture no longer contains the original V1 wire shape: ${fixture.path}`,
+			);
+		}
+	} catch (error) {
+		failures.push(
+			`historical fixture cannot be read: ${fixture.path} (${error.code ?? error.message})`,
+		);
+	}
+}
+
 console.log(
 	[
 		"OpenFab public fixture provenance audit",
 		`${dataBearingFiles.length} public data-bearing files`,
 		`${provenance.artifacts.length} independently generated artifacts`,
+		`${provenance.historicalMigrationFixtures.length} historical synthetic migration fixtures`,
 		`${totalBytes} bytes`,
 		"0 external input files",
 	].join(" | "),
@@ -97,8 +134,8 @@ function isPublicDataBearingFile(file) {
 }
 
 function validateProvenance(candidate) {
-	if (!candidate || candidate.schemaVersion !== 1) {
-		throw new Error("Synthetic fixture provenance schemaVersion must be 1.");
+	if (!candidate || candidate.schemaVersion !== 2) {
+		throw new Error("Synthetic fixture provenance schemaVersion must be 2.");
 	}
 	if (candidate.classification !== "INDEPENDENT_SYNTHETIC_CODE_GENERATED") {
 		throw new Error("Synthetic fixture provenance requires the independent synthetic class.");
@@ -146,6 +183,27 @@ function validateProvenance(candidate) {
 		}
 		paths.add(artifact.path);
 		artifactIds.add(artifact.artifactId);
+	}
+	if (!Array.isArray(candidate.historicalMigrationFixtures))
+		throw new Error("Historical migration fixture declarations are missing.");
+	for (const fixture of candidate.historicalMigrationFixtures) {
+		if (
+			!fixture ||
+			!isSafeRepositoryPath(fixture.path) ||
+			!fixture.path.startsWith("src/tilefab/project/fixtures/") ||
+			!isSafeRepositoryPath(fixture.fixtureSource) ||
+			!/^[a-f0-9]{40}$/.test(fixture.sourceRevision) ||
+			!/^[a-f0-9]{64}$/.test(fixture.sha256) ||
+			typeof fixture.description !== "string" ||
+			!fixture.description ||
+			!["USER_BLUEPRINT_LIBRARY_V1", "USER_BLUEPRINT_RECORD_V1"].includes(fixture.kind) ||
+			paths.has(fixture.path)
+		) {
+			throw new Error(
+				"Historical migration fixture provenance contains an invalid or duplicate row.",
+			);
+		}
+		paths.add(fixture.path);
 	}
 }
 

@@ -65,7 +65,7 @@ import {
 } from "./OpenFabProjectRelationships";
 
 export const OPENFAB_PROJECT_KIND = "openfab/tilefab-project" as const;
-export const OPENFAB_PROJECT_SCHEMA_VERSION = 11 as const;
+export const OPENFAB_PROJECT_SCHEMA_VERSION = 12 as const;
 export const OPENFAB_RAIL_GRAMMAR = "directed-cardinal-1m-v1" as const;
 export const OPENFAB_RAIL_CELL_ENCODING = "incoming-low-outgoing-high-v1" as const;
 export const OPENFAB_RAIL_CELL_SIZE_MILLIMETERS = 1_000 as const;

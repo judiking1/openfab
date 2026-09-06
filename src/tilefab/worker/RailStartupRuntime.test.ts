@@ -142,8 +142,8 @@ describe("compileRailStartup", () => {
 			kind: "project",
 			manifest: { id: "direct-project-001", name: "Direct project" },
 			view: null,
-			blueprints: { schemaVersion: 3, records: [] },
-			schemaVersion: 11,
+			blueprints: { schemaVersion: 4, records: [] },
+			schemaVersion: 12,
 			migratedFromVersion: null,
 			checksum: snapshot.checksum,
 		});
@@ -206,9 +206,9 @@ describe("compileRailStartup", () => {
 			kind: "project",
 			manifest: { id: "worker-project-001", name: "Worker candidate" },
 			view: { center: [12, 0], quarterTurns: 0 },
-			schemaVersion: 11,
+			schemaVersion: 12,
 			migratedFromVersion: null,
-			blueprints: { schemaVersion: 3, records: [] },
+			blueprints: { schemaVersion: 4, records: [] },
 			operations,
 			sequence: document.getPatchSequence(),
 			revision: document.map.getRevision(),
@@ -232,7 +232,7 @@ describe("compileRailStartup", () => {
 		);
 	});
 
-	it("migrates a v4 project library before publishing v10 startup metadata", () => {
+	it("migrates a v4 project library before publishing current startup metadata", () => {
 		const project = captureOpenFabProject(createRailScaleProbeDocument(25), {
 			manifest: {
 				id: "worker-project-v4",
@@ -259,9 +259,9 @@ describe("compileRailStartup", () => {
 		expect(payload.schemaVersion).toBe(RAIL_STARTUP_SCHEMA_VERSION);
 		expect(payload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 11,
+			schemaVersion: 12,
 			migratedFromVersion: 4,
-			blueprints: { schemaVersion: 3, records: [] },
+			blueprints: { schemaVersion: 4, records: [] },
 		});
 	});
 
@@ -289,9 +289,9 @@ describe("compileRailStartup", () => {
 
 		expect(payload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 11,
+			schemaVersion: 12,
 			migratedFromVersion: 7,
-			blueprints: { schemaVersion: 3, records: [] },
+			blueprints: { schemaVersion: 4, records: [] },
 		});
 	});
 

@@ -28,6 +28,7 @@ import {
 	staticFabAssemblyConnectorHierarchyEligibility,
 	staticFabAssemblyInterbayConnectorHierarchyEligibility,
 } from "./StaticFabAssemblyConnector";
+import { emptyStaticFabAssemblyRelationshipState } from "./StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
@@ -1159,6 +1160,7 @@ function withSyntheticSiblingBanks(
 		);
 	}
 	return Object.freeze({
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		map,
 		portEquipment: fixture.portEquipment,
 		organizations: copyStaticFabOrganizationState({ nextOrganizationId: nextId, records }),
@@ -1226,6 +1228,7 @@ function reopenFixture(source: FixtureState, reverseInsertion = false): FixtureS
 		hydrator.addAdvancedSwitch(record);
 	}
 	return {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		map: hydrator.finish(source.map.getRevision(), source.map.getAdvancedSwitchIdCursor()),
 		portEquipment: copyPortEquipmentState(source.portEquipment),
 		organizations: copyStaticFabOrganizationState(source.organizations),
@@ -1239,6 +1242,7 @@ function reopenedThreeBankFabFixture(): FixtureState {
 	source.map.forEachRail((x, y, _rail, encoded) => hydrator.addEncodedCell(x, y, encoded));
 	source.map.forEachAdvancedSwitch((record) => hydrator.addAdvancedSwitch(record));
 	return {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		map: hydrator.finish(source.map.getRevision(), source.map.getAdvancedSwitchIdCursor()),
 		portEquipment: copyPortEquipmentState(source.portEquipment),
 		organizations: copyStaticFabOrganizationState(source.organizations),
@@ -1265,6 +1269,7 @@ function threeBankFabFixture(): FixtureState {
 		);
 		if (!connection.prospectiveState) throw new Error(connection.plan.reason);
 		fixture = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...connection.prospectiveState,
 			patchSequence: fixture.patchSequence + 1,
 		};
@@ -1283,6 +1288,7 @@ function threeBankFabFixture(): FixtureState {
 		);
 		if (!connection.prospectiveState) throw new Error(connection.plan.reason);
 		fixture = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...connection.prospectiveState,
 			patchSequence: fixture.patchSequence + 1,
 		};
@@ -1301,6 +1307,7 @@ function connectedFabFixture(): FixtureState {
 	const loop = firstValidConnector(twoBankFab, banks[0]?.id ?? -1, banks[1]?.id ?? -1);
 	if (!loop.prospectiveState) throw new Error(loop.plan.reason);
 	return {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		...loop.prospectiveState,
 		patchSequence: twoBankFab.patchSequence + 1,
 	};
@@ -1315,6 +1322,7 @@ function hierarchyOnlyConnectedFabFixture(): FixtureState {
 	const connection = firstValidConnector(detached, banks[0]?.id ?? -1, banks[1]?.id ?? -1);
 	if (!connection.prospectiveState) throw new Error(connection.plan.reason);
 	return {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		...connection.prospectiveState,
 		patchSequence: detached.patchSequence + 1,
 	};
@@ -1331,12 +1339,14 @@ function detachedBanksFixture(): FixtureState {
 	const left = firstValidConnector(placed, bays[0]?.id ?? -1, bays[1]?.id ?? -1);
 	if (!left.prospectiveState) throw new Error(left.plan.reason);
 	const afterLeft: FixtureState = {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		...left.prospectiveState,
 		patchSequence: placed.patchSequence + 1,
 	};
 	const right = firstValidConnector(afterLeft, bays[2]?.id ?? -1, bays[3]?.id ?? -1);
 	if (!right.prospectiveState) throw new Error(right.plan.reason);
 	return {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		...right.prospectiveState,
 		patchSequence: afterLeft.patchSequence + 1,
 	};
@@ -1347,6 +1357,7 @@ function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }
 		defaultProductionBayModuleCatalogRequest("single-production-bay"),
 	);
 	let fixture: FixtureState = {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		map: new TileMap(),
 		portEquipment: emptyPortEquipmentState(),
 		organizations: emptyStaticFabOrganizationState(),
@@ -1358,6 +1369,7 @@ function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }
 			fixture.portEquipment,
 			fixture.patchSequence,
 			fixture.organizations,
+			fixture.relationships,
 			artifact.organizationBundle,
 			anchor,
 			0,

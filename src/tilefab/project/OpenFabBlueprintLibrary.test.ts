@@ -263,6 +263,7 @@ function organizationBundleFixture(): StaticFabOrganizationBundle {
 		document.portEquipment,
 		document.getPatchSequence(),
 		organizations,
+		document.relationships,
 		[1],
 		"EFFECTIVE",
 	);

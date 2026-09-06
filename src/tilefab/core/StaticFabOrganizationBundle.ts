@@ -44,6 +44,17 @@ import {
 	oppositeDirection,
 } from "./railShape";
 import {
+	adoptStaticFabAssemblyRelationshipStateSteps,
+	copyStaticFabAssemblyRelationshipRecord,
+	copyStaticFabAssemblyRelationshipState,
+	remapStaticFabAssemblyRelationshipRecord,
+	type StaticFabAssemblyRelationshipRecordV1,
+	type StaticFabAssemblyRelationshipStateV1,
+	staticFabAssemblyRelationshipStateShapeErrorSteps,
+	staticFabAssemblyRelationshipStateSourceError,
+} from "./StaticFabAssemblyRelationship";
+import { validateStaticFabAssemblyRelationshipActivation } from "./StaticFabAssemblyRelationshipActivation";
+import {
 	compareDirectedRailEdges,
 	createCanonicalStaticFabOrganizationStateBuilder,
 	normalizeStaticFabOrganizationName,
@@ -62,10 +73,14 @@ import {
 	staticFabOrganizationStateError,
 } from "./StaticFabOrganization";
 import { validateStaticFabOrganizationActivation } from "./StaticFabOrganizationActivation";
+import {
+	assertStaticFabOrganizationBundleRelationshipBudgetSteps,
+	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS,
+} from "./StaticFabOrganizationBundleRelationships";
 import type { StaticFabOrganizationSelectionMode } from "./StaticFabOrganizationSelection";
 import { type Cell, encodeRailCell, TileMap } from "./TileMap";
 
-export const STATIC_FAB_ORGANIZATION_BUNDLE_VERSION = 1 as const;
+export const STATIC_FAB_ORGANIZATION_BUNDLE_VERSION = 2 as const;
 export const STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RAIL_EDGES = 65_536;
 export const STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES = 1_024;
 export const STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS = 4_096;
@@ -87,6 +102,7 @@ const BUNDLE_KEYS = Object.freeze([
 	"ports",
 	"equipmentGroups",
 	"organizations",
+	"relationships",
 ] as const);
 const EDGE_KEYS = Object.freeze(["from", "to"] as const);
 const CELL_KEYS = Object.freeze(["x", "y"] as const);
@@ -214,6 +230,8 @@ export interface StaticFabOrganizationBundle {
 	readonly ports: readonly StaticFabOrganizationBundlePort[];
 	readonly equipmentGroups: readonly StaticFabOrganizationBundleEquipmentGroup[];
 	readonly organizations: readonly StaticFabOrganizationBundleOrganization[];
+	/** Dense local relationship IDs; organization references use local index + 1. */
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 /**
@@ -243,6 +261,8 @@ export interface MaterializedStaticFabOrganizationBundle {
 	readonly ports: readonly StaticFabOrganizationBundlePort[];
 	readonly equipmentGroups: readonly StaticFabOrganizationBundleEquipmentGroup[];
 	readonly organizations: readonly StaticFabOrganizationBundleOrganization[];
+	/** Dense local relationship IDs; organization references use local index + 1. */
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 export type StaticFabOrganizationBundleIssueCode =
@@ -255,7 +275,8 @@ export type StaticFabOrganizationBundleIssueCode =
 	| "UNSUPPORTED_EQUIPMENT_GROUP"
 	| "UNSUPPORTED_PORT_ROUTE"
 	| "LIMIT_EXCEEDED"
-	| "INVALID_BUNDLE";
+	| "INVALID_BUNDLE"
+	| "INCOMPLETE_RELATIONSHIP";
 
 export type StaticFabOrganizationBundleCaptureResult =
 	| {
@@ -302,6 +323,7 @@ export function captureStaticFabOrganizationBundle(
 	portEquipment: Parameters<typeof portEquipmentLayoutError>[1],
 	patchSequence: number,
 	state: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	requestedRootIds: readonly number[],
 	mode: StaticFabOrganizationSelectionMode = "DIRECT",
 	preparedOwnership?: RailModuleOwnershipIndex,
@@ -366,6 +388,43 @@ export function captureStaticFabOrganizationBundle(
 			`한 조직 번들은 최대 ${STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS.toLocaleString()}개 조직을 지원합니다`,
 		);
 	}
+	const ownership = resolveStaticFabOrganizationBundleCaptureOwnership(map, preparedOwnership);
+	const relationshipError = staticFabAssemblyRelationshipStateSourceError(
+		map,
+		state,
+		relationships,
+		ownership,
+	);
+	if (relationshipError) {
+		return captureFailure("INVALID_SOURCE", `조립 관계가 유효하지 않습니다 · ${relationshipError}`);
+	}
+	const includedRelationships: StaticFabAssemblyRelationshipRecordV1[] = [];
+	for (const record of relationships.records) {
+		if (!includedIds.has(record.parentOrganizationId)) continue;
+		if (mode !== "EFFECTIVE") {
+			return captureFailure(
+				"INCOMPLETE_RELATIONSHIP",
+				"조립 연결을 가진 조직은 하위 구조 전체를 함께 복사해야 합니다. 전체 구조(EFFECTIVE)를 선택한 뒤 다시 시도하세요",
+			);
+		}
+		if (includedRelationships.length === STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS) {
+			return captureFailure("LIMIT_EXCEEDED", "청사진 조립 관계 개수 한도를 초과했습니다");
+		}
+		includedRelationships.push(record);
+	}
+	try {
+		completeCooperativeSteps(
+			assertStaticFabOrganizationBundleRelationshipBudgetSteps(
+				{ nextRelationshipId: relationships.nextRelationshipId, records: includedRelationships },
+				null,
+			),
+		);
+	} catch (error) {
+		return captureFailure(
+			"LIMIT_EXCEEDED",
+			error instanceof Error ? error.message : "청사진 관계 한도를 초과했습니다",
+		);
+	}
 	const selectedEdgeByKey = new Map<string, DirectedRailEdge>();
 	const selectedSwitchIds = new Set<number>();
 	const selectedGroupIds = new Set<number>();
@@ -379,7 +438,6 @@ export function captureStaticFabOrganizationBundle(
 	}
 	const resolvedEdgeKeys = new Set<string>();
 	const resolvedSwitchIds = new Set<number>();
-	const ownership = resolveStaticFabOrganizationBundleCaptureOwnership(map, preparedOwnership);
 	const selectedModules = ownership.modules.filter((module) => {
 		const touchesEdge = module.eraseEdges.some((edge) =>
 			selectedEdgeByKey.has(staticFabOrganizationEdgeKey(edge)),
@@ -621,6 +679,44 @@ export function captureStaticFabOrganizationBundle(
 			}),
 		});
 	});
+	let portableRelationships: StaticFabAssemblyRelationshipStateV1;
+	try {
+		const localIds = new Map(orderedIds.map((id, index) => [id, index + 1] as const));
+		portableRelationships = Object.freeze({
+			nextRelationshipId: includedRelationships.length + 1,
+			records: Object.freeze(
+				includedRelationships.map((record, index) => {
+					// INT_MIN requires +2^31 normalization. Split that translation so each remap
+					// retains the signed-int32 offset contract and every intermediate cell is valid.
+					const offset = {
+						x: Math.min(-bounds.minX, 0x7fff_ffff),
+						y: Math.min(-bounds.minY, 0x7fff_ffff),
+					};
+					const transformed = remapStaticFabAssemblyRelationshipRecord(
+						copyStaticFabAssemblyRelationshipRecord(record),
+						{
+							relationshipId: index + 1,
+							organizationIds: localIds,
+							quarterTurns: 0,
+							offset,
+						},
+					);
+					if (offset.x === -bounds.minX && offset.y === -bounds.minY) return transformed;
+					return remapStaticFabAssemblyRelationshipRecord(transformed, {
+						relationshipId: index + 1,
+						organizationIds: new Map([...localIds.values()].map((id) => [id, id] as const)),
+						quarterTurns: 0,
+						offset: { x: -bounds.minX - offset.x, y: -bounds.minY - offset.y },
+					});
+				}),
+			),
+		});
+	} catch (error) {
+		return captureFailure(
+			"INCOMPLETE_RELATIONSHIP",
+			error instanceof Error ? error.message : "조립 관계 전체를 복사할 수 없습니다",
+		);
+	}
 	const bundleSeed: StaticFabOrganizationBundle = {
 		version: STATIC_FAB_ORGANIZATION_BUNDLE_VERSION,
 		captureMode: mode,
@@ -635,6 +731,7 @@ export function captureStaticFabOrganizationBundle(
 		ports: Object.freeze(ports),
 		equipmentGroups: Object.freeze(equipmentGroups),
 		organizations: Object.freeze(organizations),
+		relationships: portableRelationships,
 	};
 	// A portable cut can remove neighboring branch context and make the canonical module grammar
 	// coalesce rail edges that were distinct modules in the source map. The bundle therefore reports
@@ -718,11 +815,24 @@ export async function validateFrozenStaticFabOrganizationBundle(
 	const portEquipment = await run(createCooperativeTask(canonicalBundlePortEquipmentSteps(bundle)));
 	await validatePortEquipmentActivation(map, portEquipment, checkpoint, operationBudget);
 	const organizations = await run(createCooperativeTask(canonicalBundleOrganizationSteps(bundle)));
-	await validateStaticFabOrganizationActivation(
+	const organizationActivation = await validateStaticFabOrganizationActivation(
 		map,
 		portEquipment,
 		organizations,
 		ownership,
+		checkpoint,
+		operationBudget,
+	);
+	const relationships = await run(
+		createCooperativeTask(adoptStaticFabAssemblyRelationshipStateSteps(bundle.relationships)),
+	);
+	await validateStaticFabAssemblyRelationshipActivation(
+		map,
+		portEquipment,
+		organizations,
+		relationships,
+		ownership,
+		organizationActivation,
 		checkpoint,
 		operationBudget,
 	);
@@ -814,7 +924,7 @@ export function prepareStaticFabOrganizationBundle(
 	return Object.freeze({
 		valid: true,
 		bundle,
-		reason: "조직 번들을 검증하고 불변 portable v1 그래프로 준비했습니다",
+		reason: "조직 번들을 검증하고 불변 portable v2 그래프로 준비했습니다",
 	});
 }
 
@@ -844,7 +954,12 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 	if (organizationStateError) {
 		return `조직 번들 조직 상태가 유효하지 않습니다 · ${organizationStateError}`;
 	}
-	return null;
+	return staticFabAssemblyRelationshipStateSourceError(
+		reconstructed,
+		organizationState,
+		bundle.relationships,
+		ownership,
+	);
 }
 
 function* staticFabOrganizationBundleStructureSteps(
@@ -852,7 +967,7 @@ function* staticFabOrganizationBundleStructureSteps(
 ): Generator<void, string | null> {
 	if (!isRecord(input)) return "조직 번들은 객체여야 합니다";
 	if (!hasExactKeys(input, BUNDLE_KEYS)) {
-		return "조직 번들 최상위 필드가 portable v1 스키마와 정확히 일치해야 합니다";
+		return "조직 번들 최상위 필드가 portable v2 스키마와 정확히 일치해야 합니다";
 	}
 	if (
 		!Array.isArray(input.rootOrganizationIndices) ||
@@ -892,6 +1007,18 @@ function* staticFabOrganizationBundleStructureSteps(
 		bundle.organizations.length > STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS
 	) {
 		return "조직 번들 payload 개수가 제품 한계를 벗어났습니다";
+	}
+	try {
+		yield* assertStaticFabOrganizationBundleRelationshipBudgetSteps(
+			bundle.relationships,
+			bundle.organizations.length,
+		);
+		const relationshipError = yield* staticFabAssemblyRelationshipStateShapeErrorSteps(
+			bundle.relationships,
+		);
+		if (relationshipError) return relationshipError;
+	} catch (error) {
+		return error instanceof Error ? error.message : "청사진 조립 관계가 유효하지 않습니다";
 	}
 	if (
 		!(yield* canonicalIndexArraySteps(
@@ -1233,12 +1360,13 @@ function* staticFabOrganizationBundleStructureSteps(
 
 /** Rotate around the portable origin, then translate by one integer-cell anchor. */
 export function materializeStaticFabOrganizationBundle(
-	bundle: StaticFabOrganizationBundle,
+	bundleInput: unknown,
 	anchor: Cell,
 	quarterTurns: StaticFabOrganizationBundleQuarterTurns,
 ): MaterializedStaticFabOrganizationBundle {
-	const error = staticFabOrganizationBundleError(bundle);
-	if (error) throw new Error(`조직 번들을 배치할 수 없습니다 · ${error}`);
+	const prepared = prepareStaticFabOrganizationBundle(bundleInput);
+	if (!prepared.valid) throw new Error(`조직 번들을 배치할 수 없습니다 · ${prepared.reason}`);
+	const bundle = prepared.bundle;
 	if (!validInt32Cell(anchor))
 		throw new Error("조직 번들 anchor는 signed-int32 정수 셀이어야 합니다");
 	if (![0, 1, 2, 3].includes(quarterTurns)) {
@@ -1304,6 +1432,20 @@ export function materializeStaticFabOrganizationBundle(
 			}),
 		),
 	);
+	const localIds = new Map(bundle.organizations.map((_, index) => [index + 1, index + 1] as const));
+	const relationships = Object.freeze({
+		nextRelationshipId: bundle.relationships.nextRelationshipId,
+		records: Object.freeze(
+			bundle.relationships.records.map((record) =>
+				remapStaticFabAssemblyRelationshipRecord(record, {
+					relationshipId: record.id,
+					organizationIds: localIds,
+					quarterTurns,
+					offset: anchor,
+				}),
+			),
+		),
+	});
 	return Object.freeze({
 		version: bundle.version,
 		captureMode: bundle.captureMode,
@@ -1318,6 +1460,7 @@ export function materializeStaticFabOrganizationBundle(
 		ports,
 		equipmentGroups,
 		organizations,
+		relationships,
 	});
 }
 
@@ -1377,6 +1520,7 @@ export function transformStaticFabOrganizationBundle(
 		ports: materialized.ports,
 		equipmentGroups: materialized.equipmentGroups,
 		organizations,
+		relationships: materialized.relationships,
 	} satisfies StaticFabOrganizationBundle;
 	const normalized = prepareStaticFabOrganizationBundle(transformed);
 	if (!normalized.valid) {
@@ -1403,6 +1547,7 @@ function copyPreparedStaticFabOrganizationBundle(
 	return Object.freeze({
 		version: STATIC_FAB_ORGANIZATION_BUNDLE_VERSION,
 		captureMode: source.captureMode,
+		relationships: copyStaticFabAssemblyRelationshipState(source.relationships),
 		rootOrganizationIndices: Object.freeze([...source.rootOrganizationIndices]),
 		sourceModuleCount: source.sourceModuleCount,
 		sourceWidthMeters: source.sourceWidthMeters,

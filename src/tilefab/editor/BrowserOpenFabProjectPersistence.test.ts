@@ -1,6 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RailAreaStampTemplate } from "../core/RailAreaStamp";
+import legacyOrganizationRecord from "../project/fixtures/legacy-organization-blueprint-v1.json";
 import {
 	createOpenFabRailAreaBlueprint,
 	updateOpenFabProjectBlueprint,
@@ -862,6 +863,35 @@ describe("BrowserOpenFabProjectPersistence", () => {
 			"persistent",
 		);
 		expect(await persistence.get(record.id)).toBeNull();
+	});
+
+	it("migrates an actual V1 organization row and preserves conditional IndexedDB edits", async () => {
+		const factory = new IDBFactory();
+		vi.stubGlobal("indexedDB", factory);
+		const database = await openLegacyUserBlueprintDatabase(factory);
+		await putIndexedDbRecords(database, [legacyOrganizationRecord]);
+		database.close();
+		const persistence = new BrowserOpenFabProjectPersistence();
+		const normalized = parseOpenFabUserBlueprintRecord(legacyOrganizationRecord);
+		expect(normalized.schemaVersion).toBe(2);
+		expect(await persistence.list()).toEqual([normalized]);
+		expect(await persistence.get(normalized.id)).toEqual(normalized);
+		const renamed = renameUserBlueprint(
+			normalized,
+			"Migrated synthetic Bay",
+			"2026-09-08T00:00:00.000Z",
+		);
+		expect(await persistence.update(normalized, renamed)).toMatchObject({
+			status: "updated",
+			durability: "persistent",
+		});
+		const stale = renameUserBlueprint(normalized, "Stale overwrite", "2026-09-08T00:00:01.000Z");
+		expect(await persistence.update(normalized, stale)).toMatchObject({ status: "conflict" });
+		expect(await persistence.replaceAllIfUnchanged([renamed], [normalized])).toEqual({
+			status: "replaced",
+		});
+		expect(await persistence.remove(normalized)).toMatchObject({ status: "removed" });
+		expect(await persistence.list()).toEqual([]);
 	});
 
 	it("upgrades v2 rows, repairs slot collisions, and atomically rejects a concurrent slot claim", async () => {

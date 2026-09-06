@@ -18,6 +18,7 @@ import {
 	type StaticFabOrganizationBundlePlacementPlan,
 	staticFabOrganizationBundleFingerprint,
 } from "../core/StaticFabOrganizationBundlePlacement";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS } from "../core/StaticFabOrganizationBundleRelationships";
 import type { Cell, TileMap } from "../core/TileMap";
 import {
 	checksumRailPatchResult,
@@ -141,6 +142,7 @@ export class StaticFabOrganizationBundlePlacementBridge {
 			sourceState.portEquipment,
 			sourceState.patchSequence,
 			sourceState.organizations,
+			sourceState.relationships,
 			input.bundle,
 			input.anchor,
 			input.quarterTurns,
@@ -238,6 +240,7 @@ export class StaticFabOrganizationBundlePlacementBridge {
 						liveState.map,
 						liveState.portEquipment,
 						liveState.organizations,
+						liveState.relationships,
 					);
 					this.permit = null;
 				} else {
@@ -384,6 +387,7 @@ function validateWorkerPrepared(
 		ticket.sourceNextPortId !== snapshot.portEquipment.nextPortId ||
 		ticket.sourceNextEquipmentGroupId !== snapshot.portEquipment.nextEquipmentGroupId ||
 		ticket.sourceNextOrganizationId !== expectedSourceNextOrganizationId ||
+		ticket.sourceNextRelationshipId !== snapshot.relationships.nextRelationshipId ||
 		ticket.bundleFingerprint !== expectedBundleFingerprint ||
 		!isCell(ticket.anchor) ||
 		ticket.anchor.x !== expectedAnchor.x ||
@@ -394,7 +398,8 @@ function validateWorkerPrepared(
 		!isNonNegativeSafeInteger(ticket.prospectiveNextAdvancedSwitchId) ||
 		!isNonNegativeSafeInteger(ticket.prospectiveNextPortId) ||
 		!isNonNegativeSafeInteger(ticket.prospectiveNextEquipmentGroupId) ||
-		!isNonNegativeSafeInteger(ticket.prospectiveNextOrganizationId)
+		!isNonNegativeSafeInteger(ticket.prospectiveNextOrganizationId) ||
+		!isPositiveSafeInteger(ticket.prospectiveNextRelationshipId)
 	) {
 		return new Error("Organization-bundle placement Worker returned a corrupted one-shot ticket.");
 	}
@@ -408,6 +413,9 @@ function validateWorkerPrepared(
 			organizationChanges: value.plan.organizationMutations,
 			organizationNextIdBefore: value.plan.nextOrganizationIdBefore,
 			organizationNextIdAfter: value.plan.nextOrganizationIdAfter,
+			relationshipChanges: value.plan.relationshipMutations,
+			relationshipNextIdBefore: value.plan.nextRelationshipIdBefore,
+			relationshipNextIdAfter: value.plan.nextRelationshipIdAfter,
 		});
 	} catch {
 		return new Error("Organization-bundle placement Worker returned a malformed exact plan.");
@@ -433,6 +441,8 @@ function isPlacementPlanShape(
 		!isNonNegativeSafeInteger(value.basePatchSequence) ||
 		!isPositiveSafeInteger(value.nextOrganizationIdBefore) ||
 		!isPositiveSafeInteger(value.nextOrganizationIdAfter) ||
+		!isPositiveSafeInteger(value.nextRelationshipIdBefore) ||
+		!isPositiveSafeInteger(value.nextRelationshipIdAfter) ||
 		!isNonNegativeSafeInteger(value.newEdges) ||
 		!isNonNegativeFiniteNumber(value.lengthMeters) ||
 		!isNonNegativeSafeInteger(value.turns) ||
@@ -443,6 +453,7 @@ function isPlacementPlanShape(
 		!Array.isArray(value.portMutations) ||
 		!Array.isArray(value.equipmentGroupMutations) ||
 		!Array.isArray(value.organizationMutations) ||
+		!Array.isArray(value.relationshipMutations) ||
 		!Array.isArray(value.conflicts) ||
 		!isOrganizationBundleMetadata(value.organizationBundle)
 	) {
@@ -466,7 +477,8 @@ function isPlacementPlanShape(
 			value.switchMutations.length === 0 &&
 			value.portMutations.length === 0 &&
 			value.equipmentGroupMutations.length === 0 &&
-			value.organizationMutations.length === 0
+			value.organizationMutations.length === 0 &&
+			value.relationshipMutations.length === 0
 		);
 	}
 	return (
@@ -474,7 +486,8 @@ function isPlacementPlanShape(
 		value.switchMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES &&
 		value.portMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS &&
 		value.equipmentGroupMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS &&
-		value.organizationMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS
+		value.organizationMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS &&
+		value.relationshipMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS
 	);
 }
 
@@ -493,6 +506,8 @@ function isOrganizationBundleMetadata(value: unknown): boolean {
 		value.portCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS &&
 		isNonNegativeSafeInteger(value.equipmentGroupCount) &&
 		value.equipmentGroupCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS &&
+		isNonNegativeSafeInteger(value.relationshipCount) &&
+		value.relationshipCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS &&
 		isNonNegativeSafeInteger(value.organizationCount) &&
 		value.organizationCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS &&
 		isNonNegativeSafeInteger(value.widthMeters) &&

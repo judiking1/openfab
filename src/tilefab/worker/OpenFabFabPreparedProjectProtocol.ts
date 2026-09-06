@@ -5,7 +5,7 @@ import type {
 } from "../compile/OpenFabFabPreparedProject";
 import type { OpenFabFabProfile } from "../compile/OpenFabFabProfile";
 
-export const OPENFAB_FAB_PREPARED_PROJECT_PROTOCOL_VERSION = 2 as const;
+export const OPENFAB_FAB_PREPARED_PROJECT_PROTOCOL_VERSION = 3 as const;
 
 export type OpenFabFabPreparedProjectOperation = "VERIFY" | "SOURCE";
 

@@ -205,6 +205,7 @@ function sourceBundle(): StaticFabOrganizationBundle {
 		source.portEquipment,
 		source.getPatchSequence(),
 		organizations,
+		source.relationships,
 		[1],
 		"DIRECT",
 	);

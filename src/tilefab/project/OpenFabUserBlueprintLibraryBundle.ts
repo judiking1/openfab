@@ -10,11 +10,12 @@ import {
 	openFabUserBlueprintRecordJsonByteLength,
 	openFabUtf8ByteLength,
 	parseOpenFabUserBlueprintRecord,
+	serializeLegacyOpenFabUserBlueprintRecord,
 	serializeOpenFabUserBlueprintRecord,
 	updateOpenFabUserBlueprintRecord,
 } from "./OpenFabUserBlueprintLibrary";
 
-export const OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_SCHEMA_VERSION = 1 as const;
+export const OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_SCHEMA_VERSION = 2 as const;
 export const OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_KIND = "OPENFAB_USER_BLUEPRINT_LIBRARY" as const;
 export const OPENFAB_USER_BLUEPRINT_LIBRARY_FILE_EXTENSION = ".openfablib";
 export const OPENFAB_USER_BLUEPRINT_LIBRARY_MAX_JSON_BYTES = 128 * 1024 * 1024;
@@ -170,7 +171,10 @@ export function parseOpenFabUserBlueprintLibraryBundleValue(
 		],
 		"$",
 	);
-	if (envelope.schemaVersion !== OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_SCHEMA_VERSION) {
+	if (
+		envelope.schemaVersion !== 1 &&
+		envelope.schemaVersion !== OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_SCHEMA_VERSION
+	) {
 		fail(
 			"UNSUPPORTED_VERSION",
 			"$.schemaVersion",
@@ -204,6 +208,16 @@ export function parseOpenFabUserBlueprintLibraryBundleValue(
 			`library cannot exceed ${OPENFAB_USER_BLUEPRINT_MAX_RECORDS} records`,
 		);
 	}
+	for (let index = 0; index < envelope.records.length; index++) {
+		const record = expectRecord(envelope.records[index], `$.records[${index}]`);
+		if (record.schemaVersion !== envelope.schemaVersion) {
+			fail(
+				"UNSUPPORTED_VERSION",
+				`$.records[${index}].schemaVersion`,
+				"record version must match the library envelope",
+			);
+		}
+	}
 	const records = validateOpenFabUserBlueprintLibrarySnapshot(
 		envelope.records.map((record, index) => parseRecordAt(record, index)),
 	);
@@ -215,7 +229,26 @@ export function parseOpenFabUserBlueprintLibraryBundleValue(
 		fail("INVALID_FIELD", "$.aggregateEdgeCount", "edge count does not match records");
 	}
 	const fingerprint = fingerprintNormalizedOpenFabUserBlueprintLibrary(records);
-	if (envelope.fingerprint !== fingerprint) {
+	let sourceFingerprint = fingerprint;
+	if (envelope.schemaVersion === 1) {
+		const rawById = new Map(
+			envelope.records.map((value, index) => {
+				const record = expectRecord(value, `$.records[${index}]`);
+				return [record.id, value] as const;
+			}),
+		);
+		const checksum = new OrderedTypedChecksum();
+		checksum.addStrings([
+			"openfab-user-blueprint-library-v1",
+			`${records.length}`,
+			`${actualEdgeCount}`,
+		]);
+		checksum.addStrings(
+			records.map((record) => serializeLegacyOpenFabUserBlueprintRecord(rawById.get(record.id))),
+		);
+		sourceFingerprint = `ofubl1-${checksum.digest()}`;
+	}
+	if (envelope.fingerprint !== sourceFingerprint) {
 		fail("INVALID_FIELD", "$.fingerprint", "library fingerprint does not match records");
 	}
 	return Object.freeze({
@@ -315,12 +348,12 @@ function fingerprintNormalizedOpenFabUserBlueprintLibrary(
 ): string {
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([
-		"openfab-user-blueprint-library-v1",
+		"openfab-user-blueprint-library-v2",
 		`${normalized.length}`,
 		`${aggregateEdges(normalized)}`,
 	]);
 	checksum.addStrings(normalized.map((record) => serializeOpenFabUserBlueprintRecord(record)));
-	return `ofubl1-${checksum.digest()}`;
+	return `ofubl2-${checksum.digest()}`;
 }
 
 export function createOpenFabUserBlueprintLibraryRestorePreflight(

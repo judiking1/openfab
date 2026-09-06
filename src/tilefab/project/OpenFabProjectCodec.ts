@@ -51,6 +51,7 @@ import { classifyRailCell } from "../core/RailCellClassification";
 import { ALL_DIRECTIONS, bitCount, moveCell, oppositeDirection } from "../core/railShape";
 import {
 	createStaticFabAssemblyRelationshipState,
+	emptyStaticFabAssemblyRelationshipState,
 	staticFabAssemblyRelationshipStateSourceError,
 } from "../core/StaticFabAssemblyRelationship";
 import { staticFabPortSpacingConflict } from "../core/StaticFabBlueprint";
@@ -180,7 +181,7 @@ export class OpenFabProjectParseError extends Error {
 
 export interface OpenFabProjectParseResult {
 	readonly project: OpenFabProject;
-	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | null;
+	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | null;
 }
 
 export function parseOpenFabProjectJson(source: string): OpenFabProjectParseResult {
@@ -205,7 +206,17 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	const schemaVersion = expectInteger(root.schemaVersion, "$.schemaVersion");
 	if (schemaVersion === OPENFAB_PROJECT_SCHEMA_VERSION) {
-		return Object.freeze({ project: validateVersionEleven(root), migratedFromVersion: null });
+		return Object.freeze({ project: validateVersionTwelve(root), migratedFromVersion: null });
+	}
+	if (schemaVersion === 11) {
+		return Object.freeze({
+			project: validateVersionTwelve({
+				...root,
+				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+				blueprints: migrateBlueprintSectionV3(root.blueprints),
+			}),
+			migratedFromVersion: 11,
+		});
 	}
 	if (schemaVersion === 10) {
 		return Object.freeze({
@@ -287,7 +298,7 @@ export function serializeOpenFabProject(
 	) {
 		throw new Error("OpenFab project serialization limit is invalid.");
 	}
-	const normalized = validateVersionEleven(expectRecord(project, "$", "INVALID_ROOT"));
+	const normalized = validateVersionTwelve(expectRecord(project, "$", "INVALID_ROOT"));
 	const sorted = sortJsonObjectKeys(normalized);
 	const characterLength = prettyJsonCharacterLength(sorted) + 1;
 	if (characterLength > maximumCharacters) {
@@ -343,7 +354,7 @@ function prettyJsonCharacterLength(value: unknown, depth = 0): number {
  * Cross-project stores and file codecs use this boundary instead of maintaining a second parser.
  */
 export function parseOpenFabProjectBlueprintValue(value: unknown): OpenFabProjectBlueprint {
-	const section = validateBlueprintSectionV3({
+	const section = validateBlueprintSectionV4({
 		schemaVersion: OPENFAB_BLUEPRINT_SECTION_SCHEMA_VERSION,
 		records: [value],
 	});
@@ -354,7 +365,7 @@ export function parseOpenFabProjectBlueprintValue(value: unknown): OpenFabProjec
 	return record;
 }
 
-function validateVersionEleven(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function validateVersionTwelve(root: Readonly<Record<string, unknown>>): OpenFabProject {
 	expectExactKeys(
 		root,
 		[
@@ -387,7 +398,7 @@ function validateVersionEleven(root: Readonly<Record<string, unknown>>): OpenFab
 		ports,
 		equipment,
 		operations: validateOperationalConfigurationSection(root.operations),
-		blueprints: validateBlueprintSectionV3(root.blueprints),
+		blueprints: validateBlueprintSectionV4(root.blueprints),
 		areas: validateOrganizationSection(root.areas),
 		relationships: validateRelationshipSection(root.relationships),
 		scenarios: validateReservedSection(root.scenarios, "$.scenarios"),
@@ -401,7 +412,7 @@ function validateVersionEleven(root: Readonly<Record<string, unknown>>): OpenFab
 }
 
 function migrateVersionTen(project: OpenFabProjectVersionTen): OpenFabProject {
-	return validateVersionEleven({
+	return validateVersionTwelve({
 		...project,
 		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 		relationships: createEmptyOpenFabProjectRelationshipSection(),
@@ -409,6 +420,15 @@ function migrateVersionTen(project: OpenFabProjectVersionTen): OpenFabProject {
 }
 
 function validateVersionTen(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
+	return validateNormalizedVersionTen({
+		...root,
+		blueprints: migrateBlueprintSectionV3(root.blueprints),
+	});
+}
+
+function validateNormalizedVersionTen(
+	root: Readonly<Record<string, unknown>>,
+): OpenFabProjectVersionTen {
 	expectExactKeys(
 		root,
 		[
@@ -436,7 +456,7 @@ function validateVersionTen(root: Readonly<Record<string, unknown>>): OpenFabPro
 		ports: validatePortSection(root.ports),
 		equipment: validateEquipmentSection(root.equipment),
 		operations: validateOperationalConfigurationSection(root.operations),
-		blueprints: validateBlueprintSectionV3(root.blueprints),
+		blueprints: validateBlueprintSectionV4(root.blueprints),
 		areas: validateOrganizationSection(root.areas),
 		scenarios: validateReservedSection(root.scenarios, "$.scenarios"),
 		view: root.view === null ? null : validateView(root.view),
@@ -516,7 +536,7 @@ function migrateVersionSeven(root: Readonly<Record<string, unknown>>): OpenFabPr
 		"$ v7",
 	);
 	expectLiteral(root.schemaVersion, 7, "$.schemaVersion");
-	return validateVersionTen({
+	return validateNormalizedVersionTen({
 		...root,
 		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
@@ -542,7 +562,7 @@ function migrateVersionSix(root: Readonly<Record<string, unknown>>): OpenFabProj
 		"$ v6",
 	);
 	expectLiteral(root.schemaVersion, 6, "$.schemaVersion");
-	return validateVersionTen({
+	return validateNormalizedVersionTen({
 		...root,
 		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
@@ -570,7 +590,7 @@ function migrateVersionFive(root: Readonly<Record<string, unknown>>): OpenFabPro
 	);
 	expectLiteral(root.schemaVersion, 5, "$.schemaVersion");
 	validateReservedSection(root.areas, "$.areas");
-	return validateVersionTen({
+	return validateNormalizedVersionTen({
 		...root,
 		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
@@ -598,7 +618,7 @@ function migrateVersionFour(root: Readonly<Record<string, unknown>>): OpenFabPro
 	);
 	expectLiteral(root.schemaVersion, 4, "$.schemaVersion");
 	validateReservedSection(root.areas, "$.areas");
-	return validateVersionTen({
+	return validateNormalizedVersionTen({
 		...root,
 		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
@@ -611,7 +631,7 @@ function migrateVersionThree(root: Readonly<Record<string, unknown>>): OpenFabPr
 	expectExactKeys(root, VERSION_THREE_ROOT_KEYS, "$ v3");
 	expectLiteral(root.schemaVersion, 3, "$.schemaVersion");
 	validateReservedSection(root.areas, "$.areas");
-	return validateVersionTen({
+	return validateNormalizedVersionTen({
 		...root,
 		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
@@ -642,7 +662,7 @@ function migrateVersionTwo(root: Readonly<Record<string, unknown>>): OpenFabProj
 			);
 		}
 	}
-	return validateVersionTen({
+	return validateNormalizedVersionTen({
 		...root,
 		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
@@ -685,7 +705,7 @@ function migrateVersionOne(root: Readonly<Record<string, unknown>>): OpenFabProj
 	validateReservedSection(root.equipment, "$.equipment");
 	validateReservedSection(root.areas, "$.areas");
 	validateReservedSection(root.scenarios, "$.scenarios");
-	return validateVersionTen({
+	return validateNormalizedVersionTen({
 		...root,
 		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
@@ -704,7 +724,7 @@ function migrateVersionZero(root: Readonly<Record<string, unknown>>): OpenFabPro
 		["revision", "patchSequence", "nextAdvancedSwitchId", "cells", "advancedSwitches"],
 		"$.rail v0",
 	);
-	return validateVersionTen({
+	return validateNormalizedVersionTen({
 		kind: OPENFAB_PROJECT_KIND,
 		schemaVersion: 10,
 		manifest: root.manifest,
@@ -1769,7 +1789,28 @@ function validateAuthoredRail(project: OpenFabProjectAuthoredSource): void {
 	}
 }
 
-function validateBlueprintSectionV3(value: unknown): OpenFabProjectBlueprintSection {
+/** A legacy record envelope may contain only the original bundle v1 grammar. */
+export function parseLegacyOpenFabProjectBlueprintValue(value: unknown): OpenFabProjectBlueprint {
+	const section = migrateBlueprintSectionV3({ schemaVersion: 3, records: [value] });
+	return section.records[0] as OpenFabProjectBlueprint;
+}
+
+function migrateBlueprintSectionV3(value: unknown): OpenFabProjectBlueprintSection {
+	return validateBlueprintSection(value, 3, (value, path) => {
+		const record = expectRecord(value, path);
+		const kind = expectString(record.kind, `${path}.kind`);
+		if (kind === OPENFAB_BLUEPRINT_KIND_RAIL_AREA)
+			return validateRailAreaBlueprintRecord(record, path);
+		if (kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB)
+			return validateStaticFabBlueprintRecord(record, path);
+		if (kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION) {
+			return validateStaticFabOrganizationBlueprintRecord(record, path, true);
+		}
+		fail("INVALID_FIELD", `${path}.kind`, "unknown blueprint kind");
+	});
+}
+
+function validateBlueprintSectionV4(value: unknown): OpenFabProjectBlueprintSection {
 	return validateBlueprintSection(
 		value,
 		OPENFAB_BLUEPRINT_SECTION_SCHEMA_VERSION,
@@ -1990,9 +2031,34 @@ function validateStaticFabBlueprintRecord(
 	});
 }
 
+/** Validate the old envelope before adding empty identity; never infer historical relationships. */
+function migrateOrganizationBundleV1(value: unknown, path: string): unknown {
+	const bundle = expectRecord(value, path);
+	expectExactKeys(
+		bundle,
+		[
+			"version",
+			"captureMode",
+			"rootOrganizationIndices",
+			"sourceModuleCount",
+			"sourceWidthMeters",
+			"sourceHeightMeters",
+			"railEdges",
+			"advancedSwitches",
+			"ports",
+			"equipmentGroups",
+			"organizations",
+		],
+		path,
+	);
+	expectLiteral(bundle.version, 1, `${path}.version`);
+	return { ...bundle, version: 2, relationships: emptyStaticFabAssemblyRelationshipState() };
+}
+
 function validateStaticFabOrganizationBlueprintRecord(
 	record: Readonly<Record<string, unknown>>,
 	path: string,
+	legacyBundle = false,
 ): OpenFabStaticFabOrganizationBlueprint {
 	expectExactKeys(
 		record,
@@ -2024,7 +2090,10 @@ function validateStaticFabOrganizationBlueprintRecord(
 	if (updatedAt < createdAt) {
 		fail("INVALID_FIELD", `${path}.updatedAt`, "updatedAt cannot precede createdAt");
 	}
-	const prepared = prepareStaticFabOrganizationBundle(record.bundle);
+	const bundleInput = legacyBundle
+		? migrateOrganizationBundleV1(record.bundle, `${path}.bundle`)
+		: record.bundle;
+	const prepared = prepareStaticFabOrganizationBundle(bundleInput);
 	if (!prepared.valid) {
 		fail("INVALID_ORGANIZATION", `${path}.bundle`, prepared.reason);
 	}

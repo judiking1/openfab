@@ -167,6 +167,7 @@ function adoptedWorkerPlan(
 		document.portEquipment,
 		document.getPatchSequence(),
 		document.organizations,
+		document.relationships,
 		bundle,
 		anchor,
 		0,
@@ -195,6 +196,7 @@ function adoptedWorkerPlan(
 		document.map,
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	if (!adopted) throw new Error("Worker plan adoption failed.");
 	return adopted;

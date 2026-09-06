@@ -50,6 +50,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			state,
+			fixture.document.relationships,
 			[20, 10, 20],
 			"DIRECT",
 		);
@@ -58,6 +59,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			state,
+			fixture.document.relationships,
 			[10, 20],
 			"DIRECT",
 		);
@@ -93,6 +95,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			state,
+			fixture.document.relationships,
 			[10],
 			"EFFECTIVE",
 		);
@@ -101,6 +104,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			state,
+			fixture.document.relationships,
 			[10],
 			"EFFECTIVE",
 			buildRailModuleOwnershipIndex(fixture.document.map),
@@ -167,6 +171,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			organizationState([organizationRecord(10, "AREA", "Factory Root", [], [fixture.modules[0]])]),
+			fixture.document.relationships,
 			Array.from({ length: 1_025 }, (_, index) => index + 1),
 			"DIRECT",
 		);
@@ -190,6 +195,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			organizationState(records),
+			fixture.document.relationships,
 			[20, 10],
 			"EFFECTIVE",
 		);
@@ -218,6 +224,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			organizationState(records),
+			fixture.document.relationships,
 			[10],
 			"EFFECTIVE",
 		);
@@ -248,6 +255,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			state,
+			fixture.document.relationships,
 			[20],
 			"DIRECT",
 		);
@@ -302,6 +310,7 @@ describe("StaticFabOrganizationBundle", () => {
 				fixture.document.portEquipment,
 				fixture.document.getPatchSequence(),
 				organizationState([organizationRecord(1, "AREA", "Switch", [], [fixture.switchModule])]),
+				fixture.document.relationships,
 				[1],
 				"DIRECT",
 			);
@@ -615,6 +624,7 @@ describe("StaticFabOrganizationBundle", () => {
 			fixture.document.portEquipment,
 			fixture.document.getPatchSequence(),
 			organizationState([organizationRecord(1, "AREA", "Switch Area", [], [fixture.switchModule])]),
+			fixture.document.relationships,
 			[1],
 			"DIRECT",
 		);
@@ -666,6 +676,7 @@ describe("StaticFabOrganizationBundle", () => {
 			equipment,
 			fixture.document.getPatchSequence(),
 			organizationState([record]),
+			fixture.document.relationships,
 			[1],
 			"DIRECT",
 		);
@@ -709,6 +720,7 @@ function captureSingleOrganizationBundle(): StaticFabOrganizationBundle {
 		fixture.document.portEquipment,
 		fixture.document.getPatchSequence(),
 		organizationState([organizationRecord(1, "AREA", "Factory", [], fixture.modules.slice(0, 2))]),
+		fixture.document.relationships,
 		[1],
 		"DIRECT",
 	);
@@ -733,6 +745,7 @@ function captureEquipmentOrganizationBundle(): StaticFabOrganizationBundle {
 		equipment,
 		fixture.document.getPatchSequence(),
 		organizationState([record]),
+		fixture.document.relationships,
 		[1],
 		"DIRECT",
 	);

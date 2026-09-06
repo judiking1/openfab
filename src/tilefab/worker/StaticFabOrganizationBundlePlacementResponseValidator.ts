@@ -5,6 +5,7 @@ import {
 	advancedSwitchRecordError,
 	deriveAdvancedSwitchGeometry,
 } from "../core/AdvancedSwitch";
+import { completeCooperativeSteps } from "../core/CooperativeTask";
 import {
 	type EquipmentGroupMutation,
 	type EquipmentGroupRecord,
@@ -19,6 +20,11 @@ import {
 } from "../core/PortRecord";
 import type { RailMutation } from "../core/paint";
 import { classifyRailCell } from "../core/RailCellClassification";
+import {
+	type StaticFabAssemblyRelationshipMutationV1,
+	type StaticFabAssemblyRelationshipRecordV1,
+	staticFabAssemblyRelationshipStateShapeErrorSteps,
+} from "../core/StaticFabAssemblyRelationship";
 import {
 	STATIC_FAB_ORGANIZATION_KINDS,
 	type StaticFabOrganizationMutation,
@@ -36,6 +42,10 @@ import type {
 	StaticFabOrganizationBundlePlacementPlan,
 	StaticFabOrganizationBundlePlacementWorkerTicket,
 } from "../core/StaticFabOrganizationBundlePlacement";
+import {
+	assertStaticFabOrganizationBundleRelationshipBudgetSteps,
+	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS,
+} from "../core/StaticFabOrganizationBundleRelationships";
 import { type Cell, decodeRailCell } from "../core/TileMap";
 import { STATIC_FAB_ORGANIZATION_BUNDLE_CONFLICT_LIMIT } from "./StaticFabOrganizationBundlePlacementProtocol";
 
@@ -115,6 +125,8 @@ function placementPlanShapeError(value: unknown, mode: "compact" | "full"): stri
 		!nonNegativeSafeInteger(value.basePatchSequence) ||
 		!positiveInt32(value.nextOrganizationIdBefore) ||
 		!positiveInt32(value.nextOrganizationIdAfter) ||
+		!positiveInt32(value.nextRelationshipIdBefore) ||
+		!positiveInt32(value.nextRelationshipIdAfter) ||
 		!nonNegativeSafeInteger(value.newEdges) ||
 		value.newEdges > STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RAIL_EDGES ||
 		!nonNegativeFinite(value.lengthMeters) ||
@@ -130,6 +142,7 @@ function placementPlanShapeError(value: unknown, mode: "compact" | "full"): stri
 		!Array.isArray(value.portMutations) ||
 		!Array.isArray(value.equipmentGroupMutations) ||
 		!Array.isArray(value.organizationMutations) ||
+		!Array.isArray(value.relationshipMutations) ||
 		!Array.isArray(value.conflicts)
 	) {
 		return "placement plan mutation arrays are missing";
@@ -153,7 +166,9 @@ function placementPlanShapeError(value: unknown, mode: "compact" | "full"): stri
 			value.switchMutations.length === 0 &&
 			value.portMutations.length === 0 &&
 			value.equipmentGroupMutations.length === 0 &&
-			value.organizationMutations.length === 0
+			value.organizationMutations.length === 0 &&
+			value.relationshipMutations.length === 0 &&
+			value.nextRelationshipIdAfter === value.nextRelationshipIdBefore
 			? null
 			: "compact rejected plan carried authored mutations";
 	}
@@ -166,6 +181,7 @@ function placementPlanShapeError(value: unknown, mode: "compact" | "full"): stri
 		value.equipmentGroupMutations.length > STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS ||
 		value.organizationMutations.length === 0 ||
 		value.organizationMutations.length > STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS ||
+		value.relationshipMutations.length > STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS ||
 		value.conflicts.length !== 0
 	) {
 		return "full placement plan exceeds its mutation budget";
@@ -193,6 +209,7 @@ function placementMetadataShapeError(value: unknown, mode: "compact" | "full"): 
 		!boundedCount(value.portCount, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS) ||
 		!boundedCount(value.equipmentGroupCount, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS) ||
 		!boundedCount(value.organizationCount, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS) ||
+		!boundedCount(value.relationshipCount, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS) ||
 		!boundedCount(value.widthMeters, 0x7fff_ffff) ||
 		!boundedCount(value.heightMeters, 0x7fff_ffff) ||
 		!Array.isArray(value.organizationNames) ||
@@ -224,6 +241,7 @@ function fullPlacementMetadataMatchesPlan(
 		metadata.portCount === plan.portMutations.length &&
 		metadata.equipmentGroupCount === plan.equipmentGroupMutations.length &&
 		metadata.organizationCount === plan.organizationMutations.length &&
+		metadata.relationshipCount === plan.relationshipMutations.length &&
 		Array.isArray(metadata.organizationNames) &&
 		metadata.organizationNames.length === plan.organizationMutations.length
 		? null
@@ -244,6 +262,7 @@ function placementTicketShapeError(
 		!recordCursor(ticket.sourceNextPortId) ||
 		!recordCursor(ticket.sourceNextEquipmentGroupId) ||
 		!positiveInt32(ticket.sourceNextOrganizationId) ||
+		!positiveInt32(ticket.sourceNextRelationshipId) ||
 		!boundedFingerprint(ticket.bundleFingerprint) ||
 		!isCell(ticket.anchor) ||
 		!quarterTurns(ticket.quarterTurns) ||
@@ -252,7 +271,8 @@ function placementTicketShapeError(
 		!recordCursor(ticket.prospectiveNextAdvancedSwitchId) ||
 		!recordCursor(ticket.prospectiveNextPortId) ||
 		!recordCursor(ticket.prospectiveNextEquipmentGroupId) ||
-		!positiveInt32(ticket.prospectiveNextOrganizationId)
+		!positiveInt32(ticket.prospectiveNextOrganizationId) ||
+		!positiveInt32(ticket.prospectiveNextRelationshipId)
 	) {
 		return "placement ticket fields are invalid";
 	}
@@ -261,6 +281,8 @@ function placementTicketShapeError(
 		ticket.sourcePatchSequence !== plan.basePatchSequence ||
 		ticket.sourceNextOrganizationId !== plan.nextOrganizationIdBefore ||
 		ticket.prospectiveNextOrganizationId !== plan.nextOrganizationIdAfter ||
+		ticket.sourceNextRelationshipId !== plan.nextRelationshipIdBefore ||
+		ticket.prospectiveNextRelationshipId !== plan.nextRelationshipIdAfter ||
 		ticket.anchor.x !== plan.organizationBundle.anchor.x ||
 		ticket.anchor.y !== plan.organizationBundle.anchor.y ||
 		ticket.quarterTurns !== plan.organizationBundle.quarterTurns
@@ -371,6 +393,32 @@ function placementAdditionRecordsError(
 	} catch {
 		return "placement additions contain malformed organizations";
 	}
+	const relationships = addedRecords<
+		StaticFabAssemblyRelationshipMutationV1,
+		StaticFabAssemblyRelationshipRecordV1
+	>(plan.relationshipMutations, plan.nextRelationshipIdBefore, () => null, "relationship");
+	if (typeof relationships === "string") return relationships;
+	const relationshipState = {
+		nextRelationshipId: plan.nextRelationshipIdAfter,
+		records: relationships,
+	};
+	try {
+		completeCooperativeSteps(
+			assertStaticFabOrganizationBundleRelationshipBudgetSteps(
+				relationshipState,
+				organizations.length,
+				plan.nextOrganizationIdBefore,
+				plan.nextRelationshipIdBefore,
+			),
+		);
+		const relationshipError = completeCooperativeSteps(
+			staticFabAssemblyRelationshipStateShapeErrorSteps(relationshipState),
+		);
+		if (relationshipError)
+			return `placement additions contain invalid relationships: ${relationshipError}`;
+	} catch {
+		return "placement relationship additions exceed their bounds or reference external organizations";
+	}
 	return null;
 }
 
@@ -419,7 +467,7 @@ function addedRecords<
 		if (
 			!mutation ||
 			mutation.before !== null ||
-			mutation.after === null ||
+			!isRecord(mutation.after) ||
 			mutation.id !== sourceCursor + index ||
 			mutation.after.id !== mutation.id
 		) {

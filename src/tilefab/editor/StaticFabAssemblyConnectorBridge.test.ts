@@ -15,6 +15,7 @@ import {
 	type StaticFabAssemblyConnectorIntent,
 } from "../core/StaticFabAssemblyConnector";
 import { isIssuedStaticFabAssemblyConnectorPlan } from "../core/StaticFabAssemblyConnectorCertification";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	deriveStaticFabOrganizationSemanticRoles,
 	emptyStaticFabOrganizationState,
@@ -528,6 +529,7 @@ function productionBayDocument(count = 2): RailDocument {
 		map: new TileMap(),
 		portEquipment: emptyPortEquipmentState(),
 		organizations: emptyStaticFabOrganizationState(),
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		patchSequence: 0,
 	};
 	for (const anchor of Array.from({ length: count }, (_, index) => ({ x: index * 100, y: 0 }))) {
@@ -536,6 +538,7 @@ function productionBayDocument(count = 2): RailDocument {
 			fixture.portEquipment,
 			fixture.patchSequence,
 			fixture.organizations,
+			fixture.relationships,
 			artifact.organizationBundle,
 			anchor,
 			0,

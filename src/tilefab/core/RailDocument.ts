@@ -1057,9 +1057,12 @@ export class RailDocument {
 				"조직 청사진 배치를 거부했습니다",
 			);
 		}
-		if (plan.nextOrganizationIdBefore !== this.organizations.nextOrganizationId) {
+		if (
+			plan.nextOrganizationIdBefore !== this.organizations.nextOrganizationId ||
+			plan.nextRelationshipIdBefore !== this.relationships.nextRelationshipId
+		) {
 			return this.rejectCommand(
-				"조직 ID 세대가 변경되었습니다 · 다시 배치하세요",
+				"조직 또는 조립 관계 ID 세대가 변경되었습니다 · 다시 배치하세요",
 				"조직 청사진 배치를 거부했습니다",
 			);
 		}
@@ -1069,6 +1072,7 @@ export class RailDocument {
 				this.map,
 				this.portEquipment,
 				this.organizations,
+				this.relationships,
 			)
 		) {
 			return this.rejectCommand(
@@ -1082,6 +1086,7 @@ export class RailDocument {
 				this.map,
 				this.portEquipment,
 				this.organizations,
+				this.relationships,
 			)
 		) {
 			return this.rejectCommand(
@@ -1120,6 +1125,13 @@ export class RailDocument {
 			plan.organizationMutations,
 			plan.nextOrganizationIdBefore,
 			plan.nextOrganizationIdAfter,
+			[],
+			null,
+			null,
+			null,
+			plan.relationshipMutations,
+			plan.nextRelationshipIdBefore,
+			plan.nextRelationshipIdAfter,
 		);
 		if (validateAdvancedSwitchPatch(this.map, entry.changes, entry.switchChanges).length > 0) {
 			return this.rejectCommand(
@@ -1137,6 +1149,13 @@ export class RailDocument {
 				entry.organizationNextIdBefore,
 				entry.organizationNextIdAfter,
 				false,
+				[],
+				null,
+				null,
+				null,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
 			);
 		} catch (error) {
 			return this.rejectCommand(error, "조직 청사진을 원자적으로 배치할 수 없습니다");
@@ -1152,6 +1171,12 @@ export class RailDocument {
 			entry.organizationChanges,
 			entry.organizationNextIdBefore,
 			entry.organizationNextIdAfter,
+			[],
+			undefined,
+			null,
+			entry.relationshipChanges,
+			entry.relationshipNextIdBefore,
+			entry.relationshipNextIdAfter,
 		);
 		return true;
 	}

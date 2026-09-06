@@ -107,6 +107,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 			equipment,
 			17,
 			organizations,
+			target.relationships,
 			bundle,
 			{ x: 120, y: 45 },
 			0,
@@ -171,6 +172,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 			equipmentA,
 			9,
 			organizationsA,
+			targetA.relationships,
 			bundle,
 			anchor,
 			0,
@@ -181,6 +183,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 			equipmentB,
 			9,
 			organizationsB,
+			targetB.relationships,
 			bundle,
 			anchor,
 			0,
@@ -226,6 +229,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 			target.portEquipment,
 			target.getPatchSequence(),
 			target.organizations,
+			target.relationships,
 			bundle,
 			anchor,
 			0,
@@ -252,6 +256,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 			equipment,
 			23,
 			organizations,
+			target.relationships,
 			bundle,
 			{ x: -90, y: 25 },
 			0,
@@ -266,6 +271,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 				target.map,
 				equipment,
 				organizations,
+				target.relationships,
 			),
 		).toBe(true);
 		expect(
@@ -274,6 +280,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 				target.map.clone(),
 				equipment,
 				organizations,
+				target.relationships,
 			),
 		).toBe(false);
 		expect(
@@ -282,6 +289,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 				target.map,
 				Object.freeze({ ...equipment }),
 				organizations,
+				target.relationships,
 			),
 		).toBe(false);
 		expect(
@@ -290,6 +298,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 				target.map,
 				equipment,
 				Object.freeze({ ...organizations }),
+				target.relationships,
 			),
 		).toBe(false);
 
@@ -301,6 +310,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 				target.map,
 				equipment,
 				organizations,
+				target.relationships,
 			),
 		).toBe(false);
 
@@ -314,6 +324,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 			equipment,
 			-1,
 			organizations,
+			target.relationships,
 			bundle,
 			{ x: 0, y: 0 },
 			0,
@@ -333,6 +344,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 			target.portEquipment,
 			target.getPatchSequence(),
 			target.organizations,
+			target.relationships,
 			bundle,
 			anchor,
 			1,
@@ -396,6 +408,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 					equipment,
 					0,
 					organizations,
+					target.relationships,
 					malformed,
 					{ x: 0, y: 0 },
 					0,
@@ -429,6 +442,7 @@ function capturedOrganizationBundle(): StaticFabOrganizationBundle {
 		equipment,
 		source.getPatchSequence(),
 		organizations,
+		source.relationships,
 		[10],
 		"EFFECTIVE",
 	);

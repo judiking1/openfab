@@ -79,6 +79,7 @@ export function prepareStaticFabOrganizationBundlePlacement(
 		source.portEquipment,
 		source.getPatchSequence(),
 		source.organizations,
+		source.relationships,
 		preparedBundle.bundle,
 		request.anchor,
 		request.quarterTurns,
@@ -101,7 +102,8 @@ export function prepareStaticFabOrganizationBundlePlacement(
 	if (
 		plan.baseRevision !== request.snapshot.revision ||
 		plan.basePatchSequence !== request.snapshot.sequence ||
-		plan.nextOrganizationIdBefore !== source.organizations.nextOrganizationId
+		plan.nextOrganizationIdBefore !== source.organizations.nextOrganizationId ||
+		plan.nextRelationshipIdBefore !== source.relationships.nextRelationshipId
 	) {
 		return rejected(
 			compactRejectedPlan(plan, "조직 청사진 배치 세대가 변경되었습니다", []),
@@ -133,11 +135,13 @@ export function prepareStaticFabOrganizationBundlePlacement(
 	let prospectiveNextPortId: number;
 	let prospectiveNextEquipmentGroupId: number;
 	let prospectiveNextOrganizationId: number;
+	let prospectiveNextRelationshipId: number;
 	try {
 		const {
 			map: prospectiveMap,
 			portEquipment: prospectiveEquipment,
 			organizations: prospectiveOrganizations,
+			relationships: prospectiveRelationships,
 		} = planning.prospectiveState;
 		if (prospectiveEquipment.ports.length > 0) {
 			const prospectiveLayout = compilePhysicalRail(prospectiveMap);
@@ -154,12 +158,13 @@ export function prepareStaticFabOrganizationBundlePlacement(
 			prospectiveMap,
 			prospectiveEquipment,
 			prospectiveOrganizations,
-			source.relationships,
+			prospectiveRelationships,
 		);
 		prospectiveNextAdvancedSwitchId = prospectiveMap.getAdvancedSwitchIdCursor();
 		prospectiveNextPortId = prospectiveEquipment.nextPortId;
 		prospectiveNextEquipmentGroupId = prospectiveEquipment.nextEquipmentGroupId;
 		prospectiveNextOrganizationId = prospectiveOrganizations.nextOrganizationId;
+		prospectiveNextRelationshipId = prospectiveRelationships.nextRelationshipId;
 	} catch (error) {
 		const reason = caughtMessage(
 			error,
@@ -211,6 +216,7 @@ export function prepareStaticFabOrganizationBundlePlacement(
 				sourceNextPortId: request.snapshot.portEquipment.nextPortId,
 				sourceNextEquipmentGroupId: request.snapshot.portEquipment.nextEquipmentGroupId,
 				sourceNextOrganizationId: source.organizations.nextOrganizationId,
+				sourceNextRelationshipId: source.relationships.nextRelationshipId,
 				bundleFingerprint,
 				anchor: Object.freeze({ x: request.anchor.x, y: request.anchor.y }),
 				quarterTurns: request.quarterTurns,
@@ -220,6 +226,7 @@ export function prepareStaticFabOrganizationBundlePlacement(
 				prospectiveNextPortId,
 				prospectiveNextEquipmentGroupId,
 				prospectiveNextOrganizationId,
+				prospectiveNextRelationshipId,
 			}),
 			valid: true,
 			failureCode: null,
@@ -292,6 +299,8 @@ function compactRejectedPlan(
 		portMutations: Object.freeze([]),
 		equipmentGroupMutations: Object.freeze([]),
 		organizationMutations: Object.freeze([]),
+		relationshipMutations: Object.freeze([]),
+		nextRelationshipIdAfter: plan.nextRelationshipIdBefore,
 		nextOrganizationIdAfter: plan.nextOrganizationIdBefore,
 		valid: false,
 		reason,

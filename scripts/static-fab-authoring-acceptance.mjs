@@ -8,7 +8,10 @@ import { chromium } from "playwright-core";
 import { verifyWrappedTextLineCount, wrappedTextLineCount } from "./browser-text-layout.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const artifactRoot = path.join(root, "artifacts", "static-fab-authoring");
+const artifactRoot = path.resolve(
+	process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR ??
+		path.join(root, "artifacts", "static-fab-authoring"),
+);
 const port = Number(process.env.OPENFAB_AUTHORING_PORT ?? 5202 + (process.pid % 997));
 const host = "127.0.0.1";
 const baseUrl = `http://${host}:${port}`;

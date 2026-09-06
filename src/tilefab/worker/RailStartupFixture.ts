@@ -24,6 +24,7 @@ import type { PortEquipmentMutationPlan } from "../core/PortEquipmentPlan";
 import { planClosedRailPathComponent, planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import { type Direction, moveCell } from "../core/railShape";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
@@ -153,6 +154,7 @@ export function createSemanticBayDeleteScaleProbeDocument(fillerCellCount: numbe
 		sourceEquipment,
 		0,
 		emptyStaticFabOrganizationState(),
+		emptyStaticFabAssemblyRelationshipState(),
 		artifact.organizationBundle,
 		{ x: 0, y: 0 },
 		0,
@@ -517,6 +519,7 @@ export function createBayFlowEditScaleProbeDocument(fillerCellCount: number): Ra
 		emptyPortEquipmentState(),
 		0,
 		emptyStaticFabOrganizationState(),
+		emptyStaticFabAssemblyRelationshipState(),
 		artifact.organizationBundle,
 		{ x: 0, y: 0 },
 		0,

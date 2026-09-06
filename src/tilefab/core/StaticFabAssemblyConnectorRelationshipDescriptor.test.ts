@@ -9,9 +9,11 @@ import {
 	createRailSnapshotFromOpenFabProject,
 } from "../project/OpenFabProject";
 import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/OpenFabProjectCodec";
-import { captureRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
+import { captureRailMirrorSnapshot, checksumRailPatchResult } from "../worker/RailMirrorChecksum";
 import { RailPatchMirror } from "../worker/RailPatchMirror";
 import { hydrateStaticFabAssemblyRelationshipSnapshot } from "../worker/StaticFabAssemblyRelationshipSoA";
+import { staticFabOrganizationBundlePlacementPreparedShapeError } from "../worker/StaticFabOrganizationBundlePlacementResponseValidator";
+import { prepareStaticFabOrganizationBundlePlacement } from "../worker/StaticFabOrganizationBundlePlacementRuntime";
 import { emptyPortEquipmentState } from "./EquipmentGroup";
 import { planRailPath } from "./paint";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
@@ -29,6 +31,7 @@ import {
 import { describeStaticFabAssemblyConnectorRelationship } from "./StaticFabAssemblyConnectorRelationshipDescriptor";
 import {
 	copyStaticFabAssemblyRelationshipState,
+	emptyStaticFabAssemblyRelationshipState,
 	remapStaticFabAssemblyRelationshipRecord,
 	type StaticFabAssemblyRelationshipRecordV1,
 	type StaticFabAssemblyRelationshipStateV1,
@@ -47,8 +50,18 @@ import {
 	staticFabOrganizationRailStateError,
 } from "./StaticFabOrganization";
 import {
+	captureStaticFabOrganizationBundle,
+	prepareStaticFabOrganizationBundle,
+	staticFabOrganizationBundleError,
+	transformStaticFabOrganizationBundle,
+	validateFrozenStaticFabOrganizationBundle,
+} from "./StaticFabOrganizationBundle";
+import {
+	adoptStaticFabOrganizationBundlePlacementWorkerPlan,
+	issueStaticFabOrganizationBundlePlacementPermit,
 	planStaticFabOrganizationBundlePlacementWithProspectiveState,
 	type StaticFabOrganizationBundlePlacementProspectiveState,
+	staticFabOrganizationBundleFingerprint,
 } from "./StaticFabOrganizationBundlePlacement";
 import { type Cell, encodeRailCell, TileMap } from "./TileMap";
 
@@ -167,7 +180,11 @@ describe("explicit Connector relationship descriptors", () => {
 		]);
 		const bays = placed.organizations.records.filter((record) => record.kind === "BAY");
 		const first = firstValidConnector(placed, required(bays[0]).id, required(bays[1]).id);
-		const source = { ...required(first.prospectiveState), patchSequence: placed.patchSequence + 1 };
+		const source = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
+			...required(first.prospectiveState),
+			patchSequence: placed.patchSequence + 1,
+		};
 		const pair = reversed
 			? [required(bays[2]).id, required(bays[0]).id]
 			: [required(bays[0]).id, required(bays[2]).id];
@@ -195,14 +212,22 @@ describe("explicit Connector relationship descriptors", () => {
 			left,
 			1,
 		).record;
-		const middle = { ...required(left.prospectiveState), patchSequence: placed.patchSequence + 1 };
+		const middle = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
+			...required(left.prospectiveState),
+			patchSequence: placed.patchSequence + 1,
+		};
 		const right = firstValidConnector(middle, required(bays[2]).id, required(bays[3]).id);
 		const rightRecord = describeStaticFabAssemblyConnectorRelationship(
 			middle.organizations,
 			right,
 			2,
 		).record;
-		const source = { ...required(right.prospectiveState), patchSequence: middle.patchSequence + 1 };
+		const source = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
+			...required(right.prospectiveState),
+			patchSequence: middle.patchSequence + 1,
+		};
 		const banks = [leftRecord.parentOrganizationId, rightRecord.parentOrganizationId];
 		const joined = firstValidConnector(source, required(banks[0]), required(banks[1]));
 		const joinedRecord = describeStaticFabAssemblyConnectorRelationship(
@@ -219,7 +244,11 @@ describe("explicit Connector relationship descriptors", () => {
 				{ nextRelationshipId: 4, records },
 			),
 		).toBeNull();
-		const fab = { ...required(joined.prospectiveState), patchSequence: source.patchSequence + 1 };
+		const fab = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
+			...required(joined.prospectiveState),
+			patchSequence: source.patchSequence + 1,
+		};
 		const loop = firstValidConnector(fab, required(banks[0]), required(banks[1]));
 		const loopRecord = describeStaticFabAssemblyConnectorRelationship(
 			fab.organizations,
@@ -242,6 +271,7 @@ describe("explicit Connector relationship descriptors", () => {
 			records: [...records, loopRecord],
 		});
 		await verifyNestedRelationshipRemapping(final, canonical);
+		await verifyNestedPortableRelationships(final, canonical);
 		verifyRelationshipRemapFailures(leftRecord, final.organizations);
 		const proof = await validateStaticFabAssemblyRelationshipSourceActivation(
 			final.map,
@@ -399,6 +429,7 @@ function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }
 		defaultProductionBayModuleCatalogRequest("single-production-bay"),
 	);
 	let fixture: FixtureState = {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		map: new TileMap(),
 		portEquipment: emptyPortEquipmentState(),
 		organizations: emptyStaticFabOrganizationState(),
@@ -410,6 +441,7 @@ function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }
 			fixture.portEquipment,
 			fixture.patchSequence,
 			fixture.organizations,
+			fixture.relationships,
 			artifact.organizationBundle,
 			anchor,
 			0,
@@ -491,7 +523,7 @@ function required<T>(value: T | null | undefined): T {
 }
 
 async function verifyNestedRelationshipRemapping(
-	source: StaticFabOrganizationBundlePlacementProspectiveState,
+	source: Omit<StaticFabOrganizationBundlePlacementProspectiveState, "relationships">,
 	relationships: StaticFabAssemblyRelationshipStateV1,
 ): Promise<void> {
 	const before = JSON.stringify({ organizations: source.organizations, relationships });
@@ -704,4 +736,279 @@ function verifyRelationshipRemapFailures(
 		remapStaticFabAssemblyRelationshipRecord(record, { ...input, organizationIds: new Map() }),
 	).toThrow();
 	expect(JSON.stringify(record)).toBe(before);
+}
+
+async function verifyNestedPortableRelationships(
+	source: Omit<StaticFabOrganizationBundlePlacementProspectiveState, "relationships">,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+): Promise<void> {
+	const before = JSON.stringify({ organizations: source.organizations, relationships });
+	const fabId = required(
+		relationships.records.find((record) => record.purpose === "FAB_LOOP"),
+	).parentOrganizationId;
+	const direct = captureStaticFabOrganizationBundle(
+		source.map,
+		source.portEquipment,
+		0,
+		source.organizations,
+		relationships,
+		[fabId],
+		"DIRECT",
+	);
+	expect(direct).toMatchObject({ valid: false, code: "INCOMPLETE_RELATIONSHIP" });
+	expect(direct.reason).toContain("EFFECTIVE");
+	const captured = captureStaticFabOrganizationBundle(
+		source.map,
+		source.portEquipment,
+		0,
+		source.organizations,
+		relationships,
+		[fabId],
+		"EFFECTIVE",
+	);
+	expect(captured.valid, captured.reason).toBe(true);
+	if (!captured.valid) return;
+	const bundle = captured.bundle;
+	verifyNestedPortablePlacement(source, relationships, bundle);
+	const extreme = planStaticFabOrganizationBundlePlacementWithProspectiveState(
+		new TileMap(),
+		emptyPortEquipmentState(),
+		0,
+		emptyStaticFabOrganizationState(),
+		emptyStaticFabAssemblyRelationshipState(),
+		bundle,
+		{ x: -0x8000_0000, y: -0x8000_0000 },
+		0,
+		null,
+	);
+	expect(extreme.plan.valid, extreme.plan.reason).toBe(true);
+	const extremeState = required(extreme.prospectiveState);
+	const extremeCapture = captureStaticFabOrganizationBundle(
+		extremeState.map,
+		extremeState.portEquipment,
+		0,
+		extremeState.organizations,
+		extremeState.relationships,
+		bundle.rootOrganizationIndices.map((index) => index + 1),
+		"EFFECTIVE",
+	);
+	expect(extremeCapture.valid, extremeCapture.reason).toBe(true);
+	if (extremeCapture.valid) expect(extremeCapture.bundle).toEqual(bundle);
+
+	expect(bundle.version).toBe(2);
+	expect(bundle.relationships.records.map((record) => record.id)).toEqual([1, 2, 3, 4]);
+	expect(bundle.relationships.nextRelationshipId).toBe(5);
+	const prepared = prepareStaticFabOrganizationBundle(JSON.parse(JSON.stringify(bundle)));
+	expect(prepared.valid, prepared.reason).toBe(true);
+	if (!prepared.valid) return;
+	expect(prepared.bundle).toEqual(bundle);
+	const withoutRelations = { ...bundle, relationships: { nextRelationshipId: 1, records: [] } };
+	expect(staticFabOrganizationBundleFingerprint(withoutRelations)).not.toBe(
+		staticFabOrganizationBundleFingerprint(bundle),
+	);
+	for (const rotation of [0, 1, 2, 3] as const) {
+		const transformed = transformStaticFabOrganizationBundle(bundle, rotation);
+		expect(staticFabOrganizationBundleError(transformed)).toBeNull();
+		expect(
+			transformStaticFabOrganizationBundle(transformed, ((4 - rotation) % 4) as 0 | 1 | 2 | 3),
+		).toEqual(bundle);
+		const clone = structuredClone(transformed);
+		freezePortableFixture(clone);
+		let checkpoints = 0;
+		await validateFrozenStaticFabOrganizationBundle(
+			clone,
+			async () => {
+				checkpoints++;
+			},
+			32,
+		);
+		expect(checkpoints).toBeGreaterThan(50);
+	}
+	const bay = required(source.organizations.records.find((record) => record.kind === "BAY"));
+	const childOnly = captureStaticFabOrganizationBundle(
+		source.map,
+		source.portEquipment,
+		0,
+		source.organizations,
+		relationships,
+		[bay.id],
+		"EFFECTIVE",
+	);
+	expect(childOnly.valid, childOnly.reason).toBe(true);
+	if (!childOnly.valid) return;
+	expect(childOnly.bundle.relationships).toEqual({ nextRelationshipId: 1, records: [] });
+	const childRoot = required(
+		childOnly.bundle.organizations[required(childOnly.bundle.rootOrganizationIndices[0])],
+	);
+	expect(childRoot.parentOrganizationIndices).toEqual([]);
+	const missingParticipant = structuredClone(bundle);
+	const first = required(missingParticipant.relationships.records[0]);
+	(first.participantOrganizationIds as unknown as number[])[0] = bundle.organizations.length + 1;
+	expect(staticFabOrganizationBundleError(missingParticipant)).toContain("포함되지 않은 조직");
+	freezePortableFixture(missingParticipant);
+	await expect(
+		validateFrozenStaticFabOrganizationBundle(missingParticipant, async () => {}, 32),
+	).rejects.toThrow("포함되지 않은 조직");
+	expect(JSON.stringify({ organizations: source.organizations, relationships })).toBe(before);
+}
+
+function freezePortableFixture(value: unknown): void {
+	if (!value || typeof value !== "object") return;
+	for (const child of Object.values(value)) freezePortableFixture(child);
+	Object.freeze(value);
+}
+function verifyNestedPortablePlacement(
+	source: Omit<StaticFabOrganizationBundlePlacementProspectiveState, "relationships">,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+	bundle: import("./StaticFabOrganizationBundle").StaticFabOrganizationBundle,
+): void {
+	for (const quarterTurns of [0, 1, 2, 3] as const) {
+		const document = RailDocument.fromLoadedMap(
+			source.map.clone(),
+			0,
+			source.portEquipment,
+			source.organizations,
+			undefined,
+			relationships,
+		);
+		const snapshot = () =>
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot;
+		const mirror = new RailPatchMirror();
+		mirror.sync(snapshot());
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		const originalRelationships = document.relationships;
+		for (let instance = 0; instance < (quarterTurns === 0 ? 2 : 1); instance++) {
+			const anchor = { x: 2_000 + instance * 1_000, y: 2_000 };
+			const current = snapshot();
+			const permit = issueStaticFabOrganizationBundlePlacementPermit(
+				document.map,
+				document.portEquipment,
+				document.getPatchSequence(),
+				document.organizations,
+				document.relationships,
+				bundle,
+				anchor,
+				quarterTurns,
+				current.checksum,
+			);
+			const response = structuredClone(
+				prepareStaticFabOrganizationBundlePlacement({
+					type: "PREPARE_STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT",
+					requestId: permit.ticketId,
+					ticketId: permit.ticketId,
+					snapshot: current,
+					bundle,
+					expectedBundleFingerprint: staticFabOrganizationBundleFingerprint(bundle),
+					anchor,
+					quarterTurns,
+				}),
+			);
+			expect(response.valid, response.reason).toBe(true);
+			expect(staticFabOrganizationBundlePlacementPreparedShapeError(response)).toBeNull();
+			const plan = required(response.plan),
+				ticket = required(response.ticket);
+			expect(plan.relationshipMutations).toHaveLength(4);
+			expect(plan.nextRelationshipIdBefore).toBe(5 + instance * 4);
+			expect(plan.nextRelationshipIdAfter).toBe(9 + instance * 4);
+			expect(plan.relationshipMutations.map((mutation) => mutation.id)).toEqual(
+				Array.from({ length: 4 }, (_, index) => plan.nextRelationshipIdBefore + index),
+			);
+			const borrowed = structuredClone(response);
+			const first = required(required(borrowed.plan).relationshipMutations[0]).after as unknown as {
+				parentOrganizationId: number;
+			};
+			first.parentOrganizationId = required(originalRelationships.records[0]).parentOrganizationId;
+			expect(staticFabOrganizationBundlePlacementPreparedShapeError(borrowed)).toContain(
+				"external organizations",
+			);
+			const cursor = {
+				...response,
+				ticket: {
+					...ticket,
+					prospectiveNextRelationshipId: ticket.prospectiveNextRelationshipId + 1,
+				},
+			};
+			expect(staticFabOrganizationBundlePlacementPreparedShapeError(cursor)).toContain("bind");
+			const expectedChecksum = checksumRailPatchResult(current.checksum, {
+				changes: plan.mutations,
+				switchChanges: plan.switchMutations,
+				portChanges: plan.portMutations,
+				equipmentGroupChanges: plan.equipmentGroupMutations,
+				organizationChanges: plan.organizationMutations,
+				organizationNextIdBefore: plan.nextOrganizationIdBefore,
+				organizationNextIdAfter: plan.nextOrganizationIdAfter,
+				relationshipChanges: plan.relationshipMutations,
+				relationshipNextIdBefore: plan.nextRelationshipIdBefore,
+				relationshipNextIdAfter: plan.nextRelationshipIdAfter,
+			});
+			expect(ticket.prospectiveChecksum).toBe(expectedChecksum);
+			const adopted = required(
+				adoptStaticFabOrganizationBundlePlacementWorkerPlan(
+					permit,
+					plan,
+					ticket,
+					expectedChecksum,
+					document.map,
+					document.portEquipment,
+					document.organizations,
+					document.relationships,
+				),
+			);
+			expect(
+				adoptStaticFabOrganizationBundlePlacementWorkerPlan(
+					permit,
+					plan,
+					ticket,
+					expectedChecksum,
+					document.map,
+					document.portEquipment,
+					document.organizations,
+					document.relationships,
+				),
+			).toBeNull();
+			const beforeCount = document.relationships.records.length;
+			expect(
+				document.commitStaticFabOrganizationBundle(adopted),
+				document.getLastCommandError() ?? "",
+			).toBe(true);
+			expect(document.relationships.records.slice(0, 4)).toEqual(originalRelationships.records);
+			const installed = document.relationships;
+			const assertMirror = (count: number) => {
+				const event = required(events.at(-1));
+				expect(event.relationshipChanges).toHaveLength(4);
+				const state = mirror.applyPatch(event);
+				expect(state.assemblyRelationships).toBe(count);
+				expect(state.assemblyRelationshipNextId).toBe(plan.nextRelationshipIdAfter);
+				expect(state.checksum).toBe(snapshot().checksum);
+			};
+			assertMirror(beforeCount + 4);
+			expect(document.undo()).toBe(true);
+			expect(document.relationships.records).toEqual(installed.records.slice(0, beforeCount));
+			assertMirror(beforeCount);
+			expect(document.redo()).toBe(true);
+			expect(document.relationships).toEqual(installed);
+			assertMirror(beforeCount + 4);
+		}
+		const project = captureOpenFabProject(document, {
+			manifest: createOpenFabProjectManifest(
+				"placed-relationships",
+				"Placed nested assembly",
+				"2026-09-07T00:00:00.000Z",
+			),
+		});
+		const restored = createRailSnapshotFromOpenFabProject(
+			parseOpenFabProjectJson(serializeOpenFabProject(project)).project,
+		);
+		expect(restored.checksum).toBe(snapshot().checksum);
+		expect(hydrateStaticFabAssemblyRelationshipSnapshot(restored.relationships)).toEqual(
+			document.relationships,
+		);
+	}
 }

@@ -1,0 +1,83 @@
+{
+	"aggregateEdgeCount": 5,
+	"exportedAt": "2026-09-07T00:00:00.000Z",
+	"fingerprint": "ofubl1-741951fc:ceb23dd6",
+	"kind": "OPENFAB_USER_BLUEPRINT_LIBRARY",
+	"recordCount": 1,
+	"records": [
+		{
+			"blueprint": {
+				"bundle": {
+					"advancedSwitches": [],
+					"captureMode": "EFFECTIVE",
+					"equipmentGroups": [{ "kind": "OHB", "portIndices": [0], "template": "SINGLE" }],
+					"organizations": [
+						{
+							"kind": "AREA",
+							"membership": {
+								"advancedSwitchIndices": [],
+								"equipmentGroupIndices": [0],
+								"railEdgeIndices": [0, 1, 2, 3, 4]
+							},
+							"name": "Portable Area",
+							"parentOrganizationIndices": [],
+							"properties": { "color": "CYAN", "description": "Reusable area" }
+						},
+						{
+							"kind": "BAY",
+							"membership": {
+								"advancedSwitchIndices": [],
+								"equipmentGroupIndices": [0],
+								"railEdgeIndices": [0, 1, 2, 3, 4]
+							},
+							"name": "Portable Bay",
+							"parentOrganizationIndices": [0],
+							"properties": { "color": "AMBER", "description": "Reusable bay" }
+						}
+					],
+					"ports": [
+						{
+							"direction": "WITH_TRAVEL",
+							"equipmentGroupIndex": 0,
+							"lateralOffsetMillimeters": 700,
+							"portType": "OHB",
+							"route": { "from": 8, "kind": "CARDINAL_CELL", "to": 2, "x": 1, "z": 0 },
+							"side": "LEFT",
+							"stationMillimeters": 500
+						}
+					],
+					"railEdges": [
+						{ "from": { "x": 0, "y": 0 }, "to": { "x": 1, "y": 0 } },
+						{ "from": { "x": 1, "y": 0 }, "to": { "x": 2, "y": 0 } },
+						{ "from": { "x": 2, "y": 0 }, "to": { "x": 3, "y": 0 } },
+						{ "from": { "x": 3, "y": 0 }, "to": { "x": 4, "y": 0 } },
+						{ "from": { "x": 4, "y": 0 }, "to": { "x": 5, "y": 0 } }
+					],
+					"rootOrganizationIndices": [0],
+					"sourceHeightMeters": 0,
+					"sourceModuleCount": 1,
+					"sourceWidthMeters": 5,
+					"version": 1
+				},
+				"createdAt": "2026-08-02T00:00:00.000Z",
+				"edges": [[0, 0, 1, 0], [1, 0, 2, 0], [2, 0, 3, 0], [3, 0, 4, 0], [4, 0, 5, 0]],
+				"favorite": false,
+				"folder": "",
+				"heightMeters": 0,
+				"id": "static-fab-organization-portable",
+				"kind": "STATIC_FAB_ORGANIZATION",
+				"name": "Portable organization FAB",
+				"sourceModuleCount": 1,
+				"updatedAt": "2026-08-02T00:00:00.000Z",
+				"widthMeters": 5
+			},
+			"createdAt": "2026-08-02T00:00:00.000Z",
+			"folderPath": [],
+			"id": "library-static-fab-organization",
+			"quickSlot": null,
+			"schemaVersion": 1,
+			"updatedAt": "2026-08-02T00:00:00.000Z"
+		}
+	],
+	"schemaVersion": 1
+}

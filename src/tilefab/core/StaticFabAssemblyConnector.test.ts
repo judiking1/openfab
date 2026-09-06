@@ -18,6 +18,7 @@ import {
 	staticFabAssemblyConnectorSelectionBounds,
 	staticFabAssemblyInterbayConnectorHierarchyEligibility,
 } from "./StaticFabAssemblyConnector";
+import { emptyStaticFabAssemblyRelationshipState } from "./StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
@@ -136,12 +137,14 @@ describe("StaticFabAssemblyConnector", () => {
 		const left = firstValidConnector(placed, bays[0]?.id ?? -1, bays[1]?.id ?? -1);
 		if (!left.prospectiveState) throw new Error(left.plan.reason);
 		const afterLeft: FixtureState = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...left.prospectiveState,
 			patchSequence: placed.patchSequence + 1,
 		};
 		const right = firstValidConnector(afterLeft, bays[2]?.id ?? -1, bays[3]?.id ?? -1);
 		if (!right.prospectiveState) throw new Error(right.plan.reason);
 		const detachedBanks: FixtureState = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...right.prospectiveState,
 			patchSequence: afterLeft.patchSequence + 1,
 		};
@@ -195,6 +198,7 @@ describe("StaticFabAssemblyConnector", () => {
 		});
 
 		const connectedFab: FixtureState = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...prospective,
 			patchSequence: detachedBanks.patchSequence + 1,
 		};
@@ -410,6 +414,7 @@ describe("StaticFabAssemblyConnector", () => {
 		const first = firstValidConnector(fixture, initialBays[0]?.id ?? -1, initialBays[1]?.id ?? -1);
 		if (!first.prospectiveState) throw new Error(first.plan.reason);
 		const afterFirst: FixtureState = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...first.prospectiveState,
 			patchSequence: fixture.patchSequence + 1,
 		};
@@ -457,6 +462,7 @@ describe("StaticFabAssemblyConnector", () => {
 		const first = firstValidConnector(fixture, bays[0]?.id ?? -1, bays[1]?.id ?? -1);
 		if (!first.prospectiveState) throw new Error(first.plan.reason);
 		const connected: FixtureState = {
+			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...first.prospectiveState,
 			patchSequence: fixture.patchSequence + 1,
 		};
@@ -957,6 +963,7 @@ function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }
 		defaultProductionBayModuleCatalogRequest("single-production-bay"),
 	);
 	let fixture: FixtureState = {
+		relationships: emptyStaticFabAssemblyRelationshipState(),
 		map: new TileMap(),
 		portEquipment: emptyPortEquipmentState(),
 		organizations: emptyStaticFabOrganizationState(),
@@ -968,6 +975,7 @@ function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }
 			fixture.portEquipment,
 			fixture.patchSequence,
 			fixture.organizations,
+			fixture.relationships,
 			artifact.organizationBundle,
 			anchor,
 			0,
