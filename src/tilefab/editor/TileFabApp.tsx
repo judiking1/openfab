@@ -1100,6 +1100,7 @@ import "./TileFabApp.css";
 import { EquipmentAuthoringWorkspace } from "./EquipmentAuthoringWorkspace";
 import { useEquipmentWorkspaceFraming } from "./useEquipmentWorkspaceFraming";
 import "./EquipmentAuthoringWorkspace.css";
+import "./EquipmentInspector.css";
 
 const StaticFabInspection3DView = OPENFAB_RELEASE_CAPABILITIES.derived3D
 	? lazy(() => import("./StaticFabInspection3DView"))
@@ -26443,6 +26444,7 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedPortDetails = selectedPortEquipment
 		? resolveExactPortEquipmentSelection(railDocument.portEquipment, selectedPortEquipment)
 		: null;
+	const selectedEquipmentGroup = selectedPortDetails?.equipmentGroup;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: equipment identity changes intentionally trigger focus even though the effect reads the stable button ref.
 	useLayoutEffect(() => {
 		if (!nextPortEquipmentFocusPendingRef.current) return;
@@ -37557,28 +37559,37 @@ export default function TileFabApp(): React.ReactElement {
 					</aside>
 				) : null}
 
-				{selectedPortDetails && portEquipmentInspectorVisible ? (
+				{selectedPortDetails && selectedEquipmentGroup && portEquipmentInspectorVisible ? (
 					<aside
-						className="tilefab-inspector"
-						aria-label={`${selectedPortDetails.equipmentGroup.kind} 포트 속성`}
+						className="tilefab-inspector tilefab-equipment-inspector"
+						aria-label={`${selectedEquipmentGroup.kind} 장비 속성`}
 						data-testid="port-equipment-inspector"
 						data-port-id={selectedPortDetails.port.id}
-						data-equipment-group-id={selectedPortDetails.equipmentGroup.id}
+						data-equipment-group-id={selectedEquipmentGroup.id}
 						data-editable={selectedPortEditableDetails !== null}
 						data-compact-layout={compactInspectorSheetActive ? "bottom-sheet" : "side-panel"}
 						data-compact-obstruction="equipment"
-						data-compact-expanded={
-							compactInspectorSheetActive ? compactInspectorExpanded : true
-						}
+						data-compact-expanded={compactInspectorSheetActive ? compactInspectorExpanded : true}
 						data-compact-snap={
 							compactInspectorSheetActive && !compactInspectorExpanded ? "peek" : "expanded"
 						}
 					>
 						<header>
 							<span>
-								<small>{selectedPortDetails.equipmentGroup.kind} · RAIL-ATTACHED PORT</small>
+								<small>
+									{selectedEquipmentGroup.kind === "OHB"
+										? "OHB · 상부 보관"
+										: selectedEquipmentGroup.kind === "EQ"
+											? "EQ · 공정 장비"
+											: "Stocker · 보관 장비"}
+								</small>
 								<strong>
-									{selectedPortDetails.port.barcode ?? `PORT-${selectedPortDetails.port.id}`}
+									<span className="tilefab-device-id">
+										{selectedEquipmentGroup.kind}-{selectedEquipmentGroup.id}
+									</span>
+									<span className="tilefab-device-ports">
+										Port {selectedEquipmentGroup.portIds.length}개
+									</span>
 								</strong>
 							</span>
 							<div className="tilefab-inspector-header-actions">
@@ -37608,8 +37619,8 @@ export default function TileFabApp(): React.ReactElement {
 									ref={compactInspectorCloseRef}
 									type="button"
 									className="tilefab-inspector-close"
-									aria-label="포트 선택 닫기"
-									title="포트 선택 닫기"
+									aria-label="장비 선택 닫기"
+									title="장비 선택 닫기"
 									onClick={() => {
 										clearPortEquipmentSelection();
 										scheduleRender();
@@ -37625,156 +37636,65 @@ export default function TileFabApp(): React.ReactElement {
 							className="tilefab-contextual-inspector-content"
 							hidden={compactInspectorSheetActive && !compactInspectorExpanded}
 						>
-						{selectedPortEditableDetails ? null : (
-							<p className="tilefab-inspector-notice" role="status">
-								<AlertTriangle size={15} aria-hidden="true" />
-								무결성 진단 대상입니다. 잘못 연결된 그룹을 수정하기 전까지 편집 명령은
-								비활성화됩니다.
-							</p>
-						)}
-						{viewMode === "2d" ? (
-							<>
-								{completedModuleHandoff ? (
-									<>
-										<span
-											id="tilefab-completed-module-handoff-description"
-											className="tilefab-sr-only"
-										>
-											{completedModuleHandoff.description}
-										</span>
-										<button
-											type="button"
-											className="tilefab-equipment-next-kind tilefab-completed-module-handoff"
-											data-testid="ordinary-completed-module-handoff"
-											data-action={completedModuleHandoff.action}
-											aria-label={completedModuleHandoff.ariaLabel}
-											aria-describedby="tilefab-completed-module-handoff-description"
-											aria-keyshortcuts={editorCommandAriaKeyShortcuts([
-												"selection.connected",
-											])}
-											onClick={selectConnectedAuthoredComponent}
-											onKeyDown={(event) => {
-												if (
-													!editorCommandMatchesKeyboard(
-														"selection.connected",
-														event.nativeEvent,
-														{ context: "selection" },
-													)
-												) {
-													return;
-												}
-												event.preventDefault();
-												event.stopPropagation();
-												selectConnectedAuthoredComponent();
-											}}
-										>
-											<Layers3 size={15} aria-hidden="true" />
-											<span className="tilefab-next-port-handoff-copy">
-												<strong>{completedModuleHandoff.label}</strong>
-												<small>{completedModuleHandoff.instruction}</small>
-											</span>
-											<ChevronRight size={15} aria-hidden="true" />
-										</button>
-									</>
-								) : null}
-								<button
-									type="button"
-									className="tilefab-inspector-primary tilefab-equipment-repeat"
-									data-testid="repeat-port-equipment-authoring"
-									onClick={() =>
-										startEquipmentAuthoringContinuation(
-											equipmentAuthoringContinuation(selectedPortDetails.equipmentGroup),
-											selectedPortEquipment,
-										)
-									}
-								>
-									<Plus size={15} />{" "}
-									{equipmentAuthoringContinuation(selectedPortDetails.equipmentGroup).buttonLabel}
-								</button>
-								<p className="tilefab-equipment-repeat-explanation">
-									{equipmentAuthoringContinuationExplanation(
-										equipmentAuthoringContinuation(selectedPortDetails.equipmentGroup),
-									)}
+							{selectedPortEditableDetails ? null : (
+								<p className="tilefab-inspector-notice" role="status">
+									<AlertTriangle size={15} aria-hidden="true" />
+									무결성 진단 대상입니다. 잘못 연결된 그룹을 수정하기 전까지 편집 명령은 비활성화됩니다.
 								</p>
-								{eqToStkHandoff ? (
-									<>
-										<span
-											id="tilefab-eq-to-stk-handoff-description"
-											className="tilefab-sr-only"
-										>
-											{eqToStkHandoff.description}
-										</span>
-										<button
-											type="button"
-											className="tilefab-equipment-next-kind"
-											data-testid="ordinary-next-stk-handoff"
-											aria-label={eqToStkHandoff.ariaLabel}
-											aria-describedby="tilefab-eq-to-stk-handoff-description"
-											onClick={() => {
-												if (chooseGuidedEquipmentTool("stk", selectedPortEquipment)) {
-													setStatus(ORDINARY_STK_HANDOFF_ENTRY_STATUS);
-												}
-											}}
-										>
-											<Warehouse size={15} aria-hidden="true" />
-											<span className="tilefab-next-port-handoff-copy">
-												<strong>{eqToStkHandoff.label}</strong>
-												<small>{eqToStkHandoff.instruction}</small>
-											</span>
-											<ChevronRight size={15} aria-hidden="true" />
-										</button>
-									</>
-								) : null}
-							</>
-						) : null}
-						<p className="tilefab-equipment-selection-guide">
-							<MousePointer2 size={15} aria-hidden="true" />
-							<span>
-								{viewMode === "2d"
-									? activePortEquipment.equipmentGroups.length > 1
-										? "다른 장비 본체나 Port를 클릭하면 선택이 전환됩니다. 가려졌다면 아래 버튼으로 순환하세요."
-										: "다른 장비를 배치하면 본체·Port 클릭 또는 아래 버튼으로 선택을 전환할 수 있습니다."
-									: "3D에서 다른 장비 본체나 Port를 선택하면 이 정보가 전환됩니다."}
-							</span>
-						</p>
-						{viewMode === "2d" ? (
-							<button
-								ref={nextPortEquipmentButtonRef}
-								type="button"
-								className="tilefab-equipment-next-selection"
-								data-testid="select-next-port-equipment"
-								disabled={activePortEquipment.equipmentGroups.length < 2}
-								onClick={selectNextPortEquipmentGroup}
-							>
-								<ChevronRight size={15} aria-hidden="true" />{" "}
-								{activePortEquipment.equipmentGroups.length > 1
-									? "다음 장비 선택"
-									: "다른 장비 없음"}
-							</button>
-						) : null}
-						{viewMode === "2d" ? (
-							<details
-								key={`${selectedPortDetails.equipmentGroup.kind}-${selectedPortDetails.equipmentGroup.id}-PORT-${selectedPortDetails.port.id}`}
-								className="tilefab-equipment-more-actions"
-								data-testid="port-equipment-more-actions"
-								onToggle={(event) => {
-									if (event.currentTarget.open) return;
-									event.currentTarget
-										.querySelector<HTMLElement>(":scope > summary")
-										?.scrollIntoView({ block: "nearest" });
-								}}
-							>
-								<summary>
-									<span>
-										{selectedPortDetails.equipmentGroup.kind === "OHB"
-											? "이동·복제·철거"
-											: "구성·이동·복제·철거"}
-									</span>
-									<ChevronDown size={15} aria-hidden="true" />
-								</summary>
-								<div className="tilefab-equipment-more-actions-body">
-									{selectedPortDetails.equipmentGroup.kind === "OHB" ? (
+							)}
+							{viewMode === "2d" &&
+							selectedPortEditableDetails &&
+							selectedEquipmentGroup.kind === "STK" &&
+							selectedEquipmentGroup.template === "CUSTOM" ? (
+								<p id="tilefab-stk-membership-note" className="tilefab-inspector-notice">
+									이 사용자 구성은 Port 편집을 지원하지 않습니다. 장비 전체 이동·복제는 사용할 수
+									있습니다.
+								</p>
+							) : null}
+
+							{viewMode === "2d" ? (
+								<>
+									{completedModuleHandoff ? (
 										<>
+											<span
+												id="tilefab-completed-module-handoff-description"
+												className="tilefab-sr-only"
+											>
+												{completedModuleHandoff.description}
+											</span>
+											<button
+												type="button"
+												className="tilefab-equipment-next-kind tilefab-completed-module-handoff"
+												data-testid="ordinary-completed-module-handoff"
+												data-action={completedModuleHandoff.action}
+												aria-label={completedModuleHandoff.ariaLabel}
+												aria-describedby="tilefab-completed-module-handoff-description"
+												aria-keyshortcuts={editorCommandAriaKeyShortcuts(["selection.connected"])}
+												onClick={selectConnectedAuthoredComponent}
+												onKeyDown={(event) => {
+													if (
+														!editorCommandMatchesKeyboard("selection.connected", event.nativeEvent, {
+															context: "selection",
+														})
+													) {
+														return;
+													}
+													event.preventDefault();
+													event.stopPropagation();
+													selectConnectedAuthoredComponent();
+												}}
+											>
+												<Layers3 size={15} aria-hidden="true" />
+												<span className="tilefab-next-port-handoff-copy">
+													<strong>{completedModuleHandoff.label}</strong>
+													<small>{completedModuleHandoff.instruction}</small>
+												</span>
+												<ChevronRight size={15} aria-hidden="true" />
+											</button>
+										</>
+									) : null}
+									<div className="tilefab-device-actions">
+										{selectedEquipmentGroup.kind === "OHB" ? (
 											<button
 												type="button"
 												className="tilefab-inspector-primary"
@@ -37782,8 +37702,108 @@ export default function TileFabApp(): React.ReactElement {
 												disabled={!selectedPortEditableDetails}
 												onClick={() => startSelectedOhbPlacementIntent("move")}
 											>
-												<Move size={15} /> 합법 슬롯으로 이동
+												<Move size={15} /> 위치 이동
 											</button>
+										) : (
+											<>
+												<button
+													type="button"
+													className="tilefab-inspector-primary"
+													data-testid="edit-port-equipment-membership"
+													aria-describedby={
+														selectedPortEditableDetails &&
+														selectedEquipmentGroup.kind === "STK" &&
+														selectedEquipmentGroup.template === "CUSTOM"
+															? "tilefab-stk-membership-note"
+															: undefined
+													}
+													disabled={
+														!selectedPortEditableDetails ||
+														(selectedEquipmentGroup.kind === "STK" &&
+															selectedEquipmentGroup.template === "CUSTOM")
+													}
+													onClick={startSelectedPortEquipmentMembershipEdit}
+												>
+													<MousePointer2 size={15} /> Port 구성 편집
+												</button>
+												<button
+													type="button"
+													className="tilefab-inspector-primary"
+													data-testid="move-port-equipment-group"
+													disabled={!selectedPortEditableDetails}
+													onClick={() => startSelectedPortEquipmentGroupEdit("move")}
+												>
+													<Move size={15} /> 장비 이동
+												</button>
+											</>
+										)}
+									</div>
+									<button
+										type="button"
+										className="tilefab-inspector-primary tilefab-equipment-repeat"
+										data-testid="repeat-port-equipment-authoring"
+										onClick={() =>
+											startEquipmentAuthoringContinuation(
+												equipmentAuthoringContinuation(selectedEquipmentGroup),
+												selectedPortEquipment,
+											)
+										}
+									>
+										<Plus size={15} />{" "}
+										{equipmentAuthoringContinuation(selectedEquipmentGroup).buttonLabel}
+									</button>
+									<p className="tilefab-equipment-repeat-explanation">
+										{equipmentAuthoringContinuationExplanation(
+											equipmentAuthoringContinuation(selectedEquipmentGroup),
+										)}
+									</p>
+									{eqToStkHandoff ? (
+										<>
+											<span id="tilefab-eq-to-stk-handoff-description" className="tilefab-sr-only">
+												{eqToStkHandoff.description}
+											</span>
+											<button
+												type="button"
+												className="tilefab-equipment-next-kind"
+												data-testid="ordinary-next-stk-handoff"
+												aria-label={eqToStkHandoff.ariaLabel}
+												aria-describedby="tilefab-eq-to-stk-handoff-description"
+												onClick={() => {
+													if (chooseGuidedEquipmentTool("stk", selectedPortEquipment)) {
+														setStatus(ORDINARY_STK_HANDOFF_ENTRY_STATUS);
+													}
+												}}
+											>
+												<Warehouse size={15} aria-hidden="true" />
+												<span className="tilefab-next-port-handoff-copy">
+													<strong>{eqToStkHandoff.label}</strong>
+													<small>{eqToStkHandoff.instruction}</small>
+												</span>
+												<ChevronRight size={15} aria-hidden="true" />
+											</button>
+										</>
+									) : null}
+								</>
+							) : null}
+
+							{viewMode === "2d" ? (
+								<details
+									key={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}-PORT-${selectedPortDetails.port.id}`}
+									className="tilefab-equipment-more-actions"
+									data-testid="port-equipment-more-actions"
+									onToggle={(event) => {
+										if (event.currentTarget.open) return;
+										event.currentTarget
+											.querySelector<HTMLElement>(":scope > summary")
+											?.scrollIntoView({ block: "nearest" });
+									}}
+								>
+									<summary>
+										<span>복제·철거</span>
+										<ChevronDown size={15} aria-hidden="true" />
+									</summary>
+									<div className="tilefab-equipment-more-actions-body">
+										{selectedEquipmentGroup.kind === "OHB" ? (
 											<button
 												type="button"
 												className="tilefab-inspector-primary"
@@ -37791,33 +37811,9 @@ export default function TileFabApp(): React.ReactElement {
 												disabled={!selectedPortEditableDetails}
 												onClick={() => startSelectedOhbPlacementIntent("copy")}
 											>
-												<Copy size={15} /> 같은 OHB 포트 복제
+												<Copy size={15} /> OHB 복제
 											</button>
-										</>
-									) : (
-										<>
-											<button
-												type="button"
-												className="tilefab-inspector-primary"
-												data-testid="edit-port-equipment-membership"
-												disabled={
-													!selectedPortEditableDetails ||
-													(selectedPortDetails.equipmentGroup.kind === "STK" &&
-														selectedPortDetails.equipmentGroup.template === "CUSTOM")
-												}
-												onClick={startSelectedPortEquipmentMembershipEdit}
-											>
-												<MousePointer2 size={15} /> 포트 구성 편집
-											</button>
-											<button
-												type="button"
-												className="tilefab-inspector-primary"
-												data-testid="move-port-equipment-group"
-												disabled={!selectedPortEditableDetails}
-												onClick={() => startSelectedPortEquipmentGroupEdit("move")}
-											>
-												<Move size={15} /> 그룹 전체 이동
-											</button>
+										) : (
 											<button
 												type="button"
 												className="tilefab-inspector-primary"
@@ -37825,84 +37821,109 @@ export default function TileFabApp(): React.ReactElement {
 												disabled={!selectedPortEditableDetails}
 												onClick={() => startSelectedPortEquipmentGroupEdit("copy")}
 											>
-												<Copy size={15} /> 그룹 전체 복제
+												<Copy size={15} /> 장비 복제
 											</button>
+										)}
+										<button
+											type="button"
+											className="tilefab-inspector-danger"
+											data-testid="delete-port-equipment"
+											disabled={!selectedPortEditableDetails}
+											onClick={deleteSelected}
+										>
+											<Trash2 size={15} /> 장비와 연결 Port 철거
+										</button>
+									</div>
+								</details>
+							) : null}
+							{selectedEquipmentGroup.kind !== "OHB" ? (
+								<dl className="tilefab-device-facts">
+									{selectedEquipmentGroup.kind === "EQ" ? (
+										<>
+											<div>
+												<dt>Port 간격</dt>
+												<dd>{selectedEquipmentGroup.pitchMillimeters / 1_000} m</dd>
+											</div>
+											<div>
+												<dt>공정 Recipe</dt>
+												<dd>{selectedEquipmentGroup.recipe ?? "-"}</dd>
+											</div>
 										</>
-									)}
-									<button
-										type="button"
-										className="tilefab-inspector-danger"
-										data-testid="delete-port-equipment"
-										disabled={!selectedPortEditableDetails}
-										onClick={deleteSelected}
-									>
-										<Trash2 size={15} /> 장비 그룹과 포트 철거
-									</button>
-								</div>
+									) : null}
+									{selectedEquipmentGroup.kind === "STK" ? (
+										<div>
+											<dt>Port 구성</dt>
+											<dd>{stkAuthoringTemplateLabel(selectedEquipmentGroup.template)}</dd>
+										</div>
+									) : null}
+								</dl>
+							) : null}
+
+							{viewMode === "2d" ? (
+								<button
+									ref={nextPortEquipmentButtonRef}
+									type="button"
+									className="tilefab-equipment-next-selection"
+									data-testid="select-next-port-equipment"
+									title="가려진 장비를 순서대로 선택"
+									disabled={activePortEquipment.equipmentGroups.length < 2}
+									onClick={selectNextPortEquipmentGroup}
+								>
+									<ChevronRight size={15} aria-hidden="true" />{" "}
+									{activePortEquipment.equipmentGroups.length > 1 ? "다음 장비 선택" : "다른 장비 없음"}
+								</button>
+							) : null}
+
+							<details
+								key={selectedPortDetails.port.id}
+								className="tilefab-equipment-more-actions"
+								data-testid="equipment-port-connection-details"
+								onToggle={(event) => {
+									if (!event.currentTarget.open)
+										event.currentTarget
+											.querySelector<HTMLElement>(":scope > summary")
+											?.scrollIntoView({ block: "nearest" });
+								}}
+							>
+								<summary>
+									<span>연결 정보 · Port {selectedPortDetails.port.id}</span>
+									<ChevronDown size={15} aria-hidden="true" />
+								</summary>
+								<dl>
+									{selectedPortDetails.port.barcode ? (
+										<div>
+											<dt>바코드</dt>
+											<dd>{selectedPortDetails.port.barcode}</dd>
+										</div>
+									) : null}
+									<div>
+										<dt>PORT ID</dt>
+										<dd>PORT-{selectedPortDetails.port.id}</dd>
+									</div>
+
+									<div>
+										<dt>ROUTE</dt>
+										<dd title={portRouteDetail(selectedPortDetails.port)}>
+											{portRouteSummary(selectedPortDetails.port)}
+										</dd>
+									</div>
+									<div>
+										<dt>STATION</dt>
+										<dd>{selectedPortDetails.port.stationMillimeters} mm</dd>
+									</div>
+									<div>
+										<dt>SIDE / OFFSET</dt>
+										<dd>
+											{selectedPortDetails.port.side} ·{" "}
+											{selectedPortDetails.port.lateralOffsetMillimeters} mm
+										</dd>
+									</div>
+									<div>
+										<dt>DIRECTION</dt>
+										<dd>{selectedPortDetails.port.direction.replaceAll("_", " ")}</dd>
+									</div>
+								</dl>
 							</details>
-						) : null}
-						<dl>
-							<div>
-								<dt>PORT ID</dt>
-								<dd>PORT-{selectedPortDetails.port.id}</dd>
-							</div>
-							<div>
-								<dt>GROUP</dt>
-								<dd>
-									{selectedPortDetails.equipmentGroup.kind}-{selectedPortDetails.equipmentGroup.id}
-								</dd>
-							</div>
-							<div>
-								<dt>ROUTE</dt>
-								<dd title={portRouteDetail(selectedPortDetails.port)}>
-									{portRouteSummary(selectedPortDetails.port)}
-								</dd>
-							</div>
-							<div>
-								<dt>STATION</dt>
-								<dd>{selectedPortDetails.port.stationMillimeters} mm</dd>
-							</div>
-							<div>
-								<dt>SIDE / OFFSET</dt>
-								<dd>
-									{selectedPortDetails.port.side} ·{" "}
-									{selectedPortDetails.port.lateralOffsetMillimeters} mm
-								</dd>
-							</div>
-							<div>
-								<dt>DIRECTION</dt>
-								<dd>{selectedPortDetails.port.direction.replaceAll("_", " ")}</dd>
-							</div>
-							{selectedPortDetails.equipmentGroup.kind === "EQ" ? (
-								<>
-									<div>
-										<dt>PORTS / PITCH</dt>
-										<dd>
-											{selectedPortDetails.equipmentGroup.portIds.length} ·{" "}
-											{selectedPortDetails.equipmentGroup.pitchMillimeters / 1_000} m
-										</dd>
-									</div>
-									<div>
-										<dt>RECIPE</dt>
-										<dd>{selectedPortDetails.equipmentGroup.recipe ?? "-"}</dd>
-									</div>
-								</>
-							) : null}
-							{selectedPortDetails.equipmentGroup.kind === "STK" ? (
-								<>
-									<div>
-										<dt>PORTS</dt>
-										<dd>{selectedPortDetails.equipmentGroup.portIds.length}</dd>
-									</div>
-									<div>
-										<dt>TEMPLATE</dt>
-										<dd>
-											{stkAuthoringTemplateLabel(selectedPortDetails.equipmentGroup.template)}
-										</dd>
-									</div>
-								</>
-							) : null}
-						</dl>
 						</div>
 					</aside>
 				) : null}

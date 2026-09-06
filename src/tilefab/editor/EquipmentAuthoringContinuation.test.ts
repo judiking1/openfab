@@ -25,7 +25,7 @@ describe("EquipmentAuthoringContinuation", () => {
 		expect(equipmentAuthoringContinuationStatus(continuation)).toBe(
 			"새 EQ 배치 · PITCH 3 m · RECIPE PHOTO",
 		);
-		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("Port를 다시 선택");
+		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("새 Port를 선택");
 	});
 
 	it("preserves a reusable STK template", () => {
@@ -44,7 +44,7 @@ describe("EquipmentAuthoringContinuation", () => {
 			customTemplateFallback: false,
 		});
 		expect(equipmentAuthoringContinuationStatus(continuation)).toBe("새 STK 배치 · FOUR_PORT");
-		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("정확한 복제");
+		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("같은 설정으로");
 	});
 
 	it("falls back explicitly when a legacy CUSTOM STK cannot be recreated", () => {
@@ -64,6 +64,7 @@ describe("EquipmentAuthoringContinuation", () => {
 		expect(equipmentAuthoringContinuationStatus(continuation)).toContain(
 			"CUSTOM은 직접 재현할 수 없어 FLEX",
 		);
+		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("자유 선택(FLEX)");
 	});
 
 	it("uses a direct OHB continuation without hidden settings", () => {
@@ -79,6 +80,6 @@ describe("EquipmentAuthoringContinuation", () => {
 			groupLabel: "OHB-10",
 			buttonLabel: "새 OHB Port 배치",
 		});
-		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("새 합법 슬롯");
+		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("새 Port를 선택");
 	});
 });

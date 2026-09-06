@@ -10,22 +10,20 @@ export interface OrdinaryEqToStkHandoffContext {
 }
 
 export interface OrdinaryEqToStkHandoffPresentation {
-	readonly label: "추천 · STK Port 그룹";
-	readonly instruction: "템플릿 요구 개수 확인 · 금색 ◇ 클릭 → STK 생성";
-	readonly ariaLabel: "추천 다음 작업: STK 배치 막대에서 현재 템플릿의 요구 개수를 확인하고 금색 CENTER 슬롯을 클릭한 뒤 STK 생성을 누릅니다. 같은 설정의 EQ도 계속 배치할 수 있습니다";
+	readonly label: "다음 · Stocker 배치";
+	readonly instruction: "Port 선택 → STK 생성";
+	readonly ariaLabel: "다음 장비: Stocker 배치";
 	readonly description: string;
 }
 
 export const ORDINARY_STK_HANDOFF_ENTRY_STATUS =
-	"STK Port 그룹 · 현재 템플릿 요구 개수 확인 · 포인터는 금색 ◇ CENTER 클릭으로 추가·제거 · 준비되면 STK 생성 · 키보드는 방향키/WASD 후 Enter";
+	"Stocker 배치 · 현재 Port 구성의 요구 개수만큼 선택한 뒤 STK 생성";
 
 const NEXT_STK_HANDOFF = Object.freeze({
-	label: "추천 · STK Port 그룹",
-	instruction: "템플릿 요구 개수 확인 · 금색 ◇ 클릭 → STK 생성",
-	ariaLabel:
-		"추천 다음 작업: STK 배치 막대에서 현재 템플릿의 요구 개수를 확인하고 금색 CENTER 슬롯을 클릭한 뒤 STK 생성을 누릅니다. 같은 설정의 EQ도 계속 배치할 수 있습니다",
-	description:
-		"같은 설정으로 EQ를 더 배치하거나, 추천 다음 작업으로 STK 배치 막대에서 유지된 현재 템플릿과 요구 개수를 확인하고 금색 CENTER 슬롯을 클릭한 뒤 STK 생성을 누릅니다.",
+	label: "다음 · Stocker 배치",
+	instruction: "Port 선택 → STK 생성",
+	ariaLabel: "다음 장비: Stocker 배치",
+	description: "현재 Port 구성과 요구 개수를 확인하고 금색 ◇를 선택한 뒤 STK 생성을 누르세요.",
 }) satisfies OrdinaryEqToStkHandoffPresentation;
 
 /**

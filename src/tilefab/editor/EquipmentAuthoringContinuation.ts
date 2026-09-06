@@ -55,9 +55,9 @@ export function equipmentAuthoringContinuation(
 export function equipmentAuthoringContinuationExplanation(
 	continuation: EquipmentAuthoringContinuation,
 ): string {
-	return continuation.tool === "ohb"
-		? "원본은 유지하고 새 합법 슬롯을 선택합니다. 정확한 복제는 아래 편집 메뉴에 있습니다."
-		: "원본은 유지하고 Port를 다시 선택합니다. 정확한 복제는 아래 편집 메뉴에 있습니다.";
+	return continuation.tool === "stk" && continuation.customTemplateFallback
+		? "새 Stocker는 자유 선택(FLEX)으로 시작합니다."
+		: "같은 설정으로 새 Port를 선택해 배치합니다.";
 }
 
 export function equipmentAuthoringContinuationStatus(

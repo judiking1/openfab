@@ -28200,11 +28200,54 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 	const continuation = page.getByTestId("repeat-port-equipment-authoring");
 	const stkRecommendation = page.getByTestId("ordinary-next-stk-handoff");
 	const continuationExplanation = inspector.locator(".tilefab-equipment-repeat-explanation");
-	const selectionGuide = inspector.locator(".tilefab-equipment-selection-guide");
 	const nextEquipment = page.getByTestId("select-next-port-equipment");
-	const closeInspector = inspector.getByRole("button", { name: "포트 선택 닫기" });
+	const closeInspector = inspector.getByRole("button", { name: "장비 선택 닫기" });
 	const moreActions = page.getByTestId("port-equipment-more-actions");
 	const moreActionsSummary = moreActions.locator(":scope > summary");
+	const expectedDevice = await inspector.evaluate((element) => {
+		const id = Number(element.getAttribute("data-equipment-group-id"));
+		const group = window.__tileFab
+			.getEditorModel()
+			.document.portEquipment.equipmentGroups.find((item) => item.id === id);
+		if (!group) throw new Error("Selected equipment group is not in the authored document.");
+		return { identity: `${group.kind}-${group.id}`, count: group.portIds.length };
+	});
+	assertEqual(
+		(await inspector.locator(".tilefab-device-id").innerText()).trim(),
+		expectedDevice.identity,
+		`ordinary ${portType} device identity ${viewportLabel}`,
+	);
+	assertEqual(
+		(await inspector.locator(".tilefab-device-ports").innerText()).trim(),
+		`Port ${expectedDevice.count}개`,
+		`ordinary ${portType} whole-device Port count ${viewportLabel}`,
+	);
+	const connectionDetails = page.getByTestId("equipment-port-connection-details");
+	assertEqual(
+		await connectionDetails.getAttribute("open"),
+		null,
+		`ordinary ${portType} connection details start collapsed ${viewportLabel}`,
+	);
+	for (const id of ["edit-port-equipment-membership", "move-port-equipment-group"]) {
+		const action = inspector.getByTestId(id);
+		assertEqual(
+			await action.isVisible(),
+			true,
+			`ordinary ${portType} primary ${id} visible before disclosure ${viewportLabel}`,
+		);
+		assertEqual(
+			await moreActions.getByTestId(id).count(),
+			0,
+			`ordinary ${portType} primary ${id} has one owner outside secondary menu ${viewportLabel}`,
+		);
+		await assertLocatorInsideViewport(page, action);
+		await assertLocatorOwnsHitArea(action, `ordinary ${portType} primary ${id} ${viewportLabel}`);
+		assertAtLeast(
+			(await action.boundingBox())?.height ?? 0,
+			44,
+			`ordinary ${portType} primary ${id} height ${viewportLabel}`,
+		);
+	}
 	if (viewportLabel === "390x844") {
 		const activityNavigation = page.locator(".tilefab-tools");
 		const densityToggle = page.getByTestId("editor-tool-description-toggle");
@@ -28266,12 +28309,12 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		nextEquipmentUnavailable,
 		`ordinary ${portType} next selection availability ${viewportLabel}`,
 	);
-	assertIncludes(
-		await selectionGuide.innerText(),
-		nextEquipmentUnavailable ? "다른 장비를 배치하면" : "아래 버튼으로 순환",
-		`ordinary ${portType} next selection guide ${viewportLabel}`,
+	assertEqual(
+		await nextEquipment.getAttribute("title"),
+		"가려진 장비를 순서대로 선택",
+		`ordinary ${portType} next selection guidance ${viewportLabel}`,
 	);
-	for (const expected of ["Port를 다시 선택", "정확한 복제는 아래 편집 메뉴"]) {
+	for (const expected of ["같은 설정으로", "새 Port를 선택해 배치"]) {
 		assertIncludes(
 			await continuationExplanation.innerText(),
 			expected,
@@ -28286,22 +28329,22 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 	if (portType === "EQ") {
 		assertEqual(
 			(await stkRecommendation.locator("strong").innerText()).trim(),
-			"추천 · STK Port 그룹",
+			"다음 · Stocker 배치",
 			`ordinary EQ contextual STK recommendation label ${viewportLabel}`,
 		);
 		assertEqual(
 			(await stkRecommendation.locator("small").innerText()).trim(),
-			"템플릿 요구 개수 확인 · 금색 ◇ 클릭 → STK 생성",
+			"Port 선택 → STK 생성",
 			`ordinary EQ contextual STK recommendation pointer task ${viewportLabel}`,
 		);
 		assertEqual(
 			await stkRecommendation.getAttribute("aria-label"),
-			"추천 다음 작업: STK 배치 막대에서 현재 템플릿의 요구 개수를 확인하고 금색 CENTER 슬롯을 클릭한 뒤 STK 생성을 누릅니다. 같은 설정의 EQ도 계속 배치할 수 있습니다",
+			"다음 장비: Stocker 배치",
 			`ordinary EQ contextual STK recommendation aria ${viewportLabel}`,
 		);
 		assertIncludes(
 			await inspector.locator("#tilefab-eq-to-stk-handoff-description").innerText(),
-			"유지된 현재 템플릿과 요구 개수를 확인하고",
+			"현재 Port 구성과 요구 개수를 확인하고",
 			`ordinary EQ contextual STK recommendation description ${viewportLabel}`,
 		);
 		const hierarchy = await inspector.evaluate((element) => {
@@ -28385,7 +28428,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		await page.getByTestId("rail-canvas").focus();
 	}
 	for (const target of [continuation, nextEquipment, moreActionsSummary, closeInspector]) {
-		if (target === moreActionsSummary && viewportLabel === "390x844") {
+		if (target === moreActionsSummary || target === nextEquipment) {
 			await target.scrollIntoViewIfNeeded();
 		}
 		await assertLocatorInsideViewport(page, target);
@@ -28613,7 +28656,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			true,
 			`ordinary ${portType} collapsed summary remains visible ${responsiveLabel}`,
 		);
-		await assertLocatorInsideViewport(page, continuation);
+		await assertLocatorInsideViewport(page, moreActionsSummary);
 	};
 	if (viewportLabel === "390x844") {
 		await assertCollapsedSummaryFocusVisible("390x844");
@@ -28634,6 +28677,47 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			`ordinary ${portType} collapsed summary retains focus ${viewportLabel}`,
 		);
 	}
+	const detailsBaseline = await readMetrics(page);
+	const connectionSummary = connectionDetails.locator(":scope > summary");
+	await connectionSummary.scrollIntoViewIfNeeded();
+	await connectionSummary.focus();
+	await connectionSummary.press("Enter");
+	assertEqual(
+		await connectionDetails.getAttribute("open"),
+		"",
+		`ordinary ${portType} connection details open ${viewportLabel}`,
+	);
+	assertIncludes(
+		await connectionDetails.innerText(),
+		`PORT-${await inspector.getAttribute("data-port-id")}`,
+		`ordinary ${portType} exact selected Port detail ${viewportLabel}`,
+	);
+	await connectionSummary.scrollIntoViewIfNeeded();
+	await connectionSummary.focus();
+	await connectionSummary.press("Space");
+	assertEqual(
+		await connectionDetails.getAttribute("open"),
+		null,
+		`ordinary ${portType} connection details close ${viewportLabel}`,
+	);
+	await assertLocatorInsideViewport(page, connectionSummary);
+	assertEqual(
+		await connectionSummary.evaluate((element) => element === document.activeElement),
+		true,
+		`ordinary ${portType} connection details keep focus ${viewportLabel}`,
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		detailsBaseline,
+		`ordinary ${portType} connection details remain project-neutral ${viewportLabel}`,
+	);
+	await continuation.focus();
+	await assertLocatorInsideViewport(page, continuation);
+	assertEqual(
+		await continuation.evaluate((element) => document.activeElement === element),
+		true,
+		`ordinary ${portType} keyboard returns from details to placement ${viewportLabel}`,
+	);
 	if (viewportLabel === "390x844") {
 		const equipmentWorld = await selectedPortWorld(page);
 		const railWorld = await ordinaryRailWorldWithoutPort(page);
@@ -28925,7 +29009,7 @@ async function exerciseOrdinaryCompletedModuleHandoff(page, completionBaseline, 
 		await page.emulateMedia({ reducedMotion: "no-preference", forcedColors: "active" });
 		await page
 			.getByTestId("port-equipment-inspector")
-			.getByRole("button", { name: "포트 선택 닫기" })
+			.getByRole("button", { name: "장비 선택 닫기" })
 			.focus();
 		await page.keyboard.press("Tab");
 		assertEqual(
@@ -28969,6 +29053,10 @@ async function exerciseOrdinaryCompletedModuleHandoff(page, completionBaseline, 
 		beforeFocus,
 		`ordinary completed-module appearance/focus model ${viewportLabel}`,
 	);
+	await page.screenshot({
+		path: path.join(artifactRoot, `ordinary-completed-module-inspector-${viewportLabel}.png`),
+		fullPage: true,
+	});
 	if (viewportLabel === "390x844") await handoff.click();
 	else if (viewportLabel === "760x900") await handoff.press("o");
 	else if (viewportLabel === "1024x900") await handoff.press("Space");
@@ -34218,8 +34306,17 @@ async function assertExactOrdinaryStkTemplateCompletion(page, baseline, candidat
 				]),
 			),
 		);
-	assertEqual(inspectorFields.PORTS, String(portCount), `${label} Inspector PORTS`);
-	assertEqual(inspectorFields.TEMPLATE, label, `${label} Inspector TEMPLATE`);
+	assertEqual(
+		(
+			await page
+				.getByTestId("port-equipment-inspector")
+				.locator(".tilefab-device-ports")
+				.innerText()
+		).trim(),
+		`Port ${portCount}개`,
+		`${label} Inspector total Ports`,
+	);
+	assertEqual(inspectorFields["Port 구성"], label, `${label} Inspector Port configuration`);
 	const ownership = await page.evaluate((expectedGroupId) => {
 		const state = window.__tileFab?.getEditorModel().document.portEquipment;
 		const group = state?.equipmentGroups.find((candidate) => candidate.id === expectedGroupId);
@@ -34596,7 +34693,7 @@ async function exerciseCompactInspectorDensityPreference(page, portType, viewpor
 	const world = await selectedPortWorld(page);
 	await page
 		.getByTestId("port-equipment-inspector")
-		.getByRole("button", { name: "포트 선택 닫기" })
+		.getByRole("button", { name: "장비 선택 닫기" })
 		.click();
 	await page.getByTestId("port-equipment-inspector").waitFor({ state: "hidden" });
 	await page.evaluate(
@@ -34643,7 +34740,7 @@ async function exerciseCompactInspectorDensityPreference(page, portType, viewpor
 	);
 	await page
 		.getByTestId("port-equipment-inspector")
-		.getByRole("button", { name: "포트 선택 닫기" })
+		.getByRole("button", { name: "장비 선택 닫기" })
 		.click();
 	await page.getByTestId("port-equipment-inspector").waitFor({ state: "hidden" });
 	assertEqual(
@@ -34934,7 +35031,7 @@ async function exerciseEqToStkRecommendedEntry(
 		);
 		assertEqual(
 			(await recommendation.locator("small").innerText()).trim(),
-			"템플릿 요구 개수 확인 · 금색 ◇ 클릭 → STK 생성",
+			"Port 선택 → STK 생성",
 			`ordinary EQ to STK re-entry promise stays template-neutral ${viewportLabel}`,
 		);
 		assertProjectUnchanged(
@@ -37791,7 +37888,16 @@ async function assertOrdinaryPortTargetZoomPreservesSelection(page, portType, la
 				document.querySelector('[data-testid="rail-canvas"]')?.dataset.guidedPortKeyboardPhase ===
 				"choose-end",
 		);
+		const anchorRow = await canvas.getAttribute("data-guided-port-keyboard-row");
 		await page.keyboard.press("ArrowRight");
+		await page.waitForFunction((anchor) => {
+			const target = document.querySelector('[data-testid="rail-canvas"]');
+			return (
+				target?.getAttribute("data-guided-port-keyboard-row") !== anchor &&
+				target?.getAttribute("data-guided-port-keyboard-phase") === "choose-end" &&
+				Number(target?.getAttribute("data-eq-draft-rows")) >= 2
+			);
+		}, anchorRow);
 	}
 	const selection = () =>
 		canvas.evaluate((element) => ({
@@ -41588,7 +41694,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			const nextStkHandoff = page.getByTestId("ordinary-next-stk-handoff");
 			assertEqual(
 				(await nextStkHandoff.locator("small").innerText()).trim(),
-				"템플릿 요구 개수 확인 · 금색 ◇ 클릭 → STK 생성",
+				"Port 선택 → STK 생성",
 				`${viewport.label} recommended STK handoff previews the complete pointer task`,
 			);
 			const eqAfterStkJourney = await exerciseEqToStkRecommendedEntry(
@@ -41628,6 +41734,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 }
 
 async function exerciseEqClickEndpoints(page, label) {
+	const longRecipe = "V1-EQ-DEMO-".repeat(8);
 	const canvas = page.getByTestId("rail-canvas");
 	await clickActivityCommand(page, "build", "레일 건설");
 	await centerWorld(page, { x: 8.5, y: 12.5 });
@@ -41962,7 +42069,7 @@ async function exerciseEqClickEndpoints(page, label) {
 				);
 				const options = page.locator(".tilefab-equipment-options");
 				await options.locator(":scope > summary").click();
-				await options.getByRole("textbox", { name: "공정 Recipe" }).fill("  V1-EQ-DEMO  ");
+				await options.getByRole("textbox", { name: "공정 Recipe" }).fill(`  ${longRecipe}  `);
 				await options.locator(":scope > summary").click();
 				assertProjectUnchanged(
 					await readMetrics(page),
@@ -42009,10 +42116,39 @@ async function exerciseEqClickEndpoints(page, label) {
 				JSON.stringify(settings),
 				JSON.stringify({
 					pitch: 1000,
-					recipe: mode === "click-keyboard" ? "V1-EQ-DEMO" : "V1-EQ-SEED",
+					recipe: mode === "click-keyboard" ? longRecipe : "V1-EQ-SEED",
 				}),
 				`${label} committed EQ keeps reviewed settings`,
 			);
+			if (mode === "click-keyboard") {
+				const facts = page.locator(".tilefab-device-facts");
+				assertEqual(
+					await facts.getByText(longRecipe, { exact: true }).innerText(),
+					longRecipe,
+					`${label} Inspector shows the complete long Recipe`,
+				);
+				const overflowingRows = await facts.locator(":scope > div").evaluateAll((rows) =>
+					rows
+						.filter((row) => {
+							const bounds = row.getBoundingClientRect();
+							return Array.from(row.children).some((child) => {
+								const value = child.getBoundingClientRect();
+								return (
+									value.top < bounds.top - 0.5 ||
+									value.bottom > bounds.bottom + 0.5 ||
+									value.left < bounds.left - 0.5 ||
+									value.right > bounds.right + 0.5
+								);
+							});
+						})
+						.map((row) => row.textContent),
+				);
+				assertEqual(
+					JSON.stringify(overflowingRows),
+					"[]",
+					`${label} Inspector contains long Recipe within its row`,
+				);
+			}
 			const undone = await undoEquipmentCompletion(page, before, created, `${label} ${mode}`, {
 				allowMonotonicAllocatorFingerprint: true,
 			});

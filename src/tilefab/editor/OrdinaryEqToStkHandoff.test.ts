@@ -19,15 +19,13 @@ const READY_CONTEXT = Object.freeze({
 describe("ordinaryEqToStkHandoff", () => {
 	it("offers one optional STK handoff while repeated EQ placement remains available", () => {
 		expect(ordinaryEqToStkHandoff(READY_CONTEXT)).toEqual({
-			label: "추천 · STK Port 그룹",
-			instruction: "템플릿 요구 개수 확인 · 금색 ◇ 클릭 → STK 생성",
-			ariaLabel:
-				"추천 다음 작업: STK 배치 막대에서 현재 템플릿의 요구 개수를 확인하고 금색 CENTER 슬롯을 클릭한 뒤 STK 생성을 누릅니다. 같은 설정의 EQ도 계속 배치할 수 있습니다",
-			description:
-				"같은 설정으로 EQ를 더 배치하거나, 추천 다음 작업으로 STK 배치 막대에서 유지된 현재 템플릿과 요구 개수를 확인하고 금색 CENTER 슬롯을 클릭한 뒤 STK 생성을 누릅니다.",
+			label: "다음 · Stocker 배치",
+			instruction: "Port 선택 → STK 생성",
+			ariaLabel: "다음 장비: Stocker 배치",
+			description: "현재 Port 구성과 요구 개수를 확인하고 금색 ◇를 선택한 뒤 STK 생성을 누르세요.",
 		});
-		expect(ORDINARY_STK_HANDOFF_ENTRY_STATUS).toContain("현재 템플릿 요구 개수 확인");
-		expect(ORDINARY_STK_HANDOFF_ENTRY_STATUS).toContain("클릭으로 추가·제거");
+		expect(ORDINARY_STK_HANDOFF_ENTRY_STATUS).toContain("현재 Port 구성의 요구 개수");
+		expect(ORDINARY_STK_HANDOFF_ENTRY_STATUS).toContain("선택한 뒤 STK 생성");
 		expect(ORDINARY_STK_HANDOFF_ENTRY_STATUS).toContain("STK 생성");
 	});
 

@@ -2050,13 +2050,6 @@
 		scroll-padding-block: 8px 16px;
 	}
 
-	.tilefab-inspector[data-compact-layout="bottom-sheet"] .tilefab-equipment-repeat {
-		position: sticky;
-		z-index: 2;
-		top: 0;
-		box-shadow: 0 6px 12px rgb(3 7 8 / 34%);
-	}
-
 	.tilefab-inspector[data-compact-layout="bottom-sheet"]
 		.tilefab-contextual-inspector-content[hidden] {
 		display: none;
@@ -9893,16 +9886,6 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	margin-top: 1px;
 }
 
-.tilefab-equipment-selection-guide {
-	display: flex;
-	align-items: flex-start;
-	gap: 7px;
-	margin: 1px 10px 8px;
-	color: #9dacad;
-	font-size: var(--tilefab-font-label);
-	line-height: 1.45;
-}
-
 .tilefab-equipment-repeat-explanation {
 	margin: 0 10px 7px;
 	color: #879799;
@@ -9994,12 +9977,6 @@ button.tilefab-action-hint[data-guided-target="true"] {
 		outline: 3px solid Highlight;
 		outline-offset: 2px;
 	}
-}
-
-.tilefab-equipment-selection-guide svg {
-	flex: 0 0 auto;
-	margin-top: 1px;
-	color: #73cbd1;
 }
 
 .tilefab-equipment-next-selection {
