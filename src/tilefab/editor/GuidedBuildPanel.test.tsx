@@ -490,6 +490,29 @@ describe("GuidedBuildPanel", () => {
 		});
 		const markup = panelMarkup(portEvidence);
 		const activeMarkup = panelMarkup(portEvidence, true);
+		const workspaceMarkup = panelMarkup(
+			portEvidence,
+			true,
+			null,
+			{
+				portType: "EQ",
+				phase: "choose-end",
+			},
+			true,
+			null,
+			undefined,
+			"EQ",
+		);
+		const otherEquipmentMarkup = panelMarkup(
+			portEvidence,
+			true,
+			null,
+			null,
+			true,
+			null,
+			undefined,
+			"OHB",
+		);
 		const keyboardMarkup = panelMarkup(portEvidence, true, null, {
 			portType: "EQ",
 			phase: "choose-end",
@@ -521,6 +544,14 @@ describe("GuidedBuildPanel", () => {
 		expect(activeMarkup).toContain("시작점과 끝점을 차례로 클릭");
 		expect(activeMarkup).toContain("각 위치에서 Enter");
 		expect(activeMarkup).not.toContain("왼쪽의 강조된 EQ");
+		expect(workspaceMarkup).toContain('data-equipment-workspace="true"');
+		expect(workspaceMarkup).toContain("EQ Port 행 배치");
+		expect(workspaceMarkup).toContain('aria-valuetext="전체 미션 4/12 · EQ Port 행 배치"');
+		expect(workspaceMarkup).toContain("이 단계 도움말");
+		expect(workspaceMarkup).not.toContain('data-testid="guided-build-progress-cue"');
+		expect(workspaceMarkup).not.toContain('data-testid="guided-build-keyboard-port-hint"');
+		expect(otherEquipmentMarkup).not.toContain('data-equipment-workspace="true"');
+		expect(otherEquipmentMarkup).toContain('data-testid="guided-build-progress-cue"');
 		const stkActiveMarkup = panelMarkup(
 			{
 				...portEvidence,
@@ -903,6 +934,7 @@ function panelMarkup(
 	primaryTargetManaged = false,
 	primaryTargetInstruction: string | null = null,
 	completionActionGuidedActionId: string | undefined = undefined,
+	equipmentWorkspaceType: ComponentProps<typeof GuidedBuildPanel>["equipmentWorkspaceType"] = null,
 ): string {
 	return renderToStaticMarkup(
 		<GuidedBuildPanel
@@ -910,6 +942,7 @@ function panelMarkup(
 			suggestedActionActive={suggestedActionActive}
 			chapterCheckpointId={chapterCheckpointId}
 			keyboardPort={keyboardPort}
+			equipmentWorkspaceType={equipmentWorkspaceType}
 			primaryTargetManaged={primaryTargetManaged}
 			primaryTargetInstruction={primaryTargetInstruction}
 			completionActionGuidedActionId={completionActionGuidedActionId}

@@ -5059,7 +5059,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 				page,
 				viewport,
 				`${viewport.label} first OHB`,
-				{ exerciseToggle: viewport.width <= 520 },
+				{ exerciseToggle: viewport.width <= 760 },
 			);
 			const firstPortInstruction = await page
 				.locator('.tilefab-port-buildbar[data-port-type="OHB"] .tilefab-port-authoring-instruction')
@@ -5083,9 +5083,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 				`${viewport.label} OHB marker retains exact target identity`,
 			);
 			const firstPortInstructionLines = await wrappedTextLineCount(
-				page.locator(
-					'.tilefab-port-buildbar[data-port-type="OHB"] .tilefab-port-authoring-instruction',
-				),
+				page.locator('.tilefab-port-buildbar[data-port-type="OHB"] .tilefab-port-authoring-detail'),
 			);
 			if ([390, 520, 760].includes(viewport.width)) {
 				assertAtMost(
@@ -5632,7 +5630,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			);
 			if (viewport.width <= 760) {
 				assertAtMost(
-					await wrappedTextLineCount(ohbInstruction),
+					await wrappedTextLineCount(ohbInstruction.locator(".tilefab-port-authoring-detail")),
 					2,
 					`${viewport.label} OHB overview instruction density`,
 				);
@@ -5647,6 +5645,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			await page.locator("main.tilefab-workspace").screenshot({
 				path: path.join(artifactRoot, `factory-ohb-overview-${viewport.label}.png`),
 			});
+			await assertOrdinaryPortTargetZoomPreservesSelection(page, "OHB", viewport.label);
 			await page.getByTestId("ordinary-port-authoring-exit").click();
 			await page.waitForFunction(
 				() =>
@@ -5755,7 +5754,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			);
 			if (viewport.width <= 760) {
 				assertAtMost(
-					await wrappedTextLineCount(eqInstruction),
+					await wrappedTextLineCount(eqInstruction.locator(".tilefab-port-authoring-detail")),
 					3,
 					`${viewport.label} EQ overview instruction density`,
 				);
@@ -5770,6 +5769,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			await page.locator("main.tilefab-workspace").screenshot({
 				path: path.join(artifactRoot, `factory-eq-overview-${viewport.label}.png`),
 			});
+			await assertOrdinaryPortTargetZoomPreservesSelection(page, "EQ", viewport.label);
 			await page.getByTestId("ordinary-port-authoring-exit").click();
 			await page.waitForFunction(
 				() =>
@@ -7040,11 +7040,48 @@ async function exerciseGuidedPortHandoffRegression(
 			"true",
 			"Guided OHB exposes the Canvas placement coach",
 		);
-		assertIncludes(
-			(await page.getByTestId("guided-build-keyboard-port-hint").innerText()).trim(),
-			"방향키 / WASD · ENTER 선택",
-			"Guided OHB replaces the stale pointer-only command chip with keyboard parity",
+		assertEqual(
+			await panel.getAttribute("data-equipment-workspace"),
+			"true",
+			"Guided OHB delegates input to the mounted workspace",
 		);
+		const equipmentWorkspace = page.getByRole("region", { name: "OHB 장비 배치", exact: true });
+		assertIncludes(
+			await equipmentWorkspace.innerText(),
+			"OHB · 상부 보관",
+			"Guided OHB names the device",
+		);
+		assertIncludes(
+			await equipmentWorkspace.innerText(),
+			"Enter",
+			"Guided OHB workspace retains keyboard selection",
+		);
+		assertIncludes(
+			await equipmentWorkspace.innerText(),
+			"방향키/WASD",
+			"Guided OHB workspace retains keyboard movement",
+		);
+		assertEqual(
+			await page.getByTestId("guided-build-keyboard-port-hint").count(),
+			0,
+			"Guided OHB removes duplicate gesture furniture",
+		);
+		await panel.getByTestId("guided-build-command-help").click();
+		await panel.getByTestId("guided-build-mission-help").waitFor({ state: "visible" });
+		await page.keyboard.press("Escape");
+		assertEqual(
+			await panel.getByTestId("guided-build-command-help").getAttribute("aria-expanded"),
+			"false",
+			"Equipment Guide help closes with Escape",
+		);
+		assertEqual(
+			await panel
+				.getByTestId("guided-build-command-help")
+				.evaluate((e) => e === document.activeElement),
+			true,
+			"Equipment Guide help restores focus",
+		);
+		await canvas.focus();
 		const guidedPortLayout = await page.evaluate(() => {
 			const panelBounds = document
 				.querySelector('[data-testid="guided-build-panel"]')
@@ -7068,10 +7105,26 @@ async function exerciseGuidedPortHandoffRegression(
 			path: path.join(artifactRoot, "guided-port-ohb-coach-390x844.png"),
 			fullPage: true,
 		});
+		await assertLocatorInsideViewport(page, equipmentWorkspace);
 		assertEqual(
-			await page.locator(".tilefab-port-buildbar").isHidden(),
+			await equipmentWorkspace.isVisible(),
 			true,
-			"Guided compact OHB removes the empty buildbar",
+			"Guided compact OHB exposes its shared workspace",
+		);
+		assertAtMost(
+			await panel.evaluate((e) => e.getBoundingClientRect().height),
+			260,
+			"Equipment Guide remains compact with help closed",
+		);
+		assertAtLeast(
+			await page.evaluate(
+				() =>
+					document.querySelector(".tilefab-equipment-workspace").getBoundingClientRect().top -
+					document.querySelector('[data-testid="guided-build-panel"]').getBoundingClientRect()
+						.bottom,
+			),
+			160,
+			"Guided equipment retains a usable Canvas band",
 		);
 		assertAtLeast(
 			await page.locator(".tilefab-workspace").evaluate((element) => element.clientHeight),
@@ -8114,14 +8167,35 @@ async function exerciseGuidedPortHandoffRegression(
 			"Guided Reuse post-save selection",
 		);
 		await page.mouse.click(visibleLoopSegment.x, visibleLoopSegment.y);
-		await page.waitForFunction(
-			() =>
-				(document
-					.querySelector('[data-testid="rail-canvas"]')
-					?.getAttribute("data-selected-module-id")?.length ?? 0) > 0,
-			undefined,
-			{ timeout: 10_000 },
-		);
+		try {
+			await page.waitForFunction(
+				() =>
+					(document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-selected-module-id")?.length ?? 0) > 0,
+				undefined,
+				{ timeout: 10_000 },
+			);
+		} catch (error) {
+			await page.screenshot({ path: path.join(artifactRoot, "guided-reuse-anchor-failure.png") });
+			const state = await page.evaluate(
+				(point) => ({
+					point,
+					camera: window.__tileFab?.camera,
+					marker: document
+						.querySelector('[data-testid="guided-rail-selection-target"]')
+						?.getBoundingClientRect()
+						.toJSON(),
+					hit: document.elementFromPoint(point.x, point.y)?.outerHTML.slice(0, 400),
+					selectedModuleId: document.querySelector('[data-testid="rail-canvas"]')?.dataset
+						.selectedModuleId,
+					tool: document.querySelector(".tilefab-app")?.getAttribute("data-editor-tool"),
+					status: document.querySelector(".tilefab-statusbar")?.textContent,
+				}),
+				visibleLoopSegment,
+			);
+			throw new Error(`Guided Reuse anchor failed: ${JSON.stringify(state)}`, { cause: error });
+		}
 		const pointerReuseAnchor =
 			(await page.getByTestId("rail-canvas").getAttribute("data-selected-module-id")) ?? "";
 		assertEqual(pointerReuseAnchor.length > 0, true, "Guided Reuse pointer anchor identity");
@@ -10301,6 +10375,12 @@ async function exerciseGuidedPortHandoffRegression(
 			page,
 			"action:duplicate-bay",
 			"Guided Bay duplicate marker Escape recovery",
+		);
+		await page.waitForFunction(
+			() =>
+				document.activeElement?.getAttribute("data-guided-action-id") === "action:duplicate-bay",
+			undefined,
+			{ timeout: 10_000 },
 		);
 		assertEqual(
 			await duplicateBay.evaluate((element) => element === document.activeElement),
@@ -13433,6 +13513,12 @@ async function exerciseGuidedPortHandoffRegression(
 							44,
 							`ordinary EQ edge locator height ${viewport.label}`,
 						);
+						if (longRowEvidence.locatorOverlapsMoving) {
+							await page.screenshot({
+								path: path.join(artifactRoot, `eq-locator-overlap-${viewport.label}.png`),
+							});
+							throw new Error(`EQ locator overlaps endpoint: ${JSON.stringify(longRowEvidence)}`);
+						}
 						assertEqual(
 							longRowEvidence.locatorOverlapsMoving,
 							false,
@@ -27992,6 +28078,8 @@ async function driveOrdinaryEqEndUntilAnchorLeavesCanvas(page, phase) {
 				locatorPreservesCanvasHit:
 					locatorStyle.pointerEvents === "none" &&
 					locatorHitPoints.every(([x, y]) => document.elementFromPoint(x, y) === canvas),
+				locatorBounds: locatorBounds.toJSON(),
+				movingBounds: movingBounds.toJSON(),
 				locatorWidth: locatorBounds.width,
 				locatorHeight: locatorBounds.height,
 				locatorAriaHidden: locator.getAttribute("aria-hidden"),
@@ -33455,6 +33543,28 @@ async function selectOrdinaryStrictStkRows(
 	recoverOverviewAfterFirst = false,
 ) {
 	for (const [index, candidate] of candidates.entries()) {
+		// The opposing B2B lane can leave the safe frame after current-target zoom.
+		// Reach it through the same pan gesture as the user, preserving accepted Ports.
+		// The prior keyboard toggle publishes React state before its next painted Canvas frame.
+		await page.waitForFunction((expectedCount) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const rows = (canvas?.getAttribute("data-stk-draft-selected-rows") ?? "")
+				.split(",")
+				.filter(Boolean);
+			return (
+				document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") ===
+					String(expectedCount) && rows.length === expectedCount
+			);
+		}, index);
+		const selectedBeforePan = await page
+			.getByTestId("rail-canvas")
+			.getAttribute("data-stk-draft-selected-rows");
+		await centerWorld(page, candidate);
+		assertEqual(
+			await page.getByTestId("rail-canvas").getAttribute("data-stk-draft-selected-rows"),
+			selectedBeforePan,
+			`${label} P${index + 1} pan preserves selected Ports`,
+		);
 		const expectedLabel = index === 0 ? "첫 Port" : "Port 추가";
 		let targetReady = false;
 		for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -33686,19 +33796,51 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 		await page.evaluate(
 			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 		);
+		const activity = page.locator(".tilefab-tools");
+		const densityToggle = page.getByTestId("editor-tool-description-toggle");
+		assertEqual(
+			await activity.getAttribute("data-tool-density"),
+			viewport.width <= 760
+				? "compact"
+				: await activity.getAttribute("data-tool-density-preference"),
+			`${specification.label} workspace menu clearance ${viewport.label}`,
+		);
 		if (viewport.width === 520) {
-			const activity = page.locator(".tilefab-tools");
-			if ((await activity.getAttribute("data-tool-density")) === "compact") {
-				await page.getByTestId("editor-tool-description-toggle").click();
-				await page.waitForFunction(
-					() =>
-						document.querySelector(".tilefab-tools")?.getAttribute("data-tool-density") ===
-						"expanded",
-					undefined,
-					{ timeout: 10_000 },
-				);
-				await page.getByTestId("rail-canvas").focus();
-			}
+			const beforeMenuAttempt = await readMetrics(page);
+			const selectedRows = await page
+				.getByTestId("rail-canvas")
+				.getAttribute("data-stk-draft-selected-rows");
+			assertEqual(
+				await densityToggle.getAttribute("aria-disabled"),
+				"true",
+				`${specification.label} menu explains its temporary constraint`,
+			);
+			await densityToggle.focus();
+			await densityToggle.press("Enter");
+			assertEqual(
+				await activity.getAttribute("data-tool-density"),
+				"compact",
+				`${specification.label} constrained menu preserves clearance`,
+			);
+			assertEqual(
+				await page.getByTestId("rail-canvas").getAttribute("data-stk-draft-selected-rows"),
+				selectedRows,
+				`${specification.label} constrained menu preserves selected Ports`,
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				beforeMenuAttempt,
+				`${specification.label} constrained menu is project-neutral`,
+			);
+			await page.getByTestId("rail-canvas").focus();
+		}
+		for (const tool of await page
+			.locator('.tilefab-editor-activity-tools[data-activity="equip"] button')
+			.all()) {
+			await assertLocatorOwnsHitArea(
+				tool,
+				`${specification.label} equipment menu ${viewport.label}`,
+			);
 		}
 		await page.waitForTimeout(120);
 		const buildbar = page.locator('.tilefab-port-buildbar[data-port-type="STK"]');
@@ -36741,6 +36883,7 @@ async function assertLocatorOwnsHitArea(locator, label) {
 				bottom: bounds.bottom,
 			},
 			owned: points.map(([x, y]) => element.contains(document.elementFromPoint(x, y))),
+			hits: points.map(([x, y]) => document.elementFromPoint(x, y)?.outerHTML.slice(0, 220)),
 		};
 	});
 	assertEqual(
@@ -37339,9 +37482,9 @@ async function assertOrdinaryPortToolDensity(
 	label,
 	{ exerciseToggle = false } = {},
 ) {
-	const shouldAutoCompact = viewport.width <= 520;
+	const shouldAutoCompact = viewport.width <= 760;
 	const expectedDensity = shouldAutoCompact ? "compact" : "expanded";
-	const expectedContext = shouldAutoCompact ? "ordinary-port" : "default";
+	const expectedContext = viewport.width <= 520 ? "ordinary-port" : "default";
 	await page.waitForFunction(
 		({ density, context }) => {
 			const tools = document.querySelector(".tilefab-tools");
@@ -37362,13 +37505,13 @@ async function assertOrdinaryPortToolDensity(
 	);
 	assertEqual(
 		await activityNavigation.getAttribute("data-tool-density-constrained"),
-		"false",
-		`${label} ordinary Port density remains a soft choice`,
+		String(shouldAutoCompact),
+		`${label} compact workspace owns menu clearance`,
 	);
 	assertEqual(
 		await densityToggle.getAttribute("aria-disabled"),
-		null,
-		`${label} density toggle remains enabled`,
+		shouldAutoCompact ? "true" : null,
+		`${label} density toggle explains temporary workspace constraint`,
 	);
 	assertEqual(
 		await densityToggle.getAttribute("aria-pressed"),
@@ -37378,12 +37521,12 @@ async function assertOrdinaryPortToolDensity(
 	if (shouldAutoCompact) {
 		assertEqual(
 			await densityToggle.getAttribute("aria-describedby"),
-			"tilefab-port-tool-density-context",
+			"tilefab-tool-density-constraint",
 			`${label} compact density explains its task-local owner`,
 		);
 		assertIncludes(
-			(await page.locator("#tilefab-port-tool-density-context").textContent()) ?? "",
-			"언제든 펼칠 수 있으며 Port 작업을 끝내면 이전 메뉴 설정으로 돌아갑니다",
+			(await page.locator("#tilefab-tool-density-constraint").textContent()) ?? "",
+			"패널을 닫으면 이전 설정으로 돌아갑니다",
 			`${label} compact density announces recovery`,
 		);
 	}
@@ -37397,6 +37540,7 @@ async function assertOrdinaryPortToolDensity(
 		const toolButton = page.getByRole("button", { name: toolLabel, exact: true });
 		assertEqual(await toolButton.count(), 1, `${label} exposes ${toolLabel}`);
 		await assertLocatorInsideViewport(page, toolButton);
+		await assertLocatorOwnsHitArea(toolButton, `${label} menu ${toolLabel}`);
 		const bounds = await toolButton.boundingBox();
 		assertAtLeast(bounds?.width ?? 0, 44, `${label} ${toolLabel} width`);
 		assertAtLeast(bounds?.height ?? 0, 44, `${label} ${toolLabel} height`);
@@ -37492,50 +37636,38 @@ async function assertOrdinaryPortToolDensity(
 		const baseline = await readMetrics(page);
 		await densityToggle.focus();
 		await densityToggle.press("Enter");
-		await page.waitForFunction(
-			() =>
-				document.querySelector(".tilefab-tools")?.getAttribute("data-tool-density") === "expanded",
-			undefined,
-			{ timeout: 10_000 },
+		assertEqual(
+			await activityNavigation.getAttribute("data-tool-density"),
+			"compact",
+			`${label} constrained toggle preserves clear workspace`,
 		);
 		assertEqual(
 			await activityNavigation.getAttribute("data-tool-density-preference"),
 			"expanded",
-			`${label} local expansion does not rewrite the global preference`,
-		);
-		assertEqual(
-			await activityNavigation.getAttribute("data-tool-density-context"),
-			"ordinary-port",
-			`${label} local expansion remains inside the Port task`,
+			`${label} constrained toggle preserves saved preference`,
 		);
 		assertEqual(
 			await densityToggle.evaluate((element) => element === document.activeElement),
 			true,
-			`${label} expansion keeps toggle focus`,
+			`${label} constrained toggle keeps focus`,
 		);
-		for (const copy of ["OHB Port", "EQ Port 행", "STK Port 그룹", "고급 가져오기"]) {
-			assertIncludes(
-				await page.locator('.tilefab-editor-activity-tools[data-activity="equip"]').innerText(),
-				copy,
-				`${label} expanded menu restores ${copy}`,
-			);
-		}
-		assertProjectUnchanged(await readMetrics(page), baseline, `${label} local density expansion`);
-		await densityToggle.press("Space");
-		await page.waitForFunction(
-			() =>
-				document.querySelector(".tilefab-tools")?.getAttribute("data-tool-density") === "compact",
-			undefined,
-			{ timeout: 10_000 },
+		await page.waitForFunction(() =>
+			document
+				.querySelector('[data-testid="rail-status-message"]')
+				?.textContent.includes("장비 배치 중에는 캔버스 공간을 확보합니다"),
 		);
-		assertEqual(
-			await densityToggle.evaluate((element) => element === document.activeElement),
-			true,
-			`${label} collapse keeps toggle focus`,
+		assertIncludes(
+			await page.getByTestId("rail-status-message").innerText(),
+			"장비 배치 중에는 캔버스 공간을 확보합니다",
+			`${label} constrained toggle explains recovery`,
 		);
-		assertProjectUnchanged(await readMetrics(page), baseline, `${label} local density collapse`);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			baseline,
+			`${label} constrained menu is project-neutral`,
+		);
 		await page.getByTestId("rail-canvas").focus();
-		await assertOrdinaryPortKeyboardTargetVisible(page, `${label} density round trip`);
+		await assertOrdinaryPortKeyboardTargetVisible(page, `${label} constrained menu return`);
 	}
 	return Object.freeze(initialLayout);
 }
@@ -37648,11 +37780,77 @@ async function assertOrdinaryPortKeyboardTargetVisible(page, label) {
 	}
 }
 
+async function assertOrdinaryPortTargetZoomPreservesSelection(page, portType, label) {
+	const before = await readMetrics(page);
+	const canvas = page.getByTestId("rail-canvas");
+	if (portType === "EQ") {
+		await canvas.focus();
+		await page.keyboard.press("Enter");
+		await page.waitForFunction(
+			() =>
+				document.querySelector('[data-testid="rail-canvas"]')?.dataset.guidedPortKeyboardPhase ===
+				"choose-end",
+		);
+		await page.keyboard.press("ArrowRight");
+	}
+	const selection = () =>
+		canvas.evaluate((element) => ({
+			row: element.dataset.guidedPortKeyboardRow,
+			phase: element.dataset.guidedPortKeyboardPhase,
+			type: element.dataset.guidedPortKeyboardType,
+			rows: element.dataset.eqDraftRows,
+			anchor:
+				document
+					.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+					?.getAttribute("data-port-slot-row") ?? null,
+		}));
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
+	const selected = await selection();
+	const zoom = page.getByTestId("ordinary-port-zoom-in");
+	await assertLocatorInsideViewport(page, zoom);
+	const bounds = await zoom.boundingBox();
+	assertAtLeast(bounds?.height ?? 0, 44, `${label} ${portType} target zoom height`);
+	await zoom.click();
+	await page.waitForFunction(() => Number(window.__tileFab?.camera?.zoom) >= 38);
+	await zoom.waitFor({ state: "hidden" });
+	assertEqual(
+		JSON.stringify(await selection()),
+		JSON.stringify(selected),
+		`${label} ${portType} zoom preserves semantic selection`,
+	);
+	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} ${portType} enlarged target`);
+	await page.screenshot({
+		path: path.join(artifactRoot, `factory-${portType.toLowerCase()}-target-zoom-${label}.png`),
+	});
+	if (portType === "EQ") {
+		await canvas.focus();
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(
+			() =>
+				document.querySelector('[data-testid="rail-canvas"]')?.dataset.guidedPortKeyboardPhase ===
+				"choose-slot",
+		);
+		await page.locator(".tilefab-equipment-selection-readout").waitFor({ state: "hidden" });
+	}
+	const after = await readMetrics(page);
+	assertProjectUnchanged(after, before, `${label} ${portType} target zoom`);
+	assertExactStaticFabModelIdentity(after, before, `${label} ${portType} target zoom`);
+}
+
 async function assertOrdinaryEqDockControlsVisible(page, viewport, label) {
 	const before = await readMetrics(page);
 	const dock = page.locator('.tilefab-port-buildbar[data-port-type="EQ"]');
 	const pitchButtons = dock.locator(".tilefab-eq-pitch button");
 	const recipeInput = dock.locator(".tilefab-eq-recipe input");
+	const optionalSettings = dock.locator(".tilefab-equipment-options");
+	assertEqual(
+		await optionalSettings.getAttribute("open"),
+		null,
+		`${label} optional settings start closed`,
+	);
+	await optionalSettings.locator("summary").click();
 	assertEqual(await pitchButtons.count(), 5, `${label} exposes all five pitch controls`);
 	const layout = await dock.evaluate((element) => {
 		const rectangle = (target) => {
@@ -37707,13 +37905,28 @@ async function assertOrdinaryEqDockControlsVisible(page, viewport, label) {
 		true,
 		`${label} Recipe input focus`,
 	);
+	for (const tool of await page
+		.locator('.tilefab-editor-activity-tools[data-activity="equip"] button')
+		.all()) {
+		await assertLocatorInsideViewport(page, tool);
+		await assertLocatorOwnsHitArea(
+			tool,
+			`${label} optional Recipe leaves every equipment tool clickable`,
+		);
+	}
+	await page.screenshot({
+		path: path.join(artifactRoot, `ordinary-eq-controls-${viewport.width}x${viewport.height}.png`),
+	});
+	await optionalSettings.locator("summary").click();
+	assertEqual(
+		await optionalSettings.getAttribute("open"),
+		null,
+		`${label} optional settings close`,
+	);
 	await page.getByTestId("rail-canvas").focus();
 	const after = await readMetrics(page);
 	assertProjectUnchanged(after, before, `${label} focus traversal`);
 	assertExactStaticFabModelIdentity(after, before, `${label} focus traversal identity`);
-	await page.screenshot({
-		path: path.join(artifactRoot, `ordinary-eq-controls-${viewport.width}x${viewport.height}.png`),
-	});
 }
 
 async function assertOrdinaryPortFittedMapClearsControls(page, label) {
@@ -39167,11 +39380,33 @@ async function fitAndZoomOut(page, steps) {
 }
 
 async function centerWorld(page, world) {
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
 	for (let attempt = 0; attempt < 48; attempt++) {
 		const box = await page.getByTestId("rail-canvas").boundingBox();
 		if (!box) throw new Error("Rail canvas has no visible bounds.");
 		const point = await screenPointForWorld(page, world);
-		const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+		const center = await page.getByTestId("rail-canvas").evaluate((canvas) => {
+			const box = canvas.getBoundingClientRect();
+			const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+			if (document.elementFromPoint(center.x, center.y) === canvas) return center;
+			// A taller equipment workspace may cover the geometric center. Pan from usable Canvas.
+			for (const y of [0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) {
+				for (const x of [0.5, 0.6, 0.4, 0.7, 0.3]) {
+					const point = { x: box.x + box.width * x, y: box.y + box.height * y };
+					if (
+						[-22, 0, 22].every((dx) =>
+							[-22, 0, 22].every(
+								(dy) => document.elementFromPoint(point.x + dx, point.y + dy) === canvas,
+							),
+						)
+					)
+						return point;
+				}
+			}
+			throw new Error("No unobscured Canvas area for panning");
+		});
 		const delta = { x: center.x - point.x, y: center.y - point.y };
 		// A secondary drag shorter than 3 px is a cancel click in the editor. A target
 		// already inside that radius is centered enough; callers locate exact world input separately.
@@ -39181,11 +39416,48 @@ async function centerWorld(page, world) {
 			y: Math.max(-box.height * 0.3, Math.min(box.height * 0.3, delta.y)),
 		};
 		await page.mouse.move(center.x, center.y);
+		const eqAnchorBeforePan = await page.evaluate(
+			() =>
+				document
+					.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+					?.getAttribute("data-port-slot-row") ?? null,
+		);
 		await page.mouse.down({ button: "right" });
 		await page.mouse.move(center.x + step.x, center.y + step.y, { steps: 5 });
 		await page.mouse.up({ button: "right" });
+		if (eqAnchorBeforePan !== null) {
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			const eqAnchorAfterPan = await page.evaluate(
+				() =>
+					document
+						.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+						?.getAttribute("data-port-slot-row") ?? null,
+			);
+			if (eqAnchorBeforePan !== eqAnchorAfterPan)
+				throw new Error(
+					`EQ anchor changed during pan: ${JSON.stringify({ world, center, delta, step, eqAnchorBeforePan, eqAnchorAfterPan })}`,
+				);
+		}
 	}
-	throw new Error(`Could not center world point ${world.x},${world.y}.`);
+	await page.screenshot({ path: path.join(artifactRoot, "center-world-failure.png") });
+	const state = await page.evaluate(() => {
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		const bounds = canvas.getBoundingClientRect();
+		return {
+			camera: window.__tileFab?.camera,
+			viewport: { width: innerWidth, height: innerHeight },
+			hit: document
+				.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+				?.outerHTML.slice(0, 400),
+			dock: document
+				.querySelector(".tilefab-equipment-workspace")
+				?.getBoundingClientRect()
+				.toJSON(),
+		};
+	});
+	throw new Error(`Could not center world point ${world.x},${world.y}: ${JSON.stringify(state)}.`);
 }
 
 async function exerciseNearCenterPlacementPan(page, label) {
@@ -41387,6 +41659,10 @@ async function exerciseEqClickEndpoints(page, label) {
 				.locator(".tilefab-eq-pitch")
 				.getByRole("button", { name: "1 m", exact: true })
 				.click();
+			const initialOptions = page.locator(".tilefab-equipment-options");
+			await initialOptions.locator(":scope > summary").click();
+			await initialOptions.getByRole("textbox", { name: "공정 Recipe" }).fill("  V1-EQ-SEED  ");
+			await initialOptions.locator(":scope > summary").click();
 			const runs = await readLegalStraightPortRuns(page, "EQ");
 			const run = runs.find((candidate) => candidate.items.length >= 3);
 			if (!run) throw new Error(`${label} ${mode} needs three free EQ slots.`);
@@ -41447,7 +41723,15 @@ async function exerciseEqClickEndpoints(page, label) {
 					before,
 					`${label} Escape cancels only EQ draft`,
 				);
-				await page.mouse.move(startPoint.x, startPoint.y);
+				await centerWorld(page, start);
+				const restartedStart = await screenPointForWorld(page, start);
+				await page.mouse.move(restartedStart.x, restartedStart.y);
+				await page.waitForFunction(
+					(row) =>
+						document.querySelector('[data-testid="rail-canvas"]')?.dataset.guidedPortKeyboardRow ===
+						String(row),
+					start.row,
+				);
 				await canvas.press("Enter");
 				await page.waitForFunction(
 					() =>
@@ -41462,6 +41746,7 @@ async function exerciseEqClickEndpoints(page, label) {
 					`${label} OHB switch removes EQ anchor`,
 				);
 				await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
+				await centerWorld(page, start);
 				const freshStart = await screenPointForWorld(page, start);
 				await page.mouse.move(freshStart.x, freshStart.y);
 				await page.waitForFunction(
@@ -41486,7 +41771,30 @@ async function exerciseEqClickEndpoints(page, label) {
 				);
 			}
 			if (mode === "click-click") {
-				await page.mouse.click(startPoint.x, startPoint.y);
+				await centerWorld(page, start);
+				const cancelPoint = await screenPointForWorld(page, start);
+				await page.mouse.click(cancelPoint.x, cancelPoint.y, { button: "right" });
+				await page.waitForFunction(
+					() => !document.querySelector('[data-testid="ordinary-eq-anchor-marker"]'),
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${label} secondary click cancels only EQ draft`,
+				);
+				await centerWorld(page, start);
+				const restartPoint = await screenPointForWorld(page, start);
+				await page.mouse.click(restartPoint.x, restartPoint.y);
+				await page.waitForFunction(
+					(row) =>
+						document
+							.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+							?.getAttribute("data-port-slot-row") === String(row),
+					start.row,
+				);
+				await centerWorld(page, start);
+				const samePoint = await screenPointForWorld(page, start);
+				await page.mouse.click(samePoint.x, samePoint.y);
 				assertProjectUnchanged(
 					await readMetrics(page),
 					before,
@@ -41497,6 +41805,7 @@ async function exerciseEqClickEndpoints(page, label) {
 					horizontal ? Math.abs(item.y - start.y) > 0.5 : Math.abs(item.x - start.x) > 0.5,
 				);
 				if (!otherLine) throw new Error(`${label} requires another straight line for EQ recovery.`);
+				await centerWorld(page, otherLine);
 				const wrongPoint = await screenPointForWorld(page, otherLine);
 				assertEqual(
 					await page.evaluate(
@@ -41576,8 +41885,93 @@ async function exerciseEqClickEndpoints(page, label) {
 							.querySelector('[data-testid="rail-canvas"]')
 							?.getAttribute("data-eq-draft-rows") === "3",
 				);
+				for (const [pitch, count] of [
+					[2, 2],
+					[1, 3],
+				]) {
+					await page
+						.locator(".tilefab-eq-pitch")
+						.getByRole("button", { name: `${pitch} m`, exact: true })
+						.click();
+					await page.waitForFunction(
+						(expectedCount) =>
+							document
+								.querySelector('[data-testid="rail-canvas"]')
+								?.getAttribute("data-eq-draft-rows") === String(expectedCount),
+						count,
+						{ timeout: 2_000 },
+					);
+					assertEqual(
+						await page.getByTestId("ordinary-eq-anchor-marker").getAttribute("data-port-slot-row"),
+						String(start.row),
+						`${label} pitch change preserves EQ start`,
+					);
+					assertIncludes(
+						await page.locator(".tilefab-equipment-selection-readout").innerText(),
+						`간격 ${pitch} m`,
+						`${label} preview matches selected pitch`,
+					);
+				}
+				// A parameter action supersedes an Enter queued for an unpainted row.
+				await canvas.focus();
+				await page.evaluate(
+					(back) => {
+						const canvas = document.querySelector('[data-testid="rail-canvas"]');
+						for (const key of [back, "Enter"])
+							canvas.dispatchEvent(
+								new KeyboardEvent("keydown", { key, code: key, bubbles: true, cancelable: true }),
+							);
+						for (const label of ["2 m", "1 m"])
+							[...document.querySelectorAll(".tilefab-eq-pitch button")]
+								.find((button) => button.textContent.trim() === label)
+								.click();
+					},
+					{
+						ArrowRight: "ArrowLeft",
+						ArrowLeft: "ArrowRight",
+						ArrowUp: "ArrowDown",
+						ArrowDown: "ArrowUp",
+					}[key],
+				);
+				await page.evaluate(
+					() =>
+						new Promise((resolve) =>
+							requestAnimationFrame(() =>
+								requestAnimationFrame(() => requestAnimationFrame(resolve)),
+							),
+						),
+				);
+				assertEqual(
+					await page.evaluate(
+						() => window.__tileFab.getEditorModel().document.portEquipment.equipmentGroups.length,
+					),
+					Number(before.equipmentGroups),
+					`${label} changed settings supersede deferred EQ Enter`,
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${label} deferred EQ configuration remains transient`,
+				);
+				await canvas.press(key);
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="rail-canvas"]')
+							?.getAttribute("data-eq-draft-rows") === "3",
+				);
+				const options = page.locator(".tilefab-equipment-options");
+				await options.locator(":scope > summary").click();
+				await options.getByRole("textbox", { name: "공정 Recipe" }).fill("  V1-EQ-DEMO  ");
+				await options.locator(":scope > summary").click();
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${label} EQ settings change remains transient`,
+				);
 				await canvas.press("Enter");
 			} else {
+				await centerWorld(page, end);
 				const endPoint = await screenPointForWorld(page, end);
 				assertEqual(
 					await page.evaluate(
@@ -41598,6 +41992,27 @@ async function exerciseEqClickEndpoints(page, label) {
 					Number(metrics.equipmentPorts) === Number(before.equipmentPorts) + 3,
 			);
 			assertSingleGuidedPortCommit(created, before, `${label} ${mode} one atomic EQ row`);
+			const settings = await page.evaluate(() => {
+				const id = Number(
+					document
+						.querySelector('[data-testid="port-equipment-inspector"]')
+						?.getAttribute("data-equipment-group-id"),
+				);
+				const group = window.__tileFab
+					.getEditorModel()
+					.document.portEquipment.equipmentGroups.find((group) => group.id === id);
+				return group?.kind === "EQ"
+					? { pitch: group.pitchMillimeters, recipe: group.recipe }
+					: null;
+			});
+			assertEqual(
+				JSON.stringify(settings),
+				JSON.stringify({
+					pitch: 1000,
+					recipe: mode === "click-keyboard" ? "V1-EQ-DEMO" : "V1-EQ-SEED",
+				}),
+				`${label} committed EQ keeps reviewed settings`,
+			);
 			const undone = await undoEquipmentCompletion(page, before, created, `${label} ${mode}`, {
 				allowMonotonicAllocatorFingerprint: true,
 			});
@@ -41667,6 +42082,7 @@ async function exerciseEqClickEndpoints(page, label) {
 		"0",
 		`${label} source Undo clears pending EQ row`,
 	);
+	await page.locator(".tilefab-equipment-selection-readout").waitFor({ state: "hidden" });
 	await canvas.press("Meta+Shift+z");
 	const sourceRestored = await waitForWorker(
 		page,
@@ -41679,6 +42095,7 @@ async function exerciseEqClickEndpoints(page, label) {
 		0,
 		`${label} source Redo does not revive stale EQ anchor`,
 	);
+	await page.locator(".tilefab-equipment-selection-readout").waitFor({ state: "hidden" });
 	assertEqual(
 		sourceRestored.workerChecksum,
 		sourceRestored.modelChecksum,
@@ -42660,6 +43077,56 @@ async function exerciseRecoveryAwareStartGate(activeBrowser) {
 			state: "visible",
 		});
 		assertProjectUnchanged(await readMetrics(page), before, "recovery inventory previous page");
+		await recoveryOffer.getByRole("button", { name: "목록 닫기", exact: true }).click();
+		for (const width of [390, 760, 1024, 1440]) {
+			await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+			for (const [portType, label] of [
+				["OHB", "OHB 포트 배치"],
+				["EQ", "EQ 포트 행 배치"],
+				["STK", "STK 포트 그룹 배치"],
+			]) {
+				await clickActivityCommand(page, "equip", label);
+				await page.evaluate(
+					() =>
+						new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+				);
+				const dock = page.locator(`.tilefab-equipment-workspace[data-port-type="${portType}"]`);
+				const noticeBounds = await recoveryOffer.boundingBox();
+				const dockBounds = await dock.boundingBox();
+				if (!noticeBounds || !dockBounds)
+					throw new Error("Recovery and equipment workspace must both be visible");
+				assertAtMost(
+					noticeBounds.y + noticeBounds.height,
+					dockBounds.y - 8,
+					`${width}px ${portType} recovery clears the actual dock`,
+				);
+				await assertLocatorInsideViewport(page, recoveryOffer);
+				for (const button of await recoveryOffer.locator(".tilefab-recovery-actions button").all())
+					await assertLocatorOwnsHitArea(button, `${width}px ${portType} recovery action`);
+				await assertLocatorOwnsHitArea(
+					dock.getByTestId("ordinary-port-authoring-exit"),
+					`${width}px ${portType} equipment exit`,
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${width}px ${portType} recovery layout remains transient`,
+				);
+			}
+			await recoveryOffer.getByRole("button", { name: "목록 55개", exact: true }).click();
+			await assertLocatorInsideViewport(page, recoveryOffer);
+			await assertLocatorOwnsHitArea(
+				recoveryOffer.getByRole("button", { name: "목록 닫기", exact: true }),
+				`${width}px equipment recovery inventory close`,
+			);
+			await recoveryOffer.getByRole("button", { name: "목록 닫기", exact: true }).click();
+			await page.screenshot({
+				path: path.join(artifactRoot, `recovery-equipment-workspace-${width}.png`),
+			});
+		}
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await clickActivityCommand(page, "build", "레일 건설");
+		await recoveryOffer.getByRole("button", { name: "목록 55개", exact: true }).click();
 		const cleanupTrigger = recoveryOffer.getByRole("button", {
 			name: "오래된 복구본 정리",
 			exact: true,

@@ -22,7 +22,7 @@ const LOCATOR_HALF_WIDTH = 70;
 const LOCATOR_HALF_HEIGHT = 22;
 const ACTIVE_AVOID_WIDTH = 104;
 const ACTIVE_AVOID_HEIGHT = 72;
-const ACTIVE_AVOID_SHIFT = 84;
+const ACTIVE_AVOID_GAP = 12;
 
 function clampIntoRange(value: number, minimum: number, maximum: number): number {
 	if (minimum > maximum) return (minimum + maximum) / 2;
@@ -89,13 +89,29 @@ export function ordinaryEqAnchorEdgePresentation(
 		Math.abs(y - input.activeEnd.y) < ACTIVE_AVOID_HEIGHT
 	) {
 		if (horizontal) {
-			const above = clampIntoRange(input.activeEnd.y - ACTIVE_AVOID_SHIFT, minimumY, maximumY);
-			const below = clampIntoRange(input.activeEnd.y + ACTIVE_AVOID_SHIFT, minimumY, maximumY);
+			const above = clampIntoRange(
+				input.activeEnd.y - ACTIVE_AVOID_HEIGHT - ACTIVE_AVOID_GAP,
+				minimumY,
+				maximumY,
+			);
+			const below = clampIntoRange(
+				input.activeEnd.y + ACTIVE_AVOID_HEIGHT + ACTIVE_AVOID_GAP,
+				minimumY,
+				maximumY,
+			);
 			y =
 				Math.abs(below - input.activeEnd.y) >= Math.abs(above - input.activeEnd.y) ? below : above;
 		} else {
-			const before = clampIntoRange(input.activeEnd.x - ACTIVE_AVOID_SHIFT, minimumX, maximumX);
-			const after = clampIntoRange(input.activeEnd.x + ACTIVE_AVOID_SHIFT, minimumX, maximumX);
+			const before = clampIntoRange(
+				input.activeEnd.x - ACTIVE_AVOID_WIDTH - ACTIVE_AVOID_GAP,
+				minimumX,
+				maximumX,
+			);
+			const after = clampIntoRange(
+				input.activeEnd.x + ACTIVE_AVOID_WIDTH + ACTIVE_AVOID_GAP,
+				minimumX,
+				maximumX,
+			);
 			x =
 				Math.abs(after - input.activeEnd.x) >= Math.abs(before - input.activeEnd.x)
 					? after

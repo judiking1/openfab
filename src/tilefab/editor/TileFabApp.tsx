@@ -1097,8 +1097,9 @@ import {
 	UserBlueprintLibraryCrossTabRefreshController,
 } from "./UserBlueprintLibraryCrossTabRefreshController";
 import "./TileFabApp.css";
-import "./StkAuthoringWorkspace.css";
-import { observePortDockClearance } from "./observePortDockClearance";
+import { EquipmentAuthoringWorkspace } from "./EquipmentAuthoringWorkspace";
+import { useEquipmentWorkspaceFraming } from "./useEquipmentWorkspaceFraming";
+import "./EquipmentAuthoringWorkspace.css";
 
 const StaticFabInspection3DView = OPENFAB_RELEASE_CAPABILITIES.derived3D
 	? lazy(() => import("./StaticFabInspection3DView"))
@@ -2543,6 +2544,12 @@ export default function TileFabApp(): React.ReactElement {
 	const scheduleRenderRef = useRef<() => void>(() => undefined);
 	const appLifetimeEffectGenerationRef = useRef(0);
 	const previewReadoutRef = useRef<HTMLSpanElement>(null);
+	const equipmentSelectionReadoutRef = useRef<HTMLSpanElement | null>(null);
+	const equipmentWorkspaceFrameRef = useRef<() => void>(() => undefined);
+	const bindEquipmentSelectionReadout = useCallback((node: HTMLSpanElement | null): void => {
+		equipmentSelectionReadoutRef.current = node;
+		if (node) scheduleRenderRef.current();
+	}, []);
 	const areaStampKeyboardReadoutRef = useRef<HTMLParagraphElement>(null);
 	const areaStampKeyboardAnnouncementRef = useRef<HTMLSpanElement>(null);
 	const areaStampKeyboardAnnouncementTimerRef = useRef<number | null>(null);
@@ -3326,7 +3333,12 @@ export default function TileFabApp(): React.ReactElement {
 		readonly publishStatus: boolean;
 	} | null>(null);
 	const ordinaryPortKeyboardMarkerRef = useRef<HTMLDivElement | null>(null);
-	const ordinaryStkZoomCoachButtonRef = useRef<HTMLButtonElement | null>(null);
+	const portTargetZoomButtonRef = useRef<HTMLButtonElement | null>(null);
+	const equipmentTargetPresentationRef = useRef<{
+		readonly session: GuidedPortKeyboardSession;
+		readonly legal: boolean;
+		readonly reason: string;
+	} | null>(null);
 	const ordinaryEqAnchorMarkerRef = useRef<HTMLDivElement | null>(null);
 	const ordinaryEqAnchorEdgeLocatorRef = useRef<HTMLDivElement | null>(null);
 	const bindOrdinaryEqAnchorMarker = useCallback((node: HTMLDivElement | null): void => {
@@ -4267,15 +4279,15 @@ export default function TileFabApp(): React.ReactElement {
 					? Object.freeze({
 							label: "OHB · 대표 Port 1개",
 							instruction: "강조된 합법 슬롯 하나를 클릭하세요",
-							reservedLeftPixels: 180,
+							reservedLeftPixels: compactNavigatorViewport ? 64 : 180,
 							gesture: "single" as const,
 							recommendedPortCount: 1,
 						})
 					: tool === "eq"
 						? Object.freeze({
 								label: "EQ · Port 3개를 한 번에",
-								instruction: "청록색 1에서 2까지 드래그하세요",
-								reservedLeftPixels: 180,
+								instruction: "청록색 1 시작 → 2 끝 클릭",
+								reservedLeftPixels: compactNavigatorViewport ? 64 : 180,
 								gesture: "row" as const,
 								recommendedPortCount: 3,
 							})
@@ -4283,13 +4295,14 @@ export default function TileFabApp(): React.ReactElement {
 							? Object.freeze({
 									label: "STK · 입고와 출고 Port",
 									instruction: "강조된 슬롯 두 개를 차례로 클릭하세요",
-									reservedLeftPixels: 180,
+									reservedLeftPixels: compactNavigatorViewport ? 64 : 180,
 									gesture: "single" as const,
 									recommendedPortCount: 1,
 								})
 							: null
 				: null,
 		[
+			compactNavigatorViewport,
 			guidedBuildCurrentSuggestedAction,
 			guidedBuildEvaluation.currentMissionId,
 			guidedBuildExperienceActive,
@@ -8768,6 +8781,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (!EQ_PORT_PITCHES_MILLIMETERS.includes(next)) return;
 		eqPitchMillimetersRef.current = next;
 		setEqPitchMillimetersState(next);
+		refreshPendingEqConfiguration();
 		setStatus(`EQ 포트 피치 ${next / 1_000} m`);
 		scheduleRender();
 	};
@@ -8776,6 +8790,7 @@ export default function TileFabApp(): React.ReactElement {
 		const portable = next.slice(0, 120);
 		eqRecipeRef.current = portable;
 		setEqRecipeState(portable);
+		refreshPendingEqConfiguration();
 	};
 
 	const setStkTemplate = (next: StkAuthoringTemplate): void => {
@@ -9866,6 +9881,7 @@ export default function TileFabApp(): React.ReactElement {
 		cancelOrdinaryPortKeyboardDeferredApply();
 		ordinaryPortKeyboardPaintedSessionRef.current = null;
 		ordinaryPortKeyboardPresentationRequestRef.current = null;
+		equipmentTargetPresentationRef.current = null;
 		if (guidedPortKeyboardAnnouncementTimerRef.current !== null) {
 			window.clearTimeout(guidedPortKeyboardAnnouncementTimerRef.current);
 			guidedPortKeyboardAnnouncementTimerRef.current = null;
@@ -9904,19 +9920,18 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		const slotLegal = availabilityResult.status === PORT_SLOT_STATUS.LEGAL;
 		const legal = evaluation?.legal ?? slotLegal;
+		const reason = evaluation?.reason ??
+			(slotLegal ? "합법 슬롯" : portSlotStatusMessage(
+				availabilityResult.status,
+				session.portType,
+				availabilityResult.conflictingEquipmentGroupId,
+			));
+		equipmentTargetPresentationRef.current = { session, legal, reason };
 		const presentation = guidedPortKeyboardAccessiblePresentation(session, {
 			routeX: slots.routeXs[session.currentRow] as number,
 			routeZ: slots.routeZs[session.currentRow] as number,
 			legal,
-			reason:
-				evaluation?.reason ??
-				(slotLegal
-					? "합법 슬롯"
-					: portSlotStatusMessage(
-						availabilityResult.status,
-						session.portType,
-						availabilityResult.conflictingEquipmentGroupId,
-						)),
+			reason,
 			selectedPortCount: stkDraftSessionRef.current?.selection.rows.length ?? 0,
 		});
 		if (guidedPortKeyboardReadoutRef.current) {
@@ -10049,6 +10064,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const session = createGuidedPortKeyboardSession(portType, row, binding);
 		presentGuidedPortKeyboardSession(session);
+		requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 		setStatus(`키보드 ${portType} · 방향키 또는 WASD로 슬롯 이동 · Enter로 선택`);
 		if (guidedPortKeyboardFocusRequestRef.current === portType) {
 			guidedPortKeyboardFocusRequestRef.current = null;
@@ -11857,6 +11873,7 @@ export default function TileFabApp(): React.ReactElement {
 						})
 					: undefined;
 			if (!stkCandidateFilter) stkCandidateFilterRef.current.clear();
+			const railCoachInsets = guidedBuildRailSelectionCoach ? fitMapInsets(canvas) : null;
 			rendererRef.current.render(staticContext, overlayContext, {
 				map: activeModel.map,
 				physicalPaths: activeModel.physical.paths,
@@ -11873,7 +11890,13 @@ export default function TileFabApp(): React.ReactElement {
 				guidedPortPlacement: guidedBuildPortPlacementCoach
 					? { ...guidedBuildPortPlacementCoach, acceptsRow: stkCandidateFilter }
 					: null,
-				guidedRailSelection: guidedBuildRailSelectionCoach,
+				guidedRailSelection: guidedBuildRailSelectionCoach && railCoachInsets
+					? { ...guidedBuildRailSelectionCoach,
+						reservedLeftPixels: railCoachInsets.left,
+						reservedRightPixels: railCoachInsets.right,
+						reservedTopPixels: railCoachInsets.top,
+						reservedBottomPixels: railCoachInsets.bottom }
+					: null,
 				guidedOrganizationPlacement: guidedBuildOrganizationPlacementCoach,
 				showPortSlots:
 					activeArrangementPreview === null &&
@@ -12019,8 +12042,11 @@ export default function TileFabApp(): React.ReactElement {
 				ordinaryPortKeyboardSession?.scope === "ordinary" &&
 				ordinaryPortKeyboardSession.portType === "STK" &&
 				cameraRef.current.zoom < ORDINARY_STK_ACQUISITION_MIN_ZOOM;
-			if (ordinaryStkZoomCoachButtonRef.current) {
-				ordinaryStkZoomCoachButtonRef.current.hidden = !ordinaryStkAcquisitionNeedsZoom;
+			if (portTargetZoomButtonRef.current) {
+				portTargetZoomButtonRef.current.hidden =
+					ordinaryPortKeyboardSession?.scope !== "ordinary" ||
+					!guidedPortKeyboardSessionCurrent(ordinaryPortKeyboardSession) ||
+					cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM;
 			}
 			canvas.dataset.stkAcquisitionZoom = ordinaryStkAcquisitionNeedsZoom
 				? "overview"
@@ -12209,6 +12235,31 @@ export default function TileFabApp(): React.ReactElement {
 			if (guidedCanvasActionMarkerFingerprintRef.current !== guidedCanvasMarkerFingerprint) {
 				guidedCanvasActionMarkerFingerprintRef.current = guidedCanvasMarkerFingerprint;
 				setGuidedCanvasActionMarkers(guidedCanvasMarkers);
+			}
+			const equipmentReadout = equipmentSelectionReadoutRef.current;
+			if (equipmentReadout) {
+				const currentDraft = portRowDragRef.current;
+				const selection = currentDraft &&
+					currentDraft.portType.toLowerCase() === toolRef.current &&
+					isCurrentPortRowDrag(currentDraft) ? currentDraft.selection : null;
+				const target = equipmentTargetPresentationRef.current;
+				const rejectedTarget = target && !target.legal &&
+					target.session.portType.toLowerCase() === toolRef.current &&
+					target.session === guidedPortKeyboardSessionRef.current &&
+					guidedPortKeyboardSessionCurrent(target.session) ? target : null;
+				const anchored = selection && "state" in selection && selection.state === "ANCHORED";
+				const message = selection
+					? anchored
+						? "시작점 선택됨 · 같은 직선의 끝점을 선택하세요"
+						: selection.valid && currentDraft?.portType === "EQ"
+							? `EQ 장비 1개 · Port ${selection.rows.length}개 · 간격 ${currentDraft.pitchMillimeters / 1_000} m`
+							: portEquipmentReasonLabel(selection.reason)
+					: rejectedTarget?.reason ?? "";
+				if (equipmentReadout.textContent !== message) equipmentReadout.textContent = message;
+				equipmentReadout.hidden = message === "";
+				equipmentReadout.dataset.state = anchored
+					? "selecting" : (selection ? selection.valid : !rejectedTarget) ? "ready" : "blocked";
+				equipmentReadout.dataset.portCount = String(selection?.rows.length ?? 0);
 			}
 			const telemetryNow = performance.now();
 			const telemetryWait = 100 - (telemetryNow - telemetryPublishedAt);
@@ -15815,6 +15866,22 @@ export default function TileFabApp(): React.ReactElement {
 			return preflightSelection;
 		});
 
+	const refreshPendingEqConfiguration = (): void => {
+		const draft = portRowDragRef.current;
+		if (toolRef.current !== "eq" || draft?.portType !== "EQ" || !isCurrentPortRowDrag(draft)) return;
+		// A prior deferred Enter must not apply a subsequently changed configuration.
+		cancelOrdinaryPortKeyboardDeferredApply();
+		draft.pitchMillimeters = eqPitchMillimetersRef.current;
+		draft.recipe = eqRecipeRef.current.trim() || null;
+		if (draft.currentRow < 0) invalidatePortRowDrag(draft, draft.selection.reason);
+		else recomputePortRowDrag(draft, draft.currentRow);
+		const session = guidedPortKeyboardSessionRef.current;
+		if (session?.portType === "EQ" && session.anchorRow === draft.anchorRow && guidedPortKeyboardSessionCurrent(session)) {
+			presentGuidedPortKeyboardSession(session, { legal: draft.selection.valid, reason: draft.selection.reason });
+		}
+		scheduleRender();
+	};
+
 	const selectInspectTarget = (
 		pointer: Readonly<{ cell: Cell; world: { x: number; y: number } }>,
 		tile: Cell,
@@ -16757,7 +16824,7 @@ export default function TileFabApp(): React.ReactElement {
 					...dragBase,
 					portType: "EQ",
 					pitchMillimeters,
-					recipe: eqRecipeRef.current.trim() === "" ? null : eqRecipeRef.current,
+					recipe: eqRecipeRef.current.trim() || null,
 					selection,
 				};
 				if (previewReadoutRef.current) previewReadoutRef.current.textContent = selection.reason;
@@ -17036,15 +17103,15 @@ export default function TileFabApp(): React.ReactElement {
 		if (toolRef.current === "ohb" || toolRef.current === "eq" || toolRef.current === "stk") {
 			const portType = toolRef.current === "eq" ? "EQ" : toolRef.current === "stk" ? "STK" : "OHB";
 			const nextPortSlot = portSlotAtWorld(pointer.world, event.pointerType);
-			const ordinaryKeyboard = guidedPortKeyboardSessionRef.current;
+			const pointerCursor = guidedPortKeyboardSessionRef.current;
 			if (
 				nextPortSlot !== null &&
-				ordinaryKeyboard?.scope === "ordinary" &&
-				ordinaryKeyboard.portType === portType &&
-				guidedPortKeyboardSessionCurrent(ordinaryKeyboard) &&
-				ordinaryKeyboard.currentRow !== nextPortSlot
+				pointerCursor !== null &&
+				pointerCursor.portType === portType &&
+				guidedPortKeyboardSessionCurrent(pointerCursor) &&
+				pointerCursor.currentRow !== nextPortSlot
 			) {
-				const nextKeyboard = moveGuidedPortKeyboardCursor(ordinaryKeyboard, nextPortSlot);
+				const nextKeyboard = moveGuidedPortKeyboardCursor(pointerCursor, nextPortSlot);
 				const eqSelection =
 					nextKeyboard.portType === "EQ" &&
 					nextKeyboard.phase === "choose-end" &&
@@ -17061,7 +17128,7 @@ export default function TileFabApp(): React.ReactElement {
 				setStatus(`${portType} Enter 대상 · 포인터가 가리키는 슬롯으로 이동했습니다`);
 			}
 			if (hoverPortSlotRef.current !== nextPortSlot) {
-				if (nextPortSlot !== null || ordinaryKeyboard?.scope !== "ordinary") {
+				if (nextPortSlot !== null || pointerCursor?.scope !== "ordinary") {
 					hoverPortSlotRef.current = nextPortSlot;
 				}
 				if (previewReadoutRef.current) {
@@ -17828,12 +17895,9 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handleContextMenu = (event: React.MouseEvent<HTMLCanvasElement>): void => {
+		// Chromium can dispatch contextmenu on pointerdown, before a secondary drag.
+		// finishPointer owns click cancellation after distinguishing it from a pan.
 		event.preventDefault();
-		if (portRowDragRef.current) {
-			clearTransientConstruction(`${portRowDragRef.current.portType} 행 배치를 취소했습니다`);
-		} else if (stkDraftSessionRef.current) {
-			clearTransientConstruction("STK 포트 선택을 취소했습니다");
-		}
 	};
 
 	const zoomMapAround = (factor: number, screenX: number, screenY: number): boolean => {
@@ -17857,16 +17921,15 @@ export default function TileFabApp(): React.ReactElement {
 		if (!canvas || !zoomMapAround(factor, canvas.clientWidth / 2, canvas.clientHeight / 2)) return;
 		setStatus(`화면 배율 ${Math.round(cameraRef.current.zoom)} px/m`);
 	};
-	const zoomOrdinaryStkTarget = (): void => {
+	const zoomOrdinaryPortTarget = (): void => {
 		const session = guidedPortKeyboardSessionRef.current;
 		const canvas = canvasRef.current;
 		if (
 			!canvas ||
 			session?.scope !== "ordinary" ||
-			session.portType !== "STK" ||
 			!guidedPortKeyboardSessionCurrent(session)
 		) {
-			setStatus("현재 STK Port 대상을 다시 선택하세요");
+			setStatus("현재 Port 대상을 다시 선택하세요");
 			return;
 		}
 		const row = session.currentRow;
@@ -17882,7 +17945,7 @@ export default function TileFabApp(): React.ReactElement {
 		fittedMapCameraRef.current = false;
 		cameraReadyRef.current = true;
 		rendererRef.current.invalidateStatic();
-		setStatus("현재 STK Port를 38 px/m로 확대했습니다 · 금색 표식에서 선택하세요");
+		setStatus(`현재 ${session.portType} Port를 ${Math.round(cameraRef.current.zoom)} px/m로 확대했습니다 · 현재 표식에서 선택하세요`);
 		scheduleRender();
 		requestAnimationFrame(() => canvas.focus({ preventScroll: true }));
 	};
@@ -26434,6 +26497,38 @@ export default function TileFabApp(): React.ReactElement {
 				editorModel.portSlotArtifacts[activePortAuthoringType].slots.legalCount,
 			)
 		: null;
+	const equipmentWorkspaceActive =
+		!staticFabExclusiveCommandActive &&
+		!portEquipmentMembershipEditSession &&
+		!portEquipmentGroupEditSession &&
+		activePortAuthoringType !== null &&
+		activePortAuthoringPresentation !== null &&
+		(!guidedBuildOpen ||
+			(guidedBuildEvaluation.currentMissionId === "ports" &&
+				guidedBuildCurrentSuggestedAction === tool &&
+				!guidedBuildReviewing && !guidedBuildChapterCheckpoint));
+	equipmentWorkspaceFrameRef.current = (): void => {
+		const canvas = canvasRef.current;
+		const session = guidedPortKeyboardSessionRef.current;
+		if (
+			!equipmentWorkspaceActive || !canvas || !session || panRef.current !== null ||
+			!guidedPortKeyboardSessionCurrent(session) ||
+			(portRowDragRef.current?.pointerId ?? -1) >= 0
+		) return;
+		if (centerPortKeyboardRowIfObscured(
+			session, canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas),
+		)) {
+			cameraReadyRef.current = true;
+			fittedMapCameraRef.current = false;
+			rendererRef.current.invalidateStatic();
+			scheduleRender();
+		}
+	};
+	useEquipmentWorkspaceFraming(
+		equipmentWorkspaceActive ? `${tool}:${guidedPortKeyboard?.phase ?? "pending"}` : null,
+		canvasRef,
+		equipmentWorkspaceFrameRef,
+	);
 	const activePortLegalSlotCount = activePortAuthoringType
 		? editorModel.portSlotArtifacts[activePortAuthoringType].slots.legalCount
 		: 0;
@@ -26444,7 +26539,7 @@ export default function TileFabApp(): React.ReactElement {
 				? "배치 가능 슬롯 없음 · STK가 연결될 직선 레일을 먼저 만드세요"
 				: stkDraftReview.instruction
 			: tool === "eq" &&
-				guidedPortKeyboard?.scope === "ordinary" &&
+				guidedPortKeyboard !== null &&
 				guidedPortKeyboard.portType === "EQ"
 				? ordinaryEqAuthoringInstruction(
 						guidedPortKeyboard.phase,
@@ -26453,7 +26548,7 @@ export default function TileFabApp(): React.ReactElement {
 				: activePortAuthoringPresentation?.instruction ?? "";
 	const ordinaryEqRowExit = ordinaryEqRowExitPresentation(
 		tool === "eq" &&
-			guidedPortKeyboard?.scope === "ordinary" &&
+			guidedPortKeyboard !== null &&
 			guidedPortKeyboard.portType === "EQ"
 			? guidedPortKeyboard.phase
 			: null,
@@ -28937,7 +29032,11 @@ export default function TileFabApp(): React.ReactElement {
 			activePortAuthoringPresentation !== null &&
 			!staticFabExclusiveCommandActive,
 	});
-	const editorToolDescriptionConstraint = editorToolDensity.hardConstraint;
+	const editorToolDescriptionConstraint =
+		editorToolDensity.hardConstraint ??
+		(equipmentWorkspaceActive && compactNavigatorViewport
+			? "장비 배치 중에는 캔버스 공간을 확보합니다"
+			: null);
 	const compactPortToolContextActive = editorToolDensity.ordinaryPortContextActive;
 	const compactPortToolFocusActive = editorToolDensity.ordinaryPortFocus;
 	const editorToolDescriptionsExpanded = editorToolDescriptionConstraint
@@ -29101,6 +29200,7 @@ export default function TileFabApp(): React.ReactElement {
 			const next = moveGuidedPortKeyboardCursor(current, marker.portSlotRow);
 			presentGuidedPortKeyboardSession(next);
 			setStatus("STK 첫 Port 선택 완료 · 추천 슬롯에서 Enter로 추가한 뒤 STK 생성");
+			requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 			scheduleRender();
 			return;
 		}
@@ -31137,6 +31237,7 @@ export default function TileFabApp(): React.ReactElement {
 								: null
 						}
 						keyboardPort={guidedPortKeyboard}
+						equipmentWorkspaceType={equipmentWorkspaceActive ? activePortAuthoringType : null}
 						exclusiveCommandActive={
 							staticFabArrangement !== null || staticFabAssemblyConnector !== null
 						}
@@ -32329,7 +32430,7 @@ export default function TileFabApp(): React.ReactElement {
 									{editorToolDescriptionConstraint}. 패널을 닫으면 이전 설정으로 돌아갑니다.
 								</span>
 							) : null}
-							{compactPortToolFocusActive ? (
+							{compactPortToolFocusActive && !editorToolDescriptionConstraint ? (
 								<span id="tilefab-port-tool-density-context" className="tilefab-sr-only">
 									Port 배치 중에는 캔버스를 넓게 쓰도록 도구 설명을 접었습니다. 이 버튼으로
 									언제든 펼칠 수 있으며 Port 작업을 끝내면 이전 메뉴 설정으로 돌아갑니다.
@@ -35961,237 +36062,182 @@ export default function TileFabApp(): React.ReactElement {
 							<X size={14} /> ESC
 						</button>
 					</div>
-				) : !staticFabExclusiveCommandActive && activePortAuthoringPresentation &&
-					(!guidedBuildOpen || guidedBuildEvaluation.currentMissionId === "ports") ? (
-					<div
-						className="tilefab-buildbar tilefab-port-buildbar"
+				) : equipmentWorkspaceActive && activePortAuthoringType && activePortAuthoringPresentation ? (
+					<EquipmentAuthoringWorkspace
 						key={tool}
-						ref={observePortDockClearance}
-						data-port-intent={tool === "ohb" ? (ohbPlacementIntent?.kind ?? "place") : "place"}
-						data-port-type={activePortAuthoringType}
-					>
-						<span className="tilefab-buildbar-title">
-							{tool === "stk" ? (
-								<Warehouse size={15} />
-							) : tool === "eq" ? (
-								<Factory size={15} />
-							) : ohbPlacementIntent?.kind === "move" ? (
-								<Move size={15} />
-							) : (
-								<PackagePlus size={15} />
-							)}
-							{tool === "ohb" && ohbPlacementIntent?.kind === "move"
-										? "MOVE OHB PORT"
-										: tool === "ohb" && ohbPlacementIntent?.kind === "copy"
-											? "COPY OHB PORT"
-											: activePortAuthoringPresentation.buildbarTitle}
-						</span>
-						{!guidedBuildExperienceActive ? (
-							<button
-								type="button"
-								className="tilefab-placement-exit tilefab-port-authoring-exit"
-								data-testid="ordinary-port-authoring-exit"
-								aria-keyshortcuts={
-									tool === "stk" && (stkDraftSelection?.rows.length ?? 0) > 0
-										? undefined
-										: "Escape"
-								}
-								aria-label={
-									ordinaryEqRowExit?.ariaLabel ??
-									(ohbPlacementIntent
-										? "OHB 이동·복제 취소"
-										: tool === "stk"
-											? "STK 배치 종료"
-											: "Port 배치 종료")
-								}
-								data-exit-scope={ordinaryEqRowExit ? "eq-row" : "port-authoring"}
-								onClick={() => {
-									if (ordinaryEqRowExit) {
-										cancelGuidedPortKeyboard(
-											ordinaryPortKeyboardEscapePresentation(
-												"EQ",
-												"choose-end",
-											).message,
-											true,
-											true,
-										);
-										return;
-									}
-									exitOrdinaryPortAuthoring();
-								}}
-							>
-								<X size={14} />{" "}
-								{ordinaryEqRowExit?.label ??
-									(ohbPlacementIntent
-										? "이동·복제 취소"
-										: tool === "stk"
-											? "STK 배치 종료"
-											: "Port 배치 종료")}
-							</button>
-						) : null}
-						<span
-							id="tilefab-port-authoring-instruction"
-							className="tilefab-port-authoring-instruction"
-							data-state={tool === "stk" && stkDraftReview.issue ? "blocked" : "ready"}
-						>
-							<span
-								role={guidedPortKeyboard ? undefined : "status"}
-								aria-live={guidedPortKeyboard ? "off" : "polite"}
-							>
+						portType={activePortAuthoringType}
+						intent={tool === "ohb" ? (ohbPlacementIntent?.kind ?? "place") : "place"}
+						heading={
+							<span className="tilefab-equipment-workspace-title">
 								{tool === "stk" ? (
-									<span className="tilefab-stk-review" data-testid="stk-draft-review">
-										<strong>{stkDraftReview.title}</strong>
-										<span>{basePortAuthoringInstruction}</span>
-										{stkDraftReview.issue ? <span className="tilefab-stk-review-issue">{stkDraftReview.issue}</span> : null}
-									</span>
-								) : null}
-								{tool !== "stk" ? (
-									<span className="tilefab-port-authoring-detail">
-										{ohbPlacementIntent
-											? `PORT-${ohbPlacementIntent.portId} · 방향키/WASD로 대상 이동 · Enter 또는 클릭으로 ${ohbPlacementIntent.kind === "move" ? "이동" : "복제"} · Esc 취소`
-											: activePortAuthoringInstruction}
-									</span>
-								) : null}
+									<Warehouse size={15} />
+								) : tool === "eq" ? (
+									<Factory size={15} />
+								) : ohbPlacementIntent?.kind === "move" ? (
+									<Move size={15} />
+								) : (
+									<PackagePlus size={15} />
+								)}
+								{tool === "ohb" && ohbPlacementIntent?.kind === "move"
+									? "OHB 위치 변경"
+									: tool === "ohb" && ohbPlacementIntent?.kind === "copy"
+										? "OHB 복제"
+										: activePortAuthoringType === "OHB"
+											? "OHB · 상부 보관"
+											: activePortAuthoringType === "EQ"
+												? "EQ · 공정 장비"
+												: "Stocker · 보관 장비"}
 							</span>
-							{!guidedBuildExperienceActive && tool === "stk" ? (
-								<button
-									ref={ordinaryStkZoomCoachButtonRef}
-									type="button"
-									className="tilefab-stk-zoom-current"
-									data-testid="ordinary-stk-zoom-in"
-									hidden={cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM}
-									onClick={zoomOrdinaryStkTarget}
-								>
-									<Search size={14} aria-hidden="true" />
-									{activeStkZoomActionLabel}
-								</button>
-							) : null}
-						</span>
-						{!guidedBuildExperienceActive &&
-						activePortAuthoringPresentation.prerequisiteAction &&
-						!ohbPlacementIntent ? (
-							<button
-								type="button"
-								className="tilefab-port-next-kind tilefab-port-prerequisite"
-								data-testid="ordinary-port-build-prerequisite"
-								aria-label={activePortAuthoringPresentation.prerequisiteAction.ariaLabel}
-								aria-describedby="tilefab-port-authoring-instruction"
-								onClick={() => {
-									if (!chooseExplicitEditorTool("build")) return;
-									setStatus(
-										activeMap.size === 0
-											? "빈 FAB · 드래그 또는 Enter로 첫 직선 레일을 만드세요"
-											: "BUILD · 직선 레일을 늘리거나 새로 만드세요",
-									);
-									requestAnimationFrame(() =>
-										canvasRef.current?.focus({ preventScroll: true }),
-									);
-								}}
-							>
-								<Route size={14} aria-hidden="true" />
-								<strong>{activePortAuthoringPresentation.prerequisiteAction.label}</strong>
-								<ChevronRight size={14} aria-hidden="true" />
-							</button>
-						) : null}
-						{ordinaryOhbNextPortHandoff ? (
-							<>
-								<span id="tilefab-next-port-handoff-description" className="tilefab-sr-only">
-									{ordinaryOhbNextPortHandoff.description}
-								</span>
+						}
+						exit={
+							!guidedBuildExperienceActive || ordinaryEqRowExit ? (
 								<button
 									type="button"
-									className="tilefab-port-next-kind"
-									data-testid="ordinary-next-port-handoff"
-									data-handoff-action={ordinaryOhbNextPortHandoff.action}
-									aria-label={ordinaryOhbNextPortHandoff.ariaLabel}
-									aria-describedby="tilefab-next-port-handoff-description"
+									className="tilefab-placement-exit tilefab-port-authoring-exit"
+									data-testid="ordinary-port-authoring-exit"
+									aria-keyshortcuts={
+										tool === "stk" && (stkDraftSelection?.rows.length ?? 0) > 0 ? undefined : "Escape"
+									}
+									aria-label={
+										ordinaryEqRowExit?.ariaLabel ??
+										(ohbPlacementIntent
+											? "OHB 이동·복제 취소"
+											: tool === "stk"
+												? "STK 배치 종료"
+												: "Port 배치 종료")
+									}
+									data-exit-scope={ordinaryEqRowExit ? "eq-row" : "port-authoring"}
 									onClick={() => {
-										if (ordinaryOhbNextPortHandoff.action === "prepare-eq-rail") {
-											if (chooseExplicitEditorTool("build")) {
-												setStatus(
-													ordinaryEqHandoffRailPrerequisiteStatus(eqPitchMillimeters),
-												);
-												requestAnimationFrame(() =>
-													canvasRef.current?.focus({ preventScroll: true }),
-												);
-											}
-										} else if (chooseGuidedEquipmentTool("eq")) {
-											setStatus(ORDINARY_EQ_HANDOFF_ENTRY_STATUS);
+										if (ordinaryEqRowExit) {
+											cancelGuidedPortKeyboard(
+												ordinaryPortKeyboardEscapePresentation("EQ", "choose-end").message,
+												true,
+												true,
+											);
+											return;
 										}
+										exitOrdinaryPortAuthoring();
 									}}
 								>
-									{ordinaryOhbNextPortHandoff.action === "prepare-eq-rail" ? (
-										<Route size={14} aria-hidden="true" />
-									) : (
-										<Factory size={14} aria-hidden="true" />
-									)}
-									<span className="tilefab-next-port-handoff-copy">
-										<strong>{ordinaryOhbNextPortHandoff.label}</strong>
-										<small>{ordinaryOhbNextPortHandoff.instruction}</small>
-									</span>
-									<ChevronRight size={14} aria-hidden="true" />
+									<X size={14} />{" "}
+									{ordinaryEqRowExit?.label ??
+										(ohbPlacementIntent
+											? "이동·복제 취소"
+											: tool === "stk"
+												? "STK 배치 종료"
+												: "Port 배치 종료")}
 								</button>
-							</>
-						) : null}
-						{tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
+							) : null
+						}
+						selection={
 							<>
-								<fieldset className="tilefab-segmented tilefab-eq-pitch" aria-label="EQ 포트 피치">
-									{EQ_PORT_PITCHES_MILLIMETERS.map((pitch) => (
+								<span
+									id="tilefab-port-authoring-instruction"
+									className="tilefab-port-authoring-instruction"
+									data-state={tool === "stk" && stkDraftReview.issue ? "blocked" : "ready"}
+								>
+									<span
+										role={guidedPortKeyboard ? undefined : "status"}
+										aria-live={guidedPortKeyboard ? "off" : "polite"}
+									>
+										{tool === "stk" ? (
+											<span className="tilefab-stk-review" data-testid="stk-draft-review">
+												<strong>{stkDraftReview.title}</strong>
+												<span>{basePortAuthoringInstruction}</span>
+												{stkDraftReview.issue ? (
+													<span className="tilefab-stk-review-issue">{stkDraftReview.issue}</span>
+												) : null}
+											</span>
+										) : null}
+										{tool !== "stk" ? (
+											<span className="tilefab-port-authoring-detail">
+												{ohbPlacementIntent
+													? `PORT-${ohbPlacementIntent.portId} · 방향키/WASD로 대상 이동 · Enter 또는 클릭으로 ${ohbPlacementIntent.kind === "move" ? "이동" : "복제"} · Esc 취소`
+													: activePortAuthoringInstruction}
+											</span>
+										) : null}
+									</span>
+									{!guidedBuildExperienceActive ? (
 										<button
+											ref={portTargetZoomButtonRef}
 											type="button"
-											key={pitch}
-											data-active={eqPitchMillimeters === pitch}
-											aria-pressed={eqPitchMillimeters === pitch}
-											onClick={() => setEqPitchMillimeters(pitch)}
+											className="tilefab-stk-zoom-current tilefab-equipment-zoom-current"
+											data-testid={tool === "stk" ? "ordinary-stk-zoom-in" : "ordinary-port-zoom-in"}
+											hidden={cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM}
+											onClick={zoomOrdinaryPortTarget}
 										>
-											{pitch / 1_000} m
+											<Search size={14} aria-hidden="true" />
+											{tool === "stk" ? activeStkZoomActionLabel : "현재 Port 확대"}
 										</button>
-									))}
-								</fieldset>
-								<label className="tilefab-eq-recipe">
-									<span>RECIPE</span>
-									<input
-										type="text"
-										value={eqRecipe}
-										maxLength={120}
-										placeholder="OPTIONAL"
-										onChange={(event) => setEqRecipe(event.currentTarget.value)}
+									) : null}
+								</span>
+								{tool !== "stk" ? (
+									<span
+										ref={bindEquipmentSelectionReadout}
+										className="tilefab-equipment-selection-readout"
+										aria-live={guidedPortKeyboard ? "off" : "polite"}
 									/>
-								</label>
+								) : null}
 							</>
-						) : null}
-						{tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
-							<>
-								<fieldset
-									className="tilefab-segmented tilefab-stk-templates"
-									aria-label="STK 포트 템플릿"
-									aria-describedby="tilefab-port-authoring-instruction"
-								>
-									{STK_AUTHORING_TEMPLATES.map((template) => (
-										<button
-											type="button"
-											key={template}
-											data-testid={`stk-template-${template}`}
-											data-active={stkTemplate === template}
-											aria-pressed={stkTemplate === template}
-											aria-label={`${stkTemplatePresentation(template).label}: ${template === "FLEX" && guidedStkMinimumPorts === 2 ? "이번 Guide에서는 Port 2개 선택" : stkTemplatePresentation(template).requirement}`}
-											onClick={() => setStkTemplate(template)}
-											title={template === "FLEX" && guidedStkMinimumPorts === 2 ? "이번 Guide에서는 Port 2개 선택" : stkTemplatePresentation(template).requirement}
+						}
+						settings={
+							activePortAuthoringPresentation.configurationAvailable && (tool === "eq" || tool === "stk") ? (
+								<>
+									{tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
+										<fieldset className="tilefab-segmented tilefab-eq-pitch" aria-label="EQ 포트 피치">
+											<legend>Port 간격</legend>
+											{EQ_PORT_PITCHES_MILLIMETERS.map((pitch) => (
+												<button
+													type="button"
+													key={pitch}
+													data-active={eqPitchMillimeters === pitch}
+													aria-pressed={eqPitchMillimeters === pitch}
+													onClick={() => setEqPitchMillimeters(pitch)}
+												>
+													{pitch / 1_000} m
+												</button>
+											))}
+										</fieldset>
+									) : null}{" "}
+									{tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
+										<fieldset
+											className="tilefab-segmented tilefab-stk-templates"
+											aria-label="STK 포트 템플릿"
+											aria-describedby="tilefab-port-authoring-instruction"
 										>
-											{template === "FLEX"
-												? "FLEX"
-												: template === "FOUR_PORT"
-													? "4 PORT"
-													: template === "SIX_PORT"
-														? "6 PORT"
-														: "B2B"}
-										</button>
-									))}
-								</fieldset>
-								<fieldset
-									className="tilefab-segmented tilefab-stk-actions"
-									aria-label="STK 드래프트 작업"
-								>
+											<legend>Port 구성</legend>
+											{STK_AUTHORING_TEMPLATES.map((template) => (
+												<button
+													type="button"
+													key={template}
+													data-testid={`stk-template-${template}`}
+													data-active={stkTemplate === template}
+													aria-pressed={stkTemplate === template}
+													aria-label={`${stkTemplatePresentation(template).label}: ${template === "FLEX" && guidedStkMinimumPorts === 2 ? "이번 Guide에서는 Port 2개 선택" : stkTemplatePresentation(template).requirement}`}
+													onClick={() => setStkTemplate(template)}
+													title={
+														template === "FLEX" && guidedStkMinimumPorts === 2
+															? "이번 Guide에서는 Port 2개 선택"
+															: stkTemplatePresentation(template).requirement
+													}
+												>
+													{template === "FLEX"
+														? "자유 선택"
+														: template === "FOUR_PORT"
+															? "연속 4개"
+															: template === "SIX_PORT"
+																? "연속 6개"
+																: "양쪽 짝(B2B)"}
+												</button>
+											))}
+										</fieldset>
+									) : null}
+								</>
+							) : null
+						}
+						actions={
+							tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
+								<fieldset className="tilefab-segmented tilefab-stk-actions" aria-label="STK 드래프트 작업">
 									<button
 										type="button"
 										data-testid="stk-remove-last"
@@ -36229,24 +36275,107 @@ export default function TileFabApp(): React.ReactElement {
 										className="tilefab-stk-complete"
 										data-testid="stk-complete"
 										data-guided-action-id="command:stk.complete"
-										data-guided-target={guidedBuildPrimaryTarget?.id === "command:stk.complete" ? "true" : undefined}
+										data-guided-target={
+											guidedBuildPrimaryTarget?.id === "command:stk.complete" ? "true" : undefined
+										}
 										disabled={editorMutationWaitActive || !stkDraftReady}
 										aria-keyshortcuts="Shift+Enter"
-										aria-describedby={guidedBuildPrimaryTarget?.id === "command:stk.complete" ? "tilefab-port-authoring-instruction tilefab-guided-primary-target-description" : "tilefab-port-authoring-instruction"}
+										aria-describedby={
+											guidedBuildPrimaryTarget?.id === "command:stk.complete"
+												? "tilefab-port-authoring-instruction tilefab-guided-primary-target-description"
+												: "tilefab-port-authoring-instruction"
+										}
 										onClick={completeStkDraft}
 									>
 										<Check size={13} /> STK 생성
 									</button>
 								</fieldset>
-							</>
-						) : null}
-						<span className="tilefab-build-spec">
-							<Grid3X3 size={14} /> RAIL STATION SLOTS
-							<span>
-								{activePortAuthoringPresentation.toolDescription}
-							</span>
-						</span>
-					</div>
+							) : null
+						}
+						continuation={
+							ordinaryOhbNextPortHandoff ||
+							(!guidedBuildExperienceActive &&
+								activePortAuthoringPresentation.prerequisiteAction &&
+								!ohbPlacementIntent) ? (
+								<>
+									{!guidedBuildExperienceActive &&
+									activePortAuthoringPresentation.prerequisiteAction &&
+									!ohbPlacementIntent ? (
+										<button
+											type="button"
+											className="tilefab-port-next-kind tilefab-port-prerequisite"
+											data-testid="ordinary-port-build-prerequisite"
+											aria-label={activePortAuthoringPresentation.prerequisiteAction.ariaLabel}
+											aria-describedby="tilefab-port-authoring-instruction"
+											onClick={() => {
+												if (!chooseExplicitEditorTool("build")) return;
+												setStatus(
+													activeMap.size === 0
+														? "빈 FAB · 드래그 또는 Enter로 첫 직선 레일을 만드세요"
+														: "BUILD · 직선 레일을 늘리거나 새로 만드세요",
+												);
+												requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+											}}
+										>
+											<Route size={14} aria-hidden="true" />
+											<strong>{activePortAuthoringPresentation.prerequisiteAction.label}</strong>
+											<ChevronRight size={14} aria-hidden="true" />
+										</button>
+									) : null}
+									{ordinaryOhbNextPortHandoff ? (
+										<>
+											<span id="tilefab-next-port-handoff-description" className="tilefab-sr-only">
+												{ordinaryOhbNextPortHandoff.description}
+											</span>
+											<button
+												type="button"
+												className="tilefab-port-next-kind"
+												data-testid="ordinary-next-port-handoff"
+												data-handoff-action={ordinaryOhbNextPortHandoff.action}
+												aria-label={ordinaryOhbNextPortHandoff.ariaLabel}
+												aria-describedby="tilefab-next-port-handoff-description"
+												onClick={() => {
+													if (ordinaryOhbNextPortHandoff.action === "prepare-eq-rail") {
+														if (chooseExplicitEditorTool("build")) {
+															setStatus(ordinaryEqHandoffRailPrerequisiteStatus(eqPitchMillimeters));
+															requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+														}
+													} else if (chooseGuidedEquipmentTool("eq")) {
+														setStatus(ORDINARY_EQ_HANDOFF_ENTRY_STATUS);
+													}
+												}}
+											>
+												{ordinaryOhbNextPortHandoff.action === "prepare-eq-rail" ? (
+													<Route size={14} aria-hidden="true" />
+												) : (
+													<Factory size={14} aria-hidden="true" />
+												)}
+												<span className="tilefab-next-port-handoff-copy">
+													<strong>{ordinaryOhbNextPortHandoff.label}</strong>
+													<small>{ordinaryOhbNextPortHandoff.instruction}</small>
+												</span>
+												<ChevronRight size={14} aria-hidden="true" />
+											</button>
+										</>
+									) : null}
+								</>
+							) : null
+						}
+						optionalSettings={
+							tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
+								<label className="tilefab-eq-recipe">
+									<span>공정 Recipe</span>
+									<input
+										type="text"
+										value={eqRecipe}
+										maxLength={120}
+										placeholder="선택 사항"
+										onChange={(event) => setEqRecipe(event.currentTarget.value)}
+									/>
+								</label>
+							) : null
+						}
+					/>
 				) : null}
 
 				{organizationLibraryOpen && !readinessOpen ? (

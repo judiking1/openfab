@@ -60,6 +60,7 @@ export interface GuidedBuildPanelProps {
 	readonly chapterCheckpointId?: GuidedBuildChapterId | null;
 	readonly keyboardRail?: GuidedBuildKeyboardRailState | null;
 	readonly keyboardPort?: GuidedBuildKeyboardPortState | null;
+	readonly equipmentWorkspaceType?: GuidedPortKeyboardType | null;
 	readonly exclusiveCommandActive?: boolean;
 	readonly keyboardRailEntryRef?: RefObject<HTMLButtonElement | null>;
 	readonly onAcknowledgeNavigation: () => void;
@@ -93,6 +94,7 @@ export function GuidedBuildPanel({
 	chapterCheckpointId = null,
 	keyboardRail = null,
 	keyboardPort = null,
+	equipmentWorkspaceType = null,
 	exclusiveCommandActive = false,
 	keyboardRailEntryRef,
 	onAcknowledgeNavigation,
@@ -230,6 +232,12 @@ export function GuidedBuildPanel({
 		? guidedPortKeyboardOperationInstruction(keyboardPort.portType, keyboardPort.phase)
 		: null;
 	const keyboardOperation = keyboardRailOperation ?? keyboardPortOperation;
+	const equipmentWorkspaceOwnsInput =
+		!reviewing &&
+		!chapterCheckpoint &&
+		definition?.id === "ports" &&
+		equipmentWorkspaceType !== null &&
+		suggestedAction?.toUpperCase() === equipmentWorkspaceType;
 
 	const reviewMission = (sequence: number): void => {
 		if (keyboardRailActive || keyboardPortActive || exclusiveCommandActive) return;
@@ -250,6 +258,7 @@ export function GuidedBuildPanel({
 			data-current-chapter={currentChapter?.definition.id ?? "complete"}
 			data-chapter-checkpoint={chapterCheckpoint?.definition.id ?? ""}
 			data-presentation={presentation}
+			data-equipment-workspace={equipmentWorkspaceOwnsInput || undefined}
 			aria-labelledby="guided-build-title"
 			onKeyDown={(event: KeyboardEvent<HTMLElement>) => {
 				if (event.key !== "Escape") return;
@@ -410,7 +419,7 @@ export function GuidedBuildPanel({
 							</small>
 						</p>
 					) : null}
-					{progressCue ? (
+					{equipmentWorkspaceOwnsInput ? null : progressCue ? (
 						<div
 							className="tilefab-guided-build-progress-cue"
 							data-testid="guided-build-progress-cue"
@@ -435,7 +444,7 @@ export function GuidedBuildPanel({
 					) : showRationale ? (
 						<em>{prompt.rationale}</em>
 					) : null}
-					{keyboardRailActive && keyboardRail ? (
+					{equipmentWorkspaceOwnsInput ? null : keyboardRailActive && keyboardRail ? (
 						<div
 							className="tilefab-guided-build-hint tilefab-guided-build-keyboard-rail-hint"
 							data-testid="guided-build-keyboard-rail-hint"
@@ -593,7 +602,11 @@ export function GuidedBuildPanel({
 							<CircleHelp size={14} /> {missionHelpOpen ? "단계 도움말 닫기" : "이 단계 도움말"}
 						</button>
 					</div>
-					<nav className="tilefab-guided-build-navigation" aria-label="Guided Build 미션 이동">
+					<nav
+						hidden={equipmentWorkspaceOwnsInput && !missionHelpOpen}
+						className="tilefab-guided-build-navigation"
+						aria-label="Guided Build 미션 이동"
+					>
 						<button
 							type="button"
 							disabled={

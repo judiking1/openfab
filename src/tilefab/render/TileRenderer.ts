@@ -404,7 +404,9 @@ export interface TileRenderInput {
 		readonly label: string;
 		readonly instruction: string;
 		readonly reservedLeftPixels?: number;
+		readonly reservedRightPixels?: number;
 		readonly reservedTopPixels?: number;
+		readonly reservedBottomPixels?: number;
 		readonly eligibleRailCells?: ReadonlySet<string>;
 	}> | null;
 	guidedOrganizationPlacement?: Readonly<{
@@ -1445,7 +1447,9 @@ export class TileRenderer {
 			input.guidedRailSelection?.label ?? "no-rail-guide",
 			input.guidedRailSelection?.instruction ?? "",
 			String(input.guidedRailSelection?.reservedLeftPixels ?? 0),
+			String(input.guidedRailSelection?.reservedRightPixels ?? 0),
 			String(input.guidedRailSelection?.reservedTopPixels ?? 0),
+			String(input.guidedRailSelection?.reservedBottomPixels ?? 0),
 			input.guidedRailSelection?.eligibleRailCells
 				? [...input.guidedRailSelection.eligibleRailCells].sort().join(",")
 				: "",
@@ -1794,7 +1798,9 @@ export class TileRenderer {
 		const guidance = input.guidedRailSelection;
 		if (!guidance) return;
 		const reservedLeft = Math.max(0, guidance.reservedLeftPixels ?? 0);
+		const reservedRight = Math.max(0, guidance.reservedRightPixels ?? 0);
 		const reservedTop = Math.max(0, guidance.reservedTopPixels ?? 0);
+		const reservedBottom = Math.max(0, guidance.reservedBottomPixels ?? 0);
 		let target: Readonly<{
 			x: number;
 			y: number;
@@ -1825,13 +1831,25 @@ export class TileRenderer {
 			const screen = this.worldToScreen({ x: sample.x, y: sample.y }, input.camera);
 			if (
 				screen.x < reservedLeft + 28 ||
-				screen.x > input.width - 28 ||
+				screen.x > input.width - reservedRight - 28 ||
 				screen.y < reservedTop + 28 ||
-				screen.y > input.height - 28
+				screen.y > input.height - reservedBottom - 28
 			) {
 				continue;
 			}
 			const distance = Math.hypot(screen.x - input.width / 2, screen.y - input.height / 2);
+			// Inspect resolves equipment before rail. A rail coach must offer the same click target.
+			if (
+				distance < bestDistance &&
+				input.portEquipmentPresentation &&
+				this.hitTestPortEquipment(
+					input.portEquipmentPresentation,
+					{ x: sample.x, y: sample.y },
+					input.camera.zoom,
+				)
+			) {
+				continue;
+			}
 			if (distance < bestDistance) {
 				target = Object.freeze({
 					x: screen.x,

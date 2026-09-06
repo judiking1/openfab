@@ -1071,7 +1071,7 @@ describe("port slot rendering", () => {
 		const physical = compilePhysicalRail(document.map);
 		const renderer = new TileRenderer();
 
-		renderer.render(createRecordingContext().context, createRecordingContext().context, {
+		const input = {
 			map: document.map,
 			physicalPaths: physical.paths,
 			guidedRailSelection: {
@@ -1082,7 +1082,7 @@ describe("port slot rendering", () => {
 				eligibleRailCells: new Set(Array.from({ length: 19 }, (_, x) => `${x},0`)),
 			},
 			ghost: null,
-			camera: { offsetX: 40, offsetY: 320, zoom: 18, rotation: 0 },
+			camera: { offsetX: 40, offsetY: 320, zoom: 18, rotation: 0 as const },
 			width: 390,
 			height: 640,
 			dpr: 1,
@@ -1090,7 +1090,8 @@ describe("port slot rendering", () => {
 			hoverWorld: null,
 			anchorTile: null,
 			selectedTile: null,
-		});
+		};
+		renderer.render(createRecordingContext().context, createRecordingContext().context, input);
 
 		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([
 			expect.objectContaining({
@@ -1100,6 +1101,97 @@ describe("port slot rendering", () => {
 				worldY: expect.any(Number),
 			}),
 		]);
+		renderer.render(createRecordingContext().context, createRecordingContext().context, {
+			...input,
+			guidedRailSelection: { ...input.guidedRailSelection, reservedRightPixels: 240 },
+		});
+		const clearOfRightPanel = renderer.getGuidedCanvasActionMarkers()[0];
+		expect(clearOfRightPanel).toBeDefined();
+		expect(clearOfRightPanel.x).toBeLessThanOrEqual(input.width - 240 - 28);
+		renderer.render(createRecordingContext().context, createRecordingContext().context, {
+			...input,
+			guidedRailSelection: { ...input.guidedRailSelection, reservedBottomPixels: 350 },
+		});
+		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([]);
+	});
+
+	it.each([
+		"EQ",
+		"STK",
+	] as const)("keeps a Guided rail target clear of %s selection", (portType) => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 18, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifacts(physical, portType);
+		const row = prepared.slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL);
+		const ports = [portSlotRecord(prepared.slots, row, 1, 1, null)];
+		if (portType === "EQ") {
+			const secondRow = prepared.slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL, row + 1);
+			ports.push(portSlotRecord(prepared.slots, secondRow, 2, 1, null));
+		}
+		const presentation = compilePortEquipmentPresentation(physical, {
+			nextPortId: ports.length + 1,
+			nextEquipmentGroupId: 2,
+			ports,
+			equipmentGroups: [
+				portType === "EQ"
+					? { id: 1, kind: "EQ", pitchMillimeters: 1_000, recipe: null, portIds: [1, 2] }
+					: { id: 1, kind: "STK", template: "FLEX", portIds: [1] },
+			],
+		});
+		const renderer = new TileRenderer();
+		const input = {
+			map: document.map,
+			physicalPaths: physical.paths,
+			guidedRailSelection: { label: "Port 포함 Loop", instruction: "레일 선택" },
+			ghost: null,
+			camera: {
+				offsetX: 480 - (presentation.worldPositions[0] as number) * 18,
+				offsetY: 320,
+				zoom: 18,
+				rotation: 0 as const,
+			},
+			width: 960,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		};
+		const draw = (equipment?: typeof presentation) => {
+			renderer.render(createRecordingContext().context, createRecordingContext().context, {
+				...input,
+				portEquipmentPresentation: equipment,
+			});
+			const marker = renderer.getGuidedCanvasActionMarkers()[0];
+			if (!marker || marker.worldX === undefined || marker.worldY === undefined) {
+				throw new Error("Expected a rail marker with an exact world target");
+			}
+			return { ...marker, worldX: marker.worldX, worldY: marker.worldY };
+		};
+		const original = draw();
+		expect(original).toBeDefined();
+		expect(
+			renderer.hitTestPortEquipment(
+				presentation,
+				{ x: original.worldX, y: original.worldY },
+				input.camera.zoom,
+			),
+		).not.toBeNull();
+		const clear = draw(presentation);
+		expect(clear).toBeDefined();
+		expect(clear.pathIndex).not.toBe(original.pathIndex);
+		expect(
+			renderer.hitTestPortEquipment(
+				presentation,
+				{ x: clear.worldX, y: clear.worldY },
+				input.camera.zoom,
+			),
+		).toBeNull();
+		expect(draw()).toEqual(original);
 	});
 
 	it("does not project a Guided Reuse marker outside the eligible equipment Loop", () => {

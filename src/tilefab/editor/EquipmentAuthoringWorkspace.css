@@ -1,0 +1,275 @@
+/* One equipment draft, with required settings and recovery next to the current selection. */
+.tilefab-stk-review {
+	display: grid;
+	gap: 4px;
+	font-size: 11px;
+	line-height: 1.4;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-stk-review strong {
+	color: #ffe39a;
+	font-size: 13px;
+}
+
+.tilefab-stk-review-issue {
+	color: #ffc5bd;
+}
+
+.tilefab-buildbar.tilefab-port-buildbar.tilefab-equipment-workspace {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 10px;
+	left: max(192px, 50% - 310px);
+	right: 10px;
+	transform: none;
+	width: min(620px, calc(100% - 202px));
+	height: auto;
+	max-height: calc(100% - 160px);
+	padding: 12px;
+	overflow: auto;
+	overscroll-behavior: contain;
+	border-radius: 8px;
+}
+
+.tilefab-equipment-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.tilefab-equipment-heading > :first-child {
+	min-width: 0;
+}
+
+.tilefab-equipment-workspace-title {
+	display: flex;
+	flex-wrap: wrap;
+	height: auto;
+	gap: 6px;
+	font-size: 13px;
+	color: #e8f4f3;
+}
+
+.tilefab-equipment-selection {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+}
+
+.tilefab-equipment-workspace .tilefab-port-authoring-instruction {
+	width: 100%;
+	min-width: 0;
+	max-width: none;
+	min-height: 44px;
+	padding: 10px;
+	box-sizing: border-box;
+	font-size: 12px;
+	line-height: 1.5;
+	white-space: normal;
+	flex-wrap: wrap;
+}
+
+.tilefab-equipment-settings,
+.tilefab-equipment-actions,
+.tilefab-equipment-next {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.tilefab-equipment-actions {
+	justify-content: flex-end;
+}
+.tilefab-equipment-settings > fieldset {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+.tilefab-equipment-workspace .tilefab-segmented {
+	height: auto;
+	min-height: 50px;
+}
+.tilefab-equipment-workspace .tilefab-segmented button {
+	min-height: 44px;
+}
+.tilefab-equipment-workspace .tilefab-port-next-kind {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.tilefab-equipment-options {
+	min-width: 0;
+	border-top: 1px solid #2f4041;
+	font-size: 12px;
+}
+
+.tilefab-equipment-options summary {
+	display: list-item;
+	min-height: 44px;
+	box-sizing: border-box;
+	padding: 12px 0;
+	color: #b8c7c8;
+	cursor: pointer;
+}
+
+.tilefab-equipment-options summary:focus-visible {
+	outline: 2px solid #99e4e2;
+	outline-offset: 2px;
+}
+
+.tilefab-equipment-options .tilefab-eq-recipe {
+	min-height: 44px;
+	width: 100%;
+	box-sizing: border-box;
+}
+
+@media (max-width: 760px) {
+	.tilefab-buildbar.tilefab-port-buildbar.tilefab-equipment-workspace {
+		left: 72px;
+		right: 10px;
+		width: calc(100% - 82px);
+		padding: 8px;
+		gap: 8px;
+	}
+	.tilefab-equipment-heading {
+		gap: 8px;
+	}
+	.tilefab-equipment-workspace .tilefab-port-authoring-instruction {
+		padding: 8px;
+	}
+}
+
+.tilefab-equipment-selection-readout {
+	display: block;
+	padding: 8px 10px;
+	border-radius: 4px;
+	background: #122423;
+	color: #b6e4d7;
+	font-size: 12px;
+	font-weight: 700;
+	line-height: 1.4;
+	white-space: normal;
+}
+.tilefab-equipment-selection-readout[data-state="blocked"] {
+	color: #ffc5bd;
+	background: #2b1c1e;
+}
+.tilefab-equipment-selection-readout[hidden] {
+	display: none;
+}
+
+.tilefab-workspace:has(.tilefab-equipment-workspace) .tilefab-scale {
+	display: none;
+}
+
+.tilefab-workspace:has(.tilefab-equipment-workspace):not(:has(.tilefab-blueprint-favorite-tray))
+	.tilefab-recovery:not([data-guided-build="true"]) {
+	bottom: var(--tilefab-port-dock-clearance, 280px);
+}
+
+.tilefab-equipment-intro p {
+	margin: 4px 0 0;
+	color: #aabbbd;
+	font-size: 11px;
+	line-height: 1.4;
+	white-space: normal;
+}
+
+.tilefab-equipment-workspace .tilefab-port-authoring-detail {
+	display: block;
+}
+.tilefab-equipment-workspace .tilefab-equipment-zoom-current {
+	width: 100%;
+}
+.tilefab-equipment-settings legend {
+	padding: 0 4px;
+	color: #b8c7c8;
+	font-size: 11px;
+}
+.tilefab-equipment-settings .tilefab-segmented {
+	padding: 4px;
+}
+.tilefab-equipment-settings .tilefab-segmented button {
+	flex: 1 1 0;
+	justify-content: center;
+}
+.tilefab-equipment-workspace[data-port-type] .tilefab-equipment-settings .tilefab-stk-templates {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	width: 100%;
+	overflow: visible;
+	height: auto;
+}
+.tilefab-equipment-workspace .tilefab-port-authoring-exit {
+	flex: 0 0 auto;
+	min-height: 44px;
+}
+.tilefab-equipment-workspace .tilefab-stk-actions {
+	width: 100%;
+}
+.tilefab-equipment-options .tilefab-eq-recipe input {
+	flex: 1;
+	width: 0;
+	min-height: 44px;
+}
+
+.tilefab-guided-build-panel[data-equipment-workspace="true"] .tilefab-guided-build-mission {
+	gap: 8px;
+	padding: 8px 12px;
+}
+.tilefab-guided-build-panel[data-equipment-workspace="true"]
+	.tilefab-guided-build-navigation[hidden] {
+	display: none;
+}
+.tilefab-guided-build-panel[data-equipment-workspace="true"] .tilefab-guided-build-progress {
+	padding-top: 6px;
+}
+
+@media (max-width: 760px) {
+	.tilefab-equipment-workspace[data-port-type] .tilefab-equipment-settings .tilefab-stk-templates {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	.tilefab-app[data-guided-port-coach="true"]
+		.tilefab-buildbar.tilefab-port-buildbar.tilefab-equipment-workspace {
+		display: grid;
+	}
+	.tilefab-app[data-guided-build-active="true"]
+		.tilefab-workspace:has(.tilefab-equipment-workspace)
+		.tilefab-tools {
+		top: 8px;
+	}
+	.tilefab-workspace .tilefab-guided-build-panel[data-equipment-workspace="true"] {
+		left: 72px;
+		right: 10px;
+		width: auto;
+		max-height: 40%;
+	}
+	.tilefab-guided-build-panel[data-equipment-workspace="true"] > header {
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 5px;
+		padding-left: 8px;
+	}
+	.tilefab-guided-build-panel[data-equipment-workspace="true"] > header > span {
+		display: none;
+	}
+}
+
+.tilefab-workspace:has(.tilefab-equipment-workspace) .tilefab-recovery[data-guided-build="true"] {
+	top: auto;
+	bottom: var(--tilefab-port-dock-clearance, 280px);
+	height: auto;
+}
+@media (max-width: 760px) {
+	.tilefab-workspace:has(.tilefab-equipment-workspace) .tilefab-recovery {
+		width: auto;
+		box-sizing: border-box;
+		left: 72px;
+		right: 10px;
+		max-width: none;
+		transform: none;
+	}
+}

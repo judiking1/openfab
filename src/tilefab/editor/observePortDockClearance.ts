@@ -1,5 +1,5 @@
 /** React ref cleanup keeps transient notices above the actual, wrapping equipment dock. */
-export function observePortDockClearance(dock: HTMLDivElement | null): (() => void) | undefined {
+export function observePortDockClearance(dock: HTMLElement | null): (() => void) | undefined {
 	const workspace = dock?.closest<HTMLElement>(".tilefab-workspace");
 	if (!dock || !workspace) return;
 	const property = "--tilefab-port-dock-clearance";

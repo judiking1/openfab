@@ -41,6 +41,24 @@ describe("ordinaryEqAnchorEdgePresentation", () => {
 		expect(Math.abs((presentation?.y ?? 0) - 300)).toBeGreaterThanOrEqual(72);
 	});
 
+	it.each([
+		"top",
+		"bottom",
+	])("clears the wide locator from the active endpoint at the %s edge", (edge) => {
+		const activeEnd = { x: 380, y: edge === "top" ? 95 : 410 };
+		const presentation = ordinaryEqAnchorEdgePresentation({
+			anchor: { x: 380, y: edge === "top" ? -100 : 900 },
+			activeEnd,
+			frame: { left: 72, top: 46, width: 596, height: 410 },
+			distanceMeters: 4,
+		});
+		expect(presentation?.direction).toBe(edge);
+		// 140px locator + 44px target require more than the old shared 84px shift.
+		expect(Math.abs((presentation?.x ?? 0) - activeEnd.x)).toBeGreaterThanOrEqual(104);
+		expect((presentation?.x ?? 0) - 70).toBeGreaterThanOrEqual(72);
+		expect((presentation?.x ?? 0) + 70).toBeLessThanOrEqual(668);
+	});
+
 	it("retains diagonal direction and clamps into a compact frame", () => {
 		const presentation = ordinaryEqAnchorEdgePresentation({
 			anchor: { x: 800, y: -100 },
