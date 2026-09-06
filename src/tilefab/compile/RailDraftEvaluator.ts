@@ -155,6 +155,17 @@ interface CommittedDraftCoverage {
 	readonly continuationWindowMeters: number;
 }
 
+interface CommittedDraftResources {
+	readonly index: RailEnvelopeSpatialIndex;
+	readonly cells: PhysicalPathCellLookup;
+	readonly switches: { get(id: number): Uint32Array | undefined };
+	readonly identities: { get(identity: ArrayLike<number>): Uint32Array | undefined };
+	readonly forward: PhysicalPathAdjacency;
+	readonly reverse: PhysicalPathAdjacency;
+	readonly continuationWindowMeters: number;
+	readonly prepared: boolean;
+}
+
 const STATION_TOLERANCE_METERS = 0.002;
 const DISTANCE_EPSILON = 1e-8;
 
@@ -163,6 +174,7 @@ const DISTANCE_EPSILON = 1e-8;
  * pointer movement compiles and tests only the local future-state draft.
  */
 export class RailDraftEvaluator {
+	private preparationGeneration = 0;
 	private committedLayout: CompiledPhysicalLayout | null = null;
 	private committedIndex: RailEnvelopeSpatialIndex | null = null;
 	private committedPathIndicesByCell: PhysicalPathCellLookup = new Map();
@@ -193,6 +205,60 @@ export class RailDraftEvaluator {
 	/** Prepare revision-bound broad-phase indexes outside the first pointer interaction. */
 	prepare(committedLayout: CompiledPhysicalLayout, artifacts?: RailDraftPreparedArtifacts): void {
 		this.bindCommittedLayout(committedLayout, artifacts);
+	}
+
+	/** Keep a candidate private until its prepared indexes validate and cancellation is checked. */
+	async prepareCooperatively(
+		layout: CompiledPhysicalLayout,
+		artifacts: RailDraftPreparedArtifacts,
+		checkpoint: () => Promise<void>,
+	): Promise<void> {
+		const generation = ++this.preparationGeneration;
+		const checkCurrent = (): void => {
+			if (generation !== this.preparationGeneration) {
+				throw new Error("Draft preparation was superseded.");
+			}
+		};
+		const guardedCheckpoint = async (): Promise<void> => {
+			checkCurrent();
+			await checkpoint();
+			checkCurrent();
+		};
+		await guardedCheckpoint();
+		if (this.committedLayout === layout) return;
+		if (!railDraftPreparedArtifactsReadyForAdoption(layout, artifacts)) {
+			throw new Error("Cooperative draft preparation requires validated matching artifacts.");
+		}
+		const index = await RailEnvelopeSpatialIndex.fromSnapshotCooperatively(
+			layout.clearance.envelopes,
+			artifacts.envelopeSpatialIndex,
+			guardedCheckpoint,
+		);
+		await guardedCheckpoint();
+		const cells = new PhysicalPathCellIndex(artifacts.pathCellIndex);
+		await guardedCheckpoint();
+		const switches = new PhysicalPathSwitchIndex(artifacts.pathSwitchIndex);
+		await guardedCheckpoint();
+		const identities = new PhysicalPathIdentityIndex(artifacts.pathIdentityIndex);
+		await guardedCheckpoint();
+		const steps = installationClearanceWindowSteps(layout.clearance.envelopes);
+		let step = steps.next();
+		let operations = 0;
+		while (!step.done) {
+			if ((++operations & 127) === 0) await guardedCheckpoint();
+			step = steps.next();
+		}
+		await guardedCheckpoint();
+		this.publishCommittedLayout(layout, {
+			index,
+			cells,
+			switches,
+			identities,
+			forward: artifacts.forwardAdjacency,
+			reverse: artifacts.reverseAdjacency,
+			continuationWindowMeters: step.value,
+			prepared: true,
+		});
 	}
 
 	evaluate(
@@ -379,36 +445,61 @@ export class RailDraftEvaluator {
 		layout: CompiledPhysicalLayout,
 		artifacts?: RailDraftPreparedArtifacts,
 	): void {
+		this.preparationGeneration++;
 		if (this.committedLayout === layout) return;
-		this.committedLayout = layout;
+		let resources: CommittedDraftResources;
 		if (artifacts && railDraftPreparedArtifactsReadyForAdoption(layout, artifacts)) {
-			this.committedPreparedBindings++;
-			this.committedIndex = RailEnvelopeSpatialIndex.fromSnapshot(
-				layout.clearance.envelopes,
-				artifacts.envelopeSpatialIndex,
-			);
-			this.committedPathIndicesByCell = new PhysicalPathCellIndex(artifacts.pathCellIndex);
-			this.committedPathIndicesBySwitch = new PhysicalPathSwitchIndex(artifacts.pathSwitchIndex);
-			this.committedPathIndicesByIdentity = new PhysicalPathIdentityIndex(
-				artifacts.pathIdentityIndex,
-			);
-			this.committedForwardAdjacency = artifacts.forwardAdjacency;
-			this.committedReverseAdjacency = artifacts.reverseAdjacency;
+			resources = {
+				index: RailEnvelopeSpatialIndex.fromSnapshot(
+					layout.clearance.envelopes,
+					artifacts.envelopeSpatialIndex,
+				),
+				cells: new PhysicalPathCellIndex(artifacts.pathCellIndex),
+				switches: new PhysicalPathSwitchIndex(artifacts.pathSwitchIndex),
+				identities: new PhysicalPathIdentityIndex(artifacts.pathIdentityIndex),
+				forward: artifacts.forwardAdjacency,
+				reverse: artifacts.reverseAdjacency,
+				continuationWindowMeters: maximumPairwiseInstallationClearanceMeters(
+					layout.clearance.envelopes,
+				),
+				prepared: true,
+			};
 		} else {
-			this.committedIndex = new RailEnvelopeSpatialIndex(layout.clearance.envelopes);
-			this.committedPathIndicesByCell = PhysicalPathCellIndex.compile(layout.paths);
-			this.committedPathIndicesBySwitch = PhysicalPathSwitchIndex.compile(layout.paths);
-			this.committedPathIndicesByIdentity = PhysicalPathIdentityIndex.compile(layout.paths);
-			this.committedForwardAdjacency = buildPhysicalPathAdjacency(layout.paths);
-			this.committedReverseAdjacency = reversePhysicalPathAdjacency(
-				this.committedForwardAdjacency,
-				layout.paths.pathCount,
-			);
-			this.committedAdjacencyBuilds++;
+			const index = new RailEnvelopeSpatialIndex(layout.clearance.envelopes);
+			const cells = PhysicalPathCellIndex.compile(layout.paths);
+			const switches = PhysicalPathSwitchIndex.compile(layout.paths);
+			const identities = PhysicalPathIdentityIndex.compile(layout.paths);
+			const forward = buildPhysicalPathAdjacency(layout.paths);
+			resources = {
+				index,
+				cells,
+				switches,
+				identities,
+				forward,
+				reverse: reversePhysicalPathAdjacency(forward, layout.paths.pathCount),
+				continuationWindowMeters: maximumPairwiseInstallationClearanceMeters(
+					layout.clearance.envelopes,
+				),
+				prepared: false,
+			};
 		}
-		this.committedContinuationWindowMeters = maximumPairwiseInstallationClearanceMeters(
-			layout.clearance.envelopes,
-		);
+		this.publishCommittedLayout(layout, resources);
+	}
+
+	private publishCommittedLayout(
+		layout: CompiledPhysicalLayout,
+		resources: CommittedDraftResources,
+	): void {
+		this.committedIndex = resources.index;
+		this.committedPathIndicesByCell = resources.cells;
+		this.committedPathIndicesBySwitch = resources.switches;
+		this.committedPathIndicesByIdentity = resources.identities;
+		this.committedForwardAdjacency = resources.forward;
+		this.committedReverseAdjacency = resources.reverse;
+		this.committedContinuationWindowMeters = resources.continuationWindowMeters;
+		this.committedLayout = layout;
+		if (resources.prepared) this.committedPreparedBindings++;
+		else this.committedAdjacencyBuilds++;
 		this.committedBindings++;
 		this.committedIndexBuilds++;
 	}
@@ -816,6 +907,15 @@ function collectDirectedContinuationHalo(
 }
 
 function maximumPairwiseInstallationClearanceMeters(envelopes: CompiledRailEnvelopes): number {
+	const steps = installationClearanceWindowSteps(envelopes);
+	let step = steps.next();
+	while (!step.done) step = steps.next();
+	return step.value;
+}
+
+function* installationClearanceWindowSteps(
+	envelopes: CompiledRailEnvelopes,
+): Generator<void, number> {
 	let maximumRadiusAndToleranceMillimeters = 0;
 	for (let envelopeIndex = 0; envelopeIndex < envelopes.count; envelopeIndex++) {
 		const radiusAndTolerance =
@@ -827,6 +927,7 @@ function maximumPairwiseInstallationClearanceMeters(envelopes: CompiledRailEnvel
 				radiusAndTolerance,
 			);
 		}
+		yield;
 	}
 	return (maximumRadiusAndToleranceMillimeters * 2) / 1_000;
 }

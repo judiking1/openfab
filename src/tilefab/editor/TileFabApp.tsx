@@ -3328,6 +3328,11 @@ export default function TileFabApp(): React.ReactElement {
 	const ordinaryStkZoomCoachButtonRef = useRef<HTMLButtonElement | null>(null);
 	const ordinaryEqAnchorMarkerRef = useRef<HTMLDivElement | null>(null);
 	const ordinaryEqAnchorEdgeLocatorRef = useRef<HTMLDivElement | null>(null);
+	const bindOrdinaryEqAnchorMarker = useCallback((node: HTMLDivElement | null): void => {
+		ordinaryEqAnchorMarkerRef.current = node;
+		// A deferred Enter can render the next phase before React mounts its fixed marker.
+		if (node) scheduleRenderRef.current();
+	}, []);
 	const guidedPortKeyboardReadoutRef = useRef<HTMLParagraphElement | null>(null);
 	const guidedPortKeyboardAnnouncementRef = useRef<HTMLSpanElement | null>(null);
 	const guidedPortKeyboardAnnouncementTimerRef = useRef<number | null>(null);
@@ -6898,10 +6903,7 @@ export default function TileFabApp(): React.ReactElement {
 					map: document.map,
 				});
 				const preparationStartedAt = performanceNow();
-				draftEvaluatorRef.current.prepare(
-					nextModel.physical,
-					nextModel.draftArtifacts ?? undefined,
-				);
+				draftEvaluatorRef.current = activation.draftEvaluator;
 				const preparationMilliseconds = performanceNow() - preparationStartedAt;
 				publishEditorModel(
 					nextModel,
@@ -12119,6 +12121,10 @@ export default function TileFabApp(): React.ReactElement {
 			const ordinaryMarkerMatchesSession =
 				ordinaryPortKeyboardMarker !== null &&
 				ordinaryPortKeyboardSession?.scope === "ordinary" &&
+				(ordinaryEqAnchorSession === null ||
+					(ordinaryEqAnchorSession.anchorRow !== null &&
+						ordinaryEqAnchorMarker?.dataset.portSlotRow ===
+							String(ordinaryEqAnchorSession.anchorRow))) &&
 				ordinaryPortKeyboardMarker.dataset.portSlotRow ===
 					String(ordinaryPortKeyboardSession.currentRow) &&
 				ordinaryPortKeyboardMarker.dataset.portType === ordinaryPortKeyboardSession.portType &&
@@ -28533,6 +28539,15 @@ export default function TileFabApp(): React.ReactElement {
 		setProjectMenuOpen(false);
 		setOpenFabStartDialogOpen(true);
 	};
+	const restoreCanvasFocusAfterGuidedDismissal = (): void => {
+		const previousFocus = document.activeElement;
+		requestAnimationFrame(() => {
+			// Dismissal must not overwrite a control the user focused before this frame.
+			const activeElement = document.activeElement;
+			if (activeElement !== previousFocus && activeElement !== document.body) return;
+			canvasRef.current?.focus({ preventScroll: true });
+		});
+	};
 	const minimizeGuidedBuild = (): void => {
 		guidedBuildWasOpenRef.current = false;
 		setGuidedBuildReviewing(false);
@@ -28543,7 +28558,7 @@ export default function TileFabApp(): React.ReactElement {
 			clearPortEquipmentSelection();
 			clearAreaSelection();
 		}
-		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+		restoreCanvasFocusAfterGuidedDismissal();
 	};
 	const exitGuidedBuild = (): void => {
 		recordGuidedBuildChoice("dismissed");
@@ -28552,7 +28567,7 @@ export default function TileFabApp(): React.ReactElement {
 		setGuidedBuildChapterCheckpoint(null);
 		setGuidedBuildOpen(false);
 		if (guidedBuildEvaluation.complete && staticFabNavigatorOpen) closeStaticFabNavigator();
-		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+		restoreCanvasFocusAfterGuidedDismissal();
 	};
 	const openBlueprintLibraryFromActivity = (
 		tab: BlueprintLibraryTab = "saved",
@@ -30520,7 +30535,7 @@ export default function TileFabApp(): React.ReactElement {
 				guidedPortKeyboard.phase === "choose-end" ? (
 					<>
 						<div
-							ref={ordinaryEqAnchorMarkerRef}
+							ref={bindOrdinaryEqAnchorMarker}
 							className="tilefab-guided-canvas-marker tilefab-guided-canvas-marker--ordinary-eq-anchor"
 							data-testid="ordinary-eq-anchor-marker"
 							aria-hidden="true"

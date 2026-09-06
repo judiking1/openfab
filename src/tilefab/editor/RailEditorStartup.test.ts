@@ -66,7 +66,7 @@ describe("activateRailEditorStartup", () => {
 		const scheduler = new CountingScheduler();
 		const activation = await activateRailEditorStartup(payload, scheduler, undefined, 0.5);
 
-		expect(Reflect.ownKeys(activation)).toEqual(["model", "metrics"]);
+		expect(Reflect.ownKeys(activation)).toEqual(["draftEvaluator", "model", "metrics"]);
 		expect(Reflect.has(activation, "snapshot")).toBe(false);
 		expect(activation.model.document.map.size).toBe(1_025);
 		expect(activation.model.document.map.getRevision()).toBe(payload.snapshot.revision);
@@ -923,6 +923,47 @@ describe("activateRailEditorStartup", () => {
 		).rejects.toThrow("draft artifact alias identity is invalid");
 	});
 
+	it("publishes an already prepared evaluator with the exact activated layout", async () => {
+		const payload = compileRailStartup({ kind: "scale-probe", cellCount: 256 });
+		const activation = await activateRailEditorStartup(payload, new CountingScheduler());
+		const before = activation.draftEvaluator.getStats();
+		expect(before).toMatchObject({
+			committedBindings: 1,
+			committedPreparedBindings: 1,
+			committedAdjacencyBuilds: 0,
+		});
+		activation.draftEvaluator.prepare(
+			activation.model.physical,
+			activation.model.draftArtifacts ?? undefined,
+		);
+		expect(activation.draftEvaluator.getStats()).toEqual(before);
+	});
+
+	it("cancels after draft preparation before creating a candidate mirror", async () => {
+		const payload = compileRailStartup({ kind: "scale-probe", cellCount: 256 });
+		const controller = new AbortController();
+		const evaluator = new RailDraftEvaluator();
+		const prepare = evaluator.prepareCooperatively.bind(evaluator);
+		const preparation = vi
+			.spyOn(evaluator, "prepareCooperatively")
+			.mockImplementation(async (...args) => {
+				await prepare(...args);
+				controller.abort();
+			});
+		const createMirrorBridge = vi.fn(() => new ControlledMirrorGate());
+		await expect(
+			prepareRailEditorStartupCandidate(
+				payload,
+				new CountingScheduler(),
+				controller.signal,
+				() => undefined,
+				{ createDraftEvaluator: () => evaluator, createMirrorBridge },
+			),
+		).rejects.toBeInstanceOf(RailStartupCancelledError);
+		expect(preparation).toHaveBeenCalledOnce();
+		expect(createMirrorBridge).not.toHaveBeenCalled();
+	});
+
 	it("keeps the old session active until the candidate mirror ACKs", async () => {
 		const payload = compileRailStartup({ kind: "scale-probe", cellCount: 12 });
 		const mirror = new ControlledMirrorGate();
@@ -955,6 +996,7 @@ describe("activateRailEditorStartup", () => {
 
 			mirror.resolve(readyState(payload));
 			const candidate = await pending;
+			expect(candidate.draftEvaluator).toBe(candidate.activation.draftEvaluator);
 			activeSession = "candidate";
 			expect(activeSession).toBe("candidate");
 			expect(candidate.mirrorBridge).toBe(mirror);

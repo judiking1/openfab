@@ -2795,6 +2795,39 @@ async function assertGuidedCanvasMediaTarget(page, label) {
 	}
 }
 
+async function waitForOrdinaryEqAnchorMarker(page, marker, label) {
+	try {
+		await marker.waitFor({ state: "visible" });
+	} catch (error) {
+		const evidence = await page.evaluate(() => {
+			const read = (testId) => {
+				const element = document.querySelector(`[data-testid="${testId}"]`);
+				if (!element) return null;
+				const rect = element.getBoundingClientRect();
+				return {
+					html: element.outerHTML,
+					display: getComputedStyle(element).display,
+					x: rect.x,
+					y: rect.y,
+					width: rect.width,
+					height: rect.height,
+				};
+			};
+			return {
+				viewport: { width: innerWidth, height: innerHeight },
+				fixed: read("ordinary-eq-anchor-marker"),
+				moving: read("ordinary-port-keyboard-target"),
+				edge: read("ordinary-eq-anchor-edge-locator"),
+				readout: document.querySelector('[data-testid="guided-port-keyboard-readout"]')
+					?.textContent,
+			};
+		});
+		throw new Error(`EQ anchor did not paint at ${label}: ${JSON.stringify(evidence)}.`, {
+			cause: error,
+		});
+	}
+}
+
 async function assertOrdinaryEqEndpointMarkerMedia(page, label) {
 	const fixed = page.getByTestId("ordinary-eq-anchor-marker");
 	const moving = page.getByTestId("ordinary-port-keyboard-target");
@@ -13005,7 +13038,11 @@ async function exerciseGuidedPortHandoffRegression(
 						`ordinary EQ Enter keeps the chosen anchor ${viewport.label}`,
 					);
 					const eqFixedAnchor = page.getByTestId("ordinary-eq-anchor-marker");
-					await eqFixedAnchor.waitFor({ state: "visible" });
+					await waitForOrdinaryEqAnchorMarker(
+						page,
+						eqFixedAnchor,
+						`${practiceTransitionMode}/${viewport.label}`,
+					);
 					assertEqual(
 						await eqFixedAnchor.getAttribute("data-port-slot-row"),
 						eqAnchorRow,
@@ -25158,6 +25195,14 @@ async function exerciseCompactLayout(page) {
 		false,
 		"compact pattern browser collapses after selection",
 	);
+	const directControls = page.locator(".tilefab-template-direct-controls");
+	await assertLocatorInsideViewport(page, directControls);
+	for (const control of await directControls.getByRole("button").all()) {
+		await assertLocatorInsideViewport(page, control);
+		const bounds = await control.boundingBox();
+		assertAtLeast(bounds?.width ?? 0, 44, "compact pattern direct control width");
+		assertAtLeast(bounds?.height ?? 0, 44, "compact pattern direct control height");
+	}
 	const configToggle = page.getByTestId("pattern-config-toggle");
 	await assertLocatorInsideViewport(page, configToggle);
 	const compactTemplateId = await page.getByTestId("rail-canvas").getAttribute("data-template-id");

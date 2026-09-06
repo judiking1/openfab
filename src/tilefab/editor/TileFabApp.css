@@ -10720,11 +10720,25 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-template-direct-controls button {
+	flex: 0 0 auto;
 	justify-content: center;
 }
 
 .tilefab-template-bottom-flow {
 	min-width: 92px;
+}
+
+@media (max-width: 760px) {
+	.tilefab-buildbar > .tilefab-template-direct-controls {
+		flex: 1 1 100%;
+		height: auto;
+		max-width: 100%;
+		flex-wrap: wrap;
+	}
+
+	.tilefab-template-direct-controls > button[aria-label] {
+		min-width: 44px;
+	}
 }
 
 @media (min-width: 761px) and (max-width: 980px) {

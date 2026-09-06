@@ -154,8 +154,10 @@ function candidateFor(
 	mirrorBridge: RailWorkerBridgeHandle,
 ): RailEditorStartupCandidate {
 	const document = createRailScaleProbeDocument(12);
+	const draftEvaluator = {} as RailEditorStartupCandidate["draftEvaluator"];
 	return {
 		activation: {
+			draftEvaluator,
 			model: {
 				document,
 				operationalConfiguration:
@@ -182,7 +184,7 @@ function candidateFor(
 				yieldCount: 0,
 			},
 		},
-		draftEvaluator: {} as RailEditorStartupCandidate["draftEvaluator"],
+		draftEvaluator,
 		mirrorBridge,
 		workerState: {
 			...INITIAL_RAIL_WORKER_STATE,

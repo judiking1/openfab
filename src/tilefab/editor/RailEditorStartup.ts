@@ -20,7 +20,10 @@ import {
 } from "../compile/RailProjectReadiness";
 import { type AdvancedSwitchRecord, advancedSwitchEquals } from "../core/AdvancedSwitch";
 import { equipmentGroupEquals, type PortEquipmentState } from "../core/EquipmentGroup";
-import { checksumRailNetworkAnalysis, type RailNetworkAnalysis } from "../core/network";
+import {
+	checksumRailNetworkAnalysisCooperatively,
+	type RailNetworkAnalysis,
+} from "../core/network";
 import {
 	checksumOperationalConfigurationState,
 	copyOperationalConfigurationState,
@@ -117,6 +120,8 @@ export interface RailStartupActivationMetrics {
 
 export interface RailStartupActivation {
 	readonly model: RailEditorStartupModel;
+	/** Main-thread query resources prepared before publication, never part of project/Worker data. */
+	readonly draftEvaluator: RailDraftEvaluator;
 	readonly metrics: RailStartupActivationMetrics;
 }
 
@@ -215,10 +220,17 @@ export async function prepareRailEditorStartupCandidate(
 		sequence: payload.snapshot.sequence,
 		revision: payload.snapshot.revision,
 	});
-	const activation = await activateRailEditorStartupInternal(payload, scheduler, signal, 4, true);
+	const activation = await activateRailEditorStartupInternal(
+		payload,
+		scheduler,
+		signal,
+		4,
+		true,
+		undefined,
+		dependencies.createDraftEvaluator,
+	);
 	if (signal?.aborted) throw new RailStartupCancelledError();
-	const draftEvaluator = dependencies.createDraftEvaluator();
-	draftEvaluator.prepare(activation.model.physical, activation.model.draftArtifacts ?? undefined);
+	const draftEvaluator = activation.draftEvaluator;
 	let mirrorBridge: RailWorkerBridgeHandle | null = null;
 	try {
 		const authority = consumeStartupMirrorSnapshotAuthority(activation);
@@ -289,6 +301,7 @@ async function activateRailEditorStartupInternal(
 	sliceBudgetMilliseconds: number,
 	retainMirrorSnapshotAuthority: boolean,
 	publicationDocument?: RailDocument,
+	createDraftEvaluator: () => RailDraftEvaluator = DEFAULT_CANDIDATE_DEPENDENCIES.createDraftEvaluator,
 ): Promise<RailStartupActivation> {
 	if (!(sliceBudgetMilliseconds > 0) || !Number.isFinite(sliceBudgetMilliseconds)) {
 		throw new Error("Startup activation slice budget must be a positive finite duration.");
@@ -455,6 +468,14 @@ async function activateRailEditorStartupInternal(
 			RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
 		));
 	await yieldIfNeeded();
+	currentPhase = "draft-preparation";
+	const draftEvaluator = createDraftEvaluator();
+	await draftEvaluator.prepareCooperatively(
+		derivedBuffers.physical,
+		derivedBuffers.draftArtifacts,
+		yieldIfNeeded,
+	);
+	await yieldIfNeeded();
 	currentPhase = "document-publication";
 	if (
 		publicationDocument &&
@@ -501,6 +522,7 @@ async function activateRailEditorStartupInternal(
 		maxSlicePhase = currentPhase;
 	}
 	const activation: RailStartupActivation = Object.freeze({
+		draftEvaluator,
 		model: Object.freeze({
 			document,
 			operationalConfiguration: document.operationalConfiguration,
@@ -792,9 +814,10 @@ async function validateStartupDerivedBuffers(
 	);
 	await checkpoint();
 	setPhase("analysis-fingerprint");
-	const analysisFingerprint = checksumRailNetworkAnalysis(
+	const analysisFingerprint = await checksumRailNetworkAnalysisCooperatively(
 		derived.analysis,
 		expected.authoredChecksum,
+		checkpoint,
 	);
 	if (analysisFingerprint !== expected.analysisFingerprint) {
 		throw new Error("Rail startup analysis fingerprint mismatch.");

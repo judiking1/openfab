@@ -302,6 +302,37 @@ describe("RailPhysicalLayout", () => {
 		expect(turnoutCheckpoints - plainCheckpoints).toBeGreaterThan(targetPathCount / 256);
 	});
 
+	it.each(
+		[0, 1, 2, 3].flatMap((rotation) => [false, true].map((merge) => ({ rotation, merge }))),
+	)("preserves turnout seam ownership at rotation $rotation with merge=$merge", async ({
+		rotation,
+		merge,
+	}) => {
+		const map = new TileMap();
+		const cell = (x: number, y: number) => {
+			for (let turn = 0; turn < rotation; turn++) [x, y] = [-y, x];
+			return { x: x - 200, y: y + 400 };
+		};
+		for (const [from, to] of [
+			[cell(-3, 0), cell(3, 0)],
+			merge ? [cell(0, 3), cell(0, 0)] : [cell(0, 0), cell(0, 3)],
+			[cell(100, 0), cell(104, 0)],
+			[cell(0, 100), cell(0, 104)],
+		]) {
+			if (!from || !to) throw new Error("Expected a complete rail segment.");
+			const plan = planRailConstruction(map, from, to);
+			expect(plan.valid, plan.reason).toBe(true);
+			map.applyAtomicMutations(plan.mutations, plan.switchMutations ?? []);
+		}
+		const layout = compilePhysicalRail(map);
+		expect(layout.junctions).toHaveLength(1);
+		expect(layout.junctions[0]?.type).toBe(merge ? "MERGE" : "BRANCH");
+		expect(() => createRailPhysicalResetPublication(layout, 1)).not.toThrow();
+		await expect(
+			validateRailPhysicalLayoutContractCooperatively(layout, async () => undefined),
+		).resolves.toBeUndefined();
+	});
+
 	it("rejects hostile ingress and egress seam fan-out before adjacency publication", async () => {
 		const candidateCount = 4_096;
 		const source = straightLayout();

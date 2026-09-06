@@ -25,6 +25,7 @@ import {
 	COMPILED_ADVANCED_SWITCH_PROFILE,
 	type CompiledAdvancedSwitches,
 	compileAdvancedSwitches,
+	NO_ADVANCED_SWITCH_PATH,
 	validateCompiledAdvancedSwitches,
 } from "./AdvancedSwitchCompiler";
 import {
@@ -514,6 +515,118 @@ describe("advanced switch physical compilation", () => {
 				(issue) => issue.code === "INVALID_IDENTITY",
 			),
 		).toBe(true);
+	});
+
+	it.each([
+		{ label: "identical occupied cells", offset: 0 },
+		{ label: "incompatible occupied cells", offset: 6 },
+	])("rejects independently reconstructed overlapping claims with $label", ({ offset }) => {
+		const first: AdvancedSwitchRecord = {
+			...fixture("B", DIR_E, DIR_S, 17),
+			origin: { x: 0, y: 0 },
+		};
+		const second: AdvancedSwitchRecord = {
+			...fixture("B", DIR_E, DIR_S, 29),
+			origin: { x: 20, y: 0 },
+		};
+		const hydrator = TileMap.createHydrator();
+		for (const record of [first, second]) {
+			for (const cell of deriveAdvancedSwitchGeometry(record).cellStates)
+				hydrator.addEncodedCell(cell.x, cell.y, cell.encoded);
+			hydrator.addAdvancedSwitch(record);
+		}
+		const layout = compilePhysicalRail(hydrator.finish(0));
+		const corrupt = cloneCompiledSwitches(layout.advancedSwitches);
+		corrupt.origins[2] = offset;
+		corrupt.origins[3] = 0;
+		const issues = validateCompiledAdvancedSwitches(
+			corrupt,
+			layout.paths,
+			layout.pathIntervalRemap,
+		);
+		expect(issues).toContainEqual(
+			expect.objectContaining({ code: "INVALID_FOOTPRINT", switchIndex: 1 }),
+		);
+	});
+
+	it.each([
+		2, 3,
+	])("rejects %i matching ordinal-zero source identities for a boundary port", (count) => {
+		const record = fixture("B", DIR_E, DIR_S, 17);
+		const map = buildSwitchMap(record);
+		const layout = compilePhysicalRail(map);
+		const remap = structuredClone(layout.pathIntervalRemap);
+		const primary = remap.sourceAdvancedSwitchIds.findIndex(
+			(id, index) =>
+				id === record.id &&
+				remap.sourceAdvancedSwitchRoles[index] === ADVANCED_SWITCH_SEGMENT_ROLE.INPUT &&
+				remap.sourceAdvancedSwitchPorts[index] === 0 &&
+				remap.sourceAdvancedSwitchSegmentOrdinals[index] === 0,
+		);
+		expect(primary).toBeGreaterThanOrEqual(0);
+		const extras = Array.from({ length: remap.sourcePathCount }, (_, index) => index)
+			.filter(
+				(index) =>
+					index !== primary &&
+					remap.sourceAdvancedSwitchIds[index] === record.id &&
+					remap.sourceAdvancedSwitchSegmentOrdinals[index] === 0,
+			)
+			.slice(0, count - 1);
+		expect(extras).toHaveLength(count - 1);
+		for (const index of extras) {
+			remap.sourceAdvancedSwitchRoles[index] = ADVANCED_SWITCH_SEGMENT_ROLE.INPUT;
+			remap.sourceAdvancedSwitchPorts[index] = 0;
+		}
+		const result = compileAdvancedSwitches(map, layout.paths, remap);
+		expect(result.switches.portPathIndices[0]).toBe(NO_ADVANCED_SWITCH_PATH);
+		expect(result.diagnostics).toContainEqual(
+			expect.objectContaining({ code: "MISSING_ADVANCED_SWITCH_PORT_PATH", inputIndex: 0 }),
+		);
+	});
+
+	it("ignores nonzero segment ordinals when identifying a boundary source", () => {
+		const record = fixture("B", DIR_E, DIR_S, 17);
+		const map = buildSwitchMap(record);
+		const layout = compilePhysicalRail(map);
+		const remap = structuredClone(layout.pathIntervalRemap);
+		const extra = remap.sourceAdvancedSwitchIds.findIndex(
+			(id, index) =>
+				id === record.id &&
+				remap.sourceAdvancedSwitchRoles[index] === ADVANCED_SWITCH_SEGMENT_ROLE.INPUT &&
+				remap.sourceAdvancedSwitchPorts[index] === 1 &&
+				remap.sourceAdvancedSwitchSegmentOrdinals[index] === 0,
+		);
+		expect(extra).toBeGreaterThanOrEqual(0);
+		remap.sourceAdvancedSwitchPorts[extra] = 0;
+		remap.sourceAdvancedSwitchSegmentOrdinals[extra] = 1;
+		const result = compileAdvancedSwitches(map, layout.paths, remap);
+		expect(result.switches.portPathIndices[0]).toBe(layout.advancedSwitches.portPathIndices[0]);
+		expect(
+			result.diagnostics.some(
+				(issue) => issue.code === "MISSING_ADVANCED_SWITCH_PORT_PATH" && issue.inputIndex === 0,
+			),
+		).toBe(false);
+	});
+
+	it("keeps a missing source identity unresolved", () => {
+		const record = fixture("B", DIR_E, DIR_S, 17);
+		const map = buildSwitchMap(record);
+		const layout = compilePhysicalRail(map);
+		const remap = structuredClone(layout.pathIntervalRemap);
+		const primary = remap.sourceAdvancedSwitchIds.findIndex(
+			(id, index) =>
+				id === record.id &&
+				remap.sourceAdvancedSwitchRoles[index] === ADVANCED_SWITCH_SEGMENT_ROLE.INPUT &&
+				remap.sourceAdvancedSwitchPorts[index] === 0 &&
+				remap.sourceAdvancedSwitchSegmentOrdinals[index] === 0,
+		);
+		expect(primary).toBeGreaterThanOrEqual(0);
+		remap.sourceAdvancedSwitchIds[primary] = record.id + 1;
+		const result = compileAdvancedSwitches(map, layout.paths, remap);
+		expect(result.switches.portPathIndices[0]).toBe(NO_ADVANCED_SWITCH_PATH);
+		expect(result.diagnostics).toContainEqual(
+			expect.objectContaining({ code: "MISSING_ADVANCED_SWITCH_PORT_PATH", inputIndex: 0 }),
+		);
 	});
 
 	it("takes the zero-switch fast path on a 50k-cell ordinary map without global indexes", () => {

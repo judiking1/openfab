@@ -2193,6 +2193,13 @@ interface CooperativeTurnoutEndpointIndex {
 	readonly pathByRequest: ReadonlyMap<string, number>;
 }
 
+interface CooperativeTurnoutEndpointRequest {
+	readonly kind: "entry" | "outgoing";
+	readonly x: number;
+	readonly y: number;
+	readonly direction: Direction;
+}
+
 interface CooperativeTurnoutClearanceInterval {
 	readonly pathIndex: number;
 	readonly start: number;
@@ -2218,6 +2225,8 @@ function* buildTurnoutEndpointIndexSteps(
 	junctions: readonly CompiledJunction[],
 ): Generator<void, CooperativeTurnoutEndpointIndex> {
 	const pathByRequest = new Map<string, number>();
+	const entryCells = new Map<number, Set<number>>();
+	const exitCells = new Map<number, Set<number>>();
 	for (const junction of junctions) {
 		yield;
 		for (const [pathIndex, port] of [
@@ -2225,8 +2234,18 @@ function* buildTurnoutEndpointIndexSteps(
 			[junction.trunkPathIndex, "outgoing"],
 			[junction.divergePathIndex, junction.type === "BRANCH" ? "outgoing" : "incoming"],
 		] as const) {
-			const request = turnoutConnectedPathRequestKey(paths, pathIndex, port);
-			if (request !== null && !pathByRequest.has(request)) pathByRequest.set(request, -1);
+			const request = turnoutConnectedPathRequest(paths, pathIndex, port);
+			if (request === null) continue;
+			const key = turnoutEndpointRequestKey(request.kind, request.x, request.y, request.direction);
+			if (pathByRequest.has(key)) continue;
+			pathByRequest.set(key, -1);
+			const cells = request.kind === "entry" ? entryCells : exitCells;
+			// An outgoing seam is one cell beyond the candidate path's exit. Invert that
+			// step once per request so unrelated paths need no strings or temporary cells.
+			const cell = request.kind === "entry" ? request : moveCell(request, request.direction);
+			const ys = cells.get(cell.x);
+			if (ys) ys.add(cell.y);
+			else cells.set(cell.x, new Set([cell.y]));
 		}
 	}
 	for (let pathIndex = 0; pathIndex < paths.pathCount; pathIndex++) {
@@ -2234,7 +2253,10 @@ function* buildTurnoutEndpointIndexSteps(
 		if ((paths.kinds[pathIndex] as number) === PATH_KIND.INVALID) continue;
 		const cellOffset = pathIndex * 2;
 		const from = paths.fromDirections[pathIndex] as number;
-		if (from !== 0) {
+		if (
+			from !== 0 &&
+			entryCells.get(paths.cells[cellOffset] as number)?.has(paths.cells[cellOffset + 1] as number)
+		) {
 			const key = turnoutEndpointRequestKey(
 				"entry",
 				paths.cells[cellOffset] as number,
@@ -2245,7 +2267,13 @@ function* buildTurnoutEndpointIndexSteps(
 		}
 
 		const to = paths.toDirections[pathIndex] as number;
-		if (to === 0) continue;
+		if (
+			to === 0 ||
+			!exitCells
+				.get(paths.exitCells[cellOffset] as number)
+				?.has(paths.exitCells[cellOffset + 1] as number)
+		)
+			continue;
 		const next = moveCell(
 			{
 				x: paths.exitCells[cellOffset] as number,
@@ -2331,6 +2359,17 @@ function turnoutConnectedPathRequestKey(
 	corePathIndex: number,
 	port: "incoming" | "outgoing",
 ): string | null {
+	const request = turnoutConnectedPathRequest(paths, corePathIndex, port);
+	return request === null
+		? null
+		: turnoutEndpointRequestKey(request.kind, request.x, request.y, request.direction);
+}
+
+function turnoutConnectedPathRequest(
+	paths: CompiledPhysicalPaths,
+	corePathIndex: number,
+	port: "incoming" | "outgoing",
+): CooperativeTurnoutEndpointRequest | null {
 	if (
 		corePathIndex < 0 ||
 		corePathIndex >= paths.pathCount ||
@@ -2343,12 +2382,12 @@ function turnoutConnectedPathRequestKey(
 		const from = paths.fromDirections[corePathIndex] as number;
 		return from === 0
 			? null
-			: turnoutEndpointRequestKey(
-					"outgoing",
-					paths.cells[cellOffset] as number,
-					paths.cells[cellOffset + 1] as number,
-					from,
-				);
+			: {
+					kind: "outgoing",
+					x: paths.cells[cellOffset] as number,
+					y: paths.cells[cellOffset + 1] as number,
+					direction: from as Direction,
+				};
 	}
 	const to = paths.toDirections[corePathIndex] as number;
 	if (to === 0) return null;
@@ -2359,7 +2398,7 @@ function turnoutConnectedPathRequestKey(
 		},
 		to as Direction,
 	);
-	return turnoutEndpointRequestKey("entry", next.x, next.y, oppositeDirection(to as Direction));
+	return { kind: "entry", x: next.x, y: next.y, direction: oppositeDirection(to as Direction) };
 }
 
 function* validateTurnoutFootprintContractSteps(layout: CompiledPhysicalLayout): Generator<void> {

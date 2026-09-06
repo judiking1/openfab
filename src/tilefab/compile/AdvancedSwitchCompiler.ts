@@ -178,7 +178,7 @@ export function compileAdvancedSwitches(
 	observer?.onBuildGlobalAuxiliaryIndex("adjacency");
 	const adjacency = buildPhysicalPathAdjacency(paths);
 	observer?.onBuildGlobalAuxiliaryIndex("raw-path");
-	const rawPathsByCell = indexRawPathsByCell(remap);
+	const { rawPathsByCell, syntheticSourcePaths } = indexSourcePaths(remap);
 	observer?.onBuildGlobalAuxiliaryIndex("coverage");
 	const finalPathsByCoverageCell = indexFinalPathsByCoverageCell(paths);
 
@@ -260,7 +260,13 @@ export function compileAdvancedSwitches(
 		portOffsets.push(portRoles.length);
 		const resolvedPorts: ResolvedPort[] = [];
 		for (const port of geometry.ports) {
-			const resolved = resolveBoundaryPort(switchRecord.id, port, paths, remap);
+			const resolved = resolveBoundaryPort(
+				switchRecord.id,
+				port,
+				paths,
+				remap,
+				syntheticSourcePaths,
+			);
 			resolvedPorts.push({ port, ...resolved });
 			portRoles.push(
 				port.role === "input" ? ADVANCED_SWITCH_PORT_ROLE.INPUT : ADVANCED_SWITCH_PORT_ROLE.OUTPUT,
@@ -302,6 +308,7 @@ export function compileAdvancedSwitches(
 			switchRecord,
 			paths,
 			remap,
+			syntheticSourcePaths,
 			conflictPathIndices,
 			conflictPathStarts,
 			conflictPathEnds,
@@ -733,19 +740,35 @@ function encodeProfileClass(profileClass: AdvancedSwitchProfileClass): number {
 	return COMPILED_ADVANCED_SWITCH_PROFILE[profileClass];
 }
 
-function indexRawPathsByCell(remap: CompiledPathIntervalRemap): Map<string, number[]> {
-	const result = new Map<string, number[]>();
+type SyntheticSourcePathIndex = ReadonlyMap<string, number>;
+
+function indexSourcePaths(remap: CompiledPathIntervalRemap): {
+	rawPathsByCell: Map<string, number[]>;
+	syntheticSourcePaths: SyntheticSourcePathIndex;
+} {
+	const rawPathsByCell = new Map<string, number[]>();
+	const syntheticSourcePaths = new Map<string, number>();
 	for (let sourcePathIndex = 0; sourcePathIndex < remap.sourcePathCount; sourcePathIndex++) {
 		const offset = sourcePathIndex * 2;
 		const key = cellKey(
 			remap.sourcePathCells[offset] as number,
 			remap.sourcePathCells[offset + 1] as number,
 		);
-		const pathIndices = result.get(key);
+		const pathIndices = rawPathsByCell.get(key);
 		if (pathIndices) pathIndices.push(sourcePathIndex);
-		else result.set(key, [sourcePathIndex]);
+		else rawPathsByCell.set(key, [sourcePathIndex]);
+
+		const switchId = remap.sourceAdvancedSwitchIds[sourcePathIndex] as number;
+		if (switchId <= 0 || remap.sourceAdvancedSwitchSegmentOrdinals[sourcePathIndex] !== 0) continue;
+		const identity = syntheticSourcePathKey(
+			switchId,
+			remap.sourceAdvancedSwitchRoles[sourcePathIndex] as number,
+			remap.sourceAdvancedSwitchPorts[sourcePathIndex] as number,
+		);
+		// Ambiguous identities stay unresolved even if a third matching row appears.
+		syntheticSourcePaths.set(identity, syntheticSourcePaths.has(identity) ? -1 : sourcePathIndex);
 	}
-	return result;
+	return { rawPathsByCell, syntheticSourcePaths };
 }
 
 function resolveBoundaryPort(
@@ -753,9 +776,10 @@ function resolveBoundaryPort(
 	port: AdvancedSwitchBoundaryPort,
 	paths: CompiledPhysicalPaths,
 	remap: CompiledPathIntervalRemap,
+	syntheticSourcePaths: SyntheticSourcePathIndex,
 ): { pathIndex: number; station: number } {
 	const synthetic = findSyntheticSourcePath(
-		remap,
+		syntheticSourcePaths,
 		switchId,
 		port.role === "input"
 			? ADVANCED_SWITCH_SEGMENT_ROLE.INPUT
@@ -949,6 +973,7 @@ function compileConflictRows(
 	switchRecord: AdvancedSwitchRecord,
 	paths: CompiledPhysicalPaths,
 	remap: CompiledPathIntervalRemap,
+	syntheticSourcePaths: SyntheticSourcePathIndex,
 	pathIndices: number[],
 	starts: number[],
 	ends: number[],
@@ -956,16 +981,26 @@ function compileConflictRows(
 	routeIndices: number[],
 ): ConflictRows {
 	const syntheticMerge = ([0, 1] as const).map((portIndex) =>
-		findSyntheticSourcePath(remap, switchRecord.id, ADVANCED_SWITCH_SEGMENT_ROLE.INPUT, portIndex),
+		findSyntheticSourcePath(
+			syntheticSourcePaths,
+			switchRecord.id,
+			ADVANCED_SWITCH_SEGMENT_ROLE.INPUT,
+			portIndex,
+		),
 	) as [number, number];
 	const syntheticCenter = findSyntheticSourcePath(
-		remap,
+		syntheticSourcePaths,
 		switchRecord.id,
 		ADVANCED_SWITCH_SEGMENT_ROLE.THROAT,
 		ADVANCED_SWITCH_NO_PORT,
 	);
 	const syntheticBranch = ([0, 1] as const).map((portIndex) =>
-		findSyntheticSourcePath(remap, switchRecord.id, ADVANCED_SWITCH_SEGMENT_ROLE.OUTPUT, portIndex),
+		findSyntheticSourcePath(
+			syntheticSourcePaths,
+			switchRecord.id,
+			ADVANCED_SWITCH_SEGMENT_ROLE.OUTPUT,
+			portIndex,
+		),
 	) as [number, number];
 	return appendConflictRows(
 		remap,
@@ -1043,25 +1078,16 @@ function appendConflictRows(
 }
 
 function findSyntheticSourcePath(
-	remap: CompiledPathIntervalRemap,
+	index: SyntheticSourcePathIndex,
 	switchId: number,
 	role: number,
 	port: number,
 ): number {
-	let result = -1;
-	for (let sourcePathIndex = 0; sourcePathIndex < remap.sourcePathCount; sourcePathIndex++) {
-		if (
-			(remap.sourceAdvancedSwitchIds[sourcePathIndex] as number) !== switchId ||
-			(remap.sourceAdvancedSwitchRoles[sourcePathIndex] as number) !== role ||
-			(remap.sourceAdvancedSwitchPorts[sourcePathIndex] as number) !== port ||
-			(remap.sourceAdvancedSwitchSegmentOrdinals[sourcePathIndex] as number) !== 0
-		) {
-			continue;
-		}
-		if (result >= 0) return -1;
-		result = sourcePathIndex;
-	}
-	return result;
+	return index.get(syntheticSourcePathKey(switchId, role, port)) ?? -1;
+}
+
+function syntheticSourcePathKey(switchId: number, role: number, port: number): string {
+	return `${switchId}:${role}:${port}`;
 }
 
 function appendMappedConflictInterval(
@@ -1219,7 +1245,9 @@ function validateSemanticSwitchLayout(
 	remap: CompiledPathIntervalRemap,
 	add: StructuralIssueAppender,
 ): void {
-	const semanticMap = new TileMap();
+	// This private reconstruction retains claim checks without copying prior maps per record.
+	const semanticHydrator = TileMap.createHydrator();
+	const semanticCells = new Map<string, number>();
 	const ids = new Set<number>();
 	let recordsValid = true;
 	for (let switchIndex = 0; switchIndex < compiled.count; switchIndex++) {
@@ -1251,13 +1279,17 @@ function validateSemanticSwitchLayout(
 		try {
 			const geometry = deriveAdvancedSwitchGeometry(record);
 			for (const cell of geometry.cellStates) {
-				const before = semanticMap.getEncoded(cell.x, cell.y);
+				const key = cellKey(cell.x, cell.y);
+				const before = semanticCells.get(key) ?? 0;
 				if (before !== 0 && before !== cell.encoded) {
 					throw new Error(`switch ${record.id} overlaps incompatible rail at ${cell.x},${cell.y}`);
 				}
-				if (before === 0) semanticMap.setEncoded(cell.x, cell.y, cell.encoded);
+				if (before === 0) {
+					semanticHydrator.addEncodedCell(cell.x, cell.y, cell.encoded);
+					semanticCells.set(key, cell.encoded);
+				}
 			}
-			semanticMap.setAdvancedSwitch(record);
+			semanticHydrator.addAdvancedSwitch(record);
 		} catch (error) {
 			add(
 				"INVALID_FOOTPRINT",
@@ -1270,6 +1302,8 @@ function validateSemanticSwitchLayout(
 		}
 	}
 	if (!recordsValid) return;
+
+	const semanticMap = semanticHydrator.finish(0);
 
 	const expectedResult = compileAdvancedSwitches(semanticMap, paths, remap);
 	if (expectedResult.diagnostics.length > 0) {

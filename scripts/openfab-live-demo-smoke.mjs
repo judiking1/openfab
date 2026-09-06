@@ -216,9 +216,24 @@ async function exerciseProductionNavigatorSurface(activePage, label) {
 		`${label} top Checks owner`,
 	);
 	await launcher.focus();
-	await launcher.press("Enter");
+	await activePage.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
+	if (!(await launcher.evaluate((element) => document.activeElement === element))) {
+		throw new Error(
+			`${label}: Navigator focus moved before Enter: ${JSON.stringify(await readProductionNavigatorSurface(activePage))}`,
+		);
+	}
+	await activePage.keyboard.press("Enter");
 	const navigator = activePage.getByTestId("static-fab-navigator-panel");
-	await navigator.waitFor({ state: "visible" });
+	try {
+		await navigator.waitFor({ state: "visible" });
+	} catch (error) {
+		throw new Error(
+			`${label}: Navigator did not open: ${JSON.stringify(await readProductionNavigatorSurface(activePage))}`,
+			{ cause: error },
+		);
+	}
 	await assertProductionNavigatorOwnedPanel(activePage, "map", label);
 	await activePage.getByTestId("static-fab-navigator-tab-organizations").click();
 	const organizationLibrary = activePage.getByTestId("static-fab-organization-library");
@@ -244,6 +259,23 @@ async function exerciseProductionNavigatorSurface(activePage, label) {
 	if (!viewport || !launcherBounds) throw new Error(`${label}: Navigator bounds are unavailable.`);
 	assertRectWithinViewport(launcherBounds, viewport, `${label} Navigator launcher`);
 	return { before, launcherBounds, focusReturned: true, mapOwned: true, organizationsOwned: true };
+}
+
+async function readProductionNavigatorSurface(activePage) {
+	return activePage.evaluate(() => {
+		const app = document.querySelector('[data-testid="tilefab-app"]');
+		return {
+			viewport: { width: innerWidth, height: innerHeight },
+			activity: app?.getAttribute("data-editor-activity"),
+			navigatorTab: app?.getAttribute("data-navigator-tab"),
+			guidedActive: app?.getAttribute("data-guided-build-active"),
+			active: document.activeElement?.outerHTML.slice(0, 1_500),
+			launcher: document.querySelector('[aria-label="FAB 내비게이터"]')?.outerHTML,
+			panel: document
+				.querySelector('[data-testid="static-fab-navigator-panel"]')
+				?.outerHTML.slice(0, 2_000),
+		};
+	});
 }
 
 async function assertProductionNavigatorOwnedPanel(activePage, tab, label) {

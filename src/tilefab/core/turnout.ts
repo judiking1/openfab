@@ -1,4 +1,5 @@
 import {
+	type AdvancedSwitchGeometry,
 	type AdvancedSwitchRecord,
 	advancedSwitchRecordError,
 	deriveAdvancedSwitchGeometry,
@@ -244,19 +245,34 @@ export function validateTurnoutFootprints(
 			ownersByCell.set(key, owners);
 		}
 	}
-	for (const overlap of overlaps.values()) {
-		if (
-			advancedSwitches.some((switchRecord) =>
-				isAuthorizedAdvancedSwitchTurnoutOverlap(
-					switchRecord,
-					overlap.left,
-					overlap.right,
-					overlap.cells,
-				),
-			)
-		) {
-			continue;
+	// Derive each switch once; only a matching merge anchor can own an overlap.
+	const switchesByMergeAnchor = new Map<
+		string,
+		{
+			record: AdvancedSwitchRecord;
+			anchors: AdvancedSwitchTurnoutAnchors;
+		}[]
+	>();
+	if (overlaps.size > 0) {
+		for (const record of advancedSwitches) {
+			if (advancedSwitchRecordError(record)) continue;
+			const { mergeAnchor, branchAnchor, sharedTrunkSupport } =
+				deriveAdvancedSwitchGeometry(record);
+			const key = cellKey(mergeAnchor.x, mergeAnchor.y);
+			const candidates = switchesByMergeAnchor.get(key) ?? [];
+			candidates.push({ record, anchors: { mergeAnchor, branchAnchor, sharedTrunkSupport } });
+			switchesByMergeAnchor.set(key, candidates);
 		}
+	}
+	for (const overlap of overlaps.values()) {
+		const merge = overlap.left.kind === TURNOUT_KIND.MERGE ? overlap.left : overlap.right;
+		const candidates = switchesByMergeAnchor.get(cellKey(merge.cell.x, merge.cell.y)) ?? [];
+		if (
+			candidates.some(({ record, anchors }) =>
+				isAuthorizedTurnoutOverlap(record, anchors, overlap.left, overlap.right, overlap.cells),
+			)
+		)
+			continue;
 		issues.push({
 			code: "OVERLAPPING_FOOTPRINT",
 			message: "두 turnout의 물리 footprint가 겹칩니다. junction 사이 간격을 늘리세요",
@@ -274,7 +290,27 @@ export function isAuthorizedAdvancedSwitchTurnoutOverlap(
 	overlapCells: readonly Cell[],
 ): boolean {
 	if (advancedSwitchRecordError(switchRecord)) return false;
-	const geometry = deriveAdvancedSwitchGeometry(switchRecord);
+	return isAuthorizedTurnoutOverlap(
+		switchRecord,
+		deriveAdvancedSwitchGeometry(switchRecord),
+		left,
+		right,
+		overlapCells,
+	);
+}
+
+type AdvancedSwitchTurnoutAnchors = Pick<
+	AdvancedSwitchGeometry,
+	"mergeAnchor" | "branchAnchor" | "sharedTrunkSupport"
+>;
+
+function isAuthorizedTurnoutOverlap(
+	switchRecord: AdvancedSwitchRecord,
+	geometry: AdvancedSwitchTurnoutAnchors,
+	left: TurnoutFootprint,
+	right: TurnoutFootprint,
+	overlapCells: readonly Cell[],
+): boolean {
 	const merge =
 		left.kind === TURNOUT_KIND.MERGE ? left : right.kind === TURNOUT_KIND.MERGE ? right : null;
 	const branch =

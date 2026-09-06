@@ -134,6 +134,27 @@ export function checksumRailNetworkAnalysis(
 	analysis: RailNetworkAnalysis,
 	authoredChecksum: string,
 ): string {
+	const checksum = createRailNetworkAnalysisChecksum(analysis, authoredChecksum);
+	checksum.addViews(railNetworkAnalysisChecksumViews(analysis));
+	return checksum.digest();
+}
+
+export async function checksumRailNetworkAnalysisCooperatively(
+	analysis: RailNetworkAnalysis,
+	authoredChecksum: string,
+	checkpoint: () => Promise<void>,
+): Promise<string> {
+	const checksum = createRailNetworkAnalysisChecksum(analysis, authoredChecksum);
+	await checksum.addViewsCooperatively(railNetworkAnalysisChecksumViews(analysis), checkpoint);
+	// Empty typed tables must also observe cancellation before returning a digest.
+	await checkpoint();
+	return checksum.digest();
+}
+
+function createRailNetworkAnalysisChecksum(
+	analysis: RailNetworkAnalysis,
+	authoredChecksum: string,
+): OrderedTypedChecksum {
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([authoredChecksum, analysis.status]);
 	checksum.addNumbers([
@@ -148,7 +169,13 @@ export function checksumRailNetworkAnalysis(
 		analysis.stronglyConnected ? 1 : 0,
 		analysis.minimumReturnLinks,
 	]);
-	checksum.addViews([
+	return checksum;
+}
+
+function railNetworkAnalysisChecksumViews(
+	analysis: RailNetworkAnalysis,
+): readonly ArrayBufferView[] {
+	return [
 		analysis.openEndCells,
 		analysis.unsafeJunctionCells,
 		analysis.componentRepresentatives,
@@ -156,8 +183,7 @@ export function checksumRailNetworkAnalysis(
 		analysis.oneWayCorridorOffsets,
 		analysis.oneWayCorridorCells,
 		analysis.oneWayCorridorBoundaries,
-	]);
-	return checksum.digest();
+	];
 }
 
 function collectWeakComponentRepresentatives(
@@ -296,12 +322,14 @@ function collectStrongComponents(
 			const targetCell = moveCell(cell, direction);
 			const target = componentByCell.get(cellKey(targetCell.x, targetCell.y));
 			if (target === undefined || target === source) continue;
-			edges.push(Object.freeze({
-				fromComponent: source,
-				toComponent: target,
-				from: cell,
-				to: targetCell,
-			}));
+			edges.push(
+				Object.freeze({
+					fromComponent: source,
+					toComponent: target,
+					from: cell,
+					to: targetCell,
+				}),
+			);
 		}
 	}
 	edges.sort(compareCondensationEdges);
