@@ -197,6 +197,86 @@ describe("TileRenderer camera transforms", () => {
 		expect(overviewRailPixelWidths(10)).toBeNull();
 	});
 
+	it.each([
+		0, 1, 2, 3,
+	] as const)("keeps overview path endpoints and fallback strokes identical at rotation %s", (rotation) => {
+		const { document, plan } = createAdvancedSwitchFixture("B");
+		expect(document.commit(plan)).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const original = physical.paths.positions.slice();
+		const camera: Camera = { offsetX: 200, offsetY: 160, zoom: 0.667, rotation };
+		const render = (usePath: boolean): RecordingScreenPath => {
+			if (usePath) installRecordingPath2D();
+			else vi.stubGlobal("Path2D", undefined);
+			const ctx = createRecordingContext().context;
+			const current: RecordingScreenPath = { commands: [] };
+			let result: RecordingScreenPath = { commands: [] };
+			ctx.beginPath = () => {
+				current.commands = [];
+			};
+			ctx.moveTo = (x, y) => {
+				current.commands.push({ kind: "move", x, y });
+			};
+			ctx.lineTo = (x, y) => {
+				current.commands.push({ kind: "line", x, y });
+			};
+			ctx.stroke = ((path?: RecordingScreenPath) => {
+				if (ctx.strokeStyle === "#8dc7cb") {
+					result = { commands: [...(path ?? current).commands] };
+				}
+			}) as typeof ctx.stroke;
+			new TileRenderer().render(ctx, createRecordingContext().context, {
+				map: document.map,
+				physicalPaths: physical.paths,
+				ghost: null,
+				camera,
+				width: 400,
+				height: 320,
+				dpr: 1,
+				hoverTile: null,
+				hoverWorld: null,
+				anchorTile: null,
+				selectedTile: null,
+			});
+			return result;
+		};
+		const overview = render(true);
+		expect(overview.commands.length).toBeLessThan(physical.paths.positions.length / 2);
+		expectScreenPathsClose([render(false)], [overview]);
+		const moves = overview.commands.flatMap((command, index) =>
+			command.kind === "move" ? [index] : [],
+		);
+		expect(moves).toHaveLength(physical.paths.pathCount);
+		const renderer = new TileRenderer();
+		const expectedSpans: string[] = [];
+		for (let index = 0; index < physical.paths.pathCount; index++) {
+			const first = physical.paths.offsets[index] as number;
+			const last = (physical.paths.offsets[index + 1] as number) - 1;
+			const points = [first, last].map((pointIndex) =>
+				renderer.worldToScreen(
+					{
+						x: physical.paths.positions[pointIndex * 2] as number,
+						y: physical.paths.positions[pointIndex * 2 + 1] as number,
+					},
+					camera,
+				),
+			);
+			expectedSpans.push(JSON.stringify(points));
+		}
+		// Spatial query order need not equal source path order; compare complete directed spans.
+		const renderedSpans = moves.map((first, row) => {
+			const last = (moves[row + 1] ?? overview.commands.length) - 1;
+			return JSON.stringify(
+				[first, last].map((index) => ({
+					x: overview.commands[index]?.x,
+					y: overview.commands[index]?.y,
+				})),
+			);
+		});
+		expect(renderedSpans.sort()).toEqual(expectedSpans.sort());
+		expect(physical.paths.positions).toEqual(original);
+	});
+
 	it("keeps a stable screen margin beyond the closure target cell", () => {
 		expect(closureSnapRadiusMetersForZoom(8)).toBe(0.82);
 		expect(closureSnapRadiusMetersForZoom(38) * 38 - 19).toBeCloseTo(8);

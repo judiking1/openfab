@@ -114,6 +114,10 @@ import {
 } from "../core/StaticFabOrganizationBundlePlacementPreview";
 import { type Cell, cellKey, decodeRailCell, type RailCell, type TileMap } from "../core/TileMap";
 import {
+	nextPhysicalRailOverviewPoint,
+	overviewRailPointDistanceSquared,
+} from "./PhysicalRailOverviewPoints";
+import {
 	type CompiledRailPresentation,
 	compilePhysicalRailPresentation,
 	OPENFAB_CONSTRUCTION_PRESENTATION_PROFILE,
@@ -3609,12 +3613,23 @@ export class TileRenderer {
 	): Path2D | null {
 		if (typeof Path2D === "undefined") return null;
 		const screenPath = new Path2D();
+		const pointDistanceSquared =
+			lateralOffsetMeters === 0 ? overviewRailPointDistanceSquared(camera.zoom) : 0;
 		for (const pathIndex of pathIndices) {
 			if ((paths.kinds[pathIndex] as number) === PATH_KIND.INVALID) continue;
 			const start = paths.offsets[pathIndex] as number;
 			const end = paths.offsets[pathIndex + 1] as number;
 			if (end - start < 2) continue;
-			for (let pointIndex = start; pointIndex < end; pointIndex++) {
+			for (
+				let pointIndex = start;
+				pointIndex < end;
+				pointIndex = nextPhysicalRailOverviewPoint(
+					paths.positions,
+					pointIndex,
+					end,
+					pointDistanceSquared,
+				)
+			) {
 				const pointOffset = pointIndex * 2;
 				const screen = this.worldToScreen(
 					{
@@ -3868,13 +3883,23 @@ export class TileRenderer {
 		kindFilter?: number,
 	): void {
 		ctx.beginPath();
+		const pointDistanceSquared = overviewRailPointDistanceSquared(camera.zoom);
 		for (const pathIndex of pathIndices) {
 			const kind = physicalPaths.kinds[pathIndex] as number;
 			if (kind === PATH_KIND.INVALID || (kindFilter !== undefined && kind !== kindFilter)) continue;
 			const start = physicalPaths.offsets[pathIndex] as number;
 			const end = physicalPaths.offsets[pathIndex + 1] as number;
 			if (end - start < 2) continue;
-			for (let pointIndex = start; pointIndex < end; pointIndex++) {
+			for (
+				let pointIndex = start;
+				pointIndex < end;
+				pointIndex = nextPhysicalRailOverviewPoint(
+					physicalPaths.positions,
+					pointIndex,
+					end,
+					pointDistanceSquared,
+				)
+			) {
 				const positionOffset = pointIndex * 2;
 				const screen = this.worldToScreen(
 					{
