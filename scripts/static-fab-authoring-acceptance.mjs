@@ -4562,6 +4562,16 @@ async function auditOrdinaryNoSlotPortRecoverySeparation(browserInstance) {
 						`ordinary ${spec.portType} recovery separation unavailable at ${viewport.width}px`,
 					);
 				}
+				if (separation.gap < 8) {
+					console.error("Port recovery separation", JSON.stringify({ viewport, ...separation }));
+					await page.screenshot({
+						path: path.join(
+							artifactRoot,
+							`ordinary-${spec.portType.toLowerCase()}-recovery-gap-failure-${viewport.width}.png`,
+						),
+						fullPage: true,
+					});
+				}
 				assertAtLeast(
 					separation.gap,
 					8,
@@ -5907,7 +5917,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			}
 			assertIncludes(
 				(await page.locator(".tilefab-port-authoring-instruction").innerText()).trim(),
-				"포인터: 금색 원 클릭 · 키보드: 현재 대상에서 Enter · 또는 위치 확대",
+				"금색 슬롯 클릭 또는 방향키 후 Enter",
 				`${viewport.label} STK overview coach`,
 			);
 			assertIncludes(
@@ -7399,6 +7409,97 @@ async function exerciseGuidedPortHandoffRegression(
 			1,
 			"Guided STK names the active tool as the current Canvas step",
 		);
+		const pointerStkBefore = await readMetrics(page);
+		assertEqual(
+			await guidedCanvas.getAttribute("data-guided-keyboard-pointer-downs"),
+			"0",
+			"Guided OHB and EQ keyboard placement uses no Canvas pointer input",
+		);
+		const pointerFirstPoint = await visibleGuidedCanvasMarkerPoint(
+			"guided-port-target",
+			"Guided STK first pointer target",
+		);
+		const pointerFirstRow = await page
+			.getByTestId("guided-port-target")
+			.getAttribute("data-port-slot-row");
+		if (!pointerFirstRow) throw new Error("Guided STK first pointer target has no slot row.");
+		await page.mouse.click(pointerFirstPoint.x, pointerFirstPoint.y);
+		await page.waitForFunction(
+			() => document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "1",
+			undefined,
+			{ timeout: 10_000 },
+		);
+		await page.waitForFunction(
+			(firstRow) => {
+				const target = document.querySelector('[data-testid="guided-port-target"]');
+				const row = target?.getAttribute("data-port-slot-row");
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					row &&
+					row !== firstRow &&
+					canvas?.getAttribute("data-stk-draft-selected-rows") === firstRow
+				);
+			},
+			pointerFirstRow,
+			{ timeout: 10_000 },
+		);
+		const pointerSecondPoint = await visibleGuidedCanvasMarkerPoint(
+			"guided-port-target",
+			"Guided STK second pointer target",
+		);
+		await page.mouse.click(pointerSecondPoint.x, pointerSecondPoint.y);
+		try {
+			await page.waitForFunction(
+				() => document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "2",
+				undefined,
+				{ timeout: 10_000 },
+			);
+		} catch (error) {
+			await page.screenshot({ path: path.join(artifactRoot, "guided-stk-pointer-failure.png") });
+			throw new Error(
+				`Guided STK pointer selection failed: ${JSON.stringify({
+					pointerFirstRow,
+					selectedRows: await guidedCanvas.getAttribute("data-stk-draft-selected-rows"),
+					point: pointerSecondPoint,
+					page: await page.locator("body").ariaSnapshot(),
+				})}`,
+				{ cause: error },
+			);
+		}
+		assertEqual(
+			((await guidedCanvas.getAttribute("data-stk-draft-selected-rows")) ?? "")
+				.split(",")
+				.includes(pointerFirstRow),
+			true,
+			"Guided STK second pointer click preserves the first selected Port",
+		);
+		assertProjectUnchanged(await readMetrics(page), pointerStkBefore, "Guided STK pointer draft");
+		await assertGuidedPrimaryTarget(page, "command:stk.complete", "Guided STK pointer review");
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="guided-port-keyboard-readout"]')
+					?.textContent?.includes("현재 2개 선택") === true,
+		);
+
+		await page.getByRole("button", { name: "선택한 STK Port 모두 취소", exact: true }).click();
+		await page.waitForFunction(
+			() => {
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				const targetRow = document
+					.querySelector('[data-testid="guided-port-target"]')
+					?.getAttribute("data-port-slot-row");
+				return (
+					document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "0" &&
+					canvas?.getAttribute("data-stk-draft-selected-rows") === "" &&
+					targetRow &&
+					canvas?.getAttribute("data-guided-port-keyboard-row") === targetRow
+				);
+			},
+			undefined,
+			{ timeout: 10_000 },
+		);
+		await guidedCanvas.focus();
 		let stkMarkerFingerprint =
 			(await page.getByTestId("rail-canvas").getAttribute("data-guided-canvas-markers")) ?? "";
 		const stkFirstRow =
@@ -7699,7 +7800,29 @@ async function exerciseGuidedPortHandoffRegression(
 			exitRestartedStkFirstRow,
 			{ timeout: 10_000 },
 		);
+		await page.keyboard.press("Shift+Enter");
+		assertProjectUnchanged(
+			await readMetrics(page),
+			stkBefore,
+			"Guided STK requires two Ports before explicit creation",
+		);
 		await page.keyboard.press("Enter");
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="tilefab-app"]')
+					?.getAttribute("data-stk-draft-rows") === "2" &&
+				document
+					.querySelector('[data-testid="stk-complete"]')
+					?.getAttribute("data-guided-target") === "true",
+		);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			stkBefore,
+			"Guided STK second selection is still a draft",
+		);
+		await assertGuidedPrimaryTarget(page, "command:stk.complete", "Guided STK explicit creation");
+		await page.keyboard.press("Shift+Enter");
 		const stkPlaced = await waitForWorker(
 			page,
 			(metrics) => metrics.equipmentGroups === "3" && metrics.equipmentPorts === "6",
@@ -7747,8 +7870,8 @@ async function exerciseGuidedPortHandoffRegression(
 		await page.waitForTimeout(100);
 		assertEqual(
 			await guidedCanvas.getAttribute("data-guided-keyboard-pointer-downs"),
-			"0",
-			"Guided OHB, EQ, and STK keyboard path performs no Canvas pointer placement",
+			"2",
+			"Only the two cancelled STK draft clicks use the pointer; authored groups use the keyboard",
 		);
 		await page.screenshot({
 			path: path.join(artifactRoot, "guided-port-handoff-390x844.png"),
@@ -13709,7 +13832,7 @@ async function exerciseGuidedPortHandoffRegression(
 						const zoomCoach = page.getByTestId("ordinary-stk-zoom-in");
 						assertIncludes(
 							await responsiveBuildbar.locator(".tilefab-port-authoring-instruction").innerText(),
-							"포인터: 금색 원 클릭 · 키보드: 현재 대상에서 Enter · 또는 위치 확대",
+							"금색 슬롯 클릭 또는 방향키 후 Enter",
 							`ordinary STK overview coaching ${viewport.label}`,
 						);
 						await assertLocatorInsideViewport(page, zoomCoach);
@@ -13733,10 +13856,10 @@ async function exerciseGuidedPortHandoffRegression(
 						.locator(".tilefab-port-authoring-instruction")
 						.innerText();
 					for (const copy of [
-						"FLEX",
+						"Stocker · 0개 Port 선택",
 						"원하는 CENTER Port 1개 이상",
-						"첫 Port",
-						"방향키/WASD",
+						"금색 슬롯 클릭",
+						"방향키",
 						"Enter",
 					]) {
 						assertIncludes(
@@ -14009,7 +14132,7 @@ async function exerciseGuidedPortHandoffRegression(
 					const stkReadyInstruction = await responsiveBuildbar
 						.locator(".tilefab-port-authoring-instruction")
 						.innerText();
-					for (const copy of ["2 PORT 선택", "Shift+Enter / STK 생성", "FLEX 조건"]) {
+					for (const copy of ["2개 Port 선택", "STK 생성", "Shift+Enter"]) {
 						assertIncludes(stkReadyInstruction, copy, `ordinary STK ready phase ${viewport.label}`);
 					}
 					for (const control of [
@@ -19096,14 +19219,17 @@ async function assertBlankPointerDoesNotReuseStaleStkHover(page, target, label) 
 		const camera = window.__tileFab?.camera;
 		const bounds = element.getBoundingClientRect();
 		if (!slots || !camera || !Number.isFinite(camera.zoom) || camera.zoom <= 0) return null;
-		const minimumSlotDistanceMeters = 22 / camera.zoom + 0.05;
+		// Exclude both the 22 px cursor ring and the actual 26 px / 0.24–0.8 m slot hit area.
+		const minimumSlotDistanceMeters =
+			Math.max(22 / camera.zoom, Math.max(0.24, Math.min(0.8, 26 / camera.zoom))) + 0.05;
 		for (let clientY = bounds.top + 16; clientY < bounds.bottom - 16; clientY += 32) {
 			for (let clientX = bounds.left + 16; clientX < bounds.right - 16; clientX += 32) {
 				if (document.elementFromPoint(clientX, clientY) !== element) continue;
-				const world = {
-					x: (clientX - bounds.left - camera.offsetX) / camera.zoom,
-					y: (clientY - bounds.top - camera.offsetY) / camera.zoom,
-				};
+				const world = window.__tileFab.renderer.worldAtScreen(
+					clientX - bounds.left,
+					clientY - bounds.top,
+					camera,
+				);
 				let clear = true;
 				for (let row = 0; row < slots.count; row += 1) {
 					const slotX = slots.worldPositions[row * 2];
@@ -19119,7 +19245,9 @@ async function assertBlankPointerDoesNotReuseStaleStkHover(page, target, label) 
 		return null;
 	});
 	if (!blankPoint) {
-		throw new Error(`${label} could not resolve a blank Canvas point outside every 22 px STK hit.`);
+		throw new Error(
+			`${label} could not resolve a blank Canvas point outside every STK slot hit and cursor ring.`,
+		);
 	}
 	await page.mouse.move(target.x, target.y);
 	await page.waitForFunction(
@@ -33012,7 +33140,7 @@ async function exerciseOrdinaryFourPortLowZoomAcquisition(page, baseline) {
 	);
 	assertIncludes(
 		await instruction.innerText(),
-		"포인터: 금색 원 클릭 · 키보드: 현재 대상에서 Enter · 또는 위치 확대",
+		"금색 슬롯 클릭 또는 방향키 후 Enter",
 		"4 PORT zoom coach copy",
 	);
 	const coachBounds = await zoomCoach.boundingBox();
@@ -33527,12 +33655,7 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 		await page.waitForTimeout(120);
 		const buildbar = page.locator('.tilefab-port-buildbar[data-port-type="STK"]');
 		const instruction = await buildbar.locator(".tilefab-port-authoring-instruction").innerText();
-		for (const copy of [
-			`${specification.portCount} PORT 선택`,
-			specification.label,
-			specification.requirement,
-			"Shift+Enter / STK 생성",
-		]) {
+		for (const copy of [`${specification.portCount}개 Port 선택`, "STK 생성", "Shift+Enter"]) {
 			assertIncludes(instruction, copy, `${specification.label} copy ${viewport.label}`);
 		}
 		assertEqual(
@@ -34663,12 +34786,12 @@ async function exerciseEqToStkRecommendedEntry(
 		) {
 			assertIncludes(
 				await stkInstruction.innerText(),
-				"4 PORT · 연속 4개",
+				"같은 직선 레일의 연속 4개",
 				`ordinary EQ to STK overview retains the template requirement ${viewportLabel}`,
 			);
 			assertIncludes(
 				await stkInstruction.innerText(),
-				"포인터: 금색 원 클릭 · 키보드: 현재 대상에서 Enter · 또는 위치 확대",
+				"금색 슬롯 클릭 또는 방향키 후 Enter",
 				`ordinary EQ to STK overview pointer contract ${viewportLabel}`,
 			);
 			const zoomFirstPort = page.getByTestId("ordinary-stk-zoom-in");
@@ -34686,13 +34809,10 @@ async function exerciseEqToStkRecommendedEntry(
 		}
 		assertIncludes(
 			await stkInstruction.innerText(),
-			"4 PORT · 같은 직선 레일의 연속 4개",
+			"같은 직선 레일의 연속 4개",
 			`ordinary EQ to STK shows the retained template requirement ${viewportLabel}`,
 		);
-		for (const phrase of [
-			"포인터: 금색 ◇ CENTER 클릭으로 첫 Port 선택",
-			"키보드: 방향키/WASD 이동 → Enter",
-		]) {
+		for (const phrase of ["금색 슬롯 클릭", "방향키 후 Enter"]) {
 			assertIncludes(
 				await stkInstruction.innerText(),
 				phrase,
@@ -34729,7 +34849,7 @@ async function exerciseEqToStkRecommendedEntry(
 		);
 		assertIncludes(
 			await stkInstruction.innerText(),
-			"1 PORT 선택",
+			"1개 Port 선택",
 			`ordinary EQ to STK first selected count ${viewportLabel}`,
 		);
 		await clickCurrentStkTargetByPointer(
@@ -34755,11 +34875,7 @@ async function exerciseEqToStkRecommendedEntry(
 			`ordinary EQ to STK pointer rebuild ${viewportLabel}`,
 		);
 		const readyInstruction = await stkInstruction.innerText();
-		for (const phrase of [
-			"1 PORT 선택",
-			"포인터: 금색 ◇ CENTER 클릭으로 추가·제거",
-			"준비되면 STK 생성",
-		]) {
+		for (const phrase of ["1개 Port 선택", "선택을 확인한 뒤 STK 생성", "Shift+Enter"]) {
 			assertIncludes(
 				readyInstruction,
 				phrase,

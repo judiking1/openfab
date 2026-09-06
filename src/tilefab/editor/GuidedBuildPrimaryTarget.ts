@@ -6,6 +6,11 @@ import type {
 
 export type GuidedBuildPrimaryTarget =
 	| Readonly<{
+			id: "command:stk.complete";
+			kind: "equipment-complete";
+			instruction: string;
+	  }>
+	| Readonly<{
 			id: `activity:${EditorActivity}`;
 			kind: "activity";
 			activity: EditorActivity;
@@ -58,6 +63,7 @@ export interface GuidedBuildPrimaryTargetContext {
 	readonly keyboardRailActive: boolean;
 	readonly commandsActionable: boolean;
 	readonly portCanvasActionable: boolean;
+	readonly stkDraftReady?: boolean;
 	readonly reuseSelectionCanvasActionable: boolean;
 	readonly reuseSelectionSurfaceActive: boolean;
 	readonly reuseSelectionObstructionOpen: boolean;
@@ -188,6 +194,14 @@ function resolvePortTarget(
 			instruction: `${portToolLabel(equipmentTool)}를 선택하세요. 선택 직후 Canvas의 첫 합법 슬롯으로 안내합니다.`,
 		});
 	}
+	if (equipmentTool === "stk" && context.stkDraftReady) {
+		return Object.freeze({
+			id: "command:stk.complete",
+			kind: "equipment-complete",
+			instruction:
+				"Port 선택을 확인한 뒤 아래 ‘STK 생성’을 누르세요. Canvas에서는 Shift+Enter로 생성할 수 있습니다.",
+		});
+	}
 	if (!context.portCanvasActionable) return null;
 	return Object.freeze({
 		id: `canvas:${equipmentTool}`,
@@ -249,7 +263,7 @@ function portCanvasInstruction(tool: "ohb" | "eq" | "stk"): string {
 		return "OHB 도구가 선택됐습니다. Canvas의 점선 고리가 있는 청록 슬롯에서 Enter를 누르거나 그 슬롯을 클릭하세요.";
 	}
 	if (tool === "eq") {
-		return "EQ 도구가 선택됐습니다. Canvas의 ‘1 시작’에서 Enter를 누른 뒤 ‘2 끝’으로 이동해 Enter로 행을 확정하세요.";
+		return "‘1 시작’에서 ‘2 끝’까지 드래그하고 놓으면 EQ 행을 만듭니다. 키보드는 시작점에서 Enter, 끝점에서 Enter를 누르세요.";
 	}
-	return "STK 도구가 선택됐습니다. Canvas의 황금 마름모 슬롯에서 Enter를 눌러 입고와 출고 Port를 차례로 선택하세요.";
+	return "아래 Port 개수 조건에 맞춰 금색 마름모를 클릭하거나 강조점에서 Enter로 선택하세요. 선택을 확인한 뒤 ‘STK 생성’ 또는 Shift+Enter로 생성합니다.";
 }

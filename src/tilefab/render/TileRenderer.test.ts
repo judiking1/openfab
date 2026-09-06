@@ -957,6 +957,65 @@ describe("port slot rendering", () => {
 		]);
 	});
 
+	it("skips invalid Stocker recommendations and repaints when draft advice changes", () => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 45, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifacts(physical, "STK");
+		const renderer = new TileRenderer();
+		const context = createRecordingContext().context;
+		const input: Parameters<TileRenderer["render"]>[2] = {
+			map: document.map,
+			physicalPaths: physical.paths,
+			portSlots: prepared.slots,
+			portSlotSpatialIndex: prepared.spatialIndex,
+			portSlotAvailability: createPreparedPortSlotAvailabilityIndex(
+				physical,
+				prepared,
+				document.portEquipment,
+			),
+			showPortSlots: true,
+			interactionFocus: "ports",
+			ghost: null,
+			camera: { offsetX: 0, offsetY: 320, zoom: 18, rotation: 0 },
+			width: 900,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		};
+		const firstFilter = vi.fn(() => true);
+		const guidance = {
+			label: "STK",
+			instruction: "Port 선택",
+			gesture: "single" as const,
+			acceptsRow: firstFilter,
+		};
+		renderer.render(context, context, { ...input, guidedPortPlacement: guidance });
+		const firstRow = renderer.getGuidedCanvasActionMarkers()[0]?.portSlotRow;
+		expect(firstRow).toBeDefined();
+		const fallback = vi.fn((row: number) => row !== firstRow);
+		renderer.render(context, context, {
+			...input,
+			guidedPortPlacement: { ...guidance, acceptsRow: fallback },
+		});
+		const nextRow = renderer.getGuidedCanvasActionMarkers()[0]?.portSlotRow;
+		expect(nextRow).toBeDefined();
+		expect(nextRow).not.toBe(firstRow);
+		expect(fallback).toHaveBeenCalledTimes(2);
+		const rejectAll = vi.fn(() => false);
+		renderer.render(context, context, {
+			...input,
+			guidedPortPlacement: { ...guidance, acceptsRow: rejectAll },
+		});
+		expect(renderer.getGuidedCanvasActionMarkers()).toHaveLength(0);
+		expect(rejectAll).toHaveBeenCalledTimes(16);
+	});
+
 	it("projects a visible three-slot Guided EQ drag span with start and end markers", () => {
 		const document = new RailDocument();
 		expect(

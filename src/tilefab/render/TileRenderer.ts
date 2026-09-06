@@ -398,6 +398,7 @@ export interface TileRenderInput {
 		readonly reservedLeftPixels?: number;
 		readonly gesture?: "single" | "row";
 		readonly recommendedPortCount?: number;
+		readonly acceptsRow?: (row: number) => boolean;
 	}> | null;
 	guidedRailSelection?: Readonly<{
 		readonly label: string;
@@ -684,6 +685,7 @@ export function advancedSwitchHighlightCells(map: TileMap, cell: Cell | null): r
 /** Static rails are cached; pointer movement redraws only the lightweight overlay. */
 export class TileRenderer {
 	private staticKey = "";
+	private guidedPortCandidateFilter: ((row: number) => boolean) | undefined;
 	private staticRedraws = 0;
 	private overlayRedraws = 0;
 	private boundMap: TileMap | null = null;
@@ -1313,6 +1315,10 @@ export class TileRenderer {
 
 	private ensureStaticLayer(staticContext: CanvasRenderingContext2D, input: TileRenderInput): void {
 		const { map, physicalPaths, camera, width, height, dpr } = input;
+		if (this.guidedPortCandidateFilter !== input.guidedPortPlacement?.acceptsRow) {
+			this.guidedPortCandidateFilter = input.guidedPortPlacement?.acceptsRow;
+			this.staticKey = "";
+		}
 		if (this.boundMap !== map) {
 			this.boundMap = map;
 			this.staticKey = "";
@@ -1897,6 +1903,16 @@ export class TileRenderer {
 			);
 		});
 		if (guidance.gesture !== "row") {
+			if (guidance.acceptsRow) {
+				const distance = (row: number): number => {
+					const port = this.portSlotScreenPoint(input, slots, row);
+					return Math.hypot(port.x - input.width / 2, port.y - input.height / 2);
+				};
+				candidates.sort((left, right) => distance(left) - distance(right) || left - right);
+				// Domain checks are bounded and supplied by the authoring adapter, not the renderer.
+				const row = candidates.slice(0, 16).find(guidance.acceptsRow);
+				return row === undefined ? [] : [row];
+			}
 			let bestRow = -1;
 			let bestDistance = Number.POSITIVE_INFINITY;
 			for (const row of candidates) {

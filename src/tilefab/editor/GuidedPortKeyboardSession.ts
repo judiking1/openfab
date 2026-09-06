@@ -192,6 +192,9 @@ export function guidedPortKeyboardOperationInstruction(
 			? `방향키 또는 WASD로 STK 슬롯을 고르고 Enter로 포트를 추가·제거하세요. Shift+Enter는 선택한 포트로 그룹을 확정하고 Esc는 현재 ${selectedPortCount}개 선택을 초기화합니다.`
 			: "방향키 또는 WASD로 STK 슬롯을 고르고 Enter로 포트를 추가하세요. Esc는 Port 배치를 종료합니다.";
 	}
+	if (portType === "STK") {
+		return "강조된 슬롯에서 Enter로 Port를 선택하세요. 선택을 확인한 뒤 STK 생성 또는 Shift+Enter로 생성합니다. Esc는 선택을 초기화합니다.";
+	}
 	if (portType === "OHB" && scope === "ordinary") {
 		return "방향키 또는 WASD로 OHB 슬롯을 고르고 Enter로 배치하세요. Esc는 Port 배치를 종료합니다.";
 	}
@@ -221,10 +224,10 @@ export function guidedPortKeyboardAccessiblePresentation(
 		session.portType === "EQ" ? (session.phase === "choose-end" ? "행" : "시작 슬롯") : "슬롯";
 	const selectedSummary = session.portType === "STK" ? ` · 현재 ${selected}개 선택` : "";
 	const applyInstruction =
-		session.portType === "STK" && session.scope === "ordinary"
+		session.portType === "STK"
 			? selected > 0
 				? `Enter로 추가·제거 · Shift+Enter로 그룹 확정 · Esc로 ${selected}개 선택 초기화`
-				: "Enter로 추가 · Esc로 Port 배치 종료"
+				: `Enter로 추가 · Esc로 ${session.scope === "ordinary" ? "Port 배치 종료" : "선택 초기화"}`
 			: session.portType === "EQ" && session.phase === "choose-end"
 				? "Enter로 행 확정 · Esc로 행 선택 취소"
 				: `Enter로 ${

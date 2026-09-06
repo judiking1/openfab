@@ -1,0 +1,64 @@
+/* Stocker selection is a reviewable draft: count, issue and Create stay in one dock. */
+.tilefab-buildbar.tilefab-port-buildbar[data-port-type="STK"] {
+	height: auto;
+	max-height: none;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 8px;
+	overflow: visible;
+}
+
+.tilefab-port-buildbar[data-port-type="STK"] .tilefab-buildbar-title,
+.tilefab-port-buildbar[data-port-type="STK"] .tilefab-build-spec {
+	display: none;
+}
+
+.tilefab-port-buildbar[data-port-type="STK"] .tilefab-port-authoring-instruction {
+	order: -1;
+	flex: 1 0 100%;
+	min-width: 0;
+	max-width: none;
+	padding: 8px 10px;
+}
+
+.tilefab-stk-review {
+	display: grid;
+	gap: 4px;
+	font-size: 11px;
+	line-height: 1.4;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-stk-review strong {
+	color: #ffe39a;
+	font-size: 13px;
+}
+
+.tilefab-stk-review-issue {
+	color: #ffc5bd;
+}
+
+.tilefab-workspace:has(.tilefab-port-buildbar[data-port-type="STK"]):not(
+		:has(.tilefab-blueprint-favorite-tray)
+	)
+	.tilefab-recovery:not([data-guided-build="true"]) {
+	bottom: var(--tilefab-port-dock-clearance, 260px);
+}
+
+.tilefab-port-buildbar[data-port-type="STK"] .tilefab-stk-templates {
+	flex: 1 1 200px;
+	height: 50px;
+	min-height: 50px;
+}
+
+@media (max-width: 760px) {
+	.tilefab-port-buildbar[data-port-type="STK"] .tilefab-stk-actions {
+		flex: 1 0 100%;
+		justify-content: flex-end;
+	}
+
+	.tilefab-port-buildbar[data-port-type="STK"] .tilefab-stk-templates {
+		flex: 1 1 130px;
+	}
+}

@@ -5,6 +5,7 @@ import {
 	stkDraftAuthoringInstruction,
 	stkDraftKeyboardTargetLabel,
 	stkDraftReasonLabel,
+	stkDraftReviewPresentation,
 	stkDraftStatusPresentation,
 	stkOverviewCoachPresentation,
 	stkTemplatePresentation,
@@ -83,6 +84,27 @@ describe("StkDraftPresentation", () => {
 		).toContain("Esc 선택 초기화 · 다시 Esc STK 배치 종료");
 		expect(stkDraftAuthoringInstruction("SIX_PORT", null, 0)).toContain("직선 레일을 먼저");
 		expect(() => stkDraftAuthoringInstruction("FLEX", null, -1)).toThrow(RangeError);
+	});
+
+	it("reviews the same draft against the Guide minimum and preserves rejected-choice feedback", () => {
+		const one = selection({ rows: [1], canComplete: true });
+		expect(stkDraftReviewPresentation(one, "FLEX").ready).toBe(true);
+		expect(stkDraftReviewPresentation(one, "FLEX", 2)).toMatchObject({
+			ready: false,
+			title: "Stocker · 1개 Port 선택",
+			instruction: expect.stringContaining("Port 2개"),
+		});
+		const rejected = selection({
+			rows: [1, 2],
+			canComplete: true,
+			rejectedRow: 7,
+			reason: "기존 장비 구간과 겹칩니다",
+		});
+		expect(stkDraftReviewPresentation(rejected, "FLEX", 2)).toMatchObject({
+			ready: true,
+			issue: "기존 장비 구간과 겹칩니다",
+		});
+		expect(stkDraftReviewPresentation(null, "FOUR_PORT").instruction).toContain("연속 4개");
 	});
 
 	it("names the actual Enter toggle at the current keyboard row", () => {

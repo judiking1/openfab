@@ -95,6 +95,30 @@ describe("GuidedBuildPrimaryTarget", () => {
 		});
 	});
 
+	it("hands a ready Stocker draft to explicit creation after its Canvas marker disappears", () => {
+		const context: GuidedBuildPrimaryTargetContext = {
+			...BASE,
+			currentMissionId: "ports",
+			activeActivity: "equip",
+			tool: "stk",
+			suggestedAction: "stk",
+			portCanvasActionable: false,
+			stkDraftReady: true,
+		};
+		expect(resolveGuidedBuildPrimaryTarget(context)).toMatchObject({
+			id: "command:stk.complete",
+			kind: "equipment-complete",
+		});
+		expect(resolveGuidedBuildPrimaryTarget({ ...context, stkDraftReady: false })).toBeNull();
+		expect(resolveGuidedBuildPrimaryTarget({ ...context, commandsActionable: false })).toBeNull();
+		expect(resolveGuidedBuildPrimaryTarget({ ...context, activeActivity: "build" })).toMatchObject({
+			id: "activity:equip",
+		});
+		expect(resolveGuidedBuildPrimaryTarget({ ...context, tool: "eq" })).toMatchObject({
+			id: "tool:stk",
+		});
+	});
+
 	it("stays absent outside an open Rail or Port mission", () => {
 		expect(resolveGuidedBuildPrimaryTarget({ ...BASE, open: false })).toBeNull();
 		expect(resolveGuidedBuildPrimaryTarget({ ...BASE, commandsActionable: false })).toBeNull();

@@ -17,6 +17,37 @@ export interface StkOverviewCoachPresentation {
 	readonly zoomActionLabel: string;
 }
 
+/** A compact review of the canonical draft, shared by pointer and keyboard authoring. */
+export function stkDraftReviewPresentation(
+	selection: StkDraftSelection | null,
+	template: StkAuthoringTemplate,
+	minimumPortCount = 1,
+): {
+	readonly title: string;
+	readonly instruction: string;
+	readonly issue: string | null;
+	readonly ready: boolean;
+} {
+	const count = selection?.rows.length ?? 0;
+	const ready = !!selection?.canComplete && count >= minimumPortCount;
+	const requirement =
+		template === "FLEX" && minimumPortCount > 1
+			? `이번 Guide에서는 Port ${minimumPortCount}개 선택`
+			: stkTemplatePresentation(template).requirement;
+	const issue =
+		selection && (!selection.valid || selection.rejectedRow !== null)
+			? stkDraftReasonLabel(selection.reason)
+			: null;
+	return {
+		title: `Stocker · ${count}개 Port 선택`,
+		instruction: ready
+			? "선택을 확인한 뒤 STK 생성 · Shift+Enter도 가능"
+			: `${requirement} · 금색 슬롯 클릭 또는 방향키 후 Enter`,
+		issue,
+		ready,
+	};
+}
+
 export function stkTemplatePresentation(template: StkAuthoringTemplate): StkTemplatePresentation {
 	if (template === "FLEX") {
 		return Object.freeze({ label: "FLEX", requirement: "원하는 CENTER Port 1개 이상" });
