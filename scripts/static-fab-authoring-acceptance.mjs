@@ -23740,17 +23740,61 @@ async function observeBayFlowDialogPaint(page) {
 	});
 }
 
+async function startBayFlowPaintTrace(page, label) {
+	if (process.env.OPENFAB_BAY_FLOW_PAINT_TRACE !== "1") return null;
+	const session = await page.context().newCDPSession(page);
+	const events = [];
+	const maximumEvents = 50_000;
+	let droppedEvents = 0;
+	session.on("Tracing.dataCollected", ({ value }) => {
+		for (const event of value) {
+			if (events.length < maximumEvents) events.push(event);
+			else droppedEvents++;
+		}
+	});
+	try {
+		await session.send("Tracing.start", {
+			categories: "toplevel,devtools.timeline,v8",
+			transferMode: "ReportEvents",
+		});
+	} catch (error) {
+		await session.detach().catch(() => undefined);
+		throw error;
+	}
+	return async () => {
+		let timer;
+		try {
+			const completed = new Promise((resolve) => session.once("Tracing.tracingComplete", resolve));
+			const deadline = new Promise((_resolve, reject) => {
+				timer = setTimeout(() => reject(new Error("Bay flow trace stop timed out.")), 5_000);
+			});
+			await Promise.race([Promise.all([session.send("Tracing.end"), completed]), deadline]);
+			await writeFile(
+				path.join(artifactRoot, `bay-flow-trace-${label.replace(/[^a-zA-Z0-9-]/g, "-")}.json`),
+				JSON.stringify({ label, droppedEvents, traceEvents: events }),
+			);
+		} finally {
+			clearTimeout(timer);
+			await session.detach().catch(() => undefined);
+		}
+	};
+}
+
 async function openCertifiedBayFlowEditReview(page, target, options) {
 	await observeBayFlowDialogPaint(page);
+	let stopTrace = null;
 	let outcome = "failed";
 	try {
+		stopTrace = await startBayFlowPaintTrace(page, options.label);
 		const review = await verifyCertifiedBayFlowEditReview(page, target, options);
 		outcome = "passed";
 		return review;
 	} finally {
-		const observation = await page.evaluate(() =>
-			globalThis.__openfabStopBayFlowPaintObservation(),
-		);
+		const observation = await page
+			.evaluate(() => globalThis.__openfabStopBayFlowPaintObservation())
+			.finally(() =>
+				stopTrace?.().catch((error) => console.error("Bay flow trace capture failed:", error)),
+			);
 		if (outcome === "failed") {
 			console.error(
 				"Bay flow paint observation:",

@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -12,6 +12,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const auditScript = path.join(root, "scripts", "openfab-public-safety-audit.mjs");
 const temporaryPrefix = path.join(os.tmpdir(), "openfab-public-export-");
 let temporaryRoot = null;
+let exportIdentity = null;
+let exportPassed = false;
+let currentGate = "allowlist";
 
 try {
 	const candidateOutput = await capture(process.execPath, [auditScript, "--list"], root);
@@ -61,25 +64,35 @@ try {
 		throw new Error(`Temporary export unexpectedly contains ${historyCount} Git commits.`);
 	}
 
+	exportIdentity = { files: candidates.length, fingerprint: fingerprint(sourceEntries) };
 	console.log(
 		`OpenFab clean export | ${candidates.length} indexed files | fingerprint ${fingerprint(sourceEntries)}`,
 	);
+	currentGate = "source-audit";
 	await run(
 		process.execPath,
 		[path.join(temporaryRoot, "scripts", "openfab-public-safety-audit.mjs")],
 		temporaryRoot,
 	);
+	currentGate = "install";
 	await run(
 		"pnpm",
 		["install", "--prefer-offline", "--frozen-lockfile", "--ignore-scripts"],
 		temporaryRoot,
 	);
+	currentGate = "release-identity";
 	await run("pnpm", ["run", "check:release-identity"], temporaryRoot);
+	currentGate = "dependency-licenses";
 	await run("pnpm", ["run", "check:dependency-licenses"], temporaryRoot);
+	currentGate = "fixture-provenance";
 	await run("pnpm", ["run", "check:fixture-provenance"], temporaryRoot);
+	currentGate = "authoring";
 	await run("pnpm", ["run", "check:authoring"], temporaryRoot, fullAuthoringEnvironment());
+	currentGate = "public-bundle";
 	await run("pnpm", ["run", "check:public-bundle"], temporaryRoot);
+	currentGate = "production-smoke";
 	await run("pnpm", ["run", "test:live-demo"], temporaryRoot);
+	currentGate = "source-cleanliness";
 	await capture("git", ["diff", "--quiet"], temporaryRoot);
 
 	const untracked = await capture(
@@ -90,6 +103,8 @@ try {
 	if (untracked.length > 0) {
 		throw new Error("Temporary export build changed or added an unignored source-tree file.");
 	}
+	exportPassed = true;
+	currentGate = "complete";
 	console.log(
 		"PASS history-independent OpenFab public export, authoring acceptance, and production build",
 	);
@@ -103,6 +118,12 @@ try {
 			console.error("Refusing to clean an unexpected public-export temporary path.");
 			process.exitCode = 1;
 		} else {
+			try {
+				await preserveExportEvidence(temporaryRoot);
+			} catch (error) {
+				console.error("Public export evidence preservation failed:", error);
+				process.exitCode = 1;
+			}
 			await rm(temporaryRoot, { recursive: true, force: true, maxRetries: 3 });
 		}
 	}
@@ -175,4 +196,46 @@ function assertExactCandidatePaths(entries, candidates, label) {
 
 function fingerprint(entries) {
 	return createHash("sha256").update(entries.join("\0")).digest("hex").slice(0, 16);
+}
+
+/** Explicit opt-in; each export writes a fresh directory and preserves no source or dependencies. */
+async function preserveExportEvidence(exportRoot) {
+	const requested = process.env.OPENFAB_PUBLIC_EXPORT_EVIDENCE_DIR;
+	if (!requested) return;
+	const destination = path.resolve(requested);
+	const relative = path.relative(exportRoot, destination);
+	if (
+		relative === "" ||
+		(!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+	) {
+		throw new Error("Evidence must be outside the temporary export that will be removed.");
+	}
+	await mkdir(destination, { recursive: true });
+	const evidence = await mkdtemp(path.join(destination, "export-"));
+	await writeFile(
+		path.join(evidence, "export.json"),
+		`${JSON.stringify(
+			{
+				...exportIdentity,
+				status: exportPassed ? "PASS" : "FAIL",
+				gate: currentGate,
+				bayFlowPaintTrace: process.env.OPENFAB_BAY_FLOW_PAINT_TRACE === "1",
+			},
+			null,
+			2,
+		)}\n`,
+	);
+	const authoring = path.join(exportRoot, "artifacts", "static-fab-authoring");
+	const available = await stat(authoring).catch((error) => {
+		if (error.code === "ENOENT") return null;
+		throw error;
+	});
+	if (available?.isDirectory()) {
+		await cp(authoring, path.join(evidence, "authoring"), {
+			recursive: true,
+			errorOnExist: true,
+			force: false,
+		});
+	}
+	console.log(`OpenFab export evidence: ${evidence}`);
 }

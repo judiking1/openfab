@@ -51,3 +51,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The clean export runs the complete authoring journey, bundle audit, and production smoke.
       - run: pnpm check:public-export
+        env:
+          OPENFAB_PUBLIC_EXPORT_EVIDENCE_DIR: ${{ runner.temp }}/openfab-public-export-evidence
+          OPENFAB_BAY_FLOW_PAINT_TRACE: "1"
+      - name: Preserve authoring evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openfab-authoring-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/openfab-public-export-evidence
+          if-no-files-found: warn
+          retention-days: 7

@@ -1289,8 +1289,6 @@ function* relationshipStateSourceSteps(
 	// Organization validation guarantees ascending record IDs, so appended owners are already canonical.
 
 	const exclusiveModuleOwners = new Map<string, string>();
-	const exclusiveModuleKeys = new Set<string>();
-	const independentWitnessEdges: DirectedRailEdge[] = [];
 	const modulesByEdge = new Map<string, RailModuleOwnership[]>();
 	if (ownership) {
 		for (const module of ownership.modules) {
@@ -1352,7 +1350,6 @@ function* relationshipStateSourceSteps(
 						return `조립 관계 ${relationship.id}: Rail module ${module.key}이 여러 관계/그룹에 걸쳐 있습니다`;
 					}
 					exclusiveModuleOwners.set(module.key, groupKey);
-					exclusiveModuleKeys.add(module.key);
 				}
 			}
 			for (const module of touchedModules.values()) {
@@ -1387,7 +1384,6 @@ function* relationshipStateSourceSteps(
 						endpoint.support,
 					);
 					if (sourceError) return `조립 관계 ${relationship.id}: ${sourceError}`;
-					independentWitnessEdges.push(endpoint.support.edge);
 				}
 				for (const seam of leg.seamContacts) {
 					yield;
@@ -1404,9 +1400,6 @@ function* relationshipStateSourceSteps(
 							{ edge: incidence.edge, scope: incidence.scope },
 						);
 						if (sourceError) return `조립 관계 ${relationship.id}: ${sourceError}`;
-						if (incidence.source.binding.kind === "WITNESS") {
-							independentWitnessEdges.push(incidence.edge);
-						}
 					}
 					const junction =
 						resolved[0]?.source.incidence === "INCOMING"
@@ -1420,18 +1413,60 @@ function* relationshipStateSourceSteps(
 		}
 	}
 
-	for (const edge of independentWitnessEdges) {
+	// A higher connection may witness a lower connection's cut. Its own cut can never serve as
+	// retained support. Revisit references after collecting every exclusive owner; this keeps the
+	// complete dependency check cooperative without retaining a second per-witness object graph.
+	for (const relationship of state.records) {
 		yield;
-		const key = staticFabOrganizationEdgeKey(edge);
-		const modules = modulesByEdge.get(key) ?? [];
-		if (modules.length === 0) {
-			return `조립 관계 witness ${key}을 현재 Rail module에서 찾을 수 없습니다`;
-		}
-		for (const module of modules) {
+		for (const group of relationship.connectionGroups) {
 			yield;
-			if (exclusiveModuleKeys.has(module.key)) {
-				return `조립 관계 witness ${key}가 exclusive Rail module 안에 있습니다`;
+			for (const leg of group.legs) {
+				yield;
+				for (const endpoint of leg.endpointSupports) {
+					yield;
+					const error = yield* witnessModuleSourceSteps(
+						endpoint.support.edge,
+						relationship.id,
+						modulesByEdge,
+						exclusiveModuleOwners,
+					);
+					if (error) return error;
+				}
+				for (const seam of leg.seamContacts) {
+					yield;
+					for (const incidence of seam.incidences) {
+						yield;
+						if (incidence.binding.kind !== "WITNESS") continue;
+						const error = yield* witnessModuleSourceSteps(
+							incidence.binding.scopedEdge.edge,
+							relationship.id,
+							modulesByEdge,
+							exclusiveModuleOwners,
+						);
+						if (error) return error;
+					}
+				}
 			}
+		}
+	}
+	return null;
+}
+
+function* witnessModuleSourceSteps(
+	edge: DirectedRailEdge,
+	relationshipId: number,
+	modulesByEdge: ReadonlyMap<string, readonly RailModuleOwnership[]>,
+	exclusiveModuleOwners: ReadonlyMap<string, string>,
+): Generator<void, string | null> {
+	const key = staticFabOrganizationEdgeKey(edge);
+	const modules = modulesByEdge.get(key) ?? [];
+	if (modules.length === 0)
+		return `조립 관계 witness ${key}을 현재 Rail module에서 찾을 수 없습니다`;
+	const relationshipPrefix = `${relationshipId}:`;
+	for (const module of modules) {
+		yield;
+		if (exclusiveModuleOwners.get(module.key)?.startsWith(relationshipPrefix)) {
+			return `조립 관계 witness ${key}가 같은 관계의 exclusive Rail module 안에 있습니다`;
 		}
 	}
 	return null;
