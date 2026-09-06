@@ -23,7 +23,7 @@ export interface EditorHelpContextInput {
 
 const ORDINARY_RAIL_KEYBOARD_HELP_CONTEXTS = Object.freeze({
 	"choose-start": helpContext(
-		"BUILD · KEYBOARD RAIL · START",
+		"레일 · KEYBOARD RAIL · START",
 		"키보드로 Rail 시작점 고르기",
 		"지금은 시작점 단계입니다. 방향키는 1 m, Shift+방향키는 5 m 이동하고 Enter는 시작점을 선택합니다. Esc로 키보드 건설을 끝내도 이미 확정한 Rail은 유지됩니다.",
 		[
@@ -37,7 +37,7 @@ const ORDINARY_RAIL_KEYBOARD_HELP_CONTEXTS = Object.freeze({
 		"키보드 Rail로 돌아가기",
 	),
 	"choose-end": helpContext(
-		"BUILD · KEYBOARD RAIL · END",
+		"레일 · KEYBOARD RAIL · END",
 		"키보드로 Rail 끝점 정하고 건설하기",
 		"지금은 끝점 단계입니다. 방향키는 1 m, Shift+방향키는 5 m 이동하고 Enter는 미리 본 Rail 구간을 건설합니다. Esc로 키보드 건설을 끝내도 이미 확정한 Rail은 유지됩니다.",
 		[
@@ -57,7 +57,7 @@ const ORDINARY_RAIL_KEYBOARD_HELP_CONTEXTS = Object.freeze({
 
 const ACTIVITY_HELP_CONTEXTS = Object.freeze({
 	build: helpContext(
-		"BUILD · RAIL",
+		"레일 · RAIL",
 		"단방향 레일을 만들고 고치기",
 		"캔버스의 빈 곳 어디서든 시작할 수 있습니다. 떨어진 Rail도 먼저 만든 뒤 필요할 때 연결하고 재사용하세요.",
 		[
@@ -66,11 +66,11 @@ const ACTIVITY_HELP_CONTEXTS = Object.freeze({
 				"Smart Route로 빈 곳을 드래그합니다. 다음 Rail도 다른 빈 곳에서 독립적으로 시작할 수 있습니다.",
 			],
 			["2 · 방향", "Q/E로 방향과 코너를 바꾸고 화살표로 단방향 흐름을 확인합니다."],
-			["3 · 재사용", "Inspect에서 드래그로 필요한 레일만 선택한 뒤 복제하거나 저장합니다."],
+			["3 · 재사용", "검사 메뉴에서 드래그로 필요한 레일만 선택한 뒤 복제하거나 저장합니다."],
 		],
 	),
 	assemble: helpContext(
-		"ASSEMBLE · FAB STRUCTURE",
+		"조립 · FAB STRUCTURE",
 		"Bay를 반복하고 Bank와 Fab으로 연결하기",
 		"검증된 Bay를 배치한 뒤 같은 계층의 조직을 선택해 더 큰 FAB 구조로 조립하세요.",
 		[
@@ -80,22 +80,34 @@ const ACTIVITY_HELP_CONTEXTS = Object.freeze({
 		],
 	),
 	equip: helpContext(
-		"EQUIP · PORT FIRST",
+		"장비 · PORT FIRST",
 		"레일 Port에서 장비 만들기",
-		"장비 모양부터 그리지 말고 레일의 합법적인 Port 슬롯을 먼저 선택하세요.",
+		"장비를 고른 뒤 레일에서 강조된 Port 위치를 선택합니다. 장비마다 확정하는 방법이 다릅니다.",
 		[
-			["1 · 종류", "OHB, EQ 또는 STK 중 만들 장비를 선택합니다."],
-			["2 · Port", "강조된 레일 슬롯을 클릭하거나 안내된 범위만 드래그합니다."],
-			["3 · 그룹", "선택한 Port 수와 방향을 확인한 뒤 장비 그룹을 완료합니다."],
+			[
+				"OHB · 상부 보관",
+				"레일 옆 Port 하나를 클릭하면 OHB가 생성됩니다. 같은 레일을 드래그해 여러 개를 배치할 수도 있습니다.",
+			],
+			[
+				"EQ · 공정 장비",
+				"시작 Port와 끝 Port를 차례로 클릭합니다. 표시된 개수와 간격을 확인하세요. 드래그와 키보드도 사용할 수 있습니다.",
+			],
+			[
+				"Stocker · 보관 장비",
+				"Port 구성을 고르고 필요한 위치를 선택합니다. 개수와 오류를 확인한 뒤 STK 생성을 누르세요.",
+			],
 		],
 	),
 	inspect: helpContext(
-		"INSPECT · SELECT",
+		"검사 · SELECT",
 		"필요한 부분을 선택하고 검증하기",
 		"레일, 장비 또는 FAB 조직을 선택하면 지금 실행할 수 있는 작업만 가까운 패널에 나타납니다.",
 		[
 			["1 · 선택", "클릭은 하나, 드래그는 상자에 닿은 레일 모듈만 선택합니다."],
-			["2 · 편집", "선택 패널의 첫 번째 강조 동작으로 복제·수정·삭제를 시작합니다."],
+			[
+				"2 · 편집",
+				"장비의 이동·Port 구성은 바로 선택하고, 복제·철거와 연결 정보는 펼쳐서 확인합니다.",
+			],
 			["3 · 검증", "Checks에서 끊긴 연결과 정적 FAB 준비 상태를 확인합니다."],
 		],
 	),
@@ -114,7 +126,7 @@ export function deriveEditorHelpContext(input: EditorHelpContextInput): EditorHe
 				? "1개를 선택했습니다. 같은 종류의 Bay나 Bank를 하나 더 고르면 연결과 정렬이 열립니다."
 				: `${selectedCount.toLocaleString()}개를 선택했습니다. 포함 범위를 확인한 뒤 필요한 작업을 실행하세요.`;
 	return helpContext(
-		"INSPECT · FAB ORGANIZATION",
+		"검사 · FAB ORGANIZATION",
 		"Fab, Bank, Bay를 선택하고 재사용하기",
 		summary,
 		[

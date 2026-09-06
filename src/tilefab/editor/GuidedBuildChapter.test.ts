@@ -3,6 +3,7 @@ import {
 	completedGuidedBuildChapterBetween,
 	deriveGuidedBuildChapters,
 	GUIDED_BUILD_CHAPTERS,
+	guidedBuildChapterEntryTool,
 	guidedBuildChapterForMission,
 	guidedBuildCurrentChapter,
 	resolveGuidedBuildChapterCheckpoint,
@@ -14,6 +15,43 @@ import {
 	type GuidedBuildFoundationMissionId,
 	type GuidedBuildMissionEvaluation,
 } from "./GuidedBuildMission";
+
+describe("chapter entry tool boundaries", () => {
+	it.each([
+		"ohb",
+		"eq",
+		"stk",
+	] as const)("enters the current %s task without an authored action", (tool) => {
+		expect(guidedBuildChapterEntryTool("quick-start", "ports", tool)).toBe(tool);
+	});
+	it("enters selection only for the adjacent equipment-to-reuse checkpoint", () => {
+		expect(guidedBuildChapterEntryTool("equip", "reuse-loop", "inspect")).toBe("inspect");
+		expect(guidedBuildChapterEntryTool("quick-start", "reuse-loop", "inspect")).toBeNull();
+		expect(guidedBuildChapterEntryTool("equip", "ports", "inspect")).toBeNull();
+	});
+	it("keeps source-changing, save and project replacement actions explicit", () => {
+		for (const action of [
+			"copy-selection",
+			"graduate-practice",
+			"add-bay",
+			"duplicate-bay",
+			"arrange-bays",
+			"connect-bays",
+			"save-project",
+			"open-project",
+		] as const) {
+			expect(guidedBuildChapterEntryTool("equip", "reuse-loop", action)).toBeNull();
+			expect(guidedBuildChapterEntryTool("reuse", "bay", action)).toBeNull();
+		}
+	});
+	it("does not revive stale, dismissed or unrelated mission entries", () => {
+		expect(guidedBuildChapterEntryTool(null, "ports", "ohb")).toBeNull();
+		expect(guidedBuildChapterEntryTool("quick-start", null, "ohb")).toBeNull();
+		expect(guidedBuildChapterEntryTool("quick-start", "ports", null)).toBeNull();
+		expect(guidedBuildChapterEntryTool("quick-start", "process-loop", "ohb")).toBeNull();
+		expect(guidedBuildChapterEntryTool("reuse", "ports", "stk")).toBeNull();
+	});
+});
 
 describe("GuidedBuildChapter", () => {
 	it("partitions all 12 canonical missions once and in exact order", () => {

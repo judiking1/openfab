@@ -25,22 +25,22 @@ export interface EditorActivityDefinition {
 export const EDITOR_ACTIVITY_DEFINITIONS = [
 	{
 		id: "build",
-		label: "BUILD",
-		description: "레일 만들기와 수정",
+		label: "레일",
+		description: "단방향 레일 만들기",
 	},
 	{
 		id: "assemble",
-		label: "ASSEMBLE",
-		description: "Bay·Fab 조립과 청사진",
+		label: "조립",
+		description: "Bay·FAB 구조 만들기",
 	},
 	{
 		id: "equip",
-		label: "EQUIP",
-		description: "Port부터 OHB·EQ·STK 배치",
+		label: "장비",
+		description: "OHB·EQ·Stocker 배치",
 	},
 	{
 		id: "inspect",
-		label: "INSPECT",
+		label: "검사",
 		description: "선택·편집·검사",
 	},
 ] as const satisfies readonly EditorActivityDefinition[];

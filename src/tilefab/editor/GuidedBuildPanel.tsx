@@ -345,7 +345,7 @@ export function GuidedBuildPanel({
 					{`전체 미션 ${presentedCurrentSequence}/${missionCount} · ${currentTitle}`}
 				</span>
 				<span aria-hidden="true">
-					<strong>{presentedChapter?.definition.label ?? "ADVANCED FAB"}</strong> ·{" "}
+					<strong>{presentedChapter?.definition.label ?? "FAB 완성"}</strong> ·{" "}
 					{presentedChapterState} {presentedChapterStep}/{presentedChapter?.missionCount ?? 7} ·{" "}
 					{presentedOverallState}
 				</span>

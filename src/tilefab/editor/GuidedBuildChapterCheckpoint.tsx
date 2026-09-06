@@ -34,7 +34,7 @@ export function GuidedBuildChapterCheckpoint({
 				<Check size={18} />
 			</span>
 			<div>
-				<small>{completedChapter.label} COMPLETE</small>
+				<small>{completedChapter.label} 완료</small>
 				<strong>{guidedBuildChapterCompletionTitle(completedChapter.id)}</strong>
 				<p>{guidedBuildChapterCompletionSummary(completedChapter.id)}</p>
 			</div>

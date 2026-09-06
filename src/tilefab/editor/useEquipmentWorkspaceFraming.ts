@@ -21,7 +21,7 @@ export function useEquipmentWorkspaceFraming(
 		for (const element of [
 			workspace,
 			...workspace.querySelectorAll(
-				".tilefab-equipment-workspace, .tilefab-guided-build-panel, .tilefab-tools, .tilefab-recovery",
+				".tilefab-equipment-workspace, .tilefab-inspector, .tilefab-guided-build-panel, .tilefab-tools, .tilefab-recovery",
 			),
 		])
 			observer.observe(element);

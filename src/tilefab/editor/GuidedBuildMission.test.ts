@@ -93,7 +93,7 @@ describe("GuidedBuildMission", () => {
 			label: "화면 조작",
 			value: "TOUCH · MOUSE",
 			instruction:
-				"터치는 한 손가락 드래그로 이동하고 왼쪽 아래 +/−로 확대·축소하세요. 마우스는 오른쪽/가운데 드래그와 휠을 사용합니다.",
+				"터치는 한 손가락 드래그로 이동하고 화면의 +/− 버튼으로 확대·축소하세요. 마우스는 오른쪽/가운데 드래그와 휠을 사용합니다.",
 		});
 		expect(guidedBuildTreatsPrimaryTouchAsPan(firstRail)).toBe(false);
 		expect(Object.isFrozen(orient.missions[0]?.prompt.progressCue)).toBe(true);
@@ -628,7 +628,7 @@ describe("GuidedBuildMission", () => {
 				"이 미션은 Port까지 보존하는 닫힌 Loop 전체 복제를 연습합니다. 일반 편집에서는 드래그 상자에 닿은 일부 레일 모듈도 닫히지 않아도 그대로 복제할 수 있습니다.",
 			primaryCommandId: "selection.inspect-target",
 			suggestedAction: "inspect",
-			suggestedActionLabel: "INSPECT · Port 포함 Loop 탭",
+			suggestedActionLabel: "검사 · Port 포함 Loop 탭",
 		});
 		expect(
 			selectConnected.missions.find((mission) => mission.definition.id === "reuse-loop")?.prompt,
@@ -769,7 +769,7 @@ describe("GuidedBuildMission", () => {
 					"기본 Twin Bay 배치를 바로 시작하세요. 연습 Loop를 박스로 묶지 않고 Shell과 Gateway를 함께 만듭니다.",
 				primaryCommandId: null,
 				suggestedAction: "add-bay",
-				suggestedActionLabel: "ASSEMBLE · 기본 TWIN BAY",
+				suggestedActionLabel: "조립 · 기본 TWIN BAY",
 			},
 		);
 		expect(place.missions.find((mission) => mission.definition.id === "bay")?.prompt).toMatchObject(

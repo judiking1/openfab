@@ -61,8 +61,8 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).toContain('value="2"');
 		expect(markup).toContain('max="12"');
 		expect(markup).toContain('aria-valuetext="전체 미션 2/12 · 첫 단방향 레일"');
-		expect(markup).toContain("GUIDED BUILD · 챕터 1/4 · QUICK START");
-		expect(markup).toContain("QUICK START");
+		expect(markup).toContain("GUIDED BUILD · 챕터 1/4 · 레일 기초");
+		expect(markup).toContain("레일 기초");
 		expect(markup).toContain("미션 2/3 · 전체 미션 2/12");
 		expect(markup).not.toContain("MISSION 2 · FIRST RAIL");
 		expect(markup).not.toContain('data-testid="guided-build-mission-detail"');
@@ -278,7 +278,7 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).toContain("이동을 익혔어요");
 		expect(markup).toContain("TOUCH · MOUSE");
 		expect(markup).toContain("터치는 한 손가락 드래그로 이동하고");
-		expect(markup).toContain("왼쪽 아래 +/−로 확대·축소");
+		expect(markup).toContain("화면의 +/− 버튼으로 확대·축소");
 		expect(markup).toContain("RMB / MMB DRAG");
 		expect(markup).toContain("WASD / ←↑↓→");
 	});
@@ -529,16 +529,16 @@ describe("GuidedBuildPanel", () => {
 
 		expect(markup).toContain('data-current-mission="ports"');
 		expect(markup).toContain('data-current-chapter="equip"');
-		expect(markup).toContain("GUIDED BUILD · 챕터 2/4 · EQUIP");
+		expect(markup).toContain("GUIDED BUILD · 챕터 2/4 · 장비 배치");
 		expect(markup).toContain("EQ Port 행 배치");
 		expect(markup).toContain('aria-valuetext="전체 미션 4/12 · EQ Port 행 배치"');
 		expect(markup).toContain('data-testid="guided-build-mission-detail">PORTS · 작업 2/3');
 		expect(markup).not.toContain("MISSION 4 · PORTS · 2/3");
-		expect(markup).toContain("EQUIP · EQ 열기");
+		expect(markup).toContain("장비 · EQ 열기");
 		expect(markup).toContain("LMB</strong>");
 		expect(markup).toContain("OHB 1/1 · EQ 0/2 · STK 0/2");
 		expect(markup).toContain("청록색 1 시작과 2 끝");
-		expect(activeMarkup).not.toContain("EQUIP · EQ 열기");
+		expect(activeMarkup).not.toContain("장비 · EQ 열기");
 		expect(activeMarkup).toContain("OHB 1/1 · EQ 0/2 · STK 0/2");
 		expect(activeMarkup).toContain("EQ 도구가 준비됐습니다");
 		expect(activeMarkup).toContain("시작점과 끝점을 차례로 클릭");
@@ -570,10 +570,10 @@ describe("GuidedBuildPanel", () => {
 		expect(keyboardMarkup).toContain("키보드 Port 배치를 확정하거나 Esc로 취소한 뒤 단계 이동");
 		expect(keyboardMarkup).not.toContain("LMB DRAG</strong>");
 		expect(actualOwnerMarkup).not.toContain('data-testid="guided-build-suggested-action"');
-		expect(actualOwnerMarkup).not.toContain("EQUIP · EQ 열기");
+		expect(actualOwnerMarkup).not.toContain("장비 · EQ 열기");
 		expect(waitingMarkup).toContain("Rail mirror Worker를 동기화하는 중입니다.");
 		expect(waitingMarkup).not.toContain('data-testid="guided-build-suggested-action"');
-		expect(waitingMarkup).not.toContain("EQUIP · EQ 열기");
+		expect(waitingMarkup).not.toContain("장비 · EQ 열기");
 	});
 
 	it("pauses at an adjacent chapter checkpoint without exposing the next mission objective", () => {
@@ -601,10 +601,10 @@ describe("GuidedBuildPanel", () => {
 
 		expect(markup).toContain('data-chapter-checkpoint="quick-start"');
 		expect(markup).toContain('data-testid="guided-build-chapter-checkpoint"');
-		expect(markup).toContain("QUICK START COMPLETE");
+		expect(markup).toContain("레일 기초 완료");
 		expect(markup).toContain("레일 기본기 완료");
 		expect(markup).toContain("레일 기본기를 익혔습니다");
-		expect(markup).toContain("다음 과정 · EQUIP");
+		expect(markup).toContain("다음 과정 · 장비 배치");
 		expect(markup).toContain("잠시 접고 편집");
 		expect(markup).not.toContain("OHB, EQ, STK의 대표 Port");
 		expect(markup).not.toContain("조건 충족 시 자동 진행");
@@ -709,7 +709,7 @@ describe("GuidedBuildPanel", () => {
 		expect(choose).toContain("START FAB · 새 프로젝트");
 		expect(choose).not.toContain("가리킨 항목 적용");
 		expect(start).toContain("기본 Twin Bay 시작");
-		expect(start).toContain("ASSEMBLE · 기본 TWIN BAY");
+		expect(start).toContain("조립 · 기본 TWIN BAY");
 		expect(place).toContain("기본 Twin Bay 배치");
 		expect(place).toContain("‘여기를 탭’ 표식을 눌러 현재 위치에 배치");
 		expect(place).toContain("LMB");

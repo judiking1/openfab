@@ -89,7 +89,7 @@ function prepareEqRailHandoff(pitchMillimeters: number): OrdinaryNextPortHandoff
 		surface: "ohb-authoring",
 		action: "prepare-eq-rail",
 		label: "준비 · EQ용 직선",
-		instruction: `PITCH ${pitchMeters} m · CENTER 2곳 필요 · BUILD에서 레일 준비`,
+		instruction: `PITCH ${pitchMeters} m · CENTER 2곳 필요 · 레일 메뉴에서 준비`,
 		ariaLabel: `EQ Port 행 준비: 현재 EQ PITCH ${pitchMeters} m에 맞춰 같은 직선에 배치 가능한 CENTER 슬롯이 ${pitchMeters} m 간격으로 최소 2곳 필요합니다. BUILD에서 직선 레일을 늘리거나 새로 만든 뒤 EQUIP의 EQ Port 행으로 돌아옵니다. 기존 OHB Port는 유지됩니다`,
 		description: `현재 레일에는 한 EQ가 소유할 ${pitchMeters} m 간격의 CENTER 슬롯 2곳이 부족합니다. 기존 OHB Port는 유지되므로 BUILD에서 직선 레일을 늘리거나 새로 만든 뒤 EQ Port 행을 선택하세요.`,
 	});

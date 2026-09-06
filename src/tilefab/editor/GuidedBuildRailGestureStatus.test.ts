@@ -73,23 +73,23 @@ describe("GuidedBuildRailGestureStatus", () => {
 			guidedBuildPresentedStatus({
 				guidedBuildOpen: true,
 				currentMissionId: "ports",
-				suggestedActionLabel: "EQUIP · OHB 열기",
+				suggestedActionLabel: "장비 · OHB 열기",
 				status: RAIL_ROUTE_DRAG_STATUS,
 			}),
-		).toBe("다음: EQUIP · OHB 열기");
+		).toBe("다음: 장비 · OHB 열기");
 		expect(
 			guidedBuildPresentedStatus({
 				guidedBuildOpen: true,
 				currentMissionId: "ports",
-				suggestedActionLabel: "EQUIP · STK 열기",
+				suggestedActionLabel: "장비 · STK 열기",
 				status: DEFAULT_RAIL_BUILD_STATUS,
 			}),
-		).toBe("다음: EQUIP · STK 열기");
+		).toBe("다음: 장비 · STK 열기");
 		expect(
 			guidedBuildPresentedStatus({
 				guidedBuildOpen: true,
 				currentMissionId: "ports",
-				suggestedActionLabel: "EQUIP · OHB 열기",
+				suggestedActionLabel: "장비 · OHB 열기",
 				status: "현재 오류를 먼저 해결하세요",
 			}),
 		).toBe("현재 오류를 먼저 해결하세요");

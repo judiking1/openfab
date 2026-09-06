@@ -11,7 +11,7 @@ export interface PortAuthoringSurfacePresentation {
 
 export interface PortAuthoringPrerequisiteAction {
 	readonly label: "먼저 레일 만들기";
-	readonly ariaLabel: "BUILD로 이동해 직선 레일 만들기";
+	readonly ariaLabel: "레일 메뉴로 이동해 직선 레일 만들기";
 }
 
 /** Counts describe rail-compatible candidates; live occupancy is reported for the current target. */
@@ -35,7 +35,7 @@ export function portAuthoringSurfacePresentation(
 		legalSlotCount === 0
 			? Object.freeze({
 					label: "먼저 레일 만들기",
-					ariaLabel: "BUILD로 이동해 직선 레일 만들기",
+					ariaLabel: "레일 메뉴로 이동해 직선 레일 만들기",
 				})
 			: null;
 	if (portType === "OHB") {

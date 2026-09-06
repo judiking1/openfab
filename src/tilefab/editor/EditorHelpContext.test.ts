@@ -14,26 +14,29 @@ describe("deriveEditorHelpContext", () => {
 			organizationSelectionCount: 0,
 		});
 
-		expect(build.eyebrow).toBe("BUILD · RAIL");
+		expect(build.eyebrow).toBe("레일 · RAIL");
 		expect(build.steps).toHaveLength(3);
 		expect(build.steps.map((step) => step.label)).toEqual(["1 · 그리기", "2 · 방향", "3 · 재사용"]);
 		expect(build.summary).toContain("빈 곳 어디서든");
 		expect(build.steps[0]?.description).toContain("독립적으로 시작");
-		expect(equip.eyebrow).toBe("EQUIP · PORT FIRST");
-		expect(equip.summary).toContain("Port 슬롯");
+		expect(equip.eyebrow).toBe("장비 · PORT FIRST");
+		expect(equip.summary).toContain("Port 위치");
+		expect(equip.steps[0]?.description).toContain("클릭하면 OHB가 생성");
+		expect(equip.steps[1]?.description).toContain("시작 Port와 끝 Port를 차례로 클릭");
+		expect(equip.steps[2]?.description).toContain("STK 생성을 누르세요");
 	});
 
 	it.each([
 		{
 			phase: "choose-start" as const,
-			eyebrow: "BUILD · KEYBOARD RAIL · START",
+			eyebrow: "레일 · KEYBOARD RAIL · START",
 			title: "키보드로 Rail 시작점 고르기",
 			phaseLabel: "시작점 단계",
 			applyLabel: "시작점 선택",
 		},
 		{
 			phase: "choose-end" as const,
-			eyebrow: "BUILD · KEYBOARD RAIL · END",
+			eyebrow: "레일 · KEYBOARD RAIL · END",
 			title: "키보드로 Rail 끝점 정하고 건설하기",
 			phaseLabel: "끝점 단계",
 			applyLabel: "구간 건설",
@@ -67,7 +70,7 @@ describe("deriveEditorHelpContext", () => {
 			ordinaryRailKeyboardPhase: "choose-end",
 		});
 
-		expect(context.eyebrow).toBe("BUILD · KEYBOARD RAIL · END");
+		expect(context.eyebrow).toBe("레일 · KEYBOARD RAIL · END");
 		expect(context.summary).not.toContain("2개를 선택");
 	});
 
@@ -78,7 +81,7 @@ describe("deriveEditorHelpContext", () => {
 			organizationSelectionCount: 1,
 		});
 
-		expect(context.eyebrow).toBe("INSPECT · FAB ORGANIZATION");
+		expect(context.eyebrow).toBe("검사 · FAB ORGANIZATION");
 		expect(context.summary).toContain("같은 종류의 Bay나 Bank");
 		expect(context.steps[0]?.description).toContain("⌘/Ctrl+클릭");
 		expect(context.steps[1]?.description).toContain("DIRECT");

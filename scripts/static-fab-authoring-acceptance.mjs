@@ -173,6 +173,7 @@ try {
 		throw MID_WIDTH_TOPBAR_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_COMPACT_HELP_SCROLL_ACCEPTANCE_ONLY === "1") {
+		recordStep("deferred-help-recovery", await exerciseDeferredHelpRecovery(browser));
 		const compactHelpScroll = await exerciseCompactHelpScrollSignpostAcceptance(browser);
 		recordStep("compact-help-scroll-signpost", compactHelpScroll);
 		assertEqual(result.consoleErrors.length, 0, "Compact Help scroll console errors");
@@ -207,6 +208,8 @@ try {
 		console.log("PASS open-fragment selection-copy acceptance");
 		throw NON_LOOP_FRAGMENT_ONLY_COMPLETE;
 	}
+	recordStep("deferred-help-recovery", await exerciseDeferredHelpRecovery(browser));
+
 	const ordinaryRailKeyboard = await exerciseOrdinaryRailKeyboardAcceptance(browser);
 	recordStep("ordinary-rail-keyboard", ordinaryRailKeyboard);
 	const ordinaryRailPointer = await exerciseOrdinaryRailPointerAcceptance(browser);
@@ -3586,7 +3589,7 @@ async function exerciseGuidedBuildReleaseSurface(page, firstRunDialog) {
 		page,
 		"guided-quick-start-resume",
 		guidedResume,
-		"GUIDED · QUICK START",
+		"GUIDED · 레일 기초",
 		{ width: 1440, height: 900 },
 	);
 	await guidedResume.click();
@@ -3916,7 +3919,7 @@ async function auditOrdinaryNoSlotPortPrerequisite(page, viewport, canvas) {
 		);
 		assertEqual(
 			await action.getAttribute("aria-label"),
-			"BUILD로 이동해 직선 레일 만들기",
+			"레일 메뉴로 이동해 직선 레일 만들기",
 			`ordinary ${spec.portType} prerequisite accessible label ${viewport.label}`,
 		);
 		assertEqual(
@@ -4736,7 +4739,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 					assertIncludes(description, fragment, `${viewport.label} ${phase} Help ${fragment}`);
 				}
 				assertEqual(
-					await helpDialog.getByText("BUILD · RAIL", { exact: true }).count(),
+					await helpDialog.getByText("레일 · RAIL", { exact: true }).count(),
 					0,
 					`${viewport.label} ${phase} Help removes generic BUILD owner`,
 				);
@@ -5008,7 +5011,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			);
 			assertIncludes(
 				(await firstPortHandoff.getAttribute("aria-label")) ?? "",
-				"EQUIP에서 레일 옆 하늘색 원",
+				"장비 메뉴에서 레일 옆 하늘색 원",
 				`${viewport.label} first Port handoff accessible task`,
 			);
 			await assertLocatorInsideViewport(page, firstPortHandoff);
@@ -6613,7 +6616,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		assertIncludes(
 			await commandHelp.innerText(),
-			"QUICK START · 2 / 12",
+			"레일 기초 · 2 / 12",
 			"Global Help names the resumable Guided chapter and canonical mission progress",
 		);
 		const guidedHelpCard = commandHelp.locator(".tilefab-command-help-guided");
@@ -6638,6 +6641,24 @@ async function exerciseGuidedPortHandoffRegression(
 
 		const compactCameraControls = page.locator(".tilefab-camera-controls");
 		await compactCameraControls.waitFor({ state: "visible" });
+		await page.setViewportSize({ width: 390, height: 720 });
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		assertEqual(
+			await locatorsOverlap(compactCameraControls, page.locator(".tilefab-tools")),
+			false,
+			"Low-height Guide camera and task card do not overlap",
+		);
+		for (const button of await compactCameraControls.getByRole("button").all()) {
+			await assertLocatorOwnsHitArea(button, "Low-height Guide camera control");
+		}
+		await page.screenshot({
+			path: path.join(artifactRoot, "guided-camera-menu-390x720.png"),
+			fullPage: true,
+		});
+		await page.setViewportSize({ width: 390, height: 844 });
+
 		await compactCameraControls.getByRole("button", { name: "화면 축소", exact: true }).click();
 		await compactCameraControls.getByRole("button", { name: "화면 축소", exact: true }).click();
 		await compactCameraControls.getByRole("button", { name: "화면 축소", exact: true }).click();
@@ -6762,7 +6783,7 @@ async function exerciseGuidedPortHandoffRegression(
 		assertEqual(closedLoop.workerSimulationReady, "false", "Guided Port simulation gate");
 		const quickStartCheckpoint = await readMetrics(page);
 		const continueToEquip = panel.getByRole("button", {
-			name: "다음 과정 · EQUIP",
+			name: "다음 과정 · 장비 배치",
 			exact: true,
 		});
 		await auditGuidedChapterCheckpointWidths(page, "guided-quick-start-checkpoint", panel, [
@@ -6776,6 +6797,21 @@ async function exerciseGuidedPortHandoffRegression(
 			quickStartCheckpoint,
 			"Guided Quick Start chapter continuation",
 		);
+		await page.waitForFunction(() => {
+			const app = document.querySelector('[data-testid="tilefab-app"]');
+			return (
+				app?.getAttribute("data-editor-activity") === "equip" &&
+				document.activeElement === document.querySelector('[data-testid="rail-canvas"]')
+			);
+		});
+		await assertGuidedPrimaryTarget(page, "canvas:ohb", "Chapter Continue enters OHB directly");
+		assertProjectUnchanged(
+			await readMetrics(page),
+			quickStartCheckpoint,
+			"Automatic equipment entry is source-neutral",
+		);
+		// Retain the separate manual activity-entry and pause/resume journey.
+		await page.getByTestId("editor-activity-build").click();
 		assertEqual(
 			await page.getByTestId("editor-activity-equip").getAttribute("data-guided-target"),
 			"true",
@@ -6800,13 +6836,13 @@ async function exerciseGuidedPortHandoffRegression(
 		await panel.waitFor({ state: "hidden" });
 		const portResume = page.getByTestId("guided-build-resume");
 		await portResume.waitFor({ state: "visible" });
-		await auditGuidedResumeWidths(page, "guided-equip-resume", portResume, "GUIDED · EQUIP", {
+		await auditGuidedResumeWidths(page, "guided-equip-resume", portResume, "GUIDED · 장비 배치", {
 			width: 390,
 			height: 844,
 		});
 		assertIncludes(
 			(await portResume.innerText()).trim(),
-			"GUIDED · EQUIP",
+			"GUIDED · 장비 배치",
 			"Guided Port minimize exposes exact progress resume",
 		);
 		assertIncludes(
@@ -6863,7 +6899,7 @@ async function exerciseGuidedPortHandoffRegression(
 		await assertGuidedPrimaryTarget(page, "activity:equip", "Guided Port restart");
 		assertEqual(
 			(await page.locator(".tilefab-statusbar > [role='status']").innerText()).trim(),
-			"다음: EQUIP · OHB 열기",
+			"다음: 장비 · OHB 열기",
 			"Guided Port restart replaces contradictory idle Rail status with the exact next action",
 		);
 		await panel
@@ -7950,6 +7986,33 @@ async function exerciseGuidedPortHandoffRegression(
 		assertEqual(stkPlaced.workerSimulationReady, "false", "Guided STK simulation gate");
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.waitForTimeout(100);
+		await panel.getByRole("button", { name: "다음 과정 · Loop 재사용", exact: true }).click();
+		await page.getByTestId("guided-build-chapter-checkpoint").waitFor({ state: "hidden" });
+		await page.waitForFunction(() => {
+			const app = document.querySelector('[data-testid="tilefab-app"]');
+			return (
+				app?.getAttribute("data-editor-activity") === "inspect" &&
+				app?.getAttribute("data-editor-tool") === "inspect" &&
+				document.activeElement === document.querySelector('[data-testid="rail-canvas"]')
+			);
+		});
+		await assertGuidedPrimaryTarget(
+			page,
+			"canvas:inspect",
+			"Equip Continue enters Loop selection directly",
+		);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			stkPlaced,
+			"Automatic Reuse entry is source-neutral",
+		);
+		// Restore the last equipment tool before exercising the independent checkpoint edit path.
+		await page.getByTestId("editor-activity-equip").click();
+		assertEqual(
+			await page.getByTestId("tilefab-app").getAttribute("data-editor-tool"),
+			"stk",
+			"Manual activity entry restores STK",
+		);
 		const stkRedone = await undoAndRedo(page, eqPlaced, stkPlaced);
 		assertEqual(stkRedone.workerChecksum, stkPlaced.workerChecksum, "Guided STK atomic redo");
 		await page.waitForFunction(
@@ -7980,7 +8043,7 @@ async function exerciseGuidedPortHandoffRegression(
 			exact: true,
 		});
 		await auditGuidedChapterCheckpointWidths(page, "guided-equip-checkpoint", panel, [
-			panel.getByRole("button", { name: "다음 과정 · REUSE", exact: true }),
+			panel.getByRole("button", { name: "다음 과정 · Loop 재사용", exact: true }),
 			equipEditStart,
 		]);
 		await equipEditStart.click();
@@ -7992,13 +8055,19 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		const reuseResume = page.getByTestId("guided-build-resume");
 		await reuseResume.waitFor({ state: "visible" });
-		await auditGuidedResumeWidths(page, "guided-reuse-resume", reuseResume, "GUIDED · REUSE", {
-			width: 390,
-			height: 844,
-		});
+		await auditGuidedResumeWidths(
+			page,
+			"guided-reuse-resume",
+			reuseResume,
+			"GUIDED · Loop 재사용",
+			{
+				width: 390,
+				height: 844,
+			},
+		);
 		assertIncludes(
 			(await reuseResume.innerText()).trim(),
-			"GUIDED · REUSE",
+			"GUIDED · Loop 재사용",
 			"Guided Equip edit handoff resumes at Reuse",
 		);
 		assertEqual(
@@ -8036,6 +8105,33 @@ async function exerciseGuidedPortHandoffRegression(
 				"activity:inspect",
 				`Guided Reuse Inspect Activity ${viewport.width}`,
 			);
+			if (viewport.width === 390) {
+				await page.setViewportSize({ width: 390, height: 720 });
+				await page.evaluate(
+					() =>
+						new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+				);
+				await assertGuidedPrimaryTarget(
+					page,
+					"activity:inspect",
+					"Guided Reuse low-height activity entry",
+				);
+				await assertLocatorInsideViewport(page, page.locator(".tilefab-tools"));
+				for (const activity of ["build", "assemble", "equip", "inspect"]) {
+					await assertLocatorOwnsHitArea(
+						page.getByTestId(`editor-activity-${activity}`),
+						`Guided Reuse low-height ${activity} menu`,
+					);
+				}
+				for (const cameraButton of await page.locator(".tilefab-camera-controls button").all()) {
+					await assertLocatorOwnsHitArea(cameraButton, "Guided Reuse low-height camera");
+				}
+				await page.screenshot({
+					path: path.join(artifactRoot, "guided-reuse-menu-390x720.png"),
+					fullPage: true,
+				});
+				await page.setViewportSize(viewport);
+			}
 			assertProjectContentUnchanged(
 				await readMetrics(page),
 				reuseTargetBefore,
@@ -8048,11 +8144,27 @@ async function exerciseGuidedPortHandoffRegression(
 			"Guided Reuse Inspect Activity activation",
 		);
 		await inspectActivityTarget.click();
-		await page.waitForFunction(
-			() => document.activeElement?.getAttribute("data-guided-action-id") === "canvas:inspect",
-			undefined,
-			{ timeout: 10_000 },
-		);
+		await page
+			.waitForFunction(
+				() => document.activeElement?.getAttribute("data-guided-action-id") === "canvas:inspect",
+				undefined,
+				{ timeout: 10_000 },
+			)
+			.catch(async (error) => {
+				const diagnostics = await page.evaluate(() => ({
+					active: document.activeElement?.outerHTML,
+					app: { ...document.querySelector('[data-testid="tilefab-app"]')?.dataset },
+					canvas: { ...document.querySelector('[data-testid="rail-canvas"]')?.dataset },
+					panel: document.querySelector('[data-testid="guided-build-panel"]')?.textContent,
+				}));
+				await page.screenshot({
+					path: path.join(artifactRoot, "guided-reuse-focus-failure.png"),
+					fullPage: true,
+				});
+				throw new Error(`Guided Reuse activity focus failed: ${JSON.stringify(diagnostics)}`, {
+					cause: error,
+				});
+			});
 		await page.getByRole("button", { name: "FAB 내비게이터", exact: true }).click();
 		const reuseNavigatorClose = await assertGuidedPrimaryTarget(
 			page,
@@ -8081,6 +8193,7 @@ async function exerciseGuidedPortHandoffRegression(
 		for (const viewport of [
 			{ width: 760, height: 900 },
 			{ width: 1440, height: 900 },
+			{ width: 390, height: 720 },
 			{ width: 390, height: 844 },
 		]) {
 			await page.setViewportSize(viewport);
@@ -9158,7 +9271,7 @@ async function exerciseGuidedPortHandoffRegression(
 			{ timeout: 10_000 },
 		);
 		await page.waitForFunction(
-			() => document.activeElement?.textContent?.trim() === "ADVANCED FAB 안내 보기",
+			() => document.activeElement?.textContent?.trim() === "FAB 완성 안내 보기",
 			undefined,
 			{ timeout: 10_000 },
 		);
@@ -9227,7 +9340,7 @@ async function exerciseGuidedPortHandoffRegression(
 		});
 		const reuseCheckpoint = await readMetrics(page);
 		const continueToAdvancedFab = panel.getByRole("button", {
-			name: "ADVANCED FAB 안내 보기",
+			name: "FAB 완성 안내 보기",
 			exact: true,
 		});
 		await auditGuidedChapterCheckpointWidths(page, "guided-reuse-checkpoint", panel, [
@@ -14821,7 +14934,7 @@ async function exerciseExpertBuildReleaseSurface(page) {
 			`Expert ${viewport.width}px shows Build tool descriptions`,
 		);
 		assertEqual(
-			await page.getByRole("group", { name: "BUILD 활동 도구", exact: true }).count(),
+			await page.getByRole("group", { name: "레일 도구", exact: true }).count(),
 			1,
 			`Expert ${viewport.width}px names the active tool group`,
 		);
@@ -15516,6 +15629,89 @@ async function placeOneOhb(page) {
 	return placedSlot;
 }
 
+async function assertOhbEditSourceAndWorkspace(page, sourcePortId, label) {
+	await page.waitForFunction(() => {
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		return (
+			canvas?.getAttribute("data-guided-port-keyboard-type") === "OHB" &&
+			(canvas.getAttribute("data-guided-port-keyboard-row")?.length ?? 0) > 0
+		);
+	});
+	const target = await page.evaluate((portId) => {
+		const model = window.__tileFab?.getEditorModel();
+		const source = model?.portEquipment.ports.find((port) => String(port.id) === portId);
+		const slots = model?.portSlotArtifacts.OHB?.slots;
+		const row = Number(
+			document
+				.querySelector('[data-testid="rail-canvas"]')
+				?.getAttribute("data-guided-port-keyboard-row"),
+		);
+		if (
+			!source ||
+			source.route.kind !== "CARDINAL_CELL" ||
+			!slots ||
+			!Number.isInteger(row) ||
+			row < 0 ||
+			row >= slots.count
+		)
+			return null;
+		return {
+			sourceId: source.id,
+			x: slots.routeXs[row],
+			z: slots.routeZs[row],
+			distance: Math.hypot(
+				slots.routeXs[row] - source.route.x,
+				slots.routeZs[row] - source.route.z,
+			),
+		};
+	}, sourcePortId);
+	if (!target) throw new Error(`${label} has no current source-bound OHB target.`);
+	assertAtMost(
+		target.distance,
+		8,
+		`${label} initial target stays beside the selected OHB, independent of menu pointer position`,
+	);
+	const before = await readMetrics(page);
+	const previousViewport = page.viewportSize();
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 760, height: 900 },
+		{ width: 390, height: 720 },
+	]) {
+		await page.setViewportSize(viewport);
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		assertEqual(
+			await page.locator(".tilefab-action-hints:visible").count(),
+			0,
+			`${label} workspace owns its instructions at ${viewport.width}px`,
+		);
+		for (const id of ["ordinary-port-authoring-exit", "ordinary-port-zoom-in"]) {
+			const control = page.getByTestId(id);
+			if (id === "ordinary-port-zoom-in" && (await control.isHidden())) continue;
+			await assertLocatorInsideViewport(page, control);
+			await assertLocatorOwnsHitArea(control, `${label} ${id} ${viewport.width}px`);
+			const bounds = await control.boundingBox();
+			assertAtLeast(bounds?.width ?? 0, 44, `${label} ${id} target width`);
+			assertAtLeast(bounds?.height ?? 0, 44, `${label} ${id} target height`);
+		}
+		await page.screenshot({
+			path: path.join(
+				artifactRoot,
+				`${label.toLowerCase().replaceAll(" ", "-")}-workspace-${viewport.width}.png`,
+			),
+			fullPage: true,
+		});
+	}
+	if (previousViewport) await page.setViewportSize(previousViewport);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		before,
+		`${label} responsive workspace preserves source`,
+	);
+}
+
 async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 	const baseline = await waitForWorker(
 		page,
@@ -16049,10 +16245,23 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 		"OHB transform owns the only contextual surface",
 	);
 	assertEqual(
-		await page.getByTestId("editor-action-hints").getAttribute("data-context"),
-		"equipment-ohb-transform",
-		"OHB transform does not expose selection hints",
+		await page.getByTestId("editor-action-hints").count(),
+		0,
+		"OHB transform workspace owns its instructions",
 	);
+	assertEqual(
+		await page.locator(".tilefab-equipment-workspace").getAttribute("data-port-intent"),
+		"copy",
+		"OHB copy workspace names the current intent",
+	);
+	const ohbTransformInstruction = await page.locator(".tilefab-port-authoring-detail").innerText();
+	for (const instruction of ["방향키/WASD", "Enter 또는 클릭으로 복제", "Esc 취소"]) {
+		assertIncludes(
+			ohbTransformInstruction,
+			instruction,
+			"OHB copy workspace keeps its actual input instructions",
+		);
+	}
 	const ohbTransformCanvas = page.getByTestId("rail-canvas");
 	for (const shortcut of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"]) {
 		if (!(await ohbTransformCanvas.getAttribute("aria-keyshortcuts"))?.includes(shortcut)) {
@@ -16091,6 +16300,7 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 	await openPortEquipmentMoreActions(page);
 	await page.getByTestId("copy-ohb-port").click();
 	const ohbCopyBefore = await readMetrics(page);
+	await assertOhbEditSourceAndWorkspace(page, selectedOhbAfterRecovery.selectedPortId, "OHB copy");
 	await page.getByTestId("rail-canvas").press("Enter");
 	const ohbCopied = await waitForWorker(
 		page,
@@ -16143,6 +16353,7 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 		{ timeout: 10_000 },
 	);
 	const ohbMoveBefore = await readMetrics(page);
+	await assertOhbEditSourceAndWorkspace(page, selectedOhbAfterRecovery.selectedPortId, "OHB move");
 	const ohbMoveInitialRow = await page
 		.getByTestId("rail-canvas")
 		.getAttribute("data-guided-port-keyboard-row");
@@ -18663,7 +18874,7 @@ async function exerciseCurrentLargeFabOrganizationArrangement(
 	await contextualHelp.waitFor({ state: "visible" });
 	const organizationHelp = contextualHelp.getByTestId("editor-help-context");
 	assertEqual(
-		await organizationHelp.getByText("INSPECT · FAB ORGANIZATION", { exact: true }).count(),
+		await organizationHelp.getByText("검사 · FAB ORGANIZATION", { exact: true }).count(),
 		1,
 		"Help identifies the open Organization task",
 	);
@@ -21043,7 +21254,7 @@ async function exerciseEditorCommandHelp(page, baseline) {
 		"ordinary Help keeps Guided Build re-entry visible",
 	);
 	assertEqual(
-		await contextualHelp.getByText("BUILD · RAIL", { exact: true }).count(),
+		await contextualHelp.getByText("레일 · RAIL", { exact: true }).count(),
 		1,
 		"Help leads with the current Build activity",
 	);
@@ -26026,6 +26237,52 @@ async function createMaximumLargeFabPreset(page) {
 	const dialog = page.getByTestId("synthetic-fab-starter-dialog");
 	await dialog.waitFor({ state: "visible" });
 	await page.getByTestId("synthetic-fab-starter-production-fab-60").click();
+	const sourceBeforeNaming = await readMetrics(page);
+	const projectName = page.getByTestId("synthetic-fab-project-name");
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="synthetic-fab-project-name"]')?.value ===
+			"OpenFab 60-Bay Rail Foundation",
+	);
+	await page.getByTestId("synthetic-fab-parameter-bayCount").fill("100");
+	await page.getByTestId("synthetic-fab-parameter-bayCount").press("Enter");
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="synthetic-fab-project-name"]')?.value ===
+			"OpenFab 100-Bay Rail Foundation",
+	);
+	assertEqual(
+		await dialog.locator(".tilefab-starter-preview-title strong").innerText(),
+		"생산 FAB · 100 Bay",
+		"Preset preview title follows the configured Bay count",
+	);
+	await projectName.fill("내 FAB 설계 V1");
+	await page.getByTestId("synthetic-fab-starter-parallel-hall-fab-12").click();
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="synthetic-fab-parameter-bayCount"]')?.value === "12",
+	);
+	assertEqual(
+		await projectName.inputValue(),
+		"내 FAB 설계 V1",
+		"Explicit project name survives preset switch",
+	);
+	await page.getByTestId("synthetic-fab-starter-production-fab-60").click();
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="synthetic-fab-parameter-bayCount"]')?.value === "60",
+	);
+	assertEqual(
+		await projectName.inputValue(),
+		"내 FAB 설계 V1",
+		"Explicit project name survives switching back",
+	);
+	await projectName.fill("   ");
+	assertProjectUnchanged(
+		await readMetrics(page),
+		sourceBeforeNaming,
+		"Preset naming is source-neutral before creation",
+	);
 	const workersBeforeConfiguration = await syntheticFabStarterWorkerStarts(page);
 	await page.getByTestId("synthetic-fab-parameter-processBlockCount").fill("6");
 	await page.getByTestId("synthetic-fab-parameter-bayPitchMeters").fill("140");
@@ -26064,7 +26321,7 @@ async function createMaximumLargeFabPreset(page) {
 	const activated = await waitForWorker(
 		page,
 		(metrics) =>
-			metrics.projectName === "OpenFab 60-Bay Rail Foundation" &&
+			metrics.projectName === "OpenFab 100-Bay Rail Foundation" &&
 			metrics.workerTargetSequence === "308" &&
 			Number(metrics.authoredCells) >= 30_000 &&
 			Number(metrics.authoredEdges) >= 30_000,
@@ -26073,7 +26330,7 @@ async function createMaximumLargeFabPreset(page) {
 	const activationMilliseconds = performance.now() - activationStartedAt;
 	assertEqual(
 		activated.projectName,
-		"OpenFab 60-Bay Rail Foundation",
+		"OpenFab 100-Bay Rail Foundation",
 		"maximum activated FAB project name",
 	);
 	assertEqual(activated.strongComponents, "1", "maximum activated FAB network count");
@@ -28179,7 +28436,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 				document.activeElement === canvas &&
 				status?.includes(`${expectedType}-`) === true &&
 				status.includes(
-					expectedType === "STK" ? "다음 작업은 Inspector에서 선택" : "다음 배치: EQUIP",
+					expectedType === "STK" ? "다음 작업은 Inspector에서 선택" : "다음 배치: 장비 메뉴",
 				) === true
 			);
 		},
@@ -29545,7 +29802,7 @@ async function exerciseOrdinaryConnectedCopyTwinBayHandoff(
 			0,
 			`ordinary connected copy handoff is not persisted tutorial state ${viewportLabel}`,
 		);
-		await reopenedPage.getByRole("button", { name: "FAB 조립" }).click();
+		await reopenedPage.getByTestId("editor-activity-assemble").click();
 		const recoveryLauncher = reopenedPage.getByTestId("production-bay-module-browser");
 		await recoveryLauncher.waitFor({ state: "visible", timeout: 10_000 });
 		await assertLocatorInsideViewport(reopenedPage, recoveryLauncher);
@@ -29592,7 +29849,7 @@ async function exerciseOrdinaryConnectedCopyTwinBayHandoff(
 			recoveryPrepared,
 			`ordinary connected copy footer CANCEL ends Bay placement without mutation ${viewportLabel}`,
 		);
-		await reopenedPage.getByRole("button", { name: "FAB 조립" }).click();
+		await reopenedPage.getByTestId("editor-activity-assemble").click();
 		await recoveryLauncher.waitFor({ state: "visible", timeout: 10_000 });
 		await recoveryLauncher.click();
 		await reopenedPage.getByTestId("production-bay-module-panel").waitFor({
@@ -37449,7 +37706,8 @@ function legacyBuildbarButton(page, accessibleName) {
 }
 
 async function assertEditorActivityRailLayout(page, label) {
-	const activities = ["build", "assemble", "equip", "inspect"];
+	const activityLabels = { build: "레일", assemble: "조립", equip: "장비", inspect: "검사" };
+	const activities = Object.keys(activityLabels);
 	const app = page.getByTestId("tilefab-app");
 	const activeActivity = await app.getAttribute("data-editor-activity");
 	let pressedCount = 0;
@@ -37493,7 +37751,7 @@ async function assertEditorActivityRailLayout(page, label) {
 					labelBounds.right <= buttonBounds.right + 0.5,
 			};
 		});
-		assertEqual(visibleLabel.text, activity.toUpperCase(), `${label} ${activity} visible label`);
+		assertEqual(visibleLabel.text, activityLabels[activity], `${label} ${activity} visible label`);
 		assertEqual(visibleLabel.inside, true, `${label} ${activity} visible label clipping`);
 		const pressed = (await button.getAttribute("aria-pressed")) === "true";
 		if (pressed) pressedCount += 1;
@@ -38366,7 +38624,7 @@ async function assertGuidedProgressLanguage(page, expectation, label) {
 	const panel = page.getByTestId("guided-build-panel");
 	assertEqual(
 		await panel
-			.getByText(`GUIDED BUILD · 챕터 ${expectation.chapter} · ADVANCED FAB`, { exact: true })
+			.getByText(`GUIDED BUILD · 챕터 ${expectation.chapter} · FAB 완성`, { exact: true })
 			.count(),
 		1,
 		`${label} labels chapter progress`,
@@ -38374,7 +38632,7 @@ async function assertGuidedProgressLanguage(page, expectation, label) {
 	assertEqual(
 		await panel
 			.getByText(
-				`ADVANCED FAB · 미션 ${expectation.chapterMission} · 전체 미션 ${expectation.overallMission}`,
+				`FAB 완성 · 미션 ${expectation.chapterMission} · 전체 미션 ${expectation.overallMission}`,
 				{ exact: true },
 			)
 			.count(),
@@ -40201,7 +40459,7 @@ async function exerciseOrdinaryTaskFirstHelp(page, baseline) {
 			`${viewport.width}px Help exposes Guided entry`,
 		);
 		assertEqual(
-			await dialog.getByText("BUILD · RAIL", { exact: true }).count(),
+			await dialog.getByText("레일 · RAIL", { exact: true }).count(),
 			1,
 			`${viewport.width}px Help exposes Build context`,
 		);
@@ -40348,6 +40606,102 @@ async function exerciseOrdinaryTaskFirstHelp(page, baseline) {
 	);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	return Object.freeze(proof);
+}
+
+async function exerciseDeferredHelpRecovery(activeBrowser) {
+	const proof = [];
+	for (const mode of ["delayed", "failed"]) {
+		const context = await activeBrowser.newContext({ viewport: { width: 390, height: 720 } });
+		try {
+			const page = await context.newPage();
+			page.on("pageerror", (error) =>
+				result.pageErrors.push(`[deferred-help-${mode}] ${error.message}`),
+			);
+			page.on("console", (message) => {
+				if (message.type() !== "error") return;
+				if (
+					mode === "failed" &&
+					/EditorCommandHelpDialog-.*\.js/.test(message.location().url) &&
+					message.text().includes("net::ERR_FAILED")
+				)
+					return;
+				result.consoleErrors.push(`[deferred-help-${mode}] ${message.text()}`);
+			});
+			let heldRoute;
+			await page.route("**/EditorCommandHelpDialog-*.js", (route) => {
+				heldRoute = route;
+			});
+			await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(page, { physicalPaths: 0 });
+			const startDialog = page.getByTestId("openfab-start-dialog");
+			await startDialog.waitFor({ state: "visible" });
+			await startDialog.getByRole("button", { name: /BLANK CANVAS/ }).click();
+			assertEqual(Boolean(heldRoute), false, "Help does not load during editor startup");
+			const baseline = await readMetrics(page);
+			const helpButton = page.getByRole("button", { name: "도움말·가이드", exact: true });
+			await helpButton.click();
+			const loading = page.getByTestId("editor-command-help-loading");
+			await loading.waitFor({ state: "visible" });
+			if (!heldRoute) {
+				throw new Error(`${mode} Help did not request its deferred chunk.`);
+			}
+			if (mode === "failed") {
+				await heldRoute.abort("failed");
+				await loading.getByText("도움말을 불러오지 못했습니다.", { exact: false }).waitFor();
+			}
+			const close = loading.getByRole("button", { name: "도움말·가이드 닫기", exact: true });
+			for (const key of ["Tab", "Shift+Tab"]) {
+				await page.keyboard.press(key);
+				assertEqual(
+					await close.evaluate((e) => document.activeElement === e),
+					true,
+					`${mode} Help ${key} stays in modal`,
+				);
+			}
+			assertEqual(
+				await loading.evaluate((e) => Boolean(e.closest("[inert]"))),
+				false,
+				`${mode} Help portal is interactive`,
+			);
+			await assertLocatorInsideViewport(page, loading);
+			await assertLocatorOwnsHitArea(close, `${mode} Help close`);
+			assertAtLeast((await close.boundingBox()).height, 44, `${mode} Help close target`);
+			await page.screenshot({
+				path: path.join(artifactRoot, `help-${mode}-390x720.png`),
+				fullPage: true,
+			});
+			if (mode === "delayed") await page.keyboard.press("Escape");
+			else await close.click();
+			await loading.waitFor({ state: "hidden" });
+			await page.waitForFunction(
+				() => document.activeElement?.getAttribute("aria-label") === "도움말·가이드",
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				baseline,
+				`${mode} Help close preserves source`,
+			);
+			if (mode === "delayed") {
+				await heldRoute.continue();
+				await page.unroute("**/EditorCommandHelpDialog-*.js");
+				await helpButton.click();
+				const dialog = page.getByTestId("editor-command-help");
+				await dialog.waitFor({ state: "visible" });
+				assertEqual(
+					await dialog.getByText("레일 · RAIL", { exact: true }).count(),
+					1,
+					"Help opens after closing before load completes",
+				);
+				await page.keyboard.press("Escape");
+				await dialog.waitFor({ state: "hidden" });
+				assertProjectUnchanged(await readMetrics(page), baseline, "Loaded Help preserves source");
+			}
+			proof.push({ mode, sourcePreserved: true, closeTarget: true });
+		} finally {
+			await context.close();
+		}
+	}
+	return proof;
 }
 
 async function exerciseCompactHelpScrollSignpostAcceptance(activeBrowser) {
@@ -41003,7 +41357,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				`${viewport.label} exact 3 m Rail names the real missing prerequisite`,
 			);
 			assertEqual(
-				noSlotStatus.includes("Port는 EQUIP"),
+				noSlotStatus.includes("Port는 장비 메뉴"),
 				false,
 				`${viewport.label} exact 3 m Rail does not send a novice to an impossible Port task`,
 			);
@@ -41248,7 +41602,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			);
 			assertEqual(
 				(await eqRailPrerequisite.locator("small").innerText()).trim(),
-				"PITCH 2 m · CENTER 2곳 필요 · BUILD에서 레일 준비",
+				"PITCH 2 m · CENTER 2곳 필요 · 레일 메뉴에서 준비",
 				`${viewport.label} short Rail names the canonical EQ prerequisite`,
 			);
 			for (const phrase of ["현재 EQ PITCH 2 m", "2 m 간격으로 최소 2곳", "기존 OHB Port는 유지"]) {
@@ -42320,7 +42674,11 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 		const first = await drawOpenSegment({ x: 0.5, y: 0.5 }, { x: 8.5, y: 0.5 }, "first");
 		const firstRailStatus =
 			(await page.locator(".tilefab-statusbar [role='status']").textContent()) ?? "";
-		for (const phrase of ["다음 레일은 빈 곳 어디서든", "Port는 EQUIP", "선택·복제는 INSPECT"]) {
+		for (const phrase of [
+			"다음 레일은 빈 곳 어디서든",
+			"Port는 장비 메뉴",
+			"선택·복제는 검사 메뉴",
+		]) {
 			assertIncludes(firstRailStatus, phrase, `first ordinary Rail handoff ${phrase}`);
 		}
 		const beforeEquipEntry = await readMetrics(page);
@@ -42338,7 +42696,7 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 		);
 		assertIncludes(
 			(await firstPortHandoff.getAttribute("aria-label")) ?? "",
-			"EQUIP에서 레일 옆 하늘색 원",
+			"장비 메뉴에서 레일 옆 하늘색 원",
 			"first Rail next task names the visible OHB target",
 		);
 		await assertLocatorInsideViewport(page, firstPortHandoff);
@@ -42416,7 +42774,7 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 		);
 		assertIncludes(
 			(await assembleMenu.getByTestId("assemble-duplicate-status").innerText()) ?? "",
-			"Rail 조각은 INSPECT에서 선택·복제",
+			"Rail 조각은 검사 메뉴에서 선택·복제",
 			"Assemble redirects Rail copy to Inspect",
 		);
 		await page.keyboard.press("Escape");

@@ -28,6 +28,16 @@
 	grid-template-rows: 60px minmax(0, 1fr) auto;
 }
 
+.tilefab-command-help-loading-message {
+	padding: 16px;
+	font-size: 12px;
+	line-height: 1.6;
+}
+
+.tilefab-command-help-loading-message > p {
+	margin: 0;
+}
+
 .tilefab-command-help-intro {
 	display: grid;
 	max-height: min(300px, 42dvh);

@@ -337,7 +337,7 @@ export function EditorCommandHelpDialog({
 						<span>
 							<strong>먼저 현재 작업을 확인하세요</strong>
 							<small>
-								가이드와 현재 Activity 사용법을 확인한 뒤, 필요할 때만 전체 명령을 펼치세요.
+								가이드와 현재 메뉴 사용법을 확인한 뒤, 필요할 때만 전체 명령을 펼치세요.
 							</small>
 						</span>
 						<button type="button" onClick={() => setCommandCatalogExpanded(true)}>

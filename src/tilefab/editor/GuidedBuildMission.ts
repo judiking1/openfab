@@ -743,7 +743,7 @@ function guidedBuildMissionPrompt(
 			rationale: definition.rationale,
 			primaryCommandId: null,
 			suggestedAction: "add-bay",
-			suggestedActionLabel: "ASSEMBLE · 기본 TWIN BAY",
+			suggestedActionLabel: "조립 · 기본 TWIN BAY",
 		});
 	}
 	if (definition.id === "reuse-loop") {
@@ -768,7 +768,7 @@ function guidedBuildMissionPrompt(
 					: "inspect",
 				suggestedActionLabel: evidence.reuseGuidance.selectionAnchorReady
 					? "SELECT · 선택한 Port 포함 Loop 전체"
-					: "INSPECT · Port 포함 Loop 탭",
+					: "검사 · Port 포함 Loop 탭",
 			});
 		}
 		if (evidence.reuseGuidance.placementActive) {
@@ -809,7 +809,7 @@ function guidedBuildMissionPrompt(
 			suggestedAction: evidence.reuseGuidance.selectionAnchorReady ? "select-connected" : "inspect",
 			suggestedActionLabel: evidence.reuseGuidance.selectionAnchorReady
 				? "SELECT · Port 포함 Loop 전체"
-				: "INSPECT · Port 포함 Loop 탭",
+				: "검사 · Port 포함 Loop 탭",
 		});
 	}
 	if (definition.id !== "ports") return promptFromDefinition(definition, null, null);
@@ -821,7 +821,7 @@ function guidedBuildMissionPrompt(
 			rationale: definition.rationale,
 			primaryCommandId: "canvas.primary-click",
 			suggestedAction: "ohb",
-			suggestedActionLabel: "EQUIP · OHB 열기",
+			suggestedActionLabel: "장비 · OHB 열기",
 			progressCue: guidedBuildPortProgressCue(
 				evidence.equipment,
 				"왼쪽의 강조된 OHB · 단일 Port를 선택하세요. 캔버스 포커스에서 방향키로 슬롯을 고르고 Enter로 배치하거나, 점선 고리가 있는 청록 슬롯을 클릭하세요.",
@@ -836,7 +836,7 @@ function guidedBuildMissionPrompt(
 			rationale: definition.rationale,
 			primaryCommandId: "canvas.primary-click",
 			suggestedAction: "eq",
-			suggestedActionLabel: "EQUIP · EQ 열기",
+			suggestedActionLabel: "장비 · EQ 열기",
 			progressCue: guidedBuildPortProgressCue(
 				evidence.equipment,
 				"강조된 EQ · Port를 선택하세요. 청록색 1 시작과 2 끝을 차례로 클릭하거나 드래그하세요. 키보드는 시작과 끝에서 Enter를 사용합니다.",
@@ -851,7 +851,7 @@ function guidedBuildMissionPrompt(
 			rationale: definition.rationale,
 			primaryCommandId: "canvas.primary-click",
 			suggestedAction: "stk",
-			suggestedActionLabel: "EQUIP · STK 열기",
+			suggestedActionLabel: "장비 · STK 열기",
 			progressCue: guidedBuildPortProgressCue(
 				evidence.equipment,
 				"왼쪽의 강조된 STK · 입출고 Port를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 STK 생성을 누르세요.",
@@ -870,7 +870,7 @@ function guidedBuildOrientPrompt(
 			label: "화면 조작",
 			value: "TOUCH · MOUSE",
 			instruction:
-				"터치는 한 손가락 드래그로 이동하고 왼쪽 아래 +/−로 확대·축소하세요. 마우스는 오른쪽/가운데 드래그와 휠을 사용합니다.",
+				"터치는 한 손가락 드래그로 이동하고 화면의 +/− 버튼으로 확대·축소하세요. 마우스는 오른쪽/가운데 드래그와 휠을 사용합니다.",
 		}),
 	});
 }

@@ -1,4 +1,8 @@
-import type { GuidedBuildEvaluation, GuidedBuildFoundationMissionId } from "./GuidedBuildMission";
+import type {
+	GuidedBuildEvaluation,
+	GuidedBuildFoundationMissionId,
+	GuidedBuildSuggestedAction,
+} from "./GuidedBuildMission";
 
 export const GUIDED_BUILD_CHAPTER_IDS = ["quick-start", "equip", "reuse", "advanced-fab"] as const;
 
@@ -33,28 +37,28 @@ export const GUIDED_BUILD_CHAPTERS = Object.freeze([
 	chapter({
 		id: "quick-start",
 		sequence: 1,
-		label: "QUICK START",
+		label: "레일 기초",
 		title: "레일 기본기",
 		missionIds: ["orient", "first-rail", "process-loop"],
 	}),
 	chapter({
 		id: "equip",
 		sequence: 2,
-		label: "EQUIP",
+		label: "장비 배치",
 		title: "Port-first 장비",
 		missionIds: ["ports"],
 	}),
 	chapter({
 		id: "reuse",
 		sequence: 3,
-		label: "REUSE",
+		label: "Loop 재사용",
 		title: "Loop 재사용",
 		missionIds: ["reuse-loop"],
 	}),
 	chapter({
 		id: "advanced-fab",
 		sequence: 4,
-		label: "ADVANCED FAB",
+		label: "FAB 완성",
 		title: "FAB 구조·검증·저장",
 		missionIds: [
 			"bay",
@@ -122,6 +126,24 @@ export function deriveGuidedBuildChapters(
 		complete: completedChapterCount === GUIDED_BUILD_CHAPTERS.length,
 		chapters: Object.freeze(chapters),
 	});
+}
+
+/** A chapter continuation may choose a tool; it never executes the next authored command. */
+export function guidedBuildChapterEntryTool(
+	checkpointId: GuidedBuildChapterId | null,
+	missionId: GuidedBuildFoundationMissionId | null,
+	action: GuidedBuildSuggestedAction | null,
+): "ohb" | "eq" | "stk" | "inspect" | null {
+	if (
+		checkpointId === "quick-start" &&
+		missionId === "ports" &&
+		(action === "ohb" || action === "eq" || action === "stk")
+	)
+		return action;
+	if (checkpointId === "equip" && missionId === "reuse-loop" && action === "inspect") {
+		return "inspect";
+	}
+	return null;
 }
 
 export function guidedBuildChapterForMission(

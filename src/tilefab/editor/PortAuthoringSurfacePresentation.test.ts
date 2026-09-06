@@ -43,7 +43,7 @@ describe("portAuthoringSurfacePresentation", () => {
 			expect(portAuthoringSurfacePresentation(portType, 0, 0).configurationAvailable).toBe(false);
 			expect(portAuthoringSurfacePresentation(portType, 0, 0).prerequisiteAction).toEqual({
 				label: "먼저 레일 만들기",
-				ariaLabel: "BUILD로 이동해 직선 레일 만들기",
+				ariaLabel: "레일 메뉴로 이동해 직선 레일 만들기",
 			});
 			expect(portAuthoringSurfacePresentation(portType, 1, 1).prerequisiteAction).toBeNull();
 			expect(portAuthoringSurfacePresentation(portType, 1, 1).configurationAvailable).toBe(true);

@@ -145,14 +145,14 @@ function resolveRailTarget(context: GuidedBuildPrimaryTargetContext): GuidedBuil
 			id: "activity:build",
 			kind: "activity",
 			activity: "build",
-			instruction: "왼쪽에서 BUILD · 레일을 선택하세요. 다음 레일 도구가 그 자리에서 열립니다.",
+			instruction: "왼쪽에서 레일 · 레일을 선택하세요. 다음 레일 도구가 그 자리에서 열립니다.",
 		});
 	}
 	if (context.tool !== "build") {
 		return Object.freeze({
 			id: "tool:build",
 			kind: "rail-tool",
-			instruction: "왼쪽 BUILD 안에서 강조된 레일 건설 도구를 선택하세요.",
+			instruction: "왼쪽 레일 메뉴에서 강조된 레일 건설 도구를 선택하세요.",
 		});
 	}
 	if (context.buildMode !== "route") {
@@ -183,7 +183,7 @@ function resolvePortTarget(
 			id: "activity:equip",
 			kind: "activity",
 			activity: "equip",
-			instruction: `왼쪽에서 EQUIP · 장비를 선택하세요. 그러면 ${equipmentTool.toUpperCase()} Port 도구가 열립니다.`,
+			instruction: `왼쪽에서 장비 · 장비를 선택하세요. 그러면 ${equipmentTool.toUpperCase()} Port 도구가 열립니다.`,
 		});
 	}
 	if (context.tool !== equipmentTool) {
@@ -219,7 +219,7 @@ function resolveReuseSelectionTarget(
 			kind: "activity",
 			activity: "inspect",
 			instruction:
-				"왼쪽에서 INSPECT · 검토를 선택하세요. 선택 도구와 원본 Loop 위치가 Canvas에 이어서 표시됩니다.",
+				"왼쪽에서 검사 · 검토를 선택하세요. 선택 도구와 원본 Loop 위치가 Canvas에 이어서 표시됩니다.",
 		});
 	}
 	if (context.reuseSelectionObstructionOpen) {
@@ -234,7 +234,7 @@ function resolveReuseSelectionTarget(
 		return Object.freeze({
 			id: "tool:inspect",
 			kind: "inspect-tool",
-			instruction: "INSPECT 안에서 강조된 선택 및 정보를 선택하세요.",
+			instruction: "검사 메뉴에서 강조된 선택 및 정보를 선택하세요.",
 		});
 	}
 	if (!context.reuseSelectionCanvasActionable) return null;

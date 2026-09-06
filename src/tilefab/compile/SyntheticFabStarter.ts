@@ -707,6 +707,14 @@ export function syntheticFabStarterCatalogItem(
 	return item;
 }
 
+/** Name newly created source from its normalized settings without materializing geometry. */
+export function defaultSyntheticFabStarterProjectName(request: SyntheticFabStarterRequest): string {
+	const normalized = normalizeSyntheticFabStarterRequest(request);
+	return normalized.id === "production-fab-60"
+		? `OpenFab ${normalized.parameters.bayCount}-Bay Rail Foundation`
+		: syntheticFabStarterCatalogItem(normalized.id).defaultProjectName;
+}
+
 export function defaultSyntheticFabStarterRequest(
 	id: SyntheticFabStarterId,
 ): SyntheticFabStarterRequest {

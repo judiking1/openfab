@@ -31,7 +31,7 @@ describe("EditorActivityRail", () => {
 		const markup = renderToStaticMarkup(<EditorActivityRail {...props()} />);
 
 		expect(markup).toContain('<fieldset class="tilefab-editor-activity-rail"');
-		expect(markup).toContain('aria-label="Editor activities"');
+		expect(markup).toContain('aria-label="편집 작업"');
 		for (const activity of EDITOR_ACTIVITIES) {
 			expect(markup).toContain(`data-testid="editor-activity-${activity}"`);
 		}
@@ -53,9 +53,9 @@ describe("EditorActivityRail", () => {
 	it("keeps ready activities enabled and exposes their task descriptions", () => {
 		const markup = renderToStaticMarkup(<EditorActivityRail {...props()} />);
 
-		expect(markup).toContain("레일 만들기와 수정");
-		expect(markup).toContain("Bay·Fab 조립과 청사진");
-		expect(markup).toContain("Port부터 OHB·EQ·STK 배치");
+		expect(markup).toContain("단방향 레일 만들기");
+		expect(markup).toContain("Bay·FAB 구조 만들기");
+		expect(markup).toContain("OHB·EQ·Stocker 배치");
 		expect(markup).toContain("선택·편집·검사");
 		expect(markup).not.toContain(' disabled="');
 	});
@@ -75,7 +75,7 @@ describe("EditorActivityRail", () => {
 		);
 
 		expect(markup).toMatch(
-			/data-testid="editor-activity-assemble"[^>]*data-availability="blocked"[^>]*aria-label="ASSEMBLE:[^"]*Unavailable: Apply or cancel the active Connector first\."[^>]*aria-disabled="true"/,
+			/data-testid="editor-activity-assemble"[^>]*data-availability="blocked"[^>]*aria-label="조립:[^"]*사용 불가: Apply or cancel the active Connector first\."[^>]*aria-disabled="true"/,
 		);
 		expect(markup).not.toMatch(/data-testid="editor-activity-assemble"[^>]* disabled/);
 		expect(markup).toContain("Apply or cancel the active Connector first.");
@@ -152,6 +152,6 @@ describe("EditorActivityRail", () => {
 		expect(markup).toMatch(/data-testid="editor-activity-build"[^>]*aria-pressed="true"/);
 		expect(markup).not.toMatch(/data-testid="editor-activity-build"[^>]*data-guided-target/);
 		expect(markup).not.toContain("지금 선택");
-		expect(markup).toContain("Port부터 OHB·EQ·STK 배치");
+		expect(markup).toContain("OHB·EQ·Stocker 배치");
 	});
 });

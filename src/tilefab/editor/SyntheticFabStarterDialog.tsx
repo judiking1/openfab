@@ -23,6 +23,7 @@ import {
 import type { SyntheticFabAssemblyPlan } from "../compile/SyntheticFabAssemblyPlan";
 import { SYNTHETIC_FAB_PATTERN_CATALOG } from "../compile/SyntheticFabPattern";
 import {
+	defaultSyntheticFabStarterProjectName,
 	defaultSyntheticFabStarterRequest,
 	SYNTHETIC_FAB_PRESET_CATALOG,
 	SYNTHETIC_FAB_PROJECT_CATALOG,
@@ -106,9 +107,9 @@ export function SyntheticFabStarterDialog({
 	const [request, setRequest] = useState<SyntheticFabStarterRequest>(() =>
 		defaultSyntheticFabStarterRequest(initialId),
 	);
-	const [projectName, setProjectName] = useState(
-		() => syntheticFabStarterCatalogItem(initialId).defaultProjectName,
-	);
+	const [projectNameOverride, setProjectNameOverride] = useState<string | null>(null);
+	const defaultProjectName = defaultSyntheticFabStarterProjectName(request);
+	const projectName = projectNameOverride ?? defaultProjectName;
 	const dialogRef = useRef<HTMLElement>(null);
 	const operationErrorRef = useRef<HTMLDivElement>(null);
 	const cancelBusyButtonRef = useRef<HTMLButtonElement>(null);
@@ -124,6 +125,10 @@ export function SyntheticFabStarterDialog({
 				? SYNTHETIC_FAB_PRESET_CATALOG
 				: SYNTHETIC_FAB_PROJECT_CATALOG;
 	const item = syntheticFabStarterCatalogItem(request.id);
+	const previewLabel =
+		request.id === "production-fab-60"
+			? `생산 FAB · ${request.parameters.bayCount} Bay`
+			: item.label;
 	const largeFabMetadata = useMemo(() => largeFabDialogMetadata(request), [request]);
 	const largeFabAssembly = largeFabMetadata?.assembly ?? null;
 	const productionFabAssembly = useMemo(
@@ -334,7 +339,6 @@ export function SyntheticFabStarterDialog({
 	}, [suspended]);
 
 	const selectStarter = (id: SyntheticFabStarterId): void => {
-		const nextItem = syntheticFabStarterCatalogItem(id);
 		const nextRequest = defaultSyntheticFabStarterRequest(id);
 		setPreviewFailure(null);
 		onClearOperationError?.();
@@ -343,7 +347,6 @@ export function SyntheticFabStarterDialog({
 		setPreview(readCachedStarterPreview(nextRequest));
 		setPreviewRequested(mode !== "preset" || readCachedStarterPreview(nextRequest) !== undefined);
 		setRequest(nextRequest);
-		setProjectName(nextItem.defaultProjectName);
 	};
 	const updateParameter = (
 		descriptor: SyntheticFabStarterParameterDescriptor,
@@ -377,7 +380,7 @@ export function SyntheticFabStarterDialog({
 		}
 		onConfirm(
 			request,
-			createsProject ? projectName.trim() || item.defaultProjectName : null,
+			createsProject ? projectName.trim() || defaultProjectName : null,
 			preview,
 			independentVerification ?? undefined,
 			certificationEvidence,
@@ -416,7 +419,7 @@ export function SyntheticFabStarterDialog({
 		}
 		onConfirm(
 			request,
-			createsProject ? projectName.trim() || item.defaultProjectName : null,
+			createsProject ? projectName.trim() || defaultProjectName : null,
 			preview,
 			independentVerification ?? undefined,
 			certificationEvidence,
@@ -426,7 +429,7 @@ export function SyntheticFabStarterDialog({
 		certificationEvidence,
 		createsProject,
 		independentVerification,
-		item.defaultProjectName,
+		defaultProjectName,
 		mode,
 		onConfirm,
 		onPlace,
@@ -600,7 +603,7 @@ export function SyntheticFabStarterDialog({
 							<StarterRailPreview
 								preview={preview}
 								request={request}
-								label={item.label}
+								label={previewLabel}
 								schematic={currentSchematic}
 								failure={previewFailure}
 								idle={previewIdle}
@@ -611,7 +614,7 @@ export function SyntheticFabStarterDialog({
 						<div className="tilefab-starter-preview-title">
 							<span>
 								<small>{item.stage}</small>
-								<strong>{item.label}</strong>
+								<strong>{previewLabel}</strong>
 							</span>
 							<em data-testid="synthetic-fab-preview-source">
 								{previewIdle
@@ -801,7 +804,7 @@ export function SyntheticFabStarterDialog({
 									data-testid="synthetic-fab-project-name"
 									onChange={(event) => {
 										onClearOperationError?.();
-										setProjectName(event.currentTarget.value);
+										setProjectNameOverride(event.currentTarget.value);
 									}}
 								/>
 							</label>

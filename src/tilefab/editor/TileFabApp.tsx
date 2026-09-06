@@ -198,6 +198,7 @@ import { StkPlacementCandidateFilter } from "../compile/StkPlacementCandidateFil
 import { buildSyntheticFabPattern } from "../compile/SyntheticFabPattern";
 import {
 	buildSyntheticFabStarter,
+	defaultSyntheticFabStarterProjectName,
 	defaultSyntheticFabStarterRequest,
 	type SyntheticFabStarterRequest,
 	syntheticFabStarterCatalogItem,
@@ -647,10 +648,10 @@ import {
 	validateContextualBlueprintSaveDraft,
 } from "./ContextualBlueprintSave";
 import { ContextualBlueprintSaveDialog } from "./ContextualBlueprintSaveDialog";
-import { type EditorActivity, editorActivityCanvasLabel } from "./EditorActivity";
+import { EDITOR_ACTIVITY_DEFINITIONS, type EditorActivity, editorActivityCanvasLabel } from "./EditorActivity";
 import { EditorActivityRail } from "./EditorActivityRail";
 import { editorToolDensityPresentation } from "./EditorToolDensityPresentation";
-import { EditorCommandHelpDialog } from "./EditorCommandHelpDialog";
+import { DeferredEditorCommandHelpDialog } from "./DeferredEditorCommandHelpDialog";
 import { deriveEditorHelpContext } from "./EditorHelpContext";
 import {
 	ORDINARY_FIRST_OHB_ENTRY_STATUS,
@@ -744,6 +745,7 @@ import {
 } from "./GuidedBuildFirstRun";
 import {
 	deriveGuidedBuildChapters,
+	guidedBuildChapterEntryTool,
 	guidedBuildCurrentChapter,
 	resolveGuidedBuildChapterCheckpoint,
 	type GuidedBuildChapterId,
@@ -3756,7 +3758,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (!guidedBuildChapterCheckpoint) return;
 		setStatus(
 			guidedBuildChapterCheckpoint === "quick-start"
-				? "Process Loop 완료 · 열린 종단 0 · 다음 EQUIP 과정을 선택하세요"
+				? "Process Loop 완료 · 열린 종단 0 · 다음 장비 배치 과정을 선택하세요"
 				: "과정을 완료했습니다 · 다음 과정을 선택하세요",
 		);
 	}, [guidedBuildChapterCheckpoint]);
@@ -9845,7 +9847,7 @@ export default function TileFabApp(): React.ReactElement {
 			guidedBuildEvaluation.currentMissionId !== "process-loop";
 		clearTransientConstruction(
 			completedProcessLoop
-				? "Process Loop 완료 · 열린 종단 0 · 다음 EQUIP 과정으로 넘어갈 준비가 됐습니다"
+				? "Process Loop 완료 · 열린 종단 0 · 다음 장비 배치 과정으로 넘어갈 준비가 됐습니다"
 				: staleBinding
 					? "프로젝트 또는 FAB가 변경되어 키보드 레일 미리보기를 취소했습니다"
 				: undefined,
@@ -10077,6 +10079,7 @@ export default function TileFabApp(): React.ReactElement {
 	const startOrdinaryPortKeyboard = (
 		portType: GuidedPortKeyboardType,
 		statusMessage?: string,
+		initialTarget?: Readonly<{ x: number; z: number }>,
 	): void => {
 		const binding = currentGuidedPortKeyboardBinding();
 		if (!binding || binding.slots.portType !== portType) {
@@ -10087,12 +10090,12 @@ export default function TileFabApp(): React.ReactElement {
 		const canvas = canvasRef.current;
 		const camera = cameraRef.current;
 		const hoverWorld = hoverWorldRef.current;
-		const target = hoverWorld
+		const target = initialTarget ?? (hoverWorld
 			? { x: hoverWorld.x, z: hoverWorld.y }
 			: {
 					x: ((canvas?.clientWidth ?? 0) * 0.5 - camera.offsetX) / camera.zoom,
 					z: ((canvas?.clientHeight ?? 0) * 0.5 - camera.offsetY) / camera.zoom,
-				};
+				});
 		const row = nearestPortKeyboardInitialRow(binding, target);
 		if (row === null) {
 			setStatus(`${portType} 슬롯이 없습니다 · 직선 레일을 먼저 만드세요`);
@@ -17316,7 +17319,7 @@ export default function TileFabApp(): React.ReactElement {
 					: `EQ-${firstPort?.equipmentGroupId ?? "?"} · ${selection.rows.length} PORT · PITCH ${portDrag.pitchMillimeters / 1_000} m`;
 		syncModelUi(
 			retainsSelection
-				? `${completionStatus} 생성 · 선택한 그룹 확인/편집 중 · 다음 배치: EQUIP`
+				? `${completionStatus} 생성 · 선택한 그룹 확인/편집 중 · 다음 배치: 장비 메뉴`
 				: completionStatus,
 		);
 		if (retainsSelection) {
@@ -18458,10 +18461,9 @@ export default function TileFabApp(): React.ReactElement {
 		setStarterDialogOperationError(null);
 		try {
 			const createdAt = projectIdentity.now();
-			const starterItem = syntheticFabStarterCatalogItem(starter.id);
 			const manifest = createOpenFabProjectManifest(
 				projectIdentity.createProjectId(),
-				projectName.trim() || starterItem.defaultProjectName,
+				projectName.trim() || defaultSyntheticFabStarterProjectName(starter),
 				createdAt,
 			);
 			let snapshot: ReturnType<typeof captureRailMirrorSnapshot>["snapshot"];
@@ -18586,7 +18588,7 @@ export default function TileFabApp(): React.ReactElement {
 				"creating",
 				starter.id === "blank"
 					? "빈 FAB 프로젝트를 만들었습니다"
-					: `${starterItem.label} 합성 스타터를 만들었습니다`,
+					: `${manifest.name} 프로젝트를 만들었습니다`,
 				controller,
 				expectedIdentity,
 			);
@@ -19850,6 +19852,16 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
+		const presentation = portEquipmentPresentationRef.current;
+		const sourceRow = presentation?.portIds.indexOf(resolved.port.id) ?? -1;
+		if (!presentation || sourceRow < 0) {
+			setStatus("선택한 OHB 위치를 준비하지 못했습니다 · 장비를 다시 선택하세요");
+			return;
+		}
+		const initialTarget = {
+			x: presentation.worldPositions[sourceRow * 2] as number,
+			z: presentation.worldPositions[sourceRow * 2 + 1] as number,
+		};
 		lastEquipmentToolRef.current = "ohb";
 		updateEditorActivity("equip");
 		chooseTool("ohb", "preserve-port");
@@ -19859,7 +19871,7 @@ export default function TileFabApp(): React.ReactElement {
 			equipmentGroupId: resolved.equipmentGroup.id,
 		};
 		updateOhbPlacementIntent(intent);
-		startOrdinaryPortKeyboard("OHB");
+		startOrdinaryPortKeyboard("OHB", undefined, initialTarget);
 		setStatus(
 			kind === "move"
 				? `${resolved.port.barcode ?? `PORT-${resolved.port.id}`} 이동 · 방향키/WASD로 합법 슬롯 이동 · Enter 또는 클릭으로 확정 · Esc 취소`
@@ -21351,7 +21363,7 @@ export default function TileFabApp(): React.ReactElement {
 			startSelectedPortEquipmentGroupEdit("copy");
 			return;
 		}
-		setStatus("INSPECT에서 클릭 또는 드래그로 일부 레일 선택 · 닫힌 Loop 불필요");
+		setStatus("검사 메뉴에서 클릭 또는 드래그로 일부 레일 선택 · 닫힌 Loop 불필요");
 		scheduleRender();
 	};
 	const copyActionHintSelectionToRailClipboard = (): void => {
@@ -21487,7 +21499,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (selectedPortEquipmentRef.current) {
 			setStatus("장비만 잘라내려면 드래그로 지지 레일까지 함께 영역 선택하세요");
 		} else {
-			setStatus("INSPECT에서 클릭 또는 드래그로 잘라낼 레일을 선택하세요");
+			setStatus("검사 메뉴에서 클릭 또는 드래그로 잘라낼 레일을 선택하세요");
 		}
 		scheduleRender();
 	};
@@ -21618,7 +21630,7 @@ export default function TileFabApp(): React.ReactElement {
 		setOrganizationLibraryOpen(true);
 		setStatus(
 			activeOrganizations.records.length === 0
-				? "Inspect에서 드래그로 레일과 장비를 선택한 뒤 FAB 조직으로 분류하세요"
+				? "검사 메뉴에서 드래그로 레일과 장비를 선택한 뒤 FAB 조직으로 분류하세요"
 				: `${activeOrganizations.records.length}개 정적 FAB 조직`,
 		);
 	};
@@ -21814,7 +21826,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (modelSyncPendingRef.current) return;
 		const selection = staticFabSelectionRef.current;
 		if (!selection || selection.rail !== areaSelectionRef.current) {
-			setStatus("Inspect에서 드래그로 조직에 포함할 레일과 장비를 선택하세요");
+			setStatus("검사 메뉴에서 드래그로 조직에 포함할 레일과 장비를 선택하세요");
 			return;
 		}
 		const name = organizationNameDraft.trim();
@@ -22751,7 +22763,7 @@ export default function TileFabApp(): React.ReactElement {
 			return Object.freeze({
 				state: "blocked" as const,
 				reason:
-					"복제할 Fab, Bank, 또는 Bay 조직 하나만 선택하세요 · Rail 조각은 INSPECT에서 선택·복제하세요",
+					"복제할 Fab, Bank, 또는 Bay 조직 하나만 선택하세요 · Rail 조각은 검사 메뉴에서 선택·복제하세요",
 			});
 		}
 		if (organizationEditorDirty || organizationDetailsStale) {
@@ -24660,7 +24672,7 @@ export default function TileFabApp(): React.ReactElement {
 		const selectedArea = areaSelectionRef.current;
 		if (request === "area" || (request === "context" && selectedArea)) {
 			if (!selectedArea) {
-				setStatus("Inspect에서 드래그로 저장할 레일과 장비를 선택하세요");
+				setStatus("검사 메뉴에서 드래그로 저장할 레일과 장비를 선택하세요");
 				return null;
 			}
 			const prepared = prepareAreaStampTemplate(selectedArea);
@@ -26509,28 +26521,6 @@ export default function TileFabApp(): React.ReactElement {
 			(guidedBuildEvaluation.currentMissionId === "ports" &&
 				guidedBuildCurrentSuggestedAction === tool &&
 				!guidedBuildReviewing && !guidedBuildChapterCheckpoint));
-	equipmentWorkspaceFrameRef.current = (): void => {
-		const canvas = canvasRef.current;
-		const session = guidedPortKeyboardSessionRef.current;
-		if (
-			!equipmentWorkspaceActive || !canvas || !session || panRef.current !== null ||
-			!guidedPortKeyboardSessionCurrent(session) ||
-			(portRowDragRef.current?.pointerId ?? -1) >= 0
-		) return;
-		if (centerPortKeyboardRowIfObscured(
-			session, canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas),
-		)) {
-			cameraReadyRef.current = true;
-			fittedMapCameraRef.current = false;
-			rendererRef.current.invalidateStatic();
-			scheduleRender();
-		}
-	};
-	useEquipmentWorkspaceFraming(
-		equipmentWorkspaceActive ? `${tool}:${guidedPortKeyboard?.phase ?? "pending"}` : null,
-		canvasRef,
-		equipmentWorkspaceFrameRef,
-	);
 	const activePortLegalSlotCount = activePortAuthoringType
 		? editorModel.portSlotArtifacts[activePortAuthoringType].slots.legalCount
 		: 0;
@@ -27270,8 +27260,7 @@ export default function TileFabApp(): React.ReactElement {
 		activePortAuthoringPresentation !== null &&
 		!staticFabExclusiveCommandActive &&
 		portEquipmentGroupEditSession === null &&
-		portEquipmentMembershipEditSession === null &&
-		ohbPlacementIntent === null;
+		portEquipmentMembershipEditSession === null;
 	const presentedActionHints = guidedBuildExperienceActive
 		? guidedSelectionCommandHintId
 			? Object.freeze(actionHints.filter((hint) => hint.id === guidedSelectionCommandHintId))
@@ -28517,7 +28506,7 @@ export default function TileFabApp(): React.ReactElement {
 		const equipmentGroupCount = activePortEquipment.equipmentGroups.length;
 		if (equipmentGroupCount === 0) {
 			if (!chooseExplicitEditorTool(lastEquipmentToolRef.current)) return;
-			setStatus("배치된 장비가 없습니다 · EQUIP에서 레일 Port부터 추가하세요");
+			setStatus("배치된 장비가 없습니다 · 장비 메뉴에서 레일 Port부터 추가하세요");
 			requestAnimationFrame(() =>
 				document
 					.querySelector<HTMLButtonElement>(
@@ -28897,6 +28886,45 @@ export default function TileFabApp(): React.ReactElement {
 			!ohbPlacementIntent &&
 			!portEquipmentGroupEditSession &&
 			!portEquipmentMembershipEditSession,
+	);
+	equipmentWorkspaceFrameRef.current = (): void => {
+		const canvas = canvasRef.current;
+		if (!canvas || panRef.current !== null || (portRowDragRef.current?.pointerId ?? -1) >= 0) return;
+		let moved = false;
+		if (equipmentWorkspaceActive) {
+			const session = guidedPortKeyboardSessionRef.current;
+			if (!session || !guidedPortKeyboardSessionCurrent(session)) return;
+			moved = centerPortKeyboardRowIfObscured(
+				session, canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas),
+			);
+		} else if (portEquipmentInspectorVisible && selectedPortDetails) {
+			// Explicit Fit keeps the complete map in view as the Inspector changes size.
+			if (fittedMapCameraRef.current) {
+				fitMapRef.current();
+				return;
+			}
+			const presentation = portEquipmentPresentationRef.current;
+			const row = presentation?.portIds.indexOf(selectedPortDetails.port.id) ?? -1;
+			if (!presentation || row < 0) return;
+			moved = centerWorldPointIfObscured(
+				presentation.worldPositions[row * 2] as number,
+				presentation.worldPositions[row * 2 + 1] as number,
+				canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas),
+			);
+		}
+		if (moved) {
+			cameraReadyRef.current = true;
+			fittedMapCameraRef.current = false;
+			rendererRef.current.invalidateStatic();
+			scheduleRender();
+		}
+	};
+	useEquipmentWorkspaceFraming(
+		equipmentWorkspaceActive
+			? `${tool}:${guidedPortKeyboard?.phase ?? "pending"}`
+			: portEquipmentInspectorVisible ? `inspect:${selectedPortDetails?.port.id}` : null,
+		canvasRef,
+		equipmentWorkspaceFrameRef,
 	);
 	const eqToStkHandoff = ordinaryEqToStkHandoff({
 		ordinaryEqInspectionActive: Boolean(
@@ -30239,7 +30267,7 @@ export default function TileFabApp(): React.ReactElement {
 				aria-hidden={openFabStartDialogOpen || commandHelpOpen ? true : undefined}
 				inert={openFabStartDialogOpen || commandHelpOpen ? true : undefined}
 			>
-				<EditorCommandHelpDialog
+				<DeferredEditorCommandHelpDialog
 					open={commandHelpOpen}
 					context={editorHelpContext}
 					guidedBuild={{
@@ -30441,7 +30469,7 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 				{ordinaryRailKeyboardIdleAvailable ? (
 					<p id="tilefab-ordinary-rail-keyboard-entry-description" className="tilefab-sr-only">
-						일반 BUILD Smart Route입니다. 포인터로 어디서든 끌어 레일을 만들거나 Enter로
+						일반 레일 메뉴의 Smart Route입니다. 포인터로 어디서든 끌어 레일을 만들거나 Enter로
 						키보드 레일 건설을 시작할 수 있습니다. 열린 레일은 닫힌 Loop가 아니어도
 						건설할 수 있습니다.
 					</p>
@@ -31264,6 +31292,24 @@ export default function TileFabApp(): React.ReactElement {
 							}
 						}}
 						onContinueChapter={() => {
+							const entryTool = guidedBuildChapterEntryTool(
+								guidedBuildChapterCheckpoint,
+								guidedBuildEvaluation.currentMissionId,
+								guidedBuildCurrentSuggestedAction,
+							);
+							if (entryTool) {
+								if (!guidedBuildCommandsActionable) {
+									setStatus(guidedBuildCommandsBlockedReason ?? "현재 작업을 마친 뒤 계속하세요");
+									return;
+								}
+								if (entryTool === "inspect") {
+									if (!chooseExplicitEditorTool(entryTool)) return;
+									clearPortEquipmentSelection();
+								} else if (!chooseGuidedEquipmentTool(entryTool)) return;
+								setGuidedBuildChapterCheckpoint(null);
+								requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+								return;
+							}
 							const checkpointTrigger =
 								document.activeElement instanceof HTMLElement ? document.activeElement : null;
 							setGuidedBuildChapterCheckpoint(null);
@@ -32444,7 +32490,7 @@ export default function TileFabApp(): React.ReactElement {
 						id="tilefab-editor-activity-tools"
 						className="tilefab-editor-activity-tools"
 						data-activity={editorActivity}
-						aria-label={`${editorActivity.toUpperCase()} 활동 도구`}
+						aria-label={`${EDITOR_ACTIVITY_DEFINITIONS.find(({ id }) => id === editorActivity)?.label} 도구`}
 					>
 						{editorActivity === "build" ? (
 							<>
@@ -35450,7 +35496,7 @@ export default function TileFabApp(): React.ReactElement {
 									onClick={toggleStaticFabAssemblePalette}
 									title="Process Loop, Bay Assembly, Bay Bank 조립 패턴 선택"
 								>
-									<LayoutTemplate size={14} /> ASSEMBLE
+									<LayoutTemplate size={14} /> 조립
 								</button>
 								<button
 									type="button"
@@ -36314,7 +36360,7 @@ export default function TileFabApp(): React.ReactElement {
 												setStatus(
 													activeMap.size === 0
 														? "빈 FAB · 드래그 또는 Enter로 첫 직선 레일을 만드세요"
-														: "BUILD · 직선 레일을 늘리거나 새로 만드세요",
+														: "레일 · 직선 레일을 늘리거나 새로 만드세요",
 												);
 												requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 											}}
@@ -40700,6 +40746,17 @@ function centerPortKeyboardRowIfObscured(
 	const row = session.currentRow;
 	const worldX = session.binding.slots.worldPositions[row * 2] as number;
 	const worldZ = session.binding.slots.worldPositions[row * 2 + 1] as number;
+	return centerWorldPointIfObscured(worldX, worldZ, canvas, camera, renderer, insets);
+}
+
+function centerWorldPointIfObscured(
+	worldX: number,
+	worldZ: number,
+	canvas: HTMLCanvasElement,
+	camera: Camera,
+	renderer: TileRenderer,
+	insets: Readonly<{ left?: number; right?: number; top?: number; bottom?: number }>,
+): boolean {
 	const frame = visibleCanvasFrame(canvas, insets);
 	const screen = renderer.worldToScreen({ x: worldX, y: worldZ }, camera);
 	// Keep the complete 44 px target ring inside the unobstructed frame. The label handles its own
@@ -40750,15 +40807,14 @@ function fitMapInsets(
 		const rect = element.getBoundingClientRect();
 		if (rect.right <= canvasRect.left || rect.left >= canvasRect.right) continue;
 		const isCameraControls = element.matches(".tilefab-camera-controls");
-		const isCompactTopCameraControls =
+		const isCompactHorizontalCameraControls =
 			isCameraControls &&
 			canvas.clientWidth <= 860 &&
-			rect.top <= canvasRect.top + 24 &&
+			rect.width > rect.height &&
 			rect.height <= Math.min(96, canvasRect.height * 0.25);
-		if (isCompactTopCameraControls) {
-			// In ordinary Port authoring the compact controls are a shallow top-right toolbar. Treating
-			// them as a full-height right wall can force factory-scale maps through FIT_MIN_ZOOM and
-			// hide their left edge behind Activity navigation.
+		if (isCompactHorizontalCameraControls) {
+			// The horizontal toolbar sits at the top or below Guide. Reserve its actual bottom edge,
+			// not a full-height right wall that can leave no room for a guided selection target.
 			top = Math.max(top, rect.bottom - canvasRect.top + 12);
 		} else if (
 			isCameraControls &&

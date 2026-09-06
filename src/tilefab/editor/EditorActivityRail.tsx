@@ -31,7 +31,7 @@ export function EditorActivityRail({
 	expanded,
 	guidedTargetActivity = null,
 	guidedTargetDescriptionId,
-	label = "Editor activities",
+	label = "편집 작업",
 	visibleActivities,
 	onActivityChange,
 	onBlockedActivityAttempt,
@@ -58,7 +58,7 @@ export function EditorActivityRail({
 					? activityAvailability.reason
 					: (activityAvailability.reason ?? definition.description);
 				const accessibleLabel = blocked
-					? `${definition.label}: ${definition.description}. Unavailable: ${activityAvailability.reason}`
+					? `${definition.label}: ${definition.description}. 사용 불가: ${activityAvailability.reason}`
 					: `${definition.label}: ${definition.description}`;
 
 				return (

@@ -60,7 +60,7 @@ describe("GuidedBuildPrimaryTarget", () => {
 			kind: "activity",
 			activity: "equip",
 		});
-		expect(activityTarget?.instruction).toContain("EQUIP");
+		expect(activityTarget?.instruction).toContain("장비");
 		expect(activityTarget?.instruction).not.toContain("강조된 OHB");
 
 		const toolTarget = resolveGuidedBuildPrimaryTarget({

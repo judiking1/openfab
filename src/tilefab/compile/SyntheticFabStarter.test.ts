@@ -21,6 +21,7 @@ import {
 } from "./SyntheticFabAssemblyPlan";
 import {
 	buildSyntheticFabStarter,
+	defaultSyntheticFabStarterProjectName,
 	defaultSyntheticFabStarterRequest,
 	SYNTHETIC_FAB_PRESET_CATALOG,
 	SYNTHETIC_FAB_STARTER_CATALOG,
@@ -37,6 +38,30 @@ import {
 import { LARGE_FAB_60_TOPOLOGY_SPEC } from "./SyntheticFabTopologySpec";
 
 describe("SyntheticFabStarter", () => {
+	it("keeps catalog default project names for default requests", () => {
+		for (const item of [...SYNTHETIC_FAB_STARTER_CATALOG, ...SYNTHETIC_FAB_PRESET_CATALOG]) {
+			expect(
+				defaultSyntheticFabStarterProjectName(defaultSyntheticFabStarterRequest(item.id)),
+			).toBe(item.defaultProjectName);
+		}
+	});
+
+	it.each([
+		[50, 50],
+		[73, 73],
+		[100, 100],
+		[49, 50],
+		[101, 100],
+	])("names normalized production configuration %i with %i Bays", (bayCount, expected) => {
+		const request = defaultSyntheticFabStarterRequest("production-fab-60");
+		const configured = { ...request, parameters: { ...request.parameters, bayCount } };
+		const before = JSON.stringify(configured);
+		expect(defaultSyntheticFabStarterProjectName(configured)).toBe(
+			`OpenFab ${expected}-Bay Rail Foundation`,
+		);
+		expect(JSON.stringify(configured)).toBe(before);
+	});
+
 	it("builds every public starter deterministically through ordinary authored rail", () => {
 		for (const [id, stepCount] of [
 			["blank", 0],
