@@ -32,6 +32,7 @@ import {
 	type StaticFabOrganizationBundleQuarterTurns,
 	staticFabOrganizationBundleError,
 	transformStaticFabOrganizationBundle,
+	validateFrozenStaticFabOrganizationBundle,
 } from "./StaticFabOrganizationBundle";
 import { type Cell, encodeRailCell } from "./TileMap";
 
@@ -286,6 +287,188 @@ describe("StaticFabOrganizationBundle", () => {
 		expect(staticFabOrganizationBundleError(forged)).toContain("source 모듈 수");
 		forged.sourceModuleCount--;
 		expect(staticFabOrganizationBundleError(forged)).toBeNull();
+	});
+
+	it.each([
+		"rail",
+		"equipment",
+		"switch",
+	] as const)("cooperatively proves cloned %s source with the same semantics", async (kind) => {
+		let source: StaticFabOrganizationBundle;
+		if (kind === "switch") {
+			const fixture = advancedSwitchFixture();
+			const captured = captureStaticFabOrganizationBundle(
+				fixture.document.map,
+				fixture.document.portEquipment,
+				fixture.document.getPatchSequence(),
+				organizationState([organizationRecord(1, "AREA", "Switch", [], [fixture.switchModule])]),
+				[1],
+				"DIRECT",
+			);
+			if (!captured.valid) throw new Error(captured.reason);
+			source = captured.bundle;
+		} else
+			source =
+				kind === "equipment"
+					? captureEquipmentOrganizationBundle()
+					: captureSingleOrganizationBundle();
+		const cloned = mutableBundle(source);
+		freezeBundleFixture(cloned);
+		let checkpoints = 0;
+		expect(
+			await validateFrozenStaticFabOrganizationBundle(
+				cloned,
+				async () => {
+					checkpoints++;
+				},
+				4,
+			),
+		).toBe(cloned);
+		expect(checkpoints).toBeGreaterThan(10);
+		expect(cloned).toEqual(source);
+		expect(staticFabOrganizationBundleError(cloned)).toBeNull();
+		let cachedCheckpoints = 0;
+		await validateFrozenStaticFabOrganizationBundle(
+			cloned,
+			async () => {
+				cachedCheckpoints++;
+			},
+			4,
+		);
+		expect(cachedCheckpoints).toBe(1);
+	});
+
+	it.each([
+		[
+			"source count",
+			(bundle: MutableBundle) => {
+				bundle.sourceModuleCount++;
+			},
+		],
+		[
+			"root closure",
+			(bundle: MutableBundle) => {
+				bundle.rootOrganizationIndices[0] = 999;
+			},
+		],
+		[
+			"edge geometry",
+			(bundle: MutableBundle) => {
+				if (bundle.railEdges[0]) bundle.railEdges[0].from.x += 2;
+			},
+		],
+		[
+			"membership",
+			(bundle: MutableBundle) => {
+				bundle.organizations[0]?.membership.railEdgeIndices.pop();
+			},
+		],
+		[
+			"port station",
+			(bundle: MutableBundle) => {
+				if (bundle.ports[0]) bundle.ports[0].stationMillimeters = 0x7fff_ffff;
+			},
+		],
+		[
+			"group reference",
+			(bundle: MutableBundle) => {
+				if (bundle.ports[0]) bundle.ports[0].equipmentGroupIndex = 999;
+			},
+		],
+	] as const)("retains synchronous rejection of invalid frozen %s", async (_label, mutate) => {
+		const cloned = mutableBundle(captureEquipmentOrganizationBundle());
+		mutate(cloned);
+		const expected = staticFabOrganizationBundleError(cloned);
+		expect(expected).not.toBeNull();
+		freezeBundleFixture(cloned);
+		await expect(
+			validateFrozenStaticFabOrganizationBundle(cloned, async () => {}, 4),
+		).rejects.toThrow();
+		expect(staticFabOrganizationBundleError(cloned)).toBe(expected);
+	});
+
+	it("does not publish a cache entry after final-checkpoint cancellation", async () => {
+		const source = captureEquipmentOrganizationBundle();
+		const reference = mutableBundle(source);
+		freezeBundleFixture(reference);
+		let total = 0;
+		await validateFrozenStaticFabOrganizationBundle(
+			reference,
+			async () => {
+				total++;
+			},
+			4,
+		);
+		const cancelled = mutableBundle(source);
+		freezeBundleFixture(cancelled);
+		let reached = 0;
+		const cancellation = new Error("cancel at final checkpoint");
+		await expect(
+			validateFrozenStaticFabOrganizationBundle(
+				cancelled,
+				async () => {
+					if (++reached === total) throw cancellation;
+				},
+				4,
+			),
+		).rejects.toBe(cancellation);
+		expect(reached).toBe(total);
+		let resumed = 0;
+		await validateFrozenStaticFabOrganizationBundle(
+			cancelled,
+			async () => {
+				resumed++;
+			},
+			4,
+		);
+		expect(resumed).toBe(total);
+	});
+
+	it("rejects an unfrozen descendant without treating a frozen root as proof", async () => {
+		const cloned = mutableBundle(captureSingleOrganizationBundle());
+		Object.freeze(cloned);
+		await expect(
+			validateFrozenStaticFabOrganizationBundle(cloned, async () => {}, 1),
+		).rejects.toThrow("fully frozen");
+		expect(Object.isFrozen(cloned.railEdges)).toBe(false);
+	});
+
+	it("never caches accessor-backed source and does not invoke getters during cooperative admission", async () => {
+		const cloned = mutableBundle(captureSingleOrganizationBundle());
+		let count = cloned.sourceModuleCount;
+		let reads = 0;
+		Object.defineProperty(cloned, "sourceModuleCount", {
+			enumerable: true,
+			configurable: true,
+			get: () => {
+				reads++;
+				return count;
+			},
+		});
+		freezeBundleFixture(cloned);
+		expect(staticFabOrganizationBundleError(cloned)).toBeNull();
+		count++;
+		expect(staticFabOrganizationBundleError(cloned)).toContain("source 모듈 수");
+		const readsBefore = reads;
+		await expect(
+			validateFrozenStaticFabOrganizationBundle(cloned, async () => {}, 1),
+		).rejects.toThrow("data properties");
+		expect(reads).toBe(readsBefore);
+	});
+
+	it.each([
+		0,
+		-1,
+		1.5,
+		Number.NaN,
+	])("rejects invalid cooperative operation budget %s", async (budget) => {
+		await expect(
+			validateFrozenStaticFabOrganizationBundle(
+				captureSingleOrganizationBundle(),
+				async () => {},
+				budget,
+			),
+		).rejects.toThrow("operation budget");
 	});
 
 	it("rejects unknown fields at every portable JSON nesting boundary", () => {
@@ -789,4 +972,10 @@ function recursivelyFrozen(value: unknown, seen = new Set<object>()): boolean {
 	seen.add(value);
 	if (!Object.isFrozen(value)) return false;
 	return Object.values(value).every((entry) => recursivelyFrozen(entry, seen));
+}
+
+function freezeBundleFixture(value: unknown): void {
+	if (typeof value !== "object" || value === null) return;
+	for (const child of Object.values(value)) freezeBundleFixture(child);
+	Object.freeze(value);
 }

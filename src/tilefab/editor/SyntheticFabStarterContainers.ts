@@ -1,24 +1,23 @@
+import { completeCooperativeSteps, createCooperativeTask } from "../core/CooperativeTask";
+import { freezeTransferDataContainersSteps } from "../core/ImmutableDataContainers";
+
 /**
- * Restore immutable ordinary containers after a Worker structured clone.
- * Typed-array bytes remain mutable and must still pass the existing checksum checks.
- * Freezing alone is not evidence that the prepared project is valid.
+ * Restore immutable ordinary data containers after a Worker structured clone.
+ * Typed-array bytes remain mutable and still require independent checksum checks.
  */
 export function freezeSyntheticFabStarterContainers(value: unknown): void {
-	const visited = new WeakSet<object>();
-	const pending: unknown[] = [value];
-	while (pending.length > 0) {
-		const current = pending.pop();
-		if (
-			typeof current !== "object" ||
-			current === null ||
-			ArrayBuffer.isView(current) ||
-			visited.has(current)
-		)
-			continue;
-		visited.add(current);
-		for (const child of Array.isArray(current) ? current : Object.values(current)) {
-			if (typeof child === "object" && child !== null) pending.push(child);
-		}
-		Object.freeze(current);
+	completeCooperativeSteps(freezeTransferDataContainersSteps(value));
+}
+
+export async function freezeSyntheticFabStarterContainersCooperatively(
+	value: unknown,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<void> {
+	const task = createCooperativeTask(freezeTransferDataContainersSteps(value));
+	while (!task.done) {
+		task.step(operationBudget);
+		await checkpoint();
 	}
+	task.finish();
 }

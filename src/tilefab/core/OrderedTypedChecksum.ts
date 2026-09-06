@@ -12,15 +12,22 @@ export class OrderedTypedChecksum {
 
 	addNumber(value: number): void {
 		this.addLength(1);
-		this.scalarView.setFloat64(0, value, true);
-		this.addBytes(this.scalarBytes);
+		this.addNumberValue(value);
 	}
 
 	addNumbers(values: readonly number[]): void {
 		this.addLength(values.length);
 		for (const value of values) {
-			this.scalarView.setFloat64(0, value, true);
-			this.addBytes(this.scalarBytes);
+			this.addNumberValue(value);
+		}
+	}
+
+	/** Preserve one sequence-length prefix while allowing a wide numeric field to yield. */
+	*addNumbersSteps(values: readonly number[]): Generator<void> {
+		this.addLength(values.length);
+		for (const value of values) {
+			this.addNumberValue(value);
+			yield;
 		}
 	}
 
@@ -118,6 +125,11 @@ export class OrderedTypedChecksum {
 	private addLength(value: number): void {
 		this.scalarView.setUint32(0, value, true);
 		this.addBytes(this.scalarBytes.subarray(0, 4));
+	}
+
+	private addNumberValue(value: number): void {
+		this.scalarView.setFloat64(0, value, true);
+		this.addBytes(this.scalarBytes);
 	}
 
 	private addBytes(bytes: Uint8Array): void {

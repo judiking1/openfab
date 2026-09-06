@@ -6,12 +6,20 @@ import {
 	validateAdvancedSwitchTopology,
 } from "./AdvancedSwitch";
 import {
+	type CooperativeTask,
+	completeCooperativeSteps,
+	createCooperativeTask,
+} from "./CooperativeTask";
+import {
+	createCanonicalPortEquipmentStateBuilder,
 	type EquipmentGroupRecord,
 	equipmentGroupError,
 	type PortEquipmentState,
 	STK_AUTHORING_TEMPLATES,
 	type StkAuthoringTemplate,
 } from "./EquipmentGroup";
+import { assertFrozenDataContainersSteps } from "./ImmutableDataContainers";
+import { validatePortEquipmentActivation } from "./PortEquipmentActivation";
 import { portEquipmentLayoutError } from "./PortEquipmentLayoutValidator";
 import {
 	type AdvancedSwitchRouteRole,
@@ -23,6 +31,7 @@ import {
 } from "./PortRecord";
 import {
 	buildRailModuleOwnershipIndex,
+	createRailModuleOwnershipIndexCompiler,
 	type DirectedRailEdge,
 	type RailModuleOwnershipIndex,
 	railModuleOwnershipIndexMatchesMap,
@@ -36,6 +45,7 @@ import {
 } from "./railShape";
 import {
 	compareDirectedRailEdges,
+	createCanonicalStaticFabOrganizationStateBuilder,
 	normalizeStaticFabOrganizationName,
 	STATIC_FAB_ORGANIZATION_COLORS,
 	STATIC_FAB_ORGANIZATION_KINDS,
@@ -51,6 +61,7 @@ import {
 	staticFabOrganizationRailOwnershipIndex,
 	staticFabOrganizationStateError,
 } from "./StaticFabOrganization";
+import { validateStaticFabOrganizationActivation } from "./StaticFabOrganizationActivation";
 import type { StaticFabOrganizationSelectionMode } from "./StaticFabOrganizationSelection";
 import { type Cell, encodeRailCell, TileMap } from "./TileMap";
 
@@ -667,6 +678,119 @@ export function staticFabOrganizationBundleError(bundle: unknown): string | null
 }
 
 /**
+ * Independently validate an immutable portable source without blocking a caller's event loop.
+ * The caller owns scheduling and cancellation. A completed cache entry is published only after
+ * the final checkpoint; exceptions from scheduling propagate unchanged.
+ */
+export async function validateFrozenStaticFabOrganizationBundle(
+	input: unknown,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<StaticFabOrganizationBundle> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0) {
+		throw new RangeError("Bundle validation operation budget must be a positive safe integer.");
+	}
+	if (isRecord(input) && validatedFrozenBundles.has(input)) {
+		await checkpoint();
+		return input as unknown as StaticFabOrganizationBundle;
+	}
+	const run = async <Result>(task: CooperativeTask<Result>): Promise<Result> => {
+		while (!task.done) {
+			task.step(operationBudget);
+			await checkpoint();
+		}
+		return task.finish();
+	};
+	await run(createCooperativeTask(assertFrozenDataContainersSteps(input)));
+	const structureError = await run(
+		createCooperativeTask(staticFabOrganizationBundleStructureSteps(input)),
+	);
+	if (structureError) throw new Error(structureError);
+	const bundle = input as StaticFabOrganizationBundle;
+	const map = await run(createCooperativeTask(reconstructPortableBundleMapSteps(bundle)));
+	if (typeof map === "string") throw new Error(map);
+	const ownership = await run(createRailModuleOwnershipIndexCompiler(map));
+	if (ownership.modules.length !== bundle.sourceModuleCount) {
+		throw new Error(
+			`조직 번들 source 모듈 수 ${bundle.sourceModuleCount}개가 복원 결과 ${ownership.modules.length}개와 일치하지 않습니다`,
+		);
+	}
+	const portEquipment = await run(createCooperativeTask(canonicalBundlePortEquipmentSteps(bundle)));
+	await validatePortEquipmentActivation(map, portEquipment, checkpoint, operationBudget);
+	const organizations = await run(createCooperativeTask(canonicalBundleOrganizationSteps(bundle)));
+	await validateStaticFabOrganizationActivation(
+		map,
+		portEquipment,
+		organizations,
+		ownership,
+		checkpoint,
+		operationBudget,
+	);
+	await checkpoint();
+	validatedFrozenBundles.add(bundle);
+	return bundle;
+}
+
+function* canonicalBundlePortEquipmentSteps(
+	bundle: StaticFabOrganizationBundle,
+): Generator<void, PortEquipmentState> {
+	const builder = createCanonicalPortEquipmentStateBuilder(
+		bundle.ports.length + 1,
+		bundle.equipmentGroups.length + 1,
+	);
+	for (let index = 0; index < bundle.ports.length; index++) {
+		builder.addPort(
+			runtimePortRecord(bundle.ports[index] as StaticFabOrganizationBundlePort, index + 1),
+		);
+		yield;
+	}
+	for (let index = 0; index < bundle.equipmentGroups.length; index++) {
+		builder.addEquipmentGroup(
+			runtimeEquipmentGroup(
+				bundle.equipmentGroups[index] as StaticFabOrganizationBundleEquipmentGroup,
+				index + 1,
+			),
+		);
+		yield;
+	}
+	return builder.finish();
+}
+
+function* canonicalBundleOrganizationSteps(
+	bundle: StaticFabOrganizationBundle,
+): Generator<void, StaticFabOrganizationState> {
+	const builder = createCanonicalStaticFabOrganizationStateBuilder(bundle.organizations.length + 1);
+	for (let index = 0; index < bundle.organizations.length; index++) {
+		const organization = bundle.organizations[index] as StaticFabOrganizationBundleOrganization;
+		for (const parent of organization.parentOrganizationIndices) {
+			builder.addParentOrganizationId(parent + 1);
+			yield;
+		}
+		for (const edge of organization.membership.railEdgeIndices) {
+			builder.addRailEdge(bundle.railEdges[edge] as DirectedRailEdge);
+			yield;
+		}
+		for (const advancedSwitch of organization.membership.advancedSwitchIndices) {
+			builder.addAdvancedSwitchId(advancedSwitch + 1);
+			yield;
+		}
+		for (const group of organization.membership.equipmentGroupIndices) {
+			builder.addEquipmentGroupId(group + 1);
+			yield;
+		}
+		builder.finishRecord({
+			id: index + 1,
+			kind: organization.kind,
+			name: organization.name,
+			description: organization.properties.description,
+			color: organization.properties.color,
+		});
+		yield;
+	}
+	return builder.finish();
+}
+
+/**
  * Validate one untrusted decode boundary and return a canonical immutable graph. Callers keep the
  * prepared object in memory so pointer previews never repeat the full structural validation.
  */
@@ -695,6 +819,37 @@ export function prepareStaticFabOrganizationBundle(
 }
 
 function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | null {
+	const structureError = completeCooperativeSteps(staticFabOrganizationBundleStructureSteps(input));
+	if (structureError) return structureError;
+	const bundle = input as StaticFabOrganizationBundle;
+	const reconstructed = reconstructPortableBundleMap(bundle);
+	if (typeof reconstructed === "string") return reconstructed;
+	// Reuse this exact reconstructed source partition during organization validation below.
+	const ownership = staticFabOrganizationRailOwnershipIndex(reconstructed);
+	if (ownership.modules.length !== bundle.sourceModuleCount) {
+		return `조직 번들 source 모듈 수 ${bundle.sourceModuleCount}개가 복원 결과 ${ownership.modules.length}개와 일치하지 않습니다`;
+	}
+
+	const portEquipment = runtimePortEquipmentState(bundle);
+	const equipmentLayoutError = portEquipmentLayoutError(reconstructed, portEquipment);
+	if (equipmentLayoutError) {
+		return `조직 번들 포트/장비 배치가 유효하지 않습니다 · ${equipmentLayoutError}`;
+	}
+	const organizationState = runtimeOrganizationState(bundle);
+	const organizationStateError = staticFabOrganizationStateError(
+		reconstructed,
+		portEquipment,
+		organizationState,
+	);
+	if (organizationStateError) {
+		return `조직 번들 조직 상태가 유효하지 않습니다 · ${organizationStateError}`;
+	}
+	return null;
+}
+
+function* staticFabOrganizationBundleStructureSteps(
+	input: unknown,
+): Generator<void, string | null> {
 	if (!isRecord(input)) return "조직 번들은 객체여야 합니다";
 	if (!hasExactKeys(input, BUNDLE_KEYS)) {
 		return "조직 번들 최상위 필드가 portable v1 스키마와 정확히 일치해야 합니다";
@@ -738,7 +893,13 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 	) {
 		return "조직 번들 payload 개수가 제품 한계를 벗어났습니다";
 	}
-	if (!canonicalIndexArray(bundle.rootOrganizationIndices, bundle.organizations.length, false)) {
+	if (
+		!(yield* canonicalIndexArraySteps(
+			bundle.rootOrganizationIndices,
+			bundle.organizations.length,
+			false,
+		))
+	) {
 		return "루트 조직 local index는 중복 없는 canonical 순서여야 합니다";
 	}
 
@@ -749,6 +910,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 	let maxX = Number.NEGATIVE_INFINITY;
 	let maxY = Number.NEGATIVE_INFINITY;
 	for (const edge of bundle.railEdges) {
+		yield;
 		if (
 			!isRecord(edge) ||
 			!hasExactKeys(edge, EDGE_KEYS) ||
@@ -782,6 +944,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 		maxY = Math.max(maxY, edge.from.y, edge.to.y);
 	}
 	for (let index = 0; index < bundle.advancedSwitches.length; index++) {
+		yield;
 		const portable = bundle.advancedSwitches[index] as StaticFabOrganizationBundleAdvancedSwitch;
 		if (
 			!isRecord(portable) ||
@@ -803,13 +966,16 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 		if (error) return `조직 번들 고급 스위치 ${index}: ${error}`;
 		const geometry = deriveAdvancedSwitchGeometry(candidate);
 		for (const cell of geometry.claimedCells) {
+			yield;
 			minX = Math.min(minX, cell.x);
 			minY = Math.min(minY, cell.y);
 			maxX = Math.max(maxX, cell.x);
 			maxY = Math.max(maxY, cell.y);
 		}
 		for (const route of geometry.routes) {
+			yield;
 			for (let routeIndex = 1; routeIndex < route.length; routeIndex++) {
+				yield;
 				if (
 					!railEdgeKeys.has(
 						staticFabOrganizationEdgeKey({
@@ -826,11 +992,12 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 
 	const claimedPorts = new Set<number>();
 	for (let groupIndex = 0; groupIndex < bundle.equipmentGroups.length; groupIndex++) {
+		yield;
 		const group = bundle.equipmentGroups[groupIndex] as StaticFabOrganizationBundleEquipmentGroup;
 		if (!portableEquipmentGroupHasExactKeys(group)) {
 			return `조직 번들 장비 그룹 ${groupIndex} 필드가 portable v1 스키마와 정확히 일치해야 합니다`;
 		}
-		if (!canonicalIndexArray(group.portIndices, bundle.ports.length, true)) {
+		if (!(yield* canonicalIndexArraySteps(group.portIndices, bundle.ports.length, true))) {
 			return `조직 번들 장비 그룹 ${groupIndex}의 port index가 canonical하지 않습니다`;
 		}
 		const runtimeGroup = runtimeEquipmentGroup(group, groupIndex + 1);
@@ -840,6 +1007,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 			return `조직 번들 장비 그룹 ${groupIndex}은 legacy CUSTOM STK를 사용할 수 없습니다`;
 		}
 		for (const portIndex of group.portIndices) {
+			yield;
 			if (claimedPorts.has(portIndex)) return `조직 번들 port ${portIndex}가 여러 그룹에 속합니다`;
 			claimedPorts.add(portIndex);
 			if (bundle.ports[portIndex]?.equipmentGroupIndex !== groupIndex) {
@@ -849,6 +1017,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 	}
 	if (claimedPorts.size !== bundle.ports.length) return "조직 번들에 소유되지 않은 port가 있습니다";
 	for (let index = 0; index < bundle.ports.length; index++) {
+		yield;
 		const port = bundle.ports[index] as StaticFabOrganizationBundlePort;
 		if (
 			!isRecord(port) ||
@@ -904,6 +1073,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 	const referencedGroups = new Set<number>();
 	const namesByKind = new Map<StaticFabOrganizationKind, Set<string>>();
 	for (let index = 0; index < bundle.organizations.length; index++) {
+		yield;
 		const organization = bundle.organizations[index] as StaticFabOrganizationBundleOrganization;
 		if (
 			!isRecord(organization) ||
@@ -918,11 +1088,11 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 		const metadataError = portableOrganizationMetadataError(organization, namesByKind);
 		if (metadataError) return `조직 번들 조직 ${index}: ${metadataError}`;
 		if (
-			!canonicalIndexArray(
+			!(yield* canonicalIndexArraySteps(
 				organization.parentOrganizationIndices,
 				bundle.organizations.length,
 				true,
-			)
+			))
 		) {
 			return `조직 번들 조직 ${index}의 부모 local index가 canonical하지 않습니다`;
 		}
@@ -931,13 +1101,21 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 		}
 		const membership = organization.membership;
 		if (
-			!canonicalIndexArray(membership.railEdgeIndices, bundle.railEdges.length, true) ||
-			!canonicalIndexArray(
+			!(yield* canonicalIndexArraySteps(
+				membership.railEdgeIndices,
+				bundle.railEdges.length,
+				true,
+			)) ||
+			!(yield* canonicalIndexArraySteps(
 				membership.advancedSwitchIndices,
 				bundle.advancedSwitches.length,
 				true,
-			) ||
-			!canonicalIndexArray(membership.equipmentGroupIndices, bundle.equipmentGroups.length, true)
+			)) ||
+			!(yield* canonicalIndexArraySteps(
+				membership.equipmentGroupIndices,
+				bundle.equipmentGroups.length,
+				true,
+			))
 		) {
 			return `조직 번들 조직 ${index}의 membership local index가 canonical하지 않습니다`;
 		}
@@ -950,6 +1128,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 			return `조직 번들 조직 ${index}의 membership이 비어 있습니다`;
 		}
 		for (const edgeIndex of membership.railEdgeIndices) {
+			yield;
 			const conflict = claimPortableMembership(
 				railOwnersByKind,
 				organization.kind,
@@ -960,6 +1139,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 			referencedEdges.add(edgeIndex);
 		}
 		for (const switchIndex of membership.advancedSwitchIndices) {
+			yield;
 			const conflict = claimPortableMembership(
 				switchOwnersByKind,
 				organization.kind,
@@ -970,6 +1150,7 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 			referencedSwitches.add(switchIndex);
 		}
 		for (const groupIndex of membership.equipmentGroupIndices) {
+			yield;
 			const conflict = claimPortableMembership(
 				groupOwnersByKind,
 				organization.kind,
@@ -979,13 +1160,20 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 			if (conflict) return conflict;
 			referencedGroups.add(groupIndex);
 		}
-		const organizationEdgeKeys = new Set(
-			membership.railEdgeIndices.map((edgeIndex) =>
+		const organizationEdgeKeys = new Set<string>();
+		for (const edgeIndex of membership.railEdgeIndices) {
+			organizationEdgeKeys.add(
 				staticFabOrganizationEdgeKey(bundle.railEdges[edgeIndex] as DirectedRailEdge),
-			),
-		);
-		const organizationSwitches = new Set(membership.advancedSwitchIndices);
+			);
+			yield;
+		}
+		const organizationSwitches = new Set<number>();
+		for (const switchIndex of membership.advancedSwitchIndices) {
+			organizationSwitches.add(switchIndex);
+			yield;
+		}
 		for (const switchIndex of organizationSwitches) {
+			yield;
 			const portable = bundle.advancedSwitches[
 				switchIndex
 			] as StaticFabOrganizationBundleAdvancedSwitch;
@@ -998,7 +1186,9 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 				movementMask: portable.movementMask,
 			});
 			for (const route of geometry.routes) {
+				yield;
 				for (let routeIndex = 1; routeIndex < route.length; routeIndex++) {
+					yield;
 					const edgeKey = staticFabOrganizationEdgeKey({
 						from: route[routeIndex - 1] as Cell,
 						to: route[routeIndex] as Cell,
@@ -1010,8 +1200,10 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 			}
 		}
 		for (const groupIndex of membership.equipmentGroupIndices) {
+			yield;
 			const group = bundle.equipmentGroups[groupIndex] as StaticFabOrganizationBundleEquipmentGroup;
 			for (const portIndex of group.portIndices) {
+				yield;
 				const route = (bundle.ports[portIndex] as StaticFabOrganizationBundlePort).route;
 				const supported =
 					route.kind === "CARDINAL_CELL"
@@ -1023,7 +1215,8 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 			}
 		}
 	}
-	if (portableOrganizationCycle(bundle.organizations)) return "조직 번들 관계에 순환이 있습니다";
+	if (yield* portableOrganizationCycleSteps(bundle.organizations))
+		return "조직 번들 관계에 순환이 있습니다";
 	if (
 		referencedEdges.size !== bundle.railEdges.length ||
 		referencedSwitches.size !== bundle.advancedSwitches.length ||
@@ -1032,31 +1225,9 @@ function staticFabOrganizationBundleErrorUnchecked(input: unknown): string | nul
 		return "조직 번들에 어떤 조직도 소유하지 않는 payload가 있습니다";
 	}
 
-	const closureError = portableOrganizationRootClosureError(bundle);
+	const closureError = yield* portableOrganizationRootClosureErrorSteps(bundle);
 	if (closureError) return closureError;
 
-	const reconstructed = reconstructPortableBundleMap(bundle);
-	if (typeof reconstructed === "string") return reconstructed;
-	// Reuse this exact reconstructed source partition during organization validation below.
-	const ownership = staticFabOrganizationRailOwnershipIndex(reconstructed);
-	if (ownership.modules.length !== bundle.sourceModuleCount) {
-		return `조직 번들 source 모듈 수 ${bundle.sourceModuleCount}개가 복원 결과 ${ownership.modules.length}개와 일치하지 않습니다`;
-	}
-
-	const portEquipment = runtimePortEquipmentState(bundle);
-	const equipmentLayoutError = portEquipmentLayoutError(reconstructed, portEquipment);
-	if (equipmentLayoutError) {
-		return `조직 번들 포트/장비 배치가 유효하지 않습니다 · ${equipmentLayoutError}`;
-	}
-	const organizationState = runtimeOrganizationState(bundle);
-	const organizationStateError = staticFabOrganizationStateError(
-		reconstructed,
-		portEquipment,
-		organizationState,
-	);
-	if (organizationStateError) {
-		return `조직 번들 조직 상태가 유효하지 않습니다 · ${organizationStateError}`;
-	}
 	return null;
 }
 
@@ -1460,25 +1631,35 @@ function portableOrganizationMetadataError(
 	return null;
 }
 
-function portableOrganizationCycle(
+function* portableOrganizationCycleSteps(
 	organizations: readonly StaticFabOrganizationBundleOrganization[],
-): boolean {
+): Generator<void, boolean> {
 	const children = new Map<number, number[]>();
-	const remaining = organizations.map(
-		(organization) => organization.parentOrganizationIndices.length,
-	);
+	const remaining: number[] = [];
+	for (const organization of organizations) {
+		remaining.push(organization.parentOrganizationIndices.length);
+		yield;
+	}
 	for (let childIndex = 0; childIndex < organizations.length; childIndex++) {
+		yield;
 		for (const parentIndex of organizations[childIndex]?.parentOrganizationIndices ?? []) {
+			yield;
 			const list = children.get(parentIndex);
 			if (list) list.push(childIndex);
 			else children.set(parentIndex, [childIndex]);
 		}
 	}
-	const ready = remaining.flatMap((count, index) => (count === 0 ? [index] : []));
+	const ready: number[] = [];
+	for (let index = 0; index < remaining.length; index++) {
+		if (remaining[index] === 0) ready.push(index);
+		yield;
+	}
 	let visited = 0;
 	for (let offset = 0; offset < ready.length; offset++) {
+		yield;
 		visited++;
 		for (const childIndex of children.get(ready[offset] as number) ?? []) {
+			yield;
 			remaining[childIndex] = (remaining[childIndex] as number) - 1;
 			if (remaining[childIndex] === 0) ready.push(childIndex);
 		}
@@ -1486,29 +1667,43 @@ function portableOrganizationCycle(
 	return visited !== organizations.length;
 }
 
-function portableOrganizationRootClosureError(bundle: StaticFabOrganizationBundle): string | null {
+function* portableOrganizationRootClosureErrorSteps(
+	bundle: StaticFabOrganizationBundle,
+): Generator<void, string | null> {
 	if (bundle.captureMode === "DIRECT") {
-		if (
-			bundle.rootOrganizationIndices.length !== bundle.organizations.length ||
-			bundle.rootOrganizationIndices.some((index, position) => index !== position)
-		) {
+		if (bundle.rootOrganizationIndices.length !== bundle.organizations.length) {
 			return "DIRECT 조직 번들은 포함된 모든 조직을 명시적 루트로 기록해야 합니다";
+		}
+		for (let position = 0; position < bundle.rootOrganizationIndices.length; position++) {
+			if (bundle.rootOrganizationIndices[position] !== position) {
+				return "DIRECT 조직 번들은 포함된 모든 조직을 명시적 루트로 기록해야 합니다";
+			}
+			yield;
 		}
 		return null;
 	}
 
 	const children = new Map<number, number[]>();
 	for (let childIndex = 0; childIndex < bundle.organizations.length; childIndex++) {
+		yield;
 		for (const parentIndex of bundle.organizations[childIndex]?.parentOrganizationIndices ?? []) {
+			yield;
 			const list = children.get(parentIndex);
 			if (list) list.push(childIndex);
 			else children.set(parentIndex, [childIndex]);
 		}
 	}
-	const reached = new Set(bundle.rootOrganizationIndices);
-	const pending = [...bundle.rootOrganizationIndices];
+	const reached = new Set<number>();
+	const pending: number[] = [];
+	for (const index of bundle.rootOrganizationIndices) {
+		reached.add(index);
+		pending.push(index);
+		yield;
+	}
 	for (let offset = 0; offset < pending.length; offset++) {
+		yield;
 		for (const childIndex of children.get(pending[offset] as number) ?? []) {
+			yield;
 			if (reached.has(childIndex)) continue;
 			reached.add(childIndex);
 			pending.push(childIndex);
@@ -1520,6 +1715,12 @@ function portableOrganizationRootClosureError(bundle: StaticFabOrganizationBundl
 }
 
 function reconstructPortableBundleMap(bundle: StaticFabOrganizationBundle): TileMap | string {
+	return completeCooperativeSteps(reconstructPortableBundleMapSteps(bundle));
+}
+
+function* reconstructPortableBundleMapSteps(
+	bundle: StaticFabOrganizationBundle,
+): Generator<void, TileMap | string> {
 	const cellStates = new Map<
 		string,
 		{ readonly x: number; readonly y: number; incoming: number; outgoing: number }
@@ -1533,6 +1734,7 @@ function reconstructPortableBundleMap(bundle: StaticFabOrganizationBundle): Tile
 		return created;
 	};
 	for (const edge of bundle.railEdges) {
+		yield;
 		const direction = directionBetween(edge.from, edge.to);
 		if (direction === null) {
 			return "조직 번들 레일 edge를 TileMap으로 복원할 수 없습니다";
@@ -1543,6 +1745,7 @@ function reconstructPortableBundleMap(bundle: StaticFabOrganizationBundle): Tile
 
 	const map = new TileMap();
 	for (const state of cellStates.values()) {
+		yield;
 		map.setEncoded(
 			state.x,
 			state.y,
@@ -1550,6 +1753,7 @@ function reconstructPortableBundleMap(bundle: StaticFabOrganizationBundle): Tile
 		);
 	}
 	for (let index = 0; index < bundle.advancedSwitches.length; index++) {
+		yield;
 		const portable = bundle.advancedSwitches[index] as StaticFabOrganizationBundleAdvancedSwitch;
 		const record = {
 			id: index + 1,
@@ -1568,6 +1772,7 @@ function reconstructPortableBundleMap(bundle: StaticFabOrganizationBundle): Tile
 		}
 	}
 	for (let index = 0; index < bundle.advancedSwitches.length; index++) {
+		yield;
 		const record = map.getAdvancedSwitch(index + 1);
 		if (!record) return `조직 번들 고급 스위치 ${index}이 누락되었습니다`;
 		const issues = validateAdvancedSwitchTopology((x, y) => map.getEncoded(x, y), record);
@@ -1579,47 +1784,11 @@ function reconstructPortableBundleMap(bundle: StaticFabOrganizationBundle): Tile
 }
 
 function runtimePortEquipmentState(bundle: StaticFabOrganizationBundle): PortEquipmentState {
-	return {
-		nextPortId: bundle.ports.length + 1,
-		nextEquipmentGroupId: bundle.equipmentGroups.length + 1,
-		ports: bundle.ports.map((port, index) => runtimePortRecord(port, index + 1)),
-		equipmentGroups: bundle.equipmentGroups.map((group, index) =>
-			runtimeEquipmentGroup(group, index + 1),
-		),
-	};
+	return completeCooperativeSteps(canonicalBundlePortEquipmentSteps(bundle));
 }
 
 function runtimeOrganizationState(bundle: StaticFabOrganizationBundle): StaticFabOrganizationState {
-	return {
-		nextOrganizationId: bundle.organizations.length + 1,
-		records: bundle.organizations.map((organization, index) => ({
-			id: index + 1,
-			kind: organization.kind,
-			name: organization.name,
-			parentOrganizationIds: organization.parentOrganizationIndices.map(
-				(parentIndex) => parentIndex + 1,
-			),
-			properties: {
-				description: organization.properties.description,
-				color: organization.properties.color,
-			},
-			membership: {
-				railEdges: organization.membership.railEdgeIndices.map((edgeIndex) => {
-					const edge = bundle.railEdges[edgeIndex] as DirectedRailEdge;
-					return {
-						from: { x: edge.from.x, y: edge.from.y },
-						to: { x: edge.to.x, y: edge.to.y },
-					};
-				}),
-				advancedSwitchIds: organization.membership.advancedSwitchIndices.map(
-					(switchIndex) => switchIndex + 1,
-				),
-				equipmentGroupIds: organization.membership.equipmentGroupIndices.map(
-					(groupIndex) => groupIndex + 1,
-				),
-			},
-		})),
-	};
+	return completeCooperativeSteps(canonicalBundleOrganizationSteps(bundle));
 }
 
 function claimPortableMembership(
@@ -1742,14 +1911,15 @@ function captureFailure(
 	return Object.freeze({ valid: false, bundle: null, code, reason });
 }
 
-function canonicalIndexArray(
+function* canonicalIndexArraySteps(
 	values: readonly number[],
 	upperBound: number,
 	allowEmpty: boolean,
-): boolean {
+): Generator<void, boolean> {
 	if (!allowEmpty && values.length === 0) return false;
 	let previous = -1;
 	for (const value of values) {
+		yield;
 		if (!validIndex(value, upperBound) || value <= previous) return false;
 		previous = value;
 	}
@@ -1788,15 +1958,13 @@ function portableEquipmentGroupHasExactKeys(group: unknown): boolean {
 	return false;
 }
 
-function recursivelyFrozenObject(value: unknown, seen = new Set<object>()): boolean {
-	if (typeof value !== "object" || value === null) return true;
-	if (seen.has(value)) return true;
-	if (!Object.isFrozen(value)) return false;
-	seen.add(value);
-	for (const child of Object.values(value)) {
-		if (!recursivelyFrozenObject(child, seen)) return false;
+function recursivelyFrozenObject(value: unknown): boolean {
+	try {
+		completeCooperativeSteps(assertFrozenDataContainersSteps(value));
+		return true;
+	} catch {
+		return false;
 	}
-	return true;
 }
 
 function positiveBoundedCount(value: number, maximum: number): boolean {

@@ -28,7 +28,10 @@ import { isSyntheticFabStarterRouteGeometry } from "../compile/SyntheticFabStart
 import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import { ALL_DIRECTIONS, DIR_E, type Direction } from "../core/railShape";
 import { staticFabOrganizationBundleError } from "../core/StaticFabOrganizationBundle";
-import { staticFabOrganizationBundleFingerprint } from "../core/StaticFabOrganizationBundlePlacement";
+import {
+	fingerprintFrozenStaticFabOrganizationBundleCooperatively,
+	staticFabOrganizationBundleFingerprint,
+} from "../core/StaticFabOrganizationBundlePlacement";
 import {
 	checksumRailMirrorSnapshot,
 	RailChecksumAccumulator,
@@ -38,7 +41,12 @@ import type {
 	SyntheticFabStarterWorkerRequest,
 	SyntheticFabStarterWorkerResponse,
 } from "../worker/SyntheticFabStarterProtocol";
-import { freezeSyntheticFabStarterContainers } from "./SyntheticFabStarterContainers";
+import { freezeSyntheticFabStarterContainersCooperatively } from "./SyntheticFabStarterContainers";
+
+export interface SyntheticFabStarterAdmissionScheduler {
+	now(): number;
+	yield(): Promise<void>;
+}
 
 export interface SyntheticFabStarterWorkerPort {
 	onmessage: ((event: MessageEvent<SyntheticFabStarterWorkerResponse>) => void) | null;
@@ -51,7 +59,9 @@ export interface SyntheticFabStarterWorkerPort {
 export class SyntheticFabStarterBridge {
 	private readonly createWorker: () => SyntheticFabStarterWorkerPort;
 	private readonly timeoutMilliseconds: number;
+	private readonly admissionScheduler: SyntheticFabStarterAdmissionScheduler;
 	private worker: SyntheticFabStarterWorkerPort | null = null;
+	private activeRequestToken: object | null = null;
 	private reject: ((error: Error) => void) | null = null;
 	private timeout: ReturnType<typeof globalThis.setTimeout> | null = null;
 	private nextRequestId = 1;
@@ -62,9 +72,14 @@ export class SyntheticFabStarterBridge {
 				type: "module",
 			}) as SyntheticFabStarterWorkerPort,
 		timeoutMilliseconds = 30_000,
+		admissionScheduler: SyntheticFabStarterAdmissionScheduler = {
+			now: () => performance.now(),
+			yield: yieldSyntheticFabStarterAdmission,
+		},
 	) {
 		this.createWorker = createWorker;
 		this.timeoutMilliseconds = timeoutMilliseconds;
+		this.admissionScheduler = admissionScheduler;
 	}
 
 	prepare(request: SyntheticFabStarterRequest): Promise<PreparedSyntheticFabStarter> {
@@ -96,16 +111,25 @@ export class SyntheticFabStarterBridge {
 			return Promise.reject(normalizeWorkerError(error, "FAB starter Worker creation failed."));
 		}
 		this.worker = worker;
+		const token = {};
+		this.activeRequestToken = token;
 		const requestId = this.nextRequestId++;
 		return new Promise((resolve, reject) => {
 			this.reject = reject;
+			const isCurrent = (): boolean => this.worker === worker && this.activeRequestToken === token;
+			const assertCurrent = (): void => {
+				if (!isCurrent())
+					throw new DOMException("FAB starter preparation cancelled.", "AbortError");
+			};
 			const fail = (error: Error): void => {
-				if (this.worker !== worker) return;
+				if (!isCurrent()) return;
 				this.reject = null;
 				this.releaseWorker();
 				reject(error);
 			};
+			let admitting = false;
 			worker.onmessage = (event) => {
+				if (!isCurrent() || admitting) return;
 				const response = event.data;
 				if (!isSyntheticFabStarterWorkerResponse(response)) {
 					fail(new Error("FAB starter Worker returned a malformed response."));
@@ -119,33 +143,60 @@ export class SyntheticFabStarterBridge {
 					fail(new Error(response.message));
 					return;
 				}
-				try {
-					// Structured clone drops Object.freeze. Restore the container boundary before
-					// validation so repeated checks can reuse only proven immutable bundle data.
-					freezeSyntheticFabStarterContainers(response.prepared);
-				} catch (error) {
-					fail(normalizeWorkerError(error, "FAB starter Worker response could not be frozen."));
-					return;
-				}
-				if (
-					!preparedMatchesRequest(
-						response.prepared,
-						requestFingerprint,
-						expectedPlanFingerprint,
-						assemblyPlan,
-						pairedCirculationPlan,
-						fullFabPlan,
-						parallelHallPlan,
-						centralSpinePlan,
-						productionPlan,
+				admitting = true;
+				const admit = async (): Promise<void> => {
+					let sliceStart = this.admissionScheduler.now();
+					const checkpoint = async (force = false): Promise<void> => {
+						assertCurrent();
+						if (force || this.admissionScheduler.now() - sliceStart >= 4) {
+							await this.admissionScheduler.yield();
+							assertCurrent();
+							sliceStart = this.admissionScheduler.now();
+						}
+					};
+					await freezeSyntheticFabStarterContainersCooperatively(response.prepared, checkpoint);
+					const bundle = response.prepared.placementBundle;
+					if (bundle !== null && bundle !== undefined) {
+						try {
+							const fingerprint = await fingerprintFrozenStaticFabOrganizationBundleCooperatively(
+								bundle,
+								checkpoint,
+							);
+							if (fingerprint !== response.prepared.placementBundleFingerprint) {
+								throw new Error("FAB starter bundle fingerprint does not match its source.");
+							}
+						} catch (error) {
+							if (error instanceof Error && error.name === "AbortError") throw error;
+							throw new Error("FAB starter Worker returned a mismatched prepared project.", {
+								cause: error,
+							});
+						}
+					}
+					await checkpoint(true);
+					// Typed bytes remain mutable. Recheck the complete request and snapshot after
+					// the last suspension and publish without another intervening await.
+					if (
+						!preparedMatchesRequest(
+							response.prepared,
+							requestFingerprint,
+							expectedPlanFingerprint,
+							assemblyPlan,
+							pairedCirculationPlan,
+							fullFabPlan,
+							parallelHallPlan,
+							centralSpinePlan,
+							productionPlan,
+						)
 					)
-				) {
-					fail(new Error("FAB starter Worker returned a mismatched prepared project."));
-					return;
-				}
-				this.releaseWorker();
-				this.reject = null;
-				resolve(response.prepared);
+						throw new Error("FAB starter Worker returned a mismatched prepared project.");
+					assertCurrent();
+					this.releaseWorker();
+					this.reject = null;
+					resolve(response.prepared);
+				};
+				void admit().catch((error: unknown) => {
+					fail(normalizeWorkerError(error, "FAB starter Worker response could not be validated."));
+				});
 			};
 			worker.onmessageerror = () => {
 				fail(new Error("FAB starter Worker response could not be decoded."));
@@ -180,6 +231,7 @@ export class SyntheticFabStarterBridge {
 	}
 
 	private releaseWorker(): void {
+		this.activeRequestToken = null;
 		if (this.timeout !== null) {
 			globalThis.clearTimeout(this.timeout);
 			this.timeout = null;
@@ -213,6 +265,7 @@ export async function independentlyVerifyPreparedSyntheticFabStarter(
 	signal.addEventListener("abort", cancel, { once: true });
 	try {
 		const independent = await bridge.prepare(request);
+		if (signal.aborted) throw new DOMException("FAB starter verification cancelled.", "AbortError");
 		if (!preparedSyntheticFabStarterMatchesIndependentPreparation(prepared, independent, request)) {
 			throw new Error("Prepared FAB does not match an independent materialization of its plan.");
 		}
@@ -221,6 +274,14 @@ export async function independentlyVerifyPreparedSyntheticFabStarter(
 		signal.removeEventListener("abort", cancel);
 		bridge.dispose();
 	}
+}
+
+async function yieldSyntheticFabStarterAdmission(): Promise<void> {
+	const browserScheduler = Reflect.get(globalThis, "scheduler") as
+		| { yield?: () => Promise<void> }
+		| undefined;
+	if (browserScheduler?.yield) await browserScheduler.yield();
+	else await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
 }
 
 export function preparedSyntheticFabStarterMatchesRequest(

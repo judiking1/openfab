@@ -32,17 +32,71 @@ import {
 import {
 	captureStaticFabOrganizationBundle,
 	materializeStaticFabOrganizationBundle,
+	prepareStaticFabOrganizationBundle,
 	type StaticFabOrganizationBundle,
 } from "./StaticFabOrganizationBundle";
 import {
+	fingerprintFrozenStaticFabOrganizationBundleCooperatively,
 	isIssuedStaticFabOrganizationBundlePlacementPlan,
 	isStaticFabOrganizationBundlePlacementPlanIssuedFor,
 	planStaticFabOrganizationBundlePlacement,
 	planStaticFabOrganizationBundlePlacementWithProspectiveState,
+	staticFabOrganizationBundleFingerprint,
 } from "./StaticFabOrganizationBundlePlacement";
 import type { Cell } from "./TileMap";
 
 describe("StaticFabOrganizationBundlePlacement", () => {
+	it("keeps cooperative bundle fingerprints equal to the synchronous portable identity", async () => {
+		const source = capturedOrganizationBundle();
+		const prepared = prepareStaticFabOrganizationBundle(structuredClone(source));
+		if (!prepared.valid) throw new Error(prepared.reason);
+		let checkpoints = 0;
+		const actual = await fingerprintFrozenStaticFabOrganizationBundleCooperatively(
+			prepared.bundle,
+			async () => {
+				checkpoints++;
+			},
+			3,
+		);
+		expect(checkpoints).toBeGreaterThan(10);
+		expect(actual).toBe(staticFabOrganizationBundleFingerprint(source));
+		expect(prepared.bundle).toEqual(source);
+	});
+
+	it("does not cache a fingerprint cancelled at the final checkpoint", async () => {
+		const source = capturedOrganizationBundle();
+		const first = prepareStaticFabOrganizationBundle(structuredClone(source));
+		const second = prepareStaticFabOrganizationBundle(structuredClone(source));
+		if (!first.valid || !second.valid) throw new Error("Expected valid bundle fixtures.");
+		let total = 0;
+		await fingerprintFrozenStaticFabOrganizationBundleCooperatively(
+			first.bundle,
+			async () => {
+				total++;
+			},
+			3,
+		);
+		let reached = 0;
+		const cancellation = new Error("cancel fingerprint publication");
+		await expect(
+			fingerprintFrozenStaticFabOrganizationBundleCooperatively(
+				second.bundle,
+				async () => {
+					if (++reached === total) throw cancellation;
+				},
+				3,
+			),
+		).rejects.toBe(cancellation);
+		let retried = 0;
+		await fingerprintFrozenStaticFabOrganizationBundleCooperatively(
+			second.bundle,
+			async () => {
+				retried++;
+			},
+			3,
+		);
+		expect(retried).toBe(total);
+	});
 	it("plans rail, equipment, and organization records as one valid placement", () => {
 		const bundle = capturedOrganizationBundle();
 		const target = new RailDocument();

@@ -46,6 +46,7 @@ class ManualStarterWorker implements SyntheticFabStarterWorkerPort {
 	onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	terminated = false;
+	terminationCount = 0;
 	request: SyntheticFabStarterWorkerRequest | null = null;
 	postError: Error | null = null;
 
@@ -62,10 +63,172 @@ class ManualStarterWorker implements SyntheticFabStarterWorkerPort {
 
 	terminate(): void {
 		this.terminated = true;
+		this.terminationCount++;
 	}
 }
 
+function pausedAdmission(advanceTime = true) {
+	let resume!: () => void;
+	let notifyEntered!: () => void;
+	const blocked = new Promise<void>((resolve) => {
+		resume = resolve;
+	});
+	const entered = new Promise<void>((resolve) => {
+		notifyEntered = resolve;
+	});
+	let first = true;
+	let time = 0;
+	return {
+		entered,
+		resume: () => resume(),
+		scheduler: {
+			now: () => {
+				if (advanceTime) time += 5;
+				return time;
+			},
+			yield: async () => {
+				if (!first) return;
+				first = false;
+				notifyEntered();
+				await blocked;
+			},
+		},
+	};
+}
+
+function respondWithClonedStarter(
+	worker: ManualStarterWorker,
+	starter: Parameters<SyntheticFabStarterBridge["prepare"]>[0],
+) {
+	if (!worker.request) throw new Error("Expected a posted starter request.");
+	const prepared = structuredClone(prepareSyntheticFabStarter(starter));
+	worker.respond({
+		type: "SYNTHETIC_FAB_STARTER_PREPARED",
+		requestId: worker.request.requestId,
+		prepared,
+	});
+	return prepared;
+}
+
 describe("SyntheticFabStarterBridge", () => {
+	it("cancels a response while cooperative admission is suspended", async () => {
+		const worker = new ManualStarterWorker();
+		const pause = pausedAdmission();
+		const bridge = new SyntheticFabStarterBridge(() => worker, 30_000, pause.scheduler);
+		const starter = defaultSyntheticFabStarterRequest("single-loop");
+		const result = bridge.prepare(starter).catch((error: unknown) => error);
+		respondWithClonedStarter(worker, starter);
+		await pause.entered;
+		bridge.cancel();
+		expect(await result).toMatchObject({ name: "AbortError" });
+		pause.resume();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(worker.terminationCount).toBe(1);
+	});
+
+	it("cannot release a superseding request even when the factory reuses the same Worker", async () => {
+		const worker = new ManualStarterWorker();
+		const pause = pausedAdmission();
+		const bridge = new SyntheticFabStarterBridge(() => worker, 30_000, pause.scheduler);
+		const firstStarter = defaultSyntheticFabStarterRequest("single-loop");
+		const first = bridge.prepare(firstStarter).catch((error: unknown) => error);
+		const oldCallback = worker.onmessage;
+		respondWithClonedStarter(worker, firstStarter);
+		await pause.entered;
+		const secondStarter = defaultSyntheticFabStarterRequest("dual-loop");
+		const second = bridge.prepare(secondStarter);
+		expect(await first).toMatchObject({ name: "AbortError" });
+		oldCallback?.({
+			data: { type: "UNKNOWN" },
+		} as unknown as MessageEvent<SyntheticFabStarterWorkerResponse>);
+		pause.resume();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(worker.terminationCount).toBe(1);
+		expect(worker.onmessage).not.toBeNull();
+		respondWithClonedStarter(worker, secondStarter);
+		await expect(second).resolves.toMatchObject({ request: { id: "dual-loop" } });
+		expect(worker.terminationCount).toBe(2);
+	});
+
+	it("keeps the watchdog active through response admission", async () => {
+		const worker = new ManualStarterWorker();
+		const pause = pausedAdmission();
+		const bridge = new SyntheticFabStarterBridge(() => worker, 20, pause.scheduler);
+		const starter = defaultSyntheticFabStarterRequest("single-loop");
+		const result = bridge.prepare(starter).catch((error: unknown) => error);
+		respondWithClonedStarter(worker, starter);
+		await pause.entered;
+		expect(await result).toMatchObject({ message: "FAB starter Worker timed out." });
+		pause.resume();
+		expect(worker.terminationCount).toBe(1);
+	});
+
+	it("handles Worker errors while admission is suspended", async () => {
+		const worker = new ManualStarterWorker();
+		const pause = pausedAdmission();
+		const bridge = new SyntheticFabStarterBridge(() => worker, 30_000, pause.scheduler);
+		const starter = defaultSyntheticFabStarterRequest("single-loop");
+		const result = bridge.prepare(starter).catch((error: unknown) => error);
+		respondWithClonedStarter(worker, starter);
+		await pause.entered;
+		worker.onerror?.({ message: "admission worker error" } as ErrorEvent);
+		expect(await result).toMatchObject({ message: "admission worker error" });
+		pause.resume();
+		expect(worker.terminationCount).toBe(1);
+	});
+
+	it("admits only the first matching response and ignores later duplicates", async () => {
+		const worker = new ManualStarterWorker();
+		const pause = pausedAdmission();
+		const bridge = new SyntheticFabStarterBridge(() => worker, 30_000, pause.scheduler);
+		const starter = defaultSyntheticFabStarterRequest("single-loop");
+		const result = bridge.prepare(starter);
+		const prepared = respondWithClonedStarter(worker, starter);
+		await pause.entered;
+		worker.respond({ type: "UNKNOWN" });
+		pause.resume();
+		expect(await result).toBe(prepared);
+		expect(worker.terminationCount).toBe(1);
+	});
+
+	it("rechecks mutable snapshot bytes after the final suspension", async () => {
+		const worker = new ManualStarterWorker();
+		const pause = pausedAdmission(false);
+		const bridge = new SyntheticFabStarterBridge(() => worker, 30_000, pause.scheduler);
+		const starter = defaultSyntheticFabStarterRequest("single-loop");
+		const result = bridge.prepare(starter).catch((error: unknown) => error);
+		const prepared = respondWithClonedStarter(worker, starter);
+		await pause.entered;
+		prepared.snapshot.xs[0] = (prepared.snapshot.xs[0] as number) + 1;
+		pause.resume();
+		expect(await result).toMatchObject({
+			message: "FAB starter Worker returned a mismatched prepared project.",
+		});
+		expect(worker.terminationCount).toBe(1);
+	});
+
+	it("rejects independent verification that resolves after its signal was aborted", async () => {
+		const starter = defaultSyntheticFabStarterRequest("single-loop");
+		const source = prepareSyntheticFabStarter(starter);
+		const independent = prepareSyntheticFabStarter(starter);
+		const controller = new AbortController();
+		let disposed = false;
+		await expect(
+			independentlyVerifyPreparedSyntheticFabStarter(source, starter, controller.signal, () => ({
+				prepare: async () => {
+					controller.abort();
+					return independent;
+				},
+				cancel: () => {},
+				dispose: () => {
+					disposed = true;
+				},
+			})),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(disposed).toBe(true);
+	});
 	it("does not accept one prepared object as its own independent verification", () => {
 		const request = defaultSyntheticFabStarterRequest("single-loop");
 		const prepared = prepareSyntheticFabStarter(request);

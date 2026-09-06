@@ -5,6 +5,7 @@ import {
 	copyAdvancedSwitch,
 	deriveAdvancedSwitchGeometry,
 } from "./AdvancedSwitch";
+import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import {
 	applyPortEquipmentMutations,
 	copyEquipmentGroupRecord,
@@ -40,6 +41,7 @@ import {
 	type StaticFabOrganizationBundle,
 	type StaticFabOrganizationBundleEquipmentGroup,
 	type StaticFabOrganizationBundleQuarterTurns,
+	validateFrozenStaticFabOrganizationBundle,
 } from "./StaticFabOrganizationBundle";
 import { type Cell, cellKey, decodeRailCell, encodeRailCell, type TileMap } from "./TileMap";
 
@@ -374,8 +376,36 @@ export function staticFabOrganizationBundleFingerprint(bundleInput: unknown): st
 	const cached = bundleFingerprints.get(bundle);
 	if (cached) return cached;
 	const checksum = new OrderedTypedChecksum();
-	addStaticFabOrganizationBundleToChecksum(checksum, bundle);
+	completeCooperativeSteps(addStaticFabOrganizationBundleToChecksumSteps(checksum, bundle));
 	const fingerprint = checksum.digest();
+	bundleFingerprints.set(bundle, fingerprint);
+	return fingerprint;
+}
+
+/** Hash the same canonical fields in bounded steps; only fully validated frozen data is cached. */
+export async function fingerprintFrozenStaticFabOrganizationBundleCooperatively(
+	input: unknown,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<string> {
+	const bundle = await validateFrozenStaticFabOrganizationBundle(
+		input,
+		checkpoint,
+		operationBudget,
+	);
+	const cached = bundleFingerprints.get(bundle);
+	if (cached) return cached;
+	const checksum = new OrderedTypedChecksum();
+	const task = createCooperativeTask(
+		addStaticFabOrganizationBundleToChecksumSteps(checksum, bundle),
+	);
+	while (!task.done) {
+		task.step(operationBudget);
+		await checkpoint();
+	}
+	task.finish();
+	const fingerprint = checksum.digest();
+	await checkpoint();
 	bundleFingerprints.set(bundle, fingerprint);
 	return fingerprint;
 }
@@ -1093,10 +1123,10 @@ function placementMetadata(
 	});
 }
 
-function addStaticFabOrganizationBundleToChecksum(
+function* addStaticFabOrganizationBundleToChecksumSteps(
 	checksum: OrderedTypedChecksum,
 	bundle: StaticFabOrganizationBundle,
-): void {
+): Generator<void> {
 	checksum.addStrings(["static-fab-organization-bundle", bundle.captureMode]);
 	checksum.addNumbers([
 		bundle.version,
@@ -1108,6 +1138,7 @@ function addStaticFabOrganizationBundleToChecksum(
 	checksum.addNumbers([bundle.railEdges.length]);
 	for (const edge of bundle.railEdges) {
 		checksum.addNumbers([edge.from.x, edge.from.y, edge.to.x, edge.to.y]);
+		yield;
 	}
 	checksum.addNumbers([bundle.advancedSwitches.length]);
 	for (const advancedSwitch of bundle.advancedSwitches) {
@@ -1119,6 +1150,7 @@ function addStaticFabOrganizationBundleToChecksum(
 			advancedSwitch.lateral,
 			advancedSwitch.movementMask,
 		]);
+		yield;
 	}
 	checksum.addNumbers([bundle.ports.length]);
 	for (const port of bundle.ports) {
@@ -1138,17 +1170,19 @@ function addStaticFabOrganizationBundleToChecksum(
 				port.route.segmentOrdinal,
 			]);
 		}
+		yield;
 	}
 	checksum.addNumbers([bundle.equipmentGroups.length]);
 	for (const group of bundle.equipmentGroups) {
 		checksum.addStrings([group.kind]);
-		checksum.addNumbers(group.portIndices);
+		yield* checksum.addNumbersSteps(group.portIndices);
 		if (group.kind === "EQ") {
 			checksum.addNumbers([group.pitchMillimeters, group.recipe === null ? 0 : 1]);
 			checksum.addStrings([group.recipe ?? ""]);
 		} else {
 			checksum.addStrings([group.template]);
 		}
+		yield;
 	}
 	checksum.addNumbers([bundle.organizations.length]);
 	for (const organization of bundle.organizations) {
@@ -1158,10 +1192,11 @@ function addStaticFabOrganizationBundleToChecksum(
 			organization.properties.description,
 			organization.properties.color,
 		]);
-		checksum.addNumbers(organization.parentOrganizationIndices);
-		checksum.addNumbers(organization.membership.railEdgeIndices);
-		checksum.addNumbers(organization.membership.advancedSwitchIndices);
-		checksum.addNumbers(organization.membership.equipmentGroupIndices);
+		yield* checksum.addNumbersSteps(organization.parentOrganizationIndices);
+		yield* checksum.addNumbersSteps(organization.membership.railEdgeIndices);
+		yield* checksum.addNumbersSteps(organization.membership.advancedSwitchIndices);
+		yield* checksum.addNumbersSteps(organization.membership.equipmentGroupIndices);
+		yield;
 	}
 }
 
