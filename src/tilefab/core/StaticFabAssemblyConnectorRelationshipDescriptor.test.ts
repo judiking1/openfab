@@ -29,21 +29,28 @@ import {
 import { describeStaticFabAssemblyConnectorRelationship } from "./StaticFabAssemblyConnectorRelationshipDescriptor";
 import {
 	copyStaticFabAssemblyRelationshipState,
+	remapStaticFabAssemblyRelationshipRecord,
+	type StaticFabAssemblyRelationshipRecordV1,
+	type StaticFabAssemblyRelationshipStateV1,
 	staticFabAssemblyRelationshipStateSourceError,
 } from "./StaticFabAssemblyRelationship";
 import { validateStaticFabAssemblyRelationshipSourceActivation } from "./StaticFabAssemblyRelationshipActivation";
 import {
+	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
+	copyStaticFabOrganizationState,
 	deriveStaticFabOrganizationSemanticRoles,
 	emptyStaticFabOrganizationState,
+	type StaticFabOrganizationState,
 	staticFabOrganizationEdgeKey,
+	staticFabOrganizationParentIds,
 	staticFabOrganizationRailStateError,
 } from "./StaticFabOrganization";
 import {
 	planStaticFabOrganizationBundlePlacementWithProspectiveState,
 	type StaticFabOrganizationBundlePlacementProspectiveState,
 } from "./StaticFabOrganizationBundlePlacement";
-import { TileMap } from "./TileMap";
+import { type Cell, encodeRailCell, TileMap } from "./TileMap";
 
 interface FixtureState extends StaticFabOrganizationBundlePlacementProspectiveState {
 	readonly patchSequence: number;
@@ -234,6 +241,8 @@ describe("explicit Connector relationship descriptors", () => {
 			nextRelationshipId: 5,
 			records: [...records, loopRecord],
 		});
+		await verifyNestedRelationshipRemapping(final, canonical);
+		verifyRelationshipRemapFailures(leftRecord, final.organizations);
 		const proof = await validateStaticFabAssemblyRelationshipSourceActivation(
 			final.map,
 			final.portEquipment,
@@ -479,4 +488,220 @@ function firstValidConnector(
 function required<T>(value: T | null | undefined): T {
 	if (value === null || value === undefined) throw new Error("Expected complete Connector fixture");
 	return value;
+}
+
+async function verifyNestedRelationshipRemapping(
+	source: StaticFabOrganizationBundlePlacementProspectiveState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+): Promise<void> {
+	const before = JSON.stringify({ organizations: source.organizations, relationships });
+	const organizationIds = new Map(
+		source.organizations.records.map((record) => [record.id, 1000 - record.id]),
+	);
+	const inverseIds = new Map([...organizationIds].map(([from, to]) => [to, from]));
+	const offset = { x: -500, y: 700 };
+	for (const quarterTurns of [0, 1, 2, 3] as const) {
+		// Independent four-case affine oracle, not the remapper's iterative transform.
+		const rotate = ({ x, y }: Cell): Cell =>
+			quarterTurns === 0
+				? { x, y }
+				: quarterTurns === 1
+					? { x: -y, y: x }
+					: quarterTurns === 2
+						? { x: -x, y: -y }
+						: { x: y, y: -x };
+		const transform = (cell: Cell): Cell => {
+			const r = rotate(cell);
+			return { x: r.x + offset.x, y: r.y + offset.y };
+		};
+		const map = new TileMap();
+		const rotateMask = (mask: number) =>
+			((mask << quarterTurns) | (mask >> (4 - quarterTurns))) & 15;
+		expect(source.map.advancedSwitchCount).toBe(0);
+		source.map.forEachRail((x, y, rail) => {
+			const target = transform({ x, y });
+			map.setEncoded(
+				target.x,
+				target.y,
+				encodeRailCell({
+					incoming: rotateMask(rail.incoming),
+					outgoing: rotateMask(rail.outgoing),
+				}),
+			);
+		});
+		const organizations = copyStaticFabOrganizationState({
+			nextOrganizationId: 1001,
+			records: source.organizations.records
+				.map((record) =>
+					copyStaticFabOrganizationRecord({
+						...record,
+						id: required(organizationIds.get(record.id)),
+						parentOrganizationIds: staticFabOrganizationParentIds(record)
+							.map((id) => required(organizationIds.get(id)))
+							.sort((a, b) => a - b),
+						membership: {
+							...record.membership,
+							railEdges: record.membership.railEdges
+								.map((edge) => ({ from: transform(edge.from), to: transform(edge.to) }))
+								.sort(compareDirectedRailEdges),
+						},
+					}),
+				)
+				.sort((a, b) => a.id - b.id),
+		});
+		const remapped = copyStaticFabAssemblyRelationshipState({
+			nextRelationshipId: 21,
+			records: relationships.records
+				.map((record) =>
+					remapStaticFabAssemblyRelationshipRecord(record, {
+						relationshipId: 20 - record.id,
+						organizationIds,
+						quarterTurns,
+						offset,
+					}),
+				)
+				.sort((a, b) => a.id - b.id),
+		});
+		expect(staticFabOrganizationRailStateError(map, organizations)).toBeNull();
+		expect(staticFabAssemblyRelationshipStateSourceError(map, organizations, remapped)).toBeNull();
+		let checkpoints = 0;
+		await validateStaticFabAssemblyRelationshipSourceActivation(
+			map,
+			source.portEquipment,
+			organizations,
+			remapped,
+			async () => {
+				checkpoints++;
+			},
+			32,
+		);
+		expect(checkpoints).toBeGreaterThan(50);
+		const transformedDocument = RailDocument.fromLoadedMap(
+			map.clone(),
+			0,
+			source.portEquipment,
+			organizations,
+			undefined,
+			remapped,
+		);
+		const transformedProject = captureOpenFabProject(transformedDocument, {
+			manifest: createOpenFabProjectManifest(
+				`remapped-${quarterTurns}`,
+				"Remapped nested assembly",
+				"2026-09-07T00:00:00.000Z",
+			),
+		});
+		const reopened = createRailSnapshotFromOpenFabProject(
+			parseOpenFabProjectJson(serializeOpenFabProject(transformedProject)).project,
+		);
+		expect(hydrateStaticFabAssemblyRelationshipSnapshot(reopened.relationships)).toEqual(remapped);
+		const mirror = new RailPatchMirror();
+		const mirrored = mirror.sync(reopened);
+		expect(mirrored.assemblyRelationships).toBe(4);
+		expect(mirrored.checksum).toBe(reopened.checksum);
+		const inverseTurns = ((4 - quarterTurns) % 4) as 0 | 1 | 2 | 3;
+		const inverseOffset =
+			quarterTurns === 0
+				? { x: -offset.x, y: -offset.y }
+				: quarterTurns === 1
+					? { x: -offset.y, y: offset.x }
+					: quarterTurns === 2
+						? offset
+						: { x: offset.y, y: -offset.x };
+		const restored = copyStaticFabAssemblyRelationshipState({
+			nextRelationshipId: relationships.nextRelationshipId,
+			records: remapped.records
+				.map((record) =>
+					remapStaticFabAssemblyRelationshipRecord(record, {
+						relationshipId: 20 - record.id,
+						organizationIds: inverseIds,
+						quarterTurns: inverseTurns,
+						offset: inverseOffset,
+					}),
+				)
+				.sort((a, b) => a.id - b.id),
+		});
+		expect(restored).toEqual(relationships);
+		for (const original of relationships.records) {
+			const transformed = required(
+				remapped.records.find((record) => record.id === 20 - original.id),
+			);
+			expect(transformed.participantOrganizationIds).toEqual(
+				original.participantOrganizationIds.map((id) => organizationIds.get(id)),
+			);
+			expect(Object.isFrozen(transformed)).toBe(true);
+			expect(
+				transformed.connectionGroups.map((group) => group.legs.map((leg) => leg.directionRole)),
+			).toEqual(
+				original.connectionGroups.map((group) => group.legs.map((leg) => leg.directionRole)),
+			);
+		}
+	}
+	expect(JSON.stringify({ organizations: source.organizations, relationships })).toBe(before);
+}
+
+function verifyRelationshipRemapFailures(
+	record: StaticFabAssemblyRelationshipRecordV1,
+	organizations: StaticFabOrganizationState,
+): void {
+	const organizationIds = new Map(organizations.records.map((item) => [item.id, item.id + 100]));
+	const input = {
+		relationshipId: 11,
+		organizationIds,
+		quarterTurns: 0 as const,
+		offset: { x: 0, y: 0 },
+	};
+	for (const relationshipId of [0, -1, 1.5, 2_147_483_647, Number.NaN, Number.POSITIVE_INFINITY]) {
+		expect(() =>
+			remapStaticFabAssemblyRelationshipRecord(record, { ...input, relationshipId }),
+		).toThrow(/ID/);
+		expect(() =>
+			remapStaticFabAssemblyRelationshipRecord(
+				Object.freeze({ ...record, id: relationshipId }),
+				input,
+			),
+		).toThrow(/원본 ID/);
+	}
+	for (const quarterTurns of [-1, 0.5, 4, Number.NaN]) {
+		expect(() =>
+			remapStaticFabAssemblyRelationshipRecord(record, {
+				...input,
+				quarterTurns: quarterTurns as 0,
+			}),
+		).toThrow(/90도/);
+	}
+	for (const offset of [
+		{ x: 0.5, y: 0 },
+		{ x: 0, y: Number.NaN },
+		{ x: 2_147_483_648, y: 0 },
+	]) {
+		expect(() => remapStaticFabAssemblyRelationshipRecord(record, { ...input, offset })).toThrow(
+			/정수 셀/,
+		);
+	}
+	const missing = new Map(organizationIds);
+	missing.delete(record.parentOrganizationId);
+	expect(() =>
+		remapStaticFabAssemblyRelationshipRecord(record, { ...input, organizationIds: missing }),
+	).toThrow(/새 ID가 없습니다/);
+	const collisions = new Map(organizationIds);
+	collisions.set(
+		required(record.participantOrganizationIds[0]),
+		required(organizationIds.get(record.parentOrganizationId)),
+	);
+	expect(() =>
+		remapStaticFabAssemblyRelationshipRecord(record, { ...input, organizationIds: collisions }),
+	).toThrow(/같은 ID로 합칠/);
+	expect(() =>
+		remapStaticFabAssemblyRelationshipRecord(record, {
+			...input,
+			offset: { x: 2_147_483_647, y: 0 },
+		}),
+	).toThrow(/좌표/);
+	expect(() => remapStaticFabAssemblyRelationshipRecord({ ...record }, input)).toThrow(/불변/);
+	const before = JSON.stringify(record);
+	expect(() =>
+		remapStaticFabAssemblyRelationshipRecord(record, { ...input, organizationIds: new Map() }),
+	).toThrow();
+	expect(JSON.stringify(record)).toBe(before);
 }

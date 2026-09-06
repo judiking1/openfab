@@ -11673,6 +11673,9 @@ export default function TileFabApp(): React.ReactElement {
 		let previousHeight = canvas.clientHeight;
 		const render = (): void => {
 			scheduledFrame = 0;
+			// The modal owns interaction. Keep its background bitmap stable instead of submitting
+			// another Canvas frame while the browser is painting the review and its backdrop.
+			if (staticFabBayFlowEditUiRef.current) return;
 			const drag = dragRef.current;
 			const pendingCell = pendingDragCellRef.current;
 			if (
@@ -23351,8 +23354,10 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const publishStaticFabBayFlowEdit = (next: StaticFabBayFlowEditSession | null): void => {
+		const resumeCanvas = staticFabBayFlowEditUiRef.current !== null && next === null;
 		staticFabBayFlowEditUiRef.current = next;
 		setStaticFabBayFlowEdit(next);
+		if (resumeCanvas) scheduleRender();
 	};
 	const cancelStaticFabBayFlowEdit = (message?: string, restoreFocus = true): void => {
 		const active = staticFabBayFlowEditUiRef.current;

@@ -1,3 +1,4 @@
+import { stableSortSteps } from "./CooperativeSort";
 import { completeCooperativeSteps } from "./CooperativeTask";
 import type { PortEquipmentState } from "./EquipmentGroup";
 import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
@@ -186,6 +187,191 @@ export function copyStaticFabAssemblyRelationshipRecord(
 	const result = validateRecordShape(record, new Set<string>(), new Set<string>());
 	if (typeof result === "string") throw new Error(`조립 관계 ${record?.id ?? "?"}: ${result}`);
 	return copyRecord(record);
+}
+
+export interface StaticFabAssemblyRelationshipRemapV1 {
+	readonly relationshipId: number;
+	readonly organizationIds: ReadonlyMap<number, number>;
+	readonly quarterTurns: 0 | 1 | 2 | 3;
+	readonly offset: Cell;
+}
+
+/** Remap complete immutable identity; final portable closure/source proof remains mandatory. */
+export function remapStaticFabAssemblyRelationshipRecord(
+	record: StaticFabAssemblyRelationshipRecordV1,
+	remap: StaticFabAssemblyRelationshipRemapV1,
+): StaticFabAssemblyRelationshipRecordV1 {
+	return completeCooperativeSteps(remapStaticFabAssemblyRelationshipRecordSteps(record, remap));
+}
+
+/** Caller owns a stable ID mapping; every source container must already be deeply immutable. */
+export function* remapStaticFabAssemblyRelationshipRecordSteps(
+	record: StaticFabAssemblyRelationshipRecordV1,
+	remap: StaticFabAssemblyRelationshipRemapV1,
+): Generator<void, StaticFabAssemblyRelationshipRecordV1> {
+	const { relationshipId, quarterTurns } = remap;
+	const offsetX = remap.offset.x,
+		offsetY = remap.offset.y;
+	if (!isPositiveInt32(relationshipId) || relationshipId >= 2_147_483_647)
+		throw new Error("조립 관계의 새 ID를 안전하게 할당할 수 없습니다");
+	if (![0, 1, 2, 3].includes(quarterTurns) || !isInt32(offsetX) || !isInt32(offsetY))
+		throw new Error("조립 관계 변환은 90도 회전과 정수 셀 이동만 지원합니다");
+	const validation = yield* validateRecordShapeSteps(
+		record,
+		new Set<string>(),
+		new Set<string>(),
+		true,
+	);
+	if (typeof validation === "string") throw new Error(validation);
+	if (!isPositiveInt32(record.id) || record.id >= 2_147_483_647) {
+		throw new Error("변환할 조립 관계의 원본 ID가 유효하지 않습니다");
+	}
+	const resolvedIds = new Map<number, number>();
+	const sourcesByTarget = new Map<number, number>();
+	const organizationId = (sourceId: number): number => {
+		const cached = resolvedIds.get(sourceId);
+		if (cached !== undefined) return cached;
+		const target = remap.organizationIds.get(sourceId);
+		if (target === undefined || !isPositiveInt32(target))
+			throw new Error(`조립 관계 조직 ${sourceId}의 새 ID가 없습니다`);
+		const previous = sourcesByTarget.get(target);
+		if (previous !== undefined && previous !== sourceId)
+			throw new Error("서로 다른 조립 관계 조직을 같은 ID로 합칠 수 없습니다");
+		sourcesByTarget.set(target, sourceId);
+		resolvedIds.set(sourceId, target);
+		return target;
+	};
+	const transform = (source: Cell): Cell => {
+		let x = source.x,
+			y = source.y;
+		for (let turn = 0; turn < quarterTurns; turn++) [x, y] = [-y, x];
+		x += offsetX;
+		y += offsetY;
+		if (!isInt32(x) || !isInt32(y))
+			throw new Error("조립 관계 변환 좌표가 signed-int32 범위를 벗어났습니다");
+		return Object.freeze({ x, y });
+	};
+	function* scopedSteps(
+		source: StaticFabAssemblyScopedEdgeV1,
+	): Generator<void, StaticFabAssemblyScopedEdgeV1> {
+		yield;
+		let scope: StaticFabAssemblyRelationshipEdgeScopeV1;
+		if (source.scope.kind === "PARENT_DIRECT") scope = Object.freeze({ kind: "PARENT_DIRECT" });
+		else {
+			const ids: number[] = [];
+			for (const id of source.scope.directOwnerOrganizationIds) {
+				yield;
+				ids.push(organizationId(id));
+			}
+			yield* stableSortSteps(ids, (a, b) => a - b);
+			scope = Object.freeze({
+				kind: source.scope.kind,
+				participantIndex: source.scope.participantIndex,
+				directOwnerOrganizationIds: Object.freeze(ids),
+			});
+		}
+		return Object.freeze({
+			edge: Object.freeze({ from: transform(source.edge.from), to: transform(source.edge.to) }),
+			scope,
+		});
+	}
+	const parentOrganizationId = organizationId(record.parentOrganizationId);
+	const participants: number[] = [];
+	for (const id of record.participantOrganizationIds) {
+		yield;
+		participants.push(organizationId(id));
+	}
+	const managed: number[] = [];
+	for (const id of record.managedChildOrganizationIds) {
+		yield;
+		managed.push(organizationId(id));
+	}
+	yield* stableSortSteps(managed, (a, b) => a - b);
+	const groups: StaticFabAssemblyRelationshipConnectionGroupV1[] = [];
+	for (const group of record.connectionGroups) {
+		yield;
+		const legs: StaticFabAssemblyRelationshipLegV1[] = [];
+		for (const leg of group.legs) {
+			yield;
+			const exclusive: StaticFabAssemblyScopedEdgeV1[] = [];
+			for (const edge of leg.exclusiveCutEdges) exclusive.push(yield* scopedSteps(edge));
+			const supports: StaticFabAssemblyEndpointSupportV1[] = [];
+			for (const endpoint of leg.endpointSupports) {
+				yield;
+				supports.push(
+					Object.freeze({
+						support: yield* scopedSteps(endpoint.support),
+						adjacentExclusiveCutEdgeIndex: endpoint.adjacentExclusiveCutEdgeIndex,
+						position: endpoint.position,
+					}),
+				);
+			}
+			yield* stableSortSteps(supports, compareEndpointSupport);
+			const seams: StaticFabAssemblySeamContactV1[] = [];
+			for (const seam of leg.seamContacts) {
+				yield;
+				const incidences: StaticFabAssemblySeamIncidenceV1[] = [];
+				for (const incidence of seam.incidences) {
+					yield;
+					incidences.push(
+						Object.freeze({
+							incidence: incidence.incidence,
+							binding:
+								incidence.binding.kind === "EXCLUSIVE_CUT_EDGE"
+									? Object.freeze({
+											kind: "EXCLUSIVE_CUT_EDGE",
+											exclusiveCutEdgeIndex: incidence.binding.exclusiveCutEdgeIndex,
+										})
+									: Object.freeze({
+											kind: "WITNESS",
+											scopedEdge: yield* scopedSteps(incidence.binding.scopedEdge),
+										}),
+						}),
+					);
+				}
+				yield* stableSortSteps(incidences, (a, b) =>
+					compareResolvedIncidence(resolveIncidence(a, exclusive), resolveIncidence(b, exclusive)),
+				);
+				seams.push(Object.freeze({ role: seam.role, incidences: Object.freeze(incidences) }));
+			}
+			yield* stableSortSteps(seams, (a, b) => compareSeamContact(a, b, exclusive));
+			legs.push(
+				Object.freeze({
+					ordinal: leg.ordinal,
+					directionRole: leg.directionRole,
+					exclusiveCutEdges: Object.freeze(exclusive),
+					endpointSupports: Object.freeze(supports),
+					seamContacts: Object.freeze(seams),
+				}),
+			);
+		}
+		groups.push(Object.freeze({ ordinal: group.ordinal, legs: Object.freeze(legs) }));
+	}
+	const first = participants[0];
+	if (first === undefined) throw new Error("변환할 조립 관계 참여 조직이 없습니다");
+	const second = participants[1];
+	const participantOrganizationIds: readonly [number] | readonly [number, number] =
+		second === undefined
+			? Object.freeze([first] as const)
+			: Object.freeze([first, second] as const);
+	const result: StaticFabAssemblyRelationshipRecordV1 = Object.freeze({
+		id: relationshipId,
+		hierarchyRole: record.hierarchyRole,
+		purpose: record.purpose,
+		parentOrganizationId,
+		participantOrganizationIds,
+		managedChildOrganizationIds: Object.freeze(managed),
+		reviewPolicy: record.reviewPolicy,
+		connectionGroups: Object.freeze(groups),
+	});
+	const resultError = yield* validateRecordShapeSteps(
+		result,
+		new Set<string>(),
+		new Set<string>(),
+		true,
+	);
+	if (typeof resultError === "string") throw new Error(resultError);
+	return result;
 }
 
 /**

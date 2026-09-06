@@ -23457,6 +23457,7 @@ async function exerciseCertifiedBayFlowEditJourney(
 		});
 		await page.keyboard.press("Escape");
 		await cancelledReview.dialog.waitFor({ state: "hidden" });
+		await assertBayFlowCanvasResumed(page, cancelledReview.backgroundDraws, `${label} Escape`);
 		await page.waitForFunction(
 			() =>
 				document.activeElement?.getAttribute("data-testid") ===
@@ -23496,6 +23497,7 @@ async function exerciseCertifiedBayFlowEditJourney(
 		{ timeout: 30_000 },
 	);
 	assertNotEqual(applied.workerChecksum, beforeApply.workerChecksum, `${label} target checksum`);
+	await assertBayFlowCanvasResumed(page, review.backgroundDraws, `${label} Apply`);
 	assertBayFlowCountIdentity(applied, beforeApply, `${label} flow replacement`);
 	assertEqual(applied.organizationSelectionCount, "1", `${label} Bay selection count`);
 	assertEqual(applied.organizationSelectionIds, selectedBayId, `${label} Bay selection identity`);
@@ -23687,6 +23689,11 @@ async function observeBayFlowDialogPaint(page) {
 			)
 				return;
 			clickAt = performance.now();
+			const stats = globalThis.__tileFab.getRendererStats();
+			globalThis.__openfabBayFlowCanvasStart = {
+				staticRedraws: stats.staticRedraws,
+				overlayRedraws: stats.overlayRedraws,
+			};
 			record("click");
 			frameId = requestAnimationFrame(nextFrame);
 		};
@@ -23728,6 +23735,11 @@ async function observeBayFlowDialogPaint(page) {
 		document.addEventListener("click", clicked, true);
 		document.addEventListener("focusin", focused, true);
 		globalThis.__openfabStopBayFlowPaintObservation = () => {
+			const stats = globalThis.__tileFab.getRendererStats();
+			const backgroundDraws = {
+				before: globalThis.__openfabBayFlowCanvasStart,
+				after: { staticRedraws: stats.staticRedraws, overlayRedraws: stats.overlayRedraws },
+			};
 			collectLongTasks(performanceObserver.takeRecords());
 			performanceObserver.disconnect();
 			observer.disconnect();
@@ -23735,7 +23747,8 @@ async function observeBayFlowDialogPaint(page) {
 			document.removeEventListener("click", clicked, true);
 			document.removeEventListener("focusin", focused, true);
 			delete globalThis.__openfabStopBayFlowPaintObservation;
-			return { clickObserved: clickAt !== null, events, longTasks, final: read() };
+			delete globalThis.__openfabBayFlowCanvasStart;
+			return { clickObserved: clickAt !== null, events, longTasks, backgroundDraws, final: read() };
 		};
 	});
 }
@@ -23754,7 +23767,7 @@ async function startBayFlowPaintTrace(page, label) {
 	});
 	try {
 		await session.send("Tracing.start", {
-			categories: "toplevel,devtools.timeline,v8",
+			categories: "toplevel,devtools.timeline,v8,blink,cc",
 			transferMode: "ReportEvents",
 		});
 	} catch (error) {
@@ -23917,6 +23930,18 @@ async function verifyCertifiedBayFlowEditReview(
 	});
 	assertEqual(modalIsolation.inert, true, `${label} dialog background inert`);
 	assertEqual(modalIsolation.ariaHidden, "true", `${label} dialog background aria hidden`);
+	const backgroundDraws = await page.evaluate(() => ({
+		before: globalThis.__openfabBayFlowCanvasStart,
+		after: globalThis.__tileFab.getRendererStats(),
+	}));
+	for (const counter of ["staticRedraws", "overlayRedraws"]) {
+		assertEqual(typeof backgroundDraws.before?.[counter], "number", `${label} Canvas baseline`);
+		assertEqual(
+			backgroundDraws.after[counter],
+			backgroundDraws.before[counter],
+			`${label} retains the background Canvas while modal review is open`,
+		);
+	}
 	assertEqual(
 		await root.getAttribute("data-bay-flow-edit-command-phase"),
 		"ready",
@@ -24023,7 +24048,16 @@ async function verifyCertifiedBayFlowEditReview(
 	if (responsive) await assertNarrowBayFlowDialogLayout(page, dialog, cancel, apply, label);
 	await connectorEvidence.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, connectorEvidence);
-	return { dialog, cancel, apply, firstPaintMilliseconds };
+	return { dialog, cancel, apply, firstPaintMilliseconds, backgroundDraws: backgroundDraws.before };
+}
+
+async function assertBayFlowCanvasResumed(page, before, label) {
+	await page.waitForFunction(
+		(previous) => globalThis.__tileFab.getRendererStats().overlayRedraws > previous.overlayRedraws,
+		before,
+		{ timeout: 10_000 },
+	);
+	assertEqual(await page.getByTestId("bay-flow-edit-dialog").count(), 0, `${label} modal closed`);
 }
 
 async function assertNarrowBayFlowDialogLayout(page, dialog, cancel, apply, label) {
