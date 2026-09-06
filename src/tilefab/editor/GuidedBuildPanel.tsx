@@ -665,10 +665,10 @@ function activeSuggestedActionInstruction(
 		return "OHB 도구가 준비됐습니다. 캔버스 포커스에서 방향키 또는 WASD로 추천 슬롯을 확인하고 Enter로 배치하세요. 포인터로 강조 슬롯을 클릭해도 됩니다.";
 	}
 	if (action === "eq") {
-		return "EQ 도구가 준비됐습니다. 캔버스에서 Enter로 시작 슬롯을 고른 뒤 방향키로 끝 슬롯을 확인하고 Enter로 확정하세요. 포인터 드래그도 가능합니다.";
+		return "EQ 도구가 준비됐습니다. 같은 직선의 시작점과 끝점을 차례로 클릭하세요. 드래그하거나 각 위치에서 Enter로 확정해도 됩니다.";
 	}
 	if (action === "stk") {
-		return "STK 도구가 준비됐습니다. 캔버스에서 Enter로 추천 입고·출고 슬롯을 차례로 선택하면 그룹이 완성됩니다. 포인터 선택과 STK 생성도 가능합니다.";
+		return "STK 도구가 준비됐습니다. 표시된 Port 개수 조건에 맞춰 클릭 또는 Enter로 선택하세요. 선택을 확인한 뒤 STK 생성 또는 Shift+Enter로 만듭니다.";
 	}
 	return fallback;
 }

@@ -512,14 +512,27 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).toContain('data-testid="guided-build-mission-detail">PORTS · 작업 2/3');
 		expect(markup).not.toContain("MISSION 4 · PORTS · 2/3");
 		expect(markup).toContain("EQUIP · EQ 열기");
-		expect(markup).toContain("LMB DRAG");
+		expect(markup).toContain("LMB</strong>");
 		expect(markup).toContain("OHB 1/1 · EQ 0/2 · STK 0/2");
-		expect(markup).toContain("청록색 1 시작에서 2 끝까지");
+		expect(markup).toContain("청록색 1 시작과 2 끝");
 		expect(activeMarkup).not.toContain("EQUIP · EQ 열기");
 		expect(activeMarkup).toContain("OHB 1/1 · EQ 0/2 · STK 0/2");
 		expect(activeMarkup).toContain("EQ 도구가 준비됐습니다");
-		expect(activeMarkup).toContain("Enter로 시작 슬롯을 고른 뒤");
+		expect(activeMarkup).toContain("시작점과 끝점을 차례로 클릭");
+		expect(activeMarkup).toContain("각 위치에서 Enter");
 		expect(activeMarkup).not.toContain("왼쪽의 강조된 EQ");
+		const stkActiveMarkup = panelMarkup(
+			{
+				...portEvidence,
+				equipment: {
+					...portEvidence.equipment,
+					EQ: { groupCount: 1, portCount: 2, largestGroupPortCount: 2 },
+				},
+			},
+			true,
+		);
+		expect(stkActiveMarkup).toContain("선택을 확인한 뒤 STK 생성 또는 Shift+Enter");
+		expect(stkActiveMarkup).not.toContain("선택하면 그룹이 완성됩니다");
 		expect(keyboardMarkup).toContain('data-testid="guided-build-keyboard-port-hint"');
 		expect(keyboardMarkup).toContain("KEYBOARD EQ");
 		expect(keyboardMarkup).toContain("방향키 / WASD · ENTER 행 확정");

@@ -17,7 +17,7 @@ describe("portAuthoringSurfacePresentation", () => {
 
 	it("distinguishes EQ and STK target vocabulary", () => {
 		expect(portAuthoringSurfacePresentation("EQ", 2, 2).instruction).toBe(
-			"포트 후보 2곳 · 같은 직선 레일을 따라 2개 이상 드래그",
+			"포트 후보 2곳 · 시작점과 끝점 클릭 · 드래그도 가능",
 		);
 		expect(portAuthoringSurfacePresentation("STK", 3, 3).instruction).toBe(
 			"금색 ◇ CENTER 3개 · STK에 연결할 Port 슬롯을 선택한 뒤 STK 생성",

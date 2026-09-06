@@ -263,7 +263,7 @@ function portCanvasInstruction(tool: "ohb" | "eq" | "stk"): string {
 		return "OHB 도구가 선택됐습니다. Canvas의 점선 고리가 있는 청록 슬롯에서 Enter를 누르거나 그 슬롯을 클릭하세요.";
 	}
 	if (tool === "eq") {
-		return "‘1 시작’에서 ‘2 끝’까지 드래그하고 놓으면 EQ 행을 만듭니다. 키보드는 시작점에서 Enter, 끝점에서 Enter를 누르세요.";
+		return "‘1 시작’과 ‘2 끝’을 차례로 클릭하면 EQ 행을 만듭니다. 두 점 사이를 드래그하거나 각 위치에서 Enter를 눌러도 됩니다.";
 	}
 	return "아래 Port 개수 조건에 맞춰 금색 마름모를 클릭하거나 강조점에서 Enter로 선택하세요. 선택을 확인한 뒤 ‘STK 생성’ 또는 Shift+Enter로 생성합니다.";
 }

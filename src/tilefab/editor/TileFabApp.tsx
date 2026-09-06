@@ -659,7 +659,7 @@ import {
 	ordinaryRailCommitStatus,
 } from "./OrdinaryFirstPortHandoff";
 import {
-	ORDINARY_EQ_SINGLE_CLICK_RECOVERY_STATUS,
+	ORDINARY_EQ_ANCHOR_SELECTED_STATUS,
 	ordinaryEqAuthoringInstruction,
 	ordinaryEqKeyboardTargetLabel,
 	ordinaryEqRowExitPresentation,
@@ -8721,7 +8721,7 @@ export default function TileFabApp(): React.ReactElement {
 							: "OHB Port용 직선 레일이 없습니다 · 먼저 직선 레일을 만드세요"
 					: next === "eq"
 						? portSlotsRef.current?.legalCount
-							? `EQ CENTER 후보 슬롯 ${portSlotsRef.current.legalCount.toLocaleString()}개 · 드래그로 2개 이상 선택`
+							? ordinaryEqAuthoringInstruction("choose-slot", portSlotsRef.current.legalCount)
 							: "EQ 포트 행을 배치할 연속 직선 레일을 먼저 건설하세요"
 						: next === "stk"
 							? portSlotsRef.current?.legalCount
@@ -10527,7 +10527,7 @@ export default function TileFabApp(): React.ReactElement {
 				legal: selection.valid,
 				reason: selection.reason,
 			});
-			setStatus("EQ 시작 슬롯 선택 · 방향키로 같은 레일의 끝 슬롯 이동 · Enter로 행 확정");
+			setStatus(ORDINARY_EQ_ANCHOR_SELECTED_STATUS);
 			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 			scheduleRender();
 			return;
@@ -16429,7 +16429,15 @@ export default function TileFabApp(): React.ReactElement {
 			activePortKeyboardSession?.portType === "STK" &&
 			toolRef.current === "stk" &&
 			guidedPortKeyboardSessionCurrent(activePortKeyboardSession);
-		if (activePortKeyboardSession && event.button === 0 && !continuesStkSelection) {
+		const continuesEqSelection =
+			activePortKeyboardSession?.portType === "EQ" &&
+			toolRef.current === "eq" && activePortKeyboardSession.phase === "choose-end" &&
+			guidedPortKeyboardSessionCurrent(activePortKeyboardSession) &&
+			portRowDragRef.current?.portType === "EQ" &&
+			portRowDragRef.current.pointerId === -1 &&
+			portRowDragRef.current.anchorRow === activePortKeyboardSession.anchorRow &&
+			isCurrentPortRowDrag(portRowDragRef.current);
+		if (activePortKeyboardSession && event.button === 0 && !continuesStkSelection && !continuesEqSelection) {
 			clearTransientConstruction("포인터 Port 배치로 전환했습니다");
 		}
 		if (staticFabArrangementUiRef.current) {
@@ -16677,6 +16685,23 @@ export default function TileFabApp(): React.ReactElement {
 				commitOhbPlacementIntentAtRow(placementIntent, row);
 				return;
 			}
+			const eqCursor = guidedPortKeyboardSessionRef.current;
+			const eqDraft = portRowDragRef.current;
+			if (continuesEqSelection && portType === "EQ" && eqCursor?.portType === "EQ" && eqDraft?.portType === "EQ") {
+				cancelOrdinaryPortKeyboardDeferredApply();
+				eqDraft.pointerId = event.pointerId;
+				eqDraft.startClientX = event.clientX;
+				eqDraft.startClientY = event.clientY;
+				eqDraft.moved = true;
+				const selection = recomputePortRowDrag(eqDraft, row);
+				presentGuidedPortKeyboardSession(moveGuidedPortKeyboardCursor(eqCursor, row), {
+					legal: selection.valid, reason: selection.reason,
+				});
+				setStatus(selection.valid ? `EQ Port ${selection.rows.length}개 선택 · 놓아서 생성` : selection.reason);
+				event.currentTarget.setPointerCapture(event.pointerId);
+				scheduleRender();
+				return;
+			}
 			const candidates = rendererRef.current.queryPortSlots(
 				slots,
 				portRowDragBounds(slots, row, row),
@@ -16737,7 +16762,7 @@ export default function TileFabApp(): React.ReactElement {
 				};
 				if (previewReadoutRef.current) previewReadoutRef.current.textContent = selection.reason;
 				setStatus(
-					`같은 CENTER 직선 행을 따라 드래그해 ${pitchMillimeters / 1_000} m 피치 EQ 포트를 2개 이상 선택하세요`,
+					`시작점을 놓은 뒤 끝점을 클릭하거나 계속 드래그하세요 · EQ ${pitchMillimeters / 1_000} m 간격`,
 				);
 			}
 			event.currentTarget.setPointerCapture(event.pointerId);
@@ -17154,15 +17179,7 @@ export default function TileFabApp(): React.ReactElement {
 			return false;
 		}
 		if (!current || !selection.valid) {
-			setStatus(
-				current &&
-					portDrag.portType === "EQ" &&
-					!portDrag.moved &&
-					"state" in selection &&
-					selection.state === "ANCHORED"
-					? ORDINARY_EQ_SINGLE_CLICK_RECOVERY_STATUS
-					: selection.reason,
-			);
+			setStatus(current ? selection.reason : `FAB 데이터가 변경되어 ${portDrag.portType} 배치를 취소했습니다`);
 			scheduleRender();
 			return false;
 		}
@@ -17237,6 +17254,26 @@ export default function TileFabApp(): React.ReactElement {
 		if (retainsSelection) {
 			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 		}
+		return true;
+	};
+
+	const retainEqPointerDraft = (draft: PortRowDragState, message?: string): boolean => {
+		if (draft.portType !== "EQ" || !isCurrentPortRowDrag(draft)) return false;
+		const binding = createGuidedPortKeyboardBinding(
+			draft.modelGeneration, draft.document, draft.slots, draft.availability,
+		);
+		const anchored = selectGuidedEqKeyboardAnchor(createGuidedPortKeyboardSession(
+			"EQ", draft.anchorRow, binding, guidedBuildOpen ? "guided" : "ordinary",
+		));
+		const cursor = moveGuidedPortKeyboardCursor(anchored, draft.currentRow >= 0 ? draft.currentRow : draft.anchorRow);
+		const pointerId = draft.pointerId;
+		draft.pointerId = -1;
+		draft.moved = true;
+		portRowDragRef.current = draft;
+		presentGuidedPortKeyboardSession(cursor, { legal: draft.selection.valid, reason: draft.selection.reason });
+		if (pointerId >= 0) releasePointerCapture(pointerId);
+		if (message) setStatus(message);
+		scheduleRender();
 		return true;
 	};
 
@@ -17408,6 +17445,31 @@ export default function TileFabApp(): React.ReactElement {
 				);
 			} else if (finalTargetRow !== portDrag.currentRow) {
 				recomputePortRowDrag(portDrag, finalTargetRow);
+			}
+			if (portDrag.portType === "EQ") {
+				if (portDrag.selection.state === "ANCHORED" &&
+					retainEqPointerDraft(portDrag, ORDINARY_EQ_ANCHOR_SELECTED_STATUS)) {
+					return;
+				}
+				const cursor = guidedPortKeyboardSessionRef.current;
+				if (cursor?.portType === "EQ" && cursor.phase === "choose-end" &&
+					guidedPortKeyboardSessionCurrent(cursor) && isCurrentPortRowDrag(portDrag)) {
+					if (!portDrag.selection.valid) {
+						retainEqPointerDraft(portDrag, `${portDrag.selection.reason} · 시작점은 유지됩니다. 다른 끝 Port를 선택하세요`);
+						return;
+					}
+					if (!commitPortRowPlacement(portDrag)) {
+						retainEqPointerDraft(portDrag);
+						return;
+					}
+					if (guidedPortKeyboardSessionRef.current === cursor) {
+						guidedPortKeyboardSessionRef.current = null;
+						setGuidedPortKeyboard(null);
+						clearGuidedPortKeyboardAccessibility();
+					}
+					releasePointerCapture(event.pointerId);
+					return;
+				}
 			}
 			commitPortRowPlacement(portDrag);
 			return;
@@ -30630,7 +30692,7 @@ export default function TileFabApp(): React.ReactElement {
 					data-testid="guided-port-row-start"
 					data-port-slot-row={guidedPortRowStartMarker?.portSlotRow ?? ""}
 					role="note"
-					aria-label="EQ Port 행 드래그 시작"
+					aria-label="EQ Port 행 시작점"
 				>
 					<span>1 시작</span>
 				</div>
@@ -30645,7 +30707,7 @@ export default function TileFabApp(): React.ReactElement {
 					data-testid="guided-port-row-end"
 					data-port-slot-row={guidedPortRowEndMarker?.portSlotRow ?? ""}
 					role="note"
-					aria-label="EQ Port 행 드래그 끝"
+					aria-label="EQ Port 행 끝점"
 				>
 					<span>2 끝</span>
 				</div>
@@ -32377,7 +32439,7 @@ export default function TileFabApp(): React.ReactElement {
 										active={tool === "eq"}
 										disabled={staticFabExclusiveCommandActive}
 										caption={!guidedBuildOpen ? "EQ Port 행" : undefined}
-										captionDescription={!guidedBuildOpen ? "CENTER · 같은 직선 레일 드래그" : undefined}
+										captionDescription={!guidedBuildOpen ? "같은 직선 레일 · 시작점 → 끝점 클릭" : undefined}
 										compactCaption="EQ"
 										guidedCaption={guidedBuildOpen ? "2 · EQ · 직선 Port 행" : undefined}
 										guidedTarget={

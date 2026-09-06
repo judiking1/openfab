@@ -1,34 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
-	ORDINARY_EQ_SINGLE_CLICK_RECOVERY_STATUS,
+	ORDINARY_EQ_ANCHOR_SELECTED_STATUS,
 	ordinaryEqAuthoringInstruction,
 	ordinaryEqKeyboardTargetLabel,
 	ordinaryEqRowExitPresentation,
 } from "./OrdinaryEqAuthoringPresentation";
 
 describe("ordinaryEqAuthoringInstruction", () => {
-	it("separates the keyboard start action from the pointer drag contract", () => {
+	it("describes click endpoints and equivalent drag or keyboard input", () => {
 		const instruction = ordinaryEqAuthoringInstruction("choose-slot", 1_234);
 		expect(instruction).toContain("포트 후보 1,234곳");
-		expect(instruction).toContain(
-			"포인터: 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그",
-		);
-		expect(instruction).toContain("키보드: 흰 테두리 1 시작을 방향키/WASD로 이동 → Enter");
+		expect(instruction).toContain("청록색 슬롯의 1 시작 클릭 → 2 끝 클릭");
+		expect(instruction).toContain("드래그 또는 방향키/WASD 후 Enter도 가능");
 		expect(instruction).toContain("Esc 종료");
-		expect(instruction).not.toContain("클릭/Enter");
 	});
 
-	it("keeps pointer recovery and keyboard marker identity explicit", () => {
-		expect(ordinaryEqKeyboardTargetLabel("choose-slot")).toBe("키보드 1 시작 · ENTER");
-		expect(ordinaryEqKeyboardTargetLabel("choose-end")).toBe("키보드 2 끝 · ENTER");
-		expect(ORDINARY_EQ_SINGLE_CLICK_RECOVERY_STATUS).toContain("클릭만으로");
-		expect(ORDINARY_EQ_SINGLE_CLICK_RECOVERY_STATUS).toContain("놓지 않고 드래그");
+	it("identifies the shared start and end targets", () => {
+		expect(ordinaryEqKeyboardTargetLabel("choose-slot")).toBe("1 시작 · 클릭 / ENTER");
+		expect(ordinaryEqKeyboardTargetLabel("choose-end")).toBe("2 끝 · 클릭 / ENTER");
+		expect(ORDINARY_EQ_ANCHOR_SELECTED_STATUS).toContain("EQ 시작점 선택");
+		expect(ORDINARY_EQ_ANCHOR_SELECTED_STATUS).toContain("끝 Port를 클릭");
 	});
 
 	it("names the end phase and its first Escape boundary", () => {
 		const instruction = ordinaryEqAuthoringInstruction("choose-end", 8);
 		expect(instruction).toContain("1 시작 고정");
-		expect(instruction).toContain("방향키/WASD로 2 끝 이동 → Enter로 행 확정");
+		expect(instruction).toContain("2 끝 클릭 또는 방향키/WASD 후 Enter로 행 확정");
 		expect(instruction).toContain("Esc로 행 선택 취소");
 		expect(instruction).not.toContain("Port 배치 종료");
 	});

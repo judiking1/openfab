@@ -209,6 +209,8 @@ try {
 	}
 	const ordinaryRailKeyboard = await exerciseOrdinaryRailKeyboardAcceptance(browser);
 	recordStep("ordinary-rail-keyboard", ordinaryRailKeyboard);
+	const ordinaryRailPointer = await exerciseOrdinaryRailPointerAcceptance(browser);
+	recordStep("ordinary-rail-pointer", ordinaryRailPointer);
 	const ordinaryHierarchyContinuation = await exerciseOrdinaryModuleHierarchyContinuation(browser);
 	recordStep("ordinary-module-hierarchy-continuation", ordinaryHierarchyContinuation);
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
@@ -5161,12 +5163,12 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			);
 			assertEqual(
 				(await nextPortHandoff.locator("small").innerText()).trim(),
-				"청록색 CENTER에서 다른 슬롯까지 드래그",
+				"청록색 시작점 → 끝점 클릭",
 				`${viewport.label} EQ handoff visible pointer gesture`,
 			);
 			assertEqual(
 				await nextPortHandoff.getAttribute("aria-label"),
-				"추천 다음 작업: 청록색 CENTER 슬롯에서 시작해 같은 직선의 다른 슬롯까지 놓지 않고 드래그하여 EQ Port 행을 만듭니다. 키보드는 진입 후 표시되는 흰 테두리 1번 시작에서 Enter를 사용합니다. OHB Port는 계속 배치할 수 있습니다",
+				"추천 다음 작업: 청록색 슬롯의 시작점과 끝점을 차례로 클릭하거나 드래그하여 EQ Port 행을 만듭니다. 키보드는 진입 후 표시되는 흰 테두리 1번 시작에서 Enter를 사용합니다. OHB Port는 계속 배치할 수 있습니다",
 				`${viewport.label} EQ handoff accessible task`,
 			);
 			assertEqual(await directEqTool.count(), 1, `${viewport.label} keeps one direct EQ tool`);
@@ -5300,7 +5302,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			);
 			assertEqual(
 				(await page.getByTestId("ordinary-port-keyboard-target").innerText()).trim(),
-				"키보드 1 시작 · ENTER",
+				"1 시작 · 클릭 / ENTER",
 				`${viewport.label} both entry routes reach the same EQ target`,
 			);
 			assertEqual(
@@ -5318,22 +5320,22 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			);
 			assertEqual(
 				(await page.getByTestId("ordinary-port-keyboard-target").innerText()).trim(),
-				"키보드 1 시작 · ENTER",
+				"1 시작 · 클릭 / ENTER",
 				`${viewport.label} EQ marker retains exact start identity`,
 			);
 			await assertOrdinaryPortKeyboardTargetVisible(page, `${viewport.label} first EQ start`);
 			for (const copy of [
 				"포트 후보",
-				"포인터: 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그",
-				"키보드: 흰 테두리 1 시작을 방향키/WASD로 이동 → Enter",
+				"청록색 슬롯의 1 시작 클릭 → 2 끝 클릭",
+				"드래그 또는 방향키/WASD 후 Enter도 가능",
 				"Esc 종료",
 			]) {
 				assertIncludes(eqInstruction, copy, `${viewport.label} EQ input contract ${copy}`);
 			}
 			assertEqual(
-				eqInstruction.includes("클릭/Enter"),
-				false,
-				`${viewport.label} EQ input contract rejects single-click copy`,
+				eqInstruction.includes("1 시작 클릭 → 2 끝 클릭"),
+				true,
+				`${viewport.label} EQ input contract names both clicks`,
 			);
 			const beforeEqRowCancel = await readMetrics(page);
 			await canvas.focus();
@@ -5348,7 +5350,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			);
 			assertEqual(
 				(await page.getByTestId("ordinary-port-keyboard-target").innerText()).trim(),
-				"키보드 2 끝 · ENTER",
+				"2 끝 · 클릭 / ENTER",
 				`${viewport.label} EQ marker retains exact end identity`,
 			);
 			const eqEndInstruction = await page
@@ -5361,7 +5363,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			);
 			for (const copy of [
 				"1 시작 고정",
-				"키보드: 방향키/WASD로 2 끝 이동 → Enter로 행 확정",
+				"2 끝 클릭 또는 방향키/WASD 후 Enter로 행 확정",
 				"Esc로 행 선택 취소",
 			]) {
 				assertIncludes(eqEndInstruction, copy, `${viewport.label} EQ end buildbar owns ${copy}`);
@@ -5730,7 +5732,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			await assertOrdinaryPortKeyboardTargetVisible(page, `${viewport.label} factory EQ overview`);
 			assertEqual(
 				(await page.getByTestId("ordinary-port-keyboard-target").innerText()).trim(),
-				"키보드 1 시작 · ENTER",
+				"1 시작 · 클릭 / ENTER",
 				`${viewport.label} current EQ target identity`,
 			);
 			const eqInstruction = page.locator(
@@ -5739,10 +5741,10 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 			const eqInstructionText = (await eqInstruction.innerText()).trim();
 			for (const copy of [
 				`포트 후보 ${eqOverview.legalPortSlots.toLocaleString("ko-KR")}곳`,
-				"포인터: 청록색 CENTER",
-				"놓지 않고 드래그",
-				"키보드: 흰 테두리 1 시작",
-				"방향키/WASD로 이동 → Enter",
+				"청록색 슬롯의 1 시작 클릭 → 2 끝 클릭",
+				"드래그",
+				"방향키/WASD 후 Enter",
+				"Esc 종료",
 			]) {
 				assertIncludes(eqInstructionText, copy, `${viewport.label} EQ overview copy ${copy}`);
 			}
@@ -7289,9 +7291,51 @@ async function exerciseGuidedPortHandoffRegression(
 		}
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.waitForTimeout(100);
-		const eqBefore = await readMetrics(page);
+		let eqBefore = await readMetrics(page);
+		assertEqual(
+			await page.getByTestId("guided-port-row-start").getAttribute("aria-label"),
+			"EQ Port 행 시작점",
+			"Guided EQ accessible start matches click/drag/keyboard input",
+		);
+		assertEqual(
+			await page.getByTestId("guided-port-row-end").getAttribute("aria-label"),
+			"EQ Port 행 끝점",
+			"Guided EQ accessible end matches click/drag/keyboard input",
+		);
 		await visibleGuidedCanvasMarkerPoint("guided-port-row-start", "Guided EQ visible start marker");
 		await visibleGuidedCanvasMarkerPoint("guided-port-row-end", "Guided EQ visible end marker");
+		const clickEqStart = await visibleGuidedCanvasMarkerPoint(
+			"guided-port-row-start",
+			"Guided EQ click start",
+		);
+		await page.mouse.click(clickEqStart.x, clickEqStart.y);
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="rail-canvas"]')
+					?.getAttribute("data-guided-port-keyboard-phase") === "choose-end",
+		);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			eqBefore,
+			"Guided EQ first click remains a draft",
+		);
+		const clickEqEnd = await visibleGuidedCanvasMarkerPoint(
+			"guided-port-row-end",
+			"Guided EQ click end",
+		);
+		await page.mouse.click(clickEqEnd.x, clickEqEnd.y);
+		const clickedEq = await waitForWorker(
+			page,
+			(metrics) => metrics.equipmentGroups === "2" && metrics.equipmentPorts === "4",
+		);
+		assertSingleGuidedPortCommit(clickedEq, eqBefore, "Guided EQ endpoint clicks");
+		eqBefore = await undoEquipmentCompletion(page, eqBefore, clickedEq, "Guided EQ click row", {
+			allowMonotonicAllocatorFingerprint: true,
+		});
+		await eqTool.focus();
+		await page.keyboard.press("Enter");
+		await waitForLegalPortSlots(page);
 		await page.waitForFunction(
 			() =>
 				document.activeElement?.getAttribute("data-testid") === "rail-canvas" &&
@@ -7412,8 +7456,8 @@ async function exerciseGuidedPortHandoffRegression(
 		const pointerStkBefore = await readMetrics(page);
 		assertEqual(
 			await guidedCanvas.getAttribute("data-guided-keyboard-pointer-downs"),
-			"0",
-			"Guided OHB and EQ keyboard placement uses no Canvas pointer input",
+			"2",
+			"Guided keyboard authoring adds no pointer input after the two undone EQ clicks",
 		);
 		const pointerFirstPoint = await visibleGuidedCanvasMarkerPoint(
 			"guided-port-target",
@@ -7870,8 +7914,8 @@ async function exerciseGuidedPortHandoffRegression(
 		await page.waitForTimeout(100);
 		assertEqual(
 			await guidedCanvas.getAttribute("data-guided-keyboard-pointer-downs"),
-			"2",
-			"Only the two cancelled STK draft clicks use the pointer; authored groups use the keyboard",
+			"4",
+			"Two undone EQ clicks and two cancelled STK draft clicks; final groups use keyboard input",
 		);
 		await page.screenshot({
 			path: path.join(artifactRoot, "guided-port-handoff-390x844.png"),
@@ -13059,8 +13103,8 @@ async function exerciseGuidedPortHandoffRegression(
 						.innerText();
 					for (const copy of [
 						"포트 후보",
-						"포인터: 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그",
-						"키보드: 흰 테두리 1 시작을 방향키/WASD로 이동 → Enter",
+						"청록색 슬롯의 1 시작 클릭 → 2 끝 클릭",
+						"드래그 또는 방향키/WASD 후 Enter도 가능",
 						"Esc 종료",
 					]) {
 						assertIncludes(
@@ -13070,9 +13114,9 @@ async function exerciseGuidedPortHandoffRegression(
 						);
 					}
 					assertEqual(
-						eqInitialInstruction.includes("클릭/Enter"),
-						false,
-						`ordinary EQ does not promise a single pointer click ${viewport.label}`,
+						eqInitialInstruction.includes("1 시작 클릭 → 2 끝 클릭"),
+						true,
+						`ordinary EQ names two separate endpoint choices ${viewport.label}`,
 					);
 					if (viewport.label === "390x844") {
 						await canvas.press("Escape");
@@ -13293,7 +13337,7 @@ async function exerciseGuidedPortHandoffRegression(
 						.innerText();
 					for (const copy of [
 						"1 시작 고정",
-						"키보드: 방향키/WASD로 2 끝 이동 → Enter로 행 확정",
+						"2 끝 클릭 또는 방향키/WASD 후 Enter로 행 확정",
 						"Esc로 행 선택 취소",
 					]) {
 						assertIncludes(eqEndInstruction, copy, `ordinary EQ end instruction ${viewport.label}`);
@@ -14272,7 +14316,7 @@ async function exerciseGuidedPortHandoffRegression(
 				);
 				assertIncludes(
 					await page.getByTestId("ordinary-port-keyboard-target").innerText(),
-					"키보드 2 끝 · ENTER",
+					"2 끝 · 클릭 / ENTER",
 					"ordinary EQ Canvas marker names the current Enter target",
 				);
 				assertEqual(
@@ -14374,7 +14418,7 @@ async function exerciseGuidedPortHandoffRegression(
 				);
 				assertIncludes(
 					await page.getByTestId("ordinary-port-keyboard-target").innerText(),
-					"키보드 1 시작 · ENTER",
+					"1 시작 · 클릭 / ENTER",
 					"ordinary EQ reset Canvas marker names the first Enter target",
 				);
 				assertProjectUnchanged(
@@ -19212,10 +19256,9 @@ async function clickAvailableStkCandidate(page, candidates, expectedRows, exclud
 	throw new Error(`No legal FLEX STK candidate produced ${expectedRows} draft ports.`);
 }
 
-async function assertBlankPointerDoesNotReuseStaleStkHover(page, target, label) {
-	const canvas = page.getByTestId("rail-canvas");
-	const blankPoint = await canvas.evaluate((element) => {
-		const slots = window.__tileFab?.getEditorModel().portSlotArtifacts.STK.slots;
+async function findBlankPortCanvasPoint(page, portType) {
+	return page.getByTestId("rail-canvas").evaluate((element, portType) => {
+		const slots = window.__tileFab?.getEditorModel().portSlotArtifacts[portType].slots;
 		const camera = window.__tileFab?.camera;
 		const bounds = element.getBoundingClientRect();
 		if (!slots || !camera || !Number.isFinite(camera.zoom) || camera.zoom <= 0) return null;
@@ -19243,7 +19286,12 @@ async function assertBlankPointerDoesNotReuseStaleStkHover(page, target, label) 
 			}
 		}
 		return null;
-	});
+	}, portType);
+}
+
+async function assertBlankPointerDoesNotReuseStaleStkHover(page, target, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	const blankPoint = await findBlankPortCanvasPoint(page, "STK");
 	if (!blankPoint) {
 		throw new Error(
 			`${label} could not resolve a blank Canvas point outside every STK slot hit and cursor ring.`,
@@ -40974,7 +41022,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			);
 			assertEqual(
 				await nextEqPointerInstruction.innerText(),
-				"PITCH 2 m 준비 · 청록색 CENTER에서 드래그",
+				"PITCH 2 m 준비 · 청록색 시작점 → 끝점 클릭",
 				`${viewport.label} Build return previews the actual pointer gesture`,
 			);
 			await assertLocatorInsideViewport(page, nextEqHandoff);
@@ -40988,7 +41036,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				null,
 				`${viewport.label} native EQ return does not invent a global shortcut`,
 			);
-			for (const phrase of ["현재 EQ PITCH 2 m", "놓지 않고 드래그", "Enter"]) {
+			for (const phrase of ["현재 EQ PITCH 2 m", "드래그", "Enter"]) {
 				assertIncludes(
 					(await nextEqHandoff.getAttribute("aria-label")) ?? "",
 					phrase,
@@ -41061,7 +41109,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			);
 			const eqEntryStatus =
 				(await page.locator(".tilefab-statusbar > span[aria-live]").textContent()) ?? "";
-			for (const phrase of ["놓지 않고 드래그", "Enter"]) {
+			for (const phrase of ["드래그", "Enter"]) {
 				assertIncludes(
 					eqEntryStatus,
 					phrase,
@@ -41093,9 +41141,9 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			await assertLocatorInsideViewport(page, eqInstruction);
 			const eqInstructionText = await eqInstruction.innerText();
 			for (const phrase of [
-				"포인터: 청록색 CENTER",
-				"놓지 않고 드래그",
-				"키보드: 흰 테두리 1 시작",
+				"청록색 슬롯의 1 시작 클릭 → 2 끝 클릭",
+				"드래그",
+				"방향키/WASD 후 Enter",
 				"Enter",
 			]) {
 				assertIncludes(
@@ -41106,8 +41154,8 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			}
 			assertEqual(
 				(await page.getByTestId("ordinary-port-keyboard-target").innerText()).trim(),
-				"키보드 1 시작 · ENTER",
-				`${viewport.label} EQ marker identifies the keyboard-only target`,
+				"1 시작 · 클릭 / ENTER",
+				`${viewport.label} EQ marker identifies the shared start target`,
 			);
 			await assertOrdinaryPortKeyboardTargetVisible(
 				page,
@@ -41130,14 +41178,32 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				() =>
 					document
 						.querySelector(".tilefab-statusbar > span[aria-live]")
-						?.textContent?.includes("클릭만으로 배치되지 않습니다") === true,
+						?.textContent?.includes("EQ 시작점 선택") === true,
 				undefined,
 				{ timeout: 10_000 },
 			);
 			assertProjectUnchanged(
 				await readMetrics(page),
 				beforeEqSingleClick,
-				`${viewport.label} EQ single-click recovery`,
+				`${viewport.label} EQ first click remains an uncommitted start`,
+			);
+			const clickedEqCanvas = page.getByTestId("rail-canvas");
+			assertEqual(
+				await clickedEqCanvas.getAttribute("data-guided-port-keyboard-phase"),
+				"choose-end",
+				`${viewport.label} first EQ click keeps its anchor`,
+			);
+			await clickedEqCanvas.press("Escape");
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-guided-port-keyboard-phase") === "choose-slot",
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				beforeEqSingleClick,
+				`${viewport.label} cancel clicked EQ start`,
 			);
 			const eqRuns = await readLegalStraightPortRuns(page, "EQ");
 			const eqRun = eqRuns.find((candidate) => candidate.items.length >= 3);
@@ -41271,6 +41337,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				"false",
 				`${viewport.label} pointer EQ Undo keeps simulation gated`,
 			);
+			await exerciseEqClickEndpoints(page, viewport.label);
 			proof.push(
 				Object.freeze({
 					viewport: viewport.label,
@@ -41286,6 +41353,337 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 		}
 	}
 	return Object.freeze(proof);
+}
+
+async function exerciseEqClickEndpoints(page, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	await clickActivityCommand(page, "build", "레일 건설");
+	await centerWorld(page, { x: 8.5, y: 12.5 });
+	const railBefore = await readMetrics(page);
+	const railStart = await screenPointForWorld(page, { x: 4.5, y: 12.5 });
+	const railEnd = await screenPointForWorld(page, { x: 12.5, y: 12.5 });
+	await page.mouse.move(railStart.x, railStart.y);
+	await page.mouse.down();
+	await page.mouse.move(railEnd.x, railEnd.y, { steps: 12 });
+	await page.waitForFunction(
+		() =>
+			document
+				.querySelector('[data-testid="rail-canvas"]')
+				?.getAttribute("data-draft-preview-valid") === "true",
+	);
+	await page.mouse.up();
+	const railReady = await waitForWorker(
+		page,
+		(metrics) =>
+			Number(metrics.authoredEdges) === Number(railBefore.authoredEdges) + 8 &&
+			Number(metrics.workerTargetSequence) === Number(railBefore.workerTargetSequence) + 1,
+	);
+	assertSingleGuidedPortCommit(railReady, railBefore, `${label} parallel EQ recovery rail`);
+
+	for (const mode of ["click-click", "click-keyboard", "keyboard-click"]) {
+		try {
+			await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
+			await page
+				.locator(".tilefab-eq-pitch")
+				.getByRole("button", { name: "1 m", exact: true })
+				.click();
+			const runs = await readLegalStraightPortRuns(page, "EQ");
+			const run = runs.find((candidate) => candidate.items.length >= 3);
+			if (!run) throw new Error(`${label} ${mode} needs three free EQ slots.`);
+			const first = Math.floor((run.items.length - 3) / 2);
+			const start = run.items[first];
+			const end = run.items[first + 2];
+			await centerWorld(page, { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 });
+			const startPoint = await screenPointForWorld(page, start);
+			await page.mouse.move(startPoint.x, startPoint.y);
+			await page.waitForFunction(
+				(row) =>
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-guided-port-keyboard-row") === String(row),
+				start.row,
+			);
+			const before = await readMetrics(page);
+			if (mode === "keyboard-click") await canvas.press("Enter");
+			else await page.mouse.click(startPoint.x, startPoint.y);
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-guided-port-keyboard-phase") === "choose-end",
+			);
+			await page.waitForFunction(
+				(row) =>
+					document
+						.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+						?.getAttribute("data-port-slot-row") === String(row),
+				start.row,
+			);
+			assertEqual(
+				await page.getByTestId("ordinary-eq-anchor-marker").getAttribute("data-port-slot-row"),
+				String(start.row),
+				`${label} ${mode} fixed anchor`,
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				before,
+				`${label} ${mode} first endpoint is transient`,
+			);
+			if (mode === "keyboard-click") {
+				await canvas.press("Escape");
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="rail-canvas"]')
+							?.getAttribute("data-guided-port-keyboard-phase") === "choose-slot",
+				);
+				assertEqual(
+					await page.getByTestId("ordinary-eq-anchor-marker").count(),
+					0,
+					`${label} Escape removes pending EQ anchor`,
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${label} Escape cancels only EQ draft`,
+				);
+				await page.mouse.move(startPoint.x, startPoint.y);
+				await canvas.press("Enter");
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="rail-canvas"]')
+							?.getAttribute("data-guided-port-keyboard-phase") === "choose-end",
+				);
+				await clickActivityCommand(page, "equip", "OHB 포트 배치");
+				assertEqual(
+					await page.getByTestId("ordinary-eq-anchor-marker").count(),
+					0,
+					`${label} OHB switch removes EQ anchor`,
+				);
+				await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
+				const freshStart = await screenPointForWorld(page, start);
+				await page.mouse.move(freshStart.x, freshStart.y);
+				await page.waitForFunction(
+					(row) =>
+						document
+							.querySelector('[data-testid="rail-canvas"]')
+							?.getAttribute("data-guided-port-keyboard-row") === String(row),
+					start.row,
+				);
+				await canvas.press("Enter");
+				await page.waitForFunction(
+					(row) =>
+						document
+							.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+							?.getAttribute("data-port-slot-row") === String(row),
+					start.row,
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${label} reselecting EQ anchor remains transient`,
+				);
+			}
+			if (mode === "click-click") {
+				await page.mouse.click(startPoint.x, startPoint.y);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${label} same EQ endpoint cannot create`,
+				);
+				const horizontal = Math.abs(end.x - start.x) > Math.abs(end.y - start.y);
+				const otherLine = (await readLegalPortCandidates(page, "EQ")).find((item) =>
+					horizontal ? Math.abs(item.y - start.y) > 0.5 : Math.abs(item.x - start.x) > 0.5,
+				);
+				if (!otherLine) throw new Error(`${label} requires another straight line for EQ recovery.`);
+				const wrongPoint = await screenPointForWorld(page, otherLine);
+				assertEqual(
+					await page.evaluate(
+						(point) =>
+							document.elementFromPoint(point.x, point.y) ===
+							document.querySelector('[data-testid="rail-canvas"]'),
+						wrongPoint,
+					),
+					true,
+					`${label} wrong-line endpoint owns Canvas`,
+				);
+				await page.mouse.move(wrongPoint.x, wrongPoint.y);
+				await page.waitForFunction(
+					(row) =>
+						document
+							.querySelector('[data-testid="rail-canvas"]')
+							?.getAttribute("data-hover-port-slot") === String(row),
+					otherLine.row,
+				);
+				await page.mouse.click(wrongPoint.x, wrongPoint.y);
+				await page.waitForFunction(() =>
+					document
+						.querySelector(".tilefab-statusbar > span[aria-live]")
+						?.textContent?.includes("시작점은 유지됩니다"),
+				);
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="rail-canvas"]')
+							?.getAttribute("data-guided-port-keyboard-phase") === "choose-end",
+				);
+				assertEqual(
+					await page.getByTestId("ordinary-eq-anchor-marker").getAttribute("data-port-slot-row"),
+					String(start.row),
+					`${label} wrong-line endpoint retains anchor`,
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${label} wrong-line endpoint remains transient`,
+				);
+				const blank = await findBlankPortCanvasPoint(page, "EQ");
+				if (!blank) throw new Error(`${label} requires a blank point for EQ endpoint recovery.`);
+				await page.mouse.click(blank.x, blank.y);
+				assertEqual(
+					await canvas.getAttribute("data-guided-port-keyboard-phase"),
+					"choose-end",
+					`${label} blank EQ endpoint retains phase`,
+				);
+				assertEqual(
+					await page.getByTestId("ordinary-eq-anchor-marker").getAttribute("data-port-slot-row"),
+					String(start.row),
+					`${label} blank EQ endpoint retains anchor`,
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					`${label} blank EQ endpoint remains transient`,
+				);
+			}
+			if (mode === "click-keyboard") {
+				const dx = end.x - start.x;
+				const dy = end.y - start.y;
+				const key =
+					Math.abs(dx) >= Math.abs(dy)
+						? dx >= 0
+							? "ArrowRight"
+							: "ArrowLeft"
+						: dy >= 0
+							? "ArrowDown"
+							: "ArrowUp";
+				await canvas.press(key);
+				await canvas.press(key);
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="rail-canvas"]')
+							?.getAttribute("data-eq-draft-rows") === "3",
+				);
+				await canvas.press("Enter");
+			} else {
+				const endPoint = await screenPointForWorld(page, end);
+				assertEqual(
+					await page.evaluate(
+						(point) =>
+							document.elementFromPoint(point.x, point.y) ===
+							document.querySelector('[data-testid="rail-canvas"]'),
+						endPoint,
+					),
+					true,
+					`${label} ${mode} endpoint owns Canvas`,
+				);
+				await page.mouse.click(endPoint.x, endPoint.y);
+			}
+			const created = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.equipmentGroups) === Number(before.equipmentGroups) + 1 &&
+					Number(metrics.equipmentPorts) === Number(before.equipmentPorts) + 3,
+			);
+			assertSingleGuidedPortCommit(created, before, `${label} ${mode} one atomic EQ row`);
+			const undone = await undoEquipmentCompletion(page, before, created, `${label} ${mode}`, {
+				allowMonotonicAllocatorFingerprint: true,
+			});
+			await canvas.focus();
+			await page.keyboard.press("Meta+Shift+z");
+			const redone = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.workerTargetSequence) === Number(undone.workerTargetSequence) + 1 &&
+					metrics.modelChecksum === created.modelChecksum &&
+					metrics.equipmentGroups === created.equipmentGroups &&
+					metrics.equipmentPorts === created.equipmentPorts,
+			);
+			assertEqual(
+				redone.modelChecksum,
+				redone.workerChecksum,
+				`${label} ${mode} redo source/Worker identity`,
+			);
+			await undoEquipmentCompletion(page, before, redone, `${label} ${mode} redo cleanup`, {
+				allowMonotonicAllocatorFingerprint: true,
+			});
+		} catch (error) {
+			console.error(
+				"EQ endpoint failure",
+				JSON.stringify({
+					label,
+					mode,
+					state: await canvas.evaluate((element) => ({ ...element.dataset })).catch(() => null),
+				}),
+			);
+			await page
+				.screenshot({
+					path: path.join(artifactRoot, `eq-endpoint-failure-${label}-${mode}.png`),
+					fullPage: true,
+				})
+				.catch(() => undefined);
+			throw error;
+		}
+	}
+	await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
+	const sourceRun = (await readLegalStraightPortRuns(page, "EQ"))[0];
+	const sourceStart = sourceRun.items[Math.floor(sourceRun.items.length / 2)];
+	await centerWorld(page, sourceStart);
+	const sourcePoint = await screenPointForWorld(page, sourceStart);
+	const sourceBefore = await readMetrics(page);
+	await page.mouse.click(sourcePoint.x, sourcePoint.y);
+	await page.waitForFunction(
+		() =>
+			document
+				.querySelector('[data-testid="rail-canvas"]')
+				?.getAttribute("data-guided-port-keyboard-phase") === "choose-end",
+	);
+	await canvas.press("Meta+z");
+	const sourceUndone = await waitForWorker(
+		page,
+		(metrics) =>
+			metrics.modelChecksum === railBefore.modelChecksum &&
+			Number(metrics.workerTargetSequence) === Number(sourceBefore.workerTargetSequence) + 1,
+	);
+	assertEqual(
+		await page.getByTestId("ordinary-eq-anchor-marker").count(),
+		0,
+		`${label} source Undo invalidates pending EQ anchor`,
+	);
+	assertEqual(
+		await canvas.getAttribute("data-eq-draft-rows"),
+		"0",
+		`${label} source Undo clears pending EQ row`,
+	);
+	await canvas.press("Meta+Shift+z");
+	const sourceRestored = await waitForWorker(
+		page,
+		(metrics) =>
+			metrics.modelChecksum === sourceBefore.modelChecksum &&
+			Number(metrics.workerTargetSequence) === Number(sourceUndone.workerTargetSequence) + 1,
+	);
+	assertEqual(
+		await page.getByTestId("ordinary-eq-anchor-marker").count(),
+		0,
+		`${label} source Redo does not revive stale EQ anchor`,
+	);
+	assertEqual(
+		sourceRestored.workerChecksum,
+		sourceRestored.modelChecksum,
+		`${label} source Redo restores exact rail and equipment`,
+	);
 }
 
 async function exerciseOpenFragmentCopy(activeBrowser) {

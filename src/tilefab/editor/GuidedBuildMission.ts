@@ -834,12 +834,12 @@ function guidedBuildMissionPrompt(
 			title: "EQ Port 행 배치",
 			objective: "EQ 도구로 같은 직선 레일을 따라 두 개 이상의 Port를 한 그룹으로 배치하세요.",
 			rationale: definition.rationale,
-			primaryCommandId: "canvas.primary-drag",
+			primaryCommandId: "canvas.primary-click",
 			suggestedAction: "eq",
 			suggestedActionLabel: "EQUIP · EQ 열기",
 			progressCue: guidedBuildPortProgressCue(
 				evidence.equipment,
-				"강조된 EQ · Port를 선택하세요. 캔버스에서 Enter로 시작을 고른 뒤 방향키와 Enter로 끝을 확정하거나, 청록색 1 시작에서 2 끝까지 드래그하세요.",
+				"강조된 EQ · Port를 선택하세요. 청록색 1 시작과 2 끝을 차례로 클릭하거나 드래그하세요. 키보드는 시작과 끝에서 Enter를 사용합니다.",
 			),
 		});
 	}

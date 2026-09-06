@@ -450,7 +450,7 @@ describe("GuidedBuildMission", () => {
 			label: "Port-first 진행",
 			value: "OHB 1/1 · EQ 0/2 · STK 0/2",
 			instruction:
-				"강조된 EQ · Port를 선택하세요. 캔버스에서 Enter로 시작을 고른 뒤 방향키와 Enter로 끝을 확정하거나, 청록색 1 시작에서 2 끝까지 드래그하세요.",
+				"강조된 EQ · Port를 선택하세요. 청록색 1 시작과 2 끝을 차례로 클릭하거나 드래그하세요. 키보드는 시작과 끝에서 Enter를 사용합니다.",
 		});
 		expect(guidedBuildRevealedEquipmentToolIds(afterOhb)).toEqual(["eq"]);
 		expect(

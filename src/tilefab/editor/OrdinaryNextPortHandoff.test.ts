@@ -28,13 +28,13 @@ describe("ordinaryNextPortHandoff", () => {
 			surface: "ohb-authoring",
 			action: "start-eq",
 			label: "추천 · EQ Port 행",
-			instruction: "청록색 CENTER에서 다른 슬롯까지 드래그",
+			instruction: "청록색 시작점 → 끝점 클릭",
 			ariaLabel:
-				"추천 다음 작업: 청록색 CENTER 슬롯에서 시작해 같은 직선의 다른 슬롯까지 놓지 않고 드래그하여 EQ Port 행을 만듭니다. 키보드는 진입 후 표시되는 흰 테두리 1번 시작에서 Enter를 사용합니다. OHB Port는 계속 배치할 수 있습니다",
+				"추천 다음 작업: 청록색 슬롯의 시작점과 끝점을 차례로 클릭하거나 드래그하여 EQ Port 행을 만듭니다. 키보드는 진입 후 표시되는 흰 테두리 1번 시작에서 Enter를 사용합니다. OHB Port는 계속 배치할 수 있습니다",
 			description:
-				"OHB Port를 계속 배치하거나, 포인터로 청록색 CENTER 슬롯에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그합니다. 키보드는 흰 테두리 1번 시작에서 Enter를 사용합니다.",
+				"OHB Port를 계속 배치하거나, 청록색 슬롯의 시작점과 끝점을 차례로 클릭하거나 드래그합니다. 키보드는 흰 테두리 1번 시작에서 Enter를 사용합니다.",
 		});
-		expect(ORDINARY_EQ_HANDOFF_ENTRY_STATUS).toContain("놓지 않고 드래그");
+		expect(ORDINARY_EQ_HANDOFF_ENTRY_STATUS).toContain("차례로 클릭하거나 드래그");
 		expect(ORDINARY_EQ_HANDOFF_ENTRY_STATUS).toContain("Enter");
 	});
 
@@ -80,11 +80,11 @@ describe("ordinaryNextPortHandoff", () => {
 			surface: "build-return",
 			action: "start-eq",
 			label: "다음 · EQ Port 행",
-			instruction: "PITCH 2 m 준비 · 청록색 CENTER에서 드래그",
+			instruction: "PITCH 2 m 준비 · 청록색 시작점 → 끝점 클릭",
 			ariaLabel:
-				"다음 작업: 현재 EQ PITCH 2 m로 완성할 수 있는 직선에서 청록색 CENTER 슬롯을 시작해 같은 직선의 다른 슬롯까지 놓지 않고 드래그하여 EQ Port 행을 만듭니다. 키보드는 진입 후 표시되는 흰 테두리 1번 시작에서 Enter를 사용합니다",
+				"다음 작업: 현재 EQ PITCH 2 m로 완성할 수 있는 직선에서 청록색 슬롯의 시작점과 끝점을 차례로 클릭하거나 드래그하여 EQ Port 행을 만듭니다. 키보드는 진입 후 표시되는 흰 테두리 1번 시작에서 Enter를 사용합니다",
 			description:
-				"현재 EQ PITCH 2 m로 EQ Port 행을 완성할 수 있는 직선 레일이 준비되었습니다. 청록색 CENTER에서 같은 직선의 다른 슬롯까지 놓지 않고 드래그하거나, 흰 테두리 1번 시작에서 Enter로 시작합니다.",
+				"현재 EQ PITCH 2 m로 EQ Port 행을 완성할 수 있는 직선 레일이 준비되었습니다. 청록색 슬롯의 시작점과 끝점을 차례로 클릭하거나 드래그하거나, 흰 테두리 1번 시작에서 Enter로 시작합니다.",
 		});
 	});
 

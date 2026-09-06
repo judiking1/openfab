@@ -56,11 +56,11 @@ export function portAuthoringSurfacePresentation(
 	if (portType === "EQ") {
 		return Object.freeze({
 			toolCaption: "EQ Port 행",
-			toolDescription: "CENTER · 같은 직선 레일 드래그",
+			toolDescription: "같은 직선 레일 · 시작점 → 끝점 클릭",
 			buildbarTitle: "EQ PORT ROW",
 			instruction:
 				legalSlotCount > 0
-					? `포트 후보 ${count}곳 · 같은 직선 레일을 따라 2개 이상 드래그`
+					? `포트 후보 ${count}곳 · 시작점과 끝점 클릭 · 드래그도 가능`
 					: "배치 가능 슬롯 없음 · 연속된 직선 레일을 먼저 만드세요",
 			configurationAvailable,
 			prerequisiteAction,
