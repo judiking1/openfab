@@ -218,6 +218,10 @@ class DisposableMirror implements RailWorkerBridgeHandle {
 		return Promise.resolve(INITIAL_RAIL_WORKER_STATE);
 	}
 
+	waitUntilSnapshotReady() {
+		return Promise.reject(new Error("Snapshot readiness is not used by this loader test."));
+	}
+
 	waitUntilReady() {
 		return Promise.resolve(INITIAL_RAIL_WORKER_STATE);
 	}

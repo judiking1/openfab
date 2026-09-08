@@ -1102,6 +1102,10 @@ class ControlledMirrorGate implements RailWorkerBridgeHandle {
 		return Promise.reject(new Error("Authored-only readiness is not used by this startup test."));
 	}
 
+	waitUntilSnapshotReady(): Promise<never> {
+		return Promise.reject(new Error("Snapshot readiness is not used by this startup test."));
+	}
+
 	waitUntilReady(expectation: RailWorkerReadyExpectation): Promise<RailWorkerBridgeState> {
 		this.expectation = expectation;
 		this.resolveWaitStarted();

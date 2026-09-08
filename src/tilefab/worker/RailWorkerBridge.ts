@@ -28,6 +28,7 @@ import {
 	releaseValidatedRailStartupSnapshotForFullValidation,
 	type ValidatedRailStartupSnapshotAuthority,
 } from "./RailStartupSnapshotActivation";
+import { railWorkerStateMatchesSnapshotReadyExpectation } from "./RailWorkerSnapshotReadiness";
 import {
 	type EncodedRailPatch,
 	encodeRailPatchEvent,
@@ -36,6 +37,8 @@ import {
 	type RailMirrorToMainMessage,
 	railMirrorSnapshotTransfers,
 } from "./railMirrorProtocol";
+
+export { railWorkerStateMatchesSnapshotReadyExpectation } from "./RailWorkerSnapshotReadiness";
 
 export type RailWorkerBridgeStatus = "idle" | "syncing" | "ready" | "desynced" | "error";
 
@@ -169,6 +172,11 @@ export interface RailWorkerBridgeHandle {
 		signal?: AbortSignal,
 	): Promise<StaticFabOrganizationOutlineIndex>;
 	dispose(): void;
+	/** Authored snapshot identity only; incomplete physical layouts remain editable. */
+	waitUntilSnapshotReady(
+		expectation: RailWorkerAuthoredReadyExpectation,
+		signal?: AbortSignal,
+	): Promise<RailWorkerBridgeState>;
 	waitUntilAuthoredReady(
 		expectation: RailWorkerAuthoredReadyExpectation,
 		signal?: AbortSignal,
@@ -179,9 +187,11 @@ export interface RailWorkerBridgeHandle {
 	): Promise<RailWorkerBridgeState>;
 }
 
+type RailWorkerReadyMode = "snapshot" | "authored" | "physical";
+
 interface RailWorkerReadyWaiter {
 	readonly expectation: RailWorkerReadyExpectation | RailWorkerAuthoredReadyExpectation;
-	readonly requireExactPhysicalFingerprint: boolean;
+	readonly mode: RailWorkerReadyMode;
 	readonly resolve: (state: RailWorkerBridgeState) => void;
 	readonly reject: (error: Error) => void;
 	readonly signal?: AbortSignal;
@@ -697,31 +707,33 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		expectation: RailWorkerReadyExpectation,
 		signal?: AbortSignal,
 	): Promise<RailWorkerBridgeState> {
-		return this.waitForReady(expectation, true, signal);
+		return this.waitForReady(expectation, "physical", signal);
 	}
 
 	waitUntilAuthoredReady(
 		expectation: RailWorkerAuthoredReadyExpectation,
 		signal?: AbortSignal,
 	): Promise<RailWorkerBridgeState> {
-		return this.waitForReady(expectation, false, signal);
+		return this.waitForReady(expectation, "authored", signal);
+	}
+
+	waitUntilSnapshotReady(
+		expectation: RailWorkerAuthoredReadyExpectation,
+		signal?: AbortSignal,
+	): Promise<RailWorkerBridgeState> {
+		return this.waitForReady(expectation, "snapshot", signal);
 	}
 
 	private waitForReady(
 		expectation: RailWorkerReadyExpectation | RailWorkerAuthoredReadyExpectation,
-		requireExactPhysicalFingerprint: boolean,
+		mode: RailWorkerReadyMode,
 		signal?: AbortSignal,
 	): Promise<RailWorkerBridgeState> {
 		if (this.disposed) {
 			return Promise.reject(new Error("Rail worker bridge is already disposed."));
 		}
 		if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
-		const immediate = requireExactPhysicalFingerprint
-			? readyExpectationError(this.state, expectation as RailWorkerReadyExpectation)
-			: authoredReadyExpectationError(
-					this.state,
-					expectation as RailWorkerAuthoredReadyExpectation,
-				);
+		const immediate = readinessExpectationError(this.state, expectation, mode);
 		if (this.state.status === "ready") {
 			return immediate ? Promise.reject(new Error(immediate)) : Promise.resolve(this.state);
 		}
@@ -737,7 +749,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				: undefined;
 			const waiter: RailWorkerReadyWaiter = {
 				expectation,
-				requireExactPhysicalFingerprint,
+				mode,
 				resolve,
 				reject,
 				signal,
@@ -1400,12 +1412,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		for (const waiter of this.readyWaiters) {
 			this.readyWaiters.delete(waiter);
 			waiter.signal?.removeEventListener("abort", waiter.abortListener as EventListener);
-			const error = waiter.requireExactPhysicalFingerprint
-				? readyExpectationError(state, waiter.expectation as RailWorkerReadyExpectation)
-				: authoredReadyExpectationError(
-						state,
-						waiter.expectation as RailWorkerAuthoredReadyExpectation,
-					);
+			const error = readinessExpectationError(state, waiter.expectation, waiter.mode);
 			if (error) waiter.reject(new Error(error));
 			else waiter.resolve(state);
 		}
@@ -1625,6 +1632,24 @@ function sameTransferableIdentities(
 	);
 }
 
+function readinessExpectationError(
+	state: RailWorkerBridgeState,
+	expectation: RailWorkerReadyExpectation | RailWorkerAuthoredReadyExpectation,
+	mode: RailWorkerReadyMode,
+): string | null {
+	if (mode === "physical") {
+		return readyExpectationError(state, expectation as RailWorkerReadyExpectation);
+	}
+	if (mode === "authored") return authoredReadyExpectationError(state, expectation);
+	if (
+		state.status === "ready" &&
+		!railWorkerStateMatchesSnapshotReadyExpectation(state, expectation)
+	) {
+		return "Rail worker acknowledgement does not match the candidate snapshot authored identity.";
+	}
+	return null;
+}
+
 function readyExpectationError(
 	state: RailWorkerBridgeState,
 	expectation: RailWorkerReadyExpectation,
@@ -1652,24 +1677,7 @@ export function railWorkerStateMatchesAuthoredReadyExpectation(
 	expectation: RailWorkerAuthoredReadyExpectation,
 ): boolean {
 	return (
-		state.status === "ready" &&
-		state.simulationReady === false &&
-		state.targetSequence === expectation.sequence &&
-		state.targetRevision === expectation.revision &&
-		state.targetChecksum === expectation.checksum &&
-		state.sequence === expectation.sequence &&
-		state.revision === expectation.revision &&
-		state.checksum === expectation.checksum &&
-		state.targetCells === state.cells &&
-		state.targetEdges === state.edges &&
-		state.targetSwitches === state.switches &&
-		state.targetPorts === state.ports &&
-		state.targetEquipmentGroups === state.equipmentGroups &&
-		state.targetOrganizations === state.organizations &&
-		state.targetAssemblyRelationships === state.assemblyRelationships &&
-		state.targetAssemblyRelationshipNextId === state.assemblyRelationshipNextId &&
-		state.targetOperationalConfigurationRevision === state.operationalConfigurationRevision &&
-		state.targetOperationalConfigurationFingerprint === state.operationalConfigurationFingerprint &&
+		railWorkerStateMatchesSnapshotReadyExpectation(state, expectation) &&
 		state.physicalSequence === expectation.sequence &&
 		state.physicalRevision === expectation.revision &&
 		isPhysicalFingerprint(state.physicalFingerprint) &&

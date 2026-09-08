@@ -90,6 +90,7 @@ import {
 	type RailWorkerPort,
 	railWorkerStateMatchesAuthoredReadyExpectation,
 	railWorkerStateMatchesReadyExpectation,
+	railWorkerStateMatchesSnapshotReadyExpectation,
 } from "./RailWorkerBridge";
 import {
 	decodeRailPatchSoA,
@@ -2017,6 +2018,80 @@ describe("RailWorkerBridge", () => {
 		bridge.dispose();
 	});
 
+	it("captures an editable snapshot even when its physical layout is not valid", async () => {
+		const document = new RailDocument();
+		const port = new InProcessRailWorker();
+		port.reportPhysicalInvalid = true;
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => port,
+		);
+		const expectation = readyExpectation(document);
+		try {
+			const pending = bridge.waitUntilSnapshotReady(expectation);
+			const ready = await pending;
+			expect(ready.physicalValid).toBe(false);
+			expect(railWorkerStateMatchesSnapshotReadyExpectation(ready, expectation)).toBe(true);
+			expect(railWorkerStateMatchesAuthoredReadyExpectation(ready, expectation)).toBe(false);
+			await expect(bridge.waitUntilSnapshotReady(expectation)).resolves.toBe(ready);
+			await expect(bridge.captureCurrentSnapshot()).resolves.toMatchObject({
+				sequence: expectation.sequence,
+				revision: expectation.revision,
+				checksum: expectation.checksum,
+			});
+			await expect(bridge.waitUntilAuthoredReady(expectation)).rejects.toThrow(/authored identity/);
+			await expect(bridge.waitUntilReady(expectation)).rejects.toThrow(/physical identity/);
+			for (const changed of [
+				{ ...ready, status: "syncing" as const },
+				{ ...ready, simulationReady: true },
+				{ ...ready, targetChecksum: "forged" },
+				{ ...ready, sequence: ready.sequence + 1 },
+				{ ...ready, targetOrganizations: ready.organizations + 1 },
+				{ ...ready, targetAssemblyRelationships: ready.assemblyRelationships + 1 },
+				{ ...ready, targetAssemblyRelationshipNextId: ready.assemblyRelationshipNextId + 1 },
+				{ ...ready, operationalConfigurationRevision: ready.operationalConfigurationRevision + 1 },
+			]) {
+				expect(railWorkerStateMatchesSnapshotReadyExpectation(changed, expectation)).toBe(false);
+			}
+		} finally {
+			bridge.dispose();
+		}
+	});
+
+	it("rejects stale snapshot readiness and cancels only the requested waiter", async () => {
+		const document = new RailDocument();
+		const port = new InProcessRailWorker();
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => port,
+		);
+		try {
+			await bridge.waitUntilReady(readyExpectation(document));
+			expect(
+				document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 12, y: 0 })),
+			).toBe(true);
+			const expectation = readyExpectation(document);
+			const controller = new AbortController();
+			const cancelled = bridge.waitUntilSnapshotReady(expectation, controller.signal);
+			const stale = bridge.waitUntilSnapshotReady(expectation);
+			controller.abort();
+			expect(
+				document.commit(planRailConstruction(document.map, { x: 12, y: 0 }, { x: 12, y: 12 })),
+			).toBe(true);
+			await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+			await expect(stale).rejects.toThrow(/snapshot authored identity/);
+			await expect(bridge.waitUntilSnapshotReady(expectation)).rejects.toThrow(
+				/snapshot authored identity/,
+			);
+			await bridge.waitUntilSnapshotReady(readyExpectation(document));
+			expect(port.terminated).toBe(false);
+		} finally {
+			bridge.dispose();
+		}
+	});
+
 	it("rejects an authored-only readiness wait when a newer document generation wins", async () => {
 		const document = new RailDocument();
 		const port = new InProcessRailWorker();
@@ -2629,6 +2704,7 @@ class InProcessRailWorker implements RailWorkerPort {
 	onmessage: ((event: MessageEvent<RailMirrorToMainMessage>) => void) | null = null;
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	readonly mirror = new RailPatchMirror();
+	reportPhysicalInvalid = false;
 	desyncNextPatch = false;
 	executionErrorAfterDesyncNextPatch = false;
 	corruptAuthoredRevisionNextPatch = false;
@@ -3027,7 +3103,8 @@ class InProcessRailWorker implements RailWorkerPort {
 	}
 
 	private physicalState(): ReturnType<typeof describeRailPhysicalPublication> {
-		return describeRailPhysicalPublication(this.mirror.getPhysicalPublication());
+		const state = describeRailPhysicalPublication(this.mirror.getPhysicalPublication());
+		return this.reportPhysicalInvalid ? { ...state, physicalValid: false } : state;
 	}
 }
 

@@ -19,7 +19,50 @@ import {
 	OpenFabUserBlueprintLibraryRestoreBridge,
 	OpenFabUserBlueprintLibraryRestoreCancelledError,
 	type OpenFabUserBlueprintLibraryRestoreWorkerPort,
+	raceRestoreCancellation,
 } from "./OpenFabUserBlueprintLibraryRestoreBridge";
+
+describe("deferred restore loading cancellation", () => {
+	it.each([
+		"resolve",
+		"reject",
+	] as const)("cancels before a shared load settles, retaining its later %s for a retry", async (outcome) => {
+		const module = Object.freeze({ name: "restore review" });
+		const failure = new Error("chunk unavailable");
+		let finish!: () => void;
+		const operation = new Promise<typeof module>((resolve, reject) => {
+			finish = () => (outcome === "resolve" ? resolve(module) : reject(failure));
+		});
+		const controller = new AbortController();
+		const cancelled = raceRestoreCancellation(operation, controller.signal);
+		controller.abort();
+		await expect(cancelled).rejects.toBeInstanceOf(
+			OpenFabUserBlueprintLibraryRestoreCancelledError,
+		);
+		const retry = raceRestoreCancellation(operation, new AbortController().signal);
+		finish();
+		if (outcome === "resolve") await expect(retry).resolves.toBe(module);
+		else await expect(retry).rejects.toBe(failure);
+	});
+
+	it("consumes a late load failure when cancellation was already requested", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const operation = Promise.reject(new Error("late chunk failure"));
+		await expect(raceRestoreCancellation(operation, controller.signal)).rejects.toBeInstanceOf(
+			OpenFabUserBlueprintLibraryRestoreCancelledError,
+		);
+	});
+
+	it("preserves a successful active load and the existing operation without a signal", async () => {
+		const module = Object.freeze({ name: "restore review" });
+		const operation = Promise.resolve(module);
+		expect(raceRestoreCancellation(operation)).toBe(operation);
+		await expect(raceRestoreCancellation(operation, new AbortController().signal)).resolves.toBe(
+			module,
+		);
+	});
+});
 
 describe("OpenFabUserBlueprintLibraryRestoreBridge", () => {
 	it("parses and preflights a whole-library file off the caller thread", async () => {

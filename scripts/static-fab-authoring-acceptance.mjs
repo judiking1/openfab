@@ -1234,7 +1234,12 @@ try {
 	assertDurationTelemetry(
 		organizationBundlePlaced.organizationBundlePlacementSnapshotMs,
 		250,
-		"organization bundle snapshot duration",
+		"organization bundle snapshot handoff wall time",
+	);
+	assertEqual(
+		organizationBundlePlaced.organizationBundlePlacementSnapshotSource,
+		"authoritative-mirror",
+		"organization bundle uses the authoritative mirror snapshot handoff",
 	);
 	assertDurationTelemetry(
 		organizationBundlePlaced.organizationBundlePlacementPlanningMs,
@@ -1348,6 +1353,41 @@ try {
 		organizationBundleUndone.historyCanRedo,
 		"cancelled organization bundle redo history",
 	);
+	await desktopPage.getByTestId("rail-canvas").press("Control+v");
+	await desktopPage.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="tilefab-app"]')?.dataset.organizationBundleActive ===
+			"true",
+	);
+	await clickWorld(desktopPage, offsetCellCenter(cancellationAnchor));
+	assertEqual(
+		await desktopPage.getByTestId("rail-canvas").getAttribute("data-blueprint-placement-pending"),
+		"true",
+		"project transition starts during organization placement preparation",
+	);
+	await desktopPage.getByRole("button", { name: "프로젝트 열기", exact: true }).click();
+	const placementProjectGuard = desktopPage.locator(".tilefab-project-guard");
+	await placementProjectGuard.waitFor({ state: "visible" });
+	const placementAtGuard = await readMetrics(desktopPage);
+	assertEqual(
+		placementAtGuard.blueprintPlacementResult,
+		"cancelled",
+		"project guard cancels pending organization placement",
+	);
+	assertEqual(
+		placementAtGuard.organizationBundlePlacementTicket,
+		"revoked",
+		"project guard revokes organization placement authority",
+	);
+	await placementProjectGuard.getByRole("button", { name: "취소", exact: true }).click();
+	await placementProjectGuard.waitFor({ state: "hidden" });
+	await desktopPage.waitForTimeout(50);
+	assertProjectUnchanged(
+		await readMetrics(desktopPage),
+		organizationBundleUndone,
+		"project guard cancellation preserves source and history",
+	);
+	await desktopPage.getByTestId("rail-canvas").press("Escape");
 	await openStaticFabNavigatorTab(desktopPage, "organizations");
 	await areaLibrary.waitFor({ state: "visible" });
 	assertEqual(
@@ -18570,6 +18610,15 @@ async function exerciseUserBlueprintCrossTabRefresh(primaryPage, portableBluepri
 		"primary cross-tab channel availability",
 	);
 	const secondaryPage = await primaryPage.context().newPage();
+	let restoreDialogRequestCount = 0;
+	let resolveRestoreDialogRoute;
+	const restoreDialogRoutePromise = new Promise((resolve) => {
+		resolveRestoreDialogRoute = resolve;
+	});
+	await secondaryPage.route("**/UserBlueprintLibraryRestoreDialog-*.js", (route) => {
+		restoreDialogRequestCount++;
+		resolveRestoreDialogRoute(route);
+	});
 	secondaryPage.on("console", (message) => {
 		if (message.type() === "error") {
 			result.consoleErrors.push(`[cross-tab] ${message.text()}`);
@@ -18579,6 +18628,7 @@ async function exerciseUserBlueprintCrossTabRefresh(primaryPage, portableBluepri
 	try {
 		await secondaryPage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
 		await waitForReady(secondaryPage, { physicalPaths: 0 });
+		assertEqual(restoreDialogRequestCount, 0, "library restore UI is deferred during startup");
 		await secondaryPage.waitForFunction(
 			() => document.querySelector(".tilefab-app")?.dataset.userBlueprints === "1",
 			undefined,
@@ -18688,6 +18738,51 @@ async function exerciseUserBlueprintCrossTabRefresh(primaryPage, portableBluepri
 			minimumNotifications: Number(baseline.userBlueprintCrossTabNotifications) + 6,
 		});
 
+		const beforeDeferredRestore = await readMetrics(secondaryPage);
+		const cancelledRestoreChooserPromise = secondaryPage.waitForEvent("filechooser");
+		await secondaryPage
+			.getByRole("button", { name: "전체 청사진 라이브러리 백업 복원", exact: true })
+			.click();
+		await (await cancelledRestoreChooserPromise).setFiles(backupPath);
+		let restoreRouteTimeout;
+		let heldRestoreDialogRoute;
+		try {
+			heldRestoreDialogRoute = await Promise.race([
+				restoreDialogRoutePromise,
+				new Promise((_, reject) => {
+					restoreRouteTimeout = setTimeout(
+						() => reject(new Error("Library restore did not request its deferred UI.")),
+						10_000,
+					);
+				}),
+			]);
+		} finally {
+			clearTimeout(restoreRouteTimeout);
+		}
+		await waitForEditorStatus(secondaryPage, "복원 화면 준비 중입니다");
+		await secondaryPage.keyboard.press("Escape");
+		const restoreButton = secondaryPage.getByRole("button", {
+			name: "전체 청사진 라이브러리 백업 복원",
+			exact: true,
+		});
+		await waitForEnabled(restoreButton, 10_000);
+		await heldRestoreDialogRoute.continue();
+		assertEqual(
+			await secondaryPage.getByTestId("user-blueprint-library-restore-dialog").count(),
+			0,
+			"cancelled UI loading cannot open a late restore dialog",
+		);
+		const afterDeferredRestore = await readMetrics(secondaryPage);
+		assertProjectUnchanged(
+			afterDeferredRestore,
+			beforeDeferredRestore,
+			"deferred library restore cancellation preserves project and history",
+		);
+		assertEqual(
+			afterDeferredRestore.userBlueprints,
+			beforeDeferredRestore.userBlueprints,
+			"deferred library restore cancellation preserves stored records",
+		);
 		const restoreChooserPromise = secondaryPage.waitForEvent("filechooser");
 		await secondaryPage
 			.getByRole("button", { name: "전체 청사진 라이브러리 백업 복원", exact: true })
@@ -18696,6 +18791,7 @@ async function exerciseUserBlueprintCrossTabRefresh(primaryPage, portableBluepri
 		await restoreChooser.setFiles(backupPath);
 		const restoreDialog = secondaryPage.getByTestId("user-blueprint-library-restore-dialog");
 		await restoreDialog.waitFor({ state: "visible", timeout: 30_000 });
+		assertEqual(restoreDialogRequestCount, 1, "restore retry reuses the loaded review UI");
 		await restoreDialog.getByRole("radio", { name: /REPLACE/ }).check();
 		await restoreDialog
 			.getByRole("checkbox", { name: "현재 라이브러리를 교체한다는 것을 확인했습니다" })
@@ -44864,8 +44960,11 @@ async function readMetrics(page) {
 				canvas?.dataset.organizationBundlePlacementPlanningMs ?? "",
 			organizationBundlePlacementValidationMs:
 				canvas?.dataset.organizationBundlePlacementValidationMs ?? "",
+			blueprintPlacementResult: canvas?.dataset.blueprintPlacementResult ?? "",
 			organizationBundlePlacementSnapshotMs:
 				canvas?.dataset.organizationBundlePlacementSnapshotMs ?? "",
+			organizationBundlePlacementSnapshotSource:
+				canvas?.dataset.organizationBundlePlacementSnapshotSource ?? "",
 			organizationBundlePlacementRoundTripMs:
 				canvas?.dataset.organizationBundlePlacementRoundTripMs ?? "",
 			organizationBundlePlacementResponseValidationMs:

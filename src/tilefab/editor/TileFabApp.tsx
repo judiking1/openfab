@@ -577,7 +577,12 @@ import {
 	touchPortSlotPickRadiusMeters,
 } from "../render/TileRenderer";
 import { DeterministicResidentActiveRunOwner } from "../simulation/DeterministicResidentActiveRunOwner";
-import { captureRailMirrorSnapshot, checksumRailMap } from "../worker/RailMirrorChecksum";
+import {
+	captureRailMirrorSnapshot,
+	checksumRailMap,
+	type RailMirrorSnapshot,
+	revokeRailMirrorSnapshotCaptureAuthority,
+} from "../worker/RailMirrorChecksum";
 import { checksumRailPhysicalLayout } from "../worker/RailPhysicalLayout";
 import {
 	RAIL_SCALE_ACCEPTANCE_VERSION,
@@ -910,6 +915,7 @@ import { SimulationRuntimePresentationRouter } from "./SimulationRuntimePresenta
 import {
 	OpenFabUserBlueprintLibraryRestoreBridge,
 	OpenFabUserBlueprintLibraryRestoreCancelledError,
+	raceRestoreCancellation,
 } from "./OpenFabUserBlueprintLibraryRestoreBridge";
 import {
 	resolveNearestOpenTerminal,
@@ -1096,7 +1102,6 @@ import {
 import { SyntheticFabStarterDialog } from "./SyntheticFabStarterDialog";
 import { syntheticFabStarterPresentation } from "./SyntheticFabStarterPresentation";
 import { acquireVerifiedSyntheticFabStarter } from "./SyntheticFabStarterVerificationCache";
-import { UserBlueprintLibraryRestoreDialog } from "./UserBlueprintLibraryRestoreDialog";
 import {
 	createInitialUserBlueprintLibraryCrossTabRefreshState,
 	UserBlueprintLibraryCrossTabRefreshController,
@@ -1912,6 +1917,7 @@ interface PendingUserBlueprintImport {
 }
 
 interface PendingUserBlueprintLibraryRestore {
+	readonly Dialog: typeof import("./UserBlueprintLibraryRestoreDialog").UserBlueprintLibraryRestoreDialog;
 	readonly generation: number;
 	readonly fileName: string;
 	readonly preflight: OpenFabUserBlueprintLibraryRestorePreflight;
@@ -2544,6 +2550,7 @@ export default function TileFabApp(): React.ReactElement {
 	const blueprintPlacementBridgeRef = useRef<BlueprintPlacementBridge | null>(null);
 	const organizationBundlePlacementBridgeRef =
 		useRef<StaticFabOrganizationBundlePlacementBridge | null>(null);
+	const organizationBundlePlacementSnapshotControllerRef = useRef<AbortController | null>(null);
 	const blueprintPlacementRequestRef = useRef(0);
 	const blueprintPlacementPendingRef = useRef(false);
 	const pendingAreaStampRepeatPreviewSessionRef = useRef<RailAreaStampSession | null>(null);
@@ -5166,6 +5173,8 @@ export default function TileFabApp(): React.ReactElement {
 				blueprintPlacementBridgeRef.current = null;
 				organizationBundlePlacementBridgeRef.current?.dispose();
 				organizationBundlePlacementBridgeRef.current = null;
+				organizationBundlePlacementSnapshotControllerRef.current?.abort();
+				organizationBundlePlacementSnapshotControllerRef.current = null;
 				staticFabArrangementRequestRef.current++;
 				if (staticFabArrangementRequestTimerRef.current !== null) {
 					window.clearTimeout(staticFabArrangementRequestTimerRef.current);
@@ -7505,7 +7514,8 @@ export default function TileFabApp(): React.ReactElement {
 		if (
 			!blueprintPlacementPendingRef.current &&
 			!blueprintPlacementBridgeRef.current &&
-			!organizationBundlePlacementBridgeRef.current
+			!organizationBundlePlacementBridgeRef.current &&
+			!organizationBundlePlacementSnapshotControllerRef.current
 		) {
 			return;
 		}
@@ -7519,6 +7529,8 @@ export default function TileFabApp(): React.ReactElement {
 		blueprintPlacementBridgeRef.current = null;
 		organizationBundlePlacementBridgeRef.current?.cancel();
 		organizationBundlePlacementBridgeRef.current = null;
+		organizationBundlePlacementSnapshotControllerRef.current?.abort();
+		organizationBundlePlacementSnapshotControllerRef.current = null;
 		if (canvasRef.current) {
 			canvasRef.current.dataset.blueprintPlacementPending = "false";
 			if (wasPending) canvasRef.current.dataset.blueprintPlacementResult = "cancelled";
@@ -7719,6 +7731,23 @@ export default function TileFabApp(): React.ReactElement {
 		organizationBundlePlacementPreviewRef.current = null;
 		organizationBundlePlacementPreviewPendingAnchorRef.current = null;
 		const requestId = ++blueprintPlacementRequestRef.current;
+		const sourceDocument = editorModelRef.current.document;
+		const mirrorBridge = workerBridgeRef.current;
+		const sourceSequence = sourceDocument.getPatchSequence();
+		const sourceRevision = sourceDocument.map.getRevision();
+		let capturedSnapshot: RailMirrorSnapshot | null = null;
+		const snapshotController = new AbortController();
+		organizationBundlePlacementSnapshotControllerRef.current = snapshotController;
+		const requestIsCurrent = (): boolean =>
+			!snapshotController.signal.aborted &&
+			requestId === blueprintPlacementRequestRef.current &&
+			session === organizationBundlePlacementSessionRef.current &&
+			organizationBundlePlacementSnapshotControllerRef.current === snapshotController &&
+			editorModelRef.current.document === sourceDocument &&
+			sourceDocument.getPatchSequence() === sourceSequence &&
+			sourceDocument.map.getRevision() === sourceRevision &&
+			workerBridgeRef.current === mirrorBridge &&
+			workerBridgeDocumentRef.current === sourceDocument;
 		let singleCommitCompleted: "guided" | "preset" | null = null;
 		blueprintPlacementPendingRef.current = true;
 		setBlueprintPlacementPending(true);
@@ -7733,6 +7762,7 @@ export default function TileFabApp(): React.ReactElement {
 			canvasRef.current.dataset.organizationBundlePlacementPlanningMs = "";
 			canvasRef.current.dataset.organizationBundlePlacementValidationMs = "";
 			canvasRef.current.dataset.organizationBundlePlacementSnapshotMs = "";
+			canvasRef.current.dataset.organizationBundlePlacementSnapshotSource = "authoritative-mirror";
 			canvasRef.current.dataset.organizationBundlePlacementRoundTripMs = "";
 			canvasRef.current.dataset.organizationBundlePlacementResponseValidationMs = "";
 			canvasRef.current.dataset.organizationBundlePlacementAdoptionMs = "";
@@ -7752,27 +7782,27 @@ export default function TileFabApp(): React.ReactElement {
 
 		try {
 			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            const { StaticFabOrganizationBundlePlacementBridge } = await import("./StaticFabOrganizationBundlePlacementBridge");
-			if (
-				requestId !== blueprintPlacementRequestRef.current ||
-				session !== organizationBundlePlacementSessionRef.current
-			) {
-				return;
+			if (!requestIsCurrent()) return;
+			if (!mirrorBridge) {
+				throw new Error("현재 문서의 Rail mirror Worker가 준비된 뒤 다시 배치하세요");
 			}
-			const sourceDocument = editorModelRef.current.document;
+			const {
+				StaticFabOrganizationBundlePlacementBridge,
+				captureOrganizationBundlePlacementSnapshot,
+			} = await import("./StaticFabOrganizationBundlePlacementBridge");
+			if (!requestIsCurrent()) return;
 			const snapshotStartedAt = performance.now();
 			if (canvasRef.current) {
 				canvasRef.current.dataset.organizationBundlePlacementPhase = "snapshot";
 			}
-			const snapshot = measureInteraction(renderPerformance, "blueprint-snapshot", () =>
-				captureRailMirrorSnapshot(
-					sourceDocument.map,
-					sourceDocument.getPatchSequence(),
-					sourceDocument.portEquipment,
-					sourceDocument.organizations,
-					sourceDocument.relationships,
-				),
-			).snapshot;
+			const snapshot = await captureOrganizationBundlePlacementSnapshot(
+				sourceDocument,
+				mirrorBridge,
+				snapshotController.signal,
+				requestIsCurrent,
+			);
+			capturedSnapshot = snapshot;
+			if (!requestIsCurrent()) return;
 			if (canvasRef.current) {
 				canvasRef.current.dataset.organizationBundlePlacementSnapshotMs = (
 					performance.now() - snapshotStartedAt
@@ -7797,7 +7827,7 @@ export default function TileFabApp(): React.ReactElement {
 					};
 				},
 			});
-			if (requestId !== blueprintPlacementRequestRef.current) return;
+			if (!requestIsCurrent()) return;
 			const plan = prepared.plan;
 			const ticket = prepared.validation.ticket;
 			if (canvasRef.current) {
@@ -8011,6 +8041,10 @@ export default function TileFabApp(): React.ReactElement {
 				`조직 청사진 검사를 완료하지 못했습니다: ${error instanceof Error ? error.message : "알 수 없는 오류"}`,
 			);
 		} finally {
+			if (capturedSnapshot) revokeRailMirrorSnapshotCaptureAuthority(capturedSnapshot);
+			if (organizationBundlePlacementSnapshotControllerRef.current === snapshotController) {
+				organizationBundlePlacementSnapshotControllerRef.current = null;
+			}
 			if (requestId === blueprintPlacementRequestRef.current) {
 				blueprintPlacementPendingRef.current = false;
 				setBlueprintPlacementPending(false);
@@ -18092,6 +18126,7 @@ export default function TileFabApp(): React.ReactElement {
 
 	const beginProjectOperation = (operation: ProjectOperation): AbortController => {
 		cancelStationProposalReview();
+		cancelBlueprintPlacement();
 		if (operation !== "saving") {
 			cancelGuidedRailKeyboard(false);
 			cancelGuidedPortKeyboard(undefined, false);
@@ -18141,6 +18176,7 @@ export default function TileFabApp(): React.ReactElement {
 			preparationMilliseconds: 0,
 		});
 		cancelStationProposalReview();
+		cancelBlueprintPlacement();
 		cancelGuidedPortKeyboard(undefined, false);
 		cancelStaticFabArrangement();
 		cancelStaticFabAssemblyConnector();
@@ -18913,6 +18949,8 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			return;
 		}
+		// Keep the transition decision stable while its guard, file picker or loader is open.
+		cancelBlueprintPlacement();
 		const dirty = isOpenFabProjectDirty(
 			projectSession,
 			editorModel.authoredChecksum,
@@ -25254,6 +25292,19 @@ export default function TileFabApp(): React.ReactElement {
 			if (!read) return;
 			const currentRecords = await refreshUserBlueprintLibrary(controller.signal);
 			assertAuthoritativeUserBlueprintLibrary(projectPersistence.getStatus(), "전체 복원");
+			setStatus(`${read.name} 복원 화면 준비 중입니다 · ESC 취소`);
+			const { UserBlueprintLibraryRestoreDialog } = await raceRestoreCancellation(
+				import("./UserBlueprintLibraryRestoreDialog").catch(() => {
+					throw new Error("복원 화면을 불러오지 못했습니다. 프로젝트를 저장한 뒤 새로고침하여 다시 시도하세요.");
+				}),
+				controller.signal,
+			);
+			if (
+				controller.signal.aborted ||
+				userBlueprintLibraryRestoreControllerRef.current !== controller
+			) {
+				throw new OpenFabUserBlueprintLibraryRestoreCancelledError();
+			}
 			setStatus(`${read.name}을 Worker에서 검증 중입니다 · ESC 취소`);
 			const inspection = await userBlueprintLibraryRestoreInspector.inspect(
 				read.json,
@@ -25261,8 +25312,15 @@ export default function TileFabApp(): React.ReactElement {
 				controller.signal,
 			);
 			const { bundle, preflight, replaceImpact } = inspection;
+			if (
+				controller.signal.aborted ||
+				userBlueprintLibraryRestoreControllerRef.current !== controller
+			) {
+				throw new OpenFabUserBlueprintLibraryRestoreCancelledError();
+			}
 			setPendingUserBlueprintLibraryRestore(
 				Object.freeze({
+					Dialog: UserBlueprintLibraryRestoreDialog,
 					generation: ++userBlueprintLibraryRestoreGenerationRef.current,
 					fileName: read.name,
 					preflight,
@@ -25273,13 +25331,13 @@ export default function TileFabApp(): React.ReactElement {
 				`${read.name} 검증 완료 · ${bundle.recordCount.toLocaleString()}개 · 충돌 ${preflight.conflicts.length.toLocaleString()}개 · Worker ${Math.round(inspection.elapsedMilliseconds).toLocaleString()} ms · 적용 전 검토하세요`,
 			);
 		} catch (error) {
-			if (error instanceof OpenFabUserBlueprintLibraryRestoreCancelledError) {
+			if (controller.signal.aborted || error instanceof OpenFabUserBlueprintLibraryRestoreCancelledError) {
 				setStatus("전체 라이브러리 파일 검증을 취소했습니다");
 				return;
 			}
 			const message = error instanceof Error ? error.message : ".openfablib 파일을 읽지 못했습니다";
 			setUserBlueprintLibraryRestoreError(message);
-			setStatus(`전체 라이브러리 백업을 읽지 못했습니다 · ${message}`);
+			setStatus(`전체 라이브러리 복원을 준비하지 못했습니다 · ${message}`);
 		} finally {
 			if (userBlueprintLibraryRestoreControllerRef.current === controller) {
 				userBlueprintLibraryRestoreControllerRef.current = null;
@@ -25319,6 +25377,7 @@ export default function TileFabApp(): React.ReactElement {
 					await userBlueprintLibraryRestoreInspector.rebase(currentRecords);
 				setPendingUserBlueprintLibraryRestore(
 					Object.freeze({
+						Dialog: pending.Dialog,
 						generation: ++userBlueprintLibraryRestoreGenerationRef.current,
 						fileName: pending.fileName,
 						preflight: refreshedInspection.preflight,
@@ -31547,7 +31606,7 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 
 				{pendingUserBlueprintLibraryRestore ? (
-					<UserBlueprintLibraryRestoreDialog
+					<pendingUserBlueprintLibraryRestore.Dialog
 						key={pendingUserBlueprintLibraryRestore.generation}
 						fileName={pendingUserBlueprintLibraryRestore.fileName}
 						preflight={pendingUserBlueprintLibraryRestore.preflight}

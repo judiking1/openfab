@@ -37,6 +37,8 @@ import {
 } from "../worker/StaticFabOrganizationBundlePlacementResponseValidator";
 import { collectTransferableBuffers } from "../worker/TransferableBuffers";
 
+export { captureOrganizationBundlePlacementSnapshot } from "./OrganizationBundlePlacementSnapshot";
+
 export interface StaticFabOrganizationBundlePlacementWorkerPort {
 	onmessage:
 		| ((event: MessageEvent<StaticFabOrganizationBundlePlacementWorkerResponse>) => void)

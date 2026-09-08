@@ -409,12 +409,14 @@ function deepFreezeRestoreWorkerValue(value: unknown): void {
 	}
 }
 
-function raceRestoreCancellation<Value>(
+export function raceRestoreCancellation<Value>(
 	operation: Promise<Value>,
 	signal?: AbortSignal,
 ): Promise<Value> {
 	if (!signal) return operation;
 	if (signal.aborted) {
+		// The caller may already have started a shared module load; consume its late rejection.
+		void operation.catch(() => undefined);
 		return Promise.reject(new OpenFabUserBlueprintLibraryRestoreCancelledError());
 	}
 	return new Promise<Value>((resolve, reject) => {
