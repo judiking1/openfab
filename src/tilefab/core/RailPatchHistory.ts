@@ -1,4 +1,5 @@
 import type { AdvancedSwitchRecord } from "./AdvancedSwitch";
+import { completeCooperativeSteps } from "./CooperativeTask";
 import type { EquipmentGroupRecord } from "./EquipmentGroup";
 import { operationalConfigurationPatchTransitionFingerprint } from "./OperationalConfigurationMutation";
 import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
@@ -316,15 +317,72 @@ function copyLedgerEntry(entry: RailMirrorHistoryLedgerEntry): RailMirrorHistory
 	return Object.freeze({ ...entry, originKind: rawOriginKind });
 }
 
+/** Prepare a new bounded history without modifying the live stack between checkpoints. */
+export function* prepareRailHistoryAppendSteps<T>(
+	history: readonly T[],
+	entry: T,
+	ledgerFor: (entry: T) => RailMirrorHistoryLedgerEntry,
+	entryLimit = RAIL_MIRROR_HISTORY_ENTRY_LIMIT,
+): Generator<void, T[]> {
+	if (!Number.isSafeInteger(entryLimit) || entryLimit < 1) {
+		throw new Error("Rail history entry limit must be a positive safe integer.");
+	}
+	const historyLength = history.length;
+	const length = historyLength + 1;
+	const first = yield* railHistoryRetainedSuffixSteps(
+		length,
+		(index) => ledgerFor(index === historyLength ? entry : (history[index] as T)),
+		Math.max(0, length - entryLimit),
+	);
+	const retained: T[] = [];
+	for (let index = first; index < length; index++) {
+		retained.push(index === historyLength ? entry : (history[index] as T));
+		yield;
+	}
+	return retained;
+}
+
 export function trimRailMirrorHistoryRelationshipBudget<T extends RailMirrorHistoryLedgerEntry>(
 	undo: T[],
 	redo: T[],
 ): void {
-	while (!railMirrorHistoryRelationshipBudgetFits(undo, redo)) {
-		if (undo.length > 0) undo.shift();
-		else if (redo.length > 0) redo.shift();
-		else break;
+	const undoLength = undo.length;
+	const first = completeCooperativeSteps(
+		railHistoryRetainedSuffixSteps(
+			undoLength + redo.length,
+			(index) => (index < undoLength ? undo[index] : redo[index - undoLength]) as T,
+		),
+	);
+	if (first > 0) undo.splice(0, Math.min(first, undoLength));
+	if (first > undoLength) redo.splice(0, first - undoLength);
+}
+
+/** Valid admitted footprints are nonnegative: oldest-first eviction retains this exact suffix. */
+function* railHistoryRetainedSuffixSteps(
+	length: number,
+	ledgerAt: (index: number) => RailMirrorHistoryLedgerEntry,
+	minimumStart = 0,
+): Generator<void, number> {
+	let first = length;
+	let edges = 0;
+	let owners = 0;
+	let bytes = 0;
+	for (let index = length - 1; index >= minimumStart; index--) {
+		const entry = ledgerAt(index);
+		edges += entry.relationshipEdgeReferences;
+		owners += entry.relationshipOwnerIds;
+		bytes += entry.relationshipCanonicalBytes;
+		if (
+			edges > RAIL_MIRROR_HISTORY_RELATIONSHIP_EDGE_REFERENCE_LIMIT ||
+			owners > RAIL_MIRROR_HISTORY_RELATIONSHIP_OWNER_ID_LIMIT ||
+			bytes > RAIL_MIRROR_HISTORY_RELATIONSHIP_CANONICAL_BYTE_LIMIT
+		) {
+			return first;
+		}
+		first = index;
+		yield;
 	}
+	return first;
 }
 
 function assertRailMirrorHistoryRelationshipBudget(ledger: RailMirrorHistoryLedger): void {
@@ -337,22 +395,17 @@ function railMirrorHistoryRelationshipBudgetFits(
 	undo: readonly RailMirrorHistoryLedgerEntry[],
 	redo: readonly RailMirrorHistoryLedgerEntry[],
 ): boolean {
-	let edges = 0;
-	let owners = 0;
-	let bytes = 0;
-	for (const entry of [...undo, ...redo]) {
-		edges += entry.relationshipEdgeReferences;
-		owners += entry.relationshipOwnerIds;
-		bytes += entry.relationshipCanonicalBytes;
-		if (
-			edges > RAIL_MIRROR_HISTORY_RELATIONSHIP_EDGE_REFERENCE_LIMIT ||
-			owners > RAIL_MIRROR_HISTORY_RELATIONSHIP_OWNER_ID_LIMIT ||
-			bytes > RAIL_MIRROR_HISTORY_RELATIONSHIP_CANONICAL_BYTE_LIMIT
-		) {
-			return false;
-		}
-	}
-	return true;
+	return (
+		completeCooperativeSteps(
+			railHistoryRetainedSuffixSteps(
+				undo.length + redo.length,
+				(index) =>
+					(index < undo.length
+						? undo[index]
+						: redo[index - undo.length]) as RailMirrorHistoryLedgerEntry,
+			),
+		) === 0
+	);
 }
 
 function isNonNegativeSafeInteger(value: unknown): value is number {

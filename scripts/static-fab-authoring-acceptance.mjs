@@ -29206,6 +29206,38 @@ async function driveOrdinaryEqEndUntilAnchorLeavesCanvas(page, phase) {
 	);
 }
 
+async function assertInspectorDisclosureKeepsNewFocus(page, disclosure, label) {
+	const summary = disclosure.locator(":scope > summary");
+	await summary.scrollIntoViewIfNeeded();
+	await summary.click();
+	assertEqual(await disclosure.getAttribute("open"), "", `${label} starts expanded`);
+	// Closing details queues a native toggle. Move focus before it is delivered to expose
+	// handlers that incorrectly scroll the old summary after the user chose another action.
+	const evidence = await disclosure.evaluate(async (details) => {
+		const continuation = details
+			.closest(".tilefab-inspector")
+			?.querySelector('[data-testid="repeat-port-equipment-authoring"]');
+		if (!(continuation instanceof HTMLElement)) throw new Error("Missing continuation target.");
+		let focusedBeforeToggle = false;
+		await new Promise((resolve) => {
+			details.addEventListener(
+				"toggle",
+				() => requestAnimationFrame(() => requestAnimationFrame(resolve)),
+				{ once: true },
+			);
+			details.open = false;
+			continuation.focus();
+			focusedBeforeToggle = document.activeElement === continuation;
+		});
+		return { focusedBeforeToggle, focusedAfterToggle: document.activeElement === continuation };
+	});
+	assertEqual(evidence.focusedBeforeToggle, true, `${label} moves focus before queued close`);
+	assertEqual(evidence.focusedAfterToggle, true, `${label} preserves newer focus`);
+	const continuation = page.getByTestId("repeat-port-equipment-authoring");
+	await assertLocatorInsideViewport(page, continuation);
+	await assertLocatorOwnsHitArea(continuation, `${label} newer target remains usable`);
+}
+
 async function openPortEquipmentMoreActions(page) {
 	const details = page.getByTestId("port-equipment-more-actions");
 	await details.waitFor({ state: "visible" });
@@ -29778,6 +29810,18 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		await continuation.evaluate((element) => document.activeElement === element),
 		true,
 		`ordinary ${portType} keyboard returns from details to placement ${viewportLabel}`,
+	);
+	for (const disclosure of [moreActions, connectionDetails]) {
+		await assertInspectorDisclosureKeepsNewFocus(
+			page,
+			disclosure,
+			`ordinary ${portType} ${await disclosure.getAttribute("data-testid")} ${viewportLabel}`,
+		);
+	}
+	assertProjectUnchanged(
+		await readMetrics(page),
+		detailsBaseline,
+		`ordinary ${portType} queued disclosure close remains project-neutral ${viewportLabel}`,
 	);
 	if (viewportLabel === "390x844") {
 		const equipmentWorld = await selectedPortWorld(page);

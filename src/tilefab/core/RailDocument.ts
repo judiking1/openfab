@@ -3,6 +3,7 @@ import {
 	copyAdvancedSwitch,
 	validateAdvancedSwitchPatch,
 } from "./AdvancedSwitch";
+import { createCooperativeTask } from "./CooperativeTask";
 import {
 	applyPortEquipmentAdditionsCooperatively,
 	applyPortEquipmentMutations,
@@ -63,6 +64,7 @@ import {
 	appendBoundedRailHistoryEntry,
 	createRailMirrorHistoryLedgerEntry,
 	createRailMirrorHistoryLedgerEntryCooperatively,
+	prepareRailHistoryAppendSteps,
 	type RailMirrorHistoryLedger,
 	type RailMirrorHistoryLedgerEntry,
 	trimRailMirrorHistoryRelationshipBudget,
@@ -831,6 +833,18 @@ export class RailDocument {
 				source.relationships.nextRelationshipId,
 				cooperative.checkTime,
 			);
+			const historyTask = createCooperativeTask(
+				prepareRailHistoryAppendSteps(
+					this.undoStack,
+					entry,
+					(candidate) => candidate.mirrorHistoryEntry,
+				),
+			);
+			while (!historyTask.done) {
+				historyTask.step(128);
+				await cooperative.checkTime();
+			}
+			const nextUndoStack = historyTask.finish();
 			cooperative.assertCurrent();
 			const historyCreationFinishedAt = cooperative.readTime(historyCreationStartedAt);
 
@@ -909,7 +923,8 @@ export class RailDocument {
 
 			const historyPublicationStartedAt = patchPreparationFinishedAt;
 			this.currentPortEquipment = nextPortEquipment;
-			this.pushUndoEntry(entry);
+			this.undoStack = nextUndoStack;
+			this.redoStack = [];
 			const historyPublicationFinishedAt = cooperative.readTime(historyPublicationStartedAt);
 			const patchPublicationStartedAt = historyPublicationFinishedAt;
 			this.publishPatchEvent(event);

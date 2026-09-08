@@ -845,6 +845,7 @@ import {
 import { guidedBuildPracticeTransitionPresentation } from "./GuidedBuildPracticeTransitionPresentation";
 import { portAuthoringSurfacePresentation } from "./PortAuthoringSurfacePresentation";
 import { applyTileFabCameraZoom } from "./TileFabCameraZoom";
+import { scrollFocusedInspectorDisclosure } from "./InspectorDisclosureFocus";
 import {
 	analyzeGuidedBuildRailReuse,
 	EMPTY_GUIDED_BUILD_RAIL_REUSE_EVIDENCE,
@@ -38082,12 +38083,7 @@ export default function TileFabApp(): React.ReactElement {
 									key={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}-PORT-${selectedPortDetails.port.id}`}
 									className="tilefab-equipment-more-actions"
 									data-testid="port-equipment-more-actions"
-									onToggle={(event) => {
-										if (event.currentTarget.open) return;
-										event.currentTarget
-											.querySelector<HTMLElement>(":scope > summary")
-											?.scrollIntoView({ block: "nearest" });
-									}}
+									onToggle={(event) => scrollFocusedInspectorDisclosure(event.currentTarget)}
 								>
 									<summary>
 										<span>복제·철거</span>
@@ -38169,12 +38165,7 @@ export default function TileFabApp(): React.ReactElement {
 								key={selectedPortDetails.port.id}
 								className="tilefab-equipment-more-actions"
 								data-testid="equipment-port-connection-details"
-								onToggle={(event) => {
-									if (!event.currentTarget.open)
-										event.currentTarget
-											.querySelector<HTMLElement>(":scope > summary")
-											?.scrollIntoView({ block: "nearest" });
-								}}
+								onToggle={(event) => scrollFocusedInspectorDisclosure(event.currentTarget)}
 							>
 								<summary>
 									<span>연결 정보 · Port {selectedPortDetails.port.id}</span>

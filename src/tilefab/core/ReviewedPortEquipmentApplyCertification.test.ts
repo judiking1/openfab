@@ -109,6 +109,84 @@ describe("reviewed port/equipment Apply certification", () => {
 		expect(document.portEquipment.ports).toHaveLength(1);
 	});
 
+	it("preserves the entire source and history when any preparation checkpoint is cancelled", async () => {
+		const reviewed = () => {
+			const document = straightDocument();
+			expect(
+				document.commit(planRailConstruction(document.map, { x: 10, y: 10 }, { x: 12, y: 10 })),
+			).toBe(true);
+			expect(document.undo()).toBe(true);
+			const handle = issueReviewedPortEquipmentApply(
+				singleOhbPlan(document),
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.getPatchSequence(),
+			);
+			return { document, handle };
+		};
+		const probe = reviewed();
+		let totalCheckpoints = 0;
+		let tick = 0;
+		expect(
+			(
+				await probe.document.commitReviewedPortEquipmentCooperatively(probe.handle, {
+					checkpoint: async () => {
+						totalCheckpoints++;
+					},
+					now: () => ++tick,
+					sliceMilliseconds: 1,
+					preparePatch: async (_event, checkpoint) => {
+						await checkpoint();
+					},
+				})
+			).committed,
+		).toBe(true);
+		expect(totalCheckpoints).toBeGreaterThan(0);
+		expect(probe.document.captureRailMirrorHistoryLedger().redo).toEqual([]);
+		for (let cancelAt = 1; cancelAt <= totalCheckpoints; cancelAt++) {
+			const { document, handle } = reviewed();
+			const source = {
+				map: document.map,
+				portEquipment: document.portEquipment,
+				organizations: document.organizations,
+				relationships: document.relationships,
+				operations: document.operationalConfiguration,
+				revision: document.map.getRevision(),
+				generation: document.map.getMutationGeneration(),
+				sequence: document.getPatchSequence(),
+				history: document.captureRailMirrorHistoryLedger(),
+			};
+			const events: RailPatchEvent[] = [];
+			document.subscribe((event) => events.push(event));
+			let checkpoints = 0;
+			let currentTick = 0;
+			const cancellation = new Error("cancel prepared history");
+			const pending = document.commitReviewedPortEquipmentCooperatively(handle, {
+				checkpoint: async () => {
+					if (++checkpoints === cancelAt) throw cancellation;
+				},
+				now: () => ++currentTick,
+				sliceMilliseconds: 1,
+				preparePatch: async (_event, checkpoint) => {
+					await checkpoint();
+				},
+			});
+			await expect(pending, `checkpoint ${cancelAt}`).rejects.toBe(cancellation);
+			expect(document.map).toBe(source.map);
+			expect(document.portEquipment).toBe(source.portEquipment);
+			expect(document.organizations).toBe(source.organizations);
+			expect(document.relationships).toBe(source.relationships);
+			expect(document.operationalConfiguration).toBe(source.operations);
+			expect(document.map.getRevision()).toBe(source.revision);
+			expect(document.map.getMutationGeneration()).toBe(source.generation);
+			expect(document.getPatchSequence()).toBe(source.sequence);
+			expect(document.captureRailMirrorHistoryLedger()).toEqual(source.history);
+			expect(events).toEqual([]);
+			expect(document.commitReviewedPortEquipment(handle)).toBe(false);
+		}
+	});
+
 	it("terminally rejects cooperative Apply when the document changes at a checkpoint", async () => {
 		const document = straightDocument();
 		const handle = issueReviewedPortEquipmentApply(
@@ -152,6 +230,7 @@ describe("reviewed port/equipment Apply certification", () => {
 		document.subscribe((event) => events.push(event));
 		let prepared = false;
 		let tick = 0;
+		let currentHistory = document.captureRailMirrorHistoryLedger();
 
 		const committed = await document.commitReviewedPortEquipmentCooperatively(handle, {
 			checkpoint: async () => {},
@@ -162,6 +241,7 @@ describe("reviewed port/equipment Apply certification", () => {
 				expect(
 					document.commit(planRailConstruction(document.map, { x: 4, y: 0 }, { x: 6, y: 0 })),
 				).toBe(true);
+				currentHistory = document.captureRailMirrorHistoryLedger();
 			},
 		});
 
@@ -170,6 +250,9 @@ describe("reviewed port/equipment Apply certification", () => {
 		expect(document.portEquipment.ports).toHaveLength(0);
 		expect(events).toHaveLength(1);
 		expect(events[0]?.kind).toBe("build");
+		expect(document.captureRailMirrorHistoryLedger()).toEqual(currentHistory);
+		expect(document.undo()).toBe(true);
+		expect(document.redo()).toBe(true);
 		expect(document.commitReviewedPortEquipment(handle)).toBe(false);
 	});
 
