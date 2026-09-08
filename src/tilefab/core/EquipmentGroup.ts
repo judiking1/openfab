@@ -1,3 +1,4 @@
+import { completeCooperativeSteps } from "./CooperativeTask";
 import {
 	copyPortRecord,
 	isPositiveRecordId,
@@ -271,6 +272,13 @@ export function equipmentGroupError(group: EquipmentGroupRecord): string | null 
 }
 
 export function portEquipmentStateError(state: PortEquipmentState): string | null {
+	return completeCooperativeSteps(portEquipmentStateErrorSteps(state));
+}
+
+/** Scheduling is owned by the caller, which must keep input records stable until completion. */
+export function* portEquipmentStateErrorSteps(
+	state: PortEquipmentState,
+): Generator<void, string | null> {
 	if (!validCursor(state.nextPortId)) {
 		return "next port id cursor is outside the signed-int32 range";
 	}
@@ -281,6 +289,7 @@ export function portEquipmentStateError(state: PortEquipmentState): string | nul
 	const portIdByBarcode = new Map<string, number>();
 	let maximumPortId = 0;
 	for (const port of state.ports) {
+		yield;
 		const error = portRecordError(port);
 		if (error) return `port ${port.id}: ${error}`;
 		const copied = copyPortRecord(port);
@@ -299,12 +308,14 @@ export function portEquipmentStateError(state: PortEquipmentState): string | nul
 	let maximumGroupId = 0;
 	const claimedPorts = new Set<number>();
 	for (const group of state.equipmentGroups) {
+		yield;
 		const error = equipmentGroupError(group);
 		if (error) return `equipment group ${group.id}: ${error}`;
 		if (groups.has(group.id)) return `duplicate equipment group id ${group.id}`;
 		groups.set(group.id, group);
 		maximumGroupId = Math.max(maximumGroupId, group.id);
 		for (const portId of group.portIds) {
+			yield;
 			const port = ports.get(portId);
 			if (!port) return `equipment group ${group.id} references missing port ${portId}`;
 			if (claimedPorts.has(portId)) {
@@ -320,6 +331,7 @@ export function portEquipmentStateError(state: PortEquipmentState): string | nul
 		}
 	}
 	for (const port of ports.values()) {
+		yield;
 		if (!groups.has(port.equipmentGroupId)) {
 			return `port ${port.id} references missing equipment group ${port.equipmentGroupId}`;
 		}

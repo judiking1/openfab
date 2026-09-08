@@ -8,8 +8,10 @@ import type {
 } from "../core/StaticFabOrganizationBundlePlacement";
 import type { Cell } from "../core/TileMap";
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
+import type { StaticFabOrganizationBundlePlacementTransport } from "./StaticFabOrganizationBundlePlacementTransport";
 
 export const STATIC_FAB_ORGANIZATION_BUNDLE_CONFLICT_LIMIT = 512;
+export const STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION = 1 as const;
 
 export type StaticFabOrganizationBundlePlacementFailureCode =
 	| "snapshot"
@@ -22,6 +24,7 @@ export type StaticFabOrganizationBundlePlacementFailureCode =
 
 /** Immutable intent from which the disposable Worker must both plan and validate placement. */
 export interface PrepareStaticFabOrganizationBundlePlacementRequest {
+	readonly version: typeof STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION;
 	readonly type: "PREPARE_STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT";
 	readonly requestId: number;
 	readonly ticketId: number;
@@ -54,12 +57,14 @@ export interface PreparedStaticFabOrganizationBundlePlacement {
 }
 
 export interface StaticFabOrganizationBundlePlacementPreparedResponse {
+	readonly version: typeof STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION;
 	readonly type: "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED";
 	readonly requestId: number;
-	readonly prepared: PreparedStaticFabOrganizationBundlePlacement;
+	readonly payload: StaticFabOrganizationBundlePlacementTransport;
 }
 
 export interface StaticFabOrganizationBundlePlacementErrorResponse {
+	readonly version: typeof STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION;
 	readonly type: "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_ERROR";
 	readonly requestId: number;
 	readonly message: string;

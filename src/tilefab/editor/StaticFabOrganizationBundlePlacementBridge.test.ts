@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import {
@@ -30,7 +30,10 @@ import type {
 	StaticFabOrganizationBundlePlacementWorkerRequest,
 	StaticFabOrganizationBundlePlacementWorkerResponse,
 } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
 import { prepareStaticFabOrganizationBundlePlacement } from "../worker/StaticFabOrganizationBundlePlacementRuntime";
+import { encodeStaticFabOrganizationBundlePlacementTransport } from "../worker/StaticFabOrganizationBundlePlacementTransport";
+import { collectTransferableBuffers } from "../worker/TransferableBuffers";
 import {
 	StaticFabOrganizationBundlePlacementBridge,
 	type StaticFabOrganizationBundlePlacementInput,
@@ -73,11 +76,14 @@ class RuntimeWorker implements StaticFabOrganizationBundlePlacementWorkerPort {
 		const request = this.pendingRequest;
 		const response = this.transformResponse({
 			type: "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED",
+			version: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
 			requestId: request.requestId,
-			prepared: prepareStaticFabOrganizationBundlePlacement(request),
+			payload: encodeStaticFabOrganizationBundlePlacementTransport(
+				prepareStaticFabOrganizationBundlePlacement(request),
+			),
 		});
 		this.onmessage?.({
-			data: structuredClone(response),
+			data: structuredClone(response, { transfer: collectTransferableBuffers(response) }),
 		} as MessageEvent<StaticFabOrganizationBundlePlacementWorkerResponse>);
 	}
 }
@@ -111,33 +117,24 @@ class CorruptedTicketWorker extends RuntimeWorker {
 		| "bundleFingerprint"
 		| "planFingerprint"
 		| "prospectiveChecksum";
-
 	constructor(
 		field: "sourceChecksum" | "bundleFingerprint" | "planFingerprint" | "prospectiveChecksum",
 	) {
 		super();
 		this.field = field;
 	}
-
 	protected override transformResponse(
 		response: StaticFabOrganizationBundlePlacementWorkerResponse,
 	): StaticFabOrganizationBundlePlacementWorkerResponse {
+		const copy = structuredClone(response);
 		if (
-			response.type !== "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED" ||
-			!response.prepared.ticket
+			copy.type === "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED" &&
+			copy.payload.prepared.ticket
 		) {
-			return response;
+			const ticket = copy.payload.prepared.ticket;
+			Object.assign(ticket, { [this.field]: `${ticket[this.field]}-corrupted` });
 		}
-		return {
-			...response,
-			prepared: {
-				...response.prepared,
-				ticket: {
-					...response.prepared.ticket,
-					[this.field]: `${response.prepared.ticket[this.field]}-corrupted`,
-				},
-			},
-		};
+		return copy;
 	}
 }
 
@@ -145,138 +142,239 @@ class CorruptedPlanWorker extends RuntimeWorker {
 	protected override transformResponse(
 		response: StaticFabOrganizationBundlePlacementWorkerResponse,
 	): StaticFabOrganizationBundlePlacementWorkerResponse {
+		const copy = structuredClone(response);
 		if (
-			response.type !== "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED" ||
-			!response.prepared.plan
+			copy.type === "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED" &&
+			copy.payload.kind === "additions"
 		) {
-			return response;
+			const bytes = copy.payload.additions.encoded;
+			bytes[0] = bytes[0] === 0x21 ? 0x48 : 0x21;
 		}
-		const plan = structuredClone(response.prepared.plan);
-		const mutation = plan.mutations[0];
-		if (!mutation) throw new Error("Expected a Worker rail mutation.");
-		mutation.after = mutation.after === 0x21 ? 0x48 : 0x21;
-		return { ...response, prepared: { ...response.prepared, plan } };
+		return copy;
 	}
 }
 
+type ResponseCorruption =
+	| "conflict-cap"
+	| "fractional-count"
+	| "invalid-rail-byte"
+	| "out-of-range-cell"
+	| "out-of-range-mutation"
+	| "oversized-membership"
+	| "invalid-offset"
+	| "unsupported-version";
 class MalformedPreparedWorker extends RuntimeWorker {
-	private readonly corruption:
-		| "conflict-cap"
-		| "fractional-count"
-		| "invalid-rail-byte"
-		| "out-of-range-cell"
-		| "out-of-range-mutation"
-		| "oversized-membership";
-
-	constructor(
-		corruption:
-			| "conflict-cap"
-			| "fractional-count"
-			| "invalid-rail-byte"
-			| "out-of-range-cell"
-			| "out-of-range-mutation"
-			| "oversized-membership",
-	) {
+	private readonly corruption: ResponseCorruption;
+	constructor(corruption: ResponseCorruption) {
 		super();
 		this.corruption = corruption;
 	}
-
 	protected override transformResponse(
 		response: StaticFabOrganizationBundlePlacementWorkerResponse,
 	): StaticFabOrganizationBundlePlacementWorkerResponse {
-		if (response.type !== "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED") {
-			return response;
+		const copy = structuredClone(response);
+		if (this.corruption === "unsupported-version") {
+			Object.assign(copy, { version: 999 });
+			return copy;
 		}
-		if (this.corruption === "conflict-cap") {
-			return {
-				...response,
-				prepared: {
-					...response.prepared,
-					conflictCells: Array.from({ length: 513 }, (_, x) => ({ x, y: 0 })),
-				},
-			};
+		if (copy.type !== "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED") return copy;
+		const payload = copy.payload;
+		if (this.corruption === "conflict-cap")
+			Object.assign(payload.prepared, {
+				conflictCells: Array.from({ length: 513 }, (_, x) => ({ x, y: 0 })),
+			});
+		else if (this.corruption === "fractional-count")
+			Object.assign(payload.prepared, { conflictCount: 0.5 });
+		else if (payload.kind === "additions") {
+			const additions = payload.additions;
+			if (this.corruption === "invalid-rail-byte") additions.encoded[0] = 0xff;
+			else if (
+				this.corruption === "out-of-range-cell" ||
+				this.corruption === "out-of-range-mutation"
+			) {
+				// One coordinate table replaces both former plain cell/mutation arrays. Reject unrepresentable columns.
+				const key = this.corruption === "out-of-range-cell" ? "xs" : "ys";
+				const coordinates = Float64Array.from(additions[key]);
+				coordinates[0] = 0x8000_0000;
+				Object.assign(additions, { [key]: coordinates });
+			} else if (this.corruption === "oversized-membership")
+				Object.assign(additions.organizations.records, {
+					railEdgeCoordinates: new Int32Array(4 * 65_536 * 4 + 4),
+				});
+			else if (this.corruption === "invalid-offset")
+				additions.organizations.records.railEdgeOffsets[1] = 0xffff_ffff;
 		}
-		if (this.corruption === "fractional-count") {
-			return {
-				...response,
-				prepared: { ...response.prepared, conflictCount: 0.5 },
-			};
-		}
-		if (!response.prepared.plan) return response;
-		const plan = structuredClone(response.prepared.plan);
-		if (this.corruption === "invalid-rail-byte") {
-			const firstMutation = plan.mutations[0];
-			if (!firstMutation) throw new Error("Expected a Worker rail mutation.");
-			return {
-				...response,
-				prepared: {
-					...response.prepared,
-					plan: {
-						...plan,
-						mutations: [{ ...firstMutation, after: 0xff }, ...plan.mutations.slice(1)],
-					},
-				},
-			};
-		}
-		if (this.corruption === "out-of-range-mutation") {
-			const firstMutation = plan.mutations[0];
-			if (!firstMutation) throw new Error("Expected a Worker rail mutation.");
-			return {
-				...response,
-				prepared: {
-					...response.prepared,
-					plan: {
-						...plan,
-						mutations: [{ ...firstMutation, x: 0x8000_0000 }, ...plan.mutations.slice(1)],
-					},
-				},
-			};
-		}
-		if (this.corruption === "oversized-membership") {
-			const firstOrganization = plan.organizationMutations[0];
-			const firstEdge = firstOrganization?.after?.membership.railEdges[0];
-			if (!firstOrganization?.after || !firstEdge) {
-				throw new Error("Expected a Worker organization membership.");
-			}
-			return {
-				...response,
-				prepared: {
-					...response.prepared,
-					plan: {
-						...plan,
-						organizationMutations: [
-							{
-								...firstOrganization,
-								after: {
-									...firstOrganization.after,
-									membership: {
-										...firstOrganization.after.membership,
-										railEdges: Array.from({ length: 20_001 }, () => firstEdge),
-									},
-								},
-							},
-							...plan.organizationMutations.slice(1),
-						],
-					},
-				},
-			};
-		}
-		const firstCell = plan.cells[0];
-		if (!firstCell) throw new Error("Expected a Worker rail cell.");
-		return {
-			...response,
-			prepared: {
-				...response.prepared,
-				plan: {
-					...plan,
-					cells: [{ ...firstCell, x: 0x8000_0000 }, ...plan.cells.slice(1)],
-				},
-			},
-		};
+		return copy;
 	}
 }
 
 describe("StaticFabOrganizationBundlePlacementBridge", () => {
+	it("keeps cancellation live after transport termination through the final admission yield", async () => {
+		const baselineGate = admissionGate(Infinity);
+		const baseline = placementInput();
+		const baselineBridge = new StaticFabOrganizationBundlePlacementBridge(
+			() => new RuntimeWorker(),
+			30_000,
+			baselineGate.scheduler,
+		);
+		expect((await baselineBridge.prepare(baseline.input)).certified).toBe(true);
+		const checkpoints = baselineGate.calls();
+		expect(checkpoints).toBeGreaterThan(10);
+		for (const stopAt of [1, Math.floor(checkpoints / 2), checkpoints]) {
+			const gate = admissionGate(stopAt);
+			const { document, input } = placementInput();
+			const worker = new RuntimeWorker();
+			const bridge = new StaticFabOrganizationBundlePlacementBridge(
+				() => worker,
+				30_000,
+				gate.scheduler,
+			);
+			const outcome = bridge.prepare(input).then(
+				() => null,
+				(error) => error as Error,
+			);
+			await gate.reached;
+			expect(worker.terminated).toBe(true);
+			bridge.cancel();
+			expect(await outcome).toMatchObject({ name: "AbortError" });
+			gate.resume();
+			await Promise.resolve();
+			expect(document.getPatchSequence()).toBe(0);
+			bridge.dispose();
+		}
+	});
+
+	it("times out during admission after its Worker has already terminated", async () => {
+		const gate = admissionGate(1);
+		const { document, input } = placementInput();
+		const worker = new RuntimeWorker();
+		vi.useFakeTimers();
+		const bridge = new StaticFabOrganizationBundlePlacementBridge(() => worker, 20, gate.scheduler);
+		try {
+			const outcome = bridge.prepare(input).then(
+				() => null,
+				(error) => error as Error,
+			);
+			await gate.reached;
+			expect(worker.terminated).toBe(true);
+			await vi.advanceTimersByTimeAsync(20);
+			expect(await outcome).toMatchObject({ message: expect.stringContaining("timed out") });
+			expect(document.getPatchSequence()).toBe(0);
+		} finally {
+			bridge.dispose();
+			gate.resume();
+			vi.useRealTimers();
+		}
+	});
+
+	it("an abandoned admission and its late callback cannot cancel or settle a new request", async () => {
+		const gate = admissionGate(1);
+		const first = placementInput(),
+			second = placementInput();
+		const oldWorker = new ManualRuntimeWorker(),
+			newWorker = new RuntimeWorker();
+		let workers = 0;
+		const bridge = new StaticFabOrganizationBundlePlacementBridge(
+			() => (workers++ === 0 ? oldWorker : newWorker),
+			30_000,
+			gate.scheduler,
+		);
+		const oldOutcome = bridge.prepare(first.input).then(
+			() => null,
+			(error) => error as Error,
+		);
+		const lateCallback = oldWorker.onmessage;
+		oldWorker.deliver();
+		await gate.reached;
+		const newOutcome = bridge.prepare(second.input);
+		expect(await oldOutcome).toMatchObject({ name: "AbortError" });
+		lateCallback?.({
+			data: {
+				version: 999,
+				requestId: oldWorker.receivedRequest?.requestId,
+				type: "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_ERROR",
+				message: "late obsolete error",
+			},
+		} as unknown as MessageEvent<StaticFabOrganizationBundlePlacementWorkerResponse>);
+		gate.resume();
+		const prepared = await newOutcome;
+		expect(prepared.certified).toBe(true);
+		if (!prepared.plan) throw new Error("Expected current plan");
+		expect(second.document.commitStaticFabOrganizationBundle(prepared.plan)).toBe(true);
+		expect(first.document.getPatchSequence()).toBe(0);
+		bridge.dispose();
+	});
+
+	it("rejects a document edit made while owned response capture is suspended", async () => {
+		const gate = admissionGate(2);
+		const { document, input } = placementInput();
+		const bridge = new StaticFabOrganizationBundlePlacementBridge(
+			() => new RuntimeWorker(),
+			30_000,
+			gate.scheduler,
+		);
+		const outcome = bridge.prepare(input).then(
+			() => null,
+			(error) => error as Error,
+		);
+		await gate.reached;
+		expect(
+			document.commit(planRailConstruction(document.map, { x: -10, y: -10 }, { x: -8, y: -10 })),
+		).toBe(true);
+		const expectedSequence = document.getPatchSequence();
+		gate.resume();
+		expect(await outcome).toMatchObject({
+			message: expect.stringContaining("source changed during admission"),
+		});
+		expect(document.getPatchSequence()).toBe(expectedSequence);
+		bridge.dispose();
+	});
+
+	it("rejects an intervening mutation even when rollback restores revision and checksum", async () => {
+		const gate = admissionGate(2);
+		const { document, input } = placementInput();
+		const bridge = new StaticFabOrganizationBundlePlacementBridge(
+			() => new RuntimeWorker(),
+			30_000,
+			gate.scheduler,
+		);
+		const outcome = bridge.prepare(input).then(
+			() => null,
+			(error) => error as Error,
+		);
+		await gate.reached;
+		const map = document.map;
+		const originalGeneration = map.getMutationGeneration();
+		const checkpoint = map.createMutationCheckpoint();
+		const edit = planRailConstruction(map, { x: -10, y: -10 }, { x: -8, y: -10 });
+		expect(map.applyAtomicMutations(edit.mutations, edit.switchMutations ?? [])).toBe(true);
+		map.rollbackAtomicMutations(edit.mutations, edit.switchMutations ?? [], checkpoint);
+		expect(map.getRevision()).toBe(input.snapshot.revision);
+		expect(map.getMutationGeneration()).toBeGreaterThan(originalGeneration);
+		expect(
+			captureRailMirrorSnapshot(
+				map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot.checksum,
+		).toBe(input.snapshot.checksum);
+		gate.resume();
+		expect(await outcome).toMatchObject({
+			message: expect.stringContaining("source changed during admission"),
+		});
+		expect(document.getPatchSequence()).toBe(0);
+		bridge.dispose();
+	});
+
+	it("rejects a mismatched response protocol version", async () => {
+		const { input } = placementInput();
+		const bridge = new StaticFabOrganizationBundlePlacementBridge(
+			() => new MalformedPreparedWorker("unsupported-version"),
+		);
+		await expect(bridge.prepare(input)).rejects.toThrow("response version");
+	});
 	it("adopts only the Worker-planned clone through its one-shot source permit", async () => {
 		const { document, input } = placementInput();
 		const worker = new RuntimeWorker();
@@ -414,13 +512,8 @@ describe("StaticFabOrganizationBundlePlacementBridge", () => {
 		expect(document.commit(edit)).toBe(true);
 
 		worker.deliver();
-		const prepared = await planning;
-
-		expect(prepared.validation.valid, prepared.validation.reason).toBe(true);
-		expect(prepared.certified).toBe(false);
-		if (!prepared.plan) throw new Error("Expected the rejected Worker plan.");
-		expect(isIssuedStaticFabOrganizationBundlePlacementPlan(prepared.plan)).toBe(false);
-		expect(document.commitStaticFabOrganizationBundle(prepared.plan)).toBe(false);
+		await expect(planning).rejects.toThrow("source changed during admission");
+		expect(document.getPatchSequence()).toBe(1);
 	});
 
 	it("does not adopt when a source identity is replaced with checksum-equivalent data", async () => {
@@ -439,12 +532,7 @@ describe("StaticFabOrganizationBundlePlacementBridge", () => {
 		};
 
 		worker.deliver();
-		const prepared = await planning;
-
-		expect(prepared.validation.valid, prepared.validation.reason).toBe(true);
-		expect(prepared.certified).toBe(false);
-		if (!prepared.plan) throw new Error("Expected the rejected Worker plan.");
-		expect(isIssuedStaticFabOrganizationBundlePlacementPlan(prepared.plan)).toBe(false);
+		await expect(planning).rejects.toThrow("source changed during admission");
 	});
 
 	it.each([
@@ -464,19 +552,15 @@ describe("StaticFabOrganizationBundlePlacementBridge", () => {
 		const bridge = new StaticFabOrganizationBundlePlacementBridge(
 			() => new CorruptedTicketWorker("planFingerprint"),
 		);
-		const prepared = await bridge.prepare(input);
-		expect(prepared.validation.valid).toBe(true);
-		expect(prepared.certified).toBe(false);
-		if (!prepared.plan) throw new Error("Expected a rejected Worker plan.");
-		expect(isIssuedStaticFabOrganizationBundlePlacementPlan(prepared.plan)).toBe(false);
-		expect(document.commitStaticFabOrganizationBundle(prepared.plan)).toBe(false);
+		await expect(bridge.prepare(input)).rejects.toThrow("fingerprint");
+		expect(document.getPatchSequence()).toBe(0);
 	});
 
-	it("rejects a plan whose mutations diverge from its prospective checksum", async () => {
+	it("rejects a plan whose mutations diverge from its ticket fingerprint", async () => {
 		const { input } = placementInput();
 		const bridge = new StaticFabOrganizationBundlePlacementBridge(() => new CorruptedPlanWorker());
 
-		await expect(bridge.prepare(input)).rejects.toThrow("prospective checksum");
+		await expect(bridge.prepare(input)).rejects.toThrow("fingerprint");
 	});
 
 	it("rejects a ticket whose prospective checksum is forged", async () => {
@@ -495,6 +579,7 @@ describe("StaticFabOrganizationBundlePlacementBridge", () => {
 		"out-of-range-cell",
 		"out-of-range-mutation",
 		"oversized-membership",
+		"invalid-offset",
 	] as const)("rejects malformed Worker planning data (%s)", async (corruption) => {
 		const { input } = placementInput();
 		const bridge = new StaticFabOrganizationBundlePlacementBridge(
@@ -504,6 +589,36 @@ describe("StaticFabOrganizationBundlePlacementBridge", () => {
 		await expect(bridge.prepare(input)).rejects.toThrow("malformed planning data");
 	});
 });
+
+function admissionGate(stopAt: number) {
+	let count = 0,
+		time = 0;
+	let announce: () => void = () => {},
+		release: () => void = () => {};
+	const reached = new Promise<void>((resolve) => {
+		announce = resolve;
+	});
+	const blocked = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	return {
+		reached,
+		resume: () => release(),
+		calls: () => count,
+		scheduler: {
+			now: () => {
+				time += 5;
+				return time;
+			},
+			yield: async () => {
+				if (++count === stopAt) {
+					announce();
+					await blocked;
+				}
+			},
+		},
+	};
+}
 
 function placementInput(): {
 	document: RailDocument;

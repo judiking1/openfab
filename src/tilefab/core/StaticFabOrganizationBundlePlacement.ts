@@ -28,6 +28,7 @@ import {
 	checksumStaticFabAssemblyRelationshipRecord,
 	checksumStaticFabAssemblyRelationshipRecordSteps,
 	copyStaticFabAssemblyRelationshipRecord,
+	copyStaticFabAssemblyRelationshipRecordSteps,
 	remapStaticFabAssemblyRelationshipRecord,
 	type StaticFabAssemblyRelationshipMutationV1,
 	type StaticFabAssemblyRelationshipStateV1,
@@ -37,6 +38,7 @@ import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
+	isCanonicalStaticFabOrganizationRecord,
 	normalizeStaticFabOrganizationName,
 	type StaticFabOrganizationKind,
 	type StaticFabOrganizationMutation,
@@ -48,11 +50,17 @@ import {
 	type MaterializedStaticFabOrganizationBundle,
 	materializeStaticFabOrganizationBundle,
 	prepareStaticFabOrganizationBundle,
+	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES,
+	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS,
+	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS,
+	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS,
+	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RAIL_EDGES,
 	type StaticFabOrganizationBundle,
 	type StaticFabOrganizationBundleEquipmentGroup,
 	type StaticFabOrganizationBundleQuarterTurns,
 	validateFrozenStaticFabOrganizationBundle,
 } from "./StaticFabOrganizationBundle";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS } from "./StaticFabOrganizationBundleRelationships";
 import { type Cell, cellKey, decodeRailCell, encodeRailCell, type TileMap } from "./TileMap";
 
 export const STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_KIND =
@@ -151,6 +159,7 @@ interface StaticFabOrganizationBundlePlacementSource {
 
 interface StaticFabOrganizationBundlePlacementPermitSource
 	extends StaticFabOrganizationBundlePlacementSource {
+	readonly sourceMapMutationGeneration: number;
 	readonly baseRevision: number;
 	readonly basePatchSequence: number;
 	readonly sourceNextAdvancedSwitchId: number;
@@ -169,12 +178,19 @@ const certifiedPlans = new WeakMap<
 	StaticFabOrganizationBundlePlacementSource & {
 		readonly sourceChecksum: string;
 		readonly planFingerprint: string;
+		readonly sourceMapMutationGeneration: number;
 	}
 >();
 const pendingWorkerPermits = new WeakMap<
 	object,
 	StaticFabOrganizationBundlePlacementPermitSource
 >();
+const adoptingWorkerPermits = new WeakMap<
+	object,
+	StaticFabOrganizationBundlePlacementPermitSource
+>();
+// Only plans constructed and fingerprinted inside cooperative adoption enter this cache.
+const ownedPlanFingerprints = new WeakMap<object, string>();
 const bundleFingerprints = new WeakMap<object, string>();
 let nextWorkerTicketId = 1;
 
@@ -214,7 +230,9 @@ export function isCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
 		certification.organizations === organizations &&
 		certification.relationships === relationships &&
 		plan.baseRevision === map.getRevision() &&
-		certification.planFingerprint === staticFabOrganizationBundlePlacementFingerprint(plan)
+		certification.sourceMapMutationGeneration === map.getMutationGeneration() &&
+		certification.planFingerprint ===
+			(ownedPlanFingerprints.get(plan) ?? staticFabOrganizationBundlePlacementFingerprint(plan))
 	);
 }
 
@@ -239,6 +257,7 @@ export function consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFo
 	}
 	certifiedPlans.delete(plan);
 	issuedPlans.delete(plan);
+	ownedPlanFingerprints.delete(plan);
 	return true;
 }
 
@@ -284,6 +303,7 @@ export function issueStaticFabOrganizationBundlePlacementPermit(
 			relationships,
 			sourceChecksum,
 			baseRevision: map.getRevision(),
+			sourceMapMutationGeneration: map.getMutationGeneration(),
 			basePatchSequence,
 			sourceNextAdvancedSwitchId: map.getAdvancedSwitchIdCursor(),
 			sourceNextPortId: portEquipment.nextPortId,
@@ -303,6 +323,112 @@ export function revokeStaticFabOrganizationBundlePlacementPermit(
 	permit: StaticFabOrganizationBundlePlacementPermit,
 ): void {
 	pendingWorkerPermits.delete(permit);
+	adoptingWorkerPermits.delete(permit);
+}
+
+/**
+ * Adopt a fully immutable candidate with canonical organization records. The caller checkpoints
+ * current document identity; revocation remains effective throughout copying and fingerprinting.
+ */
+export async function adoptStaticFabOrganizationBundlePlacementWorkerPlanCooperatively(
+	permit: StaticFabOrganizationBundlePlacementPermit,
+	plan: StaticFabOrganizationBundlePlacementPlan,
+	ticket: StaticFabOrganizationBundlePlacementWorkerTicket,
+	expectedProspectiveChecksum: string,
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+	checkpoint: () => Promise<void>,
+	operationBudget = 64,
+): Promise<StaticFabOrganizationBundlePlacementPlan | null> {
+	const source = pendingWorkerPermits.get(permit);
+	pendingWorkerPermits.delete(permit);
+	if (!source) return null;
+	adoptingWorkerPermits.set(permit, source);
+	const current = (): boolean =>
+		adoptingWorkerPermits.get(permit) === source &&
+		map.getRevision() === source.baseRevision &&
+		map.getMutationGeneration() === source.sourceMapMutationGeneration &&
+		map.getAdvancedSwitchIdCursor() === source.sourceNextAdvancedSwitchId &&
+		portEquipment.nextPortId === source.sourceNextPortId &&
+		portEquipment.nextEquipmentGroupId === source.sourceNextEquipmentGroupId &&
+		organizations.nextOrganizationId === source.sourceNextOrganizationId &&
+		relationships.nextRelationshipId === source.sourceNextRelationshipId;
+	try {
+		if (
+			!Number.isSafeInteger(operationBudget) ||
+			operationBudget <= 0 ||
+			!Object.isFrozen(plan) ||
+			!placementCandidateWithinBudget(plan) ||
+			!Object.isFrozen(ticket) ||
+			!Object.isFrozen(ticket.anchor) ||
+			!current() ||
+			!placementWorkerTicketMatchesSource(
+				source,
+				permit,
+				plan,
+				ticket,
+				expectedProspectiveChecksum,
+				map,
+				portEquipment,
+				organizations,
+				relationships,
+			)
+		)
+			return null;
+		const copy = createCooperativeTask(copyFrozenWorkerPlacementPlanSteps(plan));
+		while (!copy.done) {
+			await checkpoint();
+			if (!current()) return null;
+			copy.step(operationBudget);
+		}
+		const adoptedPlan = copy.finish();
+		const hashing = createCooperativeTask(
+			staticFabOrganizationBundlePlacementFingerprintSteps(adoptedPlan),
+		);
+		while (!hashing.done) {
+			await checkpoint();
+			if (!current()) return null;
+			hashing.step(operationBudget);
+		}
+		const planFingerprint = hashing.finish();
+		if (planFingerprint !== ticket.planFingerprint) return null;
+		await checkpoint();
+		if (
+			!current() ||
+			source.sourceChecksum === null ||
+			!placementWorkerTicketMatchesSource(
+				source,
+				permit,
+				adoptedPlan,
+				ticket,
+				expectedProspectiveChecksum,
+				map,
+				portEquipment,
+				organizations,
+				relationships,
+			)
+		)
+			return null;
+		const issuedSource = Object.freeze({
+			map,
+			portEquipment,
+			organizations,
+			relationships,
+			sourceChecksum: source.sourceChecksum,
+			sourceMapMutationGeneration: source.sourceMapMutationGeneration,
+		});
+		// No suspension after this point: ownership, identity and one-shot authority publish together.
+		issuedPlans.set(adoptedPlan, issuedSource);
+		certifiedPlans.set(adoptedPlan, Object.freeze({ ...issuedSource, planFingerprint }));
+		ownedPlanFingerprints.set(adoptedPlan, planFingerprint);
+		return adoptedPlan;
+	} catch {
+		return null;
+	} finally {
+		if (adoptingWorkerPermits.get(permit) === source) adoptingWorkerPermits.delete(permit);
+	}
 }
 
 /**
@@ -321,60 +447,22 @@ export function adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 ): StaticFabOrganizationBundlePlacementPlan | null {
 	const source = pendingWorkerPermits.get(permit);
 	pendingWorkerPermits.delete(permit);
-	if (!source) return null;
+	if (!source || source.sourceChecksum === null) return null;
 	try {
 		if (
-			permit.ticketId !== ticket.ticketId ||
-			source.sourceChecksum === null ||
-			source.map !== map ||
-			source.portEquipment !== portEquipment ||
-			source.organizations !== organizations ||
-			source.relationships !== relationships ||
-			map.getRevision() !== source.baseRevision ||
-			plan.baseRevision !== source.baseRevision ||
-			plan.basePatchSequence !== source.basePatchSequence ||
-			plan.nextOrganizationIdBefore !== source.sourceNextOrganizationId ||
-			plan.nextRelationshipIdBefore !== source.sourceNextRelationshipId ||
-			ticket.sourceRevision !== source.baseRevision ||
-			ticket.sourcePatchSequence !== source.basePatchSequence ||
-			ticket.sourceChecksum !== source.sourceChecksum ||
-			ticket.sourceNextAdvancedSwitchId !== source.sourceNextAdvancedSwitchId ||
-			ticket.sourceNextPortId !== source.sourceNextPortId ||
-			ticket.sourceNextEquipmentGroupId !== source.sourceNextEquipmentGroupId ||
-			ticket.sourceNextOrganizationId !== source.sourceNextOrganizationId ||
-			ticket.sourceNextRelationshipId !== source.sourceNextRelationshipId ||
-			relationships.nextRelationshipId !== source.sourceNextRelationshipId ||
-			map.getAdvancedSwitchIdCursor() !== source.sourceNextAdvancedSwitchId ||
-			portEquipment.nextPortId !== source.sourceNextPortId ||
-			portEquipment.nextEquipmentGroupId !== source.sourceNextEquipmentGroupId ||
-			ticket.bundleFingerprint !== source.bundleFingerprint ||
-			ticket.anchor.x !== source.anchor.x ||
-			ticket.anchor.y !== source.anchor.y ||
-			ticket.quarterTurns !== source.quarterTurns ||
-			plan.organizationBundle.anchor.x !== source.anchor.x ||
-			plan.organizationBundle.anchor.y !== source.anchor.y ||
-			plan.organizationBundle.quarterTurns !== source.quarterTurns ||
-			ticket.prospectiveNextAdvancedSwitchId !==
-				nextRecordCursor(source.sourceNextAdvancedSwitchId, plan.switchMutations) ||
-			ticket.prospectiveNextPortId !==
-				nextRecordCursor(source.sourceNextPortId, plan.portMutations) ||
-			ticket.prospectiveNextEquipmentGroupId !==
-				nextRecordCursor(source.sourceNextEquipmentGroupId, plan.equipmentGroupMutations) ||
-			ticket.prospectiveNextOrganizationId !== plan.nextOrganizationIdAfter ||
-			ticket.prospectiveNextRelationshipId !== plan.nextRelationshipIdAfter ||
-			plan.nextRelationshipIdAfter !==
-				nextRecordCursor(source.sourceNextRelationshipId, plan.relationshipMutations) ||
-			ticket.validationLevel !== "exact" ||
-			typeof expectedProspectiveChecksum !== "string" ||
-			expectedProspectiveChecksum.length === 0 ||
-			typeof ticket.prospectiveChecksum !== "string" ||
-			ticket.prospectiveChecksum.length === 0 ||
-			ticket.prospectiveChecksum !== expectedProspectiveChecksum ||
-			!plan.valid ||
-			plan.kind !== "build"
-		) {
+			!placementWorkerTicketMatchesSource(
+				source,
+				permit,
+				plan,
+				ticket,
+				expectedProspectiveChecksum,
+				map,
+				portEquipment,
+				organizations,
+				relationships,
+			)
+		)
 			return null;
-		}
 		const planFingerprint = staticFabOrganizationBundlePlacementFingerprint(plan);
 		if (ticket.planFingerprint !== planFingerprint) return null;
 		const adoptedPlan = copyWorkerPlacementPlan(plan);
@@ -387,6 +475,7 @@ export function adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 			organizations,
 			relationships,
 			sourceChecksum: source.sourceChecksum,
+			sourceMapMutationGeneration: source.sourceMapMutationGeneration,
 		});
 		issuedPlans.set(adoptedPlan, issuedSource);
 		certifiedPlans.set(
@@ -401,6 +490,74 @@ export function adoptStaticFabOrganizationBundlePlacementWorkerPlan(
 	} catch {
 		return null;
 	}
+}
+
+function placementWorkerTicketMatchesSource(
+	source: StaticFabOrganizationBundlePlacementPermitSource,
+	permit: StaticFabOrganizationBundlePlacementPermit,
+	plan: StaticFabOrganizationBundlePlacementPlan,
+	ticket: StaticFabOrganizationBundlePlacementWorkerTicket,
+	expectedProspectiveChecksum: string,
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+): boolean {
+	if (
+		permit.ticketId !== ticket.ticketId ||
+		source.sourceChecksum === null ||
+		source.map !== map ||
+		source.portEquipment !== portEquipment ||
+		source.organizations !== organizations ||
+		organizations.nextOrganizationId !== source.sourceNextOrganizationId ||
+		source.relationships !== relationships ||
+		map.getRevision() !== source.baseRevision ||
+		map.getMutationGeneration() !== source.sourceMapMutationGeneration ||
+		plan.baseRevision !== source.baseRevision ||
+		plan.basePatchSequence !== source.basePatchSequence ||
+		plan.nextOrganizationIdBefore !== source.sourceNextOrganizationId ||
+		plan.nextRelationshipIdBefore !== source.sourceNextRelationshipId ||
+		ticket.sourceRevision !== source.baseRevision ||
+		ticket.sourcePatchSequence !== source.basePatchSequence ||
+		ticket.sourceChecksum !== source.sourceChecksum ||
+		ticket.sourceNextAdvancedSwitchId !== source.sourceNextAdvancedSwitchId ||
+		ticket.sourceNextPortId !== source.sourceNextPortId ||
+		ticket.sourceNextEquipmentGroupId !== source.sourceNextEquipmentGroupId ||
+		ticket.sourceNextOrganizationId !== source.sourceNextOrganizationId ||
+		ticket.sourceNextRelationshipId !== source.sourceNextRelationshipId ||
+		relationships.nextRelationshipId !== source.sourceNextRelationshipId ||
+		map.getAdvancedSwitchIdCursor() !== source.sourceNextAdvancedSwitchId ||
+		portEquipment.nextPortId !== source.sourceNextPortId ||
+		portEquipment.nextEquipmentGroupId !== source.sourceNextEquipmentGroupId ||
+		ticket.bundleFingerprint !== source.bundleFingerprint ||
+		ticket.anchor.x !== source.anchor.x ||
+		ticket.anchor.y !== source.anchor.y ||
+		ticket.quarterTurns !== source.quarterTurns ||
+		plan.organizationBundle.anchor.x !== source.anchor.x ||
+		plan.organizationBundle.anchor.y !== source.anchor.y ||
+		plan.organizationBundle.quarterTurns !== source.quarterTurns ||
+		ticket.prospectiveNextAdvancedSwitchId !==
+			nextRecordCursor(source.sourceNextAdvancedSwitchId, plan.switchMutations) ||
+		ticket.prospectiveNextPortId !==
+			nextRecordCursor(source.sourceNextPortId, plan.portMutations) ||
+		ticket.prospectiveNextEquipmentGroupId !==
+			nextRecordCursor(source.sourceNextEquipmentGroupId, plan.equipmentGroupMutations) ||
+		ticket.prospectiveNextOrganizationId !== plan.nextOrganizationIdAfter ||
+		ticket.prospectiveNextRelationshipId !== plan.nextRelationshipIdAfter ||
+		plan.nextRelationshipIdAfter !==
+			nextRecordCursor(source.sourceNextRelationshipId, plan.relationshipMutations) ||
+		ticket.validationLevel !== "exact" ||
+		typeof expectedProspectiveChecksum !== "string" ||
+		expectedProspectiveChecksum.length === 0 ||
+		typeof ticket.prospectiveChecksum !== "string" ||
+		ticket.prospectiveChecksum.length === 0 ||
+		ticket.prospectiveChecksum !== expectedProspectiveChecksum ||
+		!plan.valid ||
+		plan.kind !== "build"
+	) {
+		return false;
+	}
+	return true;
 }
 
 /** Stable identity of a canonical portable bundle, independent of runtime IDs and placement. */
@@ -451,6 +608,21 @@ export async function fingerprintFrozenStaticFabOrganizationBundleCooperatively(
 export function staticFabOrganizationBundlePlacementFingerprint(
 	plan: StaticFabOrganizationBundlePlacementPlan,
 ): string {
+	return completeCooperativeSteps(placementFingerprintSteps(plan, false));
+}
+
+/** Schema-validated plans must keep every hashed container immutable across caller checkpoints. */
+export function* staticFabOrganizationBundlePlacementFingerprintSteps(
+	plan: StaticFabOrganizationBundlePlacementPlan,
+): Generator<void, string> {
+	return yield* placementFingerprintSteps(plan, true);
+}
+
+function* placementFingerprintSteps(
+	plan: StaticFabOrganizationBundlePlacementPlan,
+	requireImmutable: boolean,
+): Generator<void, string> {
+	assertPlacementHashFrozen(plan, requireImmutable);
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_KIND, plan.kind]);
 	checksum.addNumbers([
@@ -462,29 +634,65 @@ export function staticFabOrganizationBundlePlacementFingerprint(
 		plan.nextRelationshipIdAfter,
 		plan.valid ? 1 : 0,
 	]);
-	checksum.addNumbers(
-		plan.mutations.flatMap((mutation) => [mutation.x, mutation.y, mutation.before, mutation.after]),
+	assertPlacementHashFrozen(plan.mutations, requireImmutable);
+	yield* checksum.addNumberSequenceSteps(plan.mutations.length * 4, (index) => {
+		const mutation = plan.mutations[Math.floor(index / 4)] as RailMutation;
+		if ((index & 3) === 0) assertPlacementHashFrozen(mutation, requireImmutable);
+		switch (index & 3) {
+			case 0:
+				return mutation.x;
+			case 1:
+				return mutation.y;
+			case 2:
+				return mutation.before;
+			default:
+				return mutation.after;
+		}
+	});
+	yield* addAdvancedSwitchMutationsToChecksumSteps(
+		checksum,
+		plan.switchMutations,
+		requireImmutable,
 	);
-	addAdvancedSwitchMutationsToChecksum(checksum, plan.switchMutations);
-	addPortMutationsToChecksum(checksum, plan.portMutations);
-	addEquipmentGroupMutationsToChecksum(checksum, plan.equipmentGroupMutations);
-	addOrganizationMutationsToChecksum(checksum, plan.organizationMutations);
+	yield* addPortMutationsToChecksumSteps(checksum, plan.portMutations, requireImmutable);
+	yield* addEquipmentGroupMutationsToChecksumSteps(
+		checksum,
+		plan.equipmentGroupMutations,
+		requireImmutable,
+	);
+	yield* addOrganizationMutationsToChecksumSteps(
+		checksum,
+		plan.organizationMutations,
+		requireImmutable,
+	);
+	assertPlacementHashFrozen(plan.relationshipMutations, requireImmutable);
 	checksum.addNumbers([plan.relationshipMutations.length]);
 	for (const mutation of plan.relationshipMutations) {
+		assertPlacementHashFrozen(mutation, requireImmutable);
 		checksum.addNumbers([
 			mutation.id,
 			mutation.before === null ? 0 : 1,
 			mutation.after === null ? 0 : 1,
 		]);
-		if (mutation.before)
-			checksum.addString(checksumStaticFabAssemblyRelationshipRecord(mutation.before));
-		if (mutation.after)
-			checksum.addString(checksumStaticFabAssemblyRelationshipRecord(mutation.after));
+		for (const record of [mutation.before, mutation.after]) {
+			if (!record) continue;
+			const digest = requireImmutable
+				? yield* checksumStaticFabAssemblyRelationshipRecordSteps(record)
+				: checksumStaticFabAssemblyRelationshipRecord(record);
+			checksum.addString(digest);
+		}
+		yield;
 	}
-	checksum.addStrings([
-		plan.organizationBundle.collisionPolicy,
-		...plan.organizationBundle.organizationNames,
-	]);
+	assertPlacementHashFrozen(plan.organizationBundle, requireImmutable);
+	assertPlacementHashFrozen(plan.organizationBundle.anchor, requireImmutable);
+	assertPlacementHashFrozen(plan.organizationBundle.organizationNames, requireImmutable);
+	yield* checksum.addStringSequenceSteps(
+		plan.organizationBundle.organizationNames.length + 1,
+		(index) =>
+			index === 0
+				? plan.organizationBundle.collisionPolicy
+				: (plan.organizationBundle.organizationNames[index - 1] as string),
+	);
 	checksum.addNumbers([
 		plan.organizationBundle.anchor.x,
 		plan.organizationBundle.anchor.y,
@@ -500,6 +708,208 @@ export function staticFabOrganizationBundlePlacementFingerprint(
 		plan.organizationBundle.heightMeters,
 	]);
 	return checksum.digest();
+}
+
+function* copyFrozenWorkerPlacementPlanSteps(
+	plan: StaticFabOrganizationBundlePlacementPlan,
+): Generator<void, StaticFabOrganizationBundlePlacementPlan> {
+	assertPlacementHashFrozen(plan, true);
+	const copyCells = function* (source: readonly Cell[]): Generator<void, readonly Cell[]> {
+		assertPlacementHashFrozen(source, true);
+		const result: Cell[] = [];
+		for (const cell of source) {
+			yield;
+			assertPlacementHashFrozen(cell, true);
+			const { x, y } = cell;
+			if (
+				!Number.isInteger(x) ||
+				!Number.isInteger(y) ||
+				x < -0x8000_0000 ||
+				x > 0x7fff_ffff ||
+				y < -0x8000_0000 ||
+				y > 0x7fff_ffff
+			)
+				throw new Error("Placement cells require signed int32 coordinates.");
+			result.push(Object.freeze({ x, y }));
+		}
+		return Object.freeze(result);
+	};
+	const cells = yield* copyCells(plan.cells);
+	const conflicts = yield* copyCells(plan.conflicts);
+	assertPlacementHashFrozen(plan.mutations, true);
+	const mutations: RailMutation[] = [];
+	for (const mutation of plan.mutations) {
+		yield;
+		assertPlacementHashFrozen(mutation, true);
+		const { x, y, before, after } = mutation;
+		if (
+			!Number.isInteger(x) ||
+			!Number.isInteger(y) ||
+			before !== 0 ||
+			!Number.isInteger(after) ||
+			after <= 0 ||
+			after > 255
+		)
+			throw new Error("Placement rail additions require primitive coordinates and bytes.");
+		mutations.push(Object.freeze({ x, y, before, after }));
+	}
+	const copyRecordMutations = function* <R extends { readonly id: number }>(
+		changes: readonly Readonly<{ id: number; before: R | null; after: R | null }>[],
+		copy: (record: R) => R,
+	): Generator<void, readonly Readonly<{ id: number; before: null; after: R }>[]> {
+		assertPlacementHashFrozen(changes, true);
+		const result: Readonly<{ id: number; before: null; after: R }>[] = [];
+		for (const mutation of changes) {
+			yield;
+			assertPlacementHashFrozen(mutation, true);
+			const { id, before, after } = mutation;
+			if (before !== null || after === null || !Number.isInteger(id))
+				throw new Error("Placement adoption requires exact additions.");
+			assertPlacementHashFrozen(after, true);
+			const record = copy(after);
+			if (record.id !== id) throw new Error("Placement mutation and record IDs disagree.");
+			result.push(Object.freeze({ id, before: null, after: record }));
+		}
+		return Object.freeze(result);
+	};
+	const switchMutations = yield* copyRecordMutations(plan.switchMutations, copyAdvancedSwitch);
+	const portMutations = yield* copyRecordMutations(plan.portMutations, copyPortRecord);
+	const equipmentGroupMutations = yield* copyRecordMutations(
+		plan.equipmentGroupMutations,
+		copyEquipmentGroupRecord,
+	);
+	const organizationMutations = yield* copyRecordMutations(plan.organizationMutations, (record) => {
+		// Domain-issued records have owned immutable memberships; an arbitrary frozen root is insufficient.
+		if (!isCanonicalStaticFabOrganizationRecord(record))
+			throw new Error("Placement organization records require canonical ownership.");
+		return record;
+	});
+	assertPlacementHashFrozen(plan.relationshipMutations, true);
+	const relationshipMutations: StaticFabAssemblyRelationshipMutationV1[] = [];
+	for (const mutation of plan.relationshipMutations) {
+		yield;
+		assertPlacementHashFrozen(mutation, true);
+		const { id, before, after } = mutation;
+		if (before !== null || after === null || !Number.isInteger(id))
+			throw new Error("Placement adoption requires relationship additions.");
+		const record = yield* copyStaticFabAssemblyRelationshipRecordSteps(after);
+		if (record.id !== id) throw new Error("Placement relationship IDs disagree.");
+		relationshipMutations.push(Object.freeze({ id, before: null, after: record }));
+	}
+	const metadata = plan.organizationBundle;
+	assertPlacementHashFrozen(metadata, true);
+	assertPlacementHashFrozen(metadata.anchor, true);
+	assertPlacementHashFrozen(metadata.organizationNames, true);
+	const names: string[] = [];
+	for (const name of metadata.organizationNames) {
+		yield;
+		if (typeof name !== "string" || name.length === 0 || name.length > 120)
+			throw new Error("Placement names must be bounded strings.");
+		names.push(name);
+	}
+	const result = Object.freeze({
+		kind: plan.kind,
+		baseRevision: plan.baseRevision,
+		basePatchSequence: plan.basePatchSequence,
+		valid: plan.valid,
+		reason: plan.reason,
+		issueCode: plan.issueCode,
+		newEdges: plan.newEdges,
+		lengthMeters: plan.lengthMeters,
+		turns: plan.turns,
+		bend: plan.bend,
+		nextOrganizationIdBefore: plan.nextOrganizationIdBefore,
+		nextOrganizationIdAfter: plan.nextOrganizationIdAfter,
+		nextRelationshipIdBefore: plan.nextRelationshipIdBefore,
+		nextRelationshipIdAfter: plan.nextRelationshipIdAfter,
+		cells,
+		conflicts,
+		mutations: Object.freeze(mutations),
+		switchMutations,
+		portMutations,
+		equipmentGroupMutations,
+		organizationMutations,
+		relationshipMutations: Object.freeze(relationshipMutations),
+		organizationBundle: Object.freeze({
+			collisionPolicy: metadata.collisionPolicy,
+			anchor: Object.freeze({ x: metadata.anchor.x, y: metadata.anchor.y }),
+			quarterTurns: metadata.quarterTurns,
+			sourceModuleCount: metadata.sourceModuleCount,
+			railEdgeCount: metadata.railEdgeCount,
+			advancedSwitchCount: metadata.advancedSwitchCount,
+			portCount: metadata.portCount,
+			equipmentGroupCount: metadata.equipmentGroupCount,
+			organizationCount: metadata.organizationCount,
+			relationshipCount: metadata.relationshipCount,
+			widthMeters: metadata.widthMeters,
+			heightMeters: metadata.heightMeters,
+			organizationNames: Object.freeze(names),
+		}),
+	});
+	assertPlacementHeaderPrimitives(result);
+	return result;
+}
+
+function placementCandidateWithinBudget(plan: StaticFabOrganizationBundlePlacementPlan): boolean {
+	const maxCells =
+		STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RAIL_EDGES * 2 +
+		STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES * 16;
+	const arrays: readonly [unknown, number][] = [
+		[plan.cells, maxCells],
+		[plan.mutations, maxCells],
+		[plan.conflicts, 0],
+		[plan.switchMutations, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES],
+		[plan.portMutations, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS],
+		[plan.equipmentGroupMutations, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS],
+		[plan.organizationMutations, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS],
+		[plan.relationshipMutations, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS],
+		[plan.organizationBundle.organizationNames, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS],
+	];
+	return arrays.every(
+		([array, maximum]) => Array.isArray(array) && Object.isFrozen(array) && array.length <= maximum,
+	);
+}
+
+/** Prove cached header values are primitives, never mutable objects accepted through coercion. */
+function assertPlacementHeaderPrimitives(plan: StaticFabOrganizationBundlePlacementPlan): void {
+	const metadata = plan.organizationBundle;
+	const numeric = [
+		plan.baseRevision,
+		plan.basePatchSequence,
+		plan.newEdges,
+		plan.lengthMeters,
+		plan.turns,
+		plan.nextOrganizationIdBefore,
+		plan.nextOrganizationIdAfter,
+		plan.nextRelationshipIdBefore,
+		plan.nextRelationshipIdAfter,
+		metadata.anchor.x,
+		metadata.anchor.y,
+		metadata.quarterTurns,
+		metadata.sourceModuleCount,
+		metadata.railEdgeCount,
+		metadata.advancedSwitchCount,
+		metadata.portCount,
+		metadata.equipmentGroupCount,
+		metadata.organizationCount,
+		metadata.relationshipCount,
+		metadata.widthMeters,
+		metadata.heightMeters,
+	];
+	if (
+		numeric.some((value) => typeof value !== "number" || !Number.isFinite(value)) ||
+		plan.kind !== "build" ||
+		plan.valid !== true ||
+		typeof plan.reason !== "string" ||
+		plan.reason.length > 4_096 ||
+		(plan.bend !== "horizontal-first" && plan.bend !== "vertical-first") ||
+		metadata.collisionPolicy !== "EMPTY_FOOTPRINT_V1" ||
+		(plan.issueCode !== null &&
+			plan.issueCode !== undefined &&
+			(typeof plan.issueCode !== "string" || plan.issueCode.length > 64))
+	) {
+		throw new Error("Placement header requires bounded primitive values.");
+	}
 }
 
 function copyWorkerPlacementPlan(
@@ -1350,26 +1760,33 @@ function* addStaticFabOrganizationBundleToChecksumSteps(
 	}
 }
 
-function addAdvancedSwitchMutationsToChecksum(
+function* addAdvancedSwitchMutationsToChecksumSteps(
 	checksum: OrderedTypedChecksum,
 	mutations: readonly AdvancedSwitchMutation[],
-): void {
+	requireImmutable: boolean,
+): Generator<void> {
+	assertPlacementHashFrozen(mutations, requireImmutable);
 	checksum.addNumbers([mutations.length]);
 	for (const mutation of mutations) {
+		assertPlacementHashFrozen(mutation, requireImmutable);
 		checksum.addNumbers([mutation.id]);
-		addAdvancedSwitchRecordToChecksum(checksum, mutation.before);
-		addAdvancedSwitchRecordToChecksum(checksum, mutation.after);
+		addAdvancedSwitchRecordToChecksum(checksum, mutation.before, requireImmutable);
+		addAdvancedSwitchRecordToChecksum(checksum, mutation.after, requireImmutable);
+		yield;
 	}
 }
 
 function addAdvancedSwitchRecordToChecksum(
 	checksum: OrderedTypedChecksum,
 	record: AdvancedSwitchRecord | null,
+	requireImmutable: boolean,
 ): void {
 	if (!record) {
 		checksum.addNumbers([0]);
 		return;
 	}
+	assertPlacementHashFrozen(record, requireImmutable);
+	assertPlacementHashFrozen(record.origin, requireImmutable);
 	checksum.addNumbers([
 		1,
 		record.id,
@@ -1382,23 +1799,33 @@ function addAdvancedSwitchRecordToChecksum(
 	checksum.addStrings([record.profileClass]);
 }
 
-function addPortMutationsToChecksum(
+function* addPortMutationsToChecksumSteps(
 	checksum: OrderedTypedChecksum,
 	mutations: readonly PortMutation[],
-): void {
+	requireImmutable: boolean,
+): Generator<void> {
+	assertPlacementHashFrozen(mutations, requireImmutable);
 	checksum.addNumbers([mutations.length]);
 	for (const mutation of mutations) {
+		assertPlacementHashFrozen(mutation, requireImmutable);
 		checksum.addNumbers([mutation.id]);
-		addPortRecordToChecksum(checksum, mutation.before);
-		addPortRecordToChecksum(checksum, mutation.after);
+		addPortRecordToChecksum(checksum, mutation.before, requireImmutable);
+		addPortRecordToChecksum(checksum, mutation.after, requireImmutable);
+		yield;
 	}
 }
 
-function addPortRecordToChecksum(checksum: OrderedTypedChecksum, record: PortRecord | null): void {
+function addPortRecordToChecksum(
+	checksum: OrderedTypedChecksum,
+	record: PortRecord | null,
+	requireImmutable: boolean,
+): void {
 	if (!record) {
 		checksum.addNumbers([0]);
 		return;
 	}
+	assertPlacementHashFrozen(record, requireImmutable);
+	assertPlacementHashFrozen(record.route, requireImmutable);
 	checksum.addNumbers([
 		1,
 		record.id,
@@ -1425,27 +1852,36 @@ function addPortRecordToChecksum(checksum: OrderedTypedChecksum, record: PortRec
 	checksum.addStrings([record.route.profileClass, record.route.role]);
 }
 
-function addEquipmentGroupMutationsToChecksum(
+function* addEquipmentGroupMutationsToChecksumSteps(
 	checksum: OrderedTypedChecksum,
 	mutations: readonly EquipmentGroupMutation[],
-): void {
+	requireImmutable: boolean,
+): Generator<void> {
+	assertPlacementHashFrozen(mutations, requireImmutable);
 	checksum.addNumbers([mutations.length]);
 	for (const mutation of mutations) {
+		assertPlacementHashFrozen(mutation, requireImmutable);
 		checksum.addNumbers([mutation.id]);
-		addEquipmentGroupRecordToChecksum(checksum, mutation.before);
-		addEquipmentGroupRecordToChecksum(checksum, mutation.after);
+		yield* addEquipmentGroupRecordToChecksumSteps(checksum, mutation.before, requireImmutable);
+		yield* addEquipmentGroupRecordToChecksumSteps(checksum, mutation.after, requireImmutable);
+		yield;
 	}
 }
 
-function addEquipmentGroupRecordToChecksum(
+function* addEquipmentGroupRecordToChecksumSteps(
 	checksum: OrderedTypedChecksum,
 	record: EquipmentGroupRecord | null,
-): void {
+	requireImmutable: boolean,
+): Generator<void> {
 	if (!record) {
 		checksum.addNumbers([0]);
 		return;
 	}
-	checksum.addNumbers([1, record.id, ...record.portIds]);
+	assertPlacementHashFrozen(record, requireImmutable);
+	assertPlacementHashFrozen(record.portIds, requireImmutable);
+	yield* checksum.addNumberSequenceSteps(record.portIds.length + 2, (index) =>
+		index === 0 ? 1 : index === 1 ? record.id : (record.portIds[index - 2] as number),
+	);
 	checksum.addStrings([record.kind]);
 	if (record.kind === "EQ") {
 		checksum.addNumbers([record.pitchMillimeters]);
@@ -1455,38 +1891,76 @@ function addEquipmentGroupRecordToChecksum(
 	checksum.addStrings([record.template]);
 }
 
-function addOrganizationMutationsToChecksum(
+function* addOrganizationMutationsToChecksumSteps(
 	checksum: OrderedTypedChecksum,
 	mutations: readonly StaticFabOrganizationMutation[],
-): void {
+	requireImmutable: boolean,
+): Generator<void> {
+	assertPlacementHashFrozen(mutations, requireImmutable);
 	checksum.addNumbers([mutations.length]);
 	for (const mutation of mutations) {
+		assertPlacementHashFrozen(mutation, requireImmutable);
 		checksum.addNumbers([mutation.id]);
-		addOrganizationRecordToChecksum(checksum, mutation.before);
-		addOrganizationRecordToChecksum(checksum, mutation.after);
+		yield* addOrganizationRecordToChecksumSteps(checksum, mutation.before, requireImmutable);
+		yield* addOrganizationRecordToChecksumSteps(checksum, mutation.after, requireImmutable);
+		yield;
 	}
 }
 
-function addOrganizationRecordToChecksum(
+function* addOrganizationRecordToChecksumSteps(
 	checksum: OrderedTypedChecksum,
 	record: StaticFabOrganizationRecord | null,
-): void {
+	requireImmutable: boolean,
+): Generator<void> {
 	if (!record) {
 		checksum.addNumbers([0]);
 		return;
 	}
-	checksum.addNumbers([1, record.id, ...(record.parentOrganizationIds ?? [])]);
+	assertPlacementHashFrozen(record, requireImmutable);
+	if (record.properties) assertPlacementHashFrozen(record.properties, requireImmutable);
+	if (record.parentOrganizationIds)
+		assertPlacementHashFrozen(record.parentOrganizationIds, requireImmutable);
+	const parents = record.parentOrganizationIds;
+	yield* checksum.addNumberSequenceSteps((parents?.length ?? 0) + 2, (index) =>
+		index === 0 ? 1 : index === 1 ? record.id : (parents?.[index - 2] as number),
+	);
 	checksum.addStrings([
 		record.kind,
 		record.name,
 		record.properties?.description ?? "",
 		record.properties?.color ?? "",
 	]);
-	checksum.addNumbers(
-		record.membership.railEdges.flatMap((edge) => [edge.from.x, edge.from.y, edge.to.x, edge.to.y]),
-	);
-	checksum.addNumbers(record.membership.advancedSwitchIds);
-	checksum.addNumbers(record.membership.equipmentGroupIds);
+	assertPlacementHashFrozen(record.membership, requireImmutable);
+	assertPlacementHashFrozen(record.membership.railEdges, requireImmutable);
+	yield* checksum.addNumberSequenceSteps(record.membership.railEdges.length * 4, (index) => {
+		const edge = record.membership.railEdges[Math.floor(index / 4)];
+		if (!edge) throw new Error("Placement fingerprint rail membership is incomplete.");
+		if ((index & 3) === 0) {
+			assertPlacementHashFrozen(edge, requireImmutable);
+			assertPlacementHashFrozen(edge.from, requireImmutable);
+			assertPlacementHashFrozen(edge.to, requireImmutable);
+		}
+		switch (index & 3) {
+			case 0:
+				return edge.from.x;
+			case 1:
+				return edge.from.y;
+			case 2:
+				return edge.to.x;
+			default:
+				return edge.to.y;
+		}
+	});
+	assertPlacementHashFrozen(record.membership.advancedSwitchIds, requireImmutable);
+	assertPlacementHashFrozen(record.membership.equipmentGroupIds, requireImmutable);
+	yield* checksum.addNumbersSteps(record.membership.advancedSwitchIds);
+	yield* checksum.addNumbersSteps(record.membership.equipmentGroupIds);
+}
+
+function assertPlacementHashFrozen(value: object, required: boolean): void {
+	if (required && !Object.isFrozen(value)) {
+		throw new TypeError("Cooperative placement fingerprint requires immutable hashed fields.");
+	}
 }
 
 function countTurns(bundle: MaterializedStaticFabOrganizationBundle): number {

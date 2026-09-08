@@ -10,6 +10,7 @@ import {
 	staticFabOrganizationBundleFingerprint,
 } from "../core/StaticFabOrganizationBundlePlacement";
 import { captureRailMirrorSnapshot, checksumRailMap } from "../worker/RailMirrorChecksum";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
 import { prepareStaticFabOrganizationBundlePlacement } from "../worker/StaticFabOrganizationBundlePlacementRuntime";
 
 describe("Synthetic FAB preset repeat placement", () => {
@@ -174,6 +175,7 @@ function adoptedWorkerPlan(
 		snapshot.checksum,
 	);
 	const prepared = prepareStaticFabOrganizationBundlePlacement({
+		version: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
 		type: "PREPARE_STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT",
 		requestId: permit.ticketId,
 		ticketId: permit.ticketId,

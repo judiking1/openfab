@@ -34,6 +34,7 @@ import {
 	staticFabOrganizationRailStateError,
 	staticFabOrganizationStateError,
 	staticFabOrganizationStateShapeError,
+	staticFabOrganizationStateShapeErrorSteps,
 } from "./StaticFabOrganization";
 import {
 	planAssignStaticFabOrganizationFromSelection,
@@ -49,6 +50,67 @@ import { createStaticFabSelection } from "./StaticFabSelection";
 import { encodeRailCell } from "./TileMap";
 
 describe("StaticFabOrganization", () => {
+	it("checks wide membership and hierarchy behind the same bounded shape contract", () => {
+		const edges = Array.from({ length: 2_049 }, (_, x) => ({
+			from: { x, y: 0 },
+			to: { x: x + 1, y: 0 },
+		}));
+		const membership = { railEdges: edges, advancedSwitchIds: [], equipmentGroupIds: [] };
+		const valid: StaticFabOrganizationState = {
+			nextOrganizationId: 4,
+			records: [
+				{ id: 1, kind: "BAY", name: "Child", parentOrganizationIds: [2], membership },
+				{ id: 2, kind: "AREA", name: "Parent", parentOrganizationIds: [3], membership },
+				{ id: 3, kind: "AREA", name: "Root", membership },
+			],
+		};
+		const scenarios: [StaticFabOrganizationState, string | null][] = [
+			[valid, null],
+			[
+				{
+					...valid,
+					records: valid.records.map((record) =>
+						record.id === 3 ? { ...record, parentOrganizationIds: [1] } : record,
+					),
+				},
+				"조직 관계에 순환이 있습니다 · 조직 1",
+			],
+			[
+				{
+					...valid,
+					records: valid.records.map((record) =>
+						record.id === 3 ? { ...record, parentOrganizationIds: [4] } : record,
+					),
+				},
+				"조직 3의 부모 조직 4을 찾을 수 없습니다",
+			],
+			[
+				{
+					...valid,
+					records: valid.records.map((record) => ({
+						...record,
+						membership: {
+							...membership,
+							railEdges: [...edges.slice(0, -1), edges[0] as (typeof edges)[number]],
+						},
+					})),
+				},
+				"조직 1: 레일 edge는 중복 없이 canonical 순서로 저장되어야 합니다",
+			],
+		];
+		for (const [state, expected] of scenarios) {
+			const task = createCooperativeTask(staticFabOrganizationStateShapeErrorSteps(state));
+			let operations = 0;
+			while (!task.done) {
+				const used = task.step(7);
+				expect(used).toBeLessThanOrEqual(7);
+				operations += used;
+			}
+			expect(operations).toBeGreaterThan(edges.length);
+			expect(task.finish()).toBe(expected);
+			expect(staticFabOrganizationStateShapeError(state)).toBe(expected);
+		}
+	});
 	it("schedules a wide semantic hierarchy while preserving ordered role derivation", () => {
 		const membership = { railEdges: [], advancedSwitchIds: [], equipmentGroupIds: [] };
 		const state: StaticFabOrganizationState = {

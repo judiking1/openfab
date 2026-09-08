@@ -31,6 +31,28 @@ export class OrderedTypedChecksum {
 		}
 	}
 
+	/** Hash a projected sequence without first allocating its complete flattened array. */
+	*addNumberSequenceSteps(length: number, valueAt: (index: number) => number): Generator<void> {
+		assertSequenceLength(length);
+		this.addLength(length);
+		for (let index = 0; index < length; index++) {
+			this.addNumberValue(valueAt(index));
+			yield;
+		}
+	}
+
+	/** The caller owns immutable inputs and bounds each string and projection operation. */
+	*addStringSequenceSteps(length: number, valueAt: (index: number) => string): Generator<void> {
+		assertSequenceLength(length);
+		this.addLength(length);
+		for (let index = 0; index < length; index++) {
+			const bytes = this.textEncoder.encode(valueAt(index));
+			this.addLength(bytes.length);
+			this.addBytes(bytes);
+			yield;
+		}
+	}
+
 	addViews(views: readonly ArrayBufferView[]): void {
 		this.addLength(views.length);
 		for (const view of views) {
@@ -144,4 +166,10 @@ export class OrderedTypedChecksum {
 
 function hex32(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
+}
+
+function assertSequenceLength(length: number): void {
+	if (!Number.isInteger(length) || length < 0 || length > 0xffff_ffff) {
+		throw new Error("Typed checksum sequence length must fit its unsigned 32-bit prefix.");
+	}
 }

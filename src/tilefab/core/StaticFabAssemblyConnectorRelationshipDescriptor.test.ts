@@ -12,8 +12,14 @@ import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/Ope
 import { captureRailMirrorSnapshot, checksumRailPatchResult } from "../worker/RailMirrorChecksum";
 import { RailPatchMirror } from "../worker/RailPatchMirror";
 import { hydrateStaticFabAssemblyRelationshipSnapshot } from "../worker/StaticFabAssemblyRelationshipSoA";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
 import { staticFabOrganizationBundlePlacementPreparedShapeError } from "../worker/StaticFabOrganizationBundlePlacementResponseValidator";
 import { prepareStaticFabOrganizationBundlePlacement } from "../worker/StaticFabOrganizationBundlePlacementRuntime";
+import {
+	decodeStaticFabOrganizationBundlePlacementTransport,
+	encodeStaticFabOrganizationBundlePlacementTransport,
+} from "../worker/StaticFabOrganizationBundlePlacementTransport";
+import { collectTransferableBuffers } from "../worker/TransferableBuffers";
 import { emptyPortEquipmentState } from "./EquipmentGroup";
 import { planRailPath } from "./paint";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
@@ -58,6 +64,7 @@ import {
 } from "./StaticFabOrganizationBundle";
 import {
 	adoptStaticFabOrganizationBundlePlacementWorkerPlan,
+	adoptStaticFabOrganizationBundlePlacementWorkerPlanCooperatively,
 	issueStaticFabOrganizationBundlePlacementPermit,
 	planStaticFabOrganizationBundlePlacementWithProspectiveState,
 	type StaticFabOrganizationBundlePlacementProspectiveState,
@@ -323,7 +330,7 @@ describe("explicit Connector relationship descriptors", () => {
 	});
 	it.each([
 		0, 1, 2, 3,
-	] as const)("atomically places nested relationships through Worker and history at quarter-turn %s", (quarterTurns) => {
+	] as const)("atomically places nested relationships through Worker and history at quarter-turn %s", async (quarterTurns) => {
 		const { final, canonical } = createNestedConnectorFixture();
 		const fabId = required(
 			canonical.records.find((record) => record.purpose === "FAB_LOOP"),
@@ -339,7 +346,7 @@ describe("explicit Connector relationship descriptors", () => {
 		);
 		expect(captured.valid, captured.reason).toBe(true);
 		if (!captured.valid) throw new Error(captured.reason);
-		verifyNestedPortablePlacement(final, canonical, captured.bundle, quarterTurns);
+		await verifyNestedPortablePlacement(final, canonical, captured.bundle, quarterTurns);
 	});
 	it("rejects unavailable IDs, stale organization cursors and forged path order without mutation", () => {
 		const source = placeProductionBays([
@@ -884,12 +891,12 @@ function freezePortableFixture(value: unknown): void {
 	for (const child of Object.values(value)) freezePortableFixture(child);
 	Object.freeze(value);
 }
-function verifyNestedPortablePlacement(
+async function verifyNestedPortablePlacement(
 	source: Omit<StaticFabOrganizationBundlePlacementProspectiveState, "relationships">,
 	relationships: StaticFabAssemblyRelationshipStateV1,
 	bundle: import("./StaticFabOrganizationBundle").StaticFabOrganizationBundle,
 	quarterTurns: 0 | 1 | 2 | 3,
-): void {
+): Promise<void> {
 	const document = RailDocument.fromLoadedMap(
 		source.map.clone(),
 		0,
@@ -925,8 +932,9 @@ function verifyNestedPortablePlacement(
 			quarterTurns,
 			current.checksum,
 		);
-		const response = structuredClone(
+		const originalResponse = structuredClone(
 			prepareStaticFabOrganizationBundlePlacement({
+				version: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
 				type: "PREPARE_STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT",
 				requestId: permit.ticketId,
 				ticketId: permit.ticketId,
@@ -937,6 +945,18 @@ function verifyNestedPortablePlacement(
 				quarterTurns,
 			}),
 		);
+		const encoded = encodeStaticFabOrganizationBundlePlacementTransport(originalResponse);
+		const transferred = structuredClone(encoded, { transfer: collectTransferableBuffers(encoded) });
+		let checkpoints = 0;
+		const response = await decodeStaticFabOrganizationBundlePlacementTransport(
+			transferred,
+			async () => {
+				checkpoints++;
+			},
+			32,
+		);
+		expect(response).toEqual(originalResponse);
+		expect(checkpoints).toBeGreaterThan(100);
 		expect(response.valid, response.reason).toBe(true);
 		expect(staticFabOrganizationBundlePlacementPreparedShapeError(response)).toBeNull();
 		const plan = required(response.plan),
@@ -977,7 +997,7 @@ function verifyNestedPortablePlacement(
 		});
 		expect(ticket.prospectiveChecksum).toBe(expectedChecksum);
 		const adopted = required(
-			adoptStaticFabOrganizationBundlePlacementWorkerPlan(
+			await adoptStaticFabOrganizationBundlePlacementWorkerPlanCooperatively(
 				permit,
 				plan,
 				ticket,
@@ -986,6 +1006,8 @@ function verifyNestedPortablePlacement(
 				document.portEquipment,
 				document.organizations,
 				document.relationships,
+				async () => {},
+				32,
 			),
 		);
 		expect(

@@ -26,6 +26,7 @@ import {
 } from "../core/StaticFabOrganizationBundlePlacement";
 import { captureRailMirrorSnapshot } from "./RailMirrorChecksum";
 import type { PrepareStaticFabOrganizationBundlePlacementRequest } from "./StaticFabOrganizationBundlePlacementProtocol";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION } from "./StaticFabOrganizationBundlePlacementProtocol";
 import { staticFabOrganizationBundlePlacementPreparedShapeError } from "./StaticFabOrganizationBundlePlacementResponseValidator";
 import { prepareStaticFabOrganizationBundlePlacement } from "./StaticFabOrganizationBundlePlacementRuntime";
 
@@ -160,6 +161,7 @@ function placementRequest(
 	ticketId: number,
 ): PrepareStaticFabOrganizationBundlePlacementRequest {
 	return {
+		version: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
 		type: "PREPARE_STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT",
 		requestId: ticketId,
 		ticketId,

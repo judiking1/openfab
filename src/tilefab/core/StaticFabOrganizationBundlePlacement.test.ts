@@ -1,4 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { readAdvancedSwitchRecord } from "../worker/AdvancedSwitchSoA";
+import { hydratePortEquipmentSnapshot } from "../worker/PortEquipmentSoA";
+import { captureRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
+import { hydrateStaticFabAssemblyRelationshipSnapshot } from "../worker/StaticFabAssemblyRelationshipSoA";
+import { createStaticFabOrganizationBundlePlacementCapture } from "../worker/StaticFabOrganizationBundlePlacementCapture";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
+import { staticFabOrganizationBundlePlacementPreparedShapeError } from "../worker/StaticFabOrganizationBundlePlacementResponseValidator";
+import { prepareStaticFabOrganizationBundlePlacement } from "../worker/StaticFabOrganizationBundlePlacementRuntime";
+import {
+	decodeStaticFabOrganizationBundlePlacementTransport,
+	encodeStaticFabOrganizationBundlePlacementTransport,
+} from "../worker/StaticFabOrganizationBundlePlacementTransport";
+import { hydrateStaticFabOrganizationSnapshot } from "../worker/StaticFabOrganizationSoA";
+import { collectTransferableBuffers } from "../worker/TransferableBuffers";
+import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import {
 	applyPortEquipmentMutations,
 	type EquipmentGroupRecord,
@@ -21,6 +36,12 @@ import {
 } from "./RailTemplateCatalog";
 import { DIR_E, DIR_N, DIR_W, type Direction, oppositeDirection } from "./railShape";
 import {
+	checksumStaticFabAssemblyRelationshipRecord,
+	copyStaticFabAssemblyRelationshipRecord,
+	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD,
+	type StaticFabAssemblyRelationshipRecordV1,
+} from "./StaticFabAssemblyRelationship";
+import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
 	emptyStaticFabOrganizationState,
@@ -36,16 +57,454 @@ import {
 	type StaticFabOrganizationBundle,
 } from "./StaticFabOrganizationBundle";
 import {
+	adoptStaticFabOrganizationBundlePlacementWorkerPlanCooperatively,
+	consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor,
 	fingerprintFrozenStaticFabOrganizationBundleCooperatively,
+	isCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor,
 	isIssuedStaticFabOrganizationBundlePlacementPlan,
 	isStaticFabOrganizationBundlePlacementPlanIssuedFor,
+	issueStaticFabOrganizationBundlePlacementPermit,
 	planStaticFabOrganizationBundlePlacement,
 	planStaticFabOrganizationBundlePlacementWithProspectiveState,
+	revokeStaticFabOrganizationBundlePlacementPermit,
+	type StaticFabOrganizationBundlePlacementPlan,
 	staticFabOrganizationBundleFingerprint,
+	staticFabOrganizationBundlePlacementFingerprint,
+	staticFabOrganizationBundlePlacementFingerprintSteps,
 } from "./StaticFabOrganizationBundlePlacement";
 import type { Cell } from "./TileMap";
 
 describe("StaticFabOrganizationBundlePlacement", () => {
+	it("keeps cooperative adoption one-shot and revocable through the last checkpoint", async () => {
+		const fixture = async () => {
+			const document = new RailDocument();
+			const bundle = capturedOrganizationBundle();
+			const anchor = { x: 120, y: 45 };
+			const snapshot = captureRailMirrorSnapshot(
+				document.map,
+				0,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot;
+			const permit = issueStaticFabOrganizationBundlePlacementPermit(
+				document.map,
+				document.portEquipment,
+				0,
+				document.organizations,
+				document.relationships,
+				bundle,
+				anchor,
+				0,
+				snapshot.checksum,
+			);
+			const prepared = prepareStaticFabOrganizationBundlePlacement({
+				version: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
+				type: "PREPARE_STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT",
+				requestId: 1,
+				ticketId: permit.ticketId,
+				snapshot,
+				bundle,
+				expectedBundleFingerprint: staticFabOrganizationBundleFingerprint(bundle),
+				anchor,
+				quarterTurns: 0,
+			});
+			const decoded = await decodeStaticFabOrganizationBundlePlacementTransport(
+				structuredClone(encodeStaticFabOrganizationBundlePlacementTransport(prepared)),
+				async () => {},
+				7,
+			);
+			if (!decoded.plan || !decoded.ticket) throw new Error("Expected exact decoded plan");
+			const { plan, ticket } = decoded;
+			const adopt = (checkpoint: () => Promise<void>, candidate = plan) =>
+				adoptStaticFabOrganizationBundlePlacementWorkerPlanCooperatively(
+					permit,
+					candidate,
+					ticket,
+					ticket.prospectiveChecksum,
+					document.map,
+					document.portEquipment,
+					document.organizations,
+					document.relationships,
+					checkpoint,
+					7,
+				);
+			return { document, permit, plan, adopt };
+		};
+		const successful = await fixture();
+		let checkpoints = 0;
+		const adopted = await successful.adopt(async () => {
+			checkpoints++;
+		});
+		expect(adopted).not.toBeNull();
+		if (!adopted) throw new Error("Expected adopted plan");
+		expect(adopted).toEqual(successful.plan);
+		expect(adopted).not.toBe(successful.plan);
+		const { document } = successful;
+		expect(
+			isCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
+				adopted,
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(true);
+		expect(document.getPatchSequence()).toBe(0);
+		expect(await successful.adopt(async () => {})).toBeNull();
+		expect(
+			consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
+				adopted,
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(true);
+		expect(
+			consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
+				adopted,
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(false);
+		for (const cancelledAt of [1, Math.floor(checkpoints / 2), checkpoints]) {
+			const cancelled = await fixture();
+			let count = 0;
+			expect(
+				await cancelled.adopt(async () => {
+					if (++count === cancelledAt)
+						revokeStaticFabOrganizationBundlePlacementPermit(cancelled.permit);
+				}),
+			).toBeNull();
+			expect(count).toBe(cancelledAt);
+			expect(isIssuedStaticFabOrganizationBundlePlacementPlan(cancelled.plan)).toBe(false);
+			expect(await cancelled.adopt(async () => {})).toBeNull();
+			expect(cancelled.document.getPatchSequence()).toBe(0);
+		}
+		const counterfeit = await fixture();
+		const copiedPlan = structuredClone(counterfeit.plan);
+		const freeze = (value: unknown): void => {
+			if (!value || typeof value !== "object") return;
+			for (const child of Object.values(value)) freeze(child);
+			Object.freeze(value);
+		};
+		freeze(copiedPlan);
+		expect(await counterfeit.adopt(async () => {}, copiedPlan)).toBeNull();
+		expect(isIssuedStaticFabOrganizationBundlePlacementPlan(copiedPlan)).toBe(false);
+		const coercible = await fixture();
+		const coercionPlan = Object.freeze({
+			...coercible.plan,
+			organizationBundle: Object.freeze({
+				...coercible.plan.organizationBundle,
+				widthMeters: {
+					valueOf: () => coercible.plan.organizationBundle.widthMeters,
+				} as unknown as number,
+			}),
+		});
+		expect(staticFabOrganizationBundlePlacementFingerprint(coercionPlan)).toBe(
+			staticFabOrganizationBundlePlacementFingerprint(coercible.plan),
+		);
+		expect(await coercible.adopt(async () => {}, coercionPlan)).toBeNull();
+		expect(isIssuedStaticFabOrganizationBundlePlacementPlan(coercionPlan)).toBe(false);
+		const rolledBack = await fixture();
+		const prior = await rolledBack.adopt(async () => {});
+		if (!prior) throw new Error("Expected an adopted plan before rollback");
+		const map = rolledBack.document.map;
+		const checkpoint = map.createMutationCheckpoint();
+		const mutation = { x: -10, y: -10, before: 0, after: 0x21 };
+		expect(map.applyAtomicMutations([mutation], [])).toBe(true);
+		map.rollbackAtomicMutations([mutation], [], checkpoint);
+		expect(map.getRevision()).toBe(prior.baseRevision);
+		expect(
+			isCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
+				prior,
+				map,
+				rolledBack.document.portEquipment,
+				rolledBack.document.organizations,
+				rolledBack.document.relationships,
+			),
+		).toBe(false);
+		expect(rolledBack.document.commitStaticFabOrganizationBundle(prior)).toBe(false);
+	});
+	it("transfers one typed addition representation with the exact mixed-equipment plan bytes", async () => {
+		const target = new RailDocument();
+		const bundle = capturedOrganizationBundle();
+		const prepared = prepareStaticFabOrganizationBundlePlacement({
+			version: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
+			type: "PREPARE_STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT",
+			requestId: 1,
+			ticketId: 1,
+			snapshot: captureRailMirrorSnapshot(
+				target.map,
+				0,
+				target.portEquipment,
+				target.organizations,
+				target.relationships,
+			).snapshot,
+			bundle,
+			expectedBundleFingerprint: staticFabOrganizationBundleFingerprint(bundle),
+			anchor: { x: 120, y: 45 },
+			quarterTurns: 0,
+		});
+		expect(prepared.valid, prepared.reason).toBe(true);
+		if (!prepared.plan || !prepared.ticket) throw new Error("Expected exact Worker plan");
+		const originalPlan = prepared.plan;
+		const encoded = encodeStaticFabOrganizationBundlePlacementTransport(prepared);
+		expect(encoded.kind).toBe("additions");
+		if (encoded.kind !== "additions") throw new Error("Expected typed additions");
+		for (const field of [
+			"cells",
+			"mutations",
+			"switchMutations",
+			"portMutations",
+			"equipmentGroupMutations",
+			"organizationMutations",
+			"relationshipMutations",
+		]) {
+			expect(Object.hasOwn(encoded.prepared.plan, field)).toBe(false);
+		}
+		const received = structuredClone(encoded, { transfer: collectTransferableBuffers(encoded) });
+		expect(encoded.additions.xs.byteLength).toBe(0);
+		let checkpoints = 0;
+		const decoded = await decodeStaticFabOrganizationBundlePlacementTransport(
+			received,
+			async () => {
+				checkpoints++;
+			},
+			7,
+		);
+		expect(checkpoints).toBeGreaterThan(50);
+		expect(decoded).toEqual(prepared);
+		expect(staticFabOrganizationBundlePlacementPreparedShapeError(decoded)).toBeNull();
+		expect(
+			Object.isFrozen(decoded.plan?.organizationMutations[0]?.after?.membership.railEdges),
+		).toBe(true);
+		for (const cancelledAt of [1, Math.floor(checkpoints / 2), checkpoints]) {
+			let count = 0;
+			await expect(
+				decodeStaticFabOrganizationBundlePlacementTransport(
+					received,
+					async () => {
+						if (++count === cancelledAt) throw new Error("test admission cancelled");
+					},
+					7,
+				),
+			).rejects.toThrow("test admission cancelled");
+			expect(count).toBe(cancelledAt);
+		}
+		const replaced = structuredClone(received);
+		let replacedHeader = false;
+		const ownedResult = await decodeStaticFabOrganizationBundlePlacementTransport(
+			replaced,
+			async () => {
+				if (replacedHeader) return;
+				replacedHeader = true;
+				Object.assign(replaced.prepared.plan, {
+					reason: "changed after capture",
+					organizationBundle: null,
+				});
+				Object.assign(replaced.additions, { xs: new Int32Array(), organizations: null });
+			},
+			7,
+		);
+		expect(ownedResult).toEqual(prepared);
+		const corrupted = structuredClone(received);
+		corrupted.additions.encoded[0] = 0;
+		await expect(
+			decodeStaticFabOrganizationBundlePlacementTransport(corrupted, async () => {}, 7),
+		).rejects.toThrow("rail addition mutation");
+		await expect(
+			decodeStaticFabOrganizationBundlePlacementTransport(
+				{ ...received, version: 999 },
+				async () => {},
+			),
+		).rejects.toThrow("version");
+		const capture = createStaticFabOrganizationBundlePlacementCapture(received.additions);
+		while (!capture.done) expect(capture.step(7)).toBeLessThanOrEqual(7);
+		const additions = capture.finish();
+		expect(additions).toEqual(received.additions);
+		const sourceBuffers = new Set(collectTransferableBuffers(received.additions));
+		for (const buffer of collectTransferableBuffers(additions))
+			expect(sourceBuffers.has(buffer)).toBe(false);
+		const equipment = hydratePortEquipmentSnapshot(additions.portEquipment);
+		const organizations = hydrateStaticFabOrganizationSnapshot(additions.organizations);
+		const relationships = hydrateStaticFabAssemblyRelationshipSnapshot(additions.relationships);
+		const plan: StaticFabOrganizationBundlePlacementPlan = {
+			...received.prepared.plan,
+			cells: Array.from(additions.xs, (x, index) => ({ x, y: additions.ys[index] as number })),
+			mutations: Array.from(additions.xs, (x, index) => ({
+				x,
+				y: additions.ys[index] as number,
+				before: 0,
+				after: additions.encoded[index] as number,
+			})),
+			switchMutations: Array.from(additions.switchIds, (id, index) => ({
+				id,
+				before: null,
+				after: readAdvancedSwitchRecord(additions.switches, index, id, "placement test"),
+			})),
+			portMutations: equipment.ports.map((after) => ({ id: after.id, before: null, after })),
+			equipmentGroupMutations: equipment.equipmentGroups.map((after) => ({
+				id: after.id,
+				before: null,
+				after,
+			})),
+			organizationMutations: organizations.records.map((after) => ({
+				id: after.id,
+				before: null,
+				after,
+			})),
+			relationshipMutations: relationships.records.map((after) => ({
+				id: after.id,
+				before: null,
+				after,
+			})),
+		};
+		expect(equipment.ports).toHaveLength(7);
+		expect(equipment.equipmentGroups.map((record) => record.kind)).toEqual(["OHB", "EQ", "STK"]);
+		expect(plan).toEqual(prepared.plan);
+		expect(staticFabOrganizationBundlePlacementFingerprint(plan)).toBe(
+			prepared.ticket.planFingerprint,
+		);
+		const first = prepared.plan.mutations[0];
+		if (!first) throw new Error("Expected rail additions");
+		expect(() =>
+			encodeStaticFabOrganizationBundlePlacementTransport({
+				...prepared,
+				plan: {
+					...originalPlan,
+					mutations: [{ ...first, before: 1 }, ...originalPlan.mutations.slice(1)],
+				},
+			}),
+		).toThrow("rail addition mutation");
+	});
+	it("bounds fingerprint steps inside a maximum schema-valid relationship record", () => {
+		const target = new RailDocument();
+		const base = planStaticFabOrganizationBundlePlacement(
+			target.map,
+			target.portEquipment,
+			17,
+			target.organizations,
+			target.relationships,
+			capturedOrganizationBundle(),
+			{ x: 120, y: 45 },
+			0,
+			null,
+		);
+		const record = maximumFingerprintRelationship();
+		expect(checksumStaticFabAssemblyRelationshipRecord(record)).toBe("07937eda:5c0bf0f9");
+		// This isolates the record byte contract; it does not certify a placement against source topology.
+		const plan: StaticFabOrganizationBundlePlacementPlan = Object.freeze({
+			...base,
+			nextRelationshipIdAfter: 2,
+			relationshipMutations: Object.freeze([Object.freeze({ id: 1, before: null, after: record })]),
+			organizationBundle: Object.freeze({ ...base.organizationBundle, relationshipCount: 1 }),
+		});
+		const expected = staticFabOrganizationBundlePlacementFingerprint(plan);
+		const task = createCooperativeTask(staticFabOrganizationBundlePlacementFingerprintSteps(plan));
+		task.step(64);
+		expect(task.done).toBe(false);
+		expect(() => task.finish()).toThrow("not complete");
+		let batches = 1;
+		while (!task.done) {
+			expect(task.step(64)).toBeLessThanOrEqual(64);
+			batches++;
+		}
+		expect(batches).toBeGreaterThanOrEqual(
+			Math.ceil(STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD / 64),
+		);
+		expect(task.finish()).toBe(expected);
+		const mutableRecord = Object.freeze(structuredClone(record));
+		const shallow = Object.freeze({
+			...plan,
+			relationshipMutations: Object.freeze([
+				Object.freeze({ id: 1, before: null, after: mutableRecord }),
+			]),
+		});
+		expect(() =>
+			completeCooperativeSteps(staticFabOrganizationBundlePlacementFingerprintSteps(shallow)),
+		).toThrow("불변");
+	});
+	it("preserves placement fingerprint bytes through all four quarter turns", () => {
+		const fingerprints = ([0, 1, 2, 3] as const).map((turns) => {
+			const target = new RailDocument();
+			const plan = planStaticFabOrganizationBundlePlacement(
+				target.map,
+				target.portEquipment,
+				17,
+				target.organizations,
+				target.relationships,
+				capturedOrganizationBundle(),
+				{ x: 120, y: 45 },
+				turns,
+				null,
+			);
+			expect(plan.valid, plan.reason).toBe(true);
+			const synchronous = staticFabOrganizationBundlePlacementFingerprint(plan);
+			const task = createCooperativeTask(
+				staticFabOrganizationBundlePlacementFingerprintSteps(plan),
+			);
+			let batches = 0;
+			while (!task.done) {
+				expect(task.step(7)).toBeLessThanOrEqual(7);
+				batches++;
+			}
+			expect(batches).toBeGreaterThanOrEqual(Math.ceil((plan.mutations.length * 4) / 7));
+			expect(task.finish()).toBe(synchronous);
+			return synchronous;
+		});
+		expect(fingerprints).toMatchInlineSnapshot(`
+			[
+			  "58a1890b:f248f510",
+			  "e05ac39c:49a98afb",
+			  "f07cfd80:0a8a08db",
+			  "43950344:dfa1618c",
+			]
+		`);
+	});
+	it.each([
+		["mutations"],
+		["mutations", 0],
+		["portMutations", 0, "after", "route"],
+		["equipmentGroupMutations", 0, "after", "portIds"],
+		["organizationMutations", 0, "after", "membership", "railEdges", 0, "from"],
+		["organizationBundle", "anchor"],
+		["organizationBundle", "organizationNames"],
+	])("rejects a mutable hashed container at %j without trusting a frozen root", (...path) => {
+		const target = new RailDocument();
+		const plan = planStaticFabOrganizationBundlePlacement(
+			target.map,
+			target.portEquipment,
+			17,
+			target.organizations,
+			target.relationships,
+			capturedOrganizationBundle(),
+			{ x: 120, y: 45 },
+			0,
+			null,
+		);
+		const clone = structuredClone(plan);
+		let mutable: unknown = clone;
+		for (const key of path) mutable = Reflect.get(mutable as object, key);
+		if (typeof mutable !== "object" || mutable === null)
+			throw new Error("Missing hash fixture field");
+		const freezeExcept = (value: unknown): void => {
+			if (typeof value !== "object" || value === null) return;
+			for (const nested of Object.values(value)) freezeExcept(nested);
+			if (value !== mutable) Object.freeze(value);
+		};
+		freezeExcept(clone);
+		expect(Object.isFrozen(clone)).toBe(true);
+		expect(() =>
+			completeCooperativeSteps(staticFabOrganizationBundlePlacementFingerprintSteps(clone)),
+		).toThrow("immutable hashed fields");
+		expect(staticFabOrganizationBundlePlacementFingerprint(clone)).toBe(
+			staticFabOrganizationBundlePlacementFingerprint(plan),
+		);
+	});
 	it("keeps cooperative bundle fingerprints equal to the synchronous portable identity", async () => {
 		const source = capturedOrganizationBundle();
 		const prepared = prepareStaticFabOrganizationBundle(structuredClone(source));
@@ -422,6 +881,79 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 		}
 	});
 });
+
+function maximumFingerprintRelationship(): StaticFabAssemblyRelationshipRecordV1 {
+	const cutCount = STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD - 8;
+	const edge = (x: number): DirectedRailEdge => ({ from: { x, y: 0 }, to: { x: x + 1, y: 0 } });
+	const parent = (x: number) => ({ edge: edge(x), scope: { kind: "PARENT_DIRECT" as const } });
+	const owners = Array.from({ length: 64 }, (_, index) => index + 2);
+	const cuts = Array.from({ length: cutCount }, (_, x) =>
+		x < 1023 || x === cutCount - 1
+			? {
+					edge: edge(x),
+					scope: {
+						kind: "PARTICIPANT_EFFECTIVE" as const,
+						participantIndex: 0 as const,
+						directOwnerOrganizationIds: owners,
+					},
+				}
+			: parent(x),
+	);
+	return copyStaticFabAssemblyRelationshipRecord({
+		id: 1,
+		hierarchyRole: "BAY_TO_BANK",
+		purpose: "HIERARCHY_LINK",
+		parentOrganizationId: 1,
+		participantOrganizationIds: [2],
+		managedChildOrganizationIds: [2],
+		reviewPolicy: "REVIEW_REQUIRED",
+		connectionGroups: [
+			{
+				ordinal: 0,
+				legs: [
+					{
+						ordinal: 0,
+						directionRole: "ATTACHMENT",
+						exclusiveCutEdges: cuts,
+						endpointSupports: [
+							{ support: parent(-1), adjacentExclusiveCutEdgeIndex: 0, position: "PREDECESSOR" },
+							{
+								support: parent(cutCount),
+								adjacentExclusiveCutEdgeIndex: cutCount - 1,
+								position: "SUCCESSOR",
+							},
+						],
+						seamContacts: [
+							{
+								role: "CONTACT",
+								incidences: [
+									{ incidence: "INCOMING", binding: { kind: "WITNESS", scopedEdge: parent(-1) } },
+									{
+										incidence: "OUTGOING",
+										binding: { kind: "EXCLUSIVE_CUT_EDGE", exclusiveCutEdgeIndex: 0 },
+									},
+								],
+							},
+							{
+								role: "CONTACT",
+								incidences: [
+									{
+										incidence: "INCOMING",
+										binding: { kind: "EXCLUSIVE_CUT_EDGE", exclusiveCutEdgeIndex: cutCount - 1 },
+									},
+									{
+										incidence: "OUTGOING",
+										binding: { kind: "WITNESS", scopedEdge: parent(cutCount) },
+									},
+								],
+							},
+						],
+					},
+				],
+			},
+		],
+	});
+}
 
 function capturedOrganizationBundle(): StaticFabOrganizationBundle {
 	const source = longBayDocument();

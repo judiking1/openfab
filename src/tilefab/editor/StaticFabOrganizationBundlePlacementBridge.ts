@@ -1,40 +1,32 @@
 import type { PortEquipmentState } from "../core/EquipmentGroup";
 import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
-import {
-	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES,
-	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS,
-	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS,
-	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS,
-	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RAIL_EDGES,
-	type StaticFabOrganizationBundle,
-	type StaticFabOrganizationBundleQuarterTurns,
+import type {
+	StaticFabOrganizationBundle,
+	StaticFabOrganizationBundleQuarterTurns,
 } from "../core/StaticFabOrganizationBundle";
 import {
-	adoptStaticFabOrganizationBundlePlacementWorkerPlan,
+	adoptStaticFabOrganizationBundlePlacementWorkerPlanCooperatively,
 	issueStaticFabOrganizationBundlePlacementPermit,
 	revokeStaticFabOrganizationBundlePlacementPermit,
 	type StaticFabOrganizationBundlePlacementPermit,
 	type StaticFabOrganizationBundlePlacementPlan,
 	staticFabOrganizationBundleFingerprint,
 } from "../core/StaticFabOrganizationBundlePlacement";
-import { STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS } from "../core/StaticFabOrganizationBundleRelationships";
 import type { Cell, TileMap } from "../core/TileMap";
 import {
-	checksumRailPatchResult,
+	checksumRailPatchResultCooperatively,
 	consumeRailMirrorSnapshotCaptureAuthority,
 	type RailMirrorSnapshot,
 } from "../worker/RailMirrorChecksum";
-import type {
-	PreparedStaticFabOrganizationBundlePlacement,
-	StaticFabOrganizationBundlePlacementWorkerRequest,
-	StaticFabOrganizationBundlePlacementWorkerResponse,
-} from "../worker/StaticFabOrganizationBundlePlacementProtocol";
-import { STATIC_FAB_ORGANIZATION_BUNDLE_CONFLICT_LIMIT } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
 import {
-	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PLAN_CELLS,
-	staticFabOrganizationBundlePlacementPreparedShapeError,
-} from "../worker/StaticFabOrganizationBundlePlacementResponseValidator";
+	type PreparedStaticFabOrganizationBundlePlacement,
+	STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
+	type StaticFabOrganizationBundlePlacementWorkerRequest,
+	type StaticFabOrganizationBundlePlacementWorkerResponse,
+} from "../worker/StaticFabOrganizationBundlePlacementProtocol";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RESPONSE_TEXT } from "../worker/StaticFabOrganizationBundlePlacementResponseValidator";
+import { decodeStaticFabOrganizationBundlePlacementTransport } from "../worker/StaticFabOrganizationBundlePlacementTransport";
 import { collectTransferableBuffers } from "../worker/TransferableBuffers";
 
 export { captureOrganizationBundlePlacementSnapshot } from "./OrganizationBundlePlacementSnapshot";
@@ -79,15 +71,26 @@ export interface ValidatedStaticFabOrganizationBundlePlacement {
 	readonly adoptionMilliseconds: number;
 }
 
-/** Latest-request-wins adapter for Worker planning plus one-shot main-document adoption. */
+export interface StaticFabOrganizationBundlePlacementAdmissionScheduler {
+	now(): number;
+	yield(): Promise<void>;
+}
+
+interface PlacementRequestLifetime {
+	readonly permit: StaticFabOrganizationBundlePlacementPermit;
+	readonly reject: (error: Error) => void;
+	worker: StaticFabOrganizationBundlePlacementWorkerPort | null;
+	timeout: ReturnType<typeof setTimeout> | null;
+	responseStarted: boolean;
+}
+
+/** One request owns transport, cancellation and timeout until exact adoption has finished. */
 export class StaticFabOrganizationBundlePlacementBridge {
+	private active: PlacementRequestLifetime | null = null;
+	private nextRequestId = 1;
 	private readonly createWorker: () => StaticFabOrganizationBundlePlacementWorkerPort;
 	private readonly timeoutMilliseconds: number;
-	private worker: StaticFabOrganizationBundlePlacementWorkerPort | null = null;
-	private permit: StaticFabOrganizationBundlePlacementPermit | null = null;
-	private reject: ((error: Error) => void) | null = null;
-	private timeout: ReturnType<typeof setTimeout> | null = null;
-	private nextRequestId = 1;
+	private readonly admissionScheduler: StaticFabOrganizationBundlePlacementAdmissionScheduler;
 
 	constructor(
 		createWorker: () => StaticFabOrganizationBundlePlacementWorkerPort = () =>
@@ -96,27 +99,31 @@ export class StaticFabOrganizationBundlePlacementBridge {
 				{ type: "module" },
 			) as StaticFabOrganizationBundlePlacementWorkerPort,
 		timeoutMilliseconds = 30_000,
+		admissionScheduler: StaticFabOrganizationBundlePlacementAdmissionScheduler = {
+			now: () => performance.now(),
+			yield: yieldPlacementAdmission,
+		},
 	) {
 		this.createWorker = createWorker;
 		this.timeoutMilliseconds = timeoutMilliseconds;
+		this.admissionScheduler = admissionScheduler;
 	}
 
 	prepare(
 		input: StaticFabOrganizationBundlePlacementInput,
 	): Promise<ValidatedStaticFabOrganizationBundlePlacement> {
 		this.cancel();
-		const sourceState = input.getCurrentState();
+		const source = input.getCurrentState();
+		const sourceMapGeneration = source.map.getMutationGeneration();
+		const snapshot = input.snapshot;
 		if (
-			sourceState.map.getRevision() !== input.snapshot.revision ||
-			sourceState.patchSequence !== input.snapshot.sequence ||
-			sourceState.map.getAdvancedSwitchIdCursor() !== input.snapshot.nextAdvancedSwitchId ||
-			sourceState.portEquipment.nextPortId !== input.snapshot.portEquipment.nextPortId ||
-			sourceState.portEquipment.nextEquipmentGroupId !==
-				input.snapshot.portEquipment.nextEquipmentGroupId ||
-			sourceState.organizations.nextOrganizationId !==
-				input.snapshot.organizations.nextOrganizationId ||
-			sourceState.relationships.nextRelationshipId !==
-				input.snapshot.relationships.nextRelationshipId
+			source.map.getRevision() !== snapshot.revision ||
+			source.patchSequence !== snapshot.sequence ||
+			source.map.getAdvancedSwitchIdCursor() !== snapshot.nextAdvancedSwitchId ||
+			source.portEquipment.nextPortId !== snapshot.portEquipment.nextPortId ||
+			source.portEquipment.nextEquipmentGroupId !== snapshot.portEquipment.nextEquipmentGroupId ||
+			source.organizations.nextOrganizationId !== snapshot.organizations.nextOrganizationId ||
+			source.relationships.nextRelationshipId !== snapshot.relationships.nextRelationshipId
 		) {
 			return Promise.reject(
 				new Error("Organization-bundle placement snapshot is stale before Worker planning."),
@@ -124,12 +131,12 @@ export class StaticFabOrganizationBundlePlacementBridge {
 		}
 		if (
 			!consumeRailMirrorSnapshotCaptureAuthority(
-				input.snapshot,
-				sourceState.map,
-				sourceState.patchSequence,
-				sourceState.portEquipment,
-				sourceState.organizations,
-				sourceState.relationships,
+				snapshot,
+				source.map,
+				source.patchSequence,
+				source.portEquipment,
+				source.organizations,
+				source.relationships,
 			)
 		) {
 			return Promise.reject(
@@ -138,117 +145,135 @@ export class StaticFabOrganizationBundlePlacementBridge {
 				),
 			);
 		}
+		const anchor = Object.freeze({ x: input.anchor.x, y: input.anchor.y });
+		const quarterTurns = input.quarterTurns;
 		const expectedBundleFingerprint = staticFabOrganizationBundleFingerprint(input.bundle);
 		const permit = issueStaticFabOrganizationBundlePlacementPermit(
-			sourceState.map,
-			sourceState.portEquipment,
-			sourceState.patchSequence,
-			sourceState.organizations,
-			sourceState.relationships,
+			source.map,
+			source.portEquipment,
+			source.patchSequence,
+			source.organizations,
+			source.relationships,
 			input.bundle,
-			input.anchor,
-			input.quarterTurns,
-			input.snapshot.checksum,
+			anchor,
+			quarterTurns,
+			snapshot.checksum,
 		);
-		this.permit = permit;
 		const requestId = this.nextRequestId++;
-		const requestStartedAt = performance.now();
+		const startedAt = performance.now();
 		const request: StaticFabOrganizationBundlePlacementWorkerRequest = {
+			version: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
 			type: "PREPARE_STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT",
 			requestId,
 			ticketId: permit.ticketId,
-			snapshot: input.snapshot,
+			snapshot,
 			bundle: input.bundle,
 			expectedBundleFingerprint,
-			anchor: Object.freeze({ x: input.anchor.x, y: input.anchor.y }),
-			quarterTurns: input.quarterTurns,
+			anchor,
+			quarterTurns,
 		};
-
 		return new Promise((resolve, reject) => {
 			let worker: StaticFabOrganizationBundlePlacementWorkerPort;
 			try {
 				worker = this.createWorker();
 			} catch (error) {
-				this.revokePermit(permit);
+				revokeStaticFabOrganizationBundlePlacementPermit(permit);
 				reject(workerError(error, "Organization-bundle placement Worker creation failed."));
 				return;
 			}
-			this.worker = worker;
-			this.reject = reject;
-
-			worker.onmessage = (event) => {
-				const response = event.data as unknown;
-				if (!isRecord(response) || response.requestId !== requestId) return;
-				this.releaseWorker();
-				this.reject = null;
-
-				if (response.type === "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_ERROR") {
-					this.revokePermit(permit);
-					reject(
-						new Error(
-							typeof response.message === "string"
-								? response.message
-								: "Organization-bundle placement Worker returned a malformed error.",
-						),
-					);
-					return;
-				}
-				if (response.type !== "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED") {
-					this.revokePermit(permit);
-					reject(new Error("Organization-bundle placement Worker returned a malformed response."));
-					return;
-				}
-
-				const workerRoundTripMilliseconds = performance.now() - requestStartedAt;
-				const responseValidationStartedAt = performance.now();
-				const preparedValidation = validateWorkerPrepared(
-					response.prepared,
-					permit.ticketId,
-					input.snapshot,
-					sourceState.organizations.nextOrganizationId,
-					expectedBundleFingerprint,
-					input.anchor,
-					input.quarterTurns,
-				);
-				if (preparedValidation instanceof Error) {
-					this.revokePermit(permit);
-					reject(preparedValidation);
-					return;
-				}
-				const responseValidationMilliseconds = performance.now() - responseValidationStartedAt;
-				const accepted = response.prepared as PreparedStaticFabOrganizationBundlePlacement;
-				const liveState = input.getCurrentState();
-				const liveStateUnchanged =
-					liveState.map === sourceState.map &&
-					liveState.portEquipment === sourceState.portEquipment &&
-					liveState.organizations === sourceState.organizations &&
-					liveState.relationships === sourceState.relationships &&
-					liveState.map.getRevision() === input.snapshot.revision &&
-					liveState.patchSequence === input.snapshot.sequence;
-				let adoptedPlan: StaticFabOrganizationBundlePlacementPlan | null = null;
-				const adoptionStartedAt = performance.now();
+			const lifetime: PlacementRequestLifetime = {
+				worker,
+				permit,
+				reject,
+				timeout: null,
+				responseStarted: false,
+			};
+			this.active = lifetime;
+			const assertCurrent = (): void => {
+				if (this.active !== lifetime) throw cancelled();
+				const live = input.getCurrentState();
 				if (
-					accepted.valid &&
-					accepted.plan &&
-					accepted.ticket &&
-					preparedValidation.prospectiveChecksum !== null &&
-					liveStateUnchanged
+					live.map !== source.map ||
+					live.portEquipment !== source.portEquipment ||
+					live.organizations !== source.organizations ||
+					live.relationships !== source.relationships ||
+					live.map.getRevision() !== snapshot.revision ||
+					live.map.getMutationGeneration() !== sourceMapGeneration ||
+					live.patchSequence !== snapshot.sequence ||
+					live.map.getAdvancedSwitchIdCursor() !== snapshot.nextAdvancedSwitchId ||
+					live.portEquipment.nextPortId !== snapshot.portEquipment.nextPortId ||
+					live.portEquipment.nextEquipmentGroupId !== snapshot.portEquipment.nextEquipmentGroupId ||
+					live.organizations.nextOrganizationId !== snapshot.organizations.nextOrganizationId ||
+					live.relationships.nextRelationshipId !== snapshot.relationships.nextRelationshipId
 				) {
-					adoptedPlan = adoptStaticFabOrganizationBundlePlacementWorkerPlan(
+					throw new Error("Organization-bundle placement source changed during admission.");
+				}
+			};
+			let sliceStart = this.admissionScheduler.now();
+			const checkpoint = async (): Promise<void> => {
+				assertCurrent();
+				if (this.admissionScheduler.now() - sliceStart >= 4) {
+					await this.admissionScheduler.yield();
+					assertCurrent();
+					sliceStart = this.admissionScheduler.now();
+				}
+			};
+			const receive = async (response: Record<string, unknown>): Promise<void> => {
+				if (response.version !== STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION)
+					throw new Error("Unsupported organization-bundle placement response version.");
+				if (response.type === "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_ERROR") {
+					throw new Error(
+						typeof response.message === "string" &&
+							response.message.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RESPONSE_TEXT
+							? response.message
+							: "Organization-bundle placement Worker returned a malformed error.",
+					);
+				}
+				if (response.type !== "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED")
+					throw new Error("Organization-bundle placement Worker returned a malformed response.");
+				const workerRoundTripMilliseconds = performance.now() - startedAt;
+				const validationStartedAt = performance.now();
+				let accepted: PreparedStaticFabOrganizationBundlePlacement;
+				try {
+					accepted = await decodeStaticFabOrganizationBundlePlacementTransport(
+						response.payload,
+						checkpoint,
+					);
+				} catch (error) {
+					assertCurrent();
+					throw new Error(
+						`Organization-bundle placement Worker returned malformed planning data: ${workerError(error, "Invalid response").message}`,
+					);
+				}
+				const prospectiveChecksum = await validateWorkerBinding(
+					accepted,
+					permit.ticketId,
+					snapshot,
+					expectedBundleFingerprint,
+					anchor,
+					quarterTurns,
+					checkpoint,
+				);
+				assertCurrent();
+				const responseValidationMilliseconds = performance.now() - validationStartedAt;
+				const adoptionStartedAt = performance.now();
+				let adoptedPlan: StaticFabOrganizationBundlePlacementPlan | null = null;
+				if (accepted.valid && accepted.plan && accepted.ticket && prospectiveChecksum !== null) {
+					adoptedPlan = await adoptStaticFabOrganizationBundlePlacementWorkerPlanCooperatively(
 						permit,
 						accepted.plan,
 						accepted.ticket,
-						preparedValidation.prospectiveChecksum,
-						liveState.map,
-						liveState.portEquipment,
-						liveState.organizations,
-						liveState.relationships,
+						prospectiveChecksum,
+						source.map,
+						source.portEquipment,
+						source.organizations,
+						source.relationships,
+						checkpoint,
 					);
-					this.permit = null;
-				} else {
-					this.revokePermit(permit);
 				}
+				assertCurrent();
 				const adoptionMilliseconds = performance.now() - adoptionStartedAt;
+				this.finish(lifetime);
 				resolve(
 					Object.freeze({
 						plan: adoptedPlan ?? accepted.plan,
@@ -260,67 +285,69 @@ export class StaticFabOrganizationBundlePlacementBridge {
 					}),
 				);
 			};
-
-			worker.onerror = (event) => {
-				this.releaseWorker();
-				this.reject = null;
-				this.revokePermit(permit);
-				reject(new Error(event.message));
-			};
-			worker.onmessageerror = () => {
-				this.releaseWorker();
-				this.reject = null;
-				this.revokePermit(permit);
-				reject(new Error("Organization-bundle placement Worker returned an unreadable response."));
-			};
-			this.timeout = setTimeout(() => {
-				const rejectTimeout = this.reject;
-				this.reject = null;
-				this.releaseWorker();
-				this.revokePermit(permit);
-				rejectTimeout?.(
-					new Error(
-						`Organization-bundle placement Worker timed out after ${this.timeoutMilliseconds} ms.`,
+			worker.onmessage = (event) => {
+				if (this.active !== lifetime || lifetime.responseStarted) return;
+				const response: unknown = event.data;
+				if (!isRecord(response) || response.requestId !== requestId) return;
+				lifetime.responseStarted = true;
+				this.releaseTransport(lifetime);
+				void receive(response).catch((error) =>
+					this.fail(
+						lifetime,
+						workerError(error, "Organization-bundle placement admission failed."),
 					),
 				);
-			}, this.timeoutMilliseconds);
-
+			};
+			worker.onerror = (event) => this.fail(lifetime, new Error(event.message));
+			worker.onmessageerror = () =>
+				this.fail(
+					lifetime,
+					new Error("Organization-bundle placement Worker returned an unreadable response."),
+				);
+			lifetime.timeout = setTimeout(
+				() =>
+					this.fail(
+						lifetime,
+						new Error(
+							`Organization-bundle placement Worker or admission timed out after ${this.timeoutMilliseconds} ms.`,
+						),
+					),
+				this.timeoutMilliseconds,
+			);
 			try {
-				worker.postMessage(request, collectTransferableBuffers(input.snapshot));
+				worker.postMessage(request, collectTransferableBuffers(snapshot));
 			} catch (error) {
-				this.releaseWorker();
-				this.reject = null;
-				this.revokePermit(permit);
-				reject(workerError(error, "Organization-bundle placement post failed."));
+				this.fail(lifetime, workerError(error, "Organization-bundle placement post failed."));
 			}
 		});
 	}
 
 	cancel(): void {
-		const reject = this.reject;
-		this.reject = null;
-		this.releaseWorker();
-		if (this.permit) this.revokePermit(this.permit);
-		reject?.(new DOMException("Organization-bundle placement planning cancelled.", "AbortError"));
+		if (this.active) this.fail(this.active, cancelled());
 	}
-
 	dispose(): void {
 		this.cancel();
 	}
 
-	private revokePermit(permit: StaticFabOrganizationBundlePlacementPermit): void {
-		revokeStaticFabOrganizationBundlePlacementPermit(permit);
-		if (this.permit === permit) this.permit = null;
+	private fail(lifetime: PlacementRequestLifetime, error: Error): void {
+		if (this.active !== lifetime) return;
+		this.finish(lifetime);
+		lifetime.reject(error);
 	}
-
-	private releaseWorker(): void {
-		if (this.timeout !== null) {
-			clearTimeout(this.timeout);
-			this.timeout = null;
+	private finish(lifetime: PlacementRequestLifetime): void {
+		if (this.active !== lifetime) return;
+		this.active = null;
+		if (lifetime.timeout !== null) {
+			clearTimeout(lifetime.timeout);
+			lifetime.timeout = null;
 		}
-		const worker = this.worker;
+		this.releaseTransport(lifetime);
+		revokeStaticFabOrganizationBundlePlacementPermit(lifetime.permit);
+	}
+	private releaseTransport(lifetime: PlacementRequestLifetime): void {
+		const worker = lifetime.worker;
 		if (!worker) return;
-		this.worker = null;
+		lifetime.worker = null;
 		worker.onmessage = null;
 		worker.onerror = null;
 		worker.onmessageerror = null;
@@ -328,58 +355,22 @@ export class StaticFabOrganizationBundlePlacementBridge {
 	}
 }
 
-function validateWorkerPrepared(
-	value: unknown,
+/** Called only after owned transport decoding has completed the shared structural contract. */
+async function validateWorkerBinding(
+	value: PreparedStaticFabOrganizationBundlePlacement,
 	expectedTicketId: number,
 	snapshot: RailMirrorSnapshot,
-	expectedSourceNextOrganizationId: number,
 	expectedBundleFingerprint: string,
 	expectedAnchor: Cell,
 	expectedQuarterTurns: StaticFabOrganizationBundleQuarterTurns,
-): Error | { readonly prospectiveChecksum: string | null } {
-	const shapeError = staticFabOrganizationBundlePlacementPreparedShapeError(value);
-	if (shapeError) {
-		return new Error(
-			`Organization-bundle placement Worker returned malformed planning data: ${shapeError}.`,
-		);
-	}
-	if (
-		!isRecord(value) ||
-		typeof value.valid !== "boolean" ||
-		!(value.failureCode === null || isFailureCode(value.failureCode)) ||
-		typeof value.reason !== "string" ||
-		!Array.isArray(value.conflictCells) ||
-		value.conflictCells.length > STATIC_FAB_ORGANIZATION_BUNDLE_CONFLICT_LIMIT ||
-		!value.conflictCells.every(isCell) ||
-		!isNonNegativeSafeInteger(value.conflictCount) ||
-		!isNonNegativeSafeInteger(value.candidateCommittedEnvelopePairs) ||
-		!isNonNegativeSafeInteger(value.testedCommittedEnvelopePairs) ||
-		!isNonNegativeFiniteNumber(value.planningMilliseconds) ||
-		!isNonNegativeFiniteNumber(value.validationMilliseconds)
-	) {
-		return new Error("Organization-bundle placement Worker returned malformed planning data.");
-	}
-	if (value.plan !== null && !isPlacementPlanShape(value.plan, value.valid ? "full" : "compact")) {
-		return new Error("Organization-bundle placement Worker returned malformed planning data.");
-	}
-	if (!value.valid) {
-		if (value.plan?.valid) {
-			return new Error("Organization-bundle placement Worker returned a valid plan as rejected.");
-		}
-		return value.ticket === null
-			? Object.freeze({ prospectiveChecksum: null })
-			: new Error("Organization-bundle placement Worker returned a ticket for a rejected plan.");
-	}
-	if (
-		value.failureCode !== null ||
-		!isPlacementPlanShape(value.plan, "full") ||
-		!value.plan.valid ||
-		!isRecord(value.ticket)
-	) {
-		return new Error("Organization-bundle placement Worker omitted its exact plan or ticket.");
-	}
+	checkpoint: () => Promise<void>,
+): Promise<string | null> {
+	if (!value.valid) return null;
 	const ticket = value.ticket;
+	const plan = value.plan;
 	if (
+		!ticket ||
+		!plan ||
 		ticket.ticketId !== expectedTicketId ||
 		ticket.validationLevel !== "exact" ||
 		ticket.sourceRevision !== snapshot.revision ||
@@ -388,182 +379,51 @@ function validateWorkerPrepared(
 		ticket.sourceNextAdvancedSwitchId !== snapshot.nextAdvancedSwitchId ||
 		ticket.sourceNextPortId !== snapshot.portEquipment.nextPortId ||
 		ticket.sourceNextEquipmentGroupId !== snapshot.portEquipment.nextEquipmentGroupId ||
-		ticket.sourceNextOrganizationId !== expectedSourceNextOrganizationId ||
+		ticket.sourceNextOrganizationId !== snapshot.organizations.nextOrganizationId ||
 		ticket.sourceNextRelationshipId !== snapshot.relationships.nextRelationshipId ||
 		ticket.bundleFingerprint !== expectedBundleFingerprint ||
-		!isCell(ticket.anchor) ||
 		ticket.anchor.x !== expectedAnchor.x ||
 		ticket.anchor.y !== expectedAnchor.y ||
-		ticket.quarterTurns !== expectedQuarterTurns ||
-		typeof ticket.planFingerprint !== "string" ||
-		typeof ticket.prospectiveChecksum !== "string" ||
-		!isNonNegativeSafeInteger(ticket.prospectiveNextAdvancedSwitchId) ||
-		!isNonNegativeSafeInteger(ticket.prospectiveNextPortId) ||
-		!isNonNegativeSafeInteger(ticket.prospectiveNextEquipmentGroupId) ||
-		!isNonNegativeSafeInteger(ticket.prospectiveNextOrganizationId) ||
-		!isPositiveSafeInteger(ticket.prospectiveNextRelationshipId)
+		ticket.quarterTurns !== expectedQuarterTurns
 	) {
-		return new Error("Organization-bundle placement Worker returned a corrupted one-shot ticket.");
+		throw new Error("Organization-bundle placement Worker returned a corrupted one-shot ticket.");
 	}
-	let expectedProspectiveChecksum: string;
-	try {
-		expectedProspectiveChecksum = checksumRailPatchResult(snapshot.checksum, {
-			changes: value.plan.mutations,
-			switchChanges: value.plan.switchMutations,
-			portChanges: value.plan.portMutations,
-			equipmentGroupChanges: value.plan.equipmentGroupMutations,
-			organizationChanges: value.plan.organizationMutations,
-			organizationNextIdBefore: value.plan.nextOrganizationIdBefore,
-			organizationNextIdAfter: value.plan.nextOrganizationIdAfter,
-			relationshipChanges: value.plan.relationshipMutations,
-			relationshipNextIdBefore: value.plan.nextRelationshipIdBefore,
-			relationshipNextIdAfter: value.plan.nextRelationshipIdAfter,
-		});
-	} catch {
-		return new Error("Organization-bundle placement Worker returned a malformed exact plan.");
-	}
-	if (ticket.prospectiveChecksum !== expectedProspectiveChecksum) {
-		return new Error(
+	const expected = await checksumRailPatchResultCooperatively(
+		snapshot.checksum,
+		{
+			changes: plan.mutations,
+			switchChanges: plan.switchMutations,
+			portChanges: plan.portMutations,
+			equipmentGroupChanges: plan.equipmentGroupMutations,
+			organizationChanges: plan.organizationMutations,
+			organizationNextIdBefore: plan.nextOrganizationIdBefore,
+			organizationNextIdAfter: plan.nextOrganizationIdAfter,
+			relationshipChanges: plan.relationshipMutations,
+			relationshipNextIdBefore: plan.nextRelationshipIdBefore,
+			relationshipNextIdAfter: plan.nextRelationshipIdAfter,
+		},
+		checkpoint,
+		64,
+	);
+	if (ticket.prospectiveChecksum !== expected)
+		throw new Error(
 			"Organization-bundle placement Worker returned a divergent prospective checksum.",
 		);
-	}
-	return Object.freeze({ prospectiveChecksum: expectedProspectiveChecksum });
-}
-
-function isPlacementPlanShape(
-	value: unknown,
-	mode: "compact" | "full",
-): value is StaticFabOrganizationBundlePlacementPlan {
-	if (
-		!isRecord(value) ||
-		value.kind !== "build" ||
-		typeof value.valid !== "boolean" ||
-		typeof value.reason !== "string" ||
-		!isNonNegativeSafeInteger(value.baseRevision) ||
-		!isNonNegativeSafeInteger(value.basePatchSequence) ||
-		!isPositiveSafeInteger(value.nextOrganizationIdBefore) ||
-		!isPositiveSafeInteger(value.nextOrganizationIdAfter) ||
-		!isPositiveSafeInteger(value.nextRelationshipIdBefore) ||
-		!isPositiveSafeInteger(value.nextRelationshipIdAfter) ||
-		!isNonNegativeSafeInteger(value.newEdges) ||
-		!isNonNegativeFiniteNumber(value.lengthMeters) ||
-		!isNonNegativeSafeInteger(value.turns) ||
-		(value.bend !== "horizontal-first" && value.bend !== "vertical-first") ||
-		!Array.isArray(value.cells) ||
-		!Array.isArray(value.mutations) ||
-		!Array.isArray(value.switchMutations) ||
-		!Array.isArray(value.portMutations) ||
-		!Array.isArray(value.equipmentGroupMutations) ||
-		!Array.isArray(value.organizationMutations) ||
-		!Array.isArray(value.relationshipMutations) ||
-		!Array.isArray(value.conflicts) ||
-		!isOrganizationBundleMetadata(value.organizationBundle)
-	) {
-		return false;
-	}
-	const maximumCells =
-		mode === "compact"
-			? STATIC_FAB_ORGANIZATION_BUNDLE_CONFLICT_LIMIT
-			: STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PLAN_CELLS;
-	if (
-		value.cells.length > maximumCells ||
-		value.conflicts.length > STATIC_FAB_ORGANIZATION_BUNDLE_CONFLICT_LIMIT ||
-		!value.cells.every(isCell) ||
-		!value.conflicts.every(isCell)
-	) {
-		return false;
-	}
-	if (mode === "compact") {
-		return (
-			value.mutations.length === 0 &&
-			value.switchMutations.length === 0 &&
-			value.portMutations.length === 0 &&
-			value.equipmentGroupMutations.length === 0 &&
-			value.organizationMutations.length === 0 &&
-			value.relationshipMutations.length === 0
-		);
-	}
-	return (
-		value.mutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PLAN_CELLS &&
-		value.switchMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES &&
-		value.portMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS &&
-		value.equipmentGroupMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS &&
-		value.organizationMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS &&
-		value.relationshipMutations.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS
-	);
-}
-
-function isOrganizationBundleMetadata(value: unknown): boolean {
-	return (
-		isRecord(value) &&
-		value.collisionPolicy === "EMPTY_FOOTPRINT_V1" &&
-		isCell(value.anchor) &&
-		isQuarterTurns(value.quarterTurns) &&
-		isNonNegativeSafeInteger(value.sourceModuleCount) &&
-		isNonNegativeSafeInteger(value.railEdgeCount) &&
-		value.railEdgeCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RAIL_EDGES &&
-		isNonNegativeSafeInteger(value.advancedSwitchCount) &&
-		value.advancedSwitchCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES &&
-		isNonNegativeSafeInteger(value.portCount) &&
-		value.portCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS &&
-		isNonNegativeSafeInteger(value.equipmentGroupCount) &&
-		value.equipmentGroupCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS &&
-		isNonNegativeSafeInteger(value.relationshipCount) &&
-		value.relationshipCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RELATIONSHIPS &&
-		isNonNegativeSafeInteger(value.organizationCount) &&
-		value.organizationCount <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS &&
-		isNonNegativeSafeInteger(value.widthMeters) &&
-		isNonNegativeSafeInteger(value.heightMeters) &&
-		Array.isArray(value.organizationNames) &&
-		value.organizationNames.length <= STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ORGANIZATIONS &&
-		value.organizationNames.every(
-			(name) => typeof name === "string" && name.length > 0 && name.length <= 120,
-		)
-	);
-}
-
-function isFailureCode(value: unknown): boolean {
-	return (
-		value === "snapshot" ||
-		value === "stale" ||
-		value === "fingerprint" ||
-		value === "bundle" ||
-		value === "plan" ||
-		value === "clearance" ||
-		value === "compile"
-	);
-}
-
-function isCell(value: unknown): value is Cell {
-	return isRecord(value) && isInt32(value.x) && isInt32(value.y);
-}
-
-function isQuarterTurns(value: unknown): value is StaticFabOrganizationBundleQuarterTurns {
-	return value === 0 || value === 1 || value === 2 || value === 3;
-}
-
-function isInt32(value: unknown): value is number {
-	return (
-		Number.isInteger(value) && (value as number) >= -0x8000_0000 && (value as number) <= 0x7fff_ffff
-	);
+	return expected;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-
-function isNonNegativeFiniteNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-	return Number.isSafeInteger(value) && (value as number) >= 0;
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-	return Number.isSafeInteger(value) && (value as number) > 0;
-}
-
 function workerError(error: unknown, fallback: string): Error {
 	return error instanceof Error ? error : new Error(fallback);
+}
+function cancelled(): DOMException {
+	return new DOMException("Organization-bundle placement planning cancelled.", "AbortError");
+}
+async function yieldPlacementAdmission(): Promise<void> {
+	const scheduler = (globalThis as typeof globalThis & { scheduler?: { yield(): Promise<void> } })
+		.scheduler;
+	if (scheduler?.yield) await scheduler.yield();
+	else await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }

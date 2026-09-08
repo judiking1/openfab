@@ -540,13 +540,21 @@ export function staticFabOrganizationRecordEquals(
 export function staticFabOrganizationStateShapeError(
 	state: StaticFabOrganizationState,
 ): string | null {
+	return completeCooperativeSteps(staticFabOrganizationStateShapeErrorSteps(state));
+}
+
+/** Stable input is required while the caller schedules membership and hierarchy checks. */
+export function* staticFabOrganizationStateShapeErrorSteps(
+	state: StaticFabOrganizationState,
+): Generator<void, string | null> {
 	if (!isPositiveInt32(state.nextOrganizationId)) {
 		return "다음 정적 FAB 조직 ID는 양의 32-bit 정수여야 합니다";
 	}
 	let previousId = 0;
 	const namesByKind = new Map<StaticFabOrganizationKind, Set<string>>();
 	for (const record of state.records) {
-		const error = staticFabOrganizationRecordShapeError(record);
+		yield;
+		const error = yield* staticFabOrganizationRecordShapeErrorSteps(record);
 		if (error) return `조직 ${record.id}: ${error}`;
 		if (record.id <= previousId) return "정적 FAB 조직은 ID 오름차순으로 한 번씩 저장되어야 합니다";
 		previousId = record.id;
@@ -561,7 +569,7 @@ export function staticFabOrganizationStateShapeError(
 	if (state.nextOrganizationId <= previousId) {
 		return "다음 정적 FAB 조직 ID는 모든 저장된 조직 ID보다 커야 합니다";
 	}
-	const relationshipError = staticFabOrganizationRelationshipError(state);
+	const relationshipError = yield* staticFabOrganizationRelationshipErrorSteps(state);
 	if (relationshipError) return relationshipError;
 	return null;
 }
@@ -926,10 +934,17 @@ function staticFabOrganizationRecordHeaderError(
 }
 
 function staticFabOrganizationRecordShapeError(record: StaticFabOrganizationRecord): string | null {
+	return completeCooperativeSteps(staticFabOrganizationRecordShapeErrorSteps(record));
+}
+
+function* staticFabOrganizationRecordShapeErrorSteps(
+	record: StaticFabOrganizationRecord,
+): Generator<void, string | null> {
 	const headerError = staticFabOrganizationRecordHeaderError(record);
 	if (headerError) return headerError;
 	const { railEdges, advancedSwitchIds, equipmentGroupIds } = record.membership;
 	for (let index = 0; index < railEdges.length; index++) {
+		yield;
 		const edge = railEdges[index] as DirectedRailEdge;
 		if (
 			!isInt32(edge.from.x) ||
@@ -948,10 +963,10 @@ function staticFabOrganizationRecordShapeError(record: StaticFabOrganizationReco
 			return "레일 edge는 중복 없이 canonical 순서로 저장되어야 합니다";
 		}
 	}
-	if (!canonicalPositiveIdArray(advancedSwitchIds)) {
+	if (!(yield* canonicalPositiveIdArraySteps(advancedSwitchIds))) {
 		return "고급 스위치 ID는 중복 없는 양의 정수 오름차순이어야 합니다";
 	}
-	if (!canonicalPositiveIdArray(equipmentGroupIds)) {
+	if (!(yield* canonicalPositiveIdArraySteps(equipmentGroupIds))) {
 		return "장비 그룹 ID는 중복 없는 양의 정수 오름차순이어야 합니다";
 	}
 	return null;
@@ -1028,13 +1043,25 @@ function hasDisallowedTextControlCharacter(value: string): boolean {
 export function staticFabOrganizationRelationshipError(
 	state: StaticFabOrganizationState,
 ): string | null {
-	const recordsById = new Map(state.records.map((record) => [record.id, record]));
+	return completeCooperativeSteps(staticFabOrganizationRelationshipErrorSteps(state));
+}
+
+function* staticFabOrganizationRelationshipErrorSteps(
+	state: StaticFabOrganizationState,
+): Generator<void, string | null> {
+	const recordsById = new Map<number, StaticFabOrganizationRecord>();
+	for (const record of state.records) {
+		yield;
+		recordsById.set(record.id, record);
+	}
 	const childrenByParentId = new Map<number, number[]>();
 	const remainingParentsById = new Map<number, number>();
 	for (const record of state.records) {
+		yield;
 		const parentIds = staticFabOrganizationParentIds(record);
 		remainingParentsById.set(record.id, parentIds.length);
 		for (const parentId of parentIds) {
+			yield;
 			if (!recordsById.has(parentId)) {
 				return `조직 ${record.id}의 부모 조직 ${parentId}을 찾을 수 없습니다`;
 			}
@@ -1044,23 +1071,32 @@ export function staticFabOrganizationRelationshipError(
 		}
 	}
 
-	const ready = state.records
-		.filter((record) => (remainingParentsById.get(record.id) ?? 0) === 0)
-		.map((record) => record.id);
+	const ready: number[] = [];
+	for (const record of state.records) {
+		yield;
+		if ((remainingParentsById.get(record.id) ?? 0) === 0) ready.push(record.id);
+	}
 	let visited = 0;
 	for (let offset = 0; offset < ready.length; offset++) {
+		yield;
 		const parentId = ready[offset] as number;
 		visited++;
 		for (const childId of childrenByParentId.get(parentId) ?? []) {
+			yield;
 			const remaining = (remainingParentsById.get(childId) ?? 0) - 1;
 			remainingParentsById.set(childId, remaining);
 			if (remaining === 0) ready.push(childId);
 		}
 	}
 	if (visited !== state.records.length) {
-		const cycleId = state.records.find(
-			(record) => (remainingParentsById.get(record.id) ?? 0) > 0,
-		)?.id;
+		let cycleId: number | undefined;
+		for (const record of state.records) {
+			yield;
+			if ((remainingParentsById.get(record.id) ?? 0) > 0) {
+				cycleId = record.id;
+				break;
+			}
+		}
 		return `조직 관계에 순환이 있습니다${cycleId ? ` · 조직 ${cycleId}` : ""}`;
 	}
 	return null;
@@ -1158,8 +1194,13 @@ function directedRailEdgeEquals(
 }
 
 function canonicalPositiveIdArray(values: readonly number[]): boolean {
+	return completeCooperativeSteps(canonicalPositiveIdArraySteps(values));
+}
+
+function* canonicalPositiveIdArraySteps(values: readonly number[]): Generator<void, boolean> {
 	let previous = 0;
 	for (const value of values) {
+		yield;
 		if (!isPositiveInt32(value) || value <= previous) return false;
 		previous = value;
 	}

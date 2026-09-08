@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createCooperativeTask } from "./CooperativeTask";
 import {
 	applyPortEquipmentAdditionsCooperatively,
 	applyPortEquipmentMutations,
@@ -9,11 +10,56 @@ import {
 	equipmentGroupError,
 	type PortEquipmentState,
 	portEquipmentStateError,
+	portEquipmentStateErrorSteps,
 } from "./EquipmentGroup";
 import { type PortRecord, portRecordError } from "./PortRecord";
 import { DIR_E, DIR_W } from "./railShape";
 
 describe("port and equipment-group authored records", () => {
+	it("schedules reciprocal ownership checks through late records without changing their results", () => {
+		const base = ohbState();
+		const count = 257;
+		const valid: PortEquipmentState = {
+			nextPortId: count + 1,
+			nextEquipmentGroupId: count + 1,
+			ports: Array.from({ length: count }, (_, index) => ({
+				...(base.ports[0] as PortRecord),
+				id: index + 1,
+				equipmentGroupId: index + 1,
+				barcode: `Synthetic-${index + 1}`,
+			})),
+			equipmentGroups: Array.from({ length: count }, (_, index) => ({
+				...(base.equipmentGroups[0] as PortEquipmentState["equipmentGroups"][number]),
+				id: index + 1,
+				portIds: [index + 1],
+			})),
+		};
+		const scenarios: [PortEquipmentState, string | null][] = [
+			[valid, null],
+			[
+				{
+					...valid,
+					ports: valid.ports.map((port) =>
+						port.id === count ? { ...port, equipmentGroupId: 1 } : port,
+					),
+				},
+				`port ${count} does not point back to equipment group ${count}`,
+			],
+			[{ ...valid, nextPortId: count }, "next port id cursor must exceed every port id"],
+		];
+		for (const [state, expected] of scenarios) {
+			const task = createCooperativeTask(portEquipmentStateErrorSteps(state));
+			let operations = 0;
+			while (!task.done) {
+				const used = task.step(7);
+				expect(used).toBeLessThanOrEqual(7);
+				operations += used;
+			}
+			expect(operations).toBeGreaterThan(count * 2);
+			expect(task.finish()).toBe(expected);
+			expect(portEquipmentStateError(state)).toBe(expected);
+		}
+	});
 	it("copies one valid OHB station as canonical immutable authored data", () => {
 		const state = ohbState();
 		const copied = copyPortEquipmentState(state);

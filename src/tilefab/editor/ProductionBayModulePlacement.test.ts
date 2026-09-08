@@ -10,7 +10,9 @@ import type {
 	StaticFabOrganizationBundlePlacementWorkerRequest,
 	StaticFabOrganizationBundlePlacementWorkerResponse,
 } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
+import { STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
 import { prepareStaticFabOrganizationBundlePlacement } from "../worker/StaticFabOrganizationBundlePlacementRuntime";
+import { encodeStaticFabOrganizationBundlePlacementTransport } from "../worker/StaticFabOrganizationBundlePlacementTransport";
 import {
 	StaticFabOrganizationBundlePlacementBridge,
 	type StaticFabOrganizationBundlePlacementInput,
@@ -31,8 +33,11 @@ class RuntimeWorker implements StaticFabOrganizationBundlePlacementWorkerPort {
 			this.onmessage?.({
 				data: Object.freeze({
 					type: "STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PREPARED" as const,
+					version: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION,
 					requestId: message.requestId,
-					prepared: prepareStaticFabOrganizationBundlePlacement(message),
+					payload: encodeStaticFabOrganizationBundlePlacementTransport(
+						prepareStaticFabOrganizationBundlePlacement(message),
+					),
 				}),
 			} as MessageEvent<StaticFabOrganizationBundlePlacementWorkerResponse>);
 		});

@@ -10,7 +10,7 @@ import {
 	type EquipmentGroupMutation,
 	type EquipmentGroupRecord,
 	equipmentGroupError,
-	portEquipmentStateError,
+	portEquipmentStateErrorSteps,
 } from "../core/EquipmentGroup";
 import {
 	PORT_RECORD_MAX_ID,
@@ -29,7 +29,7 @@ import {
 	STATIC_FAB_ORGANIZATION_KINDS,
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
-	staticFabOrganizationStateShapeError,
+	staticFabOrganizationStateShapeErrorSteps,
 } from "../core/StaticFabOrganization";
 import {
 	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES,
@@ -62,8 +62,8 @@ const MAX_ORGANIZATION_GROUP_REFERENCES =
 	STATIC_FAB_ORGANIZATION_BUNDLE_MAX_EQUIPMENT_GROUPS * STATIC_FAB_ORGANIZATION_KINDS.length;
 const RECORD_ID_CURSOR_MAX = PORT_RECORD_MAX_ID + 1;
 
-/** Bounded structural contract used before Worker send and after main-thread receive. */
-export function staticFabOrganizationBundlePlacementPreparedShapeError(
+/** Validate bounded envelope fields before allocating or hydrating wide mutation columns. */
+export function staticFabOrganizationBundlePlacementPreparedEnvelopeShapeError(
 	value: unknown,
 ): string | null {
 	if (!isRecord(value)) return "prepared payload must be an object";
@@ -96,12 +96,33 @@ export function staticFabOrganizationBundlePlacementPreparedShapeError(
 	) {
 		return "prepared timing values are invalid";
 	}
+	return null;
+}
 
+/** Bounded structural contract used before Worker send and after main-thread receive. */
+export function staticFabOrganizationBundlePlacementPreparedShapeError(
+	value: unknown,
+): string | null {
+	return completeCooperativeSteps(
+		staticFabOrganizationBundlePlacementPreparedShapeErrorSteps(value),
+	);
+}
+
+/** Wide validation shares the synchronous contract; suspended callers must own stable input. */
+export function* staticFabOrganizationBundlePlacementPreparedShapeErrorSteps(
+	value: unknown,
+): Generator<void, string | null> {
+	if (!isRecord(value)) return "prepared payload must be an object";
+	const envelopeError = staticFabOrganizationBundlePlacementPreparedEnvelopeShapeError(value);
+	if (envelopeError) return envelopeError;
 	if (value.plan === null) {
 		if (value.valid) return "valid prepared payload omitted its plan";
 		return value.ticket === null ? null : "rejected prepared payload carried a ticket";
 	}
-	const planError = placementPlanShapeError(value.plan, value.valid ? "full" : "compact");
+	const planError = yield* placementPlanShapeErrorSteps(
+		value.plan,
+		value.valid ? "full" : "compact",
+	);
 	if (planError) return planError;
 	const plan = value.plan as StaticFabOrganizationBundlePlacementPlan;
 	if (plan.valid !== value.valid) return "prepared and plan validity disagree";
@@ -111,12 +132,25 @@ export function staticFabOrganizationBundlePlacementPreparedShapeError(
 	const ticket = value.ticket as unknown as StaticFabOrganizationBundlePlacementWorkerTicket;
 	const ticketError = placementTicketShapeError(ticket, plan);
 	if (ticketError) return ticketError;
-	return placementAdditionRecordsError(plan, ticket);
+	return yield* placementAdditionRecordsErrorSteps(plan, ticket);
 }
 
-function placementPlanShapeError(value: unknown, mode: "compact" | "full"): string | null {
+function placementPlanScalarShapeError(value: unknown): string | null {
 	if (!isRecord(value) || value.kind !== "build") return "placement plan kind is invalid";
 	if (typeof value.valid !== "boolean") return "placement plan validity is invalid";
+	if (
+		value.issueCode !== undefined &&
+		value.issueCode !== null &&
+		value.issueCode !== "insufficient-path" &&
+		value.issueCode !== "disconnected" &&
+		value.issueCode !== "non-cardinal" &&
+		value.issueCode !== "reverse-overlap" &&
+		value.issueCode !== "duplicate" &&
+		value.issueCode !== "reserved-footprint" &&
+		value.issueCode !== "topology"
+	) {
+		return "placement plan issue code is invalid";
+	}
 	if (!boundedText(value.reason, STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RESPONSE_TEXT)) {
 		return "placement plan reason exceeds its text budget";
 	}
@@ -135,6 +169,35 @@ function placementPlanShapeError(value: unknown, mode: "compact" | "full"): stri
 	) {
 		return "placement plan scalar fields are invalid";
 	}
+	return null;
+}
+
+/** Header preflight is not a replacement for complete mutation and ticket validation. */
+export function staticFabOrganizationBundlePlacementPlanHeaderShapeError(
+	value: unknown,
+	mode: "compact" | "full",
+): string | null {
+	if (!isRecord(value)) return "placement plan kind is invalid";
+	const scalarError = placementPlanScalarShapeError(value);
+	if (scalarError) return scalarError;
+	if (
+		!Array.isArray(value.conflicts) ||
+		value.conflicts.length > STATIC_FAB_ORGANIZATION_BUNDLE_CONFLICT_LIMIT ||
+		!value.conflicts.every(isCell) ||
+		(mode === "full" && value.conflicts.length !== 0)
+	) {
+		return "placement plan conflicts exceed their bounds";
+	}
+	return placementMetadataShapeError(value.organizationBundle, mode);
+}
+
+function* placementPlanShapeErrorSteps(
+	value: unknown,
+	mode: "compact" | "full",
+): Generator<void, string | null> {
+	if (!isRecord(value)) return "placement plan kind is invalid";
+	const scalarError = placementPlanScalarShapeError(value);
+	if (scalarError) return scalarError;
 	if (
 		!Array.isArray(value.cells) ||
 		!Array.isArray(value.mutations) ||
@@ -154,7 +217,7 @@ function placementPlanShapeError(value: unknown, mode: "compact" | "full"): stri
 	if (
 		value.cells.length > maximumCells ||
 		value.conflicts.length > STATIC_FAB_ORGANIZATION_BUNDLE_CONFLICT_LIMIT ||
-		!value.cells.every(isCell) ||
+		!(yield* validCellsSteps(value.cells)) ||
 		!value.conflicts.every(isCell)
 	) {
 		return "placement plan cells exceed their bounds";
@@ -248,10 +311,21 @@ function fullPlacementMetadataMatchesPlan(
 		: "placement metadata counts do not match its plan";
 }
 
-function placementTicketShapeError(
-	ticket: StaticFabOrganizationBundlePlacementWorkerTicket,
-	plan: StaticFabOrganizationBundlePlacementPlan,
+export function placementTicketShapeError(
+	value: unknown,
+	plan: Pick<
+		StaticFabOrganizationBundlePlacementPlan,
+		| "baseRevision"
+		| "basePatchSequence"
+		| "nextOrganizationIdBefore"
+		| "nextOrganizationIdAfter"
+		| "nextRelationshipIdBefore"
+		| "nextRelationshipIdAfter"
+		| "organizationBundle"
+	>,
 ): string | null {
+	if (!isRecord(value)) return "valid prepared payload omitted its ticket";
+	const ticket = value as unknown as StaticFabOrganizationBundlePlacementWorkerTicket;
 	if (
 		!positiveSafeInteger(ticket.ticketId) ||
 		ticket.validationLevel !== "exact" ||
@@ -292,13 +366,13 @@ function placementTicketShapeError(
 	return null;
 }
 
-function placementAdditionRecordsError(
+function* placementAdditionRecordsErrorSteps(
 	plan: StaticFabOrganizationBundlePlacementPlan,
 	ticket: StaticFabOrganizationBundlePlacementWorkerTicket,
-): string | null {
-	const railError = railAdditionMutationsError(plan.cells, plan.mutations);
+): Generator<void, string | null> {
+	const railError = yield* railAdditionMutationsErrorSteps(plan.cells, plan.mutations);
 	if (railError) return railError;
-	const switchRecords = addedRecords<AdvancedSwitchMutation, AdvancedSwitchRecord>(
+	const switchRecords = yield* addedRecordsSteps<AdvancedSwitchMutation, AdvancedSwitchRecord>(
 		plan.switchMutations,
 		ticket.sourceNextAdvancedSwitchId,
 		advancedSwitchRecordShapeError,
@@ -312,7 +386,7 @@ function placementAdditionRecordsError(
 		return "advanced switch cursor does not match additions";
 	}
 
-	const ports = addedRecords<PortMutation, PortRecord>(
+	const ports = yield* addedRecordsSteps<PortMutation, PortRecord>(
 		plan.portMutations,
 		ticket.sourceNextPortId,
 		portRecordShapeError,
@@ -322,7 +396,7 @@ function placementAdditionRecordsError(
 	if (ticket.prospectiveNextPortId !== ticket.sourceNextPortId + ports.length) {
 		return "port cursor does not match additions";
 	}
-	const equipmentGroups = addedRecords<EquipmentGroupMutation, EquipmentGroupRecord>(
+	const equipmentGroups = yield* addedRecordsSteps<EquipmentGroupMutation, EquipmentGroupRecord>(
 		plan.equipmentGroupMutations,
 		ticket.sourceNextEquipmentGroupId,
 		equipmentGroupShapeError,
@@ -335,15 +409,16 @@ function placementAdditionRecordsError(
 	) {
 		return "equipment group cursor does not match additions";
 	}
-	const totalGroupPortIds = equipmentGroups.reduce(
-		(total, group) => total + group.portIds.length,
-		0,
-	);
+	let totalGroupPortIds = 0;
+	for (const group of equipmentGroups) {
+		yield;
+		totalGroupPortIds += group.portIds.length;
+	}
 	if (totalGroupPortIds > STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS) {
 		return "equipment group port references exceed their aggregate budget";
 	}
 	try {
-		const equipmentError = portEquipmentStateError({
+		const equipmentError = yield* portEquipmentStateErrorSteps({
 			nextPortId: ticket.prospectiveNextPortId,
 			nextEquipmentGroupId: ticket.prospectiveNextEquipmentGroupId,
 			ports,
@@ -355,7 +430,10 @@ function placementAdditionRecordsError(
 		return "placement additions contain malformed port equipment";
 	}
 
-	const organizations = addedRecords<StaticFabOrganizationMutation, StaticFabOrganizationRecord>(
+	const organizations = yield* addedRecordsSteps<
+		StaticFabOrganizationMutation,
+		StaticFabOrganizationRecord
+	>(
 		plan.organizationMutations,
 		plan.nextOrganizationIdBefore,
 		staticFabOrganizationRecordBudgetError,
@@ -372,6 +450,7 @@ function placementAdditionRecordsError(
 	let switchReferences = 0;
 	let equipmentGroupReferences = 0;
 	for (const organization of organizations) {
+		yield;
 		railEdgeReferences += organization.membership.railEdges.length;
 		switchReferences += organization.membership.advancedSwitchIds.length;
 		equipmentGroupReferences += organization.membership.equipmentGroupIds.length;
@@ -384,7 +463,7 @@ function placementAdditionRecordsError(
 		return "organization membership references exceed their aggregate budget";
 	}
 	try {
-		const organizationError = staticFabOrganizationStateShapeError({
+		const organizationError = yield* staticFabOrganizationStateShapeErrorSteps({
 			nextOrganizationId: plan.nextOrganizationIdAfter,
 			records: organizations,
 		});
@@ -393,7 +472,7 @@ function placementAdditionRecordsError(
 	} catch {
 		return "placement additions contain malformed organizations";
 	}
-	const relationships = addedRecords<
+	const relationships = yield* addedRecordsSteps<
 		StaticFabAssemblyRelationshipMutationV1,
 		StaticFabAssemblyRelationshipRecordV1
 	>(plan.relationshipMutations, plan.nextRelationshipIdBefore, () => null, "relationship");
@@ -403,17 +482,14 @@ function placementAdditionRecordsError(
 		records: relationships,
 	};
 	try {
-		completeCooperativeSteps(
-			assertStaticFabOrganizationBundleRelationshipBudgetSteps(
-				relationshipState,
-				organizations.length,
-				plan.nextOrganizationIdBefore,
-				plan.nextRelationshipIdBefore,
-			),
+		yield* assertStaticFabOrganizationBundleRelationshipBudgetSteps(
+			relationshipState,
+			organizations.length,
+			plan.nextOrganizationIdBefore,
+			plan.nextRelationshipIdBefore,
 		);
-		const relationshipError = completeCooperativeSteps(
-			staticFabAssemblyRelationshipStateShapeErrorSteps(relationshipState),
-		);
+		const relationshipError =
+			yield* staticFabAssemblyRelationshipStateShapeErrorSteps(relationshipState);
 		if (relationshipError)
 			return `placement additions contain invalid relationships: ${relationshipError}`;
 	} catch {
@@ -422,12 +498,13 @@ function placementAdditionRecordsError(
 	return null;
 }
 
-function railAdditionMutationsError(
+function* railAdditionMutationsErrorSteps(
 	cells: readonly Cell[],
 	mutations: readonly RailMutation[],
-): string | null {
+): Generator<void, string | null> {
 	const seen = new Set<string>();
 	for (let index = 0; index < mutations.length; index++) {
+		yield;
 		const mutation = mutations[index];
 		const cell = cells[index];
 		if (
@@ -452,7 +529,7 @@ function railAdditionMutationsError(
 	return null;
 }
 
-function addedRecords<
+function* addedRecordsSteps<
 	M extends { readonly id: number; readonly before: unknown; readonly after: R | null },
 	R extends { readonly id: number },
 >(
@@ -460,9 +537,10 @@ function addedRecords<
 	sourceCursor: number,
 	validate: (record: R) => string | null,
 	label: string,
-): readonly R[] | string {
+): Generator<void, readonly R[] | string> {
 	const records: R[] = [];
 	for (let index = 0; index < mutations.length; index++) {
+		yield;
 		const mutation = mutations[index];
 		if (
 			!mutation ||
@@ -590,6 +668,14 @@ function quarterTurns(value: unknown): value is 0 | 1 | 2 | 3 {
 
 function isCell(value: unknown): value is Cell {
 	return isRecord(value) && isInt32(value.x) && isInt32(value.y);
+}
+
+function* validCellsSteps(cells: readonly unknown[]): Generator<void, boolean> {
+	for (const cell of cells) {
+		yield;
+		if (!isCell(cell)) return false;
+	}
+	return true;
 }
 
 function isInt32(value: unknown): value is number {
