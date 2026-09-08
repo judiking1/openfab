@@ -23049,6 +23049,7 @@ async function exerciseNewFabProfileWizard(page, before) {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const desktop = await openNewFabProfileWizard(page);
 	await exerciseNewFabProfileWizardChoices(page, desktop.wizard);
+	await assertNewFabReviewVisibleAfterResize(page, desktop.wizard);
 	await assertNewFabProfileWizardFocusTrap(page, desktop.wizard);
 	await page.screenshot({
 		path: path.join(artifactRoot, "new-fab-profile-review-desktop.png"),
@@ -23144,8 +23145,13 @@ async function exerciseNewFabProfileWizard(page, before) {
 	);
 	assertIncludes(
 		(await creation.wizard.innerText()).toUpperCase(),
-		"CREATE FAILED",
+		"FAB 생성 실패",
 		"New Fab dirty-guard cancel feedback",
+	);
+	assertIncludes(
+		await creation.wizard.innerText(),
+		"검증하기를 다시 실행하세요.",
+		"New Fab cancellation names the available revalidation action",
 	);
 	assertProjectUnchanged(await readMetrics(page), before, "New Fab dirty-guard cancel isolation");
 
@@ -24983,7 +24989,7 @@ async function openNewFabProfileWizard(page) {
 				.locator(".tilefab-new-fab-steps li strong")
 				.evaluateAll((labels) => labels.map((label) => label.textContent?.trim() ?? "")),
 		),
-		JSON.stringify(["Layout", "Production", "Circulation", "Review"]),
+		JSON.stringify(["배치", "생산 구성", "연결 방식", "검토·생성"]),
 		"New Fab four-step order",
 	);
 	assertEqual(
@@ -24991,13 +24997,13 @@ async function openNewFabProfileWizard(page) {
 		"New OpenFab Fab",
 		"New Fab default project name",
 	);
-	await assertNewFabProfileStep(page, wizard, "layout", "Layout");
+	await assertNewFabProfileStep(page, wizard, "layout", "배치");
 	return { opener, wizard };
 }
 
 async function exerciseNewFabProfileWizardChoices(page, wizard) {
 	await assertNewFabProfileDefaultCounts(wizard);
-	await assertNewFabProfileCopy(wizard, "Layout");
+	await assertNewFabProfileCopy(wizard, "배치");
 	await assertNewFabProfileRadioContract(wizard, "new-fab-layout-blocks", ["1", "2", "3"], "1");
 	await assertNewFabProfileRadioContract(
 		wizard,
@@ -25008,8 +25014,8 @@ async function exerciseNewFabProfileWizardChoices(page, wizard) {
 	await selectNewFabProfileRadio(wizard, "new-fab-layout-blocks", "3");
 	await selectNewFabProfileRadio(wizard, "new-fab-bank-direction", "NORTH_SOUTH");
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "production", "Production");
-	await assertNewFabProfileCopy(wizard, "Production");
+	await assertNewFabProfileStep(page, wizard, "production", "생산 구성");
+	await assertNewFabProfileCopy(wizard, "생산 구성");
 	await assertNewFabProfileRadioContract(
 		wizard,
 		"new-fab-banks-per-layout-block",
@@ -25050,10 +25056,10 @@ async function exerciseNewFabProfileWizardChoices(page, wizard) {
 		await selectNewFabProfileRadio(wizard, name, value);
 	}
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "circulation", "Circulation");
-	await assertNewFabProfileCirculationContract(wizard, "PAIRED DIRECTED AUTO");
+	await assertNewFabProfileStep(page, wizard, "circulation", "연결 방식");
+	await assertNewFabProfileCirculationContract(wizard, "진입·진출 레일 자동 연결");
 	await wizard.getByTestId("new-fab-profile-back").click();
-	await assertNewFabProfileStep(page, wizard, "production", "Production");
+	await assertNewFabProfileStep(page, wizard, "production", "생산 구성");
 	for (const [name, value] of [
 		["new-fab-banks-per-layout-block", "3"],
 		["new-fab-process-loops-per-bank", "24"],
@@ -25077,7 +25083,7 @@ async function exerciseNewFabProfileWizardChoices(page, wizard) {
 		await selectNewFabProfileRadio(wizard, name, value);
 	}
 	await wizard.getByTestId("new-fab-profile-back").click();
-	await assertNewFabProfileStep(page, wizard, "layout", "Layout");
+	await assertNewFabProfileStep(page, wizard, "layout", "배치");
 	assertEqual(
 		await newFabProfileRadio(wizard, "new-fab-layout-blocks", "3").isChecked(),
 		true,
@@ -25096,17 +25102,17 @@ async function exerciseNewFabProfileWizardChoices(page, wizard) {
 async function navigateDefaultNewFabProfileToReview(page, wizard) {
 	if ((await wizard.getAttribute("data-step")) === "layout") {
 		await assertNewFabProfileDefaultCounts(wizard);
-		await assertNewFabProfileCopy(wizard, "Layout");
+		await assertNewFabProfileCopy(wizard, "배치");
 		await wizard.getByTestId("new-fab-profile-next").click();
 	}
-	await assertNewFabProfileStep(page, wizard, "production", "Production");
+	await assertNewFabProfileStep(page, wizard, "production", "생산 구성");
 	await assertNewFabProfileDefaultCounts(wizard);
-	await assertNewFabProfileCopy(wizard, "Production");
+	await assertNewFabProfileCopy(wizard, "생산 구성");
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "circulation", "Circulation");
+	await assertNewFabProfileStep(page, wizard, "circulation", "연결 방식");
 	await assertNewFabProfileCirculationContract(wizard);
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "review", "Review");
+	await assertNewFabProfileStep(page, wizard, "review", "검토·생성");
 	await assertNewFabProfileReviewContract(wizard);
 }
 
@@ -25184,18 +25190,18 @@ async function assertNewFabProfileCopy(wizard, step) {
 
 async function assertNewFabProfileCirculationContract(
 	wizard,
-	interBlockConnector = "NOT REQUIRED FOR ONE LAYOUT BLOCK",
+	interBlockConnector = "한 구역에서는 불필요",
 ) {
-	await assertNewFabProfileCopy(wizard, "Circulation");
+	await assertNewFabProfileCopy(wizard, "연결 방식");
 	const text = (
 		await wizard.evaluate((element) => element.innerText.replace(/\s+/g, " ").trim())
 	).toUpperCase();
 	for (const expected of [
-		"BANK DISTRIBUTOR PAIRED COLLECTOR",
-		"FAB CIRCULATION PAIRED OPPOSITE FLOW",
-		`INTER-BLOCK CONNECTOR ${interBlockConnector}`,
-		"PERIMETER REDUNDANCY OFF",
-		"RAIL PROFILE R500 · 4 M LANE PAIR",
+		"BANK 연결 레일 진입·진출 레일 한 쌍",
+		"FAB 순환 반대 방향의 순환 레일",
+		`구역 사이 연결 ${interBlockConnector}`,
+		"추가 외곽 우회로 추가 안 함",
+		"레일 규격 곡선 R500 · 레일 쌍 간격 4 M",
 	]) {
 		assertIncludes(text, expected, `New Fab circulation policy ${expected}`);
 	}
@@ -25204,7 +25210,7 @@ async function assertNewFabProfileCirculationContract(
 
 async function assertNewFabProfileReviewContract(wizard) {
 	await assertNewFabProfileDefaultCounts(wizard);
-	await assertNewFabProfileCopy(wizard, "Review");
+	await assertNewFabProfileCopy(wizard, "검토·생성");
 	assertEqual(
 		await wizard.getAttribute("data-preparation"),
 		"idle",
@@ -25220,15 +25226,33 @@ async function assertNewFabProfileReviewContract(wizard) {
 		0,
 		"New Fab exact evidence remains hidden before PREPARE",
 	);
+	const details = wizard.getByTestId("new-fab-profile-review-details");
+	assertEqual(
+		await details.getAttribute("open"),
+		null,
+		"New Fab technical configuration initially collapsed",
+	);
+	const primaryText = await wizard.innerText();
+	assertIncludes(primaryText, "구성 입력 완료", "New Fab unverified primary state");
+	assertIncludes(primaryText, "검증하기를 눌러", "New Fab verification required");
+	assertIncludes(
+		primaryText,
+		"생성 후 OHB·EQ·STK를 배치하고 포트 연결을 검사하세요",
+		"New Fab remaining equipment work",
+	);
+	assertIncludes(primaryText, "시뮬레이션은 아직 제공하지 않습니다", "New Fab simulation scope");
+	assertEqual(
+		primaryText.includes("BAY INTERNAL PAIRS"),
+		false,
+		"New Fab technical counts hidden from primary review",
+	);
+	await details.locator("summary").click();
 	const text = (
 		await wizard.evaluate((element) => element.innerText.replace(/\s+/g, " ").trim())
 	).toUpperCase();
 	for (const expected of [
-		"PROFILE VALID",
-		"NOT YET VERIFIED",
-		"PORT SERVICE · NOT CHECKED",
-		"SIMULATION · NOT SIMULATED",
-		"SIMULATIONREADY · FALSE",
+		"구성 입력 완료",
+		"검증하기를 눌러 레일과 연결을 확인하세요.",
 		"BAY INTERNAL PAIRS 48",
 		"BAY → BANK PAIRS 24",
 		"BANK → CIRCULATION PAIRS 2",
@@ -25237,18 +25261,37 @@ async function assertNewFabProfileReviewContract(wizard) {
 	]) {
 		assertIncludes(text, expected, `New Fab Review contract ${expected}`);
 	}
+	await details.locator("summary").click();
 }
 
 async function assertNewFabProfileExactEvidence(wizard) {
 	const evidence = wizard.getByTestId("new-fab-profile-exact-evidence");
 	await evidence.waitFor({ state: "visible", timeout: 10_000 });
+	const details = evidence.getByTestId("new-fab-profile-exact-details");
+	assertEqual(
+		await details.getAttribute("open"),
+		null,
+		"New Fab measured evidence initially collapsed",
+	);
+	assertIncludes(
+		await evidence.innerText(),
+		"FAB 크기 328 × 212 m",
+		"New Fab exact footprint visible before details",
+	);
+	await details.locator("summary").focus();
+	await wizard.page().keyboard.press("Enter");
+	assertEqual(
+		await details.getAttribute("open"),
+		"",
+		"New Fab measured evidence opens by keyboard",
+	);
 	const text = (await evidence.innerText())
 		.replace(/,/g, "")
 		.replace(/\s+/g, " ")
 		.trim()
 		.toUpperCase();
 	for (const expected of [
-		"OPENFAB VERIFIED · STATIC AUTHORING",
+		"레일·연결·구조 검증 완료",
 		"FAB FOOTPRINT 328 × 212 M",
 		"RAIL CELLS 11282",
 		"DIRECTED EDGES 11432",
@@ -25269,10 +25312,70 @@ async function assertNewFabProfileExactEvidence(wizard) {
 	if (!/PREPARATION COST \d+(?:\.\d+)? MS/.test(text)) {
 		throw new Error(`New Fab exact Review omits measured preparation cost: ${text}`);
 	}
+	await details.locator("summary").click();
+}
+
+async function assertNewFabReviewVisibleAfterResize(page, wizard) {
+	const originalViewport = page.viewportSize();
+	const heading = wizard.locator(".tilefab-new-fab-step-heading h2");
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await heading.focus();
+	for (const width of [760, 390, 1440]) {
+		await page.setViewportSize({ width, height: width === 390 ? 720 : 900 });
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		const positions = await wizard.evaluate((element) => {
+			const workspace = element.querySelector(".tilefab-new-fab-workspace").getBoundingClientRect();
+			const title = element
+				.querySelector(".tilefab-new-fab-step-heading h2")
+				.getBoundingClientRect();
+			const status = element
+				.querySelector(".tilefab-new-fab-review-status")
+				.getBoundingClientRect();
+			const caption = element
+				.querySelector(".tilefab-new-fab-schematic > figcaption")
+				.getBoundingClientRect();
+			const schematic = element
+				.querySelector(".tilefab-new-fab-schematic-fab")
+				.getBoundingClientRect();
+			const note = element.querySelector(".tilefab-new-fab-schematic > p").getBoundingClientRect();
+			return {
+				top: workspace.top,
+				bottom: workspace.bottom,
+				titleTop: title.top,
+				titleBottom: title.bottom,
+				statusBottom: status.bottom,
+				schematicTopGap: schematic.top - caption.bottom,
+				schematicBottomGap: note.top - schematic.bottom,
+			};
+		});
+		assertAtLeast(
+			positions.titleTop,
+			positions.top,
+			`${width}px resized New Fab review heading top`,
+		);
+		assertAtMost(
+			positions.titleBottom,
+			positions.bottom,
+			`${width}px resized New Fab review heading bottom`,
+		);
+		assertAtMost(
+			positions.statusBottom,
+			positions.bottom,
+			`${width}px resized New Fab primary review status`,
+		);
+		assertAtLeast(positions.schematicTopGap, 0, `${width}px schematic does not overlap caption`);
+		assertAtLeast(positions.schematicBottomGap, 0, `${width}px schematic does not overlap note`);
+	}
+	await page.setViewportSize(originalViewport);
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
 }
 
 async function assertNewFabProfileWizardFocusTrap(page, wizard) {
-	const close = wizard.getByRole("button", { name: "Close New Fab wizard" });
+	const close = wizard.getByRole("button", { name: "새 FAB 만들기 닫기" });
 	await close.focus();
 	await page.keyboard.press("Shift+Tab");
 	assertEqual(
@@ -25310,10 +25413,15 @@ async function exerciseResponsiveNewFabProfileWizard(page, viewport, before) {
 	const maximumProfile = viewport.width === 390;
 	if (maximumProfile) await navigateMaximumNewFabProfileToReview(page, wizard);
 	else await navigateDefaultNewFabProfileToReview(page, wizard);
+	if (maximumProfile) await assertNewFabReviewVisibleAfterResize(page, wizard);
+	for (const label of await wizard.locator(".tilefab-new-fab-steps li strong").all()) {
+		await assertLocatorInsideViewport(page, label);
+		assertEqual(await label.isVisible(), true, `${viewport.label} New Fab visible stage label`);
+	}
 	const footer = wizard.locator(".tilefab-new-fab-footer");
 	const workspace = wizard.locator(".tilefab-new-fab-workspace");
 	for (const control of [
-		wizard.getByRole("button", { name: "Close New Fab wizard" }),
+		wizard.getByRole("button", { name: "새 FAB 만들기 닫기" }),
 		wizard.getByTestId("new-fab-profile-back"),
 		wizard.getByTestId("new-fab-profile-prepare"),
 	]) {
@@ -25430,7 +25538,7 @@ async function navigateMaximumNewFabProfileToReview(page, wizard) {
 	await selectNewFabProfileRadio(wizard, "new-fab-layout-blocks", "3");
 	await selectNewFabProfileRadio(wizard, "new-fab-bank-direction", "NORTH_SOUTH");
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "production", "Production");
+	await assertNewFabProfileStep(page, wizard, "production", "생산 구성");
 	for (const [name, value] of [
 		["new-fab-banks-per-layout-block", "3"],
 		["new-fab-process-loops-per-bank", "24"],
@@ -25441,10 +25549,10 @@ async function navigateMaximumNewFabProfileToReview(page, wizard) {
 		await selectNewFabProfileRadio(wizard, name, value);
 	}
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "circulation", "Circulation");
-	await assertNewFabProfileCirculationContract(wizard, "PAIRED DIRECTED AUTO");
+	await assertNewFabProfileStep(page, wizard, "circulation", "연결 방식");
+	await assertNewFabProfileCirculationContract(wizard, "진입·진출 레일 자동 연결");
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "review", "Review");
+	await assertNewFabProfileStep(page, wizard, "review", "검토·생성");
 }
 
 async function readDefaultNewFabOrganizationContract(page) {

@@ -6049,6 +6049,14 @@ async function exerciseNewFabProfileScaleGate(activePage, budget, failures) {
 		}));
 	const preparedCreateVisible = await create.isVisible();
 	const preparedCreateEnabled = await create.isEnabled();
+	const exactDetails = activePage.getByTestId("new-fab-profile-exact-details");
+	assertEqual(
+		failures,
+		await exactDetails.getAttribute("open"),
+		null,
+		"NEW FAB measured details initially collapsed",
+	);
+	await exactDetails.locator("summary").click();
 	const exactEvidenceText = (
 		await activePage.locator('[data-testid="new-fab-profile-exact-evidence"]').innerText()
 	)
@@ -6099,13 +6107,13 @@ async function exerciseNewFabProfileScaleGate(activePage, budget, failures) {
 	assertEqual(
 		failures,
 		preparedWizardState.statusText,
-		"PREPARED RESULT RECEIVED",
+		"검증 완료 · 생성할 수 있습니다",
 		"NEW FAB prepared wizard status",
 	);
 	assertEqual(failures, preparedCreateVisible, true, "NEW FAB prepared CREATE visibility");
 	assertEqual(failures, preparedCreateEnabled, true, "NEW FAB prepared CREATE availability");
 	for (const expected of [
-		"OPENFAB VERIFIED · STATIC AUTHORING",
+		"레일·연결·구조 검증 완료",
 		"RAIL CELLS 11282",
 		"DIRECTED EDGES 11432",
 		"PHYSICAL PATHS 11478",

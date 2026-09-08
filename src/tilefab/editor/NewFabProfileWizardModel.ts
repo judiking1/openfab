@@ -6,10 +6,10 @@ import {
 } from "../compile/OpenFabFabProfile";
 
 export const NEW_FAB_PROFILE_WIZARD_STEPS = Object.freeze([
-	Object.freeze({ id: "layout" as const, label: "Layout" }),
-	Object.freeze({ id: "production" as const, label: "Production" }),
-	Object.freeze({ id: "circulation" as const, label: "Circulation" }),
-	Object.freeze({ id: "review" as const, label: "Review" }),
+	Object.freeze({ id: "layout" as const, label: "배치" }),
+	Object.freeze({ id: "production" as const, label: "생산 구성" }),
+	Object.freeze({ id: "circulation" as const, label: "연결 방식" }),
+	Object.freeze({ id: "review" as const, label: "검토·생성" }),
 ]);
 
 export type NewFabProfileWizardStep = (typeof NEW_FAB_PROFILE_WIZARD_STEPS)[number]["id"];
@@ -51,18 +51,18 @@ export interface NewFabProfilePreparedBinding<TPreparedEvidence extends object> 
  */
 export function validateNewFabProfileWizardName(name: string): NewFabProfileWizardNameValidation {
 	if (name.length === 0) {
-		return Object.freeze({ valid: false, reason: "Enter a project name." });
+		return Object.freeze({ valid: false, reason: "프로젝트 이름을 입력하세요." });
 	}
 	if (name !== name.trim()) {
 		return Object.freeze({
 			valid: false,
-			reason: "Remove spaces before or after the project name.",
+			reason: "프로젝트 이름 앞뒤의 공백을 지워 주세요.",
 		});
 	}
 	if (name.length > 120) {
 		return Object.freeze({
 			valid: false,
-			reason: "Project name must be 120 characters or fewer.",
+			reason: "프로젝트 이름은 120자 이내로 입력하세요.",
 		});
 	}
 	for (const character of name) {
@@ -70,7 +70,7 @@ export function validateNewFabProfileWizardName(name: string): NewFabProfileWiza
 		if (codePoint !== undefined && codePoint <= 0x1f) {
 			return Object.freeze({
 				valid: false,
-				reason: "Project name cannot contain control characters.",
+				reason: "프로젝트 이름에는 제어 문자를 넣을 수 없습니다.",
 			});
 		}
 	}

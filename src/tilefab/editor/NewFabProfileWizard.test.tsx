@@ -19,10 +19,10 @@ describe("NewFabProfileWizard model", () => {
 		const review = createNewFabProfileWizardReview(defaultOpenFabFabProfile());
 
 		expect(NEW_FAB_PROFILE_WIZARD_STEPS.map((step) => step.label)).toEqual([
-			"Layout",
-			"Production",
-			"Circulation",
-			"Review",
+			"배치",
+			"생산 구성",
+			"연결 방식",
+			"검토·생성",
 		]);
 		expect(review.derived.counts).toMatchObject({
 			fabs: 1,
@@ -97,11 +97,11 @@ describe("NewFabProfileWizard model", () => {
 			reason: null,
 		});
 		for (const [name, reason] of [
-			["", /Enter a project name/],
-			[" OpenFab", /before or after/],
-			["OpenFab ", /before or after/],
-			["A".repeat(121), /120 characters/],
-			["Open\u0000Fab", /control characters/],
+			["", /프로젝트 이름을 입력/],
+			[" OpenFab", /앞뒤의 공백/],
+			["OpenFab ", /앞뒤의 공백/],
+			["A".repeat(121), /120자/],
+			["Open\u0000Fab", /제어 문자/],
 		] as const) {
 			expect(validateNewFabProfileWizardName(name).reason).toMatch(reason);
 		}
@@ -129,7 +129,7 @@ describe("NewFabProfileWizard model", () => {
 			),
 		).toBe(false);
 		expect(() => bindNewFabProfilePreparedEvidence(profile, " OpenFab", evidence)).toThrow(
-			/before or after/,
+			/앞뒤의 공백/,
 		);
 	});
 });
@@ -141,18 +141,18 @@ describe("NewFabProfileWizard static shell rendering", () => {
 		expect(markup).toContain('role="dialog"');
 		expect(markup).toContain('aria-modal="true"');
 		expect(markup).toContain('data-step="layout"');
-		expect(markup).toContain("Layout");
-		expect(markup).toContain("Production");
-		expect(markup).toContain("Circulation");
-		expect(markup).toContain("Review");
-		expect(markup).toContain("generator-only physical grouping");
-		expect(markup).toContain("They are not organization records");
-		expect(markup).toContain("AUTO-FIT");
-		expect(markup).toContain("EAST–WEST AXIS");
-		expect(markup).toContain("NORTH–SOUTH AXIS");
+		expect(markup).toContain("배치");
+		expect(markup).toContain("생산 구성");
+		expect(markup).toContain("연결 방식");
+		expect(markup).toContain("검토·생성");
+		expect(markup).toContain("프로젝트 이름과 Bank를 배치할 구역·방향");
+		expect(markup).toContain("별도 편집 조직으로 저장하지 않습니다");
+		expect(markup).toContain("자동 크기");
+		expect(markup).toContain("가로 · 동서");
+		expect(markup).toContain("세로 · 남북");
 		expect(markup).toContain('maxLength="120"');
-		expect(markup).not.toContain(">PREPARE<");
-		expect(markup).not.toContain(">CREATE<");
+		expect(markup).not.toContain(">검증하기<");
+		expect(markup).not.toContain(">새 FAB 생성<");
 	});
 
 	it("uses profile language and makes the semantic preview explicitly non-exact", () => {
@@ -167,12 +167,12 @@ describe("NewFabProfileWizard static shell rendering", () => {
 			processLoopCenterPitchMeters: 16,
 		});
 
-		expect(markup).toContain("3 generator-only Layout Blocks");
-		expect(markup).toContain("9 Banks");
-		expect(markup).toContain("108 Bays");
-		expect(markup).toContain("216 Process Loops");
-		expect(markup).toContain("Bounded semantic preview");
-		expect(markup).toContain("exact rail geometry is prepared later");
+		expect(markup).toContain("3개 배치 구역");
+		expect(markup).toContain("Bank 9개");
+		expect(markup).toContain("Bay 108개");
+		expect(markup).toContain("Process Loop 216개");
+		expect(markup).toContain("구성을 보여주는 도식입니다");
+		expect(markup).toContain("정확한 레일과 크기는 검증 후 확인");
 	});
 
 	it("exposes an inert handoff shell while the dirty-project guard owns the modal", () => {

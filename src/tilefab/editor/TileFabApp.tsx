@@ -18652,7 +18652,7 @@ export default function TileFabApp(): React.ReactElement {
 		} catch (error) {
 			discardOpenFabFabPreparedProject(verified.prepared, verified.evidence);
 			const message = finishFailedProjectOperation(error);
-			throw new Error(message ?? "FAB 프로젝트 생성을 취소했습니다. PREPARE를 다시 실행하세요.", {
+			throw new Error(message ?? "FAB 프로젝트 생성을 취소했습니다. 검증하기를 다시 실행하세요.", {
 				cause: error,
 			});
 		} finally {
@@ -18979,7 +18979,7 @@ export default function TileFabApp(): React.ReactElement {
 			discardOpenFabFabPreparedProject(prepared, evidence);
 			settlePendingNewFabProjectCompletion(
 				action,
-				new Error("프로젝트 전환을 취소했습니다. PREPARE를 다시 실행하세요."),
+				new Error("프로젝트 전환을 취소했습니다. 검증하기를 다시 실행하세요."),
 			);
 		}
 		const restoreRecoveryTrigger = action?.kind === "recover";
