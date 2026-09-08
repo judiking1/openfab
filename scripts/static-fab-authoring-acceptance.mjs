@@ -19846,6 +19846,106 @@ async function clickAvailableOhbCandidate(page, candidates, before) {
 	throw new Error("No legal OHB candidate could be placed on the selected Large FAB corridor.");
 }
 
+async function readPortMembershipTarget(page) {
+	return page.getByTestId("rail-canvas").evaluate((canvas) => {
+		const rect = canvas.getBoundingClientRect();
+		const x = rect.left + Number(canvas.dataset.portMembershipKeyboardScreenX);
+		const y = rect.top + Number(canvas.dataset.portMembershipKeyboardScreenY);
+		return {
+			x,
+			y,
+			row: canvas.dataset.portMembershipKeyboardRow,
+			rows: canvas.dataset.portMembershipDraftRows,
+			cameraX: Number(canvas.dataset.cameraOffsetX),
+			cameraY: Number(canvas.dataset.cameraOffsetY),
+			zoom: Number(canvas.dataset.cameraZoom),
+			visible:
+				Boolean(canvas.dataset.portMembershipKeyboardScreenX) &&
+				x >= rect.left + 22 &&
+				x + 22 <= rect.right &&
+				y >= rect.top + 22 &&
+				y + 22 <= rect.bottom &&
+				[-22, 0, 22].every((dx) =>
+					[-22, 0, 22].every((dy) => document.elementFromPoint(x + dx, y + dy) === canvas),
+				),
+		};
+	});
+}
+
+async function assertPortMembershipTargetVisible(page, label) {
+	// The lightweight membership telemetry publishes every 100ms. Let the resize/paint settle
+	// before accepting coordinates that might otherwise still describe the previous viewport.
+	await page.waitForTimeout(150);
+	const target = await readPortMembershipTarget(page);
+	assertEqual(
+		target.visible,
+		true,
+		`${label} active Port owns its complete 44px Canvas target ${JSON.stringify(target)}`,
+	);
+	return target;
+}
+
+async function exerciseMembershipCameraIntent(page) {
+	const canvas = page.getByTestId("rail-canvas");
+	const source = await readMetrics(page);
+	const original = await assertPortMembershipTargetVisible(page, "EQ compact entry");
+	await page.mouse.move(original.x, original.y);
+	await page.mouse.down({ button: "right" });
+	await page.mouse.move(original.x - 190, original.y, { steps: 8 });
+	await page.mouse.up({ button: "right" });
+	await page.waitForTimeout(150);
+	const panned = await readPortMembershipTarget(page);
+	assertEqual(
+		Math.abs(panned.cameraX - (original.cameraX - 190)) < 0.01,
+		true,
+		"EQ deliberate pan keeps user camera",
+	);
+	await page.mouse.move(original.x, original.y + 12);
+	await page.waitForTimeout(150);
+	const hovered = await readPortMembershipTarget(page);
+	assertEqual(hovered.cameraX, panned.cameraX, "EQ pointer hover does not undo deliberate pan");
+	assertEqual(hovered.cameraY, panned.cameraY, "EQ pointer hover preserves camera height");
+	await page.getByTestId("switch-eq-membership-endpoint").click();
+	await assertPortMembershipTargetVisible(page, "EQ explicit opposite endpoint after pan");
+	await canvas.focus();
+	await page.keyboard.press("ArrowRight");
+	await assertPortMembershipTargetVisible(page, "EQ keyboard endpoint adjustment");
+
+	await page.setViewportSize({ width: 760, height: 720 });
+	const wider = await assertPortMembershipTargetVisible(page, "EQ before held resize");
+	await page.mouse.move(wider.x, wider.y);
+	await page.mouse.down({ button: "right" });
+	await page.mouse.move(550, wider.y, { steps: 8 });
+	await page.mouse.up({ button: "right" });
+	const dragStart = await assertPortMembershipTargetVisible(page, "EQ deliberate drag position");
+	await page.mouse.move(dragStart.x, dragStart.y);
+	await page.mouse.down();
+	await page.waitForTimeout(150);
+	const held = await readPortMembershipTarget(page);
+	await page.setViewportSize({ width: 390, height: 720 });
+	await page.waitForTimeout(150);
+	const resized = await readPortMembershipTarget(page);
+	assertEqual(resized.cameraX, held.cameraX, "EQ held resize preserves pointer world transform X");
+	assertEqual(resized.cameraY, held.cameraY, "EQ held resize preserves pointer world transform Y");
+	assertEqual(resized.zoom, held.zoom, "EQ held resize preserves zoom");
+	assertEqual(resized.rows, held.rows, "EQ held resize preserves draft membership");
+	assertEqual(resized.visible, false, "EQ resize waits to frame until pointer release");
+	await page.mouse.up();
+	const released = await assertPortMembershipTargetVisible(page, "EQ deferred frame after release");
+	assertEqual(released.rows, held.rows, "EQ deferred camera correction preserves draft membership");
+	assertExactStaticFabModelIdentity(
+		await readMetrics(page),
+		source,
+		"EQ view and draft changes preserve authored source",
+	);
+	return {
+		userPanPreserved: true,
+		hoverPreserved: true,
+		explicitEndpointVisible: true,
+		heldResizeDeferred: true,
+	};
+}
+
 async function exercisePortEquipmentMembershipAuthoring(page) {
 	await createSyntheticFabProject(page, "bay-assembly");
 	await placePattern(page, "long-bay", { x: 200, y: 0 });
@@ -20067,9 +20167,11 @@ async function exercisePortEquipmentMembershipAuthoring(page) {
 				);
 			}
 		}
+		await assertPortMembershipTargetVisible(page, `EQ membership ${viewport.label}`);
 	}
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.waitForTimeout(50);
+	const cameraIntent = await exerciseMembershipCameraIntent(page);
 	assertEqual(
 		await canvas.getAttribute("aria-describedby"),
 		"tilefab-port-membership-description",
@@ -20160,6 +20262,7 @@ async function exercisePortEquipmentMembershipAuthoring(page) {
 		path: path.join(artifactRoot, "compact-stk-membership.png"),
 		fullPage: true,
 	});
+	await assertPortMembershipTargetVisible(page, "STK compact membership entry");
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.waitForTimeout(100);
 	await canvas.focus();
@@ -20203,6 +20306,7 @@ async function exercisePortEquipmentMembershipAuthoring(page) {
 			{ timeout: 10_000 },
 		);
 	}
+	await assertPortMembershipTargetVisible(page, "STK distant keyboard target");
 	await page.keyboard.press("Space");
 	await waitForMembershipState(page, { type: "STK", sourceRows: 2, draftRows: 3 });
 	await page.keyboard.press("Enter");
@@ -20232,7 +20336,7 @@ async function exercisePortEquipmentMembershipAuthoring(page) {
 		initial.workerPhysicalFingerprint,
 		"STK membership physical identity",
 	);
-	return stkRedone;
+	return { ...stkRedone, membershipCameraIntent: cameraIntent };
 }
 
 async function waitForLegalPortSlots(page) {

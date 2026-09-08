@@ -1335,6 +1335,8 @@ function publishPortEquipmentMembershipTelemetry(
 	session: PortEquipmentMembershipEditSession | null,
 	telemetry: PortEquipmentMembershipTelemetry,
 	hoverPortSlot: number | null,
+	renderer: TileRenderer,
+	camera: Camera,
 ): void {
 	const write = (key: string, value: string | number | boolean): void => {
 		const next = String(value);
@@ -1346,6 +1348,23 @@ function publishPortEquipmentMembershipTelemetry(
 	write("portMembershipSourceRows", session?.sourceRows.length ?? 0);
 	write("portMembershipDraftRows", session?.selection.rows.length ?? 0);
 	write("portMembershipKeyboardRow", session?.keyboardRow ?? "");
+	const target = session
+		? renderer.worldToScreen(
+				{
+					x: session.slots.worldPositions[session.keyboardRow * 2] as number,
+					y: session.slots.worldPositions[session.keyboardRow * 2 + 1] as number,
+				},
+				camera,
+			)
+		: null;
+	write("portMembershipKeyboardScreenX", target?.x.toFixed(3) ?? "");
+	write("portMembershipKeyboardScreenY", target?.y.toFixed(3) ?? "");
+	// Membership rendering skips the general diagnostic pass. Its target and camera must still
+	// describe the same painted view after keyboard navigation, dragging or a viewport resize.
+	write("cameraOffsetX", camera.offsetX.toFixed(3));
+	write("cameraOffsetY", camera.offsetY.toFixed(3));
+	write("cameraZoom", camera.zoom.toFixed(3));
+	write("cameraRotation", camera.rotation);
 	write(
 		"portMembershipKeyboardX",
 		session ? (session.slots.routeXs[session.keyboardRow] as number) : "",
@@ -2337,6 +2356,7 @@ export default function TileFabApp(): React.ReactElement {
 	);
 	const portEquipmentMembershipUiPublishTimerRef = useRef<number | null>(null);
 	const eqMembershipDragRef = useRef<EqMembershipDragState | null>(null);
+	const eqMembershipFrameDeferredRef = useRef(false);
 	const portRowCandidateBufferRef = useRef<number[]>([]);
 	const groupEditCandidateBufferRef = useRef<number[]>([]);
 	const membershipCandidateBufferRef = useRef<number[]>([]);
@@ -6143,6 +6163,7 @@ export default function TileFabApp(): React.ReactElement {
 		next: PortEquipmentMembershipEditSession | null,
 		publication: "sync" | "coalesced" = "sync",
 	): void => {
+		if (next === null) eqMembershipFrameDeferredRef.current = false;
 		portEquipmentMembershipEditSessionRef.current = next;
 		if (publication === "coalesced") {
 			if (portEquipmentMembershipUiPublishTimerRef.current !== null) return;
@@ -12286,22 +12307,26 @@ export default function TileFabApp(): React.ReactElement {
 				telemetryTimer = 0;
 			}
 			telemetryPublishedAt = telemetryNow;
+			const membershipSession = portEquipmentMembershipEditSessionRef.current;
+			const membershipTelemetry = portEquipmentMembershipTelemetryRef.current;
+			// Input-paint callbacks publish these same fields directly. Use their guarded writer here
+			// too, so the general diagnostic cache cannot restore or retain an older target/camera.
+			publishPortEquipmentMembershipTelemetry(
+				canvas.dataset,
+				membershipSession,
+				membershipTelemetry,
+				hoverPortSlotRef.current,
+				rendererRef.current,
+				cameraRef.current,
+			);
+			if (membershipSession) {
+				renderPerformance.recordRender(performance.now() - renderStartedAt);
+				return;
+			}
 			{
 				// Browser acceptance reads these values at a bounded cadence. The visual render path
 				// remains frame-rate responsive without mutating diagnostic DOM attributes every frame.
 				const canvas = { dataset: telemetryDataset };
-				const membershipSession = portEquipmentMembershipEditSessionRef.current;
-				const membershipTelemetry = portEquipmentMembershipTelemetryRef.current;
-				publishPortEquipmentMembershipTelemetry(
-					canvas.dataset,
-					membershipSession,
-					membershipTelemetry,
-					hoverPortSlotRef.current,
-				);
-				if (membershipSession) {
-					renderPerformance.recordRender(performance.now() - renderStartedAt);
-					return;
-				}
 				const browserPerformance = performance as Performance & {
 					memory?: { usedJSHeapSize?: number };
 				};
@@ -12513,10 +12538,6 @@ export default function TileFabApp(): React.ReactElement {
 				canvas.dataset.draftCandidatePairs = String(draftStats.candidateCommittedEnvelopePairs);
 				canvas.dataset.draftTestedPairs = String(draftStats.testedCommittedEnvelopePairs);
 				canvas.dataset.modelGeneration = String(activeModel.generation);
-				canvas.dataset.cameraOffsetX = cameraRef.current.offsetX.toFixed(3);
-				canvas.dataset.cameraOffsetY = cameraRef.current.offsetY.toFixed(3);
-				canvas.dataset.cameraZoom = cameraRef.current.zoom.toFixed(3);
-				canvas.dataset.cameraRotation = String(cameraRef.current.rotation);
 				canvas.dataset.railClipboardVersion = String(railClipboardVersionRef.current);
 				const arrangement = staticFabArrangementUiRef.current;
 				canvas.dataset.staticFabArrangementActive = String(arrangement !== null);
@@ -12734,6 +12755,7 @@ export default function TileFabApp(): React.ReactElement {
 			const nextHeight = canvas.clientHeight;
 			if (
 				cameraReadyRef.current &&
+				eqMembershipDragRef.current === null &&
 				previousWidth > 0 &&
 				previousHeight > 0 &&
 				(nextWidth !== previousWidth || nextHeight !== previousHeight)
@@ -15277,6 +15299,8 @@ export default function TileFabApp(): React.ReactElement {
 						portEquipmentMembershipEditSessionRef.current,
 						telemetry,
 						hoverPortSlotRef.current,
+						rendererRef.current,
+						cameraRef.current,
 					);
 				}
 				// A nested animation frame observes the first frame after the overlay render had a paint
@@ -15324,6 +15348,7 @@ export default function TileFabApp(): React.ReactElement {
 		hoverPortSlotRef.current = nextRow;
 		if (session.portType === "EQ") {
 			updateEqMembershipTarget(session, nextRow);
+			requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 			return;
 		}
 		updatePortEquipmentMembershipEditSession(
@@ -15335,6 +15360,7 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(
 			`STK-${session.sourceEquipmentGroupId} · X ${slots.routeXs[nextRow]} · Z ${slots.routeZs[nextRow]} · Space로 포트 추가·제거`,
 		);
+		requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 		scheduleRender();
 	};
 
@@ -15557,6 +15583,10 @@ export default function TileFabApp(): React.ReactElement {
 	const switchEqMembershipEndpoint = (): void => {
 		const session = portEquipmentMembershipEditSessionRef.current;
 		if (!session || session.portType !== "EQ" || session.selection.rows.length < 2) return;
+		if (!isCurrentPortEquipmentMembershipEdit(session)) {
+			clearTransientConstruction("정적 FAB가 변경되어 포트 구성 편집을 취소했습니다");
+			return;
+		}
 		const orderedRows = orderedEqRowsByTravel(session.slots, session.selection.rows);
 		const activeEndpoint = session.activeEndpoint === "upstream" ? "downstream" : "upstream";
 		const fixedAnchorRow =
@@ -15575,6 +15605,7 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(
 			`EQ-${session.sourceEquipmentGroupId} ${activeEndpoint === "upstream" ? "상류" : "하류"} 끝점을 드래그하세요`,
 		);
+		requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 		scheduleRender();
 	};
 
@@ -17441,6 +17472,8 @@ export default function TileFabApp(): React.ReactElement {
 		if (eqMembershipDragRef.current?.pointerId === event.pointerId) {
 			eqMembershipDragRef.current = null;
 			releasePointerCapture(event.pointerId);
+			if (eqMembershipFrameDeferredRef.current)
+				requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 			setStatus("EQ 끝점 조정 완료 · Enter 또는 완료 버튼으로 적용하세요");
 			scheduleRender();
 			return;
@@ -17825,6 +17858,8 @@ export default function TileFabApp(): React.ReactElement {
 	const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>): void => {
 		if (eqMembershipDragRef.current?.pointerId === event.pointerId) {
 			eqMembershipDragRef.current = null;
+			if (eqMembershipFrameDeferredRef.current)
+				requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 			setStatus("EQ 끝점 드래그를 중단했습니다 · 현재 포트 드래프트는 유지됩니다");
 		}
 		if (portRowDragRef.current?.pointerId === event.pointerId) {
@@ -18140,6 +18175,7 @@ export default function TileFabApp(): React.ReactElement {
 		stkDraftSessionRef.current = null;
 		portEquipmentMembershipEditSessionRef.current = null;
 		eqMembershipDragRef.current = null;
+		eqMembershipFrameDeferredRef.current = false;
 		portRowCandidateBufferRef.current.length = 0;
 		pendingDragCellRef.current = null;
 		closureSnapRef.current = null;
@@ -28896,8 +28932,21 @@ export default function TileFabApp(): React.ReactElement {
 	equipmentWorkspaceFrameRef.current = (): void => {
 		const canvas = canvasRef.current;
 		if (!canvas || panRef.current !== null || (portRowDragRef.current?.pointerId ?? -1) >= 0) return;
+		if (eqMembershipDragRef.current !== null) {
+			eqMembershipFrameDeferredRef.current = true;
+			return;
+		}
+		eqMembershipFrameDeferredRef.current = false;
 		let moved = false;
-		if (equipmentWorkspaceActive) {
+		const membership = portEquipmentMembershipEditSessionRef.current;
+		if (membership) {
+			if (!isCurrentPortEquipmentMembershipEdit(membership)) return;
+			moved = centerWorldPointIfObscured(
+				membership.slots.worldPositions[membership.keyboardRow * 2] as number,
+				membership.slots.worldPositions[membership.keyboardRow * 2 + 1] as number,
+				canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas),
+			);
+		} else if (equipmentWorkspaceActive) {
 			const session = guidedPortKeyboardSessionRef.current;
 			if (!session || !guidedPortKeyboardSessionCurrent(session)) return;
 			moved = centerPortKeyboardRowIfObscured(
@@ -28926,7 +28975,9 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	};
 	useEquipmentWorkspaceFraming(
-		equipmentWorkspaceActive
+		portEquipmentMembershipEditSession
+			? `membership:${portEquipmentMembershipEditSession.portType}:${portEquipmentMembershipEditSession.sourceEquipmentGroupId}`
+			: equipmentWorkspaceActive
 			? `${tool}:${guidedPortKeyboard?.phase ?? "pending"}`
 			: portEquipmentInspectorVisible ? `inspect:${selectedPortDetails?.port.id}` : null,
 		canvasRef,
