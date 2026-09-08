@@ -102,6 +102,7 @@ export function syntheticFabStarterPresentation(
 	request: SyntheticFabStarterRequest,
 ): StarterCopy & {
 	readonly bayCount: number | null;
+	readonly label: string;
 } {
 	const id = request.id;
 	const bayCount =
@@ -116,5 +117,29 @@ export function syntheticFabStarterPresentation(
 					id === "large-fab-60"
 				? request.parameters.bayCount
 				: null;
-	return { ...STARTER_COPY[id], bayCount };
+	const copy = STARTER_COPY[id];
+	return {
+		...copy,
+		bayCount,
+		label: `${copy.name}${bayCount === null ? "" : ` · ${bayCount} Bay`}`,
+	};
+}
+
+const PARAMETER_LABELS: Readonly<Record<string, string>> = {
+	"BAY LENGTH": "Bay 길이",
+	"RAIL SPACING": "레일 간격",
+	"BAY DEPTH": "Bay 깊이",
+	"BAY FRONTAGE": "Bay 전면 폭",
+	"BAY COUNT": "Bay 수",
+	"TOTAL BAYS": "전체 Bay 수",
+	"BAY PITCH": "Bay 배치 간격",
+	"BAY BANKS": "Bank 수",
+	"OUTER LOOP DEPTH": "외곽 순환 레일 깊이",
+	"LOOP COUNT": "순환 레일 수",
+	"ZONE DEPTH": "구역 깊이",
+	"PROCESS BLOCKS": "공정 블록 수",
+};
+
+export function syntheticFabStarterParameterLabel(label: string): string {
+	return PARAMETER_LABELS[label] ?? label;
 }

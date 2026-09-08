@@ -52,7 +52,10 @@ import {
 } from "./SyntheticFabStarterCertifiedArtifact";
 import { loadCertifiedSyntheticFabStarter } from "./SyntheticFabStarterCertifiedCatalog";
 import { largeFabDialogMetadata } from "./SyntheticFabStarterDialogMetadata";
-import { syntheticFabStarterPresentation } from "./SyntheticFabStarterPresentation";
+import {
+	syntheticFabStarterParameterLabel,
+	syntheticFabStarterPresentation,
+} from "./SyntheticFabStarterPresentation";
 import {
 	SYNTHETIC_FAB_STARTER_PREVIEW_CACHE_BYTES_LIMIT,
 	SyntheticFabStarterPreviewCache,
@@ -127,7 +130,7 @@ export function SyntheticFabStarterDialog({
 				: SYNTHETIC_FAB_PROJECT_CATALOG;
 	const item = syntheticFabStarterCatalogItem(request.id);
 	const presentation = syntheticFabStarterPresentation(request);
-	const previewLabel = `${presentation.name}${presentation.bayCount === null ? "" : ` · ${presentation.bayCount} Bay`}`;
+	const previewLabel = presentation.label;
 	const largeFabMetadata = useMemo(() => largeFabDialogMetadata(request), [request]);
 	const largeFabAssembly = largeFabMetadata?.assembly ?? null;
 	const productionFabAssembly = useMemo(
@@ -471,10 +474,10 @@ export function SyntheticFabStarterDialog({
 						<span>
 							<small>
 								{mode === "project"
-									? "NEW PROJECT · FACTORY STARTERS"
+									? "새 프로젝트 · 시작 구성"
 									: mode === "preset"
-										? "FAB PRESETS · CREATE OR REPEAT-PLACE"
-										: "CURRENT MAP · FAB ASSEMBLIES"}
+										? "프리셋으로 새 프로젝트 만들기 · 현재 FAB에 배치"
+										: "현재 FAB에 조립 패턴 배치"}
 							</small>
 							<strong id="tilefab-starter-title">
 								{mode === "project"
@@ -625,16 +628,25 @@ export function SyntheticFabStarterDialog({
 								<small>{presentation.category}</small>
 								<strong>{previewLabel}</strong>
 							</span>
-							<em data-testid="synthetic-fab-preview-source">
-								{previewIdle
-									? "OPENFAB VERIFIED · READY ON DEMAND"
-									: preview === undefined
-										? certifiedPreviewPending
-											? "LOADING OPENFAB ARTIFACT"
-											: "LIVE PHYSICAL VERIFICATION"
-										: certificationEvidence
-											? "OPENFAB VERIFIED · STATIC AUTHORING"
-											: "CUSTOM · LIVE VERIFIED"}
+							<em
+								data-testid="synthetic-fab-preview-source"
+								data-failed={previewFailure !== null || preview === null}
+							>
+								{previewFailure || preview === null
+									? previewFailure?.kind === "worker-error"
+										? "미리보기 실패 · 다시 시도하세요"
+										: "레일 검증 실패 · 설정을 확인하세요"
+									: previewIdle
+										? "프리셋 사양 준비 · 실행 시 레일 검증"
+										: preview === undefined
+											? certifiedPreviewPending
+												? "검증된 프리셋을 불러오는 중"
+												: "현재 설정의 레일을 검증하는 중"
+											: request.id === "blank"
+												? "빈 격자 · 레일 없음"
+												: certificationEvidence
+													? "프리셋 레일 검증 완료"
+													: "현재 설정의 레일 검증 완료"}
 							</em>
 						</div>
 						<StarterMetrics
@@ -658,7 +670,7 @@ export function SyntheticFabStarterDialog({
 						<ul className="tilefab-starter-steps" aria-label="생성 구성">
 							{previewFailure ? (
 								<li>
-									<AlertTriangle size={13} /> EXACT BUILD PLAN UNAVAILABLE
+									<AlertTriangle size={13} /> 생성할 레일을 확인할 수 없습니다
 								</li>
 							) : request.id === "paired-circulation-fab-52" ? (
 								pairedCirculationFabPresetBuildStages(request.parameters.bayCount).map(
@@ -716,10 +728,10 @@ export function SyntheticFabStarterDialog({
 								<li>
 									<Route size={13} />{" "}
 									{certifiedPreviewPending
-										? "OPENFAB ARTIFACT LOADING"
+										? "검증된 프리셋을 불러오고 있습니다"
 										: previewIdle
-											? "OPENFAB VERIFIED RAIL READY ON COMMAND"
-											: "PHYSICAL BUILD PLAN VERIFYING"}
+											? "명령을 실행하면 프리셋 레일을 검증합니다"
+											: "생성할 레일을 검증하고 있습니다"}
 								</li>
 							) : preview?.steps.length ? (
 								preview.steps.map((step) => (
@@ -730,25 +742,26 @@ export function SyntheticFabStarterDialog({
 								))
 							) : (
 								<li>
-									<Grid3X3 size={13} /> 1 m EMPTY GRID
+									<Grid3X3 size={13} /> 빈 1 m 격자
 								</li>
 							)}
 						</ul>
 					</section>
 
 					<fieldset className="tilefab-starter-config" aria-label="스타터 치수" disabled={busy}>
-						<legend>CONFIGURATION</legend>
+						<legend>크기·구성 설정</legend>
 						{item.parameters.length === 0 ? (
 							<div className="tilefab-starter-empty-config">
 								<Grid3X3 size={18} />
 								<span>
-									<strong>1 m GRID</strong>
-									<small>0 CELLS · 0 EDGES</small>
+									<strong>1 m 격자</strong>
+									<small>레일 없음</small>
 								</span>
 							</div>
 						) : (
 							item.parameters.map((descriptor) => {
 								const value = request.parameters[descriptor.key];
+								const parameterLabel = syntheticFabStarterParameterLabel(descriptor.label);
 								const effectiveMaximum =
 									request.id === "production-fab-60" && descriptor.key === "bayPitchMeters"
 										? productionFabMaximumBayPitchMeters(
@@ -763,7 +776,7 @@ export function SyntheticFabStarterDialog({
 								return (
 									<div className="tilefab-starter-parameter" key={descriptor.key}>
 										<label htmlFor={`tilefab-starter-${descriptor.key}`}>
-											<span>{descriptor.label}</span>
+											<span>{parameterLabel}</span>
 											<small>
 												{descriptor.minimum}-{effectiveMaximum} {descriptor.unit}
 											</small>
@@ -771,7 +784,7 @@ export function SyntheticFabStarterDialog({
 										<div>
 											<button
 												type="button"
-												aria-label={`${descriptor.label} 줄이기`}
+												aria-label={`${parameterLabel} 줄이기`}
 												disabled={value <= descriptor.minimum}
 												onClick={() => updateParameter(descriptor, value - descriptor.step)}
 											>
@@ -786,7 +799,7 @@ export function SyntheticFabStarterDialog({
 											<span>{descriptor.unit}</span>
 											<button
 												type="button"
-												aria-label={`${descriptor.label} 늘리기`}
+												aria-label={`${parameterLabel} 늘리기`}
 												disabled={value >= effectiveMaximum}
 												onClick={() => updateParameter(descriptor, value + descriptor.step)}
 											>
@@ -804,7 +817,7 @@ export function SyntheticFabStarterDialog({
 					{createsProject ? (
 						<div className="tilefab-starter-project-field">
 							<label htmlFor="tilefab-starter-project-name">
-								<span>{mode === "preset" ? "NEW PROJECT NAME" : "PROJECT NAME"}</span>
+								<span>{mode === "preset" ? "새 프로젝트 이름" : "프로젝트 이름"}</span>
 								<input
 									id="tilefab-starter-project-name"
 									value={projectName}
@@ -832,8 +845,8 @@ export function SyntheticFabStarterDialog({
 						<div className="tilefab-starter-placement-mode">
 							<Stamp size={17} />
 							<span>
-								<small>PLACEMENT MODE</small>
-								<strong>REPEATABLE · MULTI-PLACE</strong>
+								<small>조립 패턴 배치</small>
+								<strong>선택한 위치에 반복 배치</strong>
 							</span>
 						</div>
 					)}
@@ -888,17 +901,17 @@ export function SyntheticFabStarterDialog({
 							{createsProject ? <Factory size={16} /> : <Stamp size={16} />}
 							{busy
 								? createsProject
-									? "CREATING"
-									: "PREPARING"
+									? "생성 중"
+									: "준비 중"
 								: previewPending
 									? certifiedPreviewPending
-										? "LOADING"
-										: "VERIFYING"
+										? "불러오는 중"
+										: "검증 중"
 									: mode === "pattern"
-										? "START PLACEMENT"
+										? "배치 시작"
 										: mode === "preset"
-											? "NEW PROJECT"
-											: "CREATE PROJECT"}
+											? "새 프로젝트"
+											: "프로젝트 생성"}
 						</button>
 						{mode === "preset" ? (
 							<button
@@ -915,7 +928,7 @@ export function SyntheticFabStarterDialog({
 								onClick={place}
 							>
 								<Stamp size={16} />
-								{busy ? "PREPARING" : previewPending ? "LOADING" : "PLACE ONCE"}
+								{busy ? "준비 중" : previewPending ? "불러오는 중" : "현재 FAB에 배치"}
 							</button>
 						) : null}
 					</div>
@@ -1113,12 +1126,12 @@ function isLargeFabPresetRequest(request: SyntheticFabStarterRequest): boolean {
 
 function pairedCirculationFabPresetBuildStages(bayCount: number): readonly string[] {
 	return Object.freeze([
-		"TWO OPPOSITE-DIRECTION OUTER CIRCULATION LOOPS",
-		"TWO BALANCED OUTER-LANE REVERSAL GATEWAYS",
-		"TWO PAIRED INTERBAY PRODUCTION HALLS",
-		`4 BAY BANKS · ${bayCount} LARGE BAY SHELLS`,
-		"MIXED SINGLE-LOOP / TWIN-LOOP BAY INTERIORS",
-		`${bayCount} BAY ↔ INTERBAY + 4 HALL ↔ OUTER GATEWAYS`,
+		"서로 반대 방향인 외곽 순환 레일 2개",
+		"외곽 레일의 방향 전환 Gateway 2개",
+		"Interbay로 연결된 공정 홀 2개",
+		`Bank 4개 · 대형 Bay ${bayCount}개`,
+		"단일·이중 Process Loop를 조합한 Bay 내부",
+		`Bay ↔ Interbay 연결 ${bayCount}개 · 홀 ↔ 외곽 연결 4개`,
 	]);
 }
 
@@ -1132,13 +1145,13 @@ function requiredLargeFabAssembly(
 function largeFabPresetBuildStages(assembly: SyntheticFabAssemblyPlan): readonly string[] {
 	const { topology } = assembly;
 	return Object.freeze([
-		"FAB-WIDE OUTER CIRCULATION",
-		"ONE SHARED INNER WALL CIRCUIT",
-		"CENTRAL DUAL-LANE INTERBAY SPINE",
-		`${topology.processBlocks.length} PROCESS BLOCKS · ${topology.processBanks.length} BANKS · ${topology.rows} ROWS`,
-		`${topology.wings.length} PROCESS ROW TRUNKS · ${topology.wings.reduce((total, wing) => total + wing.bayCount, 0)} TANGENT BAYS`,
-		"CONTINUOUS WALL ↔ SPINE OUTBOUND / RETURN LANES",
-		`${topology.spineWallLinks.length} SPINE/WALL · ${topology.wallOuterLinks.length} CARDINAL OUTER GATEWAYS`,
+		"FAB 전체를 감싸는 외곽 순환 레일",
+		"공용 내부 벽면 순환 레일 1개",
+		"중앙의 두 레인 Interbay 연결 레일",
+		`공정 블록 ${topology.processBlocks.length}개 · Bank ${topology.processBanks.length}개 · ${topology.rows}행`,
+		`공정 행 본선 ${topology.wings.length}개 · 접선형 Bay ${topology.wings.reduce((total, wing) => total + wing.bayCount, 0)}개`,
+		"벽면 ↔ 중앙 본선 사이의 연속 출발·복귀 레인",
+		`중앙 본선 ↔ 벽면 연결 ${topology.spineWallLinks.length}개 · 방위별 외곽 Gateway ${topology.wallOuterLinks.length}개`,
 	]);
 }
 
@@ -1151,45 +1164,45 @@ function requiredProductionFabAssembly(
 
 function productionFabPresetBuildStages(assembly: ProductionFabAssemblyPlan): readonly string[] {
 	return Object.freeze([
-		"FAB-WIDE OUTER CIRCULATION",
-		"ONE SHARED INTERBAY SPINE",
-		`${assembly.banks.length} BAY BANK COLLECTORS`,
-		`${assembly.profile.bayCount} PRODUCTION BAY ASSEMBLIES`,
-		`${assembly.profile.bayCount * 2} INTERNAL PROCESS LOOPS`,
-		"ONE CLOSED DIRECTED PHYSICAL NETWORK",
+		"FAB 전체를 감싸는 외곽 순환 레일",
+		"공용 Interbay 연결 레일 1개",
+		`Bank 집결 레일 ${assembly.banks.length}개`,
+		`생산 Bay ${assembly.profile.bayCount}개`,
+		`내부 Process Loop ${assembly.profile.bayCount * 2}개`,
+		"하나로 연결된 닫힌 단방향 레일망",
 	]);
 }
 
 function centralSpineFabPresetBuildStages(bayCount: number): readonly string[] {
 	return Object.freeze([
-		"FAB-WIDE OUTER CIRCULATION",
-		"ONE CENTRAL INTERBAY SPINE",
-		"TWO OPPOSED BAY BANKS",
-		`${bayCount} DEEP BAY CIRCULATION ENVELOPES`,
-		`${bayCount * 2} FULL-DEPTH PARALLEL PROCESS LOOPS`,
-		"ONE CLOSED DIRECTED PHYSICAL NETWORK",
+		"FAB 전체를 감싸는 외곽 순환 레일",
+		"중앙 Interbay 연결 레일 1개",
+		"서로 마주 보는 Bank 2개",
+		`깊은 Bay 외곽 순환 레일 ${bayCount}개`,
+		`전체 깊이의 평행 Process Loop ${bayCount * 2}개`,
+		"하나로 연결된 닫힌 단방향 레일망",
 	]);
 }
 
 function parallelHallFabPresetBuildStages(bayCount: number): readonly string[] {
 	return Object.freeze([
-		"FAB-WIDE OUTER CIRCULATION",
-		"ONE CENTRAL INTERBAY SPINE",
-		"TWO SEPARATE PRODUCTION BANK COLLECTORS",
-		"FOUR EXPLICIT OUTER / INTERBAY GATEWAYS",
-		`${bayCount} LONG PRODUCTION BAYS · ${bayCount * 2} FULL-DEPTH PROCESS LOOPS`,
-		"ONE CLOSED DIRECTED PHYSICAL NETWORK",
+		"FAB 전체를 감싸는 외곽 순환 레일",
+		"중앙 Interbay 연결 레일 1개",
+		"분리된 생산 Bank 집결 레일 2개",
+		"외곽 ↔ Interbay Gateway 4개",
+		`긴 생산 Bay ${bayCount}개 · 전체 깊이의 Process Loop ${bayCount * 2}개`,
+		"하나로 연결된 닫힌 단방향 레일망",
 	]);
 }
 
 function fullFabPresetBuildStages(bayCount: number): readonly string[] {
 	return Object.freeze([
-		"FAB-WIDE OUTER CIRCULATION",
-		"TWO PROCESS HALL INTERBAY LOOPS",
-		"FOUR OPPOSED BAY BANK COLLECTORS",
-		"EIGHT EXPLICIT OUTER / INTERBAY GATEWAYS",
-		`${bayCount} PRODUCTION BAYS · ${bayCount * 2} FULL-DEPTH PROCESS LOOPS`,
-		"ONE CLOSED DIRECTED PHYSICAL NETWORK",
+		"FAB 전체를 감싸는 외곽 순환 레일",
+		"공정 홀의 Interbay 순환 레일 2개",
+		"마주 보는 Bank 집결 레일 4개",
+		"외곽 ↔ Interbay Gateway 8개",
+		`생산 Bay ${bayCount}개 · 전체 깊이의 Process Loop ${bayCount * 2}개`,
+		"하나로 연결된 닫힌 단방향 레일망",
 	]);
 }
 
@@ -1241,7 +1254,9 @@ function StarterRailPreview({
 				<AlertTriangle size={19} />
 				<span>
 					<strong>
-						{failure.kind === "worker-error" ? "PREVIEW WORKER ERROR" : "INVALID CONFIGURATION"}
+						{failure.kind === "worker-error"
+							? "미리보기를 불러오지 못했습니다"
+							: "설정을 확인하세요"}
 					</strong>
 					<small>{failure.message}</small>
 				</span>
@@ -1252,7 +1267,7 @@ function StarterRailPreview({
 						onClick={onRetry}
 						aria-label="FAB 미리보기 다시 시도"
 					>
-						<RefreshCw size={14} /> RETRY
+						<RefreshCw size={14} /> 다시 시도
 					</button>
 				) : null}
 			</div>
@@ -1261,7 +1276,7 @@ function StarterRailPreview({
 	if (!preview) {
 		return (
 			<div className="tilefab-starter-preview-error" role="status">
-				<X size={18} /> INVALID CONFIGURATION
+				<X size={18} /> 설정을 확인하세요
 			</div>
 		);
 	}
@@ -1290,7 +1305,7 @@ function StarterRailPreview({
 			/>
 		) : (
 			<div className="tilefab-starter-preview-error" role="alert">
-				<AlertTriangle size={18} /> EXACT PHYSICAL PREVIEW UNAVAILABLE
+				<AlertTriangle size={18} /> 실제 레일 미리보기를 확인할 수 없습니다
 			</div>
 		);
 	}
@@ -1510,8 +1525,8 @@ function ExactStarterRailPreview({
 					<Maximize2 size={16} />
 				</button>
 			</div>
-			<span className="tilefab-starter-schematic-status" data-verified="true" role="status">
-				<Check size={13} /> EXACT GEOMETRY · SAMPLED FLOW
+			<span className="tilefab-starter-schematic-status" data-schematic="true" role="status">
+				<Check size={13} /> 실제 레일 형상 · 흐름 표시는 일부 구간
 			</span>
 		</div>
 	);
@@ -1723,12 +1738,12 @@ function StarterSchematicPreview({
 			) : isLargeFabPresetRequest(request) ? (
 				<span
 					className="tilefab-starter-schematic-status"
-					data-verified="true"
+					data-schematic="true"
 					role="status"
 					aria-live="polite"
 					aria-atomic="true"
 				>
-					<Check size={13} /> OPENFAB VERIFIED · RAIL TOPOLOGY · NOT TO SCALE
+					<Route size={13} /> 연결 구성 도식 · 실제 크기·비율과 다름
 				</span>
 			) : null}
 		</div>
@@ -1780,7 +1795,8 @@ function StarterSchematicStatus({
 			aria-live="polite"
 			aria-atomic="true"
 		>
-			<Route size={13} /> {certified ? "LOADING OPENFAB ARTIFACT" : "VERIFYING PHYSICAL RAIL"}
+			<Route size={13} />{" "}
+			{certified ? "검증된 프리셋을 불러오는 중" : "현재 설정의 레일을 검증하는 중"}
 		</span>
 	);
 }
@@ -1790,18 +1806,18 @@ function StarterVerificationScopes(): React.ReactElement {
 		<ul
 			className="tilefab-starter-verification-scopes"
 			data-testid="synthetic-fab-verification-scopes"
-			aria-label="OpenFab verified static authoring scopes"
+			aria-label="정적 FAB 검증 범위"
 		>
 			<li data-state="verified">
-				<Check size={12} /> RAIL GEOMETRY · VERIFIED
+				<Check size={12} /> 레일 형상 · 검증 완료
 			</li>
 			<li data-state="verified">
-				<Check size={12} /> DIRECTED TOPOLOGY · VERIFIED
+				<Check size={12} /> 단방향 연결 · 검증 완료
 			</li>
 			<li data-state="verified">
-				<Check size={12} /> ORGANIZATION · VERIFIED
+				<Check size={12} /> 조직 구조 · 검증 완료
 			</li>
-			<li data-state="not-checked">PORT SERVICE · NOT CHECKED</li>
+			<li data-state="not-checked">Port 서비스 · 미검사</li>
 		</ul>
 	);
 }
@@ -1826,14 +1842,14 @@ function StarterMetrics({
 	return (
 		<dl className="tilefab-starter-metrics">
 			<div className="tilefab-starter-scale-metric">
-				<dt>SCALE</dt>
+				<dt>생산 구성</dt>
 				<dd>
 					{failed ? (
-						"UNAVAILABLE"
+						"확인 불가"
 					) : idle ? (
-						"ON DEMAND"
+						"실행 시 계산"
 					) : pending ? (
-						"VERIFYING"
+						"검증 중"
 					) : summary?.zoneCount ? (
 						requestId === "bay-assembly" ? (
 							<>
@@ -1854,48 +1870,48 @@ function StarterMetrics({
 							</>
 						)
 					) : (
-						"EMPTY"
+						"빈 구성"
 					)}
 				</dd>
 			</div>
 			<div>
-				<dt>FOOTPRINT</dt>
+				<dt>FAB 크기</dt>
 				<dd>
 					{failed
-						? "UNAVAILABLE"
+						? "확인 불가"
 						: idle
-							? "PREPARE TO MEASURE"
+							? "실행 시 계산"
 							: pending
-								? "VERIFYING"
+								? "검증 중"
 								: `${width} × ${height} m`}
 				</dd>
 			</div>
 			<div>
-				<dt>RAIL</dt>
+				<dt>레일 길이</dt>
 				<dd>
 					{failed
-						? "UNAVAILABLE"
+						? "확인 불가"
 						: idle
-							? "READY ON COMMAND"
+							? "실행 시 계산"
 							: pending
-								? "VERIFYING"
+								? "검증 중"
 								: `${summary ? Math.round(summary.totalLengthMeters) : 0} m`}
 				</dd>
 			</div>
 			<div>
-				<dt>NETWORK</dt>
+				<dt>단방향 연결</dt>
 				<dd>
 					{failed
-						? "UNAVAILABLE"
+						? "확인 불가"
 						: idle
-							? "OPENFAB VERIFIED INPUT"
+							? "실행 시 검증"
 							: pending
-								? "VERIFYING"
+								? "검증 중"
 								: summary?.strongComponents === 1
-									? "1 CONNECTED"
+									? "하나로 연결됨"
 									: summary?.strongComponents
-										? `${summary.strongComponents} SEPARATE`
-										: "EMPTY"}
+										? `${summary.strongComponents}개 연결 영역`
+										: "빈 구성"}
 				</dd>
 			</div>
 		</dl>

@@ -2486,8 +2486,9 @@ try {
 		"restored whole-flow project after New Fab dirty state",
 	);
 	await exerciseActivityDensityFitStability(desktopPage);
+	const presetRecovery = await exerciseSyntheticFabPresetRecovery(browser);
 	const maximumLargeFab = await createMaximumLargeFabPreset(desktopPage);
-	recordStep("large-fab-100-activation", maximumLargeFab);
+	recordStep("large-fab-100-activation", { ...maximumLargeFab, presetRecovery });
 	await reloadProjectFromFile(desktopPage, secondSavedPath);
 	assertBoundIdentity(
 		await readMetrics(desktopPage),
@@ -21212,9 +21213,24 @@ async function exerciseEditorCommandHelp(page, baseline) {
 		throw new Error("command help trigger does not expose F1 and ? through aria-keyshortcuts");
 	}
 
+	await page.evaluate(() => {
+		globalThis.__openFabHelpInitialFocus = null;
+		const observer = new MutationObserver(() => {
+			const help = document.querySelector('[data-testid="editor-command-help"]');
+			if (!help) return;
+			globalThis.__openFabHelpInitialFocus = help.contains(document.activeElement);
+			observer.disconnect();
+		});
+		observer.observe(document.body, { childList: true, subtree: true });
+	});
 	await canvas.focus();
 	await page.keyboard.press("F1");
 	await dialog.waitFor({ state: "visible", timeout: 10_000 });
+	assertEqual(
+		await page.evaluate(() => globalThis.__openFabHelpInitialFocus),
+		true,
+		"Help contains focus when its mounted DOM becomes observable, before the next animation frame",
+	);
 	for (const selector of [".tilefab-topbar", ".tilefab-workspace", ".tilefab-statusbar"]) {
 		const background = page.locator(selector);
 		assertEqual(
@@ -26011,7 +26027,7 @@ async function openSyntheticFabPreset(page) {
 	assertEqual(metrics.previewSource, "catalog", "production FAB catalog preview source");
 	assertEqual(
 		(await page.getByTestId("synthetic-fab-preview-source").innerText()).trim(),
-		"OPENFAB VERIFIED · READY ON DEMAND",
+		"프리셋 사양 준비 · 실행 시 레일 검증",
 		"production FAB catalog uses scoped OpenFab verification copy",
 	);
 	assertEqual(
@@ -26100,7 +26116,7 @@ async function openPreparedSyntheticFabPreset(page) {
 	);
 	assertEqual(
 		(await page.getByTestId("synthetic-fab-preview-source").innerText()).trim(),
-		"OPENFAB VERIFIED · STATIC AUTHORING",
+		"프리셋 레일 검증 완료",
 		"cached production FAB uses scoped OpenFab verification copy",
 	);
 	const verificationScopes = page.getByTestId("synthetic-fab-verification-scopes");
@@ -26110,12 +26126,16 @@ async function openPreparedSyntheticFabPreset(page) {
 		.trim()
 		.toUpperCase();
 	for (const scope of [
-		"RAIL GEOMETRY · VERIFIED",
-		"DIRECTED TOPOLOGY · VERIFIED",
-		"ORGANIZATION · VERIFIED",
-		"PORT SERVICE · NOT CHECKED",
+		"레일 형상 · 검증 완료",
+		"단방향 연결 · 검증 완료",
+		"조직 구조 · 검증 완료",
+		"Port 서비스 · 미검사",
 	]) {
-		assertIncludes(verificationScopeText, scope, `cached production FAB scope ${scope}`);
+		assertIncludes(
+			verificationScopeText,
+			scope.toUpperCase(),
+			`cached production FAB scope ${scope}`,
+		);
 	}
 	const visibleDialogText = await dialog.evaluate((element) => element.innerText);
 	if (/\bCERTIFIED\b/.test(visibleDialogText)) {
@@ -26458,6 +26478,131 @@ async function startSyntheticFabPresetAction(page, testId) {
 	return Object.freeze({ initialState, transitionState, transitionMilliseconds });
 }
 
+async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
+	const context = await activeBrowser.newContext({ viewport: { width: 390, height: 720 } });
+	try {
+		const page = await context.newPage();
+		page.on("pageerror", (error) => result.pageErrors.push(`[preset-recovery] ${error.message}`));
+		page.on("console", (message) => {
+			if (message.type() === "error")
+				result.consoleErrors.push(`[preset-recovery] ${message.text()}`);
+		});
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		await page
+			.getByTestId("openfab-start-dialog")
+			.getByRole("button", { name: /BLANK CANVAS/ })
+			.click();
+		const baseline = await readMetrics(page);
+		await page.getByRole("button", { name: "FAB 프리셋", exact: true }).click();
+		const dialog = page.getByTestId("synthetic-fab-starter-dialog");
+		await dialog.waitFor({ state: "visible" });
+		await page.getByTestId("synthetic-fab-starter-parallel-hall-fab-12").click();
+		const bayCount = page.getByTestId("synthetic-fab-parameter-bayCount");
+		await bayCount.fill("14");
+		await bayCount.press("Enter");
+		const projectName = page.getByTestId("synthetic-fab-project-name");
+		await projectName.fill("프리셋 복구 검토");
+		let releaseRoute;
+		const intercepted = new Promise((resolve) => {
+			releaseRoute = resolve;
+		});
+		await page.route("**/syntheticFabStarterWorker-*.js", (route) => releaseRoute(route));
+		const place = page.getByTestId("place-synthetic-fab-preset");
+		const create = page.getByTestId("create-project-from-synthetic-fab-preset");
+		const requested = page.waitForRequest(/syntheticFabStarterWorker-.*\.js/, {
+			timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS,
+		});
+		await place.click();
+		await requested;
+		const route = await intercepted;
+		const source = page.getByTestId("synthetic-fab-preview-source");
+		assertIncludes(
+			await source.innerText(),
+			"검증하는 중",
+			"Custom preset reports pending verification",
+		);
+		assertEqual(await place.isDisabled(), true, "Pending preset cannot place");
+		assertEqual(await create.isDisabled(), true, "Pending preset cannot create");
+		await route.fulfill({
+			status: 200,
+			contentType: "text/javascript",
+			body: 'throw new Error("OpenFab acceptance injected Worker load failure");',
+		});
+		const error = dialog.locator(".tilefab-starter-preview-error");
+		await error.waitFor({
+			state: "visible",
+			timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS,
+		});
+		assertEqual(
+			await source.getAttribute("data-failed"),
+			"true",
+			"Failed preview cannot claim verification",
+		);
+		assertIncludes(await source.innerText(), "실패", "Failed preview badge explains failure");
+		assertEqual(
+			JSON.stringify(await dialog.locator(".tilefab-starter-metrics dd").allTextContents()),
+			JSON.stringify(["확인 불가", "확인 불가", "확인 불가", "확인 불가"]),
+			"Failed metrics do not invent measurements",
+		);
+		assertEqual(
+			await projectName.inputValue(),
+			"프리셋 복구 검토",
+			"Preview failure preserves custom name",
+		);
+		assertEqual(await bayCount.inputValue(), "14", "Preview failure preserves custom count");
+		assertEqual(await place.isDisabled(), true, "Failed preset cannot place");
+		assertEqual(await create.isDisabled(), true, "Failed preset cannot create");
+		assertProjectUnchanged(await readMetrics(page), baseline, "Failed preset preserves document");
+		const retry = page.getByRole("button", { name: "FAB 미리보기 다시 시도", exact: true });
+		await retry.scrollIntoViewIfNeeded();
+		assertAtLeast((await retry.boundingBox()).height, 44, "Preset retry target height");
+		await assertLocatorOwnsHitArea(retry, "Preset retry");
+		await page.screenshot({ path: path.join(artifactRoot, "preset-worker-failure-390.png") });
+		await page.unroute("**/syntheticFabStarterWorker-*.js");
+		await retry.click();
+		await dialog.waitFor({
+			state: "hidden",
+			timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS,
+		});
+		await page.waitForFunction(
+			() =>
+				document.querySelector('[data-testid="tilefab-app"]')?.dataset.organizationBundleActive ===
+				"true",
+		);
+		assertEqual(
+			await page.getByTestId("rail-buildbar").getAttribute("data-organization-bundle"),
+			"평행 공정 홀 · 14 Bay",
+			"Retried custom preset placement label follows configured count",
+		);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			baseline,
+			"Retried preset only prepares placement",
+		);
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(
+			() =>
+				document.querySelector('[data-testid="tilefab-app"]')?.dataset.organizationBundleActive ===
+				"false",
+		);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			baseline,
+			"Retried preset cancellation preserves document",
+		);
+		return {
+			pendingGated: true,
+			failedMetricsUnavailable: true,
+			inputsPreserved: true,
+			retryPreparedPlacement: true,
+			cancellationPreservedSource: true,
+		};
+	} finally {
+		await context.close();
+	}
+}
+
 async function createMaximumLargeFabPreset(page) {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.getByRole("button", { name: "FAB 프리셋", exact: true }).click();
@@ -26500,6 +26645,54 @@ async function createMaximumLargeFabPreset(page) {
 			0,
 			`Preset dialog overflow at ${viewport.width}px`,
 		);
+		for (const presetId of [
+			"paired-circulation-fab-52",
+			"full-fab-52",
+			"parallel-hall-fab-12",
+			"central-spine-fab-24",
+			"production-fab-60",
+		]) {
+			await page.getByTestId(`synthetic-fab-starter-${presetId}`).click();
+			for (const control of await dialog
+				.locator(
+					".tilefab-starter-parameter button, .tilefab-starter-parameter input, footer button, footer input",
+				)
+				.all()) {
+				await control.scrollIntoViewIfNeeded();
+				const box = await control.boundingBox();
+				assertAtLeast(box?.height ?? 0, 44, `${presetId} control height at ${viewport.width}px`);
+				if (await control.evaluate((e) => e.tagName === "BUTTON")) {
+					assertAtLeast(box?.width ?? 0, 44, `${presetId} button width at ${viewport.width}px`);
+				}
+				await assertLocatorOwnsHitArea(control, `${presetId} control at ${viewport.width}px`);
+				assertEqual(
+					await control.evaluate((e) => e.scrollWidth > e.clientWidth + 1),
+					false,
+					`${presetId} control text fits`,
+				);
+			}
+			const nameLabel = dialog.locator(".tilefab-starter-project-field > label > span");
+			assertAtLeast(
+				(await nameLabel.boundingBox())?.height ?? 0,
+				16,
+				"Preset name keeps a visible label",
+			);
+			const metrics = dialog.locator(".tilefab-starter-metrics");
+			await metrics.scrollIntoViewIfNeeded();
+			assertEqual(
+				await metrics
+					.locator("dd")
+					.evaluateAll((nodes) =>
+						nodes.every(
+							(e) =>
+								getComputedStyle(e).textOverflow !== "ellipsis" &&
+								e.scrollWidth <= e.clientWidth + 1,
+						),
+					),
+				true,
+				`${presetId} actual metrics remain readable at ${viewport.width}px`,
+			);
+		}
 		await page.screenshot({ path: path.join(artifactRoot, `preset-cards-${viewport.width}.png`) });
 	}
 	await page.setViewportSize({ width: 1440, height: 900 });
@@ -26926,7 +27119,7 @@ async function exerciseStaticFabArrangement(page, baseline) {
 	);
 	await page.getByTestId("synthetic-fab-placement-blocked").waitFor({ state: "visible" });
 	assertEqual(
-		await page.getByLabel("NEW PROJECT NAME", { exact: true }).count(),
+		await page.getByLabel("새 프로젝트 이름", { exact: true }).count(),
 		1,
 		"repeat-placement warning does not alter the New Project input label",
 	);

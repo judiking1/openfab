@@ -201,7 +201,6 @@ import {
 	defaultSyntheticFabStarterProjectName,
 	defaultSyntheticFabStarterRequest,
 	type SyntheticFabStarterRequest,
-	syntheticFabStarterCatalogItem,
 } from "../compile/SyntheticFabStarter";
 import type { PreparedSyntheticFabStarter } from "../compile/SyntheticFabStarterPreview";
 import {
@@ -1092,6 +1091,7 @@ import {
 	type SyntheticFabStarterCertificationEvidence,
 } from "./SyntheticFabStarterCertifiedArtifact";
 import { SyntheticFabStarterDialog } from "./SyntheticFabStarterDialog";
+import { syntheticFabStarterPresentation } from "./SyntheticFabStarterPresentation";
 import { acquireVerifiedSyntheticFabStarter } from "./SyntheticFabStarterVerificationCache";
 import { UserBlueprintLibraryRestoreDialog } from "./UserBlueprintLibraryRestoreDialog";
 import {
@@ -31486,7 +31486,7 @@ export default function TileFabApp(): React.ReactElement {
 							activateOrganizationBundlePlacement(
 								prepared.placementBundle,
 								"fab-preset",
-								syntheticFabStarterCatalogItem(starter.id).label,
+								syntheticFabStarterPresentation(starter).label,
 							);
 						}}
 					/>

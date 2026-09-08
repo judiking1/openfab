@@ -13,7 +13,7 @@ import {
 	Warehouse,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
 	EDITOR_COMMAND_REGISTRY,
@@ -92,12 +92,14 @@ export function EditorCommandHelpDialog({
 		onClose();
 	};
 
+	useLayoutEffect(() => {
+		if (!open) return;
+		if (showCommandCatalog) searchRef.current?.focus();
+		else dialogRef.current?.focus();
+	}, [open, showCommandCatalog]);
+
 	useEffect(() => {
 		if (!open) return;
-		const frame = requestAnimationFrame(() => {
-			if (showCommandCatalog) searchRef.current?.focus();
-			else dialogRef.current?.focus();
-		});
 		const closeOnEscape = (event: KeyboardEvent): void => {
 			if (event.key !== "Escape") return;
 			event.preventDefault();
@@ -108,10 +110,9 @@ export function EditorCommandHelpDialog({
 		};
 		document.addEventListener("keydown", closeOnEscape, { capture: true });
 		return () => {
-			cancelAnimationFrame(frame);
 			document.removeEventListener("keydown", closeOnEscape, { capture: true });
 		};
-	}, [onClose, open, showCommandCatalog]);
+	}, [onClose, open]);
 
 	useEffect(() => {
 		if (!open || !taskGuidanceAvailable) return;

@@ -18,7 +18,7 @@
 	display: grid;
 	width: min(1120px, calc(100vw - 32px));
 	height: min(760px, calc(100dvh - 32px));
-	grid-template-rows: 64px minmax(0, 1fr) 76px;
+	grid-template-rows: auto minmax(0, 1fr) auto;
 	overflow: hidden;
 	border: 1px solid #405053;
 	border-radius: 6px;
@@ -43,6 +43,8 @@
 	padding: 0 18px;
 	border-bottom: 1px solid #2d393b;
 	background: #111819;
+	min-height: 76px;
+	padding-block: 10px;
 }
 
 .tilefab-starter-dialog > header > div {
@@ -75,8 +77,9 @@
 
 .tilefab-starter-dialog > header small {
 	color: #7f9294;
-	font-size: 10px;
+	font-size: 12px;
 	font-weight: 720;
+	line-height: 1.4;
 }
 
 .tilefab-starter-dialog > header strong {
@@ -94,6 +97,7 @@
 	color: #95a5a7;
 	background: transparent;
 	cursor: pointer;
+	flex: 0 0 44px;
 }
 
 .tilefab-starter-dialog > header > button:hover {
@@ -372,7 +376,7 @@
 	color: #73cdd2;
 }
 
-.tilefab-starter-schematic-status[data-verified="true"] {
+.tilefab-starter-schematic-status[data-schematic="true"] {
 	border-color: #347a70;
 	color: #a9e9d9;
 	background: rgb(12 35 31 / 94%);
@@ -630,7 +634,7 @@
 
 .tilefab-starter-preview-error > button {
 	display: inline-flex;
-	min-height: 34px;
+	min-height: 44px;
 	align-items: center;
 	justify-content: center;
 	gap: 6px;
@@ -655,15 +659,18 @@
 
 .tilefab-starter-preview-title {
 	display: flex;
-	align-items: end;
+	align-items: start;
 	justify-content: space-between;
 	gap: 12px;
 	padding: 14px 2px 10px;
+	flex-wrap: wrap;
 }
 
 .tilefab-starter-preview-title > span {
 	display: grid;
 	gap: 2px;
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 
 .tilefab-starter-preview-title small {
@@ -682,15 +689,24 @@
 	border: 1px solid #3b5f53;
 	border-radius: 3px;
 	color: #7bd7ae;
-	font-size: 11px;
+	font-size: 12px;
 	font-style: normal;
 	font-weight: 760;
 	background: #10221b;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	line-height: 1.5;
+}
+
+.tilefab-starter-preview-title em[data-failed="true"] {
+	color: #f2b5a5;
+	border-color: #704b40;
+	background: #2d1c17;
 }
 
 .tilefab-starter-metrics {
 	display: grid;
-	grid-template-columns: repeat(4, minmax(0, 1fr));
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	margin: 0;
 	border-block: 1px solid #263436;
 }
@@ -703,24 +719,31 @@
 	border-right: 1px solid #263436;
 }
 
-.tilefab-starter-metrics > div:last-child {
+.tilefab-starter-metrics > div:nth-child(even) {
 	border-right: 0;
+}
+
+.tilefab-starter-metrics > div:nth-child(-n + 2) {
+	border-bottom: 1px solid #263436;
 }
 
 .tilefab-starter-metrics dt {
 	color: #728588;
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 720;
+	line-height: 1.5;
 }
 
 .tilefab-starter-metrics dd {
 	margin: 0;
-	overflow: hidden;
+	overflow: visible;
 	color: #d9e6e7;
-	font-size: 13px;
+	font-size: 14px;
 	font-weight: 740;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	text-overflow: clip;
+	white-space: normal;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
 }
 
 .tilefab-starter-scale-metric dd {
@@ -803,8 +826,9 @@
 	margin-bottom: 13px;
 	padding: 0;
 	color: #819497;
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 760;
+	line-height: 1.5;
 }
 
 .tilefab-starter-parameter {
@@ -819,22 +843,24 @@
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
+	flex-wrap: wrap;
 }
 
 .tilefab-starter-parameter > label span {
-	font-size: 11px;
+	font-size: 14px;
 	font-weight: 740;
 }
 
 .tilefab-starter-parameter > label small {
 	color: #687b7d;
-	font-size: 11px;
+	font-size: 12px;
+	line-height: 1.5;
 }
 
 .tilefab-starter-parameter > div {
 	display: grid;
-	height: 38px;
-	grid-template-columns: 38px minmax(0, 1fr) 34px 38px;
+	height: 46px;
+	grid-template-columns: 44px minmax(0, 1fr) 28px 44px;
 	align-items: center;
 	border: 1px solid #334245;
 	border-radius: 4px;
@@ -843,8 +869,8 @@
 
 .tilefab-starter-parameter button {
 	display: grid;
-	width: 38px;
-	height: 36px;
+	width: 44px;
+	height: 44px;
 	place-items: center;
 	border: 0;
 	color: #a9bbbd;
@@ -865,7 +891,7 @@
 .tilefab-starter-parameter input {
 	width: 100%;
 	min-width: 0;
-	height: 36px;
+	height: 44px;
 	padding: 0 4px;
 	border: 0;
 	color: #eef7f7;
@@ -934,6 +960,8 @@
 	display: grid;
 	width: min(410px, 48%);
 	gap: 4px;
+	flex: 1 1 auto;
+	min-width: 0;
 }
 
 .tilefab-starter-project-field > label {
@@ -943,19 +971,20 @@
 
 .tilefab-starter-project-field > label span {
 	color: #7e9193;
-	font-size: 9px;
+	font-size: 12px;
 	font-weight: 760;
+	line-height: 1.5;
 }
 
 .tilefab-starter-dialog > footer input {
 	width: 100%;
-	height: 34px;
+	height: 44px;
 	padding: 0 10px;
 	border: 1px solid #354548;
 	border-radius: 3px;
 	color: #e3eded;
 	font: inherit;
-	font-size: 12px;
+	font-size: 14px;
 	background: #0b1011;
 }
 
@@ -964,13 +993,15 @@
 	align-items: center;
 	gap: 5px;
 	color: #d9b969;
-	font-size: 9px;
+	font-size: 12px;
 	font-weight: 700;
+	line-height: 1.5;
 }
 
 .tilefab-starter-actions {
 	display: flex;
 	gap: 8px;
+	flex: 0 0 auto;
 }
 
 .tilefab-starter-placement-mode {
@@ -1008,10 +1039,13 @@
 	border-radius: 4px;
 	color: #a9b9bb;
 	font: inherit;
-	font-size: 10px;
+	font-size: 13px;
 	font-weight: 760;
 	background: #141c1e;
 	cursor: pointer;
+	min-width: 64px;
+	flex-shrink: 0;
+	white-space: nowrap;
 }
 
 .tilefab-starter-dialog > footer button:hover:not(:disabled) {
@@ -1020,7 +1054,7 @@
 }
 
 .tilefab-starter-dialog > footer .tilefab-starter-create {
-	min-width: 170px;
+	min-width: 148px;
 	border-color: #4d897e;
 	color: #d8fff1;
 	background: #193a34;
@@ -1033,59 +1067,51 @@
 
 @media (max-width: 900px) {
 	.tilefab-starter-dialog {
-		grid-template-rows: 60px minmax(0, 1fr) 76px;
+		grid-template-rows: auto minmax(0, 1fr) auto;
 	}
-
 	.tilefab-starter-workspace {
 		grid-template-columns: 260px minmax(0, 1fr);
 		grid-template-rows: minmax(0, 1fr) auto;
 	}
-
 	.tilefab-starter-list > button {
 		min-height: 112px;
 		grid-template-columns: 48px minmax(0, 1fr) 14px;
 		gap: 7px;
 	}
-
 	.tilefab-starter-list-miniature {
 		width: 48px;
 		height: 52px;
 	}
-
 	.tilefab-starter-steps {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
-
 	.tilefab-starter-verification-scopes {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
-
 	.tilefab-starter-verification-scopes li:nth-child(2) {
 		border-right: 0;
 	}
-
 	.tilefab-starter-verification-scopes li:nth-child(-n + 2) {
 		border-bottom: 1px solid #263436;
 	}
-
 	.tilefab-starter-config {
 		display: grid;
 		grid-column: 1 / -1;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px;
 		padding: 12px;
 		border-top: 1px solid #263234;
 		border-left: 0;
 	}
-
 	.tilefab-starter-config legend {
 		position: absolute;
 		width: 1px;
 		height: 1px;
 		overflow: hidden;
 		clip: rect(0 0 0 0);
+		font-size: 12px;
+		line-height: 1.5;
 	}
-
 	.tilefab-starter-parameter {
 		padding: 0;
 		border-top: 0;
@@ -1096,33 +1122,28 @@
 	.tilefab-starter-backdrop {
 		padding: 0;
 	}
-
 	.tilefab-starter-dialog {
 		width: 100vw;
 		height: 100dvh;
-		grid-template-rows: 58px minmax(0, 1fr) 112px;
+		grid-template-rows: auto minmax(0, 1fr) auto;
 		border: 0;
 		border-radius: 0;
 	}
-
 	.tilefab-starter-dialog > header {
 		padding: 0 12px;
 	}
-
 	.tilefab-starter-dialog > header small {
-		font-size: 10px;
+		font-size: 12px;
+		line-height: 1.4;
 	}
-
 	.tilefab-starter-dialog > header strong {
 		font-size: 15px;
 	}
-
 	.tilefab-starter-workspace {
 		display: flex;
 		flex-direction: column;
 		overflow-y: auto;
 	}
-
 	.tilefab-starter-list {
 		flex-shrink: 0;
 		order: 1;
@@ -1134,19 +1155,16 @@
 		scroll-padding-inline: 9px;
 		scroll-snap-type: x mandatory;
 	}
-
 	.tilefab-starter-list > button {
 		flex: 0 0 276px;
 		min-height: 112px;
 		grid-template-columns: 48px minmax(0, 1fr) 16px;
 		scroll-snap-align: start;
 	}
-
 	.tilefab-starter-list-miniature {
 		width: 48px;
 		height: 48px;
 	}
-
 	.tilefab-starter-preview {
 		flex-shrink: 0;
 		order: 3;
@@ -1154,27 +1172,26 @@
 		padding: 10px;
 		overflow: visible;
 	}
-
 	.tilefab-starter-preview-stage {
 		min-height: 210px;
 	}
-
 	.tilefab-starter-steps {
 		grid-template-columns: minmax(0, 1fr);
 	}
-
 	.tilefab-starter-preview-title strong {
 		font-size: 15px;
 	}
-
 	.tilefab-starter-metrics > div {
-		padding: 8px 5px;
+		padding: 10px;
 	}
-
 	.tilefab-starter-metrics dd {
-		font-size: 11px;
+		font-size: 14px;
+		overflow: visible;
+		line-height: 1.5;
+		text-overflow: clip;
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
-
 	.tilefab-starter-config {
 		display: grid;
 		flex-shrink: 0;
@@ -1183,7 +1200,6 @@
 		padding: 12px 10px 18px;
 		border-top: 1px solid #263234;
 	}
-
 	.tilefab-starter-config legend {
 		position: static;
 		width: auto;
@@ -1192,16 +1208,15 @@
 		margin: 0;
 		overflow: visible;
 		clip: auto;
-		font-size: 11px;
+		font-size: 12px;
+		line-height: 1.5;
 	}
-
 	.tilefab-starter-operation-error {
 		top: 66px;
 		right: 10px;
 		width: calc(100% - 20px);
 		max-height: min(220px, calc(100% - 82px));
 	}
-
 	.tilefab-starter-preview-error {
 		grid-auto-flow: row;
 		justify-items: center;
@@ -1209,23 +1224,20 @@
 		padding: 18px;
 		text-align: center;
 	}
-
 	.tilefab-starter-preview-error > span {
 		max-width: 100%;
 	}
-
 	.tilefab-starter-preview-error > button {
 		width: min(220px, 100%);
 	}
-
 	.tilefab-starter-parameter > div {
-		grid-template-columns: 34px minmax(0, 1fr) 28px 34px;
+		grid-template-columns: 44px minmax(0, 1fr) 28px 44px;
+		height: 46px;
 	}
-
 	.tilefab-starter-parameter button {
-		width: 34px;
+		width: 44px;
+		height: 44px;
 	}
-
 	.tilefab-starter-dialog > footer {
 		display: grid;
 		width: 100%;
@@ -1235,47 +1247,32 @@
 		align-items: stretch;
 		justify-content: stretch;
 	}
-
 	.tilefab-starter-project-field {
 		width: 100%;
 	}
-
-	.tilefab-starter-project-field > label span {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip: rect(0 0 0 0);
-	}
-
 	.tilefab-starter-actions {
 		display: grid;
 		width: 100%;
-		grid-template-columns: 64px minmax(0, 0.85fr) minmax(0, 1.35fr);
+		grid-template-columns: 76px minmax(0, 1fr) minmax(0, 1.3fr);
 		gap: 8px;
 	}
-
 	.tilefab-starter-actions > button {
 		min-width: 0;
-		padding-inline: 8px;
+		padding-inline: 6px;
 		white-space: nowrap;
 	}
-
 	.tilefab-starter-placement-mode {
 		display: none;
 	}
-
 	.tilefab-starter-dialog > footer .tilefab-starter-create {
 		min-width: 0;
 	}
-
 	.tilefab-starter-list > button small,
 	.tilefab-starter-parameter > label small,
 	.tilefab-starter-preview-title small {
-		font-size: 10px;
+		font-size: 12px;
 	}
-
 	.tilefab-starter-dialog > footer button {
-		font-size: 11px;
+		font-size: 13px;
 	}
 }
