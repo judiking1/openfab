@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const artifactRoot = path.join(root, "artifacts", "openfab-project-save-cancellation");
+const artifactRoot = path.resolve(
+	process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR ??
+		path.join(root, "artifacts", "openfab-project-save-cancellation"),
+);
 const port = Number(process.env.OPENFAB_PROJECT_SAVE_CANCELLATION_PORT ?? 5202);
 const host = "127.0.0.1";
 const baseUrl = `http://${host}:${port}`;

@@ -134,8 +134,14 @@ export function deriveEditorHelpContext(input: EditorHelpContextInput): EditorHe
 				"1 · 선택",
 				"클릭은 하나를 선택하고, ⌘/Ctrl+클릭은 추가·제거합니다. Shift+클릭은 연속 선택입니다.",
 			],
-			["2 · 범위", "DIRECT는 선택한 조직 자체, EFFECTIVE는 그 아래 조직까지 포함합니다."],
-			["3 · 실행", "SHOW는 위치 확인, COPY/SAVE는 재사용, ARRANGE/CONNECT는 두 조직 작업입니다."],
+			[
+				"2 · 범위",
+				"선택 조직만은 직접 속한 레일·장비만, 하위 조직 포함은 그 아래 조직의 레일·장비까지 포함합니다.",
+			],
+			[
+				"3 · 실행",
+				"지도 보기는 위치 확인, 복사·배치는 현재 프로젝트에 재사용, 청사진 저장은 라이브러리에 보관합니다. 세부 편집에서 속성을 바꾸고 목록·복사로 돌아옵니다. ARRANGE/CONNECT는 여러 조직 작업입니다.",
+			],
 		],
 		"FAB 조직으로 돌아가기",
 	);

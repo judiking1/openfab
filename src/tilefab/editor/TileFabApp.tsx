@@ -2399,6 +2399,7 @@ export default function TileFabApp(): React.ReactElement {
 	const organizationLibraryReturnFocusRef = useRef<HTMLElement | null>(null);
 	const organizationSearchInputRef = useRef<HTMLInputElement | null>(null);
 	const organizationListRef = useRef<HTMLDivElement | null>(null);
+	const organizationEditorRef = useRef<HTMLElement | null>(null);
 	const organizationMultiSelectionRef = useRef<StaticFabOrganizationMultiSelectionState>(
 		createStaticFabOrganizationMultiSelection(),
 	);
@@ -2700,6 +2701,9 @@ export default function TileFabApp(): React.ReactElement {
 		() => new StaticFabOrganizationOverviewBridge(),
 	);
 	const projectOperationControllerRef = useRef<AbortController | null>(null);
+	const [projectSaveFocusOwner, setProjectSaveFocusOwner] = useState<
+		"default" | "project-guard" | null
+	>(null);
 	const pendingNewFabProjectCompletionRef = useRef<PendingNewOpenFabProjectCompletion | null>(null);
 	const cancelPendingProjectActionRef = useRef<() => void>(() => undefined);
 	const pendingProjectActionReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -4223,6 +4227,30 @@ export default function TileFabApp(): React.ReactElement {
 					: guidedBuildConnectorApplyOwnsNextStep
 						? "연결 검토 패널에서 강조된 ‘적용 · APPLY’ 버튼을 선택하세요. 연결점을 확인 중이면 Tab으로 APPLY에 이동한 뒤 Enter를 누르세요."
 				: null);
+	useLayoutEffect(() => {
+		if (projectSaveFocusOwner === null || projectSession.operation !== "idle") return;
+		setProjectSaveFocusOwner(null);
+		if (projectOperationControllerRef.current !== null) return;
+		if (projectSaveFocusOwner === "project-guard") {
+			projectGuardDialogRef.current?.focus({ preventScroll: true });
+			return;
+		}
+		if (guidedBuildExperienceActive) {
+			const target = guidedBuildPrimaryTargetId
+				? appRootRef.current?.querySelector<HTMLElement>(
+						`[data-guided-action-id="${guidedBuildPrimaryTargetId}"]`,
+					)
+				: null;
+			(target ?? canvasRef.current)?.focus({ preventScroll: true });
+			return;
+		}
+		projectMenuTriggerRef.current?.focus({ preventScroll: true });
+	}, [
+		guidedBuildExperienceActive,
+		guidedBuildPrimaryTargetId,
+		projectSaveFocusOwner,
+		projectSession.operation,
+	]);
 	useEffect(() => {
 		if (
 			!guidedPrimaryFocusHandoffRef.current ||
@@ -5790,6 +5818,28 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildExperienceActive,
 		organizationBundlePlacementSession,
 	]);
+	useLayoutEffect(() => {
+		if (!organizationBundlePlacementSession) return;
+		const workspace = canvasRef.current?.closest<HTMLElement>(".tilefab-workspace");
+		const bar = workspace?.querySelector<HTMLElement>('[data-testid="rail-buildbar"]');
+		if (!workspace || !bar) return;
+		const property = "--tilefab-organization-hints-bottom";
+		const measure = (): void => {
+			const clearance = workspace.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 10;
+			const value = `${Math.ceil(clearance)}px`;
+			if (workspace.style.getPropertyValue(property) === value) return;
+			workspace.style.setProperty(property, value);
+			scheduleRenderRef.current();
+		};
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(bar);
+		observer.observe(workspace);
+		return () => {
+			observer.disconnect();
+			workspace.style.removeProperty(property);
+		};
+	}, [organizationBundlePlacementSession]);
 	const updateTemplatePoseLock = (next: RailTemplatePoseLock): void => {
 		templatePoseLockRef.current = next;
 		templatePointerResolutionRef.current = null;
@@ -12040,6 +12090,9 @@ export default function TileFabApp(): React.ReactElement {
 					: null,
 				ghost: activeGhost,
 				organizationBundlePreview: activeOrganizationBundlePreview,
+				organizationBundlePreviewFrame: activeOrganizationBundlePreview
+					? visibleCanvasFrame(canvas, fitMapInsets(canvas))
+					: null,
 				organizationBundlePlacementGuide,
 				staticFabArrangementPreview: activeArrangementPreview,
 				staticFabAssemblyConnectorOverlay: activeAssemblyConnectorOverlay,
@@ -18125,6 +18178,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const beginProjectOperation = (operation: ProjectOperation): AbortController => {
+		setProjectSaveFocusOwner(null);
 		cancelStationProposalReview();
 		cancelBlueprintPlacement();
 		if (operation !== "saving") {
@@ -18744,6 +18798,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return "failed";
 		const restoreSaveFocus = (): void => {
 			requestAnimationFrame(() => {
+				if (projectOperationControllerRef.current !== controller) return;
 				if (focusOwner === "project-guard") {
 					projectGuardDialogRef.current?.focus({ preventScroll: true });
 					return;
@@ -18869,8 +18924,10 @@ export default function TileFabApp(): React.ReactElement {
 		} finally {
 			if (projectOperationControllerRef.current === controller) {
 				projectOperationControllerRef.current = null;
+				// Restore after React commits the idle controls, not in a frame that may still
+				// see the saving render with no guided target. A newer operation clears this request.
+				setProjectSaveFocusOwner(focusOwner);
 			}
-			restoreSaveFocus();
 		}
 	};
 
@@ -22134,7 +22191,7 @@ export default function TileFabApp(): React.ReactElement {
 		closeCompletedGuidedOrganizationPicker(result.state.selectedOrganizationIds);
 		setStatus(
 			result.state.selectedOrganizationIds.length > 1
-				? `${result.state.selectedOrganizationIds.length.toLocaleString()}개 조직 선택 · DIRECT/EFFECTIVE 범위를 선택해 지도 확인, 복사 또는 저장`
+				? `${result.state.selectedOrganizationIds.length.toLocaleString()}개 조직 선택 · 하위 조직 포함 여부를 고른 뒤 지도 확인, 복사·배치 또는 청사진 저장`
 				: `${record.kind} '${record.name}' 상세를 열었습니다`,
 		);
 	};
@@ -25958,6 +26015,9 @@ export default function TileFabApp(): React.ReactElement {
 				equipmentGroupCount: organizationBundlePlacementSession.summary.equipmentGroupCount,
 				portCount: organizationBundlePlacementSession.summary.portCount,
 			})
+		: "";
+	const organizationBundleCountSummary = organizationBundlePlacementSession
+		? `조직 ${organizationBundlePlacementSession.summary.organizationCount.toLocaleString()}개 · 장비 ${organizationBundlePlacementSession.summary.equipmentGroupCount.toLocaleString()}개 · Port ${organizationBundlePlacementSession.summary.portCount.toLocaleString()}개`
 		: "";
 	const organizationPlacementDocumentSequence = railDocument.getPatchSequence();
 	const lastPlacedOrganizationBundleRoot =
@@ -35750,19 +35810,21 @@ export default function TileFabApp(): React.ReactElement {
 								</span>
 								<strong
 									className="tilefab-organization-bundle-summary"
-									title={`${blueprintPlacementStatusPrefix(organizationBundlePlacementSession.origin)}${organizationBundlePlacementSession.label} · ${organizationBundlePlacementLifecycle?.modeLabel ?? "반복 배치 중"}`}
+									data-testid="organization-bundle-summary"
+									title={`${blueprintPlacementStatusPrefix(organizationBundlePlacementSession.origin)}${organizationBundlePlacementSession.label} · ${organizationBundlePlacementLifecycle?.modeLabel ?? "반복 배치 중"} · ${organizationBundleCountSummary}`}
 								>
-									<span>
+									<span className="tilefab-organization-bundle-source">
 										{blueprintPlacementStatusPrefix(organizationBundlePlacementSession.origin)}
 										{organizationBundlePlacementSession.label}
 									</span>
-									<small>
-										{organizationBundlePlacementLifecycle?.modeLabel ?? "반복 배치 중"}
+									<small data-testid="organization-bundle-counts">
+										{organizationBundleCountSummary}
 									</small>
 								</strong>
 								<fieldset className="tilefab-segmented" aria-label="조직 청사진 회전">
 									<button
 										type="button"
+										className="tilefab-organization-rotate"
 										aria-label="조직 청사진 반시계 방향 회전"
 										onClick={() => rotateConstruction(-1)}
 									>
@@ -35771,6 +35833,7 @@ export default function TileFabApp(): React.ReactElement {
 									<span>{organizationBundlePlacementSession.rotationDegrees}°</span>
 									<button
 										type="button"
+										className="tilefab-organization-rotate"
 										aria-label="조직 청사진 시계 방향 회전"
 										onClick={() => rotateConstruction(1)}
 									>
@@ -36647,7 +36710,7 @@ export default function TileFabApp(): React.ReactElement {
 							<input
 								ref={organizationSearchInputRef}
 								value={organizationSearch}
-								placeholder="Search organization"
+								placeholder="이름으로 조직 찾기"
 								aria-label="저장된 FAB 조직 검색"
 								onChange={(event) => updateStaticFabOrganizationSearch(event.currentTarget.value)}
 								onKeyDown={handleStaticFabOrganizationSearchKeyDown}
@@ -36663,15 +36726,29 @@ export default function TileFabApp(): React.ReactElement {
 								data-testid="static-fab-organization-selection-summary"
 							>
 								<strong>
-									{organizationSelectionCount.toLocaleString()} SELECTED
+									선택 조직 {organizationSelectionCount.toLocaleString()}개
 								</strong>
 								<span>{organizationSelectionGuidance}</span>
+								{selectedStaticFabOrganization && selectedStaticFabOrganizationVisible ? (
+									<button
+										type="button"
+										className="tilefab-organization-detail-jump"
+										onClick={() => {
+											const editor = organizationEditorRef.current;
+											editor?.scrollIntoView({ block: "nearest" });
+											editor?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+										}}
+									>
+										세부 편집
+									</button>
+								) : null}
 							</div>
 							{organizationSelectionCount > 0 ? (
 								<>
 									<fieldset
 										className="tilefab-segmented tilefab-organization-selection-mode"
 										aria-label="조직 청사진 포함 범위"
+										aria-describedby="tilefab-organization-copy-scope-description"
 									>
 										<button
 											type="button"
@@ -36680,7 +36757,7 @@ export default function TileFabApp(): React.ReactElement {
 											title="선택한 조직 자체만 포함"
 											onClick={() => chooseOrganizationSelectionMode("DIRECT")}
 										>
-											DIRECT
+											선택 조직만
 										</button>
 										<button
 											type="button"
@@ -36689,9 +36766,17 @@ export default function TileFabApp(): React.ReactElement {
 											title="선택한 조직과 모든 하위 조직 포함"
 											onClick={() => chooseOrganizationSelectionMode("EFFECTIVE")}
 										>
-											EFFECTIVE
+											하위 조직 포함
 										</button>
 									</fieldset>
+									<p
+										id="tilefab-organization-copy-scope-description"
+										className="tilefab-organization-scope-description"
+									>
+										{organizationSelectionMode === "DIRECT"
+											? "선택한 조직에 직접 속한 레일과 장비만 포함합니다."
+											: "하위 조직의 레일과 장비까지 함께 포함합니다."}
+									</p>
 									<div
 										className="tilefab-organization-selection-actions"
 										data-count={organizationSelectionCount}
@@ -36702,10 +36787,34 @@ export default function TileFabApp(): React.ReactElement {
 												showSelectedStaticFabOrganizationOnMap(organizationSelectionMode)
 											}
 										>
-											<Crosshair size={15} /> SHOW
+											<Crosshair size={15} /> 지도 보기
+										</button>
+
+										<button
+											type="button"
+											disabled={
+												modelSyncPending || organizationEditorDirty || organizationDetailsStale
+											}
+											className="tilefab-organization-copy"
+											onClick={copySelectionToRailClipboard}
+										>
+											<Copy size={15} /> 복사·배치
+										</button>
+										<button
+											type="button"
+											data-testid="save-organization-blueprint"
+											title="선택한 조직을 재사용 청사진으로 저장 · 전체 파일은 상단 프로젝트 저장 (.openfab)"
+											disabled={
+												modelSyncPending || organizationEditorDirty || organizationDetailsStale
+											}
+											onClick={(event) =>
+												requestContextualBlueprintSave("organization", event.currentTarget)
+											}
+										>
+											<Save size={15} /> 청사진 저장
 										</button>
 										{organizationSelectionCount > 1 ? (
-											<>
+											<div className="tilefab-organization-pair-actions">
 												<button
 													type="button"
 													data-testid="connect-static-fab-assemblies"
@@ -36735,30 +36844,8 @@ export default function TileFabApp(): React.ReactElement {
 												>
 													<ArrowLeftRight size={15} /> ARRANGE
 												</button>
-											</>
+											</div>
 										) : null}
-										<button
-											type="button"
-											disabled={
-												modelSyncPending || organizationEditorDirty || organizationDetailsStale
-											}
-											onClick={copySelectionToRailClipboard}
-										>
-											<Copy size={15} /> COPY
-										</button>
-										<button
-											type="button"
-											data-testid="save-organization-blueprint"
-											title="선택한 조직을 재사용 청사진으로 저장 · 전체 파일은 상단 프로젝트 저장 (.openfab)"
-											disabled={
-												modelSyncPending || organizationEditorDirty || organizationDetailsStale
-											}
-											onClick={(event) =>
-												requestContextualBlueprintSave("organization", event.currentTarget)
-											}
-										>
-											<Save size={15} /> SAVE BLUEPRINT
-										</button>
 									</div>
 								</>
 							) : null}
@@ -36874,6 +36961,7 @@ export default function TileFabApp(): React.ReactElement {
 						{selectedStaticFabOrganization && selectedStaticFabOrganizationVisible ? (
 							<section
 								className="tilefab-organization-editor"
+								ref={organizationEditorRef}
 								data-tab={organizationDetailTab}
 								data-dirty={organizationEditorDirty}
 							>
@@ -36884,6 +36972,13 @@ export default function TileFabApp(): React.ReactElement {
 										) ?? selectedStaticFabOrganization.kind}
 										-{selectedStaticFabOrganization.id}
 									</span>
+									<button
+										type="button"
+										className="tilefab-organization-return"
+										onClick={() => organizationSearchInputRef.current?.focus()}
+									>
+										목록·복사
+									</button>
 									<small>
 										{organizationDetailsStale
 											? "STALE"
@@ -36941,19 +37036,19 @@ export default function TileFabApp(): React.ReactElement {
 										</label>
 										<dl className="tilefab-organization-coverage">
 											<div>
-												<dt>DIRECT</dt>
+												<dt>직접 소속</dt>
 												<dd>
-													{selectedStaticFabOrganization.membership.railEdges.length} RAIL ·{" "}
-													{selectedStaticFabOrganization.membership.equipmentGroupIds.length} EQ
+													레일 구간 {selectedStaticFabOrganization.membership.railEdges.length}개 ·{" "}
+													장비 {selectedStaticFabOrganization.membership.equipmentGroupIds.length}개
 												</dd>
 											</div>
 											<div>
-												<dt>DESCENDANTS</dt>
-												<dd>{selectedStaticFabOrganizationDescendantIds.length} ORGS</dd>
+												<dt>하위 조직</dt>
+												<dd>{selectedStaticFabOrganizationDescendantIds.length}개</dd>
 											</div>
 											<div>
-												<dt>EFFECTIVE</dt>
-												<dd>{selectedStaticFabOrganizationDescendantIds.length + 1} ORGS</dd>
+												<dt>하위 포함</dt>
+												<dd>조직 {selectedStaticFabOrganizationDescendantIds.length + 1}개</dd>
 											</div>
 										</dl>
 										<div className="tilefab-organization-editor-actions">
@@ -36961,14 +37056,14 @@ export default function TileFabApp(): React.ReactElement {
 												type="button"
 												onClick={() => showSelectedStaticFabOrganizationOnMap("DIRECT")}
 											>
-												<Crosshair size={14} /> SHOW DIRECT
+												<Crosshair size={14} /> 직접 소속 보기
 											</button>
 											{selectedStaticFabOrganizationDescendantIds.length > 0 ? (
 												<button
 													type="button"
 													onClick={() => showSelectedStaticFabOrganizationOnMap("EFFECTIVE")}
 												>
-													<Layers3 size={14} /> SHOW EFFECTIVE
+													<Layers3 size={14} /> 하위 포함 보기
 												</button>
 											) : null}
 											<button

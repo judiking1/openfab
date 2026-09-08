@@ -760,10 +760,10 @@ try {
 		2,
 		"organization Cmd-click multi-selection",
 	);
-	await areaLibrary.getByRole("button", { name: "EFFECTIVE", exact: true }).click();
+	await areaLibrary.getByRole("button", { name: "하위 조직 포함", exact: true }).click();
 	assertEqual(
 		await areaLibrary
-			.getByRole("button", { name: "EFFECTIVE", exact: true })
+			.getByRole("button", { name: "하위 조직 포함", exact: true })
 			.getAttribute("aria-pressed"),
 		"true",
 		"organization blueprint effective capture mode",
@@ -963,7 +963,7 @@ try {
 	await desktopPage.getByRole("button", { name: "청사진 라이브러리 닫기" }).click();
 	await openStaticFabNavigatorTab(desktopPage, "organizations");
 	await areaLibrary.waitFor({ state: "visible" });
-	await areaLibrary.getByRole("button", { name: "DIRECT", exact: true }).click();
+	await areaLibrary.getByRole("button", { name: "선택 조직만", exact: true }).click();
 	await mainBayOption.click();
 	await areaLibrary.getByRole("button", { name: "FAB 조직 라이브러리 닫기" }).click();
 	const organizationNavigatorLauncher = await activityCommandButton(
@@ -1101,13 +1101,14 @@ try {
 	await areaLibrary.waitFor({ state: "visible" });
 	await mainBayOption.click();
 	await mainAreaOption.click({ modifiers: ["Meta"] });
-	await areaLibrary.getByRole("button", { name: "EFFECTIVE", exact: true }).click();
-	await areaLibrary.getByRole("button", { name: "COPY", exact: true }).click();
+	await areaLibrary.getByRole("button", { name: "하위 조직 포함", exact: true }).click();
+	await areaLibrary.getByRole("button", { name: "복사·배치", exact: true }).click();
 	await desktopPage.waitForFunction(
 		() =>
 			document.querySelector('[data-testid="tilefab-app"]')?.dataset.organizationBundleActive ===
 			"true",
 	);
+	await assertOrganizationPlacementToolbarLayout(desktopPage);
 	const organizationGhostSaveBefore = await readMetrics(desktopPage);
 	const organizationGhostCanvas = desktopPage.getByTestId("rail-canvas");
 	await organizationGhostCanvas.focus();
@@ -1409,7 +1410,7 @@ try {
 		"parent organization selection",
 	);
 	await assertOrganizationEditorLayout(desktopPage, { width: 1280, height: 720 }, "overview");
-	await areaLibrary.getByRole("button", { name: "SHOW DIRECT", exact: true }).click();
+	await areaLibrary.getByRole("button", { name: "직접 소속 보기", exact: true }).click();
 	await waitForEditorStatus(desktopPage, "Acceptance Main FAB'을 선택했습니다");
 	assertEqual(await areaLibrary.isVisible(), true, "SHOW DIRECT keeps organization panel open");
 	const directOrganizationSelection = await readMetrics(desktopPage);
@@ -1419,7 +1420,7 @@ try {
 		"direct organization selection modules",
 	);
 	const showEffective = areaLibrary.getByRole("button", {
-		name: "SHOW EFFECTIVE",
+		name: "하위 포함 보기",
 		exact: true,
 	});
 	assertEqual(await showEffective.count(), 1, "parent exposes effective organization selection");
@@ -19100,7 +19101,7 @@ async function exerciseCurrentLargeFabOrganizationArrangement(
 		0,
 		"single Organization selection defers pair-only Arrange",
 	);
-	for (const action of ["SHOW", "COPY", "SAVE BLUEPRINT"]) {
+	for (const action of ["지도 보기", "복사·배치", "청사진 저장"]) {
 		assertEqual(
 			await selectionToolbar.getByRole("button", { name: action, exact: true }).count(),
 			1,
@@ -19118,7 +19119,7 @@ async function exerciseCurrentLargeFabOrganizationArrangement(
 	);
 	assertIncludes(
 		await organizationHelp.innerText(),
-		"DIRECT는 선택한 조직 자체",
+		"선택 조직만은 직접 속한 레일·장비만",
 		"Help explains Organization inclusion scope",
 	);
 	await organizationHelp
@@ -19144,7 +19145,7 @@ async function exerciseCurrentLargeFabOrganizationArrangement(
 	);
 	assertIncludes(
 		await selectionSummary.innerText(),
-		"4 SELECTED",
+		"선택 조직 4개",
 		"multi-Organization summary survives the details editor",
 	);
 	assertEqual(await selectionSummary.isVisible(), true, "multi-Organization summary stays visible");
@@ -33534,7 +33535,7 @@ async function exerciseOrdinaryDuplicatedBayBankNativeRecovery(
 			await openStaticFabNavigatorTab(reopenedPage, "organizations");
 			organizationLibrary = reopenedPage.getByTestId("static-fab-organization-library");
 			await organizationLibrary.waitFor({ state: "visible" });
-			await organizationLibrary.getByRole("button", { name: "SHOW", exact: true }).click();
+			await organizationLibrary.getByRole("button", { name: "지도 보기", exact: true }).click();
 			await organizationLibrary.getByRole("button", { name: "FAB 조직 라이브러리 닫기" }).click();
 			const inspectSelection = reopenedPage.getByTestId("rail-area-selection-inspector");
 			await inspectSelection.waitFor({ state: "visible", timeout: 10_000 });
@@ -37709,6 +37710,41 @@ async function assertWorkerMirrorReady(page, phase) {
 	);
 }
 
+async function assertOrganizationPlacementToolbarLayout(page) {
+	const originalViewport = page.viewportSize();
+	const before = await readMetrics(page);
+	const bar = page.getByTestId("rail-buildbar");
+	try {
+		for (const viewport of [
+			{ width: 1440, height: 900 },
+			{ width: 1024, height: 900 },
+			{ width: 820, height: 900 },
+			{ width: 760, height: 900 },
+			{ width: 651, height: 900 },
+			{ width: 650, height: 900 },
+			{ width: 390, height: 900 },
+			{ width: 390, height: 600 },
+		]) {
+			const { width } = viewport;
+			await page.setViewportSize(viewport);
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			await assertLocatorInsideViewport(page, bar);
+			await assertLocatorInsideViewport(page, page.getByTestId("organization-bundle-summary"));
+			for (const control of await bar.getByRole("button").all()) {
+				await assertLocatorInsideViewport(page, control);
+				const bounds = await control.boundingBox();
+				assertAtLeast(bounds?.width ?? 0, 44, `${width}px organization placement control width`);
+				assertAtLeast(bounds?.height ?? 0, 44, `${width}px organization placement control height`);
+			}
+		}
+	} finally {
+		if (originalViewport) await page.setViewportSize(originalViewport);
+	}
+	assertProjectContentUnchanged(await readMetrics(page), before, "organization toolbar resize");
+}
+
 async function assertOrganizationEditorLayout(page, expectedViewport, expectedTab) {
 	const viewport = page.viewportSize();
 	assertEqual(viewport?.width, expectedViewport.width, `${expectedTab} viewport width`);
@@ -37716,6 +37752,14 @@ async function assertOrganizationEditorLayout(page, expectedViewport, expectedTa
 	const library = page.getByTestId("static-fab-organization-library");
 	await library.waitFor({ state: "visible" });
 	await assertLocatorInsideViewport(page, library);
+	await library.getByRole("button", { name: "세부 편집", exact: true }).click();
+	assertEqual(
+		await library
+			.getByRole("tab", { name: expectedTab.toUpperCase(), exact: true })
+			.evaluate((element) => element === document.activeElement),
+		true,
+		"organization detail jump focuses the active tab",
+	);
 	const audit = await library.evaluate((root) => {
 		const isRendered = (element) => {
 			const rect = element.getBoundingClientRect();
@@ -37746,7 +37790,7 @@ async function assertOrganizationEditorLayout(page, expectedViewport, expectedTa
 		const overflowNodes = [
 			root,
 			...root.querySelectorAll(
-				".tilefab-organization-filters, .tilefab-organization-search, .tilefab-organization-list, .tilefab-organization-editor, .tilefab-organization-detail-tabs, .tilefab-organization-detail-panel, .tilefab-organization-editor-actions, .tilefab-organization-editor-footer, .tilefab-organization-parent-list, .tilefab-organization-colors, .tilefab-organization-relations-scope",
+				".tilefab-organization-filters, .tilefab-organization-search, .tilefab-organization-selection-toolbar, .tilefab-organization-selection-mode, .tilefab-organization-selection-actions, .tilefab-organization-pair-actions, .tilefab-organization-list, .tilefab-organization-editor, .tilefab-organization-detail-tabs, .tilefab-organization-detail-panel, .tilefab-organization-editor-actions, .tilefab-organization-editor-footer, .tilefab-organization-parent-list, .tilefab-organization-colors, .tilefab-organization-relations-scope",
 			),
 		]
 			.filter(isRendered)

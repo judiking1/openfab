@@ -84,8 +84,8 @@ describe("deriveEditorHelpContext", () => {
 		expect(context.eyebrow).toBe("검사 · FAB ORGANIZATION");
 		expect(context.summary).toContain("같은 종류의 Bay나 Bank");
 		expect(context.steps[0]?.description).toContain("⌘/Ctrl+클릭");
-		expect(context.steps[1]?.description).toContain("DIRECT");
-		expect(context.steps[1]?.description).toContain("EFFECTIVE");
+		expect(context.steps[1]?.description).toContain("선택 조직만");
+		expect(context.steps[1]?.description).toContain("하위 조직 포함");
 		expect(context.returnLabel).toBe("FAB 조직으로 돌아가기");
 	});
 

@@ -2518,6 +2518,67 @@ describe("module ownership rendering", () => {
 });
 
 describe("organization bundle ghost presentation", () => {
+	it.each([
+		false,
+		true,
+	])("keeps the placement caption inside the usable frame without moving its source (collision=%s)", (collision) => {
+		const fixture = createOrganizationBundleGhostFixture();
+		const prepared = prepareStaticFabOrganizationBundlePlacementPreviewArtifact(fixture.bundle, 0);
+		expect(prepared.valid).toBe(true);
+		if (!prepared.valid) return;
+		const planned = planStaticFabOrganizationBundlePlacementPreview(
+			fixture.map,
+			prepared.artifact,
+			{ x: 0, y: 0 },
+		);
+		const preview = collision ? { ...planned, disposition: "sampled-collision" as const } : planned;
+		const label = collision ? "겹침 감지 · 위치 이동" : "클릭·Enter로 검사·배치";
+		const revision = fixture.map.getRevision();
+		for (const frame of [
+			{ left: 190, top: 80, width: 184, height: 360 },
+			{ left: 72, top: 180, width: 302, height: 300 },
+			{ left: 170, top: 180, width: 48, height: 48 },
+		]) {
+			for (const offset of [-500, 900]) {
+				const camera = Object.freeze({ ...fixture.camera, offsetX: offset, offsetY: offset });
+				const overlay = createRecordingContext();
+				const drawText = vi.spyOn(overlay.context, "fillText");
+				new TileRenderer().render(createRecordingContext().context, overlay.context, {
+					map: fixture.map,
+					physicalPaths: fixture.physicalPaths,
+					ghost: null,
+					organizationBundlePreview: preview,
+					organizationBundlePreviewFrame: frame,
+					camera,
+					width: 390,
+					height: 760,
+					dpr: 1,
+					hoverTile: null,
+					hoverWorld: null,
+					anchorTile: null,
+					selectedTile: null,
+				});
+				const call = drawText.mock.calls.find(([text]) => text === label);
+				if (frame.width === 48) {
+					expect(call).toBeUndefined();
+				} else {
+					expect(call).toBeDefined();
+					if (!call) throw new Error("Expected placement caption");
+					const [, x, y] = call;
+					expect(x - 8).toBeGreaterThanOrEqual(frame.left + 8);
+					expect(x + label.length * 6 + 8).toBeLessThanOrEqual(frame.left + frame.width - 8);
+					expect(y - 11).toBeGreaterThanOrEqual(frame.top + 8);
+					expect(y + 11).toBeLessThanOrEqual(frame.top + frame.height - 8);
+					expect(call).toHaveLength(3);
+				}
+				expect(camera.offsetX).toBe(offset);
+				expect(camera.offsetY).toBe(offset);
+				expect(preview.anchor).toEqual({ x: 0, y: 0 });
+				expect(fixture.map.getRevision()).toBe(revision);
+			}
+		}
+	});
+
 	it("renders the coarse chunk artifact without compiling an exact rail ghost", () => {
 		const fixture = createOrganizationBundleGhostFixture();
 		const prepared = prepareStaticFabOrganizationBundlePlacementPreviewArtifact(fixture.bundle, 0);

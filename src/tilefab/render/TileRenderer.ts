@@ -438,6 +438,12 @@ export interface TileRenderInput {
 	}> | null;
 	ghost: GhostState | null;
 	organizationBundlePreview?: StaticFabOrganizationBundlePlacementPreview | null;
+	organizationBundlePreviewFrame?: Readonly<{
+		left: number;
+		top: number;
+		width: number;
+		height: number;
+	}> | null;
 	organizationBundlePlacementGuide?: Readonly<{
 		readonly sourceBounds: Readonly<{
 			readonly minX: number;
@@ -4720,20 +4726,31 @@ export class TileRenderer {
 		// feedback is important enough to add another label in the bounded lesson.
 		if (!guidedPlacement || sampledCollision) {
 			const labelAnchor = this.worldToScreen({ x: outline.minX, y: outline.minY }, input.camera);
-			const label = sampledCollision
-				? `SAMPLED COLLISION ${preview.sampledOccupiedCellCount.toLocaleString()} · MOVE BEFORE EXACT CHECK`
-				: `${artifact.sourceModuleCount.toLocaleString()} MODULE · ${artifact.portCount.toLocaleString()} PORT · CLICK = EXACT CHECK`;
-			ctx.font = "750 10px Inter, system-ui, sans-serif";
-			const labelWidth = Math.min(input.width - 16, ctx.measureText(label).width + 16);
-			const labelX = clamp(labelAnchor.x + 8, 8, Math.max(8, input.width - labelWidth - 8));
-			const labelY = clamp(labelAnchor.y - 28, 8, Math.max(8, input.height - 30));
-			ctx.fillStyle = sampledCollision ? "rgba(52, 9, 15, 0.96)" : "rgba(5, 23, 25, 0.96)";
-			roundRect(ctx, labelX, labelY, labelWidth, 22, 4);
-			ctx.fill();
-			ctx.fillStyle = color;
-			ctx.textAlign = "left";
-			ctx.textBaseline = "middle";
-			ctx.fillText(label, labelX + 8, labelY + 11, Math.max(0, labelWidth - 16));
+			const label = sampledCollision ? "겹침 감지 · 위치 이동" : "클릭·Enter로 검사·배치";
+			const frame = input.organizationBundlePreviewFrame ?? {
+				left: 0,
+				top: 0,
+				width: input.width,
+				height: input.height,
+			};
+			ctx.font = "750 12px Inter, system-ui, sans-serif";
+			const labelWidth = ctx.measureText(label).width + 16;
+			// The DOM placement controls remain available when chrome leaves too little label space.
+			if (labelWidth + 16 <= frame.width && frame.height >= 38) {
+				const labelX = clamp(
+					labelAnchor.x + 8,
+					frame.left + 8,
+					frame.left + frame.width - labelWidth - 8,
+				);
+				const labelY = clamp(labelAnchor.y - 28, frame.top + 8, frame.top + frame.height - 30);
+				ctx.fillStyle = sampledCollision ? "rgba(52, 9, 15, 0.96)" : "rgba(5, 23, 25, 0.96)";
+				roundRect(ctx, labelX, labelY, labelWidth, 22, 4);
+				ctx.fill();
+				ctx.fillStyle = color;
+				ctx.textAlign = "left";
+				ctx.textBaseline = "middle";
+				ctx.fillText(label, labelX + 8, labelY + 11);
+			}
 		}
 		ctx.restore();
 	}
