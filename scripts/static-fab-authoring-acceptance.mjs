@@ -2837,6 +2837,133 @@ async function waitForOrdinaryEqAnchorMarker(page, marker, label) {
 	}
 }
 
+async function exerciseOrdinaryEqInitialAnchorFrame(page, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	const moving = page.getByTestId("ordinary-port-keyboard-target");
+	const fixed = page.getByTestId("ordinary-eq-anchor-marker");
+	const baseline = await readMetrics(page);
+	const anchorRow = await moving.getAttribute("data-port-slot-row");
+	const viewport = page.viewportSize();
+	let confirmedBuildbarTop;
+	try {
+		for (const edge of ["right", "bottom"]) {
+			const before = await moving.boundingBox();
+			const target =
+				edge === "right"
+					? { x: viewport.width - 30, y: before.y + before.height / 2 }
+					: { x: before.x + before.width / 2, y: confirmedBuildbarTop - 52 };
+			// Both positions fit the current 44px ring but leave too little room for the fixed caption.
+			// Use real pan input so Enter, rather than a test-only camera mutation, must reframe it.
+			// Start on this slot: crossing another rail before pointerdown legitimately retargets EQ.
+			const dragStart = { x: before.x + before.width / 2, y: before.y + before.height / 2 };
+			await page.mouse.move(dragStart.x, dragStart.y);
+			await page.mouse.down({ button: "right" });
+			await page.mouse.move(
+				dragStart.x + target.x - (before.x + before.width / 2),
+				dragStart.y + target.y - (before.y + before.height / 2),
+				{ steps: 5 },
+			);
+			await page.mouse.up({ button: "right" });
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			const panned = await moving.boundingBox();
+			assertEqual(
+				await moving.getAttribute("data-port-slot-row"),
+				anchorRow,
+				`${label} ${edge} pan preserves the target row`,
+			);
+			assertAtMost(
+				Math.abs(panned.x + panned.width / 2 - target.x),
+				1,
+				`${label} ${edge} deliberate pan x`,
+			);
+			assertAtMost(
+				Math.abs(panned.y + panned.height / 2 - target.y),
+				1,
+				`${label} ${edge} deliberate pan y`,
+			);
+			await canvas.press("Enter");
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="ordinary-port-keyboard-target"]')
+						?.getAttribute("data-phase") === "choose-end",
+			);
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			await waitForOrdinaryEqAnchorMarker(page, fixed, `${label}/${edge}`);
+			assertEqual(
+				await fixed.getAttribute("data-port-slot-row"),
+				anchorRow,
+				`${label} ${edge} preserves the chosen start`,
+			);
+			assertEqual(
+				await moving.getAttribute("data-port-slot-row"),
+				anchorRow,
+				`${label} ${edge} starts the end at the same row`,
+			);
+			assertEqual(
+				await page.getByTestId("ordinary-eq-anchor-edge-locator").isVisible(),
+				false,
+				`${label} ${edge} has no spurious zero-distance edge locator`,
+			);
+			for (const presentation of [fixed, fixed.locator("span"), moving.locator("span")]) {
+				const visibility = await presentation.evaluate((element) => {
+					const box = element.getBoundingClientRect();
+					const corners = [
+						[box.left + 1, box.top + 1],
+						[box.right - 1, box.top + 1],
+						[box.left + 1, box.bottom - 1],
+						[box.right - 1, box.bottom - 1],
+					];
+					return {
+						inside:
+							box.width > 0 &&
+							box.height > 0 &&
+							box.left >= 0 &&
+							box.top >= 0 &&
+							box.right <= innerWidth &&
+							box.bottom <= innerHeight,
+						// Markers intentionally pass pointer input through to the Canvas.
+						unobscured: corners.every(
+							([x, y]) =>
+								document.elementFromPoint(x, y)?.getAttribute("data-testid") === "rail-canvas",
+						),
+					};
+				});
+				assertEqual(visibility.inside, true, `${label} ${edge} complete marker/caption`);
+				assertEqual(visibility.unobscured, true, `${label} ${edge} unobscured Canvas caption`);
+			}
+			const frame = await page.locator('.tilefab-port-buildbar[data-port-type="EQ"]').boundingBox();
+			const caption = await fixed.locator("span").boundingBox();
+			assertAtMost(
+				caption.y + caption.height,
+				frame.y,
+				`${label} ${edge} fixed caption clears the equipment panel`,
+			);
+			confirmedBuildbarTop = frame.y;
+			assertProjectUnchanged(await readMetrics(page), baseline, `${label} ${edge} start`);
+			await page.screenshot({ path: path.join(artifactRoot, `${label}-${edge}.png`) });
+			await canvas.press("Escape");
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="ordinary-port-keyboard-target"]')
+						?.getAttribute("data-phase") === "choose-slot",
+			);
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+		}
+		assertProjectUnchanged(await readMetrics(page), baseline, `${label} cancel`);
+	} catch (error) {
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-failure.png`) });
+		throw error;
+	}
+}
+
 async function assertOrdinaryEqEndpointMarkerMedia(page, label) {
 	const fixed = page.getByTestId("ordinary-eq-anchor-marker");
 	const moving = page.getByTestId("ordinary-port-keyboard-target");
@@ -13341,6 +13468,12 @@ async function exerciseGuidedPortHandoffRegression(
 						);
 					}
 					const eqResponsiveBaseline = await readMetrics(page);
+					if (viewport.label === "390x844") {
+						await exerciseOrdinaryEqInitialAnchorFrame(
+							page,
+							`ordinary-eq-initial-anchor-${practiceTransitionMode}`,
+						);
+					}
 					const eqMovingMarker = page.getByTestId("ordinary-port-keyboard-target");
 					let eqAnchorRow = await eqMovingMarker.getAttribute("data-port-slot-row");
 					await canvas.focus();
@@ -14853,6 +14986,11 @@ async function exerciseGuidedPortHandoffRegression(
 			eqWorkerSequence: eqPlaced.workerSequence,
 			stkWorkerSequence: stkPlaced.workerSequence,
 		});
+	} catch (error) {
+		await page.screenshot({
+			path: path.join(artifactRoot, `guided-port-handoff-${practiceTransitionMode}-failure.png`),
+		});
+		throw error;
 	} finally {
 		await closeBrowserResource(page, "Guided Port handoff page");
 		await closeBrowserResource(context, "Guided Port handoff context");

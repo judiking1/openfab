@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import {
 	copyStaticFabAssemblyRelationshipRecord,
+	copyStaticFabAssemblyRelationshipRecordSteps,
 	remapStaticFabAssemblyRelationshipRecord,
 	remapStaticFabAssemblyRelationshipRecordSteps,
 	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD,
@@ -140,6 +141,85 @@ describe("cooperative assembly relationship remapping", () => {
 		).toThrow(/같은 ID로 합칠/);
 	});
 });
+
+describe("cooperative assembly relationship copying", () => {
+	it.each([
+		{ name: "maximum references", count: 65_528, owners: [2] },
+		{ name: "maximum owners", count: 1_024, owners: Array.from({ length: 64 }, (_, i) => i + 2) },
+	])("copies $name in bounded slices with exact immutable identity", ({ count, owners }) => {
+		const source = attachment(count, owners);
+		const original = JSON.stringify(source);
+		const task = createCooperativeTask(copyStaticFabAssemblyRelationshipRecordSteps(source));
+		let slices = 0;
+		let maximumSlice = 0;
+		while (!task.done) {
+			const started = performance.now();
+			expect(task.step(64)).toBeLessThanOrEqual(64);
+			maximumSlice = Math.max(maximumSlice, performance.now() - started);
+			slices++;
+		}
+		const copied = task.finish();
+		expect(slices).toBeGreaterThan(Math.ceil(count / 64));
+		expect(maximumSlice).toBeLessThan(50);
+		expect(JSON.stringify(copied)).toBe(original);
+		expect(JSON.stringify(source)).toBe(original);
+		expect(freshFrozenCopy(source, copied)).toBe(true);
+		expect(task.finish()).toBe(copied);
+	});
+
+	it("keeps mutable synchronous inputs supported but rejects them across suspension", () => {
+		const source = structuredClone(attachment(4));
+		const synchronous = copyStaticFabAssemblyRelationshipRecord(source);
+		expect(Object.isFrozen(source)).toBe(false);
+		expect(freshFrozenCopy(source, synchronous)).toBe(true);
+		const task = createCooperativeTask(copyStaticFabAssemblyRelationshipRecordSteps(source));
+		expect(() => task.step(64)).toThrow(/불변/);
+		expect(() => task.finish()).toThrow(/불변/);
+		const nestedMutable = Object.freeze({ ...source });
+		expect(() =>
+			completeCooperativeSteps(copyStaticFabAssemblyRelationshipRecordSteps(nestedMutable)),
+		).toThrow(/불변/);
+		const accessor = Object.freeze({
+			...synchronous,
+			get reviewPolicy() {
+				return synchronous.reviewPolicy;
+			},
+		});
+		expect(() =>
+			completeCooperativeSteps(copyStaticFabAssemblyRelationshipRecordSteps(accessor)),
+		).toThrow(/필드/);
+	});
+
+	it("does not expose a partial copy when work is stopped", () => {
+		const source = attachment(1_024);
+		const original = JSON.stringify(source);
+		const task = createCooperativeTask(copyStaticFabAssemblyRelationshipRecordSteps(source));
+		expect(() => task.step(0)).toThrow(/positive/);
+		task.step(64);
+		expect(task.done).toBe(false);
+		expect(() => task.finish()).toThrow(/not complete/);
+		expect(JSON.stringify(source)).toBe(original);
+	});
+});
+
+function freshFrozenCopy(source: unknown, copied: unknown): boolean {
+	if (source === null || typeof source !== "object") return Object.is(source, copied);
+	if (
+		copied === null ||
+		typeof copied !== "object" ||
+		source === copied ||
+		!Object.isFrozen(copied)
+	)
+		return false;
+	const keys = Object.keys(source);
+	if (JSON.stringify(keys) !== JSON.stringify(Object.keys(copied))) return false;
+	return keys.every((key) =>
+		freshFrozenCopy(
+			(source as Record<string, unknown>)[key],
+			(copied as Record<string, unknown>)[key],
+		),
+	);
+}
 
 function attachment(
 	count: number,

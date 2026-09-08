@@ -664,7 +664,10 @@ import {
 	ordinaryEqKeyboardTargetLabel,
 	ordinaryEqRowExitPresentation,
 } from "./OrdinaryEqAuthoringPresentation";
-import { ordinaryEqAnchorEdgePresentation } from "./OrdinaryEqAnchorEdgePresentation";
+import {
+	ORDINARY_EQ_ANCHOR_FRAME_MARGINS,
+	ordinaryEqAnchorEdgePresentation,
+} from "./OrdinaryEqAnchorEdgePresentation";
 import {
 	ORDINARY_STK_HANDOFF_ENTRY_STATUS,
 	ordinaryEqToStkHandoff,
@@ -40803,7 +40806,17 @@ function centerPortKeyboardRowIfObscured(
 	const row = session.currentRow;
 	const worldX = session.binding.slots.worldPositions[row * 2] as number;
 	const worldZ = session.binding.slots.worldPositions[row * 2 + 1] as number;
-	return centerWorldPointIfObscured(worldX, worldZ, canvas, camera, renderer, insets);
+	return centerWorldPointIfObscured(
+		worldX,
+		worldZ,
+		canvas,
+		camera,
+		renderer,
+		insets,
+		session.scope === "ordinary" && session.portType === "EQ" && session.phase === "choose-end"
+			? ORDINARY_EQ_ANCHOR_FRAME_MARGINS
+			: undefined,
+	);
 }
 
 function centerWorldPointIfObscured(
@@ -40813,17 +40826,18 @@ function centerWorldPointIfObscured(
 	camera: Camera,
 	renderer: TileRenderer,
 	insets: Readonly<{ left?: number; right?: number; top?: number; bottom?: number }>,
+	safeMargins?: Readonly<{ left: number; right: number; top: number; bottom: number }>,
 ): boolean {
 	const frame = visibleCanvasFrame(canvas, insets);
 	const screen = renderer.worldToScreen({ x: worldX, y: worldZ }, camera);
-	// Keep the complete 44 px target ring inside the unobstructed frame. The label handles its own
-	// edge alignment, but the ring itself must never become a clipped keyboard target.
+	// Keep the complete target ring inside the frame. EQ endpoint captions reserve the same extra
+	// room as the fixed-anchor renderer, including when the two endpoints initially share one slot.
 	const margin = PORT_KEYBOARD_TARGET_SAFE_MARGIN;
 	if (
-		screen.x >= frame.left + margin &&
-		screen.x <= frame.left + frame.width - margin &&
-		screen.y >= frame.top + margin &&
-		screen.y <= frame.top + frame.height - margin
+		screen.x >= frame.left + (safeMargins?.left ?? margin) &&
+		screen.x <= frame.left + frame.width - (safeMargins?.right ?? margin) &&
+		screen.y >= frame.top + (safeMargins?.top ?? margin) &&
+		screen.y <= frame.top + frame.height - (safeMargins?.bottom ?? margin)
 	) {
 		return false;
 	}

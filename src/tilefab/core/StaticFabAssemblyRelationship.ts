@@ -189,6 +189,57 @@ export function copyStaticFabAssemblyRelationshipRecord(
 	return copyRecord(record);
 }
 
+/** Yielding copies require immutable input and publish only fully copied, frozen descendants. */
+export function* copyStaticFabAssemblyRelationshipRecordSteps(
+	record: StaticFabAssemblyRelationshipRecordV1,
+): Generator<void, StaticFabAssemblyRelationshipRecordV1> {
+	const result = yield* validateRecordShapeSteps(
+		record,
+		new Set<string>(),
+		new Set<string>(),
+		true,
+	);
+	if (typeof result === "string") throw new Error(`조립 관계 ${record?.id ?? "?"}: ${result}`);
+	const groups: StaticFabAssemblyRelationshipConnectionGroupV1[] = [];
+	for (const group of record.connectionGroups) {
+		yield;
+		const legs: StaticFabAssemblyRelationshipLegV1[] = [];
+		for (const leg of group.legs) {
+			yield;
+			legs.push(
+				Object.freeze({
+					ordinal: leg.ordinal,
+					directionRole: leg.directionRole,
+					exclusiveCutEdges: yield* copyRelationshipItemsSteps(
+						leg.exclusiveCutEdges,
+						copyScopedEdge,
+					),
+					endpointSupports: yield* copyRelationshipItemsSteps(
+						leg.endpointSupports,
+						copyEndpointSupport,
+					),
+					seamContacts: yield* copyRelationshipItemsSteps(leg.seamContacts, copySeamContact),
+				}),
+			);
+		}
+		groups.push(Object.freeze({ ordinal: group.ordinal, legs: Object.freeze(legs) }));
+	}
+	return copyRecordWithGroups(record, Object.freeze(groups));
+}
+
+/** Validated items contain at most three incidences and 64 direct owners per scoped edge. */
+function* copyRelationshipItemsSteps<T>(
+	items: readonly T[],
+	copy: (item: T) => T,
+): Generator<void, readonly T[]> {
+	const copied: T[] = [];
+	for (const item of items) {
+		yield;
+		copied.push(copy(item));
+	}
+	return Object.freeze(copied);
+}
+
 export interface StaticFabAssemblyRelationshipRemapV1 {
 	readonly relationshipId: number;
 	readonly organizationIds: ReadonlyMap<number, number>;
@@ -1939,6 +1990,23 @@ function addScopedEdgeToChecksum(
 function copyRecord(
 	record: StaticFabAssemblyRelationshipRecordV1,
 ): StaticFabAssemblyRelationshipRecordV1 {
+	return copyRecordWithGroups(
+		record,
+		Object.freeze(
+			record.connectionGroups.map((group) =>
+				Object.freeze({
+					ordinal: group.ordinal,
+					legs: Object.freeze(group.legs.map(copyLeg)),
+				}),
+			),
+		),
+	);
+}
+
+function copyRecordWithGroups(
+	record: StaticFabAssemblyRelationshipRecordV1,
+	connectionGroups: readonly StaticFabAssemblyRelationshipConnectionGroupV1[],
+): StaticFabAssemblyRelationshipRecordV1 {
 	return Object.freeze({
 		id: record.id,
 		hierarchyRole: record.hierarchyRole,
@@ -1949,14 +2017,7 @@ function copyRecord(
 			| readonly [number, number],
 		managedChildOrganizationIds: Object.freeze([...record.managedChildOrganizationIds]),
 		reviewPolicy: record.reviewPolicy,
-		connectionGroups: Object.freeze(
-			record.connectionGroups.map((group) =>
-				Object.freeze({
-					ordinal: group.ordinal,
-					legs: Object.freeze(group.legs.map(copyLeg)),
-				}),
-			),
-		),
+		connectionGroups,
 	});
 }
 

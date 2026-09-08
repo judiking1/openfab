@@ -15,9 +15,13 @@ export interface OrdinaryEqAnchorEdgePresentation {
 	readonly label: string;
 }
 
-const RAW_HORIZONTAL_MARGIN = 34;
-const RAW_TOP_MARGIN = 30;
-const RAW_BOTTOM_MARGIN = 60;
+/** Shared with explicit EQ target framing so a newly fixed start retains its complete caption. */
+export const ORDINARY_EQ_ANCHOR_FRAME_MARGINS = Object.freeze({
+	left: 34,
+	right: 34,
+	top: 30,
+	bottom: 60,
+});
 const LOCATOR_HALF_WIDTH = 70;
 const LOCATOR_HALF_HEIGHT = 22;
 const ACTIVE_AVOID_WIDTH = 104;
@@ -61,15 +65,15 @@ export function ordinaryEqAnchorEdgePresentation(
 	const right = input.frame.left + input.frame.width;
 	const bottom = input.frame.top + input.frame.height;
 	const horizontal =
-		input.anchor.x < input.frame.left + RAW_HORIZONTAL_MARGIN
+		input.anchor.x < input.frame.left + ORDINARY_EQ_ANCHOR_FRAME_MARGINS.left
 			? "left"
-			: input.anchor.x > right - RAW_HORIZONTAL_MARGIN
+			: input.anchor.x > right - ORDINARY_EQ_ANCHOR_FRAME_MARGINS.right
 				? "right"
 				: null;
 	const vertical =
-		input.anchor.y < input.frame.top + RAW_TOP_MARGIN
+		input.anchor.y < input.frame.top + ORDINARY_EQ_ANCHOR_FRAME_MARGINS.top
 			? "top"
-			: input.anchor.y > bottom - RAW_BOTTOM_MARGIN
+			: input.anchor.y > bottom - ORDINARY_EQ_ANCHOR_FRAME_MARGINS.bottom
 				? "bottom"
 				: null;
 	if (!horizontal && !vertical) return null;

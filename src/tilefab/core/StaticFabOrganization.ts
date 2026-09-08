@@ -73,6 +73,13 @@ export function isCanonicalStaticFabOrganizationState(state: StaticFabOrganizati
 	return canonicalStaticFabOrganizationStates.has(state);
 }
 
+/** Record provenance includes owned immutable metadata and every membership descendant. */
+export function isCanonicalStaticFabOrganizationRecord(
+	record: StaticFabOrganizationRecord,
+): boolean {
+	return canonicalStaticFabOrganizationRecords.has(record);
+}
+
 export interface CanonicalStaticFabOrganizationRecordHeader {
 	readonly id: number;
 	readonly kind: StaticFabOrganizationKind;

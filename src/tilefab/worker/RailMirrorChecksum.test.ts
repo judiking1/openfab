@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
-import type { StaticFabOrganizationRecord } from "../core/StaticFabOrganization";
+import {
+	copyStaticFabOrganizationRecord,
+	isCanonicalStaticFabOrganizationRecord,
+	renameStaticFabOrganizationRecord,
+	type StaticFabOrganizationRecord,
+} from "../core/StaticFabOrganization";
 import {
 	adoptRailMirrorSnapshotCaptureHandoff,
 	captureRailMirrorSnapshot,
@@ -367,6 +372,134 @@ describe("RailMirrorSnapshot capture authority", () => {
 });
 
 describe("RailChecksumAccumulator organization hashing", () => {
+	it("keeps replacement hashing atomic through a 50k membership and cancellation", async () => {
+		const before = copyStaticFabOrganizationRecord(largeAreaRecord(1));
+		const after = copyStaticFabOrganizationRecord(largeAreaRecord(50_000));
+		const checksum = new RailChecksumAccumulator();
+		checksum.addOrganization(before);
+		checksum.setOrganizationNextId(99);
+		const source = checksum.digest();
+		const expected = checksum.clone();
+		const mutation = { id: before.id, before, after };
+		await expect(
+			checksum.applyOrganizationMutationCooperatively(
+				mutation,
+				async () => {
+					expect(checksum.digest()).toBe(source);
+					throw new Error("cancel after membership started");
+				},
+				128,
+			),
+		).rejects.toThrow("cancel after membership started");
+		expect(checksum.digest()).toBe(source);
+		let slices = 0;
+		await checksum.applyOrganizationMutationCooperatively(
+			mutation,
+			async () => {
+				slices++;
+				expect(checksum.digest()).toBe(source);
+			},
+			128,
+		);
+		expect(slices).toBe(Math.floor(50_000 / 128) + 1);
+		expected.applyOrganizationMutation(mutation);
+		expect(checksum.digest()).toBe(expected.digest());
+		expect(checksum.organizationCount).toBe(1);
+		expect(checksum.organizationNextId).toBe(99);
+	});
+
+	it("checks cancellation even when both canonical membership hashes are cached", async () => {
+		const before = copyStaticFabOrganizationRecord(largeAreaRecord(50_000));
+		const after = renameStaticFabOrganizationRecord(before, "Renamed Cooperative Area");
+		const checksum = new RailChecksumAccumulator();
+		checksum.addOrganization(before);
+		const source = checksum.digest();
+		let callbacks = 0;
+		await expect(
+			checksum.applyOrganizationMutationCooperatively(
+				{ id: before.id, before, after },
+				async () => {
+					callbacks++;
+					throw new Error("cancel cached replacement");
+				},
+			),
+		).rejects.toThrow("cancel cached replacement");
+		expect(callbacks).toBe(1);
+		expect(checksum.digest()).toBe(source);
+	});
+
+	it("requires canonical metadata ownership and retains captured mutation sides across yields", async () => {
+		const before = copyStaticFabOrganizationRecord(largeAreaRecord(1));
+		const after = renameStaticFabOrganizationRecord(before, "Stable Metadata");
+		const raw = Object.freeze({ ...after });
+		expect(isCanonicalStaticFabOrganizationRecord(after)).toBe(true);
+		expect(isCanonicalStaticFabOrganizationRecord(raw)).toBe(false);
+		const checksum = new RailChecksumAccumulator();
+		checksum.addOrganization(before);
+		const source = checksum.digest();
+		await expect(
+			checksum.applyOrganizationMutationCooperatively(
+				{ id: before.id, before, after: raw },
+				async () => undefined,
+			),
+		).rejects.toThrow(/canonical immutable/);
+		expect(checksum.digest()).toBe(source);
+		const expected = checksum.clone();
+		expected.applyOrganizationMutation({ id: before.id, before, after });
+		const mutation = { id: before.id, before, after };
+		await checksum.applyOrganizationMutationCooperatively(mutation, async () => {
+			mutation.after = before;
+		});
+		expect(checksum.digest()).toBe(expected.digest());
+	});
+
+	it("matches the complete patch checksum and preserves allocation after remove", async () => {
+		const after = copyStaticFabOrganizationRecord({ ...largeAreaRecord(1_025), id: 7 });
+		const checksum = new RailChecksumAccumulator();
+		const patch = {
+			changes: [],
+			switchChanges: [],
+			portChanges: [],
+			equipmentGroupChanges: [],
+			organizationChanges: [{ id: after.id, before: null, after }],
+			organizationNextIdBefore: 1,
+			organizationNextIdAfter: 9,
+		};
+		let callbacks = 0;
+		const actual = await checksumRailPatchResultCooperatively(
+			checksum.digest(),
+			patch,
+			async () => {
+				callbacks++;
+			},
+			128,
+		);
+		expect(callbacks).toBeGreaterThan(8);
+		expect(actual).toBe(checksumRailPatchResult(checksum.digest(), patch));
+		await checksum.applyOrganizationMutationCooperatively(
+			{ id: after.id, before: null, after },
+			async () => undefined,
+		);
+		expect(checksum.organizationNextId).toBe(8);
+		await checksum.applyOrganizationMutationCooperatively(
+			{ id: after.id, before: after, after: null },
+			async () => undefined,
+		);
+		expect(checksum.organizationCount).toBe(0);
+		expect(checksum.organizationNextId).toBe(8);
+		const source = checksum.digest();
+		const empty = { id: 7, before: null, after: null };
+		await expect(
+			checksum.applyOrganizationMutationCooperatively(empty, async () => undefined, Number.NaN),
+		).rejects.toThrow(/operation budget/);
+		await expect(
+			checksum.applyOrganizationMutationCooperatively(empty, async () => {
+				throw new Error("cancel empty");
+			}),
+		).rejects.toThrow("cancel empty");
+		expect(checksum.digest()).toBe(source);
+	});
+
 	it("preserves the fixed organization checksum contract across hash refactors", () => {
 		const checksum = new RailChecksumAccumulator();
 		checksum.addOrganization(

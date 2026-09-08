@@ -23,6 +23,7 @@ import {
 } from "../core/StaticFabAssemblyRelationship";
 import {
 	emptyStaticFabOrganizationState,
+	isCanonicalStaticFabOrganizationRecord,
 	type StaticFabOrganizationMembership,
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
@@ -370,6 +371,43 @@ export class RailChecksumAccumulator {
 		if (mutation.after) this.addOrganization(mutation.after);
 	}
 
+	/** Canonical provenance keeps metadata and membership stable across both awaited hashes. */
+	async applyOrganizationMutationCooperatively(
+		mutation: StaticFabOrganizationMutation,
+		checkpoint: () => Promise<void>,
+		operationBudget = 256,
+	): Promise<void> {
+		if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0) {
+			throw new RangeError(
+				"Organization checksum operation budget must be a positive safe integer.",
+			);
+		}
+		const { before, after } = mutation;
+		if (
+			(before && !isCanonicalStaticFabOrganizationRecord(before)) ||
+			(after && !isCanonicalStaticFabOrganizationRecord(after))
+		) {
+			throw new TypeError(
+				"Cooperative organization mutations require canonical immutable records.",
+			);
+		}
+		const afterNextId = after ? after.id + 1 : null;
+		if (afterNextId !== null) assertOrganizationNextId(afterNextId, "organization ID cursor");
+		const beforeHash = before
+			? await this.organizationHashesCooperatively(before, checkpoint, operationBudget)
+			: null;
+		const afterHash = after
+			? await this.organizationHashesCooperatively(after, checkpoint, operationBudget)
+			: null;
+		await checkpoint();
+		this.xorHash = (this.xorHash ^ (beforeHash?.xor ?? 0) ^ (afterHash?.xor ?? 0)) >>> 0;
+		this.sumHash = (this.sumHash - (beforeHash?.sum ?? 0) + (afterHash?.sum ?? 0)) >>> 0;
+		this.currentOrganizations += (after ? 1 : 0) - (before ? 1 : 0);
+		if (afterNextId !== null && afterNextId > this.currentOrganizationNextId) {
+			this.setOrganizationNextId(afterNextId);
+		}
+	}
+
 	addAssemblyRelationship(record: StaticFabAssemblyRelationshipRecordV1): void {
 		const fingerprint = assemblyRelationshipRecordFingerprint(record);
 		this.xorHash = (this.xorHash ^ fingerprint.xor) >>> 0;
@@ -408,6 +446,40 @@ export class RailChecksumAccumulator {
 	applyAssemblyRelationshipMutation(mutation: StaticFabAssemblyRelationshipMutationV1): void {
 		if (mutation.before) this.removeAssemblyRelationship(mutation.before);
 		if (mutation.after) this.addAssemblyRelationship(mutation.after);
+	}
+
+	/** Hash both immutable sides before atomically changing the accumulator, including on cancellation. */
+	async applyAssemblyRelationshipMutationCooperatively(
+		mutation: StaticFabAssemblyRelationshipMutationV1,
+		checkpoint: () => Promise<void>,
+		operationBudget = 256,
+	): Promise<void> {
+		if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0) {
+			throw new RangeError(
+				"Relationship checksum operation budget must be a positive safe integer.",
+			);
+		}
+		const { before, after } = mutation;
+		const afterNextId = after ? after.id + 1 : null;
+		if (afterNextId !== null)
+			assertOrganizationNextId(afterNextId, "assembly relationship ID cursor");
+		const beforeHash = before
+			? await assemblyRelationshipRecordFingerprintCooperatively(
+					before,
+					checkpoint,
+					operationBudget,
+				)
+			: null;
+		const afterHash = after
+			? await assemblyRelationshipRecordFingerprintCooperatively(after, checkpoint, operationBudget)
+			: null;
+		await checkpoint();
+		this.xorHash = (this.xorHash ^ (beforeHash?.xor ?? 0) ^ (afterHash?.xor ?? 0)) >>> 0;
+		this.sumHash = (this.sumHash - (beforeHash?.sum ?? 0) + (afterHash?.sum ?? 0)) >>> 0;
+		this.currentAssemblyRelationships += (after ? 1 : 0) - (before ? 1 : 0);
+		if (afterNextId !== null && afterNextId > this.currentAssemblyRelationshipNextId) {
+			this.setAssemblyRelationshipNextId(afterNextId);
+		}
 	}
 
 	clone(): RailChecksumAccumulator {
@@ -705,6 +777,7 @@ export function checksumRailPatchResult(
 	return checksum.digest();
 }
 
+/** Organization sides must be canonical; relationship sides must be deeply immutable. */
 export async function checksumRailPatchResultCooperatively(
 	sourceChecksum: string,
 	patch: RailChecksumPatchInput,
@@ -744,11 +817,15 @@ export async function checksumRailPatchResultCooperatively(
 		await consumeOperation();
 	}
 	for (const change of patch.organizationChanges) {
-		checksum.applyOrganizationMutation(change);
+		await checksum.applyOrganizationMutationCooperatively(change, checkpoint, operationBudget);
 		await consumeOperation();
 	}
 	for (const change of patch.relationshipChanges ?? []) {
-		checksum.applyAssemblyRelationshipMutation(change);
+		await checksum.applyAssemblyRelationshipMutationCooperatively(
+			change,
+			checkpoint,
+			operationBudget,
+		);
 		await consumeOperation();
 	}
 	await checkpoint();
@@ -1036,6 +1113,19 @@ function assemblyRelationshipRecordFingerprint(record: StaticFabAssemblyRelation
 	readonly sum: number;
 } {
 	return assemblyRelationshipDigestFingerprint(checksumStaticFabAssemblyRelationshipRecord(record));
+}
+
+async function assemblyRelationshipRecordFingerprintCooperatively(
+	record: StaticFabAssemblyRelationshipRecordV1,
+	checkpoint: () => Promise<void>,
+	operationBudget: number,
+): Promise<OrganizationHashPair> {
+	const task = createCooperativeTask(checksumStaticFabAssemblyRelationshipRecordSteps(record));
+	while (!task.done) {
+		task.step(operationBudget);
+		await checkpoint();
+	}
+	return assemblyRelationshipDigestFingerprint(task.finish());
 }
 
 function assemblyRelationshipDigestFingerprint(digest: string): {

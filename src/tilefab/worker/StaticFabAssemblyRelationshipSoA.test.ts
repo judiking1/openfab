@@ -14,7 +14,11 @@ import {
 	type StaticFabAssemblyScopedEdgeV1,
 	staticFabAssemblyRelationshipStateEquals,
 } from "../core/StaticFabAssemblyRelationship";
-import { RailChecksumAccumulator } from "./RailMirrorChecksum";
+import {
+	checksumRailPatchResult,
+	checksumRailPatchResultCooperatively,
+	RailChecksumAccumulator,
+} from "./RailMirrorChecksum";
 import {
 	createStaticFabAssemblyRelationshipSnapshot,
 	createStaticFabAssemblyRelationshipSnapshotHydrator,
@@ -130,6 +134,130 @@ describe("StaticFabAssemblyRelationshipSoA", () => {
 			),
 		).rejects.toThrow("cancelled");
 		expect(checksum.digest()).toBe(before);
+	});
+
+	it("replaces a maximum relationship without publishing the removal before an awaited addition", async () => {
+		const before = createStaticFabAssemblyRelationshipState(reciprocalState()).records[0];
+		const after = createStaticFabAssemblyRelationshipState(maximumRecordState()).records[0];
+		if (!before || !after) throw new Error("Missing relationship records");
+		let beforeSlices = 0;
+		const checksum = new RailChecksumAccumulator();
+		await checksum.addAssemblyRelationshipCooperatively(
+			before,
+			async () => {
+				beforeSlices++;
+			},
+			128,
+		);
+		checksum.setAssemblyRelationshipNextId(99);
+		const source = checksum.digest();
+		const mutation = { id: before.id, before, after };
+		let cancelledSlices = 0;
+		await expect(
+			checksum.applyAssemblyRelationshipMutationCooperatively(
+				mutation,
+				async () => {
+					expect(checksum.digest()).toBe(source);
+					if (++cancelledSlices > beforeSlices) throw new Error("cancel during after hash");
+				},
+				128,
+			),
+		).rejects.toThrow("cancel during after hash");
+		expect(checksum.digest()).toBe(source);
+		expect(checksum.assemblyRelationshipCount).toBe(1);
+		expect(checksum.assemblyRelationshipNextId).toBe(99);
+
+		const expected = checksum.clone();
+		expected.applyAssemblyRelationshipMutation(mutation);
+		let slices = 0;
+		await checksum.applyAssemblyRelationshipMutationCooperatively(
+			mutation,
+			async () => {
+				slices++;
+				expect(checksum.digest()).toBe(source);
+			},
+			128,
+		);
+		expect(slices).toBeGreaterThan(1_000);
+		expect(checksum.digest()).toBe(expected.digest());
+	});
+
+	it("preserves addition, removal, allocation cursors and the final cancellation boundary", async () => {
+		const record = createStaticFabAssemblyRelationshipState(reciprocalState()).records[0];
+		if (!record) throw new Error("Missing relationship record");
+		const checksum = new RailChecksumAccumulator();
+		const synchronous = checksum.clone();
+		const add = { id: record.id, before: null, after: record };
+		let hashSlices = 0;
+		await synchronous.addAssemblyRelationshipCooperatively(
+			record,
+			async () => {
+				hashSlices++;
+			},
+			128,
+		);
+		const empty = checksum.digest();
+		let callbacks = 0;
+		await expect(
+			checksum.applyAssemblyRelationshipMutationCooperatively(
+				add,
+				async () => {
+					if (++callbacks > hashSlices) throw new Error("cancel before publication");
+				},
+				128,
+			),
+		).rejects.toThrow("cancel before publication");
+		expect(callbacks).toBe(hashSlices + 1);
+		expect(checksum.digest()).toBe(empty);
+		await checksum.applyAssemblyRelationshipMutationCooperatively(add, async () => undefined);
+		expect(checksum.digest()).toBe(synchronous.digest());
+		expect(checksum.assemblyRelationshipNextId).toBe(record.id + 1);
+		const remove = { id: record.id, before: record, after: null };
+		synchronous.applyAssemblyRelationshipMutation(remove);
+		await checksum.applyAssemblyRelationshipMutationCooperatively(remove, async () => undefined);
+		expect(checksum.digest()).toBe(synchronous.digest());
+		expect(checksum.assemblyRelationshipCount).toBe(0);
+		expect(checksum.assemblyRelationshipNextId).toBe(record.id + 1);
+		const noOp = { id: record.id, before: null, after: null };
+		await expect(
+			checksum.applyAssemblyRelationshipMutationCooperatively(noOp, async () => undefined, 0),
+		).rejects.toThrow(/operation budget/);
+		await expect(
+			checksum.applyAssemblyRelationshipMutationCooperatively(noOp, async () => {
+				throw new Error("cancel empty");
+			}),
+		).rejects.toThrow("cancel empty");
+		expect(checksum.digest()).toBe(synchronous.digest());
+	});
+
+	it("uses bounded relationship hashing in the cooperative patch checksum with unchanged identity", async () => {
+		const record = createStaticFabAssemblyRelationshipState(maximumRecordState()).records[0];
+		if (!record) throw new Error("Missing relationship record");
+		const source = new RailChecksumAccumulator().digest();
+		const patch = {
+			changes: [],
+			switchChanges: [],
+			portChanges: [],
+			equipmentGroupChanges: [],
+			organizationChanges: [],
+			organizationNextIdBefore: 1,
+			organizationNextIdAfter: 1,
+			relationshipNextIdBefore: 1,
+			relationshipNextIdAfter: 99,
+			relationshipChanges: [{ id: record.id, before: null, after: record }],
+		};
+		let callbacks = 0;
+		expect(
+			await checksumRailPatchResultCooperatively(
+				source,
+				patch,
+				async () => {
+					callbacks++;
+				},
+				128,
+			),
+		).toBe(checksumRailPatchResult(source, patch));
+		expect(callbacks).toBeGreaterThan(1_000);
 	});
 
 	it("rejects mutable descendants and frozen accessors at the immutable adoption boundary", () => {
