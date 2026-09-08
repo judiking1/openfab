@@ -696,7 +696,7 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 		);
 
 		expect(plan.valid).toBe(false);
-		expect(plan.reason).toContain("빈 footprint");
+		expect(plan.reason).toContain("기존 레일 또는 스위치와 겹칩니다");
 		expect(plan.conflicts).toEqual(expect.arrayContaining([occupiedEdge.from, occupiedEdge.to]));
 		expect(plan.mutations).toEqual([]);
 		expect(plan.portMutations).toEqual([]);

@@ -5581,6 +5581,35 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	font: inherit;
 }
 
+.tilefab-organization-placement-failure {
+	display: grid;
+	min-width: 0;
+	max-height: 140px;
+	flex: 1 0 100%;
+	gap: 4px;
+	overflow: auto;
+	padding: 8px;
+	border: 1px solid #a65b61;
+	border-radius: 4px;
+	color: #f5c9ce;
+	background: #332225;
+	font-size: var(--tilefab-font-caption);
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+	white-space: normal;
+}
+
+.tilefab-organization-placement-failure small {
+	color: #d5b8bd;
+	font: inherit;
+}
+
+.tilefab-buildbar[data-organization-bundle]:not([data-organization-bundle=""]):has(
+		.tilefab-organization-placement-failure
+	) {
+	max-height: min(340px, calc(100% - 90px));
+}
+
 @media (min-width: 761px) {
 	.tilefab-buildbar[data-organization-bundle]:not([data-organization-bundle=""]) {
 		width: max-content;
@@ -13236,12 +13265,19 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-app[data-organization-bundle-active="true"]
-	.tilefab-action-hints[data-context="blueprint"] {
+	.tilefab-action-hints[data-context="blueprint"],
+.tilefab-app[data-organization-bundle-active="true"]:has(.tilefab-organization-placement-failure)
+	.tilefab-hierarchy-handoff-dock {
 	bottom: var(--tilefab-organization-hints-bottom, 86px);
 }
 
 .tilefab-organization-rotate {
 	min-width: 44px;
+}
+
+.tilefab-app[data-organization-bundle-active="true"] .tilefab-scale {
+	z-index: 1;
+	pointer-events: none;
 }
 
 .tilefab-app[data-organization-bundle-active="true"][data-guided-build-active="false"]

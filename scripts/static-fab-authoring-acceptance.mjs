@@ -33995,9 +33995,78 @@ async function exerciseOrdinaryResilientFabNativeRecovery(
 			undefined,
 			{ timeout: 10_000 },
 		);
+		await exerciseResilientFabCopyRejectionFeedback(reopenedPage, savedPath, fabOrganizationId);
 	} finally {
 		await closeBrowserResource(context, "ordinary resilient Fab native reopen context");
 	}
+}
+
+async function exerciseResilientFabCopyRejectionFeedback(page, savedPath, fabOrganizationId) {
+	const before = await readMetrics(page);
+	const native = JSON.parse(await readFile(savedPath, "utf8"));
+	const fab = native.areas.records.find((record) => record.id === fabOrganizationId);
+	if (!fab || fab.membership.railEdges.length === 0) {
+		throw new Error("Recovered Fab has no authored rail membership for overlap verification.");
+	}
+	const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+	for (const [fromX, fromY, toX, toY] of fab.membership.railEdges) {
+		for (const [x, y] of [
+			[fromX, fromY],
+			[toX, toY],
+		]) {
+			bounds.minX = Math.min(bounds.minX, x);
+			bounds.minY = Math.min(bounds.minY, y);
+			bounds.maxX = Math.max(bounds.maxX, x);
+			bounds.maxY = Math.max(bounds.maxY, y);
+		}
+	}
+	const occupied = offsetCellCenter({
+		x: Math.round((bounds.minX + bounds.maxX) / 2),
+		y: Math.round((bounds.minY + bounds.maxY) / 2),
+	});
+	const startCopy = async () => {
+		await openStaticFabNavigatorTab(page, "organizations");
+		const library = page.getByTestId("static-fab-organization-library");
+		await library.locator(`[role="option"][data-organization-id="${fabOrganizationId}"]`).click();
+		await library.getByRole("button", { name: "하위 조직 포함", exact: true }).click();
+		await library.getByRole("button", { name: "복사·배치", exact: true }).click();
+		await page.getByTestId("organization-bundle-summary").waitFor({ state: "visible" });
+	};
+	await startCopy();
+	await clickWorld(page, occupied);
+	const failure = page.getByTestId("organization-bundle-placement-failure");
+	await failure.waitFor({ state: "visible", timeout: 20_000 });
+	assertIncludes(
+		await failure.innerText(),
+		"기존 레일 또는 스위치와 겹칩니다",
+		"copy refusal reason",
+	);
+	assertEqual(await failure.getAttribute("role"), "alert", "copy refusal accessible announcement");
+	assertIncludes(
+		await page.getByTestId("rail-status-message").innerText(),
+		"기존 레일 또는 스위치와 겹칩니다",
+		"copy refusal takes priority over the recovered Fab next-task status",
+	);
+	assertEqual(
+		(await page.locator(".tilefab-status-preview").innerText()).includes("검증 중"),
+		false,
+		"copy refusal ends the busy preview readout",
+	);
+	assertProjectUnchanged(await readMetrics(page), before, "recovered Fab overlap refusal");
+	await assertOrganizationPlacementToolbarLayout(page);
+	await page.screenshot({ path: path.join(artifactRoot, "recovered-fab-copy-rejection.png") });
+	await page.getByRole("button", { name: "조직 청사진 시계 방향 회전", exact: true }).click();
+	await failure.waitFor({ state: "hidden" });
+	await page.getByRole("button", { name: "조직 청사진 반시계 방향 회전", exact: true }).click();
+	await clickWorld(page, occupied);
+	await failure.waitFor({ state: "visible", timeout: 20_000 });
+	await page.getByTestId("organization-bundle-exit").click();
+	await failure.waitFor({ state: "hidden" });
+	await startCopy();
+	assertEqual(await failure.count(), 0, "new copy session clears the previous rejection");
+	await page.getByTestId("organization-bundle-exit").click();
+	assertProjectUnchanged(await readMetrics(page), before, "recovered Fab copy cancel and retry");
+	await page.getByTestId("ordinary-resilient-fab-checks-handoff").waitFor({ state: "visible" });
 }
 
 async function exerciseOrdinaryStrictStkSafeFrame(page) {
@@ -37732,11 +37801,28 @@ async function assertOrganizationPlacementToolbarLayout(page) {
 			);
 			await assertLocatorInsideViewport(page, bar);
 			await assertLocatorInsideViewport(page, page.getByTestId("organization-bundle-summary"));
+			const failure = page.getByTestId("organization-bundle-placement-failure");
+			if (await failure.isVisible()) {
+				await assertLocatorInsideViewport(page, failure);
+				const dock = page.locator(".tilefab-hierarchy-handoff-dock:visible");
+				if (await dock.count()) {
+					const dockBounds = await dock.boundingBox();
+					const barBounds = await bar.boundingBox();
+					assertAtMost(
+						(dockBounds?.y ?? Infinity) + (dockBounds?.height ?? Infinity),
+						(barBounds?.y ?? 0) - 8,
+						`${width}px next-task dock clears the copy failure notice`,
+					);
+				}
+			}
 			for (const control of await bar.getByRole("button").all()) {
 				await assertLocatorInsideViewport(page, control);
 				const bounds = await control.boundingBox();
 				assertAtLeast(bounds?.width ?? 0, 44, `${width}px organization placement control width`);
 				assertAtLeast(bounds?.height ?? 0, 44, `${width}px organization placement control height`);
+				if (await failure.isVisible()) {
+					await assertLocatorOwnsHitArea(control, `${width}px rejected copy control hit area`);
+				}
 			}
 		}
 	} finally {

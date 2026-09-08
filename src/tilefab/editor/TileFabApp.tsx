@@ -2882,6 +2882,9 @@ export default function TileFabApp(): React.ReactElement {
 		Readonly<{ left: number; right: number; top: number; bottom: number }>
 	>(() => Object.freeze({ left: 70, right: 8, top: 350, bottom: 170 }));
 	const [blueprintPlacementPending, setBlueprintPlacementPending] = useState(false);
+	const [organizationBundlePlacementFailure, setOrganizationBundlePlacementFailure] = useState<
+		string | null
+	>(null);
 	const [lastBlueprintPlacementAnchor, setLastBlueprintPlacementAnchor] = useState("");
 	const [railClipboardKind, setRailClipboardKind] = useState<RailClipboard["kind"] | null>(null);
 	const [recentRailClipboards, setRecentRailClipboards] = useState<
@@ -5737,6 +5740,7 @@ export default function TileFabApp(): React.ReactElement {
 	const updateOrganizationBundlePlacementSession = (
 		next: StaticFabOrganizationBundlePlacementSession | null,
 	): void => {
+		setOrganizationBundlePlacementFailure(null);
 		const current = organizationBundlePlacementSessionRef.current;
 		const preservesPlacementLifecycle =
 			current !== null &&
@@ -7561,6 +7565,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const cancelBlueprintPlacement = (): void => {
+		setOrganizationBundlePlacementFailure(null);
 		if (
 			!blueprintPlacementPendingRef.current &&
 			!blueprintPlacementBridgeRef.current &&
@@ -7598,6 +7603,14 @@ export default function TileFabApp(): React.ReactElement {
 			canvasRef.current.dataset.blueprintPlacementResult = "committed";
 			canvasRef.current.dataset.blueprintPlacementRequestAnchor = encodedAnchor;
 			canvasRef.current.dataset.blueprintPlacementAnchor = encodedAnchor;
+		}
+	};
+
+	const showOrganizationBundlePlacementFailure = (message: string): void => {
+		setOrganizationBundlePlacementFailure(message);
+		setStatus(message);
+		if (previewReadoutRef.current) {
+			previewReadoutRef.current.textContent = "배치되지 않았습니다 · 안내를 확인하고 다시 시도하세요";
 		}
 	};
 	const recordCommittedAreaStampPlacement = (): void => {
@@ -7799,6 +7812,7 @@ export default function TileFabApp(): React.ReactElement {
 			workerBridgeRef.current === mirrorBridge &&
 			workerBridgeDocumentRef.current === sourceDocument;
 		let singleCommitCompleted: "guided" | "preset" | null = null;
+		setOrganizationBundlePlacementFailure(null);
 		blueprintPlacementPendingRef.current = true;
 		setBlueprintPlacementPending(true);
 		if (canvasRef.current) {
@@ -7918,7 +7932,9 @@ export default function TileFabApp(): React.ReactElement {
 					canvasRef.current.dataset.organizationBundlePlacementPhase = "stale";
 					canvasRef.current.dataset.organizationBundlePlacementTicket = "revoked";
 				}
-				setStatus("검사 중 맵이 변경되어 조직 청사진 배치를 취소했습니다 · 다시 클릭하세요");
+				showOrganizationBundlePlacementFailure(
+					"검사 중 맵이 변경되어 조직 청사진 배치를 취소했습니다 · 다시 클릭하세요",
+				);
 				return;
 			}
 			if (!prepared.validation.valid || !prepared.certified || !plan) {
@@ -7955,7 +7971,7 @@ export default function TileFabApp(): React.ReactElement {
 						templateFeedback: null,
 					};
 				}
-				setStatus(
+				showOrganizationBundlePlacementFailure(
 					prepared.validation.valid && prepared.certified
 						? prepared.validation.reason
 						: prepared.validation.valid
@@ -7982,7 +7998,9 @@ export default function TileFabApp(): React.ReactElement {
 					canvasRef.current.dataset.organizationBundlePlacementPhase = "stale";
 					canvasRef.current.dataset.organizationBundlePlacementTicket = "rejected";
 				}
-				setStatus(activeDocument.getLastCommandError() ?? "조직 청사진을 확정하지 못했습니다");
+				showOrganizationBundlePlacementFailure(
+					activeDocument.getLastCommandError() ?? "조직 청사진을 확정하지 못했습니다",
+				);
 				return;
 			}
 			const placedAssemblyRecognition =
@@ -8087,7 +8105,7 @@ export default function TileFabApp(): React.ReactElement {
 				canvasRef.current.dataset.organizationBundlePlacementPhase = "error";
 				canvasRef.current.dataset.organizationBundlePlacementTicket = "revoked";
 			}
-			setStatus(
+			showOrganizationBundlePlacementFailure(
 				`조직 청사진 검사를 완료하지 못했습니다: ${error instanceof Error ? error.message : "알 수 없는 오류"}`,
 			);
 		} finally {
@@ -26586,7 +26604,9 @@ export default function TileFabApp(): React.ReactElement {
 		connectedFabStatusOverride.message === presentedStatus
 			? connectedFabStatusOverride.message
 			: null;
-	const taskHandoffLiveStatus = ordinaryStaticFabIssueRecheckContext
+	const taskHandoffLiveStatus = organizationBundlePlacementSession && organizationBundlePlacementFailure
+		? organizationBundlePlacementFailure
+		: ordinaryStaticFabIssueRecheckContext
 		? presentedStatus
 		: resilientFabChecksHandoff
 		? currentResilientFabLoopReceipt?.phase === "applied" &&
@@ -35767,6 +35787,17 @@ export default function TileFabApp(): React.ReactElement {
 							</fieldset>
 						) : organizationBundlePlacementSession ? (
 							<>
+								{organizationBundlePlacementFailure ? (
+									<div
+										className="tilefab-organization-placement-failure"
+										data-testid="organization-bundle-placement-failure"
+										role="alert"
+									>
+										<strong>배치하지 못했습니다</strong>
+										<span>{organizationBundlePlacementFailure}</span>
+										<small>안내를 확인한 뒤 다시 배치하거나 Esc로 취소하세요.</small>
+									</div>
+								) : null}
 								{placedTwinBayDuplicateHandoff ? (
 									<>
 										<span

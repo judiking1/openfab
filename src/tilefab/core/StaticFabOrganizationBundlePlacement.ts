@@ -1324,7 +1324,7 @@ function buildRailMutations(
 	if (conflicts.size > 0) {
 		return Object.freeze({
 			valid: false,
-			reason: "조직 청사진은 현재 빈 footprint에만 배치할 수 있습니다",
+			reason: "기존 레일 또는 스위치와 겹칩니다 · 빈 공간으로 옮겨 다시 배치하세요",
 			cells,
 			mutations: Object.freeze([]),
 			conflicts: Object.freeze([...conflicts.values()].sort(compareCells)),
