@@ -52,6 +52,7 @@ import {
 } from "./SyntheticFabStarterCertifiedArtifact";
 import { loadCertifiedSyntheticFabStarter } from "./SyntheticFabStarterCertifiedCatalog";
 import { largeFabDialogMetadata } from "./SyntheticFabStarterDialogMetadata";
+import { syntheticFabStarterPresentation } from "./SyntheticFabStarterPresentation";
 import {
 	SYNTHETIC_FAB_STARTER_PREVIEW_CACHE_BYTES_LIMIT,
 	SyntheticFabStarterPreviewCache,
@@ -125,10 +126,8 @@ export function SyntheticFabStarterDialog({
 				? SYNTHETIC_FAB_PRESET_CATALOG
 				: SYNTHETIC_FAB_PROJECT_CATALOG;
 	const item = syntheticFabStarterCatalogItem(request.id);
-	const previewLabel =
-		request.id === "production-fab-60"
-			? `생산 FAB · ${request.parameters.bayCount} Bay`
-			: item.label;
+	const presentation = syntheticFabStarterPresentation(request);
+	const previewLabel = `${presentation.name}${presentation.bayCount === null ? "" : ` · ${presentation.bayCount} Bay`}`;
 	const largeFabMetadata = useMemo(() => largeFabDialogMetadata(request), [request]);
 	const largeFabAssembly = largeFabMetadata?.assembly ?? null;
 	const productionFabAssembly = useMemo(
@@ -537,25 +536,35 @@ export function SyntheticFabStarterDialog({
 									: "생산 Bay 조립 패턴"
 						}
 					>
-						{catalog.map((candidate) => (
-							<button
-								type="button"
-								aria-pressed={candidate.id === request.id}
-								key={candidate.id}
-								disabled={busy}
-								data-active={candidate.id === request.id}
-								data-testid={`synthetic-fab-starter-${candidate.id}`}
-								onClick={() => selectStarter(candidate.id)}
-							>
-								<StarterMiniature id={candidate.id} />
-								<span>
-									<small>{candidate.stage}</small>
-									<strong>{candidate.label}</strong>
-									<em>{candidate.title}</em>
-								</span>
-								{candidate.id === request.id ? <Check size={16} /> : null}
-							</button>
-						))}
+						{catalog.map((candidate) => {
+							const copy = syntheticFabStarterPresentation(
+								candidate.id === request.id
+									? request
+									: defaultSyntheticFabStarterRequest(candidate.id),
+							);
+							return (
+								<button
+									type="button"
+									aria-pressed={candidate.id === request.id}
+									key={candidate.id}
+									disabled={busy}
+									data-active={candidate.id === request.id}
+									data-testid={`synthetic-fab-starter-${candidate.id}`}
+									onClick={() => selectStarter(candidate.id)}
+								>
+									<StarterMiniature id={candidate.id} />
+									<span>
+										<small>
+											{copy.category}
+											{copy.bayCount === null ? "" : ` · ${copy.bayCount} Bay`}
+										</small>
+										<strong>{copy.name}</strong>
+										<em>{copy.description}</em>
+									</span>
+									{candidate.id === request.id ? <Check size={16} /> : null}
+								</button>
+							);
+						})}
 					</nav>
 
 					<section
@@ -613,7 +622,7 @@ export function SyntheticFabStarterDialog({
 						</div>
 						<div className="tilefab-starter-preview-title">
 							<span>
-								<small>{item.stage}</small>
+								<small>{presentation.category}</small>
 								<strong>{previewLabel}</strong>
 							</span>
 							<em data-testid="synthetic-fab-preview-source">

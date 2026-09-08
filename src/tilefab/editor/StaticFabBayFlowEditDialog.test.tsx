@@ -21,7 +21,7 @@ describe("StaticFabBayFlowEditDialog", () => {
 		expect(markup).toContain('data-command="edit-bay-flow"');
 		expect(markup).toContain('data-target-pattern="co-rotating"');
 		expect(markup).toContain('data-phase="analyzing"');
-		expect(markup).toContain("ANALYZING EXACT SOURCE");
+		expect(markup).toContain("변경 가능 여부를 확인하고 있습니다");
 		expect(markup).toMatch(/data-testid="bay-flow-edit-cancel"[^>]*data-initial-focus="true"/);
 		expect(markup).toMatch(/data-testid="bay-flow-edit-apply"[^>]*disabled/);
 		expect(markup).not.toContain("autofocus");
@@ -33,15 +33,38 @@ describe("StaticFabBayFlowEditDialog", () => {
 		expect(markup).toContain('data-phase="ready"');
 		expect(markup).toContain("ALTERNATING");
 		expect(markup).toContain("CO-ROTATING");
-		expect(markup).toContain("92 removed");
-		expect(markup).toContain("92 added directed edges");
-		expect(markup).toContain("FIXED");
+		expect(markup).toContain("92개 제거");
+		expect(markup).toContain("92개 추가");
+		expect(markup).toContain("유지하는 항목");
 		expect(markup).toContain(
-			"Bay identity, Process Loops, Bank relation, external gateway, envelope, and equipment remain authored.",
+			"Bay와 Process Loop, Bank 연결, 외부 진입·진출구, 외곽 범위, 장비를 유지합니다.",
 		);
-		expect(markup).toContain("WORKER-CERTIFIED TOPOLOGY");
-		expect(markup).toContain("zero open, unsafe, diagnostic");
+		expect(markup).toContain("연결 구조 검증");
+		expect(markup).toMatch(/<details[^>]*data-testid="bay-flow-edit-details"/);
+		expect(markup).not.toMatch(/<details[^>]*open/);
+		expect(markup).toContain("레일·검증 세부 정보");
+		expect(markup).toContain("열린 끝점, 위험 분기, 잘못된 경로");
 		expect(markup).not.toMatch(/data-testid="bay-flow-edit-apply"[^>]*disabled/);
+	});
+
+	it("does not certify partial evidence on a rejected command", () => {
+		const rejected = reduceStaticFabBayFlowEditSession(analyzingSession(), {
+			type: "ANALYSIS_REJECTED",
+			requestSequence: 1,
+			reason: "An external gateway changed.",
+			review: reviewFixture(),
+			sourceEvidence: evidence(),
+			prospectiveEvidence: { ...evidence(), physicalPathCount: 3699, physicalOpenPathCount: 2 },
+			timings: null,
+		});
+		const markup = renderDialog(rejected);
+		expect(markup).toContain("An external gateway changed.");
+		expect(markup).toContain("검증 미완료 · 적용 불가");
+		expect(markup).toContain("3,700 → 3,699");
+		expect(markup).toContain("0 → 2");
+		expect(markup).not.toContain("변경 전후 개수 동일");
+		expect(markup).not.toContain("문제 0건");
+		expect(markup).toMatch(/data-testid="bay-flow-edit-apply"[^>]*disabled/);
 	});
 
 	it("bounds connector identity samples", () => {
@@ -52,7 +75,7 @@ describe("StaticFabBayFlowEditDialog", () => {
 		});
 		const markup = renderDialog(readySession(review));
 
-		expect(markup).toContain("0:0&gt;1:0, 1:0&gt;2:0, 2:0&gt;3:0, 3:1&gt;2:1 +2 MORE");
+		expect(markup).toContain("0:0&gt;1:0, 1:0&gt;2:0, 2:0&gt;3:0, 3:1&gt;2:1 외 2개");
 		expect(markup).not.toContain("2:1&gt;1:1");
 		expect(markup).not.toContain("1:1&gt;0:1");
 	});
@@ -70,7 +93,7 @@ describe("StaticFabBayFlowEditDialog", () => {
 		const applying = reduceStaticFabBayFlowEditSession(readySession(), { type: "APPLY" });
 
 		expect(renderDialog(rejected)).toContain('data-phase="rejected"');
-		expect(renderDialog(rejected)).toContain("COMMAND BLOCKED");
+		expect(renderDialog(rejected)).toContain("변경할 수 없습니다");
 		expect(renderDialog(applying)).toContain('data-phase="applying"');
 		expect(renderDialog(applying)).toContain('aria-busy="true"');
 		expect(renderDialog(applying)).toMatch(/data-testid="bay-flow-edit-cancel"[^>]*disabled/);

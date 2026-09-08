@@ -105,9 +105,9 @@ export function StaticFabAssembleMenu({
 					<Factory size={24} />
 				</span>
 				<span>
-					<small>START A PROJECT</small>
-					<strong>NEW FAB</strong>
-					<em>Generate banks, Bay circulation, gateways, and a closed directed network.</em>
+					<small>새 프로젝트 시작</small>
+					<strong>새 FAB 만들기</strong>
+					<em>Bay와 Bank, 진입·진출구가 연결된 FAB를 만듭니다.</em>
 				</span>
 				<ChevronRight size={18} />
 			</button>
@@ -116,9 +116,9 @@ export function StaticFabAssembleMenu({
 				<header>
 					<span>
 						<LayoutTemplate size={14} />
-						<strong id="tilefab-assemble-add-title">ADD TO CURRENT FAB</strong>
+						<strong id="tilefab-assemble-add-title">현재 FAB에 추가</strong>
 					</span>
-					<small>Semantic assemblies first</small>
+					<small>Bay부터 차례로 조립</small>
 				</header>
 				<div className="tilefab-assemble-action-grid">
 					<button
@@ -131,8 +131,8 @@ export function StaticFabAssembleMenu({
 							<Network size={20} />
 						</span>
 						<span>
-							<strong>ADD BAY</strong>
-							<small>Single or Twin Process Loop</small>
+							<strong>Bay 추가</strong>
+							<small>Process Loop 1개 또는 2개 구성</small>
 						</span>
 					</button>
 					<button type="button" data-testid="assemble-open-blueprints" onClick={onOpenBlueprints}>
@@ -140,8 +140,8 @@ export function StaticFabAssembleMenu({
 							<LibraryBig size={20} />
 						</span>
 						<span>
-							<strong>PLACE BLUEPRINT</strong>
-							<small>{blueprintCount.toLocaleString()} saved and reusable</small>
+							<strong>청사진 배치</strong>
+							<small>{blueprintCount.toLocaleString()} 개 저장됨</small>
 						</span>
 					</button>
 				</div>
@@ -155,12 +155,12 @@ export function StaticFabAssembleMenu({
 				<header>
 					<span>
 						<FolderOpen size={14} />
-						<strong id="tilefab-assemble-selection-title">SELECTION</strong>
+						<strong id="tilefab-assemble-selection-title">구조 선택</strong>
 					</span>
 					<small>
 						{selectionCount === 0
-							? "Choose a Fab, Bank, or Bay"
-							: `${selectionCount.toLocaleString()} ORGANIZATION${selectionCount === 1 ? "" : "S"}`}
+							? "Fab·Bank·Bay를 선택하세요"
+							: `조직 ${selectionCount.toLocaleString()}개 선택`}
 					</small>
 				</header>
 				<div className="tilefab-assemble-selection-actions">
@@ -169,10 +169,10 @@ export function StaticFabAssembleMenu({
 						data-testid="assemble-browse-organizations"
 						onClick={onBrowseOrganizations}
 					>
-						<LibraryBig size={16} /> BROWSE ORGANIZATIONS
+						<LibraryBig size={16} /> 구조 목록
 					</button>
 					<button type="button" data-testid="assemble-select-on-canvas" onClick={onSelectOnCanvas}>
-						<FolderOpen size={16} /> SELECT ON CANVAS
+						<FolderOpen size={16} /> 캔버스에서 선택
 					</button>
 					<button
 						type="button"
@@ -183,7 +183,7 @@ export function StaticFabAssembleMenu({
 						onClick={onDuplicateSelection}
 						title={duplicateAvailability.reason}
 					>
-						<Copy size={16} /> DUPLICATE ORGANIZATION
+						<Copy size={16} /> 선택한 구조 복제
 					</button>
 					<button
 						type="button"
@@ -211,7 +211,7 @@ export function StaticFabAssembleMenu({
 						data-testid="assemble-duplicate-status"
 						data-ready={duplicateAvailability.state === "ready"}
 					>
-						<span>DUPLICATE ORGANIZATION</span>
+						<span>선택한 구조 복제</span>
 						{duplicateAvailability.reason}
 					</p>
 					<p
@@ -231,10 +231,8 @@ export function StaticFabAssembleMenu({
 				{selectionCount === 1 && selectedBayCount === 1 ? (
 					<section className="tilefab-assemble-semantic-bay" aria-label="Selected Bay commands">
 						<header>
-							<span>SELECTED BAY</span>
-							<small className="tilefab-assemble-semantic-bay-header-detail">
-								Semantic Bay actions
-							</small>
+							<span>선택한 Bay</span>
+							<small className="tilefab-assemble-semantic-bay-header-detail">흐름·연결·삭제</small>
 						</header>
 						<div className="tilefab-assemble-semantic-bay-actions">
 							<button
@@ -246,7 +244,7 @@ export function StaticFabAssembleMenu({
 								title={editFlowAvailability.reason}
 								onClick={(event) => onEditSelectedBayFlow("alternating", event.currentTarget)}
 							>
-								<RefreshCw size={15} /> SET ALTERNATING…
+								<RefreshCw size={15} /> 교대 방향으로…
 							</button>
 							<button
 								type="button"
@@ -257,7 +255,7 @@ export function StaticFabAssembleMenu({
 								title={editFlowAvailability.reason}
 								onClick={(event) => onEditSelectedBayFlow("co-rotating", event.currentTarget)}
 							>
-								<RefreshCw size={15} /> SET CO-ROTATING…
+								<RefreshCw size={15} /> 같은 방향으로…
 							</button>
 							<button
 								type="button"
@@ -267,7 +265,7 @@ export function StaticFabAssembleMenu({
 								title={disconnectAvailability.reason}
 								onClick={(event) => onDisconnectSelectedBay(event.currentTarget)}
 							>
-								<Unlink size={15} /> DISCONNECT BAY…
+								<Unlink size={15} /> Bay 연결 해제…
 							</button>
 							<button
 								type="button"
@@ -277,7 +275,7 @@ export function StaticFabAssembleMenu({
 								title={deleteAvailability.reason}
 								onClick={(event) => onDeleteSelectedBay(event.currentTarget)}
 							>
-								<Trash2 size={15} /> DELETE BAY…
+								<Trash2 size={15} /> Bay 삭제…
 							</button>
 						</div>
 						<div className="tilefab-assemble-semantic-bay-statuses">
@@ -286,7 +284,7 @@ export function StaticFabAssembleMenu({
 								data-testid="assemble-edit-flow-status"
 								data-ready={editFlowAvailability.state === "ready"}
 							>
-								<span>FLOW TARGET</span>
+								<span>흐름 변경</span>
 								{editFlowAvailability.reason}
 							</p>
 							<p
@@ -294,7 +292,7 @@ export function StaticFabAssembleMenu({
 								data-testid="assemble-disconnect-status"
 								data-ready={disconnectAvailability.state === "ready"}
 							>
-								<span>DISCONNECT</span>
+								<span>연결 해제</span>
 								{disconnectAvailability.reason}
 							</p>
 							<p
@@ -302,7 +300,7 @@ export function StaticFabAssembleMenu({
 								data-testid="assemble-delete-status"
 								data-ready={deleteAvailability.state === "ready"}
 							>
-								<span>DELETE</span>
+								<span>삭제</span>
 								{deleteAvailability.reason}
 							</p>
 						</div>
@@ -318,17 +316,16 @@ export function StaticFabAssembleMenu({
 				<summary>
 					<span>
 						<LayoutTemplate size={15} />
-						<strong>ADVANCED RAIL MOTIFS</strong>
-						<small>Independent closed rail stamps</small>
+						<strong>고급 레일 패턴</strong>
+						<small>닫힌 레일 패턴을 개별 배치</small>
 					</span>
 					<ChevronRight size={16} />
 				</summary>
 				{advancedOpen ? (
 					<div className="tilefab-assemble-advanced-body">
 						<p data-testid="contextual-rail-tool-guidance">
-							Closed motifs start here and do not create a complete Fab, Bank, or Bay organization.
-							Select a straight rail or open terminal on Canvas to reveal Return, Bypass, and
-							terminal repair commands.
+							이 패턴은 레일만 배치하며 Fab·Bank·Bay 조직을 만들지 않습니다. 캔버스에서 직선
+							레일이나 열린 끝점을 선택하면 반환·우회·끝점 복구 도구를 사용할 수 있습니다.
 						</p>
 						<button
 							type="button"
@@ -340,8 +337,8 @@ export function StaticFabAssembleMenu({
 								<LayoutTemplate size={18} />
 							</span>
 							<span>
-								<strong>RAIL-ONLY ASSEMBLIES</strong>
-								<small>Compatibility tools for reusable area stamps</small>
+								<strong>레일 전용 조립</strong>
+								<small>기존 영역 스탬프와 호환되는 도구</small>
 							</span>
 							<ChevronRight size={16} />
 						</button>

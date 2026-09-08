@@ -34338,7 +34338,7 @@ export default function TileFabApp(): React.ReactElement {
 						<header>
 							<span>
 								<LayoutTemplate size={15} />
-								<strong>{activeTemplateItem?.label ?? "ASSEMBLE FAB"}</strong>
+								<strong>{activeTemplateItem?.label ?? "FAB 조립"}</strong>
 							</span>
 							<div>
 								{templateSession ? (

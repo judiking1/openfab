@@ -43,6 +43,50 @@
 	grid-column: 1 / -1;
 }
 
+.tilefab-bay-flow-disclosure {
+	min-width: 0;
+	border: 1px solid #3d5050;
+	border-radius: 5px;
+}
+
+.tilefab-bay-flow-disclosure > summary {
+	min-height: 44px;
+	padding: 12px;
+	color: #c4d8d4;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 700;
+}
+
+.tilefab-bay-flow-disclosure > summary:focus-visible {
+	outline: 2px solid #a5decd;
+	outline-offset: -3px;
+}
+
+.tilefab-bay-flow-disclosure-body {
+	display: grid;
+	min-width: 0;
+	gap: 12px;
+	padding: 0 12px 12px;
+}
+
+.tilefab-bay-flow-findings {
+	display: grid;
+	gap: 6px;
+	margin: 8px 0 0;
+	font-size: 12px;
+}
+
+.tilefab-bay-flow-findings > div {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.tilefab-bay-flow-findings dd {
+	margin: 0;
+}
+
 .tilefab-assemble-semantic-bay {
 	display: grid;
 	gap: 5px;
@@ -592,4 +636,35 @@
 	.tilefab-semantic-bay-spinner {
 		animation: none;
 	}
+}
+
+.tilefab-semantic-bay-dialog[data-command="edit-bay-flow"] .tilefab-semantic-bay-status {
+	grid-template-columns: 24px minmax(0, 1fr);
+}
+
+.tilefab-semantic-bay-dialog[data-command="edit-bay-flow"]
+	:is(
+		.tilefab-semantic-bay-intro,
+		.tilefab-semantic-bay-impact-copy,
+		.tilefab-semantic-bay-status-title
+	) {
+	font-size: 14px;
+	line-height: 1.6;
+	word-break: keep-all;
+}
+
+.tilefab-semantic-bay-dialog[data-command="edit-bay-flow"]
+	:is(
+		.tilefab-semantic-bay-impact-detail,
+		.tilefab-semantic-bay-status-detail,
+		.tilefab-semantic-bay-candidate-note
+	) {
+	color: #aebfbb;
+	font-size: 12px;
+	line-height: 1.6;
+	word-break: keep-all;
+}
+
+.tilefab-semantic-bay-dialog[data-command="edit-bay-flow"] > footer button {
+	font-size: 13px;
 }

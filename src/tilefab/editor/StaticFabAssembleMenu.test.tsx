@@ -42,19 +42,19 @@ function props(overrides: Partial<StaticFabAssembleMenuProps> = {}): StaticFabAs
 describe("StaticFabAssembleMenu", () => {
 	it("leads with task-level FAB commands and keeps motifs in Advanced", () => {
 		const markup = renderToStaticMarkup(<StaticFabAssembleMenu {...props()} />);
-		expect(markup).toContain("NEW FAB");
-		expect(markup).toContain("ADD BAY");
-		expect(markup).toContain("PLACE BLUEPRINT");
-		expect(markup).toContain("BROWSE ORGANIZATIONS");
-		expect(markup).toContain("SELECT ON CANVAS");
-		expect(markup).not.toContain("SELECTED BAY");
-		expect(markup).not.toContain("DISCONNECT BAY…");
-		expect(markup).not.toContain("DELETE BAY…");
+		expect(markup).toContain("새 FAB 만들기");
+		expect(markup).toContain("Bay 추가");
+		expect(markup).toContain("청사진 배치");
+		expect(markup).toContain("구조 목록");
+		expect(markup).toContain("캔버스에서 선택");
+		expect(markup).not.toContain("선택한 Bay");
+		expect(markup).not.toContain("Bay 연결 해제…");
+		expect(markup).not.toContain("Bay 삭제…");
 		expect(markup).toContain('data-testid="assemble-select-on-canvas"');
 		expect(markup).toContain('data-testid="assemble-browse-organizations"');
-		expect(markup).toContain("DUPLICATE ORGANIZATION");
+		expect(markup).toContain("선택한 구조 복제");
 		expect(markup).not.toMatch(/>DUPLICATE</);
-		expect(markup).toContain("ADVANCED RAIL MOTIFS");
+		expect(markup).toContain("고급 레일 패턴");
 		expect(markup).toMatch(/<details class="tilefab-assemble-advanced">/);
 		expect(markup).not.toMatch(/<details class="tilefab-assemble-advanced"[^>]*open/);
 		expect(markup).not.toContain('data-testid="advanced-content"');
@@ -64,8 +64,8 @@ describe("StaticFabAssembleMenu", () => {
 		const markup = renderToStaticMarkup(
 			<StaticFabAssembleMenu {...props({ selectionCount: 1, selectedBankCount: 1 })} />,
 		);
-		expect(markup).toContain("1 ORGANIZATION");
-		expect(markup).not.toContain("SELECTED BAY");
+		expect(markup).toContain("조직 1개 선택");
+		expect(markup).not.toContain("선택한 Bay");
 		expect(markup).not.toContain('data-testid="assemble-disconnect-selected-bay"');
 		expect(markup).not.toContain('data-testid="assemble-delete-selected-bay"');
 	});
@@ -92,7 +92,7 @@ describe("StaticFabAssembleMenu", () => {
 			/>,
 		);
 
-		expect(markup).toContain("SELECTED BAY");
+		expect(markup).toContain("선택한 Bay");
 		expect(markup).toMatch(/data-testid="assemble-disconnect-selected-bay"(?![^>]*disabled)/);
 		expect(markup).toMatch(/data-testid="assemble-delete-selected-bay"[^>]*disabled/);
 		expect(markup).toMatch(
@@ -152,8 +152,8 @@ describe("StaticFabAssembleMenu", () => {
 		const markup = renderToStaticMarkup(
 			<StaticFabAssembleMenu {...props({ advancedInitiallyOpen: true })} />,
 		);
-		expect(markup).toContain("RAIL-ONLY ASSEMBLIES");
-		expect(markup).toContain("do not create a complete Fab, Bank, or Bay organization");
+		expect(markup).toContain("레일 전용 조립");
+		expect(markup).toContain("Fab·Bank·Bay 조직을 만들지 않습니다");
 		expect(markup).not.toContain("CERTIFIED · PARAMETRIC");
 		expect(markup).not.toContain("OPEN END");
 	});

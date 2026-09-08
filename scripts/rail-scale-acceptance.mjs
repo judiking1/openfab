@@ -7956,6 +7956,10 @@ async function readBayFlowEditScaleState(page) {
 }
 
 async function readBayFlowEditEvidence(page) {
+	const disclosure = page.getByTestId("bay-flow-edit-details");
+	if (await disclosure.evaluate((element) => element.open))
+		throw new Error("Bay Flow technical details must start collapsed.");
+	await disclosure.locator("summary").click();
 	return page.getByTestId("bay-flow-edit-dialog").evaluate((dialog) => {
 		const parseNumber = (value) => Number(String(value ?? "").replaceAll(",", ""));
 		const review = dialog.querySelector(".tilefab-semantic-bay-review");
@@ -7965,46 +7969,53 @@ async function readBayFlowEditEvidence(page) {
 		}
 		const replaced = review.querySelector('[data-impact="removed"]')?.textContent ?? "";
 		const fixed = review.querySelector('[data-impact="preserved"]')?.textContent ?? "";
-		const replacement = replaced.match(
-			/ALTERNATING\s*→\s*CO-ROTATING\s*·\s*([\d,]+)\s+removed\s*\+\s*([\d,]+)\s+added directed edges/i,
+		const sourceFlowRecognized = /교대 방향 \(ALTERNATING\)\s*→\s*같은 방향 \(CO-ROTATING\)/.test(
+			replaced,
 		);
-		const changed = replaced.match(
-			/([\d,]+)\s+changed cells\s*·\s*([\d,]+)\s+existing memberships/i,
-		);
+		const replacement = replaced.match(/레일 방향 연결\s*([\d,]+)개 제거\s*·\s*([\d,]+)개 추가/);
+		const changed = replaced.match(/([\d,]+)개 셀\s*·\s*기존 조직\s*([\d,]+)개의 레일 구성 변경/);
 		const articles = [...evidence.querySelectorAll(".tilefab-semantic-bay-evidence-grid article")];
-		const authored = articles.find((article) => (article.textContent ?? "").includes("AUTHORED"));
-		const physical = articles.find((article) => (article.textContent ?? "").includes("PHYSICAL"));
+		const authored = articles.find((article) => (article.textContent ?? "").includes("편집 레일"));
+		const physical = articles.find((article) => (article.textContent ?? "").includes("실제 경로"));
 		const authoredMatch = (authored?.textContent ?? "").match(
-			/([\d,]+)\s+cells\s*·\s*([\d,]+)\s+edges\s*·\s*([\d,]+)\s+weak\s*\/\s*([\d,]+)\s+SCC/i,
+			/셀\s*([\d,]+)\s*→\s*([\d,]+)\s*·\s*방향 연결\s*([\d,]+)\s*→\s*([\d,]+)\s*·\s*연결 성분\s*([\d,]+)\s*→\s*([\d,]+)\s*·\s*강연결 성분\s*([\d,]+)\s*→\s*([\d,]+)/,
 		);
 		const physicalMatch = (physical?.textContent ?? "").match(
-			/([\d,]+)\s+paths\s*·\s*([\d,]+)\s+weak\s*\/\s*([\d,]+)\s+SCC/i,
+			/경로\s*([\d,]+)\s*→\s*([\d,]+)\s*·\s*연결 성분\s*([\d,]+)\s*→\s*([\d,]+)\s*·\s*강연결 성분\s*([\d,]+)\s*→\s*([\d,]+)/,
 		);
 		const candidate =
 			evidence.querySelector(".tilefab-semantic-bay-candidate-note")?.textContent ?? "";
-		const prospective = candidate.match(
-			/Source and result counts are equal:\s*authored\s+([\d,]+)\s+edges\s*·\s*physical\s+([\d,]+)\s+paths/i,
-		);
+		const pairedCountsEqual = (match) =>
+			Boolean(match) &&
+			match
+				.slice(1)
+				.every(
+					(value, index, counts) =>
+						index % 2 === 1 || parseNumber(value) === parseNumber(counts[index + 1]),
+				);
 		return {
 			phase: dialog.dataset.phase ?? "",
 			targetInternalFlowPattern: dialog.dataset.targetPattern ?? "",
-			sourceInternalFlowPattern: replacement ? "alternating" : "",
-			detachedBay: /Detached Bay\s*·\s*no external connector/i.test(fixed),
-			certified: /EXACT\s*·\s*SOURCE-BOUND/i.test(evidence.textContent ?? ""),
-			countsEqual: /Source and result counts are equal/i.test(candidate),
+			sourceInternalFlowPattern: sourceFlowRecognized ? "alternating" : "",
+			detachedBay: /독립 Bay\s*·\s*외부 연결 없음/.test(fixed),
+			certified: /현재 프로젝트 기준 검증 완료/.test(evidence.textContent ?? ""),
+			countsEqual:
+				/변경 전후 개수 동일/.test(candidate) &&
+				pairedCountsEqual(authoredMatch) &&
+				pairedCountsEqual(physicalMatch),
 			removedDirectedEdges: replacement ? parseNumber(replacement[1]) : Number.NaN,
 			addedDirectedEdges: replacement ? parseNumber(replacement[2]) : Number.NaN,
 			changedCells: changed ? parseNumber(changed[1]) : Number.NaN,
 			changedOrganizations: changed ? parseNumber(changed[2]) : Number.NaN,
 			authoredCells: authoredMatch ? parseNumber(authoredMatch[1]) : Number.NaN,
-			authoredEdges: authoredMatch ? parseNumber(authoredMatch[2]) : Number.NaN,
-			authoredComponents: authoredMatch ? parseNumber(authoredMatch[3]) : Number.NaN,
-			authoredStrongComponents: authoredMatch ? parseNumber(authoredMatch[4]) : Number.NaN,
+			authoredEdges: authoredMatch ? parseNumber(authoredMatch[3]) : Number.NaN,
+			authoredComponents: authoredMatch ? parseNumber(authoredMatch[5]) : Number.NaN,
+			authoredStrongComponents: authoredMatch ? parseNumber(authoredMatch[7]) : Number.NaN,
 			physicalPaths: physicalMatch ? parseNumber(physicalMatch[1]) : Number.NaN,
-			physicalComponents: physicalMatch ? parseNumber(physicalMatch[2]) : Number.NaN,
-			physicalStrongComponents: physicalMatch ? parseNumber(physicalMatch[3]) : Number.NaN,
-			prospectiveAuthoredEdges: prospective ? parseNumber(prospective[1]) : Number.NaN,
-			prospectivePhysicalPaths: prospective ? parseNumber(prospective[2]) : Number.NaN,
+			physicalComponents: physicalMatch ? parseNumber(physicalMatch[3]) : Number.NaN,
+			physicalStrongComponents: physicalMatch ? parseNumber(physicalMatch[5]) : Number.NaN,
+			prospectiveAuthoredEdges: authoredMatch ? parseNumber(authoredMatch[4]) : Number.NaN,
+			prospectivePhysicalPaths: physicalMatch ? parseNumber(physicalMatch[2]) : Number.NaN,
 		};
 	});
 }

@@ -8303,11 +8303,12 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-assemble-menu .tilefab-assemble-primary small,
 .tilefab-assemble-menu .tilefab-assemble-primary em {
-	color: #81938e;
+	color: #a7b9b2;
 	font-style: normal;
-	font-size: 10px;
+	font-size: 12px;
 	font-weight: 700;
-	line-height: 1.35;
+	line-height: 1.5;
+	word-break: keep-all;
 }
 
 .tilefab-assemble-primary strong {
@@ -8416,10 +8417,11 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-assemble-action-grid small,
 .tilefab-assemble-legacy small {
-	color: #77878a;
-	font-size: 10px;
+	color: #a0b3b5;
+	font-size: 12px;
 	font-weight: 650;
-	line-height: 1.3;
+	line-height: 1.5;
+	word-break: keep-all;
 }
 
 .tilefab-assemble-selection[data-selection-count="0"] {
@@ -8445,8 +8447,9 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	color: #bdc9ca;
 	background: #151d1e;
 	cursor: pointer;
-	font-size: 10px;
+	font-size: 12px;
 	font-weight: 740;
+	word-break: keep-all;
 }
 
 .tilefab-assemble-selection-actions button:hover:not(:disabled) {
@@ -12869,13 +12872,6 @@ button.tilefab-action-hint[data-guided-target="true"] {
 		grid-template-columns: 44px minmax(0, 1fr) 16px;
 		gap: 8px;
 		padding-inline: 8px;
-	}
-
-	.tilefab-assemble-menu .tilefab-assemble-primary em {
-		display: -webkit-box;
-		overflow: hidden;
-		-webkit-box-orient: vertical;
-		-webkit-line-clamp: 2;
 	}
 
 	.tilefab-assemble-section > header small {

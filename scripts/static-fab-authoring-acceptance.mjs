@@ -22541,7 +22541,7 @@ async function enterCanvasOrganizationSelectionFromAssembleMenu(page, expectedCo
 	await assertLocatorInsideViewport(page, selectOnCanvas);
 	assertIncludes(
 		await selectOnCanvas.innerText(),
-		"SELECT ON CANVAS",
+		"캔버스에서 선택",
 		`${label} Canvas Select label`,
 	);
 	const bounds = await selectOnCanvas.boundingBox();
@@ -23424,8 +23424,8 @@ async function exerciseCertifiedBayFlowEditJourney(
 		0,
 		`${label} Bay flow does not expose a toggle command`,
 	);
-	assertIncludes(await alternating.innerText(), "ALTERNATING", `${label} ALTERNATING label`);
-	assertIncludes(await coRotating.innerText(), "CO-ROTATING", `${label} CO-ROTATING label`);
+	assertIncludes(await alternating.innerText(), "교대 방향으로", `${label} ALTERNATING label`);
+	assertIncludes(await coRotating.innerText(), "같은 방향으로", `${label} CO-ROTATING label`);
 
 	if (responsive) {
 		for (const [controlLabel, locator] of [
@@ -24018,30 +24018,42 @@ async function verifyCertifiedBayFlowEditReview(
 		`${sourceFlowLabel} → ${targetFlowLabel}`,
 		`${label} exact replacement review`,
 	);
-	assertIncludes(text, "FIXED", `${label} fixed authored evidence`);
-	assertIncludes(text, "external gateway", `${label} fixed gateway statement`);
-	assertIncludes(text, "FIXED CONNECTOR", `${label} fixed connector evidence`);
-	assertIncludes(text, "EXACT · SOURCE-BOUND", `${label} source-bound certification`);
-	assertIncludes(text, "Source and result counts are equal", `${label} exact count evidence`);
-	assertIncludes(text, "zero open", `${label} closed topology evidence`);
+	assertIncludes(text, "유지하는 항목", `${label} fixed authored evidence`);
+	assertIncludes(text, "외부 진입·진출구", `${label} fixed gateway statement`);
+	assertIncludes(text, "유지되는 연결 레일", `${label} fixed connector evidence`);
+	assertIncludes(text, "현재 프로젝트 기준 검증 완료", `${label} source-bound certification`);
+	assertIncludes(text, "변경 전후 개수 동일", `${label} exact count evidence`);
+	assertIncludes(text, "문제 0건", `${label} closed topology evidence`);
+	const details = dialog.getByTestId("bay-flow-edit-details");
+	assertEqual(
+		await details.evaluate((element) => element.open),
+		false,
+		`${label} technical details initially collapsed`,
+	);
+	await details.locator("summary").click();
+	assertEqual(
+		await details.evaluate((element) => element.open),
+		true,
+		`${label} technical details disclosed`,
+	);
 	const connectorEvidence = dialog
 		.locator(".tilefab-semantic-bay-bounded-details p")
-		.filter({ hasText: "FIXED CONNECTOR" });
+		.filter({ hasText: "유지되는 연결 레일" });
 	assertEqual(await connectorEvidence.count(), 1, `${label} fixed connector row count`);
 	const connectorText = (await connectorEvidence.textContent()) ?? "";
-	if (connectorText.includes("NONE")) {
+	if (connectorText.includes("없음")) {
 		throw new Error(`${label} attached Twin Bay did not expose its fixed gateway route.`);
 	}
 	assertIncludes(connectorText, ":", `${label} fixed gateway directed-edge keys`);
 	await connectorEvidence.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, connectorEvidence);
 	assertEqual(
-		await dialog.getByRole("region", { name: "Exact flow replacement review" }).isVisible(),
+		await dialog.getByRole("region", { name: "흐름 변경 내용" }).isVisible(),
 		true,
 		`${label} exact review visibility`,
 	);
 	assertEqual(
-		await dialog.getByRole("region", { name: "Worker topology evidence" }).isVisible(),
+		await dialog.getByRole("region", { name: "연결 구조 검증 결과" }).isVisible(),
 		true,
 		`${label} Worker evidence visibility`,
 	);
@@ -24128,12 +24140,38 @@ async function assertNarrowBayFlowDialogLayout(page, dialog, cancel, apply, labe
 	});
 	assertEqual(frameAfter.headerTop, frameBefore.headerTop, `${label} fixed dialog header`);
 	assertEqual(frameAfter.footerBottom, frameBefore.footerBottom, `${label} fixed dialog footer`);
+	const disclosure = dialog.getByTestId("bay-flow-edit-details");
+	const summary = disclosure.locator("summary");
 	await cancel.focus();
+	await page.keyboard.press("Shift+Tab");
+	assertEqual(
+		await summary.evaluate((element) => element === document.activeElement),
+		true,
+		`${label} disclosure is keyboard reachable`,
+	);
+	await page.keyboard.press("Enter");
+	assertEqual(
+		await disclosure.evaluate((element) => element.open),
+		false,
+		`${label} keyboard closes details`,
+	);
+	await page.keyboard.press("Enter");
+	assertEqual(
+		await disclosure.evaluate((element) => element.open),
+		true,
+		`${label} keyboard opens details`,
+	);
 	await page.keyboard.press("Shift+Tab");
 	assertEqual(
 		await apply.evaluate((element) => element === document.activeElement),
 		true,
 		`${label} focus trap wraps backward to Apply`,
+	);
+	await page.keyboard.press("Tab");
+	assertEqual(
+		await summary.evaluate((element) => element === document.activeElement),
+		true,
+		`${label} focus trap wraps forward to disclosure`,
 	);
 	await page.keyboard.press("Tab");
 	assertEqual(
@@ -24216,8 +24254,8 @@ async function assertOrganizationBrowseSelectionContext(page, metrics, label) {
 }
 
 function staticFabBayFlowLabel(pattern) {
-	if (pattern === "alternating") return "ALTERNATING";
-	if (pattern === "co-rotating") return "CO-ROTATING";
+	if (pattern === "alternating") return "교대 방향 (ALTERNATING)";
+	if (pattern === "co-rotating") return "같은 방향 (CO-ROTATING)";
 	throw new Error(`Unsupported Bay flow acceptance pattern: ${String(pattern)}.`);
 }
 
@@ -26317,6 +26355,46 @@ async function createMaximumLargeFabPreset(page) {
 	await page.getByRole("button", { name: "FAB 프리셋", exact: true }).click();
 	const dialog = page.getByTestId("synthetic-fab-starter-dialog");
 	await dialog.waitFor({ state: "visible" });
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 760, height: 900 },
+		{ width: 390, height: 720 },
+	]) {
+		await page.setViewportSize(viewport);
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		const cardProblems = await dialog
+			.locator(".tilefab-starter-list > button")
+			.evaluateAll((cards) =>
+				cards.flatMap((card) => {
+					const box = card.getBoundingClientRect();
+					return [...card.querySelectorAll(":scope > span > strong, :scope > span > em")]
+						.filter((copy) => {
+							const rect = copy.getBoundingClientRect();
+							return (
+								rect.top < box.top ||
+								rect.bottom > box.bottom + 1 ||
+								rect.left < box.left ||
+								rect.right > box.right + 1
+							);
+						})
+						.map((copy) => `${card.getAttribute("data-testid")}: ${copy.textContent}`);
+				}),
+			);
+		assertEqual(
+			cardProblems.length,
+			0,
+			`Preset card text fits at ${viewport.width}px: ${cardProblems.join("; ")}`,
+		);
+		assertEqual(
+			await dialog.evaluate((element) => element.scrollWidth - element.clientWidth),
+			0,
+			`Preset dialog overflow at ${viewport.width}px`,
+		);
+		await page.screenshot({ path: path.join(artifactRoot, `preset-cards-${viewport.width}.png`) });
+	}
+	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.getByTestId("synthetic-fab-starter-production-fab-60").click();
 	const sourceBeforeNaming = await readMetrics(page);
 	const projectName = page.getByTestId("synthetic-fab-project-name");
@@ -26334,8 +26412,13 @@ async function createMaximumLargeFabPreset(page) {
 	);
 	assertEqual(
 		await dialog.locator(".tilefab-starter-preview-title strong").innerText(),
-		"생산 FAB · 100 Bay",
+		"대규모 검증 FAB · 100 Bay",
 		"Preset preview title follows the configured Bay count",
+	);
+	assertIncludes(
+		await page.getByTestId("synthetic-fab-starter-production-fab-60").innerText(),
+		"100 Bay",
+		"Preset card follows the configured Bay count",
 	);
 	await projectName.fill("내 FAB 설계 V1");
 	await page.getByTestId("synthetic-fab-starter-parallel-hall-fab-12").click();
@@ -42845,7 +42928,7 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 		const duplicateOrganization = assembleMenu.getByTestId("assemble-duplicate-selection");
 		assertIncludes(
 			(await duplicateOrganization.innerText()).toUpperCase(),
-			"DUPLICATE ORGANIZATION",
+			"선택한 구조 복제",
 			"Assemble distinguishes organization duplication",
 		);
 		assertEqual(

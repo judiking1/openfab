@@ -86,8 +86,8 @@
 
 .tilefab-starter-dialog > header > button {
 	display: grid;
-	width: 38px;
-	height: 38px;
+	width: 44px;
+	height: 44px;
 	place-items: center;
 	border: 1px solid transparent;
 	border-radius: 4px;
@@ -177,11 +177,12 @@
 	display: grid;
 	min-width: 0;
 	min-height: 0;
-	grid-template-columns: 250px minmax(0, 1fr) 250px;
+	grid-template-columns: 290px minmax(0, 1fr) 250px;
 }
 
 .tilefab-starter-list {
 	display: grid;
+	grid-auto-rows: max-content;
 	align-content: start;
 	gap: 7px;
 	min-width: 0;
@@ -194,8 +195,8 @@
 
 .tilefab-starter-list > button {
 	display: grid;
-	min-height: 92px;
-	grid-template-columns: 76px minmax(0, 1fr) 16px;
+	min-height: 112px;
+	grid-template-columns: 56px minmax(0, 1fr) 16px;
 	align-items: center;
 	gap: 10px;
 	padding: 8px;
@@ -228,9 +229,10 @@
 .tilefab-starter-list > button small,
 .tilefab-starter-list > button strong,
 .tilefab-starter-list > button em {
-	overflow: hidden;
 	letter-spacing: 0;
-	text-overflow: ellipsis;
+	white-space: normal;
+	word-break: keep-all;
+	overflow-wrap: anywhere;
 }
 
 .tilefab-starter-list > button small {
@@ -238,23 +240,20 @@
 	font-size: 11px;
 	font-style: normal;
 	font-weight: 760;
-	white-space: nowrap;
+	line-height: 1.45;
 }
 
 .tilefab-starter-list > button strong {
-	display: -webkit-box;
-	font-size: 12px;
+	font-size: 14px;
 	font-weight: 760;
-	line-height: 1.2;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
+	line-height: 1.4;
 }
 
 .tilefab-starter-list > button em {
-	color: #7f9092;
-	font-size: 11px;
+	color: #a7b8ba;
+	font-size: 12px;
 	font-style: normal;
-	white-space: nowrap;
+	line-height: 1.5;
 }
 
 .tilefab-starter-list > button > svg {
@@ -263,7 +262,7 @@
 
 .tilefab-starter-list-miniature {
 	display: grid;
-	width: 76px;
+	width: 56px;
 	height: 62px;
 	place-items: center;
 	overflow: hidden;
@@ -1038,18 +1037,18 @@
 	}
 
 	.tilefab-starter-workspace {
-		grid-template-columns: 190px minmax(0, 1fr);
+		grid-template-columns: 260px minmax(0, 1fr);
 		grid-template-rows: minmax(0, 1fr) auto;
 	}
 
 	.tilefab-starter-list > button {
-		min-height: 84px;
-		grid-template-columns: 58px minmax(0, 1fr) 14px;
+		min-height: 112px;
+		grid-template-columns: 48px minmax(0, 1fr) 14px;
 		gap: 7px;
 	}
 
 	.tilefab-starter-list-miniature {
-		width: 58px;
+		width: 48px;
 		height: 52px;
 	}
 
@@ -1137,9 +1136,9 @@
 	}
 
 	.tilefab-starter-list > button {
-		flex: 0 0 168px;
-		min-height: 76px;
-		grid-template-columns: 48px minmax(0, 1fr) 12px;
+		flex: 0 0 276px;
+		min-height: 112px;
+		grid-template-columns: 48px minmax(0, 1fr) 16px;
 		scroll-snap-align: start;
 	}
 
@@ -1276,7 +1275,6 @@
 		font-size: 10px;
 	}
 
-	.tilefab-starter-list > button em,
 	.tilefab-starter-dialog > footer button {
 		font-size: 11px;
 	}
