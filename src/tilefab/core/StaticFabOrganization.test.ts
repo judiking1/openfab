@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planAdvancedSwitch } from "./AdvancedSwitchPlanner";
-import { createCooperativeTask } from "./CooperativeTask";
+import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import type { PortEquipmentState } from "./EquipmentGroup";
 import { planRailConstruction } from "./paint";
 import {
@@ -19,8 +19,11 @@ import {
 } from "./RailTemplateCatalog";
 import type { Direction } from "./railShape";
 import {
+	applyStaticFabOrganizationAdditionsSteps,
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
+	copyStaticFabOrganizationRecord,
+	copyStaticFabOrganizationState,
 	deriveStaticFabOrganizationSemanticRoleSteps,
 	deriveStaticFabOrganizationSemanticRoles,
 	emptyStaticFabOrganizationState,
@@ -50,6 +53,61 @@ import { createStaticFabSelection } from "./StaticFabSelection";
 import { encodeRailCell } from "./TileMap";
 
 describe("StaticFabOrganization", () => {
+	it("privately merges immutable additions with exact cursors and complete hierarchy validation", () => {
+		const membership = {
+			railEdges: [{ from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }],
+			advancedSwitchIds: [],
+			equipmentGroupIds: [],
+		};
+		const existing = copyStaticFabOrganizationRecord({
+			id: 2,
+			kind: "AREA",
+			name: "Existing",
+			membership,
+		});
+		const source = copyStaticFabOrganizationState({ nextOrganizationId: 3, records: [existing] });
+		const parent = copyStaticFabOrganizationRecord({
+			id: 5,
+			kind: "AREA",
+			name: "Root",
+			membership,
+		});
+		const child = copyStaticFabOrganizationRecord({
+			id: 3,
+			kind: "BAY",
+			name: "Child",
+			parentOrganizationIds: [5],
+			membership,
+		});
+		const additions = Object.freeze(
+			[parent, child].map((after) => Object.freeze({ id: after.id, before: null, after })),
+		);
+		const candidate = completeCooperativeSteps(
+			applyStaticFabOrganizationAdditionsSteps(source, additions, 6),
+		);
+		expect(candidate).toEqual(applyStaticFabOrganizationMutations(source, additions, 6));
+		expect(isCanonicalStaticFabOrganizationState(candidate)).toBe(true);
+		expect(candidate.records[0]).toBe(source.records[0]);
+		expect(candidate.records[1]).toBe(child);
+		const task = applyStaticFabOrganizationAdditionsSteps(source, additions, 6);
+		task.next();
+		task.return(source);
+		expect(source.records).toEqual([existing]);
+		for (const [invalid, nextId, error] of [
+			[Object.freeze([...additions, additions[0]]), 6, "중복"],
+			[Object.freeze([Object.freeze({ id: 2, before: null, after: existing })]), 3, "중복"],
+			[Object.freeze([Object.freeze({ id: 3, before: null, after: child })]), 4, "부모 조직 5"],
+		] as const)
+			expect(() =>
+				completeCooperativeSteps(applyStaticFabOrganizationAdditionsSteps(source, invalid, nextId)),
+			).toThrow(error);
+		expect(() =>
+			completeCooperativeSteps(applyStaticFabOrganizationAdditionsSteps(source, additions, 7)),
+		).toThrow("ID");
+		expect(() =>
+			completeCooperativeSteps(applyStaticFabOrganizationAdditionsSteps(source, [...additions], 6)),
+		).toThrow("불변");
+	});
 	it("checks wide membership and hierarchy behind the same bounded shape contract", () => {
 		const edges = Array.from({ length: 2_049 }, (_, x) => ({
 			from: { x, y: 0 },

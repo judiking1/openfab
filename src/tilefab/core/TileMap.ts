@@ -479,6 +479,86 @@ export class TileMap {
 		this.advanceMutationGeneration();
 	}
 
+	/** Prepare an unpublished addition-only candidate; the caller owns command certification. */
+	createAdditionCandidateSteps(
+		cellAdditions: readonly TileMapCellMutation[],
+		switchAdditions: readonly AdvancedSwitchMutation[],
+	): Generator<void, TileMap> {
+		const cellCount = cellAdditions.length;
+		const switchCount = switchAdditions.length;
+		const steps = function* (source: TileMap): Generator<void, TileMap> {
+			const copy = yield* source.cloneCandidateSteps();
+			for (let index = 0; index < cellCount; index++) {
+				const { x, y, before, after } = cellAdditions[index] as TileMapCellMutation;
+				if (
+					!Number.isSafeInteger(x) ||
+					!Number.isSafeInteger(y) ||
+					before !== 0 ||
+					!Number.isInteger(after) ||
+					after <= 0 ||
+					after > 0xff ||
+					copy.getEncoded(x, y) !== 0 ||
+					copy.hasAdvancedSwitchClaim(x, y)
+				)
+					throw new Error(`Rail addition at ${x},${y} is invalid or overlaps existing source.`);
+				copy.setEncoded(x, y, after);
+				yield;
+			}
+			let nextId = copy.nextAdvancedSwitchId;
+			for (let index = 0; index < switchCount; index++) {
+				const change = switchAdditions[index] as AdvancedSwitchMutation;
+				if (change.before !== null || !change.after || copy.advancedSwitches.has(change.id)) {
+					throw new Error(`Advanced switch addition ${change.id} has a nonempty before value.`);
+				}
+				const record = copyAdvancedSwitch(change.after);
+				if (record.id !== change.id) throw new Error("Advanced switch addition id mismatch.");
+				for (const cell of deriveAdvancedSwitchGeometry(record).claimedCells) {
+					const key = cellKey(cell.x, cell.y);
+					if (copy.advancedSwitchClaims.has(key) || source.getEncoded(cell.x, cell.y) !== 0) {
+						throw new Error(`Advanced switch addition ${record.id} overlaps existing source.`);
+					}
+					copy.advancedSwitchClaims.set(key, record.id);
+				}
+				copy.assertCanAdvanceMutationGeneration(1);
+				copy.advanceMutationGeneration();
+				copy.advancedSwitches.set(record.id, record);
+				copy.revision++;
+				nextId = Math.max(nextId, record.id + 1);
+				yield;
+			}
+			if (nextId !== copy.nextAdvancedSwitchId) {
+				copy.assertCanAdvanceMutationGeneration(1);
+				copy.advanceMutationGeneration();
+				copy.nextAdvancedSwitchId = nextId;
+			}
+			return copy;
+		};
+		return this.guardTraversalGeneration(steps(this), this.revision, this.mutationGeneration);
+	}
+
+	private *cloneCandidateSteps(): Generator<void, TileMap> {
+		const copy = new TileMap();
+		for (const [key, chunk] of this.chunks) {
+			COPY_ON_WRITE_CHUNKS.add(chunk);
+			copy.chunks.set(key, chunk);
+			yield;
+		}
+		for (const [id, record] of this.advancedSwitches) {
+			copy.advancedSwitches.set(id, copyAdvancedSwitch(record));
+			yield;
+		}
+		for (const [key, id] of this.advancedSwitchClaims) {
+			copy.advancedSwitchClaims.set(key, id);
+			yield;
+		}
+		copy.railCellCount = this.railCellCount;
+		copy.directedEdgeCount = this.directedEdgeCount;
+		copy.revision = this.revision;
+		copy.nextAdvancedSwitchId = this.nextAdvancedSwitchId;
+		copy.mutationGeneration = this.mutationGeneration;
+		return copy;
+	}
+
 	clone(): TileMap {
 		const copy = new TileMap();
 		copy.chunks = new Map(this.chunks);
@@ -573,11 +653,11 @@ export class TileMap {
 		return this.guardTraversalGeneration(steps(), this.revision, this.mutationGeneration);
 	}
 
-	private *guardTraversalGeneration(
-		steps: Generator<void, void>,
+	private *guardTraversalGeneration<T>(
+		steps: Generator<void, T>,
 		revision: number,
 		mutationGeneration: number,
-	): Generator<void, void> {
+	): Generator<void, T> {
 		const assertStableSource = (): void => {
 			if (this.revision !== revision || this.mutationGeneration !== mutationGeneration) {
 				throw new Error("TileMap changed during cooperative source traversal.");
@@ -587,7 +667,7 @@ export class TileMap {
 			assertStableSource();
 			const next = steps.next();
 			assertStableSource();
-			if (next.done) return;
+			if (next.done) return next.value;
 			yield;
 		}
 	}

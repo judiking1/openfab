@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
+import { productionBankContactFixture } from "../compile/StaticFabAssemblyRelationshipTestFixture";
 import {
 	captureRailMirrorSnapshot,
 	checksumRailMap,
 	checksumRailPatchResult,
 } from "../worker/RailMirrorChecksum";
 import { RailPatchMirror } from "../worker/RailPatchMirror";
-import { decodeRailPatchSoA, encodeRailPatchEvent } from "../worker/railMirrorProtocol";
+import {
+	decodeRailPatchSoA,
+	encodeRailPatchEvent,
+	encodeStaticFabAdditionRailPatchEventCooperatively,
+} from "../worker/railMirrorProtocol";
+import { planRailConstruction } from "./paint";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
 import {
 	buildRailModuleOwnershipIndex,
@@ -36,7 +42,188 @@ import {
 } from "./StaticFabOrganizationBundlePlacement";
 
 describe("StaticFabOrganizationBundle document commit", () => {
-	it("publishes one atomic patch and preserves Worker parity through undo and redo", () => {
+	it("prepares a complete nested relationship closure and replays the exact six-domain packet", async () => {
+		const fixture = productionBankContactFixture();
+		const root = fixture.organizations.records.find(
+			(record) => (record.parentOrganizationIds?.length ?? 0) === 0,
+		);
+		if (!root) throw new Error("Synthetic Fab root missing");
+		const captured = captureStaticFabOrganizationBundle(
+			fixture.map,
+			fixture.portEquipment,
+			0,
+			fixture.organizations,
+			fixture.relationships,
+			[root.id],
+			"EFFECTIVE",
+		);
+		if (!captured.valid) throw new Error(captured.reason);
+		const document = new RailDocument();
+		const mirror = new RailPatchMirror();
+		mirror.sync(snapshotFor(document));
+		let encoded: ReturnType<typeof encodeRailPatchEvent> | null = null;
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => {
+			events.push(event);
+			const packet = encoded ?? encodeRailPatchEvent(event);
+			encoded = null;
+			mirror.applyPatch(decodeRailPatchSoA(packet.patch, mirror.organizationState));
+		});
+		const plan = adoptedWorkerPlan(document, captured.bundle, { x: 500, y: 500 }, 1);
+		expect(plan.relationshipMutations.length).toBeGreaterThan(0);
+		let tick = 0;
+		const result = await document.commitStaticFabOrganizationBundleCooperatively(plan, {
+			now: () => ++tick,
+			checkpoint: async () => {},
+			preparePatch: async (event, checkpoint) => {
+				encoded = await encodeStaticFabAdditionRailPatchEventCooperatively(event, checkpoint, 37);
+			},
+		});
+		expect(result.committed).toBe(true);
+		expect(result.publicationError).toBeUndefined();
+		expect(events).toHaveLength(1);
+		const expected = snapshotFor(document);
+		expect(mirror.captureSnapshot()).toEqual(expected);
+		expect(document.undo()).toBe(true);
+		expect(document.relationships.records).toHaveLength(0);
+		expect(document.redo()).toBe(true);
+		expect(snapshotFor(document).checksum).toBe(expected.checksum);
+		expect(mirror.captureSnapshot()).toEqual(snapshotFor(document));
+	});
+	it.each([
+		["observer failed", "observer failed"],
+		["", "문서 변경 통지를 완료하지 못했습니다"],
+	])("reports observer failure %j without undoing or misreporting the committed command", async (observerMessage, expectedMessage) => {
+		const document = new RailDocument();
+		const plan = adoptedWorkerPlan(document, sourceBundle(), { x: 30, y: 30 }, 0);
+		const unsubscribe = document.subscribe(() => {
+			throw new Error(observerMessage);
+		});
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		let tick = 0;
+		const result = await document.commitStaticFabOrganizationBundleCooperatively(plan, {
+			now: () => ++tick,
+			checkpoint: async () => {},
+		});
+		expect(result).toMatchObject({ committed: true, publicationError: expectedMessage });
+		expect(events).toHaveLength(1);
+		expect(document.getPatchSequence()).toBe(1);
+		expect(document.organizations.records).toHaveLength(1);
+		unsubscribe();
+		expect(document.undo()).toBe(true);
+		expect(document.redo()).toBe(true);
+	});
+	it("cancels every actual preparation checkpoint without publishing or discarding existing Redo", async () => {
+		const bundle = sourceBundle();
+		const fixture = () => {
+			const document = new RailDocument();
+			document.commit(
+				planRailConstruction(document.map, { x: -100, y: -100 }, { x: -98, y: -100 }),
+			);
+			document.undo();
+			return { document, plan: adoptedWorkerPlan(document, bundle, { x: 30, y: 30 }, 0) };
+		};
+		const successful = fixture();
+		let checkpoints = 0;
+		let tick = 0;
+		expect(
+			(
+				await successful.document.commitStaticFabOrganizationBundleCooperatively(successful.plan, {
+					now: () => (tick += 5),
+					checkpoint: async () => {
+						checkpoints++;
+					},
+				})
+			).committed,
+		).toBe(true);
+		expect(checkpoints).toBeGreaterThan(10);
+		for (let stop = 1; stop <= checkpoints; stop++) {
+			const { document, plan } = fixture();
+			const original = snapshotFor(document);
+			const history = document.captureRailMirrorHistoryLedger();
+			const events: RailPatchEvent[] = [];
+			document.subscribe((event) => events.push(event));
+			const cancelled = new Error(`cancel at ${stop}`);
+			let seen = 0;
+			await expect(
+				document.commitStaticFabOrganizationBundleCooperatively(plan, {
+					now: () => (tick += 5),
+					checkpoint: async () => {
+						if (++seen === stop) throw cancelled;
+					},
+				}),
+			).rejects.toBe(cancelled);
+			expect(snapshotFor(document)).toEqual(original);
+			expect(document.captureRailMirrorHistoryLedger()).toEqual(history);
+			expect(events).toHaveLength(0);
+			expect(document.commitStaticFabOrganizationBundle(plan)).toBe(false);
+			expect(document.redo()).toBe(true);
+		}
+	});
+
+	it("keeps a newer command and history when the last preparation clock reenters", async () => {
+		const document = new RailDocument();
+		const plan = adoptedWorkerPlan(document, sourceBundle(), { x: 30, y: 30 }, 0);
+		let armed = false;
+		let authored = false;
+		let time = 0;
+		const result = await document.commitStaticFabOrganizationBundleCooperatively(plan, {
+			checkpoint: async () => {},
+			preparePatch: async () => {
+				armed = true;
+			},
+			now: () => {
+				if (armed && !authored)
+					authored = document.commit(
+						planRailConstruction(document.map, { x: -100, y: -100 }, { x: -98, y: -100 }),
+					);
+				return ++time;
+			},
+		});
+		expect(authored).toBe(true);
+		expect(result.committed).toBe(false);
+		expect(document.getPatchSequence()).toBe(1);
+		expect(document.organizations.records).toHaveLength(0);
+		expect(document.captureRailMirrorHistoryLedger().undo).toHaveLength(1);
+		expect(document.undo()).toBe(true);
+		expect(document.map.size).toBe(0);
+		expect(document.redo()).toBe(true);
+	});
+
+	it("publishes complete state, history and sequence before clocks can observe the candidate", async () => {
+		const document = new RailDocument();
+		const plan = adoptedWorkerPlan(document, sourceBundle(), { x: 30, y: 30 }, 0);
+		const observations: { sequence: number; cells: number; organizations: number; undo: number }[] =
+			[];
+		const observe = () =>
+			observations.push({
+				sequence: document.getPatchSequence(),
+				cells: document.map.size,
+				organizations: document.organizations.records.length,
+				undo: document.captureRailMirrorHistoryLedger().undo.length,
+			});
+		document.subscribe(observe);
+		let time = 0;
+		const result = await document.commitStaticFabOrganizationBundleCooperatively(plan, {
+			now: () => {
+				observe();
+				return ++time;
+			},
+			checkpoint: async () => {},
+		});
+		expect(result.committed).toBe(true);
+		for (const observation of observations)
+			expect(observation).toEqual(
+				observation.sequence === 0
+					? { sequence: 0, cells: 0, organizations: 0, undo: 0 }
+					: { sequence: 1, cells: plan.mutations.length, organizations: 1, undo: 1 },
+			);
+	});
+	it.each([
+		"ordinary",
+		"cooperative",
+	])("%s publishes one atomic patch and preserves Worker parity through undo and redo", async (mode) => {
 		const bundle = sourceBundle();
 		const destination = new RailDocument();
 		const mirror = new RailPatchMirror();
@@ -49,15 +236,41 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			).snapshot,
 		);
 		const events: RailPatchEvent[] = [];
+		let preparedEncoding: Awaited<
+			ReturnType<typeof encodeStaticFabAdditionRailPatchEventCooperatively>
+		> | null = null;
 		destination.subscribe((event) => {
 			events.push(event);
-			const encoded = encodeRailPatchEvent(event);
+			const encoded = preparedEncoding ?? encodeRailPatchEvent(event);
+			preparedEncoding = null;
 			mirror.applyPatch(decodeRailPatchSoA(encoded.patch, mirror.organizationState));
 		});
 		const plan = adoptedWorkerPlan(destination, bundle, { x: 30, y: -12 }, 1);
 
 		expect(plan.valid, plan.reason).toBe(true);
-		expect(destination.commitStaticFabOrganizationBundle(plan)).toBe(true);
+		let time = 0;
+		const committed =
+			mode === "ordinary"
+				? destination.commitStaticFabOrganizationBundle(plan)
+				: (
+						await destination.commitStaticFabOrganizationBundleCooperatively(plan, {
+							now: () => ++time,
+							checkpoint: async () => {},
+							preparePatch: async (event) => {
+								expect(destination.map.size).toBe(0);
+								expect(destination.organizations.records).toHaveLength(0);
+								expect(destination.getPatchSequence()).toBe(0);
+								expect(event.sequence).toBe(1);
+								preparedEncoding = await encodeStaticFabAdditionRailPatchEventCooperatively(
+									event,
+									async () => {},
+									7,
+								);
+								expect(preparedEncoding.patch).toEqual(encodeRailPatchEvent(event).patch);
+							},
+						})
+					).committed;
+		expect(committed).toBe(true);
 		expect(events).toHaveLength(1);
 		expect(events[0]?.kind).toBe(STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_KIND);
 		expect(events[0]?.changes.length).toBeGreaterThan(0);
@@ -408,6 +621,7 @@ function snapshotFor(document: RailDocument) {
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	).snapshot;
 }
 

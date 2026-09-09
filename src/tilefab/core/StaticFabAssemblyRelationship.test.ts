@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { productionBankContactFixture } from "../compile/StaticFabAssemblyRelationshipTestFixture";
+import { completeCooperativeSteps } from "./CooperativeTask";
 import { buildRailModuleOwnershipIndex, type DirectedRailEdge } from "./RailModuleOwnership";
 import { directionBetween, oppositeDirection } from "./railShape";
 import {
+	applyStaticFabAssemblyRelationshipAdditionsSteps,
 	applyStaticFabAssemblyRelationshipMutations,
 	checksumStaticFabAssemblyRelationshipRecord,
 	checksumStaticFabAssemblyRelationshipState,
@@ -21,6 +23,7 @@ import {
 	type StaticFabAssemblyRelationshipMutationV1,
 	type StaticFabAssemblyRelationshipStateV1,
 	type StaticFabAssemblyScopedEdgeV1,
+	staticFabAssemblyRelationshipAdditionFootprintSteps,
 	staticFabAssemblyRelationshipCanonicalByteLength,
 	staticFabAssemblyRelationshipRecordEquals,
 	staticFabAssemblyRelationshipStateEquals,
@@ -35,6 +38,65 @@ import {
 import { decodeRailCell, encodeRailCell, TileMap } from "./TileMap";
 
 describe("StaticFabAssemblyRelationship", () => {
+	it("prepares immutable relationship additions with identical footprint, budgets and monotonic cursor", () => {
+		const source = emptyStaticFabAssemblyRelationshipState();
+		const record = copyStaticFabAssemblyRelationshipRecord(contactOnlyState().records[0]);
+		const additions = Object.freeze([
+			Object.freeze({ id: record.id, before: null, after: record }),
+		]);
+		const footprint = completeCooperativeSteps(
+			staticFabAssemblyRelationshipAdditionFootprintSteps(additions),
+		);
+		expect(footprint).toEqual(staticFabAssemblyRelationshipTransitionFootprint(additions));
+		const candidate = completeCooperativeSteps(
+			applyStaticFabAssemblyRelationshipAdditionsSteps(source, additions, 2),
+		);
+		expect(candidate).toEqual(applyStaticFabAssemblyRelationshipMutations(source, additions, 2));
+		expect(isCanonicalStaticFabAssemblyRelationshipState(candidate)).toBe(true);
+		expect(candidate.records[0]).toBe(record);
+		expect(
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipAdditionsSteps(candidate, Object.freeze([]), 1),
+			),
+		).toBe(candidate);
+		expect(() =>
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipAdditionsSteps(source, additions, 1),
+			),
+		).toThrow();
+		expect(() =>
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipAdditionsSteps(candidate, additions, 2),
+			),
+		).toThrow();
+		for (const limits of [
+			{ maximumEdgeReferences: footprint.edgeReferenceCount - 1 },
+			{ maximumOwnerIds: footprint.ownerIdCount - 1 },
+			{ maximumCanonicalBytes: footprint.canonicalByteCount - 1 },
+		]) {
+			expect(() =>
+				completeCooperativeSteps(
+					staticFabAssemblyRelationshipAdditionFootprintSteps(additions, limits),
+				),
+			).toThrow();
+		}
+		const malformed = Object.freeze([
+			...additions,
+			Object.freeze({ id: 2, before: null, after: record }),
+		]);
+		expect(() =>
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipAdditionsSteps(source, malformed, 3),
+			),
+		).toThrow("ID");
+		const mutable = Object.freeze([
+			Object.freeze({ id: 1, before: null, after: contactOnlyState().records[0] }),
+		]);
+		expect(() =>
+			completeCooperativeSteps(staticFabAssemblyRelationshipAdditionFootprintSteps(mutable)),
+		).toThrow();
+		expect(source.records).toHaveLength(0);
+	});
 	it("constructs the empty canonical state", () => {
 		const state = emptyStaticFabAssemblyRelationshipState();
 

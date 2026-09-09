@@ -247,6 +247,10 @@ async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
 		bankDuplicatePreparationLongTasks: [],
 		bankDuplicatePreparationLongAnimationFrames: [],
 		bankDuplicateCommitLongTasks: [],
+		bankDuplicateMaximumPreparationSliceMilliseconds: Number.POSITIVE_INFINITY,
+		bankDuplicatePublicationMilliseconds: Number.POSITIVE_INFINITY,
+		bankDuplicatePublicationWarningPreserved: false,
+		bankDuplicatePublicationWarningStatus: "",
 		bankDuplicateSurfaceProbe: null,
 		bankUndoRedoReady: false,
 		bankDuplicateCommitObservedAsyncSync: false,
@@ -398,6 +402,12 @@ async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
 					})) ?? [],
 				organizationBundlePlacementPhase:
 					canvas?.getAttribute("data-organization-bundle-placement-phase") ?? "",
+				organizationBundlePlacementMaxSliceMs: Number(
+					canvas?.getAttribute("data-organization-bundle-placement-max-slice-ms") || Number.NaN,
+				),
+				organizationBundlePlacementPublicationMs: Number(
+					canvas?.getAttribute("data-organization-bundle-placement-publication-ms") || Number.NaN,
+				),
 				blueprintPlacementResult: canvas?.getAttribute("data-blueprint-placement-result") ?? "",
 			};
 		});
@@ -1104,6 +1114,16 @@ async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
 			if (globalThis.__openFabPlacedBaySync) globalThis.__openFabPlacedBaySync.values = [];
 		});
 		const bankDuplicateCommitLongTaskStartedAt = await beginHierarchyLongTaskWindow();
+		// A one-shot observer fault must not turn an applied command into a retry or lose its warning
+		// when the asynchronous model activation later publishes its completion message.
+		await page.evaluate(() => {
+			const railDocument = globalThis.__tileFab?.getDocument?.();
+			if (!railDocument) throw new Error("Missing document for publication observer probe.");
+			const unsubscribe = railDocument.subscribe(() => {
+				unsubscribe();
+				throw new Error("Scale acceptance one-shot publication observer failure");
+			});
+		});
 		await page.getByTestId("rail-canvas").press("Enter");
 		await page.waitForFunction(
 			(expected) => {
@@ -1133,6 +1153,32 @@ async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
 			{ timeout: 15_000 },
 		);
 		const duplicatedBank = await readState();
+		await page.evaluate(
+			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+		);
+		const publicationStatus = page.getByTestId("rail-status-message");
+		result.bankDuplicatePublicationWarningStatus = await publicationStatus.innerText();
+		result.bankDuplicatePublicationWarningPreserved =
+			result.bankDuplicatePublicationWarningStatus.includes(
+				"배치는 적용되었습니다 · 상태 갱신을 완료하지 못했습니다. 다시 배치하기 전에 현재 배치를 확인하세요",
+			) && (await publicationStatus.getAttribute("role")) === "alert";
+		assertEqual(
+			failures,
+			result.bankDuplicatePublicationWarningPreserved,
+			true,
+			"committed copy warning survives asynchronous model activation",
+		);
+		result.bankDuplicateMaximumPreparationSliceMilliseconds =
+			duplicatedBank.organizationBundlePlacementMaxSliceMs;
+		result.bankDuplicatePublicationMilliseconds =
+			duplicatedBank.organizationBundlePlacementPublicationMs;
+		for (const [label, value] of [
+			["preparation slice", result.bankDuplicateMaximumPreparationSliceMilliseconds],
+			["publication", result.bankDuplicatePublicationMilliseconds],
+		]) {
+			if (!Number.isFinite(value) || value < 0 || value > 8)
+				result.failures.push(`Prepared Bank duplicate ${label} ${value}ms exceeds 8ms.`);
+		}
 		const bankDuplicateCommitPerformance = await readHierarchyLongTaskWindow(
 			bankDuplicateCommitLongTaskStartedAt,
 		);

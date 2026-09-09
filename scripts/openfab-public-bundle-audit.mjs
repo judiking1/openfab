@@ -17,7 +17,9 @@ collectStaticEntry(entries[0][0]);
 
 const deferredSourcePattern =
 	/(?:StaticFabInspection3DView|SimulationReadinessBridge|SimulationOperationalConfiguration|synthetic-fab-presets)/;
-const deferredInitialKeys = [...initialKeys].filter((key) => deferredSourcePattern.test(key));
+const deferredInitialKeys = [...initialKeys].filter(
+	(key) => deferredSourcePattern.test(key) || manifest[key]?.name === "StaticFabArrangementBridge",
+);
 if (deferredInitialKeys.length > 0) {
 	throw new Error(
 		`Deferred public capabilities entered the initial graph: ${deferredInitialKeys.join(", ")}`,

@@ -1,3 +1,4 @@
+import { stableSortSteps } from "../core/CooperativeSort";
 import {
 	type CooperativeTask,
 	completeCooperativeSteps,
@@ -28,6 +29,7 @@ import {
 	type StaticFabAssemblyScopedEdgeV1,
 	type StaticFabAssemblySeamContactV1,
 	type StaticFabAssemblySeamIncidenceV1,
+	staticFabAssemblyRelationshipAdditionFootprintSteps,
 	staticFabAssemblyRelationshipTransitionFootprint,
 } from "../core/StaticFabAssemblyRelationship";
 import { assertTransferableTypedArray as assertTypedArray } from "./TransferableTypedArray";
@@ -393,6 +395,71 @@ export function encodeStaticFabAssemblyRelationshipPatch(
 	});
 }
 
+/** Encode immutable addition-only records with the exact existing patch byte contract. */
+export async function encodeStaticFabAssemblyRelationshipAdditionsCooperatively(
+	mutations: readonly StaticFabAssemblyRelationshipMutationV1[],
+	nextRelationshipIdBefore: number,
+	nextRelationshipIdAfter: number,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<EncodedStaticFabAssemblyRelationshipPatch> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
+		throw new RangeError("Relationship encoding operation budget must be positive.");
+	const task = createCooperativeTask(
+		encodeAdditionPatchSteps(mutations, nextRelationshipIdBefore, nextRelationshipIdAfter),
+	);
+	while (!task.done) {
+		task.step(operationBudget);
+		await checkpoint();
+	}
+	return task.finish();
+}
+
+function* encodeAdditionPatchSteps(
+	mutations: readonly StaticFabAssemblyRelationshipMutationV1[],
+	nextRelationshipIdBefore: number,
+	nextRelationshipIdAfter: number,
+): Generator<void, EncodedStaticFabAssemblyRelationshipPatch> {
+	yield* staticFabAssemblyRelationshipAdditionFootprintSteps(mutations, {
+		maximumEdgeReferences: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_MAX_EDGE_REFERENCES,
+		maximumOwnerIds: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_MAX_OWNER_IDS,
+		maximumCanonicalBytes: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_MAX_CANONICAL_BYTES,
+	});
+	validatePositiveInt32(nextRelationshipIdBefore, "relationship patch before cursor");
+	validatePositiveInt32(nextRelationshipIdAfter, "relationship patch after cursor");
+	if (nextRelationshipIdAfter < nextRelationshipIdBefore)
+		throw new Error("Relationship patch cursor must not move backward.");
+	const relationshipIds = new Int32Array(mutations.length);
+	const beforePresent = new Uint8Array(mutations.length);
+	const afterPresent = new Uint8Array(mutations.length);
+	const beforeRecords: null[] = [];
+	const afterRecords: StaticFabAssemblyRelationshipRecordV1[] = [];
+	let previousId = 0;
+	for (let index = 0; index < mutations.length; index++) {
+		yield;
+		const mutation = mutations[index] as StaticFabAssemblyRelationshipMutationV1;
+		if (mutation.id <= previousId)
+			throw new Error("Static FAB assembly relationship patch ids must be in canonical order.");
+		previousId = mutation.id;
+		relationshipIds[index] = mutation.id;
+		afterPresent[index] = 1;
+		beforeRecords.push(null);
+		afterRecords.push(mutation.after as StaticFabAssemblyRelationshipRecordV1);
+	}
+	const fields: StaticFabAssemblyRelationshipPatchSoA = Object.freeze({
+		schemaVersion: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_SCHEMA_VERSION,
+		relationshipIds,
+		nextRelationshipIdBefore,
+		nextRelationshipIdAfter,
+		beforePresent,
+		before: yield* createRecordFieldsSteps(beforeRecords),
+		afterPresent,
+		after: yield* createRecordFieldsSteps(afterRecords),
+	});
+	yield* validatePatchStructureSteps(fields);
+	return Object.freeze({ fields, transfer: staticFabAssemblyRelationshipPatchTransfers(fields) });
+}
+
 export function decodeStaticFabAssemblyRelationshipPatch(
 	fields: StaticFabAssemblyRelationshipPatchSoA,
 ): readonly StaticFabAssemblyRelationshipMutationV1[] {
@@ -437,6 +504,12 @@ export function staticFabAssemblyRelationshipPatchTransfers(
 export function validateStaticFabAssemblyRelationshipPatchStructure(
 	fields: StaticFabAssemblyRelationshipPatchSoA,
 ): void {
+	completeCooperativeSteps(validatePatchStructureSteps(fields));
+}
+
+function* validatePatchStructureSteps(
+	fields: StaticFabAssemblyRelationshipPatchSoA,
+): Generator<void> {
 	assertExactKeys(
 		fields,
 		[
@@ -459,7 +532,7 @@ export function validateStaticFabAssemblyRelationshipPatchStructure(
 	assertTypedArray(fields.relationshipIds, Int32Array, "relationship patch ids");
 	assertTypedArray(fields.beforePresent, Uint8Array, "relationship patch before presence");
 	assertTypedArray(fields.afterPresent, Uint8Array, "relationship patch after presence");
-	validateCanonicalPositiveInt32Ids(fields.relationshipIds, "relationship patch ids");
+	yield* validateCanonicalPositiveInt32IdsSteps(fields.relationshipIds, "relationship patch ids");
 	validatePositiveInt32(fields.nextRelationshipIdBefore, "relationship patch before cursor");
 	validatePositiveInt32(fields.nextRelationshipIdAfter, "relationship patch after cursor");
 	if (fields.nextRelationshipIdAfter < fields.nextRelationshipIdBefore) {
@@ -468,13 +541,18 @@ export function validateStaticFabAssemblyRelationshipPatchStructure(
 	if (fields.relationshipIds.length > STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_RECORDS * 2) {
 		throw new Error("Static FAB assembly relationship patch exceeds its mutation-row budget.");
 	}
-	validatePresence(
+	yield* validatePresenceSteps(
 		fields.beforePresent,
 		fields.relationshipIds.length,
 		"relationship patch before",
 	);
-	validatePresence(fields.afterPresent, fields.relationshipIds.length, "relationship patch after");
+	yield* validatePresenceSteps(
+		fields.afterPresent,
+		fields.relationshipIds.length,
+		"relationship patch after",
+	);
 	for (let index = 0; index < fields.relationshipIds.length; index++) {
+		yield;
 		const id = fields.relationshipIds[index] as number;
 		const beforePresent = (fields.beforePresent[index] as number) === 1;
 		const afterPresent = (fields.afterPresent[index] as number) === 1;
@@ -488,7 +566,7 @@ export function validateStaticFabAssemblyRelationshipPatchStructure(
 			throw new Error(`Relationship patch after cursor does not cover record ${id}.`);
 		}
 	}
-	const beforeCounts = validateRecordFields(
+	const beforeCounts = yield* validateRecordFieldsSteps(
 		fields.before,
 		fields.relationshipIds.length,
 		fields.beforePresent,
@@ -499,7 +577,7 @@ export function validateStaticFabAssemblyRelationshipPatchStructure(
 			maximumCanonicalBytes: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_MAX_CANONICAL_BYTES,
 		},
 	);
-	const afterCounts = validateRecordFields(
+	const afterCounts = yield* validateRecordFieldsSteps(
 		fields.after,
 		fields.relationshipIds.length,
 		fields.afterPresent,
@@ -537,45 +615,87 @@ export function validateStaticFabAssemblyRelationshipPatchStructure(
 function createRecordFields(
 	records: readonly (StaticFabAssemblyRelationshipRecordV1 | null)[],
 ): StaticFabAssemblyRelationshipRecordFieldsSoA {
-	const counts = countRecordCollection(records);
-	const edgeTable = collectCanonicalEdgeTable(records);
+	return completeCooperativeSteps(createRecordFieldsSteps(records));
+}
+
+function* createRecordFieldsSteps(
+	records: readonly (StaticFabAssemblyRelationshipRecordV1 | null)[],
+): Generator<void, StaticFabAssemblyRelationshipRecordFieldsSoA> {
+	const counts = yield* countRecordCollectionSteps(records);
+	const edgeTable = yield* collectCanonicalEdgeTableSteps(records);
 	const edgeIndexesByKey = new Map<string, number>();
 	for (let index = 0; index < edgeTable.length; index++) {
+		yield;
 		edgeIndexesByKey.set(edgeKey(edgeTable[index] as DirectedRailEdge), index);
 	}
 
+	let participantCount = 0;
+	let managedCount = 0;
+	for (const record of records) {
+		yield;
+		participantCount += record?.participantOrganizationIds.length ?? 0;
+		managedCount += record?.managedChildOrganizationIds.length ?? 0;
+	}
 	const hierarchyRoles = new Uint8Array(records.length);
+	yield;
 	const purposes = new Uint8Array(records.length);
+	yield;
 	const parentOrganizationIds = new Int32Array(records.length);
+	yield;
 	const reviewPolicies = new Uint8Array(records.length);
+	yield;
 	const participantOffsets = new Uint32Array(records.length + 1);
-	const participantOrganizationIds = new Int32Array(
-		records.reduce((total, record) => total + (record?.participantOrganizationIds.length ?? 0), 0),
-	);
+	yield;
+	const participantOrganizationIds = new Int32Array(participantCount);
+	yield;
 	const managedChildOffsets = new Uint32Array(records.length + 1);
-	const managedChildOrganizationIds = new Int32Array(
-		records.reduce((total, record) => total + (record?.managedChildOrganizationIds.length ?? 0), 0),
-	);
+	yield;
+	const managedChildOrganizationIds = new Int32Array(managedCount);
+	yield;
 	const connectionGroupOffsets = new Uint32Array(records.length + 1);
+	yield;
 	const groupLegOffsets = new Uint32Array(counts.groups + 1);
+	yield;
 	const legDirectionRoles = new Uint8Array(counts.legs);
+	yield;
 	const legExclusiveCutEdgeOffsets = new Uint32Array(counts.legs + 1);
+	yield;
 	const exclusiveCutEdgeScopedIndexes = new Uint32Array(counts.exclusiveCutEdges);
+	yield;
 	const legEndpointSupportOffsets = new Uint32Array(counts.legs + 1);
+	yield;
 	const endpointSupportScopedIndexes = new Uint32Array(counts.endpointSupports);
+	yield;
 	const endpointAdjacentExclusiveCutEdgeIndexes = new Uint32Array(counts.endpointSupports);
+	yield;
 	const endpointPositions = new Uint8Array(counts.endpointSupports);
+	yield;
 	const legSeamContactOffsets = new Uint32Array(counts.legs + 1);
+	yield;
 	const seamRoles = new Uint8Array(counts.seamContacts);
+	yield;
 	const seamIncidenceOffsets = new Uint32Array(counts.seamContacts + 1);
+	yield;
 	const incidenceDirections = new Uint8Array(counts.incidences);
+	yield;
 	const incidenceBindingKinds = new Uint8Array(counts.incidences);
+	yield;
 	const incidenceExclusiveCutEdgeIndexes = new Uint32Array(counts.incidences);
-	incidenceExclusiveCutEdgeIndexes.fill(UINT32_ABSENT);
+	yield;
+	for (let index = 0; index < incidenceExclusiveCutEdgeIndexes.length; index++) {
+		yield;
+		incidenceExclusiveCutEdgeIndexes[index] = UINT32_ABSENT;
+	}
 	const incidenceWitnessScopedEdgeIndexes = new Uint32Array(counts.incidences);
-	incidenceWitnessScopedEdgeIndexes.fill(UINT32_ABSENT);
+	yield;
+	for (let index = 0; index < incidenceWitnessScopedEdgeIndexes.length; index++) {
+		yield;
+		incidenceWitnessScopedEdgeIndexes[index] = UINT32_ABSENT;
+	}
 	const edgeCoordinates = new Int32Array(edgeTable.length * 4);
+	yield;
 	for (let index = 0; index < edgeTable.length; index++) {
+		yield;
 		writeEdge(edgeCoordinates, index, edgeTable[index] as DirectedRailEdge);
 	}
 	const scopedEdges: StaticFabAssemblyRelationshipScopedEdgeFieldsSoA = {
@@ -585,7 +705,10 @@ function createRecordFields(
 		directOwnerOffsets: new Uint32Array(counts.scopedEdges + 1),
 		directOwnerOrganizationIds: new Int32Array(counts.ownerIds),
 	};
-	scopedEdges.participantIndexes.fill(-1);
+	for (let index = 0; index < scopedEdges.participantIndexes.length; index++) {
+		yield;
+		scopedEdges.participantIndexes[index] = -1;
+	}
 
 	let participantIndex = 0;
 	let managedIndex = 0;
@@ -597,7 +720,7 @@ function createRecordFields(
 	let incidenceIndex = 0;
 	let scopedIndex = 0;
 	let ownerIndex = 0;
-	const writeScoped = (scoped: StaticFabAssemblyScopedEdgeV1): number => {
+	const writeScoped = function* (scoped: StaticFabAssemblyScopedEdgeV1): Generator<void, number> {
 		const result = scopedIndex++;
 		const edgeIndex = edgeIndexesByKey.get(edgeKey(scoped.edge));
 		if (edgeIndex === undefined)
@@ -608,6 +731,7 @@ function createRecordFields(
 		if (scoped.scope.kind !== "PARENT_DIRECT") {
 			scopedEdges.participantIndexes[result] = scoped.scope.participantIndex;
 			for (const ownerId of scoped.scope.directOwnerOrganizationIds) {
+				yield;
 				scopedEdges.directOwnerOrganizationIds[ownerIndex++] = ownerId;
 			}
 		}
@@ -616,6 +740,7 @@ function createRecordFields(
 	};
 
 	for (let recordIndex = 0; recordIndex < records.length; recordIndex++) {
+		yield;
 		const record = records[recordIndex];
 		participantOffsets[recordIndex] = participantIndex;
 		managedChildOffsets[recordIndex] = managedIndex;
@@ -626,23 +751,29 @@ function createRecordFields(
 		parentOrganizationIds[recordIndex] = record.parentOrganizationId;
 		reviewPolicies[recordIndex] = tagIndex(REVIEW_POLICIES, record.reviewPolicy);
 		for (const id of record.participantOrganizationIds) {
+			yield;
 			participantOrganizationIds[participantIndex++] = id;
 		}
 		for (const id of record.managedChildOrganizationIds) {
+			yield;
 			managedChildOrganizationIds[managedIndex++] = id;
 		}
 		for (const group of record.connectionGroups) {
+			yield;
 			groupLegOffsets[groupIndex] = legIndex;
 			groupIndex++;
 			for (const leg of group.legs) {
+				yield;
 				legDirectionRoles[legIndex] = tagIndex(DIRECTION_ROLES, leg.directionRole);
 				legExclusiveCutEdgeOffsets[legIndex] = exclusiveIndex;
 				for (const scoped of leg.exclusiveCutEdges) {
-					exclusiveCutEdgeScopedIndexes[exclusiveIndex++] = writeScoped(scoped);
+					yield;
+					exclusiveCutEdgeScopedIndexes[exclusiveIndex++] = yield* writeScoped(scoped);
 				}
 				legEndpointSupportOffsets[legIndex] = endpointIndex;
 				for (const endpoint of leg.endpointSupports) {
-					endpointSupportScopedIndexes[endpointIndex] = writeScoped(endpoint.support);
+					yield;
+					endpointSupportScopedIndexes[endpointIndex] = yield* writeScoped(endpoint.support);
 					endpointAdjacentExclusiveCutEdgeIndexes[endpointIndex] =
 						endpoint.adjacentExclusiveCutEdgeIndex;
 					endpointPositions[endpointIndex] = tagIndex(ENDPOINT_POSITIONS, endpoint.position);
@@ -650,10 +781,12 @@ function createRecordFields(
 				}
 				legSeamContactOffsets[legIndex] = seamIndex;
 				for (const seam of leg.seamContacts) {
+					yield;
 					seamRoles[seamIndex] = tagIndex(SEAM_ROLES, seam.role);
 					seamIncidenceOffsets[seamIndex] = incidenceIndex;
 					seamIndex++;
 					for (const incidence of seam.incidences) {
+						yield;
 						incidenceDirections[incidenceIndex] = tagIndex(
 							INCIDENCE_DIRECTIONS,
 							incidence.incidence,
@@ -666,7 +799,7 @@ function createRecordFields(
 							incidenceExclusiveCutEdgeIndexes[incidenceIndex] =
 								incidence.binding.exclusiveCutEdgeIndex;
 						} else {
-							incidenceWitnessScopedEdgeIndexes[incidenceIndex] = writeScoped(
+							incidenceWitnessScopedEdgeIndexes[incidenceIndex] = yield* writeScoped(
 								incidence.binding.scopedEdge,
 							);
 						}
@@ -717,9 +850,9 @@ function createRecordFields(
 	});
 }
 
-function countRecordCollection(
+function* countRecordCollectionSteps(
 	records: readonly (StaticFabAssemblyRelationshipRecordV1 | null)[],
-): RecordCollectionCounts {
+): Generator<void, RecordCollectionCounts> {
 	const counts: MutableRecordCollectionCounts = {
 		groups: 0,
 		legs: 0,
@@ -734,24 +867,29 @@ function countRecordCollection(
 		canonicalBytes: 8,
 	};
 	for (const record of records) {
+		yield;
 		if (!record) continue;
 		counts.canonicalBytes +=
 			32 +
 			record.participantOrganizationIds.length * 4 +
 			record.managedChildOrganizationIds.length * 4;
 		for (const group of record.connectionGroups) {
+			yield;
 			counts.groups++;
 			counts.canonicalBytes += 8;
 			for (const leg of group.legs) {
+				yield;
 				counts.legs++;
 				counts.canonicalBytes += 20;
 				for (const scoped of leg.exclusiveCutEdges) {
+					yield;
 					counts.exclusiveCutEdges++;
 					counts.scopedEdges++;
 					counts.edgeReferences++;
 					addScopedCounts(counts, scoped);
 				}
 				for (const endpoint of leg.endpointSupports) {
+					yield;
 					counts.endpointSupports++;
 					counts.scopedEdges++;
 					counts.edgeReferences += 2;
@@ -759,9 +897,11 @@ function countRecordCollection(
 					addScopedCounts(counts, endpoint.support);
 				}
 				for (const seam of leg.seamContacts) {
+					yield;
 					counts.seamContacts++;
 					counts.canonicalBytes += 8;
 					for (const incidence of seam.incidences) {
+						yield;
 						counts.incidences++;
 						counts.edgeReferences++;
 						if (incidence.binding.kind === "EXCLUSIVE_CUT_EDGE") {
@@ -792,28 +932,45 @@ function addScopedCounts(
 	counts.canonicalBytes += 28 + scoped.scope.directOwnerOrganizationIds.length * 4;
 }
 
-function collectCanonicalEdgeTable(
+function* collectCanonicalEdgeTableSteps(
 	records: readonly (StaticFabAssemblyRelationshipRecordV1 | null)[],
-): readonly DirectedRailEdge[] {
+): Generator<void, readonly DirectedRailEdge[]> {
 	const byKey = new Map<string, DirectedRailEdge>();
 	const collect = (scoped: StaticFabAssemblyScopedEdgeV1): void => {
 		byKey.set(edgeKey(scoped.edge), scoped.edge);
 	};
 	for (const record of records) {
+		yield;
 		if (!record) continue;
 		for (const group of record.connectionGroups) {
+			yield;
 			for (const leg of group.legs) {
-				for (const scoped of leg.exclusiveCutEdges) collect(scoped);
-				for (const endpoint of leg.endpointSupports) collect(endpoint.support);
+				yield;
+				for (const scoped of leg.exclusiveCutEdges) {
+					collect(scoped);
+					yield;
+				}
+				for (const endpoint of leg.endpointSupports) {
+					collect(endpoint.support);
+					yield;
+				}
 				for (const seam of leg.seamContacts) {
+					yield;
 					for (const incidence of seam.incidences) {
+						yield;
 						if (incidence.binding.kind === "WITNESS") collect(incidence.binding.scopedEdge);
 					}
 				}
 			}
 		}
 	}
-	return [...byKey.values()].sort(compareEdges);
+	const edges: DirectedRailEdge[] = [];
+	for (const edge of byKey.values()) {
+		edges.push(edge);
+		yield;
+	}
+	yield* stableSortSteps(edges, compareEdges);
+	return edges;
 }
 
 function readPresentRecords(
@@ -1008,22 +1165,6 @@ function freezeScopedEdge(scoped: StaticFabAssemblyScopedEdgeV1): StaticFabAssem
 	if (scoped.scope.kind !== "PARENT_DIRECT") Object.freeze(scoped.scope.directOwnerOrganizationIds);
 	Object.freeze(scoped.scope);
 	return Object.freeze(scoped);
-}
-
-function validateRecordFields(
-	fields: StaticFabAssemblyRelationshipRecordFieldsSoA,
-	recordCount: number,
-	presence: Uint8Array | undefined,
-	label: string,
-	limits: {
-		readonly maximumEdgeReferences: number;
-		readonly maximumOwnerIds: number;
-		readonly maximumCanonicalBytes: number;
-	},
-): RecordCollectionCounts {
-	return completeCooperativeSteps(
-		validateRecordFieldsSteps(fields, recordCount, presence, label, limits),
-	);
 }
 
 function* validateRecordFieldsSteps(
@@ -1628,10 +1769,6 @@ function* validateOffsetsSteps(
 	if (previous !== payloadLength) throw new Error(`${label} do not cover their payload.`);
 }
 
-function validatePresence(values: Uint8Array, count: number, label: string): void {
-	completeCooperativeSteps(validatePresenceSteps(values, count, label));
-}
-
 function* validatePresenceSteps(
 	values: Uint8Array,
 	count: number,
@@ -1663,10 +1800,6 @@ function validatePositiveInt32(value: number, label: string): void {
 	if (!Number.isSafeInteger(value) || value < 1 || value > 0x7fff_ffff) {
 		throw new Error(`${label} must be a positive signed int32.`);
 	}
-}
-
-function validateCanonicalPositiveInt32Ids(values: Int32Array, label: string): void {
-	completeCooperativeSteps(validateCanonicalPositiveInt32IdsSteps(values, label));
 }
 
 function* validateCanonicalPositiveInt32IdsSteps(

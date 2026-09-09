@@ -58,6 +58,7 @@ import {
 } from "./StaticFabOrganizationBundle";
 import {
 	adoptStaticFabOrganizationBundlePlacementWorkerPlanCooperatively,
+	consumeCertifiedStaticFabOrganizationBundlePlacementPlanCooperatively,
 	consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor,
 	fingerprintFrozenStaticFabOrganizationBundleCooperatively,
 	isCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor,
@@ -152,15 +153,21 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 		).toBe(true);
 		expect(document.getPatchSequence()).toBe(0);
 		expect(await successful.adopt(async () => {})).toBeNull();
+		let consumeCheckpoints = 0;
 		expect(
-			consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
+			await consumeCertifiedStaticFabOrganizationBundlePlacementPlanCooperatively(
 				adopted,
 				document.map,
 				document.portEquipment,
 				document.organizations,
 				document.relationships,
+				async () => {
+					consumeCheckpoints++;
+				},
+				1,
 			),
-		).toBe(true);
+		).toBe(adopted);
+		expect(consumeCheckpoints).toBe(1);
 		expect(
 			consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor(
 				adopted,

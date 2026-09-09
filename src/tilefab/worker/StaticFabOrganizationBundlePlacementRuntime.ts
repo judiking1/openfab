@@ -1,5 +1,6 @@
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { resolvePortAttachment } from "../compile/PortAttachmentResolver";
+import { assertPortSlotCapacity } from "../compile/PortSlotCompiler";
 import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
 import { prepareStaticFabOrganizationBundle } from "../core/StaticFabOrganizationBundle";
 import {
@@ -143,8 +144,11 @@ export function prepareStaticFabOrganizationBundlePlacement(
 			organizations: prospectiveOrganizations,
 			relationships: prospectiveRelationships,
 		} = planning.prospectiveState;
+		const prospectiveLayout = compilePhysicalRail(prospectiveMap);
+		if (!prospectiveLayout.valid)
+			throw new Error("조직 청사진의 물리 레일 검증을 통과하지 못했습니다");
+		assertPortSlotCapacity(prospectiveLayout);
 		if (prospectiveEquipment.ports.length > 0) {
-			const prospectiveLayout = compilePhysicalRail(prospectiveMap);
 			for (const port of prospectiveEquipment.ports) {
 				const attachment = resolvePortAttachment(prospectiveLayout, port);
 				if (!attachment.ok) {

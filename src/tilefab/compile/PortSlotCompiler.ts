@@ -576,16 +576,8 @@ export function compileBasePortSlots(
 	const policy = OPENFAB_PORT_SLOT_POLICIES[portType];
 	const remap = layout.pathIntervalRemap;
 	const exclusionMask = compilePortSlotExclusionMask(layout);
-	let linearSourceCount = 0;
-	for (let sourcePathIndex = 0; sourcePathIndex < remap.sourcePathCount; sourcePathIndex++) {
-		if (isCardinalLinearSource(remap, sourcePathIndex)) linearSourceCount++;
-	}
-	const count = linearSourceCount * policy.sides.length;
-	if (count > PORT_SLOT_MAX_ROWS) {
-		throw new Error(
-			`Port slot budget exceeded: ${count} rows is greater than ${PORT_SLOT_MAX_ROWS}.`,
-		);
-	}
+	const count = countLinearPortSlotSources(remap) * policy.sides.length;
+	assertPortSlotRowBudget(count);
 
 	const sourcePathOffsets = new Uint32Array(remap.sourcePathCount + 1);
 	const sourcePathIndices = new Uint32Array(count);
@@ -1045,6 +1037,43 @@ async function appendCsrCellsCooperatively(
 			await checkpointWork();
 		}
 		await checkpointWork();
+	}
+}
+
+/** Check every equipment catalog before an authored candidate is accepted, without allocating rows. */
+export function assertPortSlotCapacity(layout: CompiledPhysicalLayout): void {
+	// Keep the derived catalog's source/interval/geometry proofs within their existing ceilings too.
+	for (const [count, maximum] of [
+		[layout.pathIntervalRemap.sourcePathCount, PORT_SLOT_MAX_ROWS],
+		[layout.pathIntervalRemap.count, PORT_SLOT_MAX_ROWS * 8],
+		[layout.paths.pathCount, PORT_SLOT_MAX_ROWS],
+		[layout.paths.pointCount, PORT_SLOT_MAX_ROWS * 64],
+	] as const) {
+		if (!Number.isSafeInteger(count) || count < 0 || count > maximum) {
+			throw new Error(
+				"레일 계산 규모가 현재 지원 한도를 넘습니다. 복사 범위를 줄이거나 별도 프로젝트에 배치하세요.",
+			);
+		}
+	}
+	const linearSourceCount = countLinearPortSlotSources(layout.pathIntervalRemap);
+	for (const policy of Object.values(OPENFAB_PORT_SLOT_POLICIES)) {
+		assertPortSlotRowBudget(linearSourceCount * policy.sides.length);
+	}
+}
+
+function countLinearPortSlotSources(remap: CompiledPathIntervalRemap): number {
+	let count = 0;
+	for (let index = 0; index < remap.sourcePathCount; index++) {
+		if (isCardinalLinearSource(remap, index)) count++;
+	}
+	return count;
+}
+
+function assertPortSlotRowBudget(count: number): void {
+	if (count > PORT_SLOT_MAX_ROWS) {
+		throw new Error(
+			`장비 배치 위치가 ${count.toLocaleString("en-US")}개로 현재 지원 한도 ${PORT_SLOT_MAX_ROWS.toLocaleString("en-US")}개를 넘습니다. 복사 범위를 줄이거나 별도 프로젝트에 배치하세요.`,
+		);
 	}
 }
 

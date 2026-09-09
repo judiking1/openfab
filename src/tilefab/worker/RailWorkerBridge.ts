@@ -13,6 +13,7 @@ import {
 	captureRailMirrorSnapshot,
 	checksumRailMap,
 	checksumRailMirrorSnapshot,
+	checksumRailPatchResultCooperatively,
 	issueRailMirrorSnapshotCaptureHandoff,
 	RailChecksumAccumulator,
 	type RailMirrorSnapshot,
@@ -33,6 +34,7 @@ import {
 	type EncodedRailPatch,
 	encodeRailPatchEvent,
 	encodeReviewedPortEquipmentRailPatchEventCooperatively,
+	encodeStaticFabAdditionRailPatchEventCooperatively,
 	type MainToRailMirrorMessage,
 	type RailMirrorToMainMessage,
 	railMirrorSnapshotTransfers,
@@ -160,8 +162,17 @@ export interface RailWorkerAuthoredReadyExpectation {
 	readonly revision: number;
 }
 
+export interface RailPreparedAdditionPatchLease {
+	readonly isCurrent: () => boolean;
+}
+
 export interface RailWorkerBridgeHandle {
 	getState(): RailWorkerBridgeState;
+	prepareStaticFabAdditionPatchCooperatively?(
+		event: RailPatchEvent,
+		checkpoint: () => Promise<void>,
+		operationBudget?: number,
+	): Promise<RailPreparedAdditionPatchLease>;
 	prepareReviewedPortEquipmentPatchCooperatively?(
 		event: RailPatchEvent,
 		checkpoint: () => Promise<void>,
@@ -289,7 +300,8 @@ interface RailWorkerInitialSnapshotValidation {
 	readonly binding: RailWorkerInitialSnapshotBinding;
 }
 
-interface PreparedReviewedPortEquipmentPatch {
+interface PreparedAuthoredPatch {
+	readonly operationalConfigurationFingerprint?: string;
 	readonly epoch: number;
 	readonly baseSequence: number;
 	readonly encoded: EncodedRailPatch;
@@ -383,10 +395,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		RailWorkerAbandonedOrganizationOutlineCapture
 	>();
 	private nextOrganizationOutlineCaptureRequestId = 1;
-	private preparedReviewedPortEquipmentPatches = new WeakMap<
-		RailPatchEvent,
-		PreparedReviewedPortEquipmentPatch
-	>();
+	private preparedAuthoredPatches = new WeakMap<RailPatchEvent, PreparedAuthoredPatch>();
 
 	constructor(
 		document: RailDocument,
@@ -475,10 +484,64 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		}
 		await checkpoint();
 		if (!this.patchPreparationSourceIsCurrent(epoch, baseSequence, event)) return;
-		this.preparedReviewedPortEquipmentPatches.set(
+		this.preparedAuthoredPatches.set(
 			event,
 			Object.freeze({ epoch, baseSequence, encoded, expectedChecksum }),
 		);
+	}
+
+	/** Prepare an exact six-domain addition packet and expose its revocable publication binding. */
+	async prepareStaticFabAdditionPatchCooperatively(
+		event: RailPatchEvent,
+		checkpoint: () => Promise<void>,
+		operationBudget = 128,
+	): Promise<RailPreparedAdditionPatchLease> {
+		const epoch = this.epoch;
+		const baseSequence = this.latestSentSequence;
+		const sourceMap = this.document.map;
+		const sourceGeneration = sourceMap.getMutationGeneration();
+		const operationalConfiguration = this.document.operationalConfiguration;
+		// This is the exact fingerprint of the latest sent authored generation. Static additions
+		// preserve that same immutable operational state; recomputing it at publication is unnecessary.
+		const operationalConfigurationFingerprint =
+			this.state.targetOperationalConfigurationFingerprint;
+		const sourceChecksum = this.expectedChecksum.digest();
+		const sourceIsCurrent = () =>
+			this.patchPreparationSourceIsCurrent(epoch, baseSequence, event) &&
+			this.document.map === sourceMap &&
+			sourceMap.getMutationGeneration() === sourceGeneration &&
+			this.document.getPatchSequence() === baseSequence &&
+			sourceMap.getRevision() === event.baseRevision &&
+			this.document.operationalConfiguration === operationalConfiguration;
+		const check = async () => {
+			if (!sourceIsCurrent()) throw new Error("Rail Worker addition preparation became stale.");
+			await checkpoint();
+			if (!sourceIsCurrent()) throw new Error("Rail Worker addition preparation became stale.");
+		};
+		await check();
+		const encoded = await encodeStaticFabAdditionRailPatchEventCooperatively(
+			event,
+			check,
+			operationBudget,
+		);
+		const digest = await checksumRailPatchResultCooperatively(
+			sourceChecksum,
+			event,
+			check,
+			operationBudget,
+		);
+		await check();
+		const prepared = Object.freeze({
+			epoch,
+			baseSequence,
+			encoded,
+			expectedChecksum: RailChecksumAccumulator.fromDigest(digest),
+			operationalConfigurationFingerprint,
+		});
+		this.preparedAuthoredPatches.set(event, prepared);
+		return Object.freeze({
+			isCurrent: () => sourceIsCurrent() && this.preparedAuthoredPatches.get(event) === prepared,
+		});
 	}
 
 	captureCurrentOrganizationOutline(
@@ -687,7 +750,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
-		this.preparedReviewedPortEquipmentPatches = new WeakMap();
+		this.preparedAuthoredPatches = new WeakMap();
 		this.unsubscribe();
 		this.worker.onmessage = null;
 		this.worker.onerror = null;
@@ -768,7 +831,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		initialSnapshotValidation?: RailWorkerInitialSnapshotValidation,
 	): void {
 		if (this.disposed || this.state.status === "error") return;
-		this.preparedReviewedPortEquipmentPatches = new WeakMap();
+		this.preparedAuthoredPatches = new WeakMap();
 		const capture = initialSnapshot
 			? {
 					snapshot: initialSnapshot,
@@ -861,15 +924,17 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				);
 				return;
 			}
-			const prepared = this.preparedReviewedPortEquipmentPatches.get(patch);
-			this.preparedReviewedPortEquipmentPatches.delete(patch);
+			const prepared = this.preparedAuthoredPatches.get(patch);
+			this.preparedAuthoredPatches.delete(patch);
 			let encoded: EncodedRailPatch;
+			let preparedOperationalFingerprint: string | undefined;
 			if (
 				prepared &&
 				prepared.epoch === this.epoch &&
 				prepared.baseSequence === this.latestSentSequence
 			) {
 				encoded = prepared.encoded;
+				preparedOperationalFingerprint = prepared.operationalConfigurationFingerprint;
 				this.expectedChecksum = prepared.expectedChecksum;
 			} else {
 				this.expectedChecksum.applyOrganizationNextId(
@@ -900,9 +965,9 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			}
 			this.latestSentSequence = patch.sequence;
 			const checksum = this.expectedChecksum.digest();
-			const operationalConfigurationFingerprint = checksumOperationalConfigurationState(
-				this.document.operationalConfiguration,
-			);
+			const operationalConfigurationFingerprint =
+				preparedOperationalFingerprint ??
+				checksumOperationalConfigurationState(this.document.operationalConfiguration);
 			this.expectedBySequence.set(patch.sequence, {
 				checksum,
 				baseSequence: patch.sequence - 1,
@@ -1322,7 +1387,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 	private recover(message: string, replaceTerminalWorker = false): void {
 		if (this.disposed) return;
 		if (this.state.status === "error") return;
-		this.preparedReviewedPortEquipmentPatches = new WeakMap();
+		this.preparedAuthoredPatches = new WeakMap();
 		this.rejectSnapshotCaptures(new Error(`Rail snapshot capture failed: ${message}`));
 		this.clearAbandonedSnapshotCaptures();
 		this.rejectOrganizationOutlineCaptures(

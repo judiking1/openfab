@@ -981,7 +981,7 @@ import {
 	type ReadinessPathIdentityIndexBinding,
 	resolveReadinessPathIdentityIndex,
 } from "./ReadinessPathIdentityIndex";
-import { StaticFabArrangementBridge } from "./StaticFabArrangementBridge";
+import { DeferredStaticFabArrangementBridge as StaticFabArrangementBridge } from "./DeferredStaticFabArrangementBridge";
 import {
 	STATIC_FAB_ASSEMBLE_DUPLICATE_CAPTURE_MODE,
 	StaticFabAssembleMenu,
@@ -2889,6 +2889,11 @@ export default function TileFabApp(): React.ReactElement {
 	const [organizationBundlePlacementFailure, setOrganizationBundlePlacementFailure] = useState<
 		string | null
 	>(null);
+	const [organizationBundlePublicationNotice, setOrganizationBundlePublicationNotice] = useState<{
+		readonly document: RailDocument;
+		readonly patchSequence: number;
+		readonly message: string;
+	} | null>(null);
 	const [lastBlueprintPlacementAnchor, setLastBlueprintPlacementAnchor] = useState("");
 	const [railClipboardKind, setRailClipboardKind] = useState<RailClipboard["kind"] | null>(null);
 	const [recentRailClipboards, setRecentRailClipboards] = useState<
@@ -6556,6 +6561,7 @@ export default function TileFabApp(): React.ReactElement {
 			updateStkDraftSession(null);
 		}
 		refreshPortDerivedArtifacts(nextModel, portTypeForTool(toolRef.current));
+		if (previousModel.document !== nextModel.document) setOrganizationBundlePublicationNotice(null);
 		editorModelRef.current = nextModel;
 		refreshTemplateAttachmentGuide(nextModel, templateSessionRef.current);
 		publishUiState(() => setEditorModel(nextModel));
@@ -7534,7 +7540,7 @@ export default function TileFabApp(): React.ReactElement {
 						canvasRef.current.dataset.stationReviewCommitPatchPreparationMs =
 							commitResult.timings.patchPreparationMilliseconds.toFixed(3);
 						canvasRef.current.dataset.stationReviewCommitUndoMs =
-							commitResult.timings.historyPublicationMilliseconds.toFixed(3);
+							commitResult.timings.historyPublicationMilliseconds?.toFixed(3) ?? "";
 						canvasRef.current.dataset.stationReviewCommitPatchMs =
 							commitResult.timings.patchPublicationMilliseconds.toFixed(3);
 					}
@@ -7818,6 +7824,8 @@ export default function TileFabApp(): React.ReactElement {
 			workerBridgeRef.current === mirrorBridge &&
 			workerBridgeDocumentRef.current === sourceDocument;
 		let singleCommitCompleted: "guided" | "preset" | null = null;
+		let publicationWarning: string | null = null;
+		setOrganizationBundlePublicationNotice(null);
 		setOrganizationBundlePlacementFailure(null);
 		blueprintPlacementPendingRef.current = true;
 		setBlueprintPlacementPending(true);
@@ -7837,6 +7845,9 @@ export default function TileFabApp(): React.ReactElement {
 			canvasRef.current.dataset.organizationBundlePlacementResponseValidationMs = "";
 			canvasRef.current.dataset.organizationBundlePlacementAdoptionMs = "";
 			canvasRef.current.dataset.organizationBundlePlacementCommitMs = "";
+			canvasRef.current.dataset.organizationBundlePlacementPublicationMs = "";
+			canvasRef.current.dataset.organizationBundlePlacementMaxSliceMs = "";
+			canvasRef.current.dataset.organizationBundlePlacementPatchPreparationMs = "";
 			canvasRef.current.dataset.organizationBundlePlacementTicket = "pending";
 			canvasRef.current.dataset.organizationBundlePlacementTicketAnchor = "";
 			canvasRef.current.dataset.organizationBundlePlacementPlanAnchor = "";
@@ -7844,9 +7855,9 @@ export default function TileFabApp(): React.ReactElement {
 			canvasRef.current.dataset.organizationBundlePlacementTargetChecksum = "";
 			canvasRef.current.dataset.organizationBundlePlacementTargetChecksumMatch = "";
 		}
-		setStatus(`${session.label}의 레일·포트·장비·조직을 Worker에서 계획하고 검사합니다`);
+		setStatus(`${session.label}의 배치 위치와 연결을 검사하고 있습니다 · Esc로 취소할 수 있습니다`);
 		if (previewReadoutRef.current) {
-			previewReadoutRef.current.textContent = "EXACT FAB CHECK · 편집 원자성 검증 중";
+			previewReadoutRef.current.textContent = "배치 검사 중 · Esc로 취소";
 		}
 		scheduleRender();
 
@@ -7991,12 +8002,37 @@ export default function TileFabApp(): React.ReactElement {
 			if (canvasRef.current) {
 				canvasRef.current.dataset.organizationBundlePlacementPhase = "committing";
 			}
+			setStatus(`${session.label} 배치를 준비하고 있습니다 · Esc로 취소할 수 있습니다`);
+			if (previewReadoutRef.current) previewReadoutRef.current.textContent = "배치 준비 중 · Esc로 취소";
+			scheduleRender();
 			const commitStartedAt = performance.now();
-			const committed = activeDocument.commitStaticFabOrganizationBundle(plan);
+			const prepareAdditionPatch = mirrorBridge.prepareStaticFabAdditionPatchCooperatively?.bind(mirrorBridge);
+			if (!prepareAdditionPatch) throw new Error("현재 Rail Worker가 조직 청사진 전송 준비를 지원하지 않습니다");
+			let preparedPatchIsCurrent: (() => boolean) | null = null;
+			const commitResult = await activeDocument.commitStaticFabOrganizationBundleCooperatively(plan, {
+				checkpoint: () => new Promise<void>(resolve => window.setTimeout(resolve, 0)),
+				now: performanceNow,
+				checkCancelled: () => {
+					if (!requestIsCurrent() || snapshotController.signal.aborted || workerBridgeRef.current !== mirrorBridge ||
+						(preparedPatchIsCurrent !== null && !preparedPatchIsCurrent())) {
+						throw new Error("문서 또는 배치 요청이 변경되어 조직 청사진 적용을 취소했습니다");
+					}
+				},
+				preparePatch: async (event, checkpoint) => {
+					const lease = await prepareAdditionPatch(event, checkpoint);
+					preparedPatchIsCurrent = lease.isCurrent;
+				},
+			});
+			const committed = commitResult.committed;
 			const commitMilliseconds = performance.now() - commitStartedAt;
 			if (canvasRef.current) {
 				canvasRef.current.dataset.organizationBundlePlacementCommitMs =
 					commitMilliseconds.toFixed(2);
+				canvasRef.current.dataset.organizationBundlePlacementMaxSliceMs = commitResult.timings?.maximumPreparationSliceMilliseconds?.toFixed(3) ?? "";
+				canvasRef.current.dataset.organizationBundlePlacementPublicationMs =
+					commitResult.timings?.patchPublicationMilliseconds.toFixed(3) ?? "";
+				canvasRef.current.dataset.organizationBundlePlacementPatchPreparationMs =
+					commitResult.timings?.patchPreparationMilliseconds.toFixed(3) ?? "";
 			}
 			if (!committed) {
 				if (canvasRef.current) {
@@ -8074,8 +8110,12 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 			clearDraftPreviewTelemetry(canvasRef.current);
 			if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
+			if (commitResult.publicationError) {
+				publicationWarning = "배치는 적용되었습니다 · 상태 갱신을 완료하지 못했습니다. 다시 배치하기 전에 현재 배치를 확인하세요";
+				setOrganizationBundlePublicationNotice({ document: activeDocument, patchSequence: activeDocument.getPatchSequence(), message: publicationWarning });
+			}
 			syncModelUi(
-				recognizedAssemblyRole === "BAY_BANK" && recognizedDuplicateSourceAssemblyRoot
+				publicationWarning ?? (recognizedAssemblyRole === "BAY_BANK" && recognizedDuplicateSourceAssemblyRoot
 					? `${session.label} · 원본과 복제 Bay Bank를 정확히 선택했습니다 · 다음: CONNECT BANKS`
 					: recognizedAssemblyRole === "TWIN_BAY" && recognizedDuplicateSourceAssemblyRoot
 						? `${session.label} · 원본과 복제 Twin Bay를 정확히 선택했습니다 · 다음: CONNECT BAYS`
@@ -8083,7 +8123,7 @@ export default function TileFabApp(): React.ReactElement {
 					? `${session.label} · 인증 Twin Bay 전체 계층을 배치하고 선택했습니다`
 					: blueprintPlacementUsesSingleCommitByDefault(session.origin) && keepRepeatPlacement
 					? `${session.label} 1회 배치를 완료했습니다 · 반복 배치 중 · 다음 위치에서도 계속하려면 Shift를 누른 채 배치하세요`
-					: `${session.label} · 레일 ${plan.organizationBundle.sourceModuleCount.toLocaleString()}개, 포트 ${plan.organizationBundle.portCount.toLocaleString()}개, 장비 ${plan.organizationBundle.equipmentGroupCount.toLocaleString()}개, 조직 ${plan.organizationBundle.organizationCount.toLocaleString()}개를 배치했습니다`,
+					: `${session.label} · 레일 ${plan.organizationBundle.sourceModuleCount.toLocaleString()}개, 포트 ${plan.organizationBundle.portCount.toLocaleString()}개, 장비 ${plan.organizationBundle.equipmentGroupCount.toLocaleString()}개, 조직 ${plan.organizationBundle.organizationCount.toLocaleString()}개를 배치했습니다`),
 			);
 			if (
 				guidedBuildOpen &&
@@ -8128,9 +8168,9 @@ export default function TileFabApp(): React.ReactElement {
 				if (singleCommitCompleted && organizationBundlePlacementSessionRef.current === session) {
 					updateOrganizationBundlePlacementSession(null);
 					setStatus(
-						singleCommitCompleted === "guided"
+						publicationWarning ?? (singleCommitCompleted === "guided"
 							? `${session.label} 배치를 완료했습니다 · 다음 가이드 단계로 이동합니다`
-							: `${session.label} 1회 배치를 완료했습니다 · Shift+클릭 반복은 프리셋에서 다시 시작할 수 있습니다`,
+							: `${session.label} 1회 배치를 완료했습니다 · Shift+클릭 반복은 프리셋에서 다시 시작할 수 있습니다`),
 					);
 					requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 				}
@@ -18299,6 +18339,7 @@ export default function TileFabApp(): React.ReactElement {
 		workerBridgeRef.current = prepared.candidate.mirrorBridge;
 		workerBridgeDocumentRef.current = nextModel.document;
 		draftEvaluatorRef.current = prepared.candidate.draftEvaluator;
+		setOrganizationBundlePublicationNotice(null);
 		editorModelRef.current = nextModel;
 		dragRef.current = null;
 		portRowDragRef.current = null;
@@ -26623,7 +26664,11 @@ export default function TileFabApp(): React.ReactElement {
 		connectedFabStatusOverride.message === presentedStatus
 			? connectedFabStatusOverride.message
 			: null;
-	const taskHandoffLiveStatus = organizationBundlePlacementSession && organizationBundlePlacementFailure
+	const currentPublicationWarning = organizationBundlePublicationNotice?.document === railDocument &&
+		organizationBundlePublicationNotice.patchSequence === railDocument.getPatchSequence() &&
+		organizationBundlePublicationNotice.message === status
+		? organizationBundlePublicationNotice.message : null;
+	const taskHandoffLiveStatus = currentPublicationWarning ?? (organizationBundlePlacementSession && organizationBundlePlacementFailure
 		? organizationBundlePlacementFailure
 		: ordinaryStaticFabIssueRecheckContext
 		? presentedStatus
@@ -26655,7 +26700,7 @@ export default function TileFabApp(): React.ReactElement {
 				: "Twin Bay 2개 선택 완료 · 다음: Tab으로 CONNECT BAYS 검토 열기 · Apply 전에는 프로젝트 변경 없음"
 			: placedTwinBayDuplicateHandoff
 			? "Twin Bay 배치 완료 · 다음: Tab으로 전체 계층 복제 · 앞서 만든 일반 레일과 장비 연결 구조는 제외"
-			: presentedStatus;
+			: presentedStatus);
 	const selectedPortDetails = selectedPortEquipment
 		? resolveExactPortEquipmentSelection(railDocument.portEquipment, selectedPortEquipment)
 		: null;
@@ -38724,9 +38769,10 @@ export default function TileFabApp(): React.ReactElement {
 				</span>
 				<span
 					data-testid="rail-status-message"
-					role={guidedPortKeyboard ? undefined : "status"}
+					title={currentPublicationWarning ?? undefined}
+					role={currentPublicationWarning ? "alert" : guidedPortKeyboard ? undefined : "status"}
 					aria-live={
-						guidedPortKeyboard ||
+						currentPublicationWarning ? "assertive" : guidedPortKeyboard ||
 						areaStampSession ||
 						organizationBundlePlacementSession ||
 						stampSession ||

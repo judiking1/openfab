@@ -261,6 +261,57 @@ export function consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFo
 	return true;
 }
 
+/** Consume one-shot authority and return privately owned immutable additions before document preparation. */
+export async function consumeCertifiedStaticFabOrganizationBundlePlacementPlanCooperatively(
+	plan: StaticFabOrganizationBundlePlacementPlan,
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<StaticFabOrganizationBundlePlacementPlan | null> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
+		throw new RangeError("Placement consumption operation budget must be positive.");
+	const certification = certifiedPlans.get(plan);
+	if (
+		!certification ||
+		certification.map !== map ||
+		certification.portEquipment !== portEquipment ||
+		certification.organizations !== organizations ||
+		certification.relationships !== relationships
+	)
+		return null;
+	const current = () =>
+		map.getRevision() === plan.baseRevision &&
+		map.getMutationGeneration() === certification.sourceMapMutationGeneration;
+	const ownedFingerprint = ownedPlanFingerprints.get(plan);
+	// Reserve before suspension: concurrent consumers and cancelled attempts cannot replay this authority.
+	certifiedPlans.delete(plan);
+	issuedPlans.delete(plan);
+	ownedPlanFingerprints.delete(plan);
+	if (!current()) return null;
+	if (ownedFingerprint === certification.planFingerprint) {
+		await checkpoint();
+		return current() ? plan : null;
+	}
+	const copy = createCooperativeTask(copyFrozenWorkerPlacementPlanSteps(plan));
+	while (!copy.done) {
+		await checkpoint();
+		if (!current()) return null;
+		copy.step(operationBudget);
+	}
+	const owned = copy.finish();
+	const hash = createCooperativeTask(staticFabOrganizationBundlePlacementFingerprintSteps(owned));
+	while (!hash.done) {
+		await checkpoint();
+		if (!current()) return null;
+		hash.step(operationBudget);
+	}
+	await checkpoint();
+	return current() && hash.finish() === certification.planFingerprint ? owned : null;
+}
+
 /**
  * Create one identity-bound authority before transferring the source snapshot. Bundle hashing is
  * cached on the recursively frozen portable graph, so an active placement session pays this cost

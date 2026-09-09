@@ -23,6 +23,7 @@ import {
 	createStaticFabAssemblyRelationshipSnapshot,
 	createStaticFabAssemblyRelationshipSnapshotHydrator,
 	decodeStaticFabAssemblyRelationshipPatch,
+	encodeStaticFabAssemblyRelationshipAdditionsCooperatively,
 	encodeStaticFabAssemblyRelationshipPatch,
 	hydrateStaticFabAssemblyRelationshipSnapshot,
 	type StaticFabAssemblyRelationshipPatchSoA,
@@ -34,6 +35,55 @@ import {
 } from "./StaticFabAssemblyRelationshipSoA";
 
 describe("StaticFabAssemblyRelationshipSoA", () => {
+	it.each([
+		"reciprocal",
+		"maximum",
+	])("encodes %s immutable additions with exact transferable bytes and bounded checkpoints", async (kind) => {
+		const state = createStaticFabAssemblyRelationshipState(
+			kind === "maximum" ? maximumRecordState() : reciprocalState(),
+		);
+		const mutations = Object.freeze(
+			state.records.map((after) => Object.freeze({ id: after.id, before: null, after })),
+		);
+		const expected = encodeStaticFabAssemblyRelationshipPatch(
+			mutations,
+			1,
+			state.nextRelationshipId,
+		);
+		let checkpoints = 0;
+		const encoded = await encodeStaticFabAssemblyRelationshipAdditionsCooperatively(
+			mutations,
+			1,
+			state.nextRelationshipId,
+			async () => {
+				checkpoints++;
+			},
+			37,
+		);
+		expect(encoded.fields).toEqual(expected.fields);
+		expect(encoded.transfer.map((buffer) => new Uint8Array(buffer))).toEqual(
+			expected.transfer.map((buffer) => new Uint8Array(buffer)),
+		);
+		expect(new Set(encoded.transfer).size).toBe(encoded.transfer.length);
+		expect(checkpoints).toBeGreaterThan(kind === "maximum" ? 1000 : 1);
+		const delivered = structuredClone(encoded.fields, { transfer: encoded.transfer });
+		expect(decodeStaticFabAssemblyRelationshipPatch(delivered)).toEqual(mutations);
+		const cancelled = new Error("cancel relationship encoding");
+		await expect(
+			encodeStaticFabAssemblyRelationshipAdditionsCooperatively(
+				mutations,
+				1,
+				state.nextRelationshipId,
+				async () => {
+					throw cancelled;
+				},
+				1,
+			),
+		).rejects.toBe(cancelled);
+		await expect(
+			encodeStaticFabAssemblyRelationshipAdditionsCooperatively(mutations, 1, 1, async () => {}),
+		).rejects.toThrow("cursor");
+	});
 	it("round-trips canonical records through a unique transferable edge-index snapshot", () => {
 		const source = createStaticFabAssemblyRelationshipState(reciprocalState());
 		const snapshot = createStaticFabAssemblyRelationshipSnapshot(source);

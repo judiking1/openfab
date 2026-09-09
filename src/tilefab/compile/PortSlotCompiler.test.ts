@@ -8,10 +8,12 @@ import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { resolvePortAttachment } from "./PortAttachmentResolver";
 import { compilePortEquipmentPresentation } from "./PortEquipmentPresentation";
 import {
+	assertPortSlotCapacity,
 	compileBasePortSlots,
 	compilePortSlotExclusionMask,
 	compilePortSlotExclusionMaskCooperatively,
 	compilePortSlots,
+	PORT_SLOT_MAX_ROWS,
 	PORT_SLOT_STATUS,
 	PortSlotAvailabilityIndex,
 	PortSlotSpatialIndex,
@@ -19,6 +21,25 @@ import {
 } from "./PortSlotCompiler";
 
 describe("PortSlotCompiler", () => {
+	it("preflights all prepared physical proof ceilings before counting or allocating slot rows", () => {
+		const layout = compilePhysicalRail(straightDocument(8).map);
+		expect(() => assertPortSlotCapacity(layout)).not.toThrow();
+		for (const candidate of [
+			{
+				...layout,
+				pathIntervalRemap: { ...layout.pathIntervalRemap, sourcePathCount: PORT_SLOT_MAX_ROWS + 1 },
+			},
+			{
+				...layout,
+				pathIntervalRemap: { ...layout.pathIntervalRemap, count: PORT_SLOT_MAX_ROWS * 8 + 1 },
+			},
+			{ ...layout, paths: { ...layout.paths, pathCount: PORT_SLOT_MAX_ROWS + 1 } },
+			{ ...layout, paths: { ...layout.paths, pointCount: PORT_SLOT_MAX_ROWS * 64 + 1 } },
+		]) {
+			expect(() => assertPortSlotCapacity(candidate)).toThrow("레일 계산 규모가 현재 지원 한도");
+		}
+	});
+
 	it("skips exact occupied candidates but leaves clearance rejection to live availability", () => {
 		const document = straightDocument(8);
 		const layout = compilePhysicalRail(document.map);

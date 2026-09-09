@@ -1,3 +1,4 @@
+import { completeCooperativeSteps, createCooperativeTask } from "../core/CooperativeTask";
 import type { DirectedRailEdge } from "../core/RailModuleOwnership";
 import {
 	compareDirectedRailEdges,
@@ -5,6 +6,7 @@ import {
 	copyStaticFabOrganizationRecord,
 	copyStaticFabOrganizationState,
 	createCanonicalStaticFabOrganizationStateBuilder,
+	isCanonicalStaticFabOrganizationRecord,
 	renameStaticFabOrganizationRecord,
 	replaceStaticFabOrganizationRecordMembership,
 	STATIC_FAB_ORGANIZATION_COLORS,
@@ -496,6 +498,82 @@ export function encodeStaticFabOrganizationPatch(
 	return Object.freeze({ fields, transfer: staticFabOrganizationPatchTransfers(fields) });
 }
 
+/** The addition transport uses FULL rows and retains owned canonical membership records. */
+export async function encodeStaticFabOrganizationAdditionsCooperatively(
+	mutations: readonly StaticFabOrganizationMutation[],
+	nextOrganizationIdBefore: number,
+	nextOrganizationIdAfter: number,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<EncodedStaticFabOrganizationPatch> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
+		throw new RangeError("Organization encoding operation budget must be positive.");
+	const task = createCooperativeTask(
+		encodeOrganizationAdditionSteps(mutations, nextOrganizationIdBefore, nextOrganizationIdAfter),
+	);
+	while (!task.done) {
+		task.step(operationBudget);
+		await checkpoint();
+	}
+	return task.finish();
+}
+
+function* encodeOrganizationAdditionSteps(
+	mutations: readonly StaticFabOrganizationMutation[],
+	nextOrganizationIdBefore: number,
+	nextOrganizationIdAfter: number,
+): Generator<void, EncodedStaticFabOrganizationPatch> {
+	if (!Array.isArray(mutations) || !Object.isFrozen(mutations))
+		throw new Error("Organization additions must be immutable.");
+	const organizationIds = new Int32Array(mutations.length);
+	const operationCodes = new Uint8Array(mutations.length);
+	const beforePresent = new Uint8Array(mutations.length);
+	const afterPresent = new Uint8Array(mutations.length);
+	const emptyNames: string[] = [];
+	const emptyRecords: null[] = [];
+	const records: StaticFabOrganizationRecord[] = [];
+	const seen = new Set<number>();
+	for (let index = 0; index < mutations.length; index++) {
+		yield;
+		const change = mutations[index] as StaticFabOrganizationMutation;
+		if (
+			!Object.isFrozen(change) ||
+			change.before !== null ||
+			!change.after ||
+			!isCanonicalStaticFabOrganizationRecord(change.after) ||
+			change.id !== change.after.id ||
+			seen.has(change.id)
+		)
+			throw new Error("Prepared organization encoding requires unique canonical additions.");
+		seen.add(change.id);
+		organizationIds[index] = change.id;
+		afterPresent[index] = 1;
+		emptyNames.push("");
+		emptyRecords.push(null);
+		records.push(change.after);
+	}
+	const fields: StaticFabOrganizationPatchSoA = Object.freeze({
+		schemaVersion: STATIC_FAB_ORGANIZATION_PATCH_SCHEMA_VERSION,
+		organizationIds,
+		operationCodes,
+		beforeNames: Object.freeze(emptyNames),
+		afterNames: Object.freeze(emptyNames),
+		beforeMetadata: yield* createMetadataFieldsSteps(emptyRecords),
+		afterMetadata: yield* createMetadataFieldsSteps(emptyRecords),
+		removedMembership: yield* createMembershipFieldsSteps(emptyRecords),
+		addedMembership: yield* createMembershipFieldsSteps(emptyRecords),
+		beforeRecordHashes: new Uint32Array(mutations.length * 2),
+		afterRecordHashes: new Uint32Array(mutations.length * 2),
+		nextOrganizationIdBefore,
+		nextOrganizationIdAfter,
+		beforePresent,
+		before: yield* createRecordFieldsSteps(emptyRecords, true),
+		afterPresent,
+		after: yield* createRecordFieldsSteps(records, true),
+	});
+	return Object.freeze({ fields, transfer: staticFabOrganizationPatchTransfers(fields) });
+}
+
 export function decodeStaticFabOrganizationPatch(
 	fields: StaticFabOrganizationPatchSoA,
 	currentState?: StaticFabOrganizationState,
@@ -869,28 +947,31 @@ export function validateStaticFabOrganizationPatchShape(
 function createRecordFields(
 	records: readonly (StaticFabOrganizationRecord | null)[],
 ): StaticFabOrganizationRecordFieldsSoA {
-	const parentCount = records.reduce(
-		(count, record) => count + (record ? staticFabOrganizationParentIds(record).length : 0),
-		0,
-	);
-	const edgeCount = records.reduce(
-		(count, record) => count + (record?.membership.railEdges.length ?? 0),
-		0,
-	);
-	const switchCount = records.reduce(
-		(count, record) => count + (record?.membership.advancedSwitchIds.length ?? 0),
-		0,
-	);
-	const groupCount = records.reduce(
-		(count, record) => count + (record?.membership.equipmentGroupIds.length ?? 0),
-		0,
-	);
+	return completeCooperativeSteps(createRecordFieldsSteps(records));
+}
+
+function* createRecordFieldsSteps(
+	records: readonly (StaticFabOrganizationRecord | null)[],
+	canonicalOnly = false,
+): Generator<void, StaticFabOrganizationRecordFieldsSoA> {
+	let parentCount = 0;
+	let edgeCount = 0;
+	let switchCount = 0;
+	let groupCount = 0;
+	for (const record of records) {
+		yield;
+		parentCount += record ? staticFabOrganizationParentIds(record).length : 0;
+		edgeCount += record?.membership.railEdges.length ?? 0;
+		switchCount += record?.membership.advancedSwitchIds.length ?? 0;
+		groupCount += record?.membership.equipmentGroupIds.length ?? 0;
+	}
+
 	const fields: StaticFabOrganizationRecordFieldsSoA = {
 		kinds: new Uint8Array(records.length),
-		names: new Array<string>(records.length).fill(""),
+		names: new Array<string>(records.length),
 		parentOrganizationOffsets: new Uint32Array(records.length + 1),
 		parentOrganizationIds: new Int32Array(parentCount),
-		descriptions: new Array<string>(records.length).fill(""),
+		descriptions: new Array<string>(records.length),
 		colors: new Uint8Array(records.length),
 		railEdgeOffsets: new Uint32Array(records.length + 1),
 		railEdgeCoordinates: new Int32Array(edgeCount * 4),
@@ -904,22 +985,29 @@ function createRecordFields(
 	let switchOffset = 0;
 	let groupOffset = 0;
 	for (let index = 0; index < records.length; index++) {
+		yield;
+		(fields.descriptions as string[])[index] = "";
+		(fields.names as string[])[index] = "";
 		fields.parentOrganizationOffsets[index] = parentOffset;
 		fields.railEdgeOffsets[index] = edgeOffset;
 		fields.advancedSwitchOffsets[index] = switchOffset;
 		fields.equipmentGroupOffsets[index] = groupOffset;
 		const source = records[index];
 		if (!source) continue;
-		const record = copyStaticFabOrganizationRecord(source);
+		if (canonicalOnly && !isCanonicalStaticFabOrganizationRecord(source))
+			throw new Error("Prepared organization encoding requires canonical records.");
+		const record = canonicalOnly ? source : copyStaticFabOrganizationRecord(source);
 		fields.kinds[index] = STATIC_FAB_ORGANIZATION_KINDS.indexOf(record.kind);
 		(fields.names as string[])[index] = record.name;
 		const properties = staticFabOrganizationProperties(record);
 		(fields.descriptions as string[])[index] = properties.description;
 		fields.colors[index] = staticFabOrganizationColorCode(properties.color);
 		for (const parentId of staticFabOrganizationParentIds(record)) {
+			yield;
 			fields.parentOrganizationIds[parentOffset++] = parentId;
 		}
 		for (const edge of record.membership.railEdges) {
+			yield;
 			const coordinateOffset = edgeOffset * 4;
 			fields.railEdgeCoordinates[coordinateOffset] = edge.from.x;
 			fields.railEdgeCoordinates[coordinateOffset + 1] = edge.from.y;
@@ -928,9 +1016,11 @@ function createRecordFields(
 			edgeOffset++;
 		}
 		for (const switchId of record.membership.advancedSwitchIds) {
+			yield;
 			fields.advancedSwitchIds[switchOffset++] = switchId;
 		}
 		for (const groupId of record.membership.equipmentGroupIds) {
+			yield;
 			fields.equipmentGroupIds[groupOffset++] = groupId;
 		}
 	}
@@ -944,22 +1034,33 @@ function createRecordFields(
 function createMetadataFields(
 	records: readonly (StaticFabOrganizationRecord | null)[],
 ): StaticFabOrganizationMetadataFieldsSoA {
-	const parentCount = records.reduce(
-		(count, record) => count + (record ? staticFabOrganizationParentIds(record).length : 0),
-		0,
-	);
+	return completeCooperativeSteps(createMetadataFieldsSteps(records));
+}
+
+function* createMetadataFieldsSteps(
+	records: readonly (StaticFabOrganizationRecord | null)[],
+): Generator<void, StaticFabOrganizationMetadataFieldsSoA> {
+	let parentCount = 0;
+	for (const record of records) {
+		yield;
+		parentCount += record ? staticFabOrganizationParentIds(record).length : 0;
+	}
+
 	const fields: StaticFabOrganizationMetadataFieldsSoA = {
 		parentOrganizationOffsets: new Uint32Array(records.length + 1),
 		parentOrganizationIds: new Int32Array(parentCount),
-		descriptions: new Array<string>(records.length).fill(""),
+		descriptions: new Array<string>(records.length),
 		colors: new Uint8Array(records.length),
 	};
 	let parentOffset = 0;
 	for (let index = 0; index < records.length; index++) {
+		yield;
+		(fields.descriptions as string[])[index] = "";
 		fields.parentOrganizationOffsets[index] = parentOffset;
 		const record = records[index];
 		if (!record) continue;
 		for (const parentId of staticFabOrganizationParentIds(record)) {
+			yield;
 			fields.parentOrganizationIds[parentOffset++] = parentId;
 		}
 		const properties = staticFabOrganizationProperties(record);
@@ -973,18 +1074,22 @@ function createMetadataFields(
 function createMembershipFields(
 	memberships: readonly (StaticFabOrganizationRecord["membership"] | null)[],
 ): StaticFabOrganizationMembershipFieldsSoA {
-	const edgeCount = memberships.reduce(
-		(count, membership) => count + (membership?.railEdges.length ?? 0),
-		0,
-	);
-	const switchCount = memberships.reduce(
-		(count, membership) => count + (membership?.advancedSwitchIds.length ?? 0),
-		0,
-	);
-	const groupCount = memberships.reduce(
-		(count, membership) => count + (membership?.equipmentGroupIds.length ?? 0),
-		0,
-	);
+	return completeCooperativeSteps(createMembershipFieldsSteps(memberships));
+}
+
+function* createMembershipFieldsSteps(
+	memberships: readonly (StaticFabOrganizationRecord["membership"] | null)[],
+): Generator<void, StaticFabOrganizationMembershipFieldsSoA> {
+	let edgeCount = 0;
+	let switchCount = 0;
+	let groupCount = 0;
+	for (const membership of memberships) {
+		yield;
+		edgeCount += membership?.railEdges.length ?? 0;
+		switchCount += membership?.advancedSwitchIds.length ?? 0;
+		groupCount += membership?.equipmentGroupIds.length ?? 0;
+	}
+
 	const fields: StaticFabOrganizationMembershipFieldsSoA = {
 		railEdgeOffsets: new Uint32Array(memberships.length + 1),
 		railEdgeCoordinates: new Int32Array(edgeCount * 4),
@@ -997,12 +1102,14 @@ function createMembershipFields(
 	let switchOffset = 0;
 	let groupOffset = 0;
 	for (let index = 0; index < memberships.length; index++) {
+		yield;
 		fields.railEdgeOffsets[index] = edgeOffset;
 		fields.advancedSwitchOffsets[index] = switchOffset;
 		fields.equipmentGroupOffsets[index] = groupOffset;
 		const membership = memberships[index];
 		if (!membership) continue;
 		for (const edge of membership.railEdges) {
+			yield;
 			const coordinateOffset = edgeOffset * 4;
 			fields.railEdgeCoordinates[coordinateOffset] = edge.from.x;
 			fields.railEdgeCoordinates[coordinateOffset + 1] = edge.from.y;
@@ -1011,9 +1118,11 @@ function createMembershipFields(
 			edgeOffset++;
 		}
 		for (const switchId of membership.advancedSwitchIds) {
+			yield;
 			fields.advancedSwitchIds[switchOffset++] = switchId;
 		}
 		for (const groupId of membership.equipmentGroupIds) {
+			yield;
 			fields.equipmentGroupIds[groupOffset++] = groupId;
 		}
 	}

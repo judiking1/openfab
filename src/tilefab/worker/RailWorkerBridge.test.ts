@@ -102,6 +102,36 @@ import {
 import { STATIC_FAB_ORGANIZATION_PATCH_OPERATIONS } from "./StaticFabOrganizationSoA";
 
 describe("RailWorkerBridge", () => {
+	it.each([
+		"edit",
+		"dispose",
+	])("revokes prepared addition publication on %s and rejects stale preparation", async (change) => {
+		const source = new RailDocument();
+		let event: Parameters<Parameters<RailDocument["subscribe"]>[0]>[0] | null = null;
+		source.subscribe((value) => {
+			event = value;
+		});
+		source.commit(planRailConstruction(source.map, { x: 0, y: 0 }, { x: 4, y: 0 }));
+		if (!event) throw new Error("Expected addition event");
+		const document = new RailDocument();
+		const worker = new InProcessRailWorker();
+		const bridge = new RailWorkerBridge(
+			document,
+			() => {},
+			() => worker,
+		);
+		await bridge.waitUntilReady(readyExpectation(document));
+		const lease = await bridge.prepareStaticFabAdditionPatchCooperatively(event, async () => {}, 1);
+		expect(lease.isCurrent()).toBe(true);
+		if (change === "edit")
+			document.commit(planRailConstruction(document.map, { x: -10, y: -10 }, { x: -6, y: -10 }));
+		else bridge.dispose();
+		expect(lease.isCurrent()).toBe(false);
+		await expect(
+			bridge.prepareStaticFabAdditionPatchCooperatively(event, async () => {}),
+		).rejects.toThrow("stale");
+		bridge.dispose();
+	});
 	it("ACKs operational configuration edit, undo, and redo through the live bridge", async () => {
 		const document = new RailDocument();
 		const port = new InProcessRailWorker();
@@ -1346,7 +1376,10 @@ describe("RailWorkerBridge", () => {
 		bridge.dispose();
 	});
 
-	it("spends a cooperatively prepared reviewed-Apply packet on the exact published event", async () => {
+	it.each([
+		"reviewed",
+		"addition",
+	])("spends a cooperatively prepared %s packet on the exact published event", async (encoding) => {
 		const document = new RailDocument();
 		expect(
 			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
@@ -1380,7 +1413,16 @@ describe("RailWorkerBridge", () => {
 			sliceMilliseconds: 1,
 			preparePatch: async (event, checkpoint) => {
 				preparedEvent = event;
-				await bridge.prepareReviewedPortEquipmentPatchCooperatively(event, checkpoint, 1);
+				if (encoding === "reviewed")
+					await bridge.prepareReviewedPortEquipmentPatchCooperatively(event, checkpoint, 1);
+				else {
+					const lease = await bridge.prepareStaticFabAdditionPatchCooperatively(
+						event,
+						checkpoint,
+						1,
+					);
+					expect(lease.isCurrent()).toBe(true);
+				}
 			},
 		});
 

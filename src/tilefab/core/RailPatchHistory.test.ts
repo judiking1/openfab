@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	appendBoundedRailHistoryEntry,
 	copyRailMirrorHistoryLedger,
+	createRailMirrorHistoryAdditionLedgerEntryCooperatively,
 	createRailMirrorHistoryLedgerEntry,
 	createRailMirrorHistoryLedgerEntryCooperatively,
 	RAIL_MIRROR_HISTORY_ENTRY_LIMIT,
@@ -11,8 +12,14 @@ import {
 	railPatchTransitionFingerprintCooperatively,
 	trimRailMirrorHistoryRelationshipBudget,
 } from "./RailPatchHistory";
-import type { StaticFabAssemblyRelationshipRecordV1 } from "./StaticFabAssemblyRelationship";
-import type { StaticFabOrganizationRecord } from "./StaticFabOrganization";
+import {
+	copyStaticFabAssemblyRelationshipRecord,
+	type StaticFabAssemblyRelationshipRecordV1,
+} from "./StaticFabAssemblyRelationship";
+import {
+	copyStaticFabOrganizationRecord,
+	type StaticFabOrganizationRecord,
+} from "./StaticFabOrganization";
 import {
 	cachedStaticFabOrganizationMembershipFingerprint,
 	cacheStaticFabOrganizationMembershipFingerprint,
@@ -31,6 +38,83 @@ const ENTRY: RailMirrorHistoryLedgerEntry = Object.freeze({
 });
 
 describe("RailPatchHistory", () => {
+	it("prepares exact reciprocal V5 ledgers across nested immutable additions", async () => {
+		const relationship = copyStaticFabAssemblyRelationshipRecord(relationshipRecord());
+		const organization = copyStaticFabOrganizationRecord({
+			id: 1,
+			kind: "AREA",
+			name: "Synthetic membership",
+			membership: {
+				railEdges: Array.from({ length: 2049 }, (_, x) => ({
+					from: { x, y: 0 },
+					to: { x: x + 1, y: 0 },
+				})),
+				advancedSwitchIds: [1, 2],
+				equipmentGroupIds: [1],
+			},
+		});
+		const empty = Object.freeze([]);
+		const transition = Object.freeze({
+			changes: Object.freeze([Object.freeze({ x: 0, y: 0, before: 0, after: 1 })]),
+			switchChanges: empty,
+			portChanges: empty,
+			equipmentGroupChanges: Object.freeze([
+				Object.freeze({
+					id: 1,
+					before: null,
+					after: Object.freeze({
+						id: 1,
+						kind: "EQ" as const,
+						portIds: Object.freeze([1, 2, 3]),
+						pitchMillimeters: 1000,
+						recipe: "Synthetic",
+					}),
+				}),
+			]),
+			organizationChanges: Object.freeze([
+				Object.freeze({ id: 1, before: null, after: organization }),
+			]),
+			organizationNextIdBefore: 1,
+			organizationNextIdAfter: 2,
+			organizationImpactAuthorizations: empty,
+			relationshipChanges: Object.freeze([
+				Object.freeze({ id: 1, before: null, after: relationship }),
+			]),
+			relationshipNextIdBefore: 1,
+			relationshipNextIdAfter: 2,
+		});
+		let checkpoints = 0;
+		const prepared = await createRailMirrorHistoryAdditionLedgerEntryCooperatively(
+			"place-static-fab-organization-bundle",
+			transition,
+			async () => {
+				checkpoints++;
+			},
+			1,
+		);
+		expect(prepared).toEqual(
+			createRailMirrorHistoryLedgerEntry("place-static-fab-organization-bundle", transition),
+		);
+		expect(checkpoints).toBeGreaterThan(4098);
+		const cancelled = new Error("cancel preparation");
+		await expect(
+			createRailMirrorHistoryAdditionLedgerEntryCooperatively(
+				"place-static-fab-organization-bundle",
+				transition,
+				async () => {
+					throw cancelled;
+				},
+				1,
+			),
+		).rejects.toBe(cancelled);
+		await expect(
+			createRailMirrorHistoryAdditionLedgerEntryCooperatively(
+				"place-static-fab-organization-bundle",
+				{ ...transition },
+				async () => {},
+			),
+		).rejects.toThrow("immutable");
+	});
 	it("keeps the newest entries when a bounded authored history reaches capacity", () => {
 		const history = [1, 2, 3];
 

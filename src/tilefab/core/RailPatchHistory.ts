@@ -1,17 +1,27 @@
 import type { AdvancedSwitchRecord } from "./AdvancedSwitch";
-import { completeCooperativeSteps } from "./CooperativeTask";
+import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import type { EquipmentGroupRecord } from "./EquipmentGroup";
 import { operationalConfigurationPatchTransitionFingerprint } from "./OperationalConfigurationMutation";
 import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
 import type { PortRecord } from "./PortRecord";
 import type { RailHistoryOriginKind, RailPatchEvent } from "./RailDocument";
+import type { DirectedRailEdge } from "./RailModuleOwnership";
 import {
 	checksumStaticFabAssemblyRelationshipRecord,
+	checksumStaticFabAssemblyRelationshipRecordSteps,
 	type StaticFabAssemblyRelationshipRecordV1,
+	staticFabAssemblyRelationshipAdditionFootprintSteps,
 	staticFabAssemblyRelationshipTransitionFootprint,
 } from "./StaticFabAssemblyRelationship";
-import type { StaticFabOrganizationRecord } from "./StaticFabOrganization";
-import { staticFabOrganizationFingerprint } from "./StaticFabOrganizationFingerprint";
+import {
+	isCanonicalStaticFabOrganizationRecord,
+	type StaticFabOrganizationRecord,
+} from "./StaticFabOrganization";
+import {
+	composeStaticFabOrganizationFingerprint,
+	createStaticFabOrganizationMembershipFingerprintAccumulator,
+	staticFabOrganizationFingerprint,
+} from "./StaticFabOrganizationFingerprint";
 
 export interface RailMirrorHistoryLedgerEntry {
 	readonly originKind: RailHistoryOriginKind;
@@ -106,6 +116,14 @@ export function railPatchTransitionFingerprint(
 	transition: RailPatchTransition,
 	reverse = false,
 ): string {
+	return completeCooperativeSteps(transitionFingerprintSteps(transition, reverse, false));
+}
+
+function* transitionFingerprintSteps(
+	transition: RailPatchTransition,
+	reverse: boolean,
+	boundedRecords: boolean,
+): Generator<void, string> {
 	const relationshipChanges = transition.relationshipChanges ?? [];
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings(["OPENFAB_RAIL_PATCH_TRANSITION_V5"]);
@@ -117,38 +135,67 @@ export function railPatchTransitionFingerprint(
 			reverse ? mutation.after : mutation.before,
 			reverse ? mutation.before : mutation.after,
 		]);
+		yield;
 	}
 	checksum.addNumbers([transition.switchChanges.length]);
 	for (const mutation of transition.switchChanges) {
 		checksum.addNumbers([mutation.id]);
 		addAdvancedSwitchRecord(checksum, reverse ? mutation.after : mutation.before);
 		addAdvancedSwitchRecord(checksum, reverse ? mutation.before : mutation.after);
+		yield;
 	}
 	checksum.addNumbers([transition.portChanges.length]);
 	for (const mutation of transition.portChanges) {
 		checksum.addNumbers([mutation.id]);
 		addPortRecord(checksum, reverse ? mutation.after : mutation.before);
 		addPortRecord(checksum, reverse ? mutation.before : mutation.after);
+		yield;
 	}
 	checksum.addNumbers([transition.equipmentGroupChanges.length]);
 	for (const mutation of transition.equipmentGroupChanges) {
 		checksum.addNumbers([mutation.id]);
-		addEquipmentGroupRecord(checksum, reverse ? mutation.after : mutation.before);
-		addEquipmentGroupRecord(checksum, reverse ? mutation.before : mutation.after);
+		if (boundedRecords) {
+			yield* addEquipmentGroupRecordSteps(checksum, reverse ? mutation.after : mutation.before);
+			yield* addEquipmentGroupRecordSteps(checksum, reverse ? mutation.before : mutation.after);
+		} else {
+			addEquipmentGroupRecord(checksum, reverse ? mutation.after : mutation.before);
+			addEquipmentGroupRecord(checksum, reverse ? mutation.before : mutation.after);
+		}
+		yield;
 	}
 	checksum.addNumbers([transition.organizationChanges.length]);
 	for (const mutation of transition.organizationChanges) {
 		checksum.addNumbers([mutation.id]);
-		addOrganizationRecord(checksum, reverse ? mutation.after : mutation.before);
-		addOrganizationRecord(checksum, reverse ? mutation.before : mutation.after);
+		if (boundedRecords) {
+			yield* addOrganizationRecordSteps(checksum, reverse ? mutation.after : mutation.before);
+			yield* addOrganizationRecordSteps(checksum, reverse ? mutation.before : mutation.after);
+		} else {
+			addOrganizationRecord(checksum, reverse ? mutation.after : mutation.before);
+			addOrganizationRecord(checksum, reverse ? mutation.before : mutation.after);
+		}
+		yield;
 	}
 	checksum.addNumbers([relationshipChanges.length]);
 	for (const mutation of relationshipChanges) {
 		checksum.addNumbers([mutation.id]);
-		addAssemblyRelationshipRecord(checksum, reverse ? mutation.after : mutation.before);
-		addAssemblyRelationshipRecord(checksum, reverse ? mutation.before : mutation.after);
+		if (boundedRecords) {
+			yield* addAssemblyRelationshipRecordSteps(
+				checksum,
+				reverse ? mutation.after : mutation.before,
+			);
+			yield* addAssemblyRelationshipRecordSteps(
+				checksum,
+				reverse ? mutation.before : mutation.after,
+			);
+		} else {
+			addAssemblyRelationshipRecord(checksum, reverse ? mutation.after : mutation.before);
+			addAssemblyRelationshipRecord(checksum, reverse ? mutation.before : mutation.after);
+		}
+		yield;
 	}
-	checksum.addNumbers(transition.organizationImpactAuthorizations ?? []);
+	if (boundedRecords)
+		yield* checksum.addNumbersSteps(transition.organizationImpactAuthorizations ?? []);
+	else checksum.addNumbers(transition.organizationImpactAuthorizations ?? []);
 	checksum.addString(
 		operationalConfigurationPatchTransitionFingerprint(
 			transition.operationalConfigurationPatch,
@@ -158,80 +205,34 @@ export function railPatchTransitionFingerprint(
 	return checksum.digest();
 }
 
-/** Same V5 fingerprint contract with caller-controlled event-loop checkpoints. */
+/** Preserve the legacy V5 contract, including mutable records, with per-mutation checkpoints. */
 export async function railPatchTransitionFingerprintCooperatively(
 	transition: RailPatchTransition,
 	checkpoint: () => Promise<void>,
 	operationBudget = 128,
 	reverse = false,
 ): Promise<string> {
-	const relationshipChanges = transition.relationshipChanges ?? [];
+	return finishHistorySteps(
+		transitionFingerprintSteps(transition, reverse, false),
+		checkpoint,
+		operationBudget,
+	);
+}
+
+async function finishHistorySteps<T>(
+	steps: Generator<void, T>,
+	checkpoint: () => Promise<void>,
+	operationBudget: number,
+): Promise<T> {
 	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0) {
 		throw new RangeError("Rail patch fingerprint operation budget must be positive.");
 	}
-	let operations = 0;
-	const consumeOperation = async (): Promise<void> => {
-		operations++;
-		if (operations < operationBudget) return;
-		operations = 0;
+	const task = createCooperativeTask(steps);
+	while (!task.done) {
+		task.step(operationBudget);
 		await checkpoint();
-	};
-	const checksum = new OrderedTypedChecksum();
-	checksum.addStrings(["OPENFAB_RAIL_PATCH_TRANSITION_V5"]);
-	checksum.addNumbers([transition.changes.length]);
-	for (const mutation of transition.changes) {
-		checksum.addNumbers([
-			mutation.x,
-			mutation.y,
-			reverse ? mutation.after : mutation.before,
-			reverse ? mutation.before : mutation.after,
-		]);
-		await consumeOperation();
 	}
-	checksum.addNumbers([transition.switchChanges.length]);
-	for (const mutation of transition.switchChanges) {
-		checksum.addNumbers([mutation.id]);
-		addAdvancedSwitchRecord(checksum, reverse ? mutation.after : mutation.before);
-		addAdvancedSwitchRecord(checksum, reverse ? mutation.before : mutation.after);
-		await consumeOperation();
-	}
-	checksum.addNumbers([transition.portChanges.length]);
-	for (const mutation of transition.portChanges) {
-		checksum.addNumbers([mutation.id]);
-		addPortRecord(checksum, reverse ? mutation.after : mutation.before);
-		addPortRecord(checksum, reverse ? mutation.before : mutation.after);
-		await consumeOperation();
-	}
-	checksum.addNumbers([transition.equipmentGroupChanges.length]);
-	for (const mutation of transition.equipmentGroupChanges) {
-		checksum.addNumbers([mutation.id]);
-		addEquipmentGroupRecord(checksum, reverse ? mutation.after : mutation.before);
-		addEquipmentGroupRecord(checksum, reverse ? mutation.before : mutation.after);
-		await consumeOperation();
-	}
-	checksum.addNumbers([transition.organizationChanges.length]);
-	for (const mutation of transition.organizationChanges) {
-		checksum.addNumbers([mutation.id]);
-		addOrganizationRecord(checksum, reverse ? mutation.after : mutation.before);
-		addOrganizationRecord(checksum, reverse ? mutation.before : mutation.after);
-		await consumeOperation();
-	}
-	checksum.addNumbers([relationshipChanges.length]);
-	for (const mutation of relationshipChanges) {
-		checksum.addNumbers([mutation.id]);
-		addAssemblyRelationshipRecord(checksum, reverse ? mutation.after : mutation.before);
-		addAssemblyRelationshipRecord(checksum, reverse ? mutation.before : mutation.after);
-		await consumeOperation();
-	}
-	checksum.addNumbers(transition.organizationImpactAuthorizations ?? []);
-	checksum.addString(
-		operationalConfigurationPatchTransitionFingerprint(
-			transition.operationalConfigurationPatch,
-			reverse,
-		),
-	);
-	await checkpoint();
-	return checksum.digest();
+	return task.finish();
 }
 
 export function createRailMirrorHistoryLedgerEntry(
@@ -280,6 +281,70 @@ export async function createRailMirrorHistoryLedgerEntryCooperatively(
 		relationshipOwnerIds: footprint.ownerIdCount,
 		relationshipCanonicalBytes: footprint.canonicalByteCount,
 	});
+}
+
+/** Fully bounded deep-record ledger preparation for immutable addition-only commands. */
+export async function createRailMirrorHistoryAdditionLedgerEntryCooperatively(
+	originKind: RailHistoryOriginKind,
+	transition: RailPatchTransition,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<RailMirrorHistoryLedgerEntry> {
+	await finishHistorySteps(assertAdditionTransitionSteps(transition), checkpoint, operationBudget);
+	const footprint = await finishHistorySteps(
+		staticFabAssemblyRelationshipAdditionFootprintSteps(
+			transition.relationshipChanges ?? Object.freeze([]),
+		),
+		checkpoint,
+		operationBudget,
+	);
+	const forwardFingerprint = await finishHistorySteps(
+		transitionFingerprintSteps(transition, false, true),
+		checkpoint,
+		operationBudget,
+	);
+	const reverseFingerprint = await finishHistorySteps(
+		transitionFingerprintSteps(transition, true, true),
+		checkpoint,
+		operationBudget,
+	);
+	return Object.freeze({
+		originKind,
+		forwardFingerprint,
+		reverseFingerprint,
+		relationshipEdgeReferences: footprint.edgeReferenceCount,
+		relationshipOwnerIds: footprint.ownerIdCount,
+		relationshipCanonicalBytes: footprint.canonicalByteCount,
+	});
+}
+
+function* assertAdditionTransitionSteps(transition: RailPatchTransition): Generator<void> {
+	if (
+		!Object.isFrozen(transition) ||
+		(transition.operationalConfigurationPatch ?? null) !== null ||
+		(transition.organizationImpactAuthorizations?.length ?? 0) !== 0
+	) {
+		throw new Error("Prepared addition history requires immutable static-only changes.");
+	}
+	if (!Object.isFrozen(transition.changes)) throw new Error("Rail additions must be immutable.");
+	for (const change of transition.changes) {
+		yield;
+		if (!Object.isFrozen(change) || change.before !== 0 || change.after === 0)
+			throw new Error("Prepared rail history requires nonempty additions.");
+	}
+	for (const changes of [
+		transition.switchChanges,
+		transition.portChanges,
+		transition.equipmentGroupChanges,
+		transition.organizationChanges,
+	]) {
+		if (!Object.isFrozen(changes)) throw new Error("Record additions must be immutable.");
+		for (const change of changes) {
+			yield;
+			if (!Object.isFrozen(change) || change.before !== null || change.after === null)
+				throw new Error("Prepared record history requires nonempty additions.");
+		}
+	}
 }
 
 export function copyRailMirrorHistoryLedger(
@@ -503,4 +568,65 @@ function addAssemblyRelationshipRecord(
 	}
 	checksum.addNumbers([1]);
 	checksum.addString(checksumStaticFabAssemblyRelationshipRecord(record));
+}
+
+function* addEquipmentGroupRecordSteps(
+	checksum: OrderedTypedChecksum,
+	record: EquipmentGroupRecord | null,
+): Generator<void> {
+	if (!record) {
+		checksum.addNumbers([0]);
+		return;
+	}
+	yield* checksum.addNumberSequenceSteps(record.portIds.length + 3, (index) => {
+		if (index === 0) return 1;
+		if (index === 1) return record.id;
+		if (index === 2) return record.portIds.length;
+		return record.portIds[index - 3] as number;
+	});
+	checksum.addStrings([record.kind]);
+	if (record.kind === "EQ") {
+		checksum.addNumbers([record.pitchMillimeters]);
+		checksum.addStrings([record.recipe ?? ""]);
+	} else checksum.addStrings([record.template]);
+}
+
+function* addOrganizationRecordSteps(
+	checksum: OrderedTypedChecksum,
+	record: StaticFabOrganizationRecord | null,
+): Generator<void> {
+	if (!record) {
+		checksum.addNumbers([0]);
+		return;
+	}
+	if (!isCanonicalStaticFabOrganizationRecord(record))
+		throw new Error("Prepared history requires canonical organizations.");
+	const membership = record.membership;
+	const accumulator = createStaticFabOrganizationMembershipFingerprintAccumulator();
+	for (let i = 0; i < membership.railEdges.length; i++) {
+		yield;
+		accumulator.addRailEdge(i, membership.railEdges[i] as DirectedRailEdge);
+	}
+	for (let i = 0; i < membership.advancedSwitchIds.length; i++) {
+		yield;
+		accumulator.addAdvancedSwitchId(i, membership.advancedSwitchIds[i] as number);
+	}
+	for (let i = 0; i < membership.equipmentGroupIds.length; i++) {
+		yield;
+		accumulator.addEquipmentGroupId(i, membership.equipmentGroupIds[i] as number);
+	}
+	const fingerprint = composeStaticFabOrganizationFingerprint(record, accumulator.finish());
+	checksum.addNumbers([1, fingerprint.xor, fingerprint.sum]);
+}
+
+function* addAssemblyRelationshipRecordSteps(
+	checksum: OrderedTypedChecksum,
+	record: StaticFabAssemblyRelationshipRecordV1 | null,
+): Generator<void> {
+	if (!record) {
+		checksum.addNumbers([0]);
+		return;
+	}
+	checksum.addNumbers([1]);
+	checksum.addString(yield* checksumStaticFabAssemblyRelationshipRecordSteps(record));
 }

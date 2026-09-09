@@ -433,6 +433,25 @@ export function staticFabAssemblyRelationshipTransitionFootprint(
 	mutations: readonly StaticFabAssemblyRelationshipMutationV1[],
 	limits: StaticFabAssemblyRelationshipTransitionFootprintLimitsV1 = {},
 ): StaticFabAssemblyRelationshipTransitionFootprintV1 {
+	return completeCooperativeSteps(relationshipTransitionFootprintSteps(mutations, limits, false));
+}
+
+/** Full transition accounting for immutable, addition-only prepared commands. */
+export function* staticFabAssemblyRelationshipAdditionFootprintSteps(
+	mutations: readonly StaticFabAssemblyRelationshipMutationV1[],
+	limits: StaticFabAssemblyRelationshipTransitionFootprintLimitsV1 = {},
+): Generator<void, StaticFabAssemblyRelationshipTransitionFootprintV1> {
+	if (!Array.isArray(mutations) || !Object.isFrozen(mutations)) {
+		throw new Error("협력적 조립 관계 추가 목록은 불변이어야 합니다");
+	}
+	return yield* relationshipTransitionFootprintSteps(mutations, limits, true);
+}
+
+function* relationshipTransitionFootprintSteps(
+	mutations: readonly StaticFabAssemblyRelationshipMutationV1[],
+	limits: StaticFabAssemblyRelationshipTransitionFootprintLimitsV1,
+	additionsOnly: boolean,
+): Generator<void, StaticFabAssemblyRelationshipTransitionFootprintV1> {
 	if (!Array.isArray(mutations)) throw new Error("조립 관계 변경 목록은 배열이어야 합니다");
 	if (mutations.length > STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_RECORDS * 2) {
 		throw new Error("조립 관계 transition 변경 수가 문서 전후 record 한도를 초과했습니다");
@@ -463,6 +482,7 @@ export function staticFabAssemblyRelationshipTransitionFootprint(
 	let ownerIdCount = 0;
 	let canonicalByteCount = 0;
 	for (let index = 0; index < mutations.length; index++) {
+		yield;
 		const mutation = mutations[index] as StaticFabAssemblyRelationshipMutationV1;
 		if (
 			!mutation ||
@@ -470,6 +490,9 @@ export function staticFabAssemblyRelationshipTransitionFootprint(
 			!hasExactKeys(mutation, ["id", "before", "after"])
 		) {
 			throw new Error(`조립 관계 변경 ${index} 필드가 V1 계약과 정확히 일치하지 않습니다`);
+		}
+		if (additionsOnly && (!Object.isFrozen(mutation) || mutation.before !== null)) {
+			throw new Error("조립 관계 추가는 비어 있는 before 값이 필요합니다");
 		}
 		if (!isPositiveInt32(mutation.id)) {
 			throw new Error(`조립 관계 변경 ID ${mutation.id}이 유효하지 않습니다`);
@@ -492,10 +515,11 @@ export function staticFabAssemblyRelationshipTransitionFootprint(
 			if (record.id !== mutation.id) {
 				throw new Error(`조립 관계 ${mutation.id} 변경의 ${side} record ID가 일치하지 않습니다`);
 			}
-			const result = validateRecordShape(
+			const result = yield* validateRecordShapeSteps(
 				record,
 				side === "before" ? beforeExclusiveEdges : afterExclusiveEdges,
 				side === "before" ? beforeManagedBindings : afterManagedBindings,
+				additionsOnly,
 			);
 			if (typeof result === "string") {
 				throw new Error(`조립 관계 ${mutation.id} 변경의 ${side} 값: ${result}`);
@@ -521,11 +545,56 @@ export function staticFabAssemblyRelationshipTransitionFootprint(
 				throw new Error("조립 관계 transition canonical byte 예산을 초과했습니다");
 			}
 		}
-		if (staticFabAssemblyRelationshipRecordEquals(mutation.before, mutation.after)) {
+		if (
+			!additionsOnly &&
+			staticFabAssemblyRelationshipRecordEquals(mutation.before, mutation.after)
+		) {
 			throw new Error(`조립 관계 ${mutation.id} 변경은 no-op입니다`);
 		}
 	}
 	return Object.freeze({ edgeReferenceCount, ownerIdCount, canonicalByteCount });
+}
+
+/** Prepare a complete immutable relationship generation without publishing intermediate records. */
+export function* applyStaticFabAssemblyRelationshipAdditionsSteps(
+	state: StaticFabAssemblyRelationshipStateV1,
+	mutations: readonly StaticFabAssemblyRelationshipMutationV1[],
+	plannedNextRelationshipId: number,
+): Generator<void, StaticFabAssemblyRelationshipStateV1> {
+	if (
+		!isCanonicalStaticFabAssemblyRelationshipState(state) ||
+		!isPositiveInt32(plannedNextRelationshipId)
+	) {
+		throw new Error("조립 관계 추가에는 canonical 원본과 양의 다음 ID가 필요합니다");
+	}
+	yield* staticFabAssemblyRelationshipAdditionFootprintSteps(mutations);
+	const nextRelationshipId = Math.max(state.nextRelationshipId, plannedNextRelationshipId);
+	if (mutations.length === 0 && nextRelationshipId === state.nextRelationshipId) return state;
+	const added: StaticFabAssemblyRelationshipRecordV1[] = [];
+	for (const mutation of mutations) {
+		yield;
+		added.push(mutation.after as StaticFabAssemblyRelationshipRecordV1);
+	}
+	yield* stableSortSteps(added, (left, right) => left.id - right.id);
+	const records: StaticFabAssemblyRelationshipRecordV1[] = [];
+	let existingIndex = 0;
+	let addedIndex = 0;
+	let previousId = 0;
+	while (existingIndex < state.records.length || addedIndex < added.length) {
+		yield;
+		const existing = state.records[existingIndex];
+		const addition = added[addedIndex];
+		const next =
+			existing && (!addition || existing.id <= addition.id)
+				? (state.records[existingIndex++] as StaticFabAssemblyRelationshipRecordV1)
+				: (added[addedIndex++] as StaticFabAssemblyRelationshipRecordV1);
+		if (next.id <= previousId) throw new Error(`조립 관계 ${next.id} 추가 ID가 중복됩니다`);
+		previousId = next.id;
+		records.push(next);
+	}
+	return yield* adoptStaticFabAssemblyRelationshipStateSteps(
+		Object.freeze({ nextRelationshipId, records: Object.freeze(records) }),
+	);
 }
 
 export function applyStaticFabAssemblyRelationshipMutations(

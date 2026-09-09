@@ -2,6 +2,7 @@ import {
 	type AdvancedSwitchMutation,
 	copyAdvancedSwitch,
 	validateAdvancedSwitchPatch,
+	validateAdvancedSwitchPatchSteps,
 } from "./AdvancedSwitch";
 import { createCooperativeTask } from "./CooperativeTask";
 import {
@@ -62,6 +63,7 @@ import {
 import type { RailConstructionPlan, RailErasePlan, RailMutation } from "./paint";
 import {
 	appendBoundedRailHistoryEntry,
+	createRailMirrorHistoryAdditionLedgerEntryCooperatively,
 	createRailMirrorHistoryLedgerEntry,
 	createRailMirrorHistoryLedgerEntryCooperatively,
 	prepareRailHistoryAppendSteps,
@@ -93,6 +95,7 @@ import {
 	isStaticFabAssemblyConnectorPlanIssuedFor,
 } from "./StaticFabAssemblyConnectorCertification";
 import {
+	applyStaticFabAssemblyRelationshipAdditionsSteps,
 	applyStaticFabAssemblyRelationshipMutations,
 	assertStaticFabAssemblyRelationshipStateSource,
 	copyStaticFabAssemblyRelationshipRecord,
@@ -106,6 +109,7 @@ import {
 import {
 	assertStaticFabAssemblyRelationshipActivation,
 	type ValidatedStaticFabAssemblyRelationshipActivation,
+	validateStaticFabAssemblyRelationshipSourceActivation,
 } from "./StaticFabAssemblyRelationshipActivation";
 import {
 	assertStaticFabBayFlowEditAppliedProjection,
@@ -121,6 +125,7 @@ import {
 } from "./StaticFabBayFlowEditCertification";
 import type { StaticFabMutationPlan } from "./StaticFabBlueprint";
 import {
+	applyStaticFabOrganizationAdditionsSteps,
 	applyStaticFabOrganizationMutations,
 	assertStaticFabOrganizationState,
 	copyStaticFabOrganizationState,
@@ -139,6 +144,7 @@ import {
 	type ValidatedStaticFabOrganizationActivation,
 } from "./StaticFabOrganizationActivation";
 import {
+	consumeCertifiedStaticFabOrganizationBundlePlacementPlanCooperatively,
 	consumeCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor,
 	isIssuedStaticFabOrganizationBundlePlacementPlan,
 	isStaticFabOrganizationBundlePlacementPlanIssuedFor,
@@ -215,17 +221,22 @@ export interface RailPatchEvent {
 }
 
 export interface RailDocumentPortEquipmentCommitTimings {
+	readonly maximumPreparationSliceMilliseconds?: number;
 	readonly authorityConsumptionMilliseconds: number;
 	readonly commandValidationMilliseconds: number;
 	readonly historyCreationMilliseconds: number;
 	readonly stateApplicationMilliseconds: number;
 	readonly patchPreparationMilliseconds: number;
-	readonly historyPublicationMilliseconds: number;
+	/** Null when history and the patch are published as one indivisible operation. */
+	readonly historyPublicationMilliseconds: number | null;
+	/** Includes state/history installation for cooperative commands. */
 	readonly patchPublicationMilliseconds: number;
 	readonly totalMilliseconds: number;
 }
 
 export interface MeasuredRailDocumentReviewedPortEquipmentCommit {
+	/** A published command stays committed even if a downstream observer fails. */
+	readonly publicationError?: string;
 	readonly committed: boolean;
 	readonly timings: RailDocumentPortEquipmentCommitTimings | null;
 }
@@ -918,15 +929,15 @@ export class RailDocument {
 				entry.relationshipNextIdAfter,
 			);
 			await options.preparePatch?.(event, cooperative.checkTime);
-			cooperative.assertCurrent();
 			const patchPreparationFinishedAt = cooperative.readTime(patchPreparationStartedAt);
+			// The clock and cancellation hooks may reenter the document. Validate after the clock,
+			// then publish state, history, sequence and the event without another callback between them.
+			cooperative.assertCurrent();
 
-			const historyPublicationStartedAt = patchPreparationFinishedAt;
+			const patchPublicationStartedAt = patchPreparationFinishedAt;
 			this.currentPortEquipment = nextPortEquipment;
 			this.undoStack = nextUndoStack;
 			this.redoStack = [];
-			const historyPublicationFinishedAt = cooperative.readTime(historyPublicationStartedAt);
-			const patchPublicationStartedAt = historyPublicationFinishedAt;
 			this.publishPatchEvent(event);
 			const patchPublicationFinishedAt = cooperative.readTime(patchPublicationStartedAt);
 			return Object.freeze({
@@ -937,8 +948,7 @@ export class RailDocument {
 					historyCreationMilliseconds: historyCreationFinishedAt - historyCreationStartedAt,
 					stateApplicationMilliseconds: stateApplicationFinishedAt - stateApplicationStartedAt,
 					patchPreparationMilliseconds: patchPreparationFinishedAt - patchPreparationStartedAt,
-					historyPublicationMilliseconds:
-						historyPublicationFinishedAt - historyPublicationStartedAt,
+					historyPublicationMilliseconds: null,
 					patchPublicationMilliseconds: patchPublicationFinishedAt - patchPublicationStartedAt,
 					totalMilliseconds: patchPublicationFinishedAt - totalStartedAt,
 				}),
@@ -1194,6 +1204,212 @@ export class RailDocument {
 			entry.relationshipNextIdAfter,
 		);
 		return true;
+	}
+
+	/** Prepare all six authored domains, history and transport before publishing one addition command. */
+	async commitStaticFabOrganizationBundleCooperatively(
+		input: StaticFabOrganizationBundlePlacementPlan,
+		options: RailDocumentCooperativeCommitOptions,
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		this.lastCommandError = null;
+		const source = captureRailDocumentPortEquipmentSource(this);
+		const cooperative = createRailDocumentCommitCooperativeController(this, source, options);
+		const totalStartedAt = cooperative.readTime(0);
+		try {
+			cooperative.assertCurrent();
+			const plan = await consumeCertifiedStaticFabOrganizationBundlePlacementPlanCooperatively(
+				input,
+				source.map,
+				source.portEquipment,
+				source.organizations,
+				source.relationships,
+				cooperative.checkTime,
+			);
+			const authorityFinishedAt = cooperative.readTime(totalStartedAt);
+			if (!plan) return cooperativeCommitRejected();
+			cooperative.assertCurrent();
+			if (
+				!plan.valid ||
+				plan.mutations.length === 0 ||
+				plan.organizationMutations.length === 0 ||
+				plan.baseRevision !== source.revision ||
+				plan.basePatchSequence !== source.patchSequence ||
+				plan.nextOrganizationIdBefore !== source.organizations.nextOrganizationId ||
+				plan.nextRelationshipIdBefore !== source.relationships.nextRelationshipId
+			)
+				return cooperativeCommitRejected();
+			const check = cooperative.checkTime;
+			await finishDocumentPreparationSteps(this.assertBundleAdditionProtectionSteps(plan), check);
+			const customError = await legacyCustomEquipmentMutationErrorCooperatively(
+				plan.portMutations,
+				plan.equipmentGroupMutations,
+				this.legacyCustomEquipment,
+				check,
+			);
+			if (customError) throw new Error(customError);
+			const topology = await finishDocumentPreparationSteps(
+				validateAdvancedSwitchPatchSteps(source.map, plan.mutations, plan.switchMutations),
+				check,
+			);
+			if (topology.length > 0)
+				throw new Error("조직 청사진의 고급 스위치 topology가 변경되었습니다");
+			const commandValidationFinishedAt = cooperative.readTime(authorityFinishedAt);
+
+			const transition = Object.freeze({
+				kind: STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_KIND,
+				changes: plan.mutations,
+				switchChanges: plan.switchMutations,
+				portChanges: plan.portMutations,
+				equipmentGroupChanges: plan.equipmentGroupMutations,
+				organizationChanges: plan.organizationMutations,
+				organizationNextIdBefore: plan.nextOrganizationIdBefore,
+				organizationNextIdAfter: plan.nextOrganizationIdAfter,
+				relationshipChanges: plan.relationshipMutations,
+				relationshipNextIdBefore: plan.nextRelationshipIdBefore,
+				relationshipNextIdAfter: plan.nextRelationshipIdAfter,
+				organizationImpactAuthorizations: Object.freeze([]) as readonly number[],
+				operationalConfigurationPatch: null,
+				staticFabAssemblyConnectorEvidence: null,
+				staticFabBayFlowEditEvidence: null,
+			});
+			const mirrorHistoryEntry = await createRailMirrorHistoryAdditionLedgerEntryCooperatively(
+				transition.kind,
+				transition,
+				check,
+			);
+			const entry: HistoryEntry = Object.freeze({ ...transition, mirrorHistoryEntry });
+			const nextUndoStack = await finishDocumentPreparationSteps(
+				prepareRailHistoryAppendSteps(
+					this.undoStack,
+					entry,
+					(candidate) => candidate.mirrorHistoryEntry,
+				),
+				check,
+			);
+			const historyCreationFinishedAt = cooperative.readTime(commandValidationFinishedAt);
+			const nextMap = await finishDocumentPreparationSteps(
+				source.map.createAdditionCandidateSteps(entry.changes, entry.switchChanges),
+				check,
+			);
+			const nextPortEquipment = await applyPortEquipmentAdditionsCooperatively(
+				source.portEquipment,
+				entry.portChanges,
+				entry.equipmentGroupChanges,
+				check,
+			);
+			await assertPortEquipmentLayoutCooperatively(nextMap, nextPortEquipment, check);
+			const nextOrganizations = await finishDocumentPreparationSteps(
+				applyStaticFabOrganizationAdditionsSteps(
+					source.organizations,
+					entry.organizationChanges,
+					entry.organizationNextIdAfter,
+				),
+				check,
+			);
+			const nextRelationships = await finishDocumentPreparationSteps(
+				applyStaticFabAssemblyRelationshipAdditionsSteps(
+					source.relationships,
+					entry.relationshipChanges,
+					entry.relationshipNextIdAfter,
+				),
+				check,
+			);
+			const activation = await validateStaticFabAssemblyRelationshipSourceActivation(
+				nextMap,
+				nextPortEquipment,
+				nextOrganizations,
+				nextRelationships,
+				check,
+			);
+			const nextImpactIndex = consumeStaticFabOrganizationImpactIndex(
+				activation.organizationActivation,
+				nextMap,
+				nextPortEquipment,
+				nextOrganizations,
+			);
+			const stateApplicationFinishedAt = cooperative.readTime(historyCreationFinishedAt);
+			// These arrays come exclusively from the consumed, owned plan. Do not recopy wide descendants.
+			const event: RailPatchEvent = Object.freeze({
+				sequence: source.patchSequence + 1,
+				kind: entry.kind,
+				baseRevision: source.revision,
+				revision: nextMap.getRevision(),
+				changes: entry.changes,
+				switchChanges: entry.switchChanges,
+				portChanges: entry.portChanges,
+				equipmentGroupChanges: entry.equipmentGroupChanges,
+				organizationChanges: entry.organizationChanges,
+				organizationNextIdBefore: entry.organizationNextIdBefore,
+				organizationNextIdAfter: entry.organizationNextIdAfter,
+				relationshipChanges: entry.relationshipChanges,
+				relationshipNextIdBefore: entry.relationshipNextIdBefore,
+				relationshipNextIdAfter: entry.relationshipNextIdAfter,
+				organizationImpactAuthorizations: entry.organizationImpactAuthorizations,
+				operationalConfigurationPatch: null,
+			});
+			await options.preparePatch?.(event, check);
+			const patchPreparationFinishedAt = cooperative.readTime(stateApplicationFinishedAt);
+			const maximumPreparationSliceMilliseconds = cooperative.maximumSliceAt(
+				patchPreparationFinishedAt,
+			);
+			cooperative.assertCurrent();
+			// No callbacks or awaits until all truth, history and sequence are installed.
+			this.currentMap = nextMap;
+			this.currentPortEquipment = nextPortEquipment;
+			this.currentOrganizations = nextOrganizations;
+			this.currentRelationships = nextRelationships;
+			this.organizationImpactIndex = nextImpactIndex;
+			this.undoStack = nextUndoStack;
+			this.redoStack = [];
+			let publicationError: string | undefined;
+			this.publishPatchEvent(event, (error) => {
+				publicationError ??=
+					error instanceof Error && error.message
+						? error.message
+						: "문서 변경 통지를 완료하지 못했습니다";
+			});
+			const finishedAt = cooperative.readTime(patchPreparationFinishedAt);
+			return Object.freeze({
+				committed: true,
+				...(publicationError ? { publicationError } : {}),
+				timings: Object.freeze({
+					maximumPreparationSliceMilliseconds,
+					authorityConsumptionMilliseconds: authorityFinishedAt - totalStartedAt,
+					commandValidationMilliseconds: commandValidationFinishedAt - authorityFinishedAt,
+					historyCreationMilliseconds: historyCreationFinishedAt - commandValidationFinishedAt,
+					stateApplicationMilliseconds: stateApplicationFinishedAt - historyCreationFinishedAt,
+					patchPreparationMilliseconds: patchPreparationFinishedAt - stateApplicationFinishedAt,
+					historyPublicationMilliseconds: null,
+					patchPublicationMilliseconds: finishedAt - patchPreparationFinishedAt,
+					totalMilliseconds: finishedAt - totalStartedAt,
+				}),
+			});
+		} catch (error) {
+			if (error instanceof RailDocumentCommitSourceChangedError) return cooperativeCommitRejected();
+			throw error;
+		}
+	}
+
+	private *assertBundleAdditionProtectionSteps(
+		plan: StaticFabOrganizationBundlePlacementPlan,
+	): Generator<void> {
+		for (const change of plan.mutations) {
+			yield;
+			if (this.organizationImpactIndex.organizationOwnersForCell(change.x, change.y).length > 0)
+				throw new Error("조직 청사진이 보호된 기존 조직 레일을 변경합니다");
+		}
+		for (const change of plan.switchMutations) {
+			yield;
+			if (this.organizationImpactIndex.organizationOwnersForSwitch(change.id).length > 0)
+				throw new Error("조직 청사진이 보호된 기존 조직 스위치를 변경합니다");
+		}
+		for (const change of plan.equipmentGroupMutations) {
+			yield;
+			if (change.after?.kind === "STK" && change.after.template === "CUSTOM")
+				throw new Error("조직 청사진은 legacy CUSTOM STK를 배치할 수 없습니다");
+			if (this.organizationImpactIndex.organizationOwnersForEquipmentGroup(change.id).length > 0)
+				throw new Error("조직 청사진이 보호된 기존 조직 장비를 변경합니다");
+		}
 	}
 
 	/** Commit one exact typed hierarchy connector as one history entry and one Worker patch. */
@@ -2301,12 +2517,22 @@ export class RailDocument {
 		);
 	}
 
-	private publishPatchEvent(event: RailPatchEvent): void {
+	private publishPatchEvent(
+		event: RailPatchEvent,
+		onListenerError?: (error: unknown) => void,
+	): void {
 		if (event.sequence !== this.patchSequence + 1) {
 			throw new Error("Prepared Rail patch event sequence is no longer current.");
 		}
 		this.patchSequence = event.sequence;
-		for (const listener of this.listeners) listener(event);
+		for (const listener of this.listeners) {
+			try {
+				listener(event);
+			} catch (error) {
+				if (!onListenerError) throw error;
+				onListenerError(error);
+			}
+		}
 	}
 
 	private rejectCommand(error: unknown, fallback: string): false {
@@ -2436,6 +2662,7 @@ interface RailDocumentPortEquipmentSource {
 }
 
 interface RailDocumentCommitCooperativeController {
+	readonly maximumSliceAt: (time: number) => number;
 	readonly assertCurrent: () => void;
 	readonly checkTime: () => Promise<void>;
 	readonly readTime: (previous: number) => number;
@@ -2483,6 +2710,9 @@ function createRailDocumentCommitCooperativeController(
 	}
 	let previousTime = readOptionalCommitTime(options.now, 0);
 	let sliceStartedAt = previousTime;
+	let maximumSliceMilliseconds = 0;
+	const maximumSliceAt = (time: number): number =>
+		Math.max(maximumSliceMilliseconds, time - sliceStartedAt);
 	const readTime = (previous: number): number => {
 		previousTime = readOptionalCommitTime(options.now, Math.max(previous, previousTime));
 		return previousTime;
@@ -2505,16 +2735,29 @@ function createRailDocumentCommitCooperativeController(
 	const checkTime = async (): Promise<void> => {
 		assertCurrent();
 		const current = readTime(sliceStartedAt);
+		maximumSliceMilliseconds = maximumSliceAt(current);
 		if (current - sliceStartedAt < sliceMilliseconds) return;
 		await options.checkpoint();
 		assertCurrent();
 		sliceStartedAt = readTime(current);
 	};
-	return Object.freeze({ assertCurrent, checkTime, readTime });
+	return Object.freeze({ assertCurrent, checkTime, readTime, maximumSliceAt });
 }
 
 function cooperativeCommitRejected(): MeasuredRailDocumentReviewedPortEquipmentCommit {
 	return Object.freeze({ committed: false, timings: null });
+}
+
+async function finishDocumentPreparationSteps<T>(
+	steps: Generator<void, T>,
+	checkpoint: () => Promise<void>,
+): Promise<T> {
+	const task = createCooperativeTask(steps);
+	while (!task.done) {
+		task.step(128);
+		await checkpoint();
+	}
+	return task.finish();
 }
 
 async function createPortEquipmentHistoryEntryCooperatively(

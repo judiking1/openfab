@@ -1,3 +1,4 @@
+import { completeCooperativeSteps } from "./CooperativeTask";
 import {
 	ALL_DIRECTIONS,
 	bitCount,
@@ -347,10 +348,22 @@ export function validateAdvancedSwitchPatch(
 	cellMutations: readonly AdvancedSwitchCellMutation[],
 	switchMutations: readonly AdvancedSwitchMutation[] = [],
 ): AdvancedSwitchTopologyIssue[] {
+	return completeCooperativeSteps(
+		validateAdvancedSwitchPatchSteps(map, cellMutations, switchMutations),
+	);
+}
+
+/** Preserve the full topology contract with one checkpoint per mutation, owner, and issue. */
+export function* validateAdvancedSwitchPatchSteps(
+	map: AdvancedSwitchMapReader,
+	cellMutations: readonly AdvancedSwitchCellMutation[],
+	switchMutations: readonly AdvancedSwitchMutation[] = [],
+): Generator<void, AdvancedSwitchTopologyIssue[]> {
 	const issues: AdvancedSwitchTopologyIssue[] = [];
 	const cellsAfter = new Map<string, number>();
 	const changedCells = new Set<string>();
 	for (const mutation of cellMutations) {
+		yield;
 		const key = coordinateKey(mutation.x, mutation.y);
 		if (
 			changedCells.has(key) ||
@@ -373,6 +386,7 @@ export function validateAdvancedSwitchPatch(
 
 	const changesById = new Map<number, AdvancedSwitchMutation>();
 	for (const mutation of switchMutations) {
+		yield;
 		const current = map.getAdvancedSwitch(mutation.id);
 		const recordError = mutation.after ? advancedSwitchRecordError(mutation.after) : null;
 		if (
@@ -399,10 +413,12 @@ export function validateAdvancedSwitchPatch(
 		cellsAfter.get(coordinateKey(x, y)) ?? map.getEncoded(x, y);
 	const affected = new Map<number, AdvancedSwitchRecord>();
 	for (const mutation of cellMutations) {
+		yield;
 		const owner = map.getAdvancedSwitchOwningCell(mutation.x, mutation.y);
 		if (owner) affected.set(owner.id, owner);
 	}
 	for (const mutation of switchMutations) {
+		yield;
 		if (mutation.before) affected.set(mutation.before.id, mutation.before);
 		if (mutation.after) affected.set(mutation.after.id, mutation.after);
 	}
@@ -414,6 +430,7 @@ export function validateAdvancedSwitchPatch(
 
 	const pendingClaims = new Map<string, AdvancedSwitchRecord>();
 	for (const mutation of switchMutations) {
+		yield;
 		const after = mutation.after;
 		if (!after || advancedSwitchRecordError(after)) continue;
 		for (const cell of deriveAdvancedSwitchGeometry(after).claimedCells) {
@@ -443,6 +460,7 @@ export function validateAdvancedSwitchPatch(
 	}
 
 	for (const [id, touchedRecord] of affected) {
+		yield;
 		const mutation = changesById.get(id);
 		const after = finalRecord(id);
 		if (mutation?.before) {
@@ -478,7 +496,7 @@ export function validateAdvancedSwitchPatch(
 		else if (!mutation) issues.push(...validateAdvancedSwitchTopology(readAfter, touchedRecord));
 	}
 
-	return deduplicateIssues(issues);
+	return yield* deduplicateIssuesSteps(issues);
 }
 
 function isRemovedSwitchBoundaryRemainder(
@@ -569,15 +587,20 @@ function decode(encoded: number): { incoming: number; outgoing: number } {
 	return { incoming: encoded & 15, outgoing: (encoded >> 4) & 15 };
 }
 
-function deduplicateIssues(
+function* deduplicateIssuesSteps(
 	issues: readonly AdvancedSwitchTopologyIssue[],
-): AdvancedSwitchTopologyIssue[] {
-	const unique = new Map<string, AdvancedSwitchTopologyIssue>();
+): Generator<void, AdvancedSwitchTopologyIssue[]> {
+	const keys = new Set<string>();
+	const unique: AdvancedSwitchTopologyIssue[] = [];
 	for (const issue of issues) {
+		yield;
 		const key = `${issue.code}:${issue.switchIds.join(",")}:${issue.cells
 			.map((cell) => coordinateKey(cell.x, cell.y))
 			.join("|")}`;
-		if (!unique.has(key)) unique.set(key, issue);
+		if (!keys.has(key)) {
+			keys.add(key);
+			unique.push(issue);
+		}
 	}
-	return [...unique.values()];
+	return unique;
 }

@@ -15,6 +15,123 @@ import {
 import { DIR_E, DIR_W } from "./railShape";
 
 describe("reviewed port/equipment Apply certification", () => {
+	it("never exposes a new reviewed state with its old sequence to an injected clock", async () => {
+		const document = straightDocument();
+		const handle = issueReviewedPortEquipmentApply(
+			singleOhbPlan(document),
+			document.map,
+			document.portEquipment,
+			document.organizations,
+			document.getPatchSequence(),
+		);
+		const observations: { sequence: number; ports: number; undo: number; events: number }[] = [];
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => {
+			events.push(event);
+			expect(document.getPatchSequence()).toBe(event.sequence);
+			expect(document.portEquipment.ports).toHaveLength(1);
+			expect(document.captureRailMirrorHistoryLedger().undo).toHaveLength(1);
+		});
+		let tick = 0;
+		const result = await document.commitReviewedPortEquipmentCooperatively(handle, {
+			checkpoint: async () => {},
+			now: () => {
+				observations.push({
+					sequence: document.getPatchSequence(),
+					ports: document.portEquipment.ports.length,
+					undo: document.captureRailMirrorHistoryLedger().undo.length,
+					events: events.length,
+				});
+				return ++tick;
+			},
+		});
+		expect(result.committed).toBe(true);
+		expect(observations.length).toBeGreaterThan(2);
+		for (const observation of observations) {
+			expect(observation).toEqual(
+				observation.sequence === 7
+					? { sequence: 7, ports: 0, undo: 0, events: 0 }
+					: { sequence: 8, ports: 1, undo: 1, events: 1 },
+			);
+		}
+	});
+
+	it("rejects the prepared candidate if the final preparation clock authors a newer command", async () => {
+		const document = straightDocument();
+		const handle = issueReviewedPortEquipmentApply(
+			singleOhbPlan(document),
+			document.map,
+			document.portEquipment,
+			document.organizations,
+			document.getPatchSequence(),
+		);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		let armed = false;
+		let authored = false;
+		let newerHistory: ReturnType<RailDocument["captureRailMirrorHistoryLedger"]> | null = null;
+		let tick = 0;
+		const result = await document.commitReviewedPortEquipmentCooperatively(handle, {
+			checkpoint: async () => {},
+			preparePatch: async () => {
+				armed = true;
+			},
+			now: () => {
+				if (armed && !authored) {
+					authored = document.commit(
+						planRailConstruction(document.map, { x: 10, y: 10 }, { x: 12, y: 10 }),
+					);
+					newerHistory = document.captureRailMirrorHistoryLedger();
+				}
+				return ++tick;
+			},
+		});
+		expect(authored).toBe(true);
+		expect(result.committed).toBe(false);
+		expect(document.getPatchSequence()).toBe(8);
+		expect(document.portEquipment.ports).toHaveLength(0);
+		expect(document.captureRailMirrorHistoryLedger()).toEqual(newerHistory);
+		expect(events.map((event) => event.kind)).toEqual(["build"]);
+		expect(document.commitReviewedPortEquipment(handle)).toBe(false);
+		expect(document.undo()).toBe(true);
+		expect(document.map.getEncoded(11, 10)).toBe(0);
+		expect(document.redo()).toBe(true);
+		expect(document.map.getEncoded(11, 10)).not.toBe(0);
+	});
+
+	it("preserves a subsequent Undo issued by the first clock after publication", async () => {
+		const document = straightDocument();
+		const handle = issueReviewedPortEquipmentApply(
+			singleOhbPlan(document),
+			document.map,
+			document.portEquipment,
+			document.organizations,
+			document.getPatchSequence(),
+		);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		let undone = false;
+		let tick = 0;
+		const result = await document.commitReviewedPortEquipmentCooperatively(handle, {
+			checkpoint: async () => {},
+			now: () => {
+				if (!undone && document.getPatchSequence() === 8) undone = document.undo();
+				return ++tick;
+			},
+		});
+		expect(result.committed).toBe(true);
+		expect(undone).toBe(true);
+		expect(document.getPatchSequence()).toBe(9);
+		expect(document.portEquipment.ports).toHaveLength(0);
+		expect(events.map((event) => [event.sequence, event.kind])).toEqual([
+			[8, "place-ohb"],
+			[9, "undo"],
+		]);
+		expect(document.captureRailMirrorHistoryLedger().redo).toHaveLength(1);
+		expect(document.redo()).toBe(true);
+		expect(document.portEquipment.ports).toHaveLength(1);
+	});
+
 	it("rejects copied handles while preserving the exact one-shot document authority", () => {
 		const document = straightDocument();
 		const plan = singleOhbPlan(document);

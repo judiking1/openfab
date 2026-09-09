@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
+import { assertPortSlotCapacity, PORT_SLOT_MAX_ROWS } from "../compile/PortSlotCompiler";
+import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import {
 	buildRailModuleOwnershipIndex,
@@ -31,6 +34,32 @@ import { staticFabOrganizationBundlePlacementPreparedShapeError } from "./Static
 import { prepareStaticFabOrganizationBundlePlacement } from "./StaticFabOrganizationBundlePlacementRuntime";
 
 describe("StaticFabOrganizationBundlePlacementRuntime", () => {
+	it("rejects a port-free copy before issuing authority when its future equipment catalog would overflow", () => {
+		const destination = new RailDocument();
+		// Two terminals contribute no rows; the remaining cells exactly fill both side catalogs.
+		const lastX = PORT_SLOT_MAX_ROWS / 2 + 1;
+		const rail = planRailConstruction(destination.map, { x: lastX, y: 1000 }, { x: 0, y: 1000 });
+		expect(destination.commit(rail)).toBe(true);
+		expect(() => assertPortSlotCapacity(compilePhysicalRail(destination.map))).not.toThrow();
+		const before = captureRailMirrorSnapshot(
+			destination.map,
+			destination.getPatchSequence(),
+		).snapshot;
+		const result = prepareStaticFabOrganizationBundlePlacement(
+			placementRequest(destination, sourceBundle(), { x: 40, y: -20 }, 0, 76),
+		);
+		expect(result.valid).toBe(false);
+		expect(result.failureCode).toBe("plan");
+		expect(result.ticket).toBeNull();
+		expect(result.reason).toContain("현재 지원 한도 204,096개");
+		expect(result.reason).toContain("복사 범위를 줄이거나 별도 프로젝트");
+		expect(
+			captureRailMirrorSnapshot(destination.map, destination.getPatchSequence()).snapshot,
+		).toEqual(before);
+		expect(destination.portEquipment.ports).toHaveLength(0);
+		expect(destination.organizations.records).toHaveLength(0);
+	}, 30_000);
+
 	it("plans and validates an exact source-bound plan from immutable bundle intent", () => {
 		const destination = new RailDocument();
 		const bundle = sourceBundle();

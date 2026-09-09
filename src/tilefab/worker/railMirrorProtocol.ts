@@ -3,6 +3,7 @@ import {
 	type StaticFabOrganizationOutlineIndexSnapshot,
 } from "../compile/StaticFabOrganizationOutlineIndex";
 import { ADVANCED_SWITCH_MAX_ID, type AdvancedSwitchMutation } from "../core/AdvancedSwitch";
+import { completeCooperativeSteps, createCooperativeTask } from "../core/CooperativeTask";
 import type { OperationalConfigurationState } from "../core/OperationalConfiguration";
 import type { OperationalConfigurationPatch } from "../core/OperationalConfigurationMutation";
 import type { RailMutation } from "../core/paint";
@@ -31,12 +32,14 @@ import type { RailMirrorState } from "./RailPatchMirror";
 import type { RailPhysicalLayoutState } from "./RailPhysicalLayout";
 import {
 	decodeStaticFabAssemblyRelationshipPatch,
+	encodeStaticFabAssemblyRelationshipAdditionsCooperatively,
 	encodeStaticFabAssemblyRelationshipPatch,
 	type StaticFabAssemblyRelationshipPatchSoA,
 	staticFabAssemblyRelationshipSnapshotTransfers,
 } from "./StaticFabAssemblyRelationshipSoA";
 import {
 	decodeStaticFabOrganizationPatch,
+	encodeStaticFabOrganizationAdditionsCooperatively,
 	encodeStaticFabOrganizationPatch,
 	type StaticFabOrganizationPatchSoA,
 	staticFabOrganizationSnapshotTransfers,
@@ -178,11 +181,54 @@ export function encodeRailPatchEvent(
 	event: RailPatchEvent,
 	options: RailPatchEncodingOptions = {},
 ): EncodedRailPatch {
+	const rail = completeCooperativeSteps(createRailPatchRailFieldsSteps(event));
+	const portEquipment = encodePortEquipmentPatch(event.portChanges, event.equipmentGroupChanges);
+	const organizations = encodeStaticFabOrganizationPatch(
+		event.organizationChanges,
+		event.organizationNextIdBefore,
+		event.organizationNextIdAfter,
+		{ compactExisting: options.compactOrganizations },
+	);
+	const relationships = encodeStaticFabAssemblyRelationshipPatch(
+		event.relationshipChanges,
+		event.relationshipNextIdBefore,
+		event.relationshipNextIdAfter,
+	);
+	const organizationImpactAuthorizations = encodeOrganizationImpactAuthorizations(
+		event.organizationImpactAuthorizations ?? [],
+	);
+	return assembleEncodedRailPatch(
+		event,
+		rail,
+		portEquipment,
+		organizations,
+		relationships,
+		organizationImpactAuthorizations,
+	);
+}
+
+type RailPatchRailFields = Pick<
+	RailPatchSoA,
+	| "xs"
+	| "ys"
+	| "before"
+	| "after"
+	| "switchIds"
+	| "switchBeforePresent"
+	| "switchBefore"
+	| "switchAfterPresent"
+	| "switchAfter"
+>;
+
+function* createRailPatchRailFieldsSteps(
+	event: RailPatchEvent,
+): Generator<void, RailPatchRailFields> {
 	const xs = new Int32Array(event.changes.length);
 	const ys = new Int32Array(event.changes.length);
 	const before = new Uint8Array(event.changes.length);
 	const after = new Uint8Array(event.changes.length);
 	for (let index = 0; index < event.changes.length; index++) {
+		yield;
 		const change = event.changes[index] as RailMutation;
 		assertInt32Coordinate(change.x, "x");
 		assertInt32Coordinate(change.y, "y");
@@ -199,6 +245,7 @@ export function encodeRailPatchEvent(
 	const switchAfterPresent = new Uint8Array(event.switchChanges.length);
 	const switchAfter = createAdvancedSwitchRecordFields(event.switchChanges.length);
 	for (let index = 0; index < event.switchChanges.length; index++) {
+		yield;
 		const change = event.switchChanges[index] as AdvancedSwitchMutation;
 		assertAdvancedSwitchId(change.id, `Rail patch switch ${index} id`);
 		if (
@@ -217,21 +264,38 @@ export function encodeRailPatchEvent(
 			writeAdvancedSwitchRecord(switchAfter, index, change.after);
 		}
 	}
-	const portEquipment = encodePortEquipmentPatch(event.portChanges, event.equipmentGroupChanges);
-	const organizations = encodeStaticFabOrganizationPatch(
-		event.organizationChanges,
-		event.organizationNextIdBefore,
-		event.organizationNextIdAfter,
-		{ compactExisting: options.compactOrganizations },
-	);
-	const relationships = encodeStaticFabAssemblyRelationshipPatch(
-		event.relationshipChanges,
-		event.relationshipNextIdBefore,
-		event.relationshipNextIdAfter,
-	);
-	const organizationImpactAuthorizations = encodeOrganizationImpactAuthorizations(
-		event.organizationImpactAuthorizations ?? [],
-	);
+	return {
+		xs,
+		ys,
+		before,
+		after,
+		switchIds,
+		switchBeforePresent,
+		switchBefore,
+		switchAfterPresent,
+		switchAfter,
+	};
+}
+
+function assembleEncodedRailPatch(
+	event: RailPatchEvent,
+	rail: RailPatchRailFields,
+	portEquipment: ReturnType<typeof encodePortEquipmentPatch>,
+	organizations: ReturnType<typeof encodeStaticFabOrganizationPatch>,
+	relationships: ReturnType<typeof encodeStaticFabAssemblyRelationshipPatch>,
+	organizationImpactAuthorizations: Int32Array,
+): EncodedRailPatch {
+	const {
+		xs,
+		ys,
+		before,
+		after,
+		switchIds,
+		switchBeforePresent,
+		switchBefore,
+		switchAfterPresent,
+		switchAfter,
+	} = rail;
 	return {
 		patch: {
 			sequence: event.sequence,
@@ -270,6 +334,80 @@ export function encodeRailPatchEvent(
 			organizationImpactAuthorizations.buffer,
 		],
 	};
+}
+
+/** Prepare every typed domain for an unpublished, immutable addition-only authored event. */
+export async function encodeStaticFabAdditionRailPatchEventCooperatively(
+	event: RailPatchEvent,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<EncodedRailPatch> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
+		throw new RangeError("Rail addition encoding operation budget must be positive.");
+	if (
+		!Object.isFrozen(event) ||
+		(event.organizationImpactAuthorizations?.length ?? 0) !== 0 ||
+		(event.operationalConfigurationPatch ?? null) !== null ||
+		event.historyOriginKind !== undefined
+	)
+		throw new Error("Cooperative addition encoding requires an immutable static forward event.");
+	const admission = createCooperativeTask(assertRailAdditionEventSteps(event));
+	while (!admission.done) {
+		admission.step(operationBudget);
+		await checkpoint();
+	}
+	admission.finish();
+	const task = createCooperativeTask(createRailPatchRailFieldsSteps(event));
+	while (!task.done) {
+		task.step(operationBudget);
+		await checkpoint();
+	}
+	const rail = task.finish();
+	const portEquipment = await encodePortEquipmentPatchCooperatively(
+		event.portChanges,
+		event.equipmentGroupChanges,
+		checkpoint,
+		operationBudget,
+	);
+	const organizations = await encodeStaticFabOrganizationAdditionsCooperatively(
+		event.organizationChanges,
+		event.organizationNextIdBefore,
+		event.organizationNextIdAfter,
+		checkpoint,
+		operationBudget,
+	);
+	const relationships = await encodeStaticFabAssemblyRelationshipAdditionsCooperatively(
+		event.relationshipChanges,
+		event.relationshipNextIdBefore,
+		event.relationshipNextIdAfter,
+		checkpoint,
+		operationBudget,
+	);
+	return assembleEncodedRailPatch(
+		event,
+		rail,
+		portEquipment,
+		organizations,
+		relationships,
+		new Int32Array(0),
+	);
+}
+
+function* assertRailAdditionEventSteps(event: RailPatchEvent): Generator<void> {
+	if (!Object.isFrozen(event.changes)) throw new Error("Rail additions must be immutable.");
+	for (const change of event.changes) {
+		yield;
+		if (!Object.isFrozen(change) || change.before !== 0 || change.after === 0)
+			throw new Error("Rail preparation requires nonempty additions.");
+	}
+	for (const changes of [event.switchChanges, event.portChanges, event.equipmentGroupChanges]) {
+		if (!Object.isFrozen(changes)) throw new Error("Record additions must be immutable.");
+		for (const change of changes) {
+			yield;
+			if (!Object.isFrozen(change) || change.before !== null || !change.after)
+				throw new Error("Record preparation requires nonempty additions.");
+		}
+	}
 }
 
 /**

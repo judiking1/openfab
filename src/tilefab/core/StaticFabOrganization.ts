@@ -1,3 +1,4 @@
+import { stableSortSteps } from "./CooperativeSort";
 import { completeCooperativeSteps } from "./CooperativeTask";
 import type { PortEquipmentState } from "./EquipmentGroup";
 import {
@@ -747,6 +748,61 @@ export function assertStaticFabOrganizationState(
 ): void {
 	const error = staticFabOrganizationStateError(map, portEquipment, state);
 	if (error) throw new Error(error);
+}
+
+/** Prepare canonical additions privately while retaining unchanged immutable memberships. */
+export function* applyStaticFabOrganizationAdditionsSteps(
+	state: StaticFabOrganizationState,
+	mutations: readonly StaticFabOrganizationMutation[],
+	nextOrganizationId: number,
+): Generator<void, StaticFabOrganizationState> {
+	if (!isCanonicalStaticFabOrganizationState(state) || !isPositiveInt32(nextOrganizationId)) {
+		throw new Error("조직 추가에는 canonical 원본과 양의 다음 ID가 필요합니다");
+	}
+	if (!Array.isArray(mutations) || !Object.isFrozen(mutations)) {
+		throw new Error("협력적 조직 추가 목록은 불변이어야 합니다");
+	}
+	const added: StaticFabOrganizationRecord[] = [];
+	let expectedNextId = state.nextOrganizationId;
+	for (const mutation of mutations) {
+		yield;
+		if (!Object.isFrozen(mutation)) throw new Error("조직 추가 항목은 불변이어야 합니다");
+		if (
+			!isPositiveInt32(mutation.id) ||
+			mutation.before !== null ||
+			!mutation.after ||
+			mutation.after.id !== mutation.id ||
+			!isCanonicalStaticFabOrganizationRecord(mutation.after)
+		) {
+			throw new Error("조직 추가는 불변의 새 canonical 레코드만 포함해야 합니다");
+		}
+		added.push(mutation.after);
+		expectedNextId = Math.max(expectedNextId, mutation.id + 1);
+	}
+	if (expectedNextId !== nextOrganizationId) {
+		throw new Error(`다음 정적 FAB 조직 ID는 ${expectedNextId}이어야 합니다`);
+	}
+	yield* stableSortSteps(added, (left, right) => left.id - right.id);
+	const records: StaticFabOrganizationRecord[] = [];
+	let existingIndex = 0;
+	let addedIndex = 0;
+	let previousId = 0;
+	while (existingIndex < state.records.length || addedIndex < added.length) {
+		yield;
+		const existing = state.records[existingIndex];
+		const addition = added[addedIndex];
+		const next =
+			existing && (!addition || existing.id <= addition.id)
+				? (state.records[existingIndex++] as StaticFabOrganizationRecord)
+				: (added[addedIndex++] as StaticFabOrganizationRecord);
+		if (next.id <= previousId) throw new Error(`조직 ${next.id} 추가 ID가 중복됩니다`);
+		previousId = next.id;
+		records.push(next);
+	}
+	const candidate = Object.freeze({ nextOrganizationId, records: Object.freeze(records) });
+	const error = yield* staticFabOrganizationStateShapeErrorSteps(candidate);
+	if (error) throw new Error(error);
+	return brandCanonicalStaticFabOrganizationState(candidate);
 }
 
 export function applyStaticFabOrganizationMutations(

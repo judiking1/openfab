@@ -9,6 +9,7 @@ import {
 	createStaticFabOrganizationSnapshot,
 	createStaticFabOrganizationSnapshotHydrator,
 	decodeStaticFabOrganizationPatch,
+	encodeStaticFabOrganizationAdditionsCooperatively,
 	encodeStaticFabOrganizationPatch,
 	hydrateStaticFabOrganizationDiagnosticSnapshot,
 	hydrateStaticFabOrganizationSnapshot,
@@ -20,6 +21,56 @@ import {
 } from "./StaticFabOrganizationSoA";
 
 describe("StaticFabOrganizationSoA", () => {
+	it("encodes wide canonical additions with identical bytes and no shared transfer buffers", async () => {
+		const state = copyStaticFabOrganizationState(largeAreaFixture(10001));
+		const mutations = Object.freeze(
+			state.records.map((after) => Object.freeze({ id: after.id, before: null, after })),
+		);
+		const expected = encodeStaticFabOrganizationPatch(mutations, 1, state.nextOrganizationId, {
+			compactExisting: true,
+		});
+		let checkpoints = 0;
+		const encoded = await encodeStaticFabOrganizationAdditionsCooperatively(
+			mutations,
+			1,
+			state.nextOrganizationId,
+			async () => {
+				checkpoints++;
+			},
+			7,
+		);
+		expect(encoded.fields).toEqual(expected.fields);
+		expect(encoded.transfer.map((buffer) => new Uint8Array(buffer))).toEqual(
+			expected.transfer.map((buffer) => new Uint8Array(buffer)),
+		);
+		expect(checkpoints).toBeGreaterThan(1000);
+		expect(new Set(encoded.transfer).size).toBe(encoded.transfer.length);
+		expect(
+			decodeStaticFabOrganizationPatch(
+				structuredClone(encoded.fields, { transfer: encoded.transfer }),
+			),
+		).toEqual(mutations);
+		await expect(
+			encodeStaticFabOrganizationAdditionsCooperatively(
+				[...mutations],
+				1,
+				state.nextOrganizationId,
+				async () => {},
+			),
+		).rejects.toThrow("immutable");
+		const cancelled = new Error("cancel organization encoding");
+		await expect(
+			encodeStaticFabOrganizationAdditionsCooperatively(
+				mutations,
+				1,
+				state.nextOrganizationId,
+				async () => {
+					throw cancelled;
+				},
+				1,
+			),
+		).rejects.toBe(cancelled);
+	});
 	it("round-trips canonical organization membership through CSR typed buffers", () => {
 		const canonical = copyStaticFabOrganizationState(fixture());
 		const snapshot = createStaticFabOrganizationSnapshot(fixture());

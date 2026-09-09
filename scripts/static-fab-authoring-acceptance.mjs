@@ -1272,6 +1272,16 @@ try {
 		3_000,
 		"organization bundle atomic commit duration",
 	);
+	assertDurationTelemetry(
+		organizationBundlePlaced.organizationBundlePlacementMaxSliceMs,
+		8,
+		"organization bundle maximum preparation slice",
+	);
+	assertDurationTelemetry(
+		organizationBundlePlaced.organizationBundlePlacementPublicationMs,
+		8,
+		"organization bundle prepared publication duration",
+	);
 	const organizationBundlePlacedGeometry = await readRailGeometry(desktopPage);
 	assertTranslatedRailGeometry(
 		organizationBundleSourceGeometry,
@@ -45303,6 +45313,10 @@ async function readMetrics(page) {
 				canvas?.dataset.organizationBundlePlacementAdoptionMs ?? "",
 			organizationBundlePlacementCommitMs:
 				canvas?.dataset.organizationBundlePlacementCommitMs ?? "",
+			organizationBundlePlacementMaxSliceMs:
+				canvas?.dataset.organizationBundlePlacementMaxSliceMs ?? "",
+			organizationBundlePlacementPublicationMs:
+				canvas?.dataset.organizationBundlePlacementPublicationMs ?? "",
 			organizationBundlePlacementTicket: canvas?.dataset.organizationBundlePlacementTicket ?? "",
 			organizationBundlePlacementTicketAnchor:
 				canvas?.dataset.organizationBundlePlacementTicketAnchor ?? "",
