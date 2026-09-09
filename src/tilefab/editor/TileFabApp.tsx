@@ -845,6 +845,7 @@ import {
 import { guidedBuildPracticeTransitionPresentation } from "./GuidedBuildPracticeTransitionPresentation";
 import { portAuthoringSurfacePresentation } from "./PortAuthoringSurfacePresentation";
 import { applyTileFabCameraZoom } from "./TileFabCameraZoom";
+import { tileFabMapScale } from "./TileFabMapScale";
 import { scrollFocusedInspectorDisclosure } from "./InspectorDisclosureFocus";
 import {
 	analyzeGuidedBuildRailReuse,
@@ -2323,6 +2324,8 @@ export default function TileFabApp(): React.ReactElement {
 	});
 	const exitInspection3DRef = useRef<() => void>(() => undefined);
 	const cameraReadyRef = useRef(false);
+	const mapScaleLineRef = useRef<HTMLSpanElement | null>(null);
+	const mapScaleLabelRef = useRef<HTMLElement | null>(null);
 	const dragRef = useRef<DragState | null>(null);
 	const pendingDragCellRef = useRef<Cell | null>(null);
 	const closureSnapRef = useRef<Cell | null>(null);
@@ -4143,7 +4146,9 @@ export default function TileFabApp(): React.ReactElement {
 	const guidedStkMinimumPorts =
 		guidedBuildOpen && guidedBuildEvaluation.currentMissionId === "ports" &&
 		guidedBuildCurrentSuggestedAction === "stk" ? 2 : 1;
-	const stkDraftReview = stkDraftReviewPresentation(stkDraftSelection, stkTemplate, guidedStkMinimumPorts);
+	const stkDraftReview = stkDraftReviewPresentation(
+		stkDraftSelection, stkTemplate, guidedStkMinimumPorts, guidedPortKeyboard?.portType === "STK",
+	);
 	const stkDraftReady = stkDraftReview.ready;
 	const guidedBuildPrimaryTarget = guidedBuildPlacementSessionActive || guidedBuildReviewing
 		? null
@@ -11799,6 +11804,7 @@ export default function TileFabApp(): React.ReactElement {
 		let telemetryPublishedAt = Number.NEGATIVE_INFINITY;
 		let previousWidth = canvas.clientWidth;
 		let previousHeight = canvas.clientHeight;
+		let mapScaleZoom = Number.NaN;
 		const render = (): void => {
 			scheduledFrame = 0;
 			// The modal owns interaction. Keep its background bitmap stable instead of submitting
@@ -11821,6 +11827,18 @@ export default function TileFabApp(): React.ReactElement {
 				cameraRef.current.offsetX = width / 2;
 				cameraRef.current.offsetY = height / 2;
 				cameraReadyRef.current = true;
+			}
+			const scaleLine = mapScaleLineRef.current;
+			const scaleLabel = mapScaleLabelRef.current;
+			if (scaleLine && scaleLabel && mapScaleZoom !== cameraRef.current.zoom) {
+				const scale = tileFabMapScale(cameraRef.current.zoom);
+				scaleLine.style.width = `${scale?.pixels ?? 0}px`;
+				scaleLabel.textContent = scale ? `${scale.meters} m` : "";
+				scaleLabel.parentElement?.setAttribute(
+					"aria-label",
+					scale ? `지도 거리 눈금 ${scale.meters} 미터` : "지도 거리 눈금 준비 중",
+				);
+				mapScaleZoom = cameraRef.current.zoom;
 			}
 			const pixelWidth = Math.max(1, Math.round(width * dpr));
 			const pixelHeight = Math.max(1, Math.round(height * dpr));
@@ -26694,6 +26712,7 @@ export default function TileFabApp(): React.ReactElement {
 				activePortAuthoringType,
 				editorModel.portSlotArtifacts[activePortAuthoringType].slots.count,
 				editorModel.portSlotArtifacts[activePortAuthoringType].slots.legalCount,
+				guidedPortKeyboard?.portType === activePortAuthoringType,
 			)
 		: null;
 	const equipmentWorkspaceActive =
@@ -26710,6 +26729,12 @@ export default function TileFabApp(): React.ReactElement {
 		? editorModel.portSlotArtifacts[activePortAuthoringType].slots.legalCount
 		: 0;
 	const activeStkZoomActionLabel = (stkDraftSelection?.rows.length ?? 0) === 0 ? "첫 Port 확대" : "현재 Port 확대";
+	const ordinaryPortKeyboardEntryVisible =
+		equipmentWorkspaceActive &&
+		!guidedBuildExperienceActive &&
+		!ohbPlacementIntent &&
+		guidedPortKeyboard === null &&
+		activePortLegalSlotCount > 0;
 	const basePortAuthoringInstruction =
 		tool === "stk"
 			? activePortLegalSlotCount === 0
@@ -28584,6 +28609,28 @@ export default function TileFabApp(): React.ReactElement {
 			startOrdinaryPortKeyboard(next.toUpperCase() as GuidedPortKeyboardType);
 		}
 		return true;
+	};
+	const resumeOrdinaryPortKeyboard = (): void => {
+		const portType = portTypeForTool(toolRef.current);
+		if (
+			!portType ||
+			editorActivityRef.current !== "equip" ||
+			guidedBuildExperienceActive ||
+			guidedPortKeyboardSessionRef.current ||
+			ohbPlacementIntentRef.current ||
+			portEquipmentGroupEditSessionRef.current ||
+			portEquipmentMembershipEditSessionRef.current ||
+			portRowDragRef.current ||
+			panRef.current
+		) return;
+		if (blockStaticFabExclusiveCommand()) return;
+		const blockedReason = editorActivityTransitionBlockedReason();
+		if (blockedReason) {
+			setStatus(blockedReason);
+			return;
+		}
+		// Rebind against the current model without clearing selected Stocker ports or repeat return.
+		startOrdinaryPortKeyboard(portType);
 	};
 	const startEquipmentAuthoringContinuation = (
 		continuation: EquipmentAuthoringContinuation,
@@ -36419,7 +36466,7 @@ export default function TileFabApp(): React.ReactElement {
 											</span>
 										) : null}
 									</span>
-									{!guidedBuildExperienceActive ? (
+									{!guidedBuildExperienceActive && guidedPortKeyboard?.scope === "ordinary" ? (
 										<button
 											ref={portTargetZoomButtonRef}
 											type="button"
@@ -36433,6 +36480,17 @@ export default function TileFabApp(): React.ReactElement {
 										</button>
 									) : null}
 								</span>
+								{ordinaryPortKeyboardEntryVisible ? (
+									<button
+										type="button"
+										className="tilefab-port-keyboard-start"
+										data-testid="ordinary-port-keyboard-start"
+										disabled={editorMutationWaitActive || portRowDragRef.current !== null}
+										onClick={resumeOrdinaryPortKeyboard}
+									>
+										키보드 배치 시작
+									</button>
+								) : null}
 								{tool !== "stk" ? (
 									<span
 										ref={bindEquipmentSelectionReadout}
@@ -38648,9 +38706,9 @@ export default function TileFabApp(): React.ReactElement {
 					</aside>
 				) : null}
 
-				<div className="tilefab-scale">
-					<span />
-					<strong>5 m</strong>
+				<div className="tilefab-scale" role="img" aria-label="지도 거리 눈금 준비 중">
+					<span className="tilefab-scale-line" ref={mapScaleLineRef} aria-hidden="true" />
+					<strong ref={mapScaleLabelRef} />
 				</div>
 			</main>
 

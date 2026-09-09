@@ -9941,6 +9941,15 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	font-size: var(--tilefab-font-caption);
 }
 
+.tilefab-scale {
+	pointer-events: none;
+}
+
+.tilefab-scale .tilefab-scale-line {
+	flex: none;
+	width: 0;
+}
+
 .tilefab-network,
 .tilefab-statusbar,
 .tilefab-buildbar-title,

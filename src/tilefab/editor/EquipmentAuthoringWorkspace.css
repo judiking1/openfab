@@ -59,6 +59,12 @@
 	min-width: 0;
 }
 
+.tilefab-equipment-workspace .tilefab-port-keyboard-start {
+	min-height: 44px;
+	width: 100%;
+	justify-content: center;
+}
+
 .tilefab-equipment-workspace .tilefab-port-authoring-instruction {
 	width: 100%;
 	min-width: 0;

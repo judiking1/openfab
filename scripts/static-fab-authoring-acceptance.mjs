@@ -34047,6 +34047,7 @@ async function exerciseOrdinaryResilientFabNativeRecovery(
 
 async function exerciseResilientFabCopyRejectionFeedback(page, savedPath, fabOrganizationId) {
 	const before = await readMetrics(page);
+	await exerciseMetricMapScale(page);
 	const native = JSON.parse(await readFile(savedPath, "utf8"));
 	const fab = native.areas.records.find((record) => record.id === fabOrganizationId);
 	if (!fab || fab.membership.railEdges.length === 0) {
@@ -37823,6 +37824,93 @@ async function assertWorkerMirrorReady(page, phase) {
 	);
 }
 
+async function assertMetricMapScale(page, label, expectedVisible = true) {
+	const scale = page.locator(".tilefab-scale");
+	assertEqual(await scale.isVisible(), expectedVisible, `${label} metric ruler visibility`);
+	if (!expectedVisible) return;
+	await page.waitForFunction(
+		() => {
+			const scale = document.querySelector(".tilefab-scale");
+			const text = scale?.querySelector("strong")?.textContent ?? "";
+			const meters = Number(text.replace(/ m$/, ""));
+			const zoom = Number(
+				document.querySelector('[data-testid="rail-canvas"]')?.dataset.cameraZoom,
+			);
+			const width = scale?.querySelector("span")?.getBoundingClientRect().width ?? 0;
+			return (
+				text.endsWith(" m") &&
+				scale?.getAttribute("aria-label") === `지도 거리 눈금 ${meters} 미터` &&
+				meters > 0 &&
+				zoom > 0 &&
+				width >= 31.9 &&
+				width <= 80.1 &&
+				Math.abs(width - meters * zoom) <= 0.05 + meters * 0.00051
+			);
+		},
+		undefined,
+		{ timeout: 10_000 },
+	);
+	// The ruler intentionally passes pointer input through to the Canvas below it.
+	await assertLocatorInsideViewport(page, scale, { requireHitTarget: false });
+	assertEqual(
+		await scale.evaluate((element) => getComputedStyle(element).pointerEvents),
+		"none",
+		`${label} ruler does not intercept authoring controls`,
+	);
+}
+
+async function exerciseMetricMapScale(page) {
+	const originalViewport = page.viewportSize();
+	const before = await readMetrics(page);
+	try {
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.getByRole("button", { name: "전체 보기", exact: true }).click();
+		await page.evaluate(
+			() =>
+				new Promise((resolve) =>
+					requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+				),
+		);
+		await assertMetricMapScale(page, "Fit");
+		// The compact camera buttons appear at 760px and below; desktop uses the header and wheel.
+		await page.setViewportSize({ width: 760, height: 900 });
+		await page.evaluate(
+			() =>
+				new Promise((resolve) =>
+					requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+				),
+		);
+		for (const name of ["화면 확대", "화면 축소"]) {
+			const previous = (await readMetrics(page)).cameraZoom;
+			await page.getByRole("button", { name, exact: true }).click();
+			await page.waitForFunction(
+				(value) =>
+					document.querySelector('[data-testid="rail-canvas"]')?.dataset.cameraZoom !== value,
+				previous,
+				{ timeout: 10_000 },
+			);
+			await assertMetricMapScale(page, name);
+		}
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const prior = await readMetrics(page);
+		const bounds = await page.getByTestId("rail-canvas").boundingBox();
+		if (!bounds) throw new Error("Metric ruler wheel probe has no canvas bounds.");
+		await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+		await page.mouse.wheel(0, -120);
+		await page.waitForFunction(
+			(previous) =>
+				document.querySelector('[data-testid="rail-canvas"]')?.dataset.cameraZoom !== previous,
+			prior.cameraZoom,
+			{ timeout: 10_000 },
+		);
+		await assertMetricMapScale(page, "wheel zoom");
+		await page.screenshot({ path: path.join(artifactRoot, "camera-metric-ruler.png") });
+	} finally {
+		if (originalViewport) await page.setViewportSize(originalViewport);
+	}
+	assertProjectContentUnchanged(await readMetrics(page), before, "metric ruler view actions");
+}
+
 async function assertOrganizationPlacementToolbarLayout(page) {
 	const originalViewport = page.viewportSize();
 	const before = await readMetrics(page);
@@ -37845,6 +37933,7 @@ async function assertOrganizationPlacementToolbarLayout(page) {
 			);
 			await assertLocatorInsideViewport(page, bar);
 			await assertLocatorInsideViewport(page, page.getByTestId("organization-bundle-summary"));
+			await assertMetricMapScale(page, `${width}px copy toolbar`, width > 650);
 			const failure = page.getByTestId("organization-bundle-placement-failure");
 			if (await failure.isVisible()) {
 				await assertLocatorInsideViewport(page, failure);
@@ -38737,7 +38826,7 @@ async function assertEditorActivityRailLayout(page, label) {
 	assertEqual(pressedCount, 1, `${label} single active editor activity`);
 }
 
-async function assertLocatorInsideViewport(page, locator) {
+async function assertLocatorInsideViewport(page, locator, { requireHitTarget = true } = {}) {
 	const box = await locator.boundingBox();
 	const viewport = page.viewportSize();
 	const visibility = await locator.evaluate((element) => {
@@ -38800,7 +38889,7 @@ async function assertLocatorInsideViewport(page, locator) {
 		box.y + box.height > viewport.height ||
 		visibility.visibleWidth < visibility.width - 1 ||
 		visibility.visibleHeight < visibility.height - 1 ||
-		!visibility.hitTarget
+		(requireHitTarget && !visibility.hitTarget)
 	) {
 		throw new Error(
 			`Active control is clipped or occluded: ${JSON.stringify({ box, viewport, visibility })}.`,
@@ -43568,6 +43657,52 @@ async function exerciseEqClickEndpoints(page, label) {
 		sourceRestored.modelChecksum,
 		`${label} source Redo restores exact rail and equipment`,
 	);
+	await assertOrdinaryPortKeyboardReentry(page, "EQ", `${label} source Redo`, sourceRestored);
+}
+
+async function assertOrdinaryPortKeyboardReentry(page, portType, label, baseline) {
+	const app = page.getByTestId("tilefab-app");
+	assertEqual(
+		await app.getAttribute("data-port-keyboard-scope"),
+		"",
+		`${label} discards old cursor`,
+	);
+	assertEqual(
+		await page.getByTestId("ordinary-port-keyboard-target").count(),
+		0,
+		`${label} does not revive the old painted target`,
+	);
+	const entry = page.getByTestId("ordinary-port-keyboard-start");
+	await entry.waitFor({ state: "visible" });
+	await assertLocatorInsideViewport(page, entry);
+	await assertLocatorOwnsHitArea(entry, `${label} keyboard entry`);
+	const bounds = await entry.boundingBox();
+	assertAtLeast(bounds?.height ?? 0, 44, `${label} keyboard entry height`);
+	assertAtLeast(bounds?.width ?? 0, 44, `${label} keyboard entry width`);
+	if (portType === "OHB") {
+		assertEqual(
+			(await page.locator(".tilefab-port-authoring-instruction").innerText()).includes("Enter"),
+			false,
+			`${label} inactive cursor does not advertise Enter`,
+		);
+	}
+	await entry.focus();
+	await entry.press("Enter");
+	await page.waitForFunction(
+		(type) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			return (
+				document.querySelector(".tilefab-app")?.dataset.portKeyboardScope === "ordinary" &&
+				canvas?.dataset.guidedPortKeyboardType === type &&
+				document.activeElement === canvas
+			);
+		},
+		portType,
+		{ timeout: 10_000 },
+	);
+	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} fresh target`);
+	assertEqual(await entry.count(), 0, `${label} hides entry while cursor is active`);
+	assertProjectUnchanged(await readMetrics(page), baseline, `${label} cursor entry is not an edit`);
 }
 
 async function exerciseOpenFragmentCopy(activeBrowser) {
@@ -43696,6 +43831,27 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 			beforeEquipEntry,
 			"ordinary EQUIP discovery entry",
 		);
+		const portCanvas = page.getByTestId("rail-canvas");
+		await portCanvas.press("Meta+z");
+		const railUndone = await waitForWorker(
+			page,
+			(metrics) =>
+				metrics.modelChecksum === blankBaseline.modelChecksum &&
+				Number(metrics.workerTargetSequence) === Number(first.workerTargetSequence) + 1,
+		);
+		assertEqual(
+			await page.getByTestId("ordinary-port-keyboard-start").count(),
+			0,
+			"OHB does not offer keyboard entry without compatible rail",
+		);
+		await portCanvas.press("Meta+Shift+z");
+		const railRestored = await waitForWorker(
+			page,
+			(metrics) =>
+				metrics.modelChecksum === first.modelChecksum &&
+				Number(metrics.workerTargetSequence) === Number(railUndone.workerTargetSequence) + 1,
+		);
+		await assertOrdinaryPortKeyboardReentry(page, "OHB", "OHB rail Undo/Redo", railRestored);
 		await page.getByTestId("rail-canvas").focus();
 		await page.keyboard.press("Escape");
 		await page.waitForFunction(

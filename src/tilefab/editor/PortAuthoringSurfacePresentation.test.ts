@@ -3,7 +3,7 @@ import { portAuthoringSurfacePresentation } from "./PortAuthoringSurfacePresenta
 
 describe("portAuthoringSurfacePresentation", () => {
 	it("names the ordinary OHB target and both placement gestures", () => {
-		const presentation = portAuthoringSurfacePresentation("OHB", 12, 12);
+		const presentation = portAuthoringSurfacePresentation("OHB", 12, 12, true);
 		expect(presentation).toEqual({
 			toolCaption: "OHB Port",
 			toolDescription: "레일 옆 원 · 클릭 또는 드래그",
@@ -13,6 +13,14 @@ describe("portAuthoringSurfacePresentation", () => {
 			configurationAvailable: true,
 			prerequisiteAction: null,
 		});
+	});
+
+	it("offers deliberate keyboard entry when no current OHB target exists", () => {
+		const { instruction } = portAuthoringSurfacePresentation("OHB", 12, 12);
+		expect(instruction).toContain("레일 옆 원 클릭");
+		expect(instruction).toContain("배치 시작 버튼");
+		expect(instruction).not.toContain("Enter");
+		expect(instruction).not.toContain("WASD");
 	});
 
 	it("distinguishes EQ and STK target vocabulary", () => {

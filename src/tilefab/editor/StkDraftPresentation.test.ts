@@ -107,6 +107,17 @@ describe("StkDraftPresentation", () => {
 		expect(stkDraftReviewPresentation(null, "FOUR_PORT").instruction).toContain("연속 4개");
 	});
 
+	it("keeps template requirements while offering fresh keyboard entry without a cursor", () => {
+		const partial = selection({ rows: [1], canComplete: false });
+		const inactive = stkDraftReviewPresentation(partial, "FOUR_PORT");
+		expect(inactive.instruction).toContain("연속 4개");
+		expect(inactive.instruction).toContain("배치 시작 버튼");
+		expect(inactive.instruction).not.toContain("Enter");
+		expect(stkDraftReviewPresentation(partial, "FOUR_PORT", 1, true).instruction).toContain(
+			"방향키 후 Enter",
+		);
+	});
+
 	it("names the actual Enter toggle at the current keyboard row", () => {
 		expect(stkDraftKeyboardTargetLabel(null, false)).toBe("첫 Port 위치");
 		expect(stkDraftKeyboardTargetLabel(selection({ rows: [7] }), true)).toBe("선택됨 · ENTER 해제");

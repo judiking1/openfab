@@ -22,6 +22,7 @@ export function stkDraftReviewPresentation(
 	selection: StkDraftSelection | null,
 	template: StkAuthoringTemplate,
 	minimumPortCount = 1,
+	keyboardTargetActive = false,
 ): {
 	readonly title: string;
 	readonly instruction: string;
@@ -42,7 +43,9 @@ export function stkDraftReviewPresentation(
 		title: `Stocker · ${count}개 Port 선택`,
 		instruction: ready
 			? "선택을 확인한 뒤 STK 생성 · Shift+Enter도 가능"
-			: `${requirement} · 금색 슬롯 클릭 또는 방향키 후 Enter`,
+			: keyboardTargetActive
+				? `${requirement} · 금색 슬롯 클릭 또는 방향키 후 Enter`
+				: `${requirement} · 금색 슬롯 클릭 · 키보드는 배치 시작 버튼을 누르세요`,
 		issue,
 		ready,
 	};
