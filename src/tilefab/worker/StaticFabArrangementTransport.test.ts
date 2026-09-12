@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
 	isIssuedStaticFabArrangementPlan,
 	staticFabArrangementPlanFingerprint,
@@ -108,7 +108,7 @@ describe("Arrangement movement transport", () => {
 			checkpoints++;
 		});
 		expect(decoded.ticket?.planFingerprint).toBe(prepared.ticket.planFingerprint);
-		expect(decoded.plan?.relationshipMutations).toEqual([mutation]);
+		assert.deepEqual(decoded.plan?.relationshipMutations, [mutation]);
 		expect(checkpoints).toBeGreaterThan(65_536 / 64);
 		expect(maximum).toBeLessThan(50);
 		if (wire.kind !== "movement") throw new Error("Expected movement");

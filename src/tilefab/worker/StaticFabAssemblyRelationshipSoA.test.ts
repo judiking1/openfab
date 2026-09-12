@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { createCooperativeTask } from "../core/CooperativeTask";
 import type { DirectedRailEdge } from "../core/RailModuleOwnership";
 import { staticFabArrangementPlanFingerprint } from "../core/StaticFabArrangementCertification";
@@ -202,14 +202,16 @@ describe("StaticFabAssemblyRelationshipSoA", () => {
 			},
 			37,
 		);
-		expect(encoded.fields).toEqual(expected.fields);
-		expect(encoded.transfer.map((buffer) => new Uint8Array(buffer))).toEqual(
+		// Chai compares typed-array entries directly without materializing millions of property keys.
+		assert.deepEqual(encoded.fields, expected.fields);
+		assert.deepEqual(
+			encoded.transfer.map((buffer) => new Uint8Array(buffer)),
 			expected.transfer.map((buffer) => new Uint8Array(buffer)),
 		);
 		expect(new Set(encoded.transfer).size).toBe(encoded.transfer.length);
 		expect(checkpoints).toBeGreaterThan(kind === "maximum" ? 1000 : 1);
 		const delivered = structuredClone(encoded.fields, { transfer: encoded.transfer });
-		expect(decodeStaticFabAssemblyRelationshipPatch(delivered)).toEqual(mutations);
+		assert.deepEqual(decodeStaticFabAssemblyRelationshipPatch(delivered), mutations);
 		const cancelled = new Error("cancel relationship encoding");
 		await expect(
 			encodeStaticFabAssemblyRelationshipAdditionsCooperatively(
@@ -282,16 +284,18 @@ describe("StaticFabAssemblyRelationshipSoA", () => {
 			);
 			expect(maximumSlice).toBeLessThan(50);
 			expect(checkpoints).toBeGreaterThan(1000);
-			expect(encoded.fields).toEqual(expected.fields);
-			expect(encoded.transfer.map((buffer) => new Uint8Array(buffer))).toEqual(
+			assert.deepEqual(encoded.fields, expected.fields);
+			assert.deepEqual(
+				encoded.transfer.map((buffer) => new Uint8Array(buffer)),
 				expected.transfer.map((buffer) => new Uint8Array(buffer)),
 			);
 			expect(new Set(encoded.transfer).size).toBe(encoded.transfer.length);
-			expect(
+			assert.deepEqual(
 				decodeStaticFabAssemblyRelationshipPatch(
 					structuredClone(encoded.fields, { transfer: encoded.transfer }),
 				),
-			).toEqual(changes);
+				changes,
+			);
 		}
 	});
 	it("rejects unstable, noncanonical or cancelled reversible relationship packets", async () => {

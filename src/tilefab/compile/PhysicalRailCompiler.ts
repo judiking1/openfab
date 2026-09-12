@@ -50,7 +50,7 @@ import {
 	PATH_KIND,
 } from "./PhysicalPathCompiler";
 import { type CompiledRailClearance, compileRailClearance } from "./RailClearanceValidator";
-import { deriveTurnoutClearancePathIntervals } from "./TurnoutClearanceOwnership";
+import { TurnoutClearancePathIndex } from "./TurnoutClearanceOwnership";
 
 export { type AuthoredRailType, classifyRailCell } from "../core/RailCellClassification";
 
@@ -917,6 +917,7 @@ function compileTurnoutFootprintSoA(
 	junctions: readonly CompiledJunction[],
 	paths: CompiledPhysicalPaths,
 ): CompiledTurnoutFootprints {
+	const clearancePaths = footprints.length > 0 ? new TurnoutClearancePathIndex(paths) : null;
 	const junctionByCell = new Map(
 		junctions.map((junction) => [cellKey(junction.cell.x, junction.cell.y), junction]),
 	);
@@ -953,8 +954,8 @@ function compileTurnoutFootprintSoA(
 		].filter((pathIndex) => pathIndex >= 0 && pathIndex < paths.pathCount);
 		allPathIndices.push(...footprintPathIndices);
 		clearancePathOffsets[footprintIndex] = allClearancePathIndices.length;
-		if (junction) {
-			for (const interval of deriveTurnoutClearancePathIntervals(junction, paths)) {
+		if (junction && clearancePaths) {
+			for (const interval of clearancePaths.intervalsFor(junction)) {
 				allClearancePathIndices.push(interval.pathIndex);
 				allClearancePathStarts.push(interval.start);
 				allClearancePathEnds.push(interval.end);

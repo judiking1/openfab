@@ -26,6 +26,9 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ### Fixed
 
+- Large FAB compilation indexes directed turnout connections once instead of scanning every
+  physical path for each junction. Clearance ownership and compiled geometry remain identical.
+
 - Optional operational settings load only when opened, keeping their editor and stylesheet out
   of initial loading. Loading and download failure remain closeable with keyboard focus retained.
 
