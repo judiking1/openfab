@@ -9195,7 +9195,7 @@ async function exerciseGuidedPortHandoffRegression(
 		assertEqual(
 			await guidedReuseHeldPlacement
 				.getByText(
-					`COPY ${selectedReuse.selectionModules} RAIL · ${selectedReuse.selectionEquipmentGroups} GROUPS · ${selectedReuse.selectionPorts} PORTS`,
+					`복제 레일 ${selectedReuse.selectionModules}개 · 장비 ${selectedReuse.selectionEquipmentGroups}개 · 포트 ${selectedReuse.selectionPorts}개`,
 					{ exact: true },
 				)
 				.count(),
@@ -9203,12 +9203,12 @@ async function exerciseGuidedPortHandoffRegression(
 			"Guided Reuse placement keeps exact Rail, equipment, and Port identity",
 		);
 		assertEqual(
-			await guidedReuseHeldPlacement.getByText("PLACE ONCE", { exact: true }).count(),
+			await guidedReuseHeldPlacement.getByText("1회 배치", { exact: true }).count(),
 			1,
 			"Guided Reuse placement truthfully names its single commit",
 		);
 		assertEqual(
-			await guidedReuseHeldPlacement.getByText("REPEAT ON", { exact: true }).count(),
+			await guidedReuseHeldPlacement.getByText("반복 배치", { exact: true }).count(),
 			0,
 			"Guided Reuse placement does not promise hidden repeat placement",
 		);
@@ -9273,6 +9273,8 @@ async function exerciseGuidedPortHandoffRegression(
 		for (const viewport of [
 			{ width: 390, height: 844, label: "390x844" },
 			{ width: 760, height: 900, label: "760x900" },
+			{ width: 820, height: 900, label: "820x900" },
+			{ width: 1024, height: 900, label: "1024x900" },
 			{ width: 1440, height: 900, label: "1440x900" },
 		]) {
 			await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -9306,30 +9308,23 @@ async function exerciseGuidedPortHandoffRegression(
 			);
 			const activityToolsVisible = await page.locator(".tilefab-tools").isVisible();
 			const cameraControls = page.locator(".tilefab-camera-controls");
-			const cameraControlsVisible = await cameraControls.isVisible();
-			if (viewport.width <= 760) {
-				assertEqual(
-					activityToolsVisible,
-					false,
-					`Guided Reuse placement hides competing Activity controls ${viewport.label}`,
-				);
-				assertEqual(
-					cameraControlsVisible,
-					true,
-					`Guided Reuse placement retains camera recovery ${viewport.label}`,
-				);
-				await assertLocatorInsideViewport(page, cameraControls);
-			} else {
-				assertEqual(
-					activityToolsVisible,
-					true,
-					`Guided Reuse desktop retains Activity controls ${viewport.label}`,
-				);
-				assertEqual(
-					cameraControlsVisible,
-					false,
-					`Guided Reuse desktop hides compact camera controls ${viewport.label}`,
-				);
+			assertEqual(
+				activityToolsVisible,
+				viewport.width > 760,
+				`Guided Reuse placement Activity visibility ${viewport.label}`,
+			);
+			assertEqual(
+				await cameraControls.isVisible(),
+				viewport.width <= 860,
+				`Guided Reuse placement camera recovery ${viewport.label}`,
+			);
+			if (viewport.width <= 860) await assertLocatorInsideViewport(page, cameraControls);
+			const copyBar = page.getByTestId("rail-buildbar");
+			for (const button of await copyBar.locator("button").all()) {
+				if (await button.isVisible()) await assertLocatorInsideViewport(page, button);
+			}
+			if (viewport.width > 760) {
+				await assertLocatorInsideViewport(page, copyBar.locator(".tilefab-buildbar-title"));
 			}
 			assertAtMost(
 				await page.evaluate(() => document.documentElement.scrollWidth),
@@ -20905,12 +20900,12 @@ async function exerciseBlueprintClipboardShortcuts(page) {
 	assertEqual(
 		await page
 			.locator(".tilefab-buildbar-title")
-			.getByText(`COPY ${copied.areaStampModules} RAIL`, { exact: true })
+			.getByText(`레일 ${copied.areaStampModules}개 복제`, { exact: true })
 			.count(),
 		1,
 		"selection copy placement bar retains the exact selected rail count",
 	);
-	const compactPlacementIdentity = `COPY ${copied.areaStampModules} RAIL · ${beforeCopy.selectionEquipmentGroups} ${Number(beforeCopy.selectionEquipmentGroups) === 1 ? "GROUP" : "GROUPS"} · ${beforeCopy.selectionPorts} ${Number(beforeCopy.selectionPorts) === 1 ? "PORT" : "PORTS"}`;
+	const compactPlacementIdentity = `복제 레일 ${copied.areaStampModules}개 · 장비 ${beforeCopy.selectionEquipmentGroups}개 · 포트 ${beforeCopy.selectionPorts}개`;
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.waitForTimeout(100);
 	const compactHeldPlacement = page.getByTestId("area-stamp-multi-place-status");
@@ -20921,7 +20916,7 @@ async function exerciseBlueprintClipboardShortcuts(page) {
 		"390px placement keeps exact held Rail, equipment, and Port identity visible",
 	);
 	assertEqual(
-		await compactHeldPlacement.getByText("REPEAT ON", { exact: true }).count(),
+		await compactHeldPlacement.getByText("반복 배치", { exact: true }).count(),
 		1,
 		"390px Expert selection copy preserves explicit repeat placement",
 	);
@@ -21032,7 +21027,7 @@ async function exerciseBlueprintClipboardShortcuts(page) {
 		undefined,
 		{ timeout: 10_000 },
 	);
-	const compactRecentIdentity = compactPlacementIdentity.replace(/^COPY /, "RECENT ");
+	const compactRecentIdentity = compactPlacementIdentity.replace(/^복제 /, "최근 ");
 	assertEqual(
 		await compactHeldPlacement.getByText(compactRecentIdentity, { exact: true }).count(),
 		1,
@@ -26784,6 +26779,8 @@ async function exerciseSyntheticFabPresetPlacementModes(page, before) {
 		preparationMilliseconds,
 		firstPlacementMilliseconds,
 		secondPlacementMilliseconds,
+		firstPlacementMetrics: firstPlaced,
+		secondPlacementMetrics: secondPlaced,
 		placedRailCells: firstAdded.cells.length,
 		placedOrganizations: firstOrganizationIdIncrement,
 		firstPointer: `${firstPointer.x},${firstPointer.y}`,
@@ -27586,6 +27583,50 @@ async function exerciseStaticFabArrangement(page, baseline) {
 			`compact arrangement command ${index} bottom`,
 		);
 	}
+
+	for (const height of [720, 600]) {
+		await page.setViewportSize({ width: 390, height });
+		await page.waitForTimeout(120);
+		const bar = page.getByTestId("static-fab-arrangement-bar");
+		const modes = bar.locator(".tilefab-arrangement-modes button");
+		for (const [index, label] of [
+			"최소 경계",
+			"중심",
+			"최대 경계",
+			"중심 간격",
+			"빈 간격",
+		].entries()) {
+			const button = modes.nth(index);
+			assertIncludes(await button.innerText(), label, `compact arrangement mode ${index}`);
+			await assertLocatorInsideViewport(page, button);
+			await assertLocatorInsideViewport(page, button.locator("span"));
+		}
+		const overlap = await bar.evaluate((element) => {
+			const controls = [...element.querySelectorAll("button, .tilefab-arrangement-feedback")];
+			return controls.some((control, index) => {
+				const a = control.getBoundingClientRect();
+				return controls.slice(index + 1).some((other) => {
+					const b = other.getBoundingClientRect();
+					return (
+						Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+						Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+					);
+				});
+			});
+		});
+		assertEqual(
+			overlap,
+			false,
+			`compact arrangement ${height}px controls and feedback do not overlap`,
+		);
+		await assertLocatorInsideViewport(page, bar.locator(".tilefab-arrangement-feedback"));
+		await assertLocatorInsideViewport(page, bar.locator(".tilefab-arrangement-cancel"));
+		await assertLocatorInsideViewport(page, page.getByTestId("apply-static-fab-arrangement"));
+		await page.screenshot({
+			path: path.join(artifactRoot, `arrangement-readable-modes-390x${height}.png`),
+		});
+	}
+	await page.setViewportSize({ width: 390, height: 720 });
 
 	const centerMode = page.locator(
 		'[data-testid="static-fab-arrangement-bar"] button[data-mode="ALIGN_CENTER"]',
@@ -38901,6 +38942,7 @@ async function assertLocatorInsideViewport(page, locator, { requireHitTarget = t
 		visibility.visibleHeight < visibility.height - 1 ||
 		(requireHitTarget && !visibility.hitTarget)
 	) {
+		await page.screenshot({ path: path.join(artifactRoot, "clipped-control.png") });
 		throw new Error(
 			`Active control is clipped or occluded: ${JSON.stringify({ box, viewport, visibility })}.`,
 		);
@@ -41300,12 +41342,12 @@ async function exercisePresetPlacementLifecycle(activeBrowser) {
 			}
 			assertIncludes(
 				(await placementStatus.innerText()).toUpperCase(),
-				"FAB PRESET",
+				"FAB 프리셋",
 				`${viewport.width}px FAB preset compact identity`,
 			);
 			assertIncludes(
 				(await placementStatus.innerText()).toUpperCase(),
-				"PLACE ONCE",
+				"1회 배치",
 				`${viewport.width}px FAB preset one-shot mode`,
 			);
 			assertEqual(
@@ -41437,7 +41479,7 @@ async function exercisePresetPlacementLifecycle(activeBrowser) {
 		const repeatStatus = page.getByTestId("organization-bundle-status");
 		assertIncludes(
 			(await repeatStatus.innerText()).toUpperCase(),
-			"REPEAT ON",
+			"반복 배치",
 			"FAB preset repeat mode label",
 		);
 		const repeatHints = page.getByTestId("editor-action-hints");
@@ -44075,8 +44117,65 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 			1,
 			"invalid open fragment live reason",
 		);
+		const placementFailure = page.getByTestId("area-stamp-placement-failure");
+		await placementFailure.waitFor({ state: "visible" });
+		const failureReason = await placementFailure.locator("span").innerText();
+		assertAtLeast(failureReason.trim().length, 1, "open fragment failure preserves a reason");
+		assertIncludes(
+			await page.locator(".tilefab-statusbar [role='status']").innerText(),
+			failureReason,
+			"open fragment failure takes priority in the visible footer",
+		);
+		assertIncludes(
+			await page.getByTestId("area-stamp-keyboard-announcement").textContent(),
+			"배치하지 못했습니다",
+			"open fragment failed retry is announced before any completion handoff",
+		);
+		assertEqual(
+			await page.getByTestId("area-stamp-keyboard-announcement").getAttribute("aria-live"),
+			"assertive",
+			"the placement announcement owns failure feedback",
+		);
+		assertEqual(
+			await page.locator(".tilefab-statusbar [role='status']").getAttribute("aria-live"),
+			"off",
+			"the visible footer does not repeat the placement failure announcement",
+		);
+		for (const width of [1400, 1399, 1181, 1024, 820, 760, 520, 431, 390]) {
+			await page.setViewportSize({ width, height: 600 });
+			await page.waitForTimeout(75);
+			await assertLocatorInsideViewport(page, placementFailure);
+			await assertLocatorInsideViewport(page, placementFailure.locator("small"));
+			await assertLocatorInsideViewport(page, page.getByTestId("area-stamp-exit"));
+			const failureBox = await placementFailure.boundingBox();
+			const failureHints = page.getByTestId("editor-action-hints");
+			await assertLocatorInsideViewport(page, failureHints);
+			for (const cue of await failureHints.locator(".tilefab-action-hint-input > span").all()) {
+				if (await cue.isVisible()) await assertLocatorInsideViewport(page, cue);
+			}
+			const failureHintsBox = await failureHints.boundingBox();
+			if (
+				!failureBox ||
+				!failureHintsBox ||
+				failureHintsBox.y + failureHintsBox.height > failureBox.y
+			) {
+				throw new Error("Copy placement shortcuts cover the failure reason.");
+			}
+		}
 
+		assertProjectUnchanged(
+			await readMetrics(page),
+			beforeInvalidApply,
+			"compact failure review leaves source unchanged",
+		);
+		await page.screenshot({
+			path: path.join(artifactRoot, "area-copy-rejection-390x600.png"),
+			fullPage: true,
+		});
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await canvas.focus();
 		for (let step = 0; step < 10; step += 1) await page.keyboard.press("ArrowDown");
+		assertEqual(await placementFailure.count(), 0, "location retry clears the old failure");
 		await page.waitForFunction(
 			() =>
 				document.querySelector('[data-testid="rail-canvas"]')?.dataset.draftPreviewValid === "true",
@@ -44175,12 +44274,12 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 		const recentStatus = page.getByTestId("area-stamp-multi-place-status");
 		assertIncludes(
 			(await recentStatus.innerText()).toUpperCase(),
-			"RECENT",
+			"최근",
 			"Recent area compact source identity",
 		);
 		assertIncludes(
 			(await recentStatus.innerText()).toUpperCase(),
-			"REPEAT ON",
+			"반복 배치",
 			"Recent area repeat mode",
 		);
 		assertEqual(
@@ -44354,7 +44453,7 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 		);
 		assertIncludes(
 			(await moduleStatus.innerText()).toUpperCase(),
-			"REPEAT ON",
+			"반복 배치",
 			"Recent module repeat mode label",
 		);
 		assertEqual(
@@ -44977,15 +45076,53 @@ async function waitForWorker(page, predicate, { timeout = 20_000 } = {}) {
 		undefined,
 		{ timeout },
 	);
+	const startedAt = performance.now();
 	const deadline = Date.now() + timeout;
+	const transitions = [];
+	let previousState = "";
 	while (Date.now() < deadline) {
 		const metrics = await readMetrics(page);
-		if (workerIsSettled(metrics) && predicate(metrics)) return metrics;
+		const settled = workerIsSettled(metrics);
+		const matches = settled && predicate(metrics);
+		const state = JSON.stringify([
+			metrics.workerStatus,
+			metrics.workerSequence,
+			metrics.workerTargetSequence,
+			metrics.modelSequence,
+			metrics.modelSyncPending,
+			metrics.modelDerivationStatus,
+			metrics.organizationBundlePlacementPhase,
+			settled,
+			matches,
+		]);
+		if (state !== previousState) {
+			if (transitions.length < 64)
+				transitions.push({
+					elapsedMilliseconds: performance.now() - startedAt,
+					state: JSON.parse(state),
+				});
+			previousState = state;
+		}
+		if (settled && matches) return metrics;
 		await page.waitForTimeout(50);
 	}
-	throw new Error(
-		`Timed out waiting for authored state. ${JSON.stringify(await readMetrics(page))}`,
+	const final = await readMetrics(page);
+	await writeFile(
+		path.join(artifactRoot, "authored-state-timeout.json"),
+		JSON.stringify(
+			{
+				timeout,
+				elapsedMilliseconds: performance.now() - startedAt,
+				transitions,
+				finalSettled: workerIsSettled(final),
+				finalMatches: workerIsSettled(final) && predicate(final),
+				final,
+			},
+			null,
+			2,
+		),
 	);
+	throw new Error(`Timed out waiting for authored state. ${JSON.stringify(final)}`);
 }
 
 async function exerciseOrganizationBundleCoarsePreview(page) {
@@ -45092,6 +45229,13 @@ async function readMetrics(page) {
 			startupMessage: canvas?.dataset.startupMessage ?? "",
 			startupMirrorFingerprintMatch: canvas?.dataset.startupMirrorFingerprintMatch ?? "",
 			modelSyncPending: canvas?.dataset.modelSyncPending ?? "",
+			modelDerivationStatus: canvas?.dataset.modelDerivationStatus ?? "",
+			modelDerivationWorkerMs: canvas?.dataset.modelDerivationWorkerMs ?? "",
+			modelDerivationActivationMs: canvas?.dataset.modelDerivationActivationMs ?? "",
+			modelDerivationActivationMaxSliceMs:
+				canvas?.dataset.modelDerivationActivationMaxSliceMs ?? "",
+			modelDerivationActivationMaxSlicePhase:
+				canvas?.dataset.modelDerivationActivationMaxSlicePhase ?? "",
 			physicalPaths: canvas?.dataset.physicalPaths ?? "",
 			authoredCells: canvas?.dataset.authoredCells ?? "",
 			authoredEdges: canvas?.dataset.authoredEdges ?? "",

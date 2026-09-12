@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
+import { assertPortSlotCapacity, PORT_SLOT_MAX_ROWS } from "../compile/PortSlotCompiler";
+import { planRailConstruction } from "../core/paint";
 import { initialRailAreaStampPose, type RailAreaStampTemplate } from "../core/RailAreaStamp";
 import { RailDocument } from "../core/RailDocument";
 import { DIR_E, DIR_W } from "../core/railShape";
@@ -102,6 +105,54 @@ function staticFabTemplate(
 }
 
 describe("BlueprintPlacementRuntime", () => {
+	it.each([
+		false,
+		true,
+	])("checks the complete future catalog for rail/mixed placement (mixed=%s)", (mixed) => {
+		const document = new RailDocument();
+		const rail = planRailConstruction(
+			document.map,
+			{ x: PORT_SLOT_MAX_ROWS / 2 - 1, y: 1000 },
+			{ x: 0, y: 1000 },
+		);
+		expect(document.commit(rail)).toBe(true);
+		const template = mixed ? staticFabTemplate(THREE_METER_ROUTE, 0) : null;
+		const exact = prepareBlueprintPlacement({
+			...placementRequest(document, THREE_METER_ROUTE),
+			staticFabTemplate: template,
+		});
+		expect(exact.valid, exact.reason).toBe(true);
+		expect(
+			"staticFab" in exact.plan
+				? document.commitStaticFab(exact.plan)
+				: document.commit(exact.plan),
+		).toBe(true);
+		expect(() => assertPortSlotCapacity(compilePhysicalRail(document.map))).not.toThrow();
+		const before = captureRailMirrorSnapshot(
+			document.map,
+			document.getPatchSequence(),
+			document.portEquipment,
+		).snapshot;
+		const rejected = prepareBlueprintPlacement({
+			...placementRequest(document, THREE_METER_ROUTE),
+			staticFabTemplate: template,
+			anchor: { x: 20, y: -10 },
+		});
+		expect(rejected.valid).toBe(false);
+		expect(rejected.reason).toContain("현재 지원 한도 204,096개");
+		expect(rejected.reason).toContain("복사 범위를 줄이거나 별도 프로젝트");
+		expect(
+			captureRailMirrorSnapshot(document.map, document.getPatchSequence(), document.portEquipment)
+				.snapshot,
+		).toEqual(before);
+		expect(document.undo()).toBe(true);
+		expect(document.redo()).toBe(true);
+		expect(
+			captureRailMirrorSnapshot(document.map, document.getPatchSequence(), document.portEquipment)
+				.snapshot.checksum,
+		).toBe(before.checksum);
+	}, 30_000);
+
 	it("plans and physically validates one exact placement against a typed authored snapshot", () => {
 		const document = new RailDocument();
 		const snapshot = captureRailMirrorSnapshot(

@@ -1,5 +1,6 @@
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { resolvePortAttachment } from "../compile/PortAttachmentResolver";
+import { assertPortSlotCapacity } from "../compile/PortSlotCompiler";
 import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
 import { applyPortEquipmentMutations } from "../core/EquipmentGroup";
 import { planRailAreaStamp, type RailAreaStampPlan } from "../core/RailAreaStamp";
@@ -59,18 +60,22 @@ export function prepareBlueprintPlacement(
 		plan,
 		source.portEquipment,
 	);
-	if (evaluation.valid && "staticFab" in plan) {
+	if (evaluation.valid) {
 		try {
 			const prospectiveMap = source.map.clone();
 			if (!prospectiveMap.applyAtomicMutations(plan.mutations, plan.switchMutations ?? [])) {
 				throw new Error("레일 또는 switch mutation의 before 상태가 스냅샷과 일치하지 않습니다");
 			}
-			const prospectiveEquipment = applyPortEquipmentMutations(
-				source.portEquipment,
-				plan.portMutations,
-				plan.equipmentGroupMutations,
-			);
+			const prospectiveEquipment =
+				"staticFab" in plan
+					? applyPortEquipmentMutations(
+							source.portEquipment,
+							plan.portMutations,
+							plan.equipmentGroupMutations,
+						)
+					: source.portEquipment;
 			const prospectiveLayout = compilePhysicalRail(prospectiveMap);
+			assertPortSlotCapacity(prospectiveLayout);
 			for (const port of prospectiveEquipment.ports) {
 				const attachment = resolvePortAttachment(prospectiveLayout, port);
 				if (attachment.ok) continue;
@@ -93,9 +98,7 @@ export function prepareBlueprintPlacement(
 				request,
 				plan,
 				false,
-				error instanceof Error
-					? error.message
-					: "혼합 청사진의 prospective 물리 상태를 검증할 수 없습니다",
+				error instanceof Error ? error.message : "청사진 배치 후 물리 상태를 검증할 수 없습니다",
 				plan.conflicts,
 				planningMilliseconds,
 				now() - validationStartedAt,

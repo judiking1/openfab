@@ -2,7 +2,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { planOhbPlacement } from "../compile/PortPlacementPlanner";
 import {
+	assertPortSlotCapacity,
 	compilePortSlots,
+	PORT_SLOT_MAX_ROWS,
 	PORT_SLOT_STATUS,
 	PortSlotAvailabilityIndex,
 } from "../compile/PortSlotCompiler";
@@ -11,6 +13,7 @@ import {
 	defaultProductionBayModuleCatalogRequest,
 } from "../compile/ProductionBayModuleCatalog";
 import { emptyPortEquipmentState } from "../core/EquipmentGroup";
+import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import {
 	discoverStaticFabAssemblyGateways,
@@ -67,6 +70,58 @@ describe("StaticFabAssemblyConnectorRuntime", () => {
 		interbayFixture = exactInterbayFixture();
 		fabLoopFixture = exactFabLoopFixture();
 	});
+
+	it("rejects a connector that would make a currently supported source unopenable", () => {
+		const originalSlots = compilePortSlots(
+			compilePhysicalRail(fixture.map),
+			fixture.portEquipment,
+			"OHB",
+		).count;
+		const document = RailDocument.fromLoadedMap(
+			fixture.map.clone(),
+			fixture.patchSequence,
+			fixture.portEquipment,
+			fixture.organizations,
+		);
+		const filler = planRailConstruction(
+			document.map,
+			{ x: (PORT_SLOT_MAX_ROWS - originalSlots) / 2 + 1, y: 1000 },
+			{ x: 0, y: 1000 },
+		);
+		expect(document.commit(filler)).toBe(true);
+		expect(() => assertPortSlotCapacity(compilePhysicalRail(document.map))).not.toThrow();
+		const beforeEquipment = document.portEquipment;
+		const beforeOrganizations = document.organizations;
+		const snapshot = captureRailMirrorSnapshot(
+			document.map,
+			document.getPatchSequence(),
+			document.portEquipment,
+			document.organizations,
+		).snapshot;
+		const prepared = prepareStaticFabAssemblyConnector(
+			connectorRequest(
+				{ ...fixture, map: document.map, patchSequence: document.getPatchSequence(), snapshot },
+				fixture.intent,
+				97,
+			),
+		);
+		expect(staticFabAssemblyConnectorPreparedShapeError(prepared)).toBeNull();
+		expect(prepared.valid).toBe(false);
+		expect(prepared.failureCode).toBe("compile");
+		expect(prepared.ticket).toBeNull();
+		expect(prepared.reason).toContain("현재 지원 한도 204,096개");
+		expect(prepared.plan?.mutations).toHaveLength(0);
+		expect(
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+			).snapshot,
+		).toEqual(snapshot);
+		expect(document.portEquipment).toBe(beforeEquipment);
+		expect(document.organizations).toBe(beforeOrganizations);
+	}, 30_000);
 
 	it("prepares one exact source-bound connector from two public Production Bays", () => {
 		let now = 0;

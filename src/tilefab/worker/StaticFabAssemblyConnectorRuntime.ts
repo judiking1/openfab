@@ -1,6 +1,7 @@
 import type { CompiledPhysicalLayout } from "../compile/PhysicalRailCompiler";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { resolvePortAttachment } from "../compile/PortAttachmentResolver";
+import { assertPortSlotCapacity } from "../compile/PortSlotCompiler";
 import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
 import {
 	planStaticFabAssemblyConnectorWithProspectiveState,
@@ -212,6 +213,7 @@ export function prepareStaticFabAssemblyConnectorInSession(
 		}
 		const prospective = planning.prospectiveState;
 		const prospectiveLayout = compilePhysicalRail(prospective.map);
+		assertPortSlotCapacity(prospectiveLayout);
 		if (prospective.portEquipment.ports.length > 0) {
 			for (const port of prospective.portEquipment.ports) {
 				const attachment = resolvePortAttachment(prospectiveLayout, port);

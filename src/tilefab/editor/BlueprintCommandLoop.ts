@@ -105,26 +105,24 @@ export function blueprintPlacementCompactIdentity(input: {
 	const source = (() => {
 		switch (input.origin) {
 			case "selection-copy":
-				return "COPY";
+				return "복제";
 			case "recent":
-				return "RECENT";
+				return "최근";
 			case "library":
 			case "favorite":
-				return "BLUEPRINT";
+				return "청사진";
 			case "assembly-pattern":
-				return "ASSEMBLY";
+				return "조립";
 			case "fab-preset":
-				return "FAB PRESET";
+				return "FAB 프리셋";
 		}
 	})();
-	const details = [`${input.sourceModuleCount.toLocaleString()} RAIL`];
+	const details = [`레일 ${input.sourceModuleCount.toLocaleString()}개`];
 	if (input.equipmentGroupCount > 0) {
-		details.push(
-			`${input.equipmentGroupCount.toLocaleString()} ${input.equipmentGroupCount === 1 ? "GROUP" : "GROUPS"}`,
-		);
+		details.push(`장비 ${input.equipmentGroupCount.toLocaleString()}개`);
 	}
 	if (input.portCount > 0) {
-		details.push(`${input.portCount.toLocaleString()} ${input.portCount === 1 ? "PORT" : "PORTS"}`);
+		details.push(`포트 ${input.portCount.toLocaleString()}개`);
 	}
 	return `${source} ${details.join(" · ")}`;
 }

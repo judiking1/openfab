@@ -1,6 +1,7 @@
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { resolvePortAttachment } from "../compile/PortAttachmentResolver";
 import { compilePortEquipmentPresentation } from "../compile/PortEquipmentPresentation";
+import { assertPortSlotCapacity } from "../compile/PortSlotCompiler";
 import { additionalStaticFabArrangementClearanceCells } from "../compile/StaticFabArrangementClearance";
 import { resolveStaticFabArrangementCommand } from "../compile/StaticFabArrangementCommandResolver";
 import { planStaticFabArrangement } from "../compile/StaticFabArrangementPlanner";
@@ -208,6 +209,7 @@ function prepareStaticFabArrangementCandidate(
 		);
 		if (organizationIssue) throw new Error(organizationIssue);
 		const prospectiveLayout = compilePhysicalRail(prospectiveMap);
+		assertPortSlotCapacity(prospectiveLayout);
 		for (const port of prospectiveEquipment.ports) {
 			const attachment = resolvePortAttachment(prospectiveLayout, port);
 			if (!attachment.ok) {

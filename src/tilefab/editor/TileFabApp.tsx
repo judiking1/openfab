@@ -2874,6 +2874,13 @@ export default function TileFabApp(): React.ReactElement {
 	const [stampSession, setStampSession] = useState<RailStampSession | null>(null);
 	const [moduleStampCommittedCount, setModuleStampCommittedCount] = useState(0);
 	const [areaStampSession, setAreaStampSession] = useState<RailAreaStampSession | null>(null);
+	const areaStampPlacementFailureRef = useRef<Readonly<{
+		session: RailAreaStampSession;
+		patchSequence: number;
+		message: string;
+	}> | null>(null);
+	const [areaStampPlacementFailure, setAreaStampPlacementFailure] =
+		useState<typeof areaStampPlacementFailureRef.current>(null);
 	const [areaStampCommittedCount, setAreaStampCommittedCount] = useState(0);
 	const [organizationBundlePlacementSession, setOrganizationBundlePlacementSession] =
 		useState<StaticFabOrganizationBundlePlacementSession | null>(null);
@@ -5731,7 +5738,35 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		setStampSession(next);
 	};
+	function clearAreaStampPlacementFailure(): void {
+		if (areaStampPlacementFailureRef.current === null) return;
+		areaStampPlacementFailureRef.current = null;
+		setAreaStampPlacementFailure(null);
+	}
+	function showAreaStampPlacementFailure(
+		message: string,
+		expectedSession = areaStampSessionRef.current,
+	): void {
+		const session = areaStampSessionRef.current;
+		if (
+			!session ||
+			session !== expectedSession ||
+			session.document !== editorModelRef.current.document
+		) return;
+		const notice = Object.freeze({
+			session,
+			patchSequence: session.document.getPatchSequence(),
+			message,
+		});
+		areaStampPlacementFailureRef.current = notice;
+		setAreaStampPlacementFailure(notice);
+		setStatus(message);
+		if (previewReadoutRef.current) {
+			previewReadoutRef.current.textContent = "배치되지 않았습니다 · 도구의 안내를 확인하세요";
+		}
+	}
 	const updateAreaStampSession = (next: RailAreaStampSession | null): void => {
+		clearAreaStampPlacementFailure();
 		areaStampSessionRef.current = next;
 		if (!next) {
 			areaStampCommittedCountRef.current = 0;
@@ -5834,11 +5869,11 @@ export default function TileFabApp(): React.ReactElement {
 		organizationBundlePlacementSession,
 	]);
 	useLayoutEffect(() => {
-		if (!organizationBundlePlacementSession) return;
+		if (!organizationBundlePlacementSession && !areaStampSession) return;
 		const workspace = canvasRef.current?.closest<HTMLElement>(".tilefab-workspace");
 		const bar = workspace?.querySelector<HTMLElement>('[data-testid="rail-buildbar"]');
 		if (!workspace || !bar) return;
-		const property = "--tilefab-organization-hints-bottom";
+		const property = "--tilefab-placement-hints-bottom";
 		const measure = (): void => {
 			const clearance = workspace.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 10;
 			const value = `${Math.ceil(clearance)}px`;
@@ -5854,7 +5889,7 @@ export default function TileFabApp(): React.ReactElement {
 			observer.disconnect();
 			workspace.style.removeProperty(property);
 		};
-	}, [organizationBundlePlacementSession]);
+	}, [organizationBundlePlacementSession, areaStampSession]);
 	const updateTemplatePoseLock = (next: RailTemplatePoseLock): void => {
 		templatePoseLockRef.current = next;
 		templatePointerResolutionRef.current = null;
@@ -6561,7 +6596,10 @@ export default function TileFabApp(): React.ReactElement {
 			updateStkDraftSession(null);
 		}
 		refreshPortDerivedArtifacts(nextModel, portTypeForTool(toolRef.current));
-		if (previousModel.document !== nextModel.document) setOrganizationBundlePublicationNotice(null);
+		if (previousModel.document !== nextModel.document) {
+			clearAreaStampPlacementFailure();
+			setOrganizationBundlePublicationNotice(null);
+		}
 		editorModelRef.current = nextModel;
 		refreshTemplateAttachmentGuide(nextModel, templateSessionRef.current);
 		publishUiState(() => setEditorModel(nextModel));
@@ -7626,6 +7664,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	};
 	const recordCommittedAreaStampPlacement = (): void => {
+		clearAreaStampPlacementFailure();
 		const committedCount = areaStampCommittedCountRef.current + 1;
 		areaStampCommittedCountRef.current = committedCount;
 		setAreaStampCommittedCount(committedCount);
@@ -7647,6 +7686,8 @@ export default function TileFabApp(): React.ReactElement {
 			session.origin,
 		);
 		cancelBlueprintPlacement();
+		clearAreaStampPlacementFailure();
+		const failPlacement = (message: string): void => showAreaStampPlacementFailure(message, session);
 		const requestId = ++blueprintPlacementRequestRef.current;
 		blueprintPlacementPendingRef.current = true;
 		setBlueprintPlacementPending(true);
@@ -7656,9 +7697,9 @@ export default function TileFabApp(): React.ReactElement {
 			canvasRef.current.dataset.blueprintPlacementRequestAnchor = `${anchor.x},${anchor.y}`;
 			canvasRef.current.dataset.blueprintPlacementPose = `${pose.quarterTurns}:${pose.reverseFlow ? 1 : 0}`;
 		}
-		setStatus(`${session.label} 전체 위상과 물리 간섭을 Worker에서 검사합니다`);
+		setStatus(`${session.label} 전체 연결 상태와 배치 가능 여부를 검사합니다`);
 		if (previewReadoutRef.current) {
-			previewReadoutRef.current.textContent = "EXACT CHECK · 이동과 화면 조작은 계속할 수 있습니다";
+			previewReadoutRef.current.textContent = "배치 검사 중 · Esc로 취소";
 		}
 		scheduleRender();
 
@@ -7706,7 +7747,7 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			if (!sourceStillCurrent) {
 				if (canvas) canvas.dataset.blueprintPlacementResult = "stale";
-				setStatus("검사 중 맵이 변경되어 청사진 배치를 취소했습니다 · 다시 클릭하세요");
+				failPlacement("검사 중 맵이 변경되어 청사진 배치를 취소했습니다 · 다시 클릭하세요");
 				return;
 			}
 			if (!prepared.valid) {
@@ -7735,7 +7776,7 @@ export default function TileFabApp(): React.ReactElement {
 					evaluation,
 					templateFeedback: null,
 				};
-				setStatus(
+				failPlacement(
 					prepared.conflictCount > prepared.conflictCells.length
 						? `${prepared.reason} · 충돌 ${prepared.conflictCount.toLocaleString()}곳 중 ${prepared.conflictCells.length.toLocaleString()}곳 표시`
 						: prepared.reason,
@@ -7752,7 +7793,7 @@ export default function TileFabApp(): React.ReactElement {
 				: activeDocument.commit(prepared.plan);
 			if (!committed) {
 				if (canvas) canvas.dataset.blueprintPlacementResult = "stale";
-				setStatus("청사진 확정 직전에 맵이 변경되었습니다 · 다시 배치하세요");
+				failPlacement("청사진 확정 직전에 맵이 변경되었습니다 · 다시 배치하세요");
 				return;
 			}
 			recordCommittedBlueprintPlacement(anchor);
@@ -7782,7 +7823,7 @@ export default function TileFabApp(): React.ReactElement {
 				return;
 			}
 			if (canvasRef.current) canvasRef.current.dataset.blueprintPlacementResult = "error";
-			setStatus(
+			failPlacement(
 				`청사진 정밀 검사를 완료하지 못했습니다: ${error instanceof Error ? error.message : "알 수 없는 오류"}`,
 			);
 		} finally {
@@ -8565,7 +8606,7 @@ export default function TileFabApp(): React.ReactElement {
 				mode,
 				rootCount: binding.roots.length,
 				phase: "planning",
-				reason: "최신 배치 옵션을 Worker 검증 요청으로 병합하고 있습니다",
+				reason: "선택한 정렬 방식으로 배치할 수 있는지 검사하고 있습니다",
 				conflictCount: 0,
 				workerRoundTripMilliseconds: null,
 				sessionHydrationMilliseconds: null,
@@ -9074,6 +9115,10 @@ export default function TileFabApp(): React.ReactElement {
 
 	function areaStampKeyboardSummary(session: RailAreaStampSession): string {
 		const identity = areaStampAccessibleIdentity(session);
+		const failure = areaStampPlacementFailureRef.current;
+		if (failure?.session === session && failure.patchSequence === session.document.getPatchSequence()) {
+			return `${identity} · 배치하지 못했습니다 · ${failure.message} · 위치를 바꿔 Enter로 다시 배치하거나 Esc로 취소하세요`;
+		}
 		const certifiedTwinBayContinuation =
 			connectedCopyTwinBayHandoff !== null && areaStampSessionRef.current === session;
 		const anchor = hoverRef.current;
@@ -9264,6 +9309,7 @@ export default function TileFabApp(): React.ReactElement {
 			x: anchor.x + (direction === "left" ? -1 : direction === "right" ? 1 : 0),
 			y: anchor.y + (direction === "up" ? -1 : direction === "down" ? 1 : 0),
 		});
+		if (areaSession) clearAreaStampPlacementFailure();
 		hoverRef.current = next;
 		hoverWorldRef.current = organizationSession || moduleSession
 			? Object.freeze({ x: next.x + 0.5, y: next.y + 0.5 })
@@ -9445,16 +9491,17 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const session = areaStampSessionRef.current;
 		if (!session || blueprintPlacementPendingRef.current) return;
+		clearAreaStampPlacementFailure();
 		if (!hoverRef.current || previewRef.current?.mode !== "build") refreshBuildPreview();
 		const preview = previewRef.current;
 		if (!preview || preview.mode !== "build") {
-			setStatus("방향키 또는 WASD로 복제 위치를 선택하세요");
+			showAreaStampPlacementFailure("방향키 또는 WASD로 복제 위치를 선택하세요");
 			updateAreaStampKeyboardAccessibility(session, "immediate");
 			return;
 		}
 		if (isRailAreaStampPreviewPlan(preview.plan)) {
 			if (!preview.evaluation.valid) {
-				setStatus(preview.evaluation.reason);
+				showAreaStampPlacementFailure(preview.evaluation.reason);
 				updateAreaStampKeyboardAccessibility(session, "immediate");
 				return;
 			}
@@ -9470,7 +9517,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (!isRailAreaStampPlan(preview.plan) && !isStaticFabMutationPlan(preview.plan)) {
-			setStatus("현재 복제 고스트를 다시 준비하세요");
+			showAreaStampPlacementFailure("현재 복제 고스트를 다시 준비하세요");
 			updateAreaStampKeyboardAccessibility(session, "immediate");
 			return;
 		}
@@ -9484,7 +9531,7 @@ export default function TileFabApp(): React.ReactElement {
 					templateFeedback: null,
 				};
 			}
-			setStatus(
+			showAreaStampPlacementFailure(
 				editorModelRef.current.document.getLastCommandError() ??
 					result.evaluation?.reason ??
 					"Worker 동기화가 끝난 뒤 다시 배치하세요",
@@ -14152,6 +14199,9 @@ export default function TileFabApp(): React.ReactElement {
 		if (templateSessionRef.current) templatePreviewAnchorRef.current = cell;
 		const previous = cursorCellRef.current;
 		if (cell.x === previous.x && cell.y === previous.y) return;
+		if (areaStampSessionRef.current && !blueprintPlacementPendingRef.current) {
+			clearAreaStampPlacementFailure();
+		}
 		cursorCellRef.current = cell;
 		if (cursorReadoutRef.current) {
 			cursorReadoutRef.current.textContent = `X ${cell.x} m · Z ${cell.y} m`;
@@ -17879,12 +17929,12 @@ export default function TileFabApp(): React.ReactElement {
 					}
 				}
 			}
-			setStatus(
-				railDocument.getLastCommandError() ??
-					commitResult.evaluation?.reason ??
-					finalPlan?.reason ??
-					"배치를 완료하지 못했습니다",
-			);
+			const failureMessage = railDocument.getLastCommandError() ??
+				commitResult.evaluation?.reason ??
+				finalPlan?.reason ??
+				"배치를 완료하지 못했습니다";
+			if (activeAreaStamp) showAreaStampPlacementFailure(failureMessage);
+			else setStatus(failureMessage);
 			scheduleRender();
 			return;
 		}
@@ -26664,11 +26714,15 @@ export default function TileFabApp(): React.ReactElement {
 		connectedFabStatusOverride.message === presentedStatus
 			? connectedFabStatusOverride.message
 			: null;
+	const currentAreaStampPlacementFailure = areaStampPlacementFailure?.session === areaStampSession &&
+		areaStampSession?.document === railDocument &&
+		areaStampPlacementFailure?.patchSequence === railDocument.getPatchSequence()
+		? areaStampPlacementFailure.message : null;
 	const currentPublicationWarning = organizationBundlePublicationNotice?.document === railDocument &&
 		organizationBundlePublicationNotice.patchSequence === railDocument.getPatchSequence() &&
 		organizationBundlePublicationNotice.message === status
 		? organizationBundlePublicationNotice.message : null;
-	const taskHandoffLiveStatus = currentPublicationWarning ?? (organizationBundlePlacementSession && organizationBundlePlacementFailure
+	const taskHandoffLiveStatus = currentPublicationWarning ?? currentAreaStampPlacementFailure ?? (organizationBundlePlacementSession && organizationBundlePlacementFailure
 		? organizationBundlePlacementFailure
 		: ordinaryStaticFabIssueRecheckContext
 		? presentedStatus
@@ -30862,11 +30916,13 @@ export default function TileFabApp(): React.ReactElement {
 							className="tilefab-sr-only"
 							data-testid="area-stamp-keyboard-announcement"
 							data-placement-live-owner="true"
-							role="status"
-							aria-live="polite"
+							role={currentAreaStampPlacementFailure ? "alert" : "status"}
+							aria-live={currentAreaStampPlacementFailure ? "assertive" : "polite"}
 							aria-atomic="true"
 						>
-							{taskHandoffLiveStatus}
+							{currentAreaStampPlacementFailure && areaStampSession
+								? areaStampKeyboardSummary(areaStampSession)
+								: taskHandoffLiveStatus}
 						</span>
 					</>
 				) : null}
@@ -35399,15 +35455,15 @@ export default function TileFabApp(): React.ReactElement {
 							<span>
 								<strong>
 									{guidedBuildArrangementSubject
-										? `ARRANGE · ${guidedBuildArrangementSubject}`
-										: `ARRANGE ${staticFabArrangement.rootCount} ROOTS`}
+										? `정렬 · ${guidedBuildArrangementSubject}`
+										: `${staticFabArrangement.rootCount}개 구조 정렬`}
 								</strong>
 								<small>
 									{guidedBuildArrangementSubject
-										? "2개 · CENTER ALIGNMENT"
+										? "두 구조의 중심 맞추기"
 										: staticFabArrangement.source === "ORGANIZATIONS"
-										? "ORGANIZATION ROOTS"
-										: "SELECTED COMPONENTS"}
+										? "선택한 조직 전체"
+										: "선택한 독립 구조"}
 								</small>
 							</span>
 						</header>
@@ -35486,14 +35542,17 @@ export default function TileFabApp(): React.ReactElement {
 						>
 							<strong>
 								{staticFabArrangement.phase === "planning"
-									? "VERIFYING"
+									? "배치 검사 중"
 									: staticFabArrangement.phase === "certified"
-										? "READY"
+										? "적용 가능"
 										: staticFabArrangement.conflictCount > 0
-											? `${staticFabArrangement.conflictCount} CONFLICTS`
-											: "NOT READY"}
+											? `충돌 ${staticFabArrangement.conflictCount}곳`
+											: "적용할 수 없음"}
 							</strong>
 							<span title={staticFabArrangement.reason}>{staticFabArrangement.reason}</span>
+							{staticFabArrangement.rootCount < 3 && (
+								<span>간격 맞춤: 구조 3개 이상 필요</span>
+							)}
 						</p>
 						<div className="tilefab-arrangement-actions">
 							<button
@@ -35518,7 +35577,7 @@ export default function TileFabApp(): React.ReactElement {
 								}}
 								title="취소 · Esc"
 							>
-								<X size={15} /> <kbd>ESC</kbd>
+								<X size={15} /> 취소 <kbd>ESC</kbd>
 							</button>
 							<button
 								type="button"
@@ -35540,7 +35599,7 @@ export default function TileFabApp(): React.ReactElement {
 								onClick={applyStaticFabArrangement}
 								title="검증된 배치 적용 · Enter"
 							>
-								<Check size={15} /> APPLY <kbd>ENTER</kbd>
+								<Check size={15} /> 적용 <kbd>ENTER</kbd>
 							</button>
 						</div>
 					</section>
@@ -35659,7 +35718,7 @@ export default function TileFabApp(): React.ReactElement {
 									? "FAB TEMPLATE"
 									: areaStampSession
 										? areaStampSession.origin === "selection-copy"
-											? `COPY ${areaStampSession.template.sourceModuleCount} RAIL`
+											? `레일 ${areaStampSession.template.sourceModuleCount}개 복제`
 											: areaStampSession.source === "assembly-pattern"
 											? "FAB ASSEMBLY"
 											: "BLUEPRINT"
@@ -35882,7 +35941,7 @@ export default function TileFabApp(): React.ReactElement {
 							<>
 								{organizationBundlePlacementFailure ? (
 									<div
-										className="tilefab-organization-placement-failure"
+										className="tilefab-placement-failure"
 										data-testid="organization-bundle-placement-failure"
 										role="alert"
 									>
@@ -35928,8 +35987,8 @@ export default function TileFabApp(): React.ReactElement {
 									<strong>{organizationBundleCompactIdentity}</strong>
 									<small>
 										{organizationBundleSingleCommit
-											? "PLACE ONCE"
-											: "REPEAT ON"}
+											? "1회 배치"
+											: "반복 배치"}
 									</small>
 								</span>
 								<strong
@@ -35970,13 +36029,24 @@ export default function TileFabApp(): React.ReactElement {
 							</>
 						) : areaStampSession ? (
 							<>
+								{currentAreaStampPlacementFailure ? (
+									<section
+										className="tilefab-placement-failure"
+										data-testid="area-stamp-placement-failure"
+										aria-label="배치 실패"
+									>
+										<strong>배치하지 못했습니다</strong>
+										<span>{currentAreaStampPlacementFailure}</span>
+										<small>다시 배치 Enter · 취소 Esc</small>
+									</section>
+								) : null}
 								<span
 									className="tilefab-multi-place-status"
 									data-testid="area-stamp-multi-place-status"
 								>
 									<i />
 									<strong>{areaStampCompactIdentity}</strong>
-									<small>{guidedAreaStampSingleCommit ? "PLACE ONCE" : "REPEAT ON"}</small>
+									<small>{guidedAreaStampSingleCommit ? "1회 배치" : "반복 배치"}</small>
 								</span>
 								{connectedCopyTwinBayHandoff ? (
 									<>
@@ -36015,7 +36085,7 @@ export default function TileFabApp(): React.ReactElement {
 									title="가까운 호환 종단에 맞춰 회전과 흐름을 자동 정렬"
 								>
 									<Link2 size={14} />
-									{areaStampSession.autoPose ? "AUTO SNAP" : "POSE LOCKED"}
+									{areaStampSession.autoPose ? "자동 맞춤" : "방향 고정"}
 								</button>
 								<fieldset className="tilefab-segmented" aria-label="영역 복제 회전">
 									<button
@@ -36045,8 +36115,8 @@ export default function TileFabApp(): React.ReactElement {
 									title="선택 영역 외형은 유지하고 모든 레일 진행 방향을 반전"
 								>
 									<ArrowLeftRight size={14} />
-									<span>FLOW</span>
-									<strong>{areaStampSession.pose.reverseFlow ? "REVERSE" : "ORIGINAL"}</strong>
+									<span>진행 방향</span>
+									<strong>{areaStampSession.pose.reverseFlow ? "반전" : "원본 유지"}</strong>
 								</button>
 								<button
 									type="button"
@@ -36086,7 +36156,7 @@ export default function TileFabApp(): React.ReactElement {
 										{stampSession.origin === "recent" ? "RECENT · " : "COPY · "}
 										{stampSession.template.grammar}
 									</strong>
-									<small>{moduleStampSingleCommit ? "PLACE ONCE" : "REPEAT ON"}</small>
+									<small>{moduleStampSingleCommit ? "1회 배치" : "반복 배치"}</small>
 								</span>
 								<fieldset className="tilefab-segmented" aria-label="복제 모듈 회전">
 									<button
@@ -38769,7 +38839,7 @@ export default function TileFabApp(): React.ReactElement {
 				</span>
 				<span
 					data-testid="rail-status-message"
-					title={currentPublicationWarning ?? undefined}
+					title={currentPublicationWarning ?? currentAreaStampPlacementFailure ?? undefined}
 					role={currentPublicationWarning ? "alert" : guidedPortKeyboard ? undefined : "status"}
 					aria-live={
 						currentPublicationWarning ? "assertive" : guidedPortKeyboard ||
@@ -39854,15 +39924,15 @@ function staticFabArrangementModeForKeyboardCode(code: string): StaticFabArrange
 function staticFabArrangementModeLabel(mode: StaticFabArrangementMode): string {
 	switch (mode) {
 		case "ALIGN_MIN":
-			return "MIN";
+			return "최소 경계";
 		case "ALIGN_CENTER":
-			return "CENTER";
+			return "중심";
 		case "ALIGN_MAX":
-			return "MAX";
+			return "최대 경계";
 		case "DISTRIBUTE_CENTERS":
-			return "CENTERS";
+			return "중심 간격";
 		case "DISTRIBUTE_GAPS":
-			return "GAPS";
+			return "빈 간격";
 	}
 }
 

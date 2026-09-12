@@ -4,6 +4,7 @@ import { analyzePhysicalPathTopology } from "../compile/PhysicalPathTopology";
 import type { CompiledPhysicalLayout } from "../compile/PhysicalRailCompiler";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { resolvePortAttachment } from "../compile/PortAttachmentResolver";
+import { assertPortSlotCapacity } from "../compile/PortSlotCompiler";
 import {
 	applyPortEquipmentMutations,
 	type PortEquipmentState,
@@ -298,6 +299,7 @@ export function prepareStaticFabSemanticBayMutationInSession(
 	let prospectiveEvidence: StaticFabSemanticBayMutationTopologyEvidence;
 	try {
 		prospectiveLayout = compilePhysicalRail(prospectiveMap);
+		assertPortSlotCapacity(prospectiveLayout);
 		assertPhysicalPortAttachments(prospectiveLayout, prospectiveEquipment);
 		prospectiveEvidence = createTopologyEvidence(prospectiveMap, prospectiveLayout);
 	} catch (error) {

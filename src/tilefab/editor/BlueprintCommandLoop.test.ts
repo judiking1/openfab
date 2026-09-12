@@ -93,7 +93,7 @@ describe("BlueprintCommandLoop", () => {
 				equipmentGroupCount: 3,
 				portCount: 6,
 			}),
-		).toBe("COPY 17 RAIL · 3 GROUPS · 6 PORTS");
+		).toBe("복제 레일 17개 · 장비 3개 · 포트 6개");
 		expect(
 			blueprintPlacementCompactIdentity({
 				origin: "assembly-pattern",
@@ -101,7 +101,7 @@ describe("BlueprintCommandLoop", () => {
 				equipmentGroupCount: 0,
 				portCount: 0,
 			}),
-		).toBe("ASSEMBLY 97 RAIL");
+		).toBe("조립 레일 97개");
 	});
 
 	it("retains active placement ghosts while the pointer uses editor chrome", () => {
