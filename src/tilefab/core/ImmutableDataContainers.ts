@@ -19,7 +19,9 @@ export function assertFrozenDataContainersSteps(value: unknown): Generator<void>
 }
 
 function* immutableDataContainerSteps(root: unknown, freeze: boolean): Generator<void> {
-	const visited = new WeakSet<object>();
+	// This traversal already retains the root graph until completion. A temporary strong set
+	// avoids ephemeron-table growth pauses without extending any container's lifetime.
+	const visited = new Set<object>();
 	const pending: Frame[] = [{ kind: "value", value: root }];
 	while (pending.length > 0) {
 		const frame = pending.pop() as Frame;

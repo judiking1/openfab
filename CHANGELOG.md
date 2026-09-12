@@ -26,6 +26,12 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ### Fixed
 
+- Large relationship validation avoids long temporary visitation-table pauses. Organization
+  bundle placement yields earlier during ownership and membership checks before atomic publication.
+
+- Sparse layout overview queries skip empty regions, and the overview grid keeps readable
+  spacing when zoomed out. Authored rail, port, and equipment identities are unchanged.
+
 - Large FAB compilation indexes directed turnout connections once instead of scanning every
   physical path for each junction. Clearance ownership and compiled geometry remain identical.
 

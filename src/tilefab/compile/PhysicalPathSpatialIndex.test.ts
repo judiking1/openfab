@@ -5,6 +5,29 @@ import { compilePhysicalPaths } from "./PhysicalPathCompiler";
 import { PhysicalPathSpatialIndex } from "./PhysicalPathSpatialIndex";
 
 describe("PhysicalPathSpatialIndex", () => {
+	it("queries an extreme sparse overview in the same order as occupied row-major chunks", () => {
+		const map = new TileMap();
+		const straight = encodeRailCell({ incoming: DIR_W, outgoing: DIR_E });
+		for (const [x, y] of [
+			[-2_000_000_000, -2_000_000_000],
+			[0, 0],
+			[2_000_000_000, 2_000_000_000],
+		])
+			map.setEncoded(x, y, straight);
+		const paths = compilePhysicalPaths(map);
+		const index = new PhysicalPathSpatialIndex(paths);
+		const all = index.query({
+			minX: -2_147_483_648,
+			maxX: 2_147_483_647,
+			minY: -2_147_483_648,
+			maxY: 2_147_483_647,
+		});
+		expect(all).toEqual([0, 1, 2]);
+		expect(index.query({ minX: -1, maxX: 1, minY: -2_147_483_648, maxY: 2_147_483_647 })).toEqual([
+			1,
+		]);
+	});
+
 	it("queries only paths intersecting visible chunks, including negative coordinates", () => {
 		const map = new TileMap();
 		const straight = encodeRailCell({ incoming: DIR_W, outgoing: DIR_E });

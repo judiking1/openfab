@@ -1,4 +1,5 @@
 import type { CompiledPhysicalPaths } from "./PhysicalPathCompiler";
+import { visitSparseGridBuckets } from "./SparseGridQuery";
 
 export interface PhysicalWorldBounds {
 	minX: number;
@@ -87,17 +88,18 @@ export class PhysicalPathSpatialIndex {
 		const minChunkY = Math.floor(bounds.minY / chunkSize);
 		const maxChunkX = Math.floor(bounds.maxX / chunkSize);
 		const maxChunkY = Math.floor(bounds.maxY / chunkSize);
-		for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY++) {
-			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-				const bucket = this.chunks.get(chunkKey(chunkX, chunkY));
-				if (!bucket) continue;
+		visitSparseGridBuckets(
+			this.chunks,
+			{ minX: minChunkX, maxX: maxChunkX, minY: minChunkY, maxY: maxChunkY },
+			",",
+			(bucket) => {
 				for (const pathIndex of bucket) {
 					if ((this.stamps[pathIndex] as number) === this.queryStamp) continue;
 					this.stamps[pathIndex] = this.queryStamp;
 					if (intersectsPath(this.paths, pathIndex, bounds)) target.push(pathIndex);
 				}
-			}
-		}
+			},
+		);
 		return target;
 	}
 }

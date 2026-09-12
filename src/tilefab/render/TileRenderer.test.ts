@@ -198,6 +198,15 @@ describe("TileRenderer camera transforms", () => {
 		expect(overviewRailPixelWidths(10)).toBeNull();
 	});
 
+	it("bounds the overview grid by screen pixels even across the full coordinate domain", () => {
+		for (const zoom of [0.999, 0.25, 0.125, 0.01, 1e-9]) {
+			const step = gridMajorStepForZoom(zoom);
+			expect(Number.isFinite(step)).toBe(true);
+			expect(step * zoom).toBeGreaterThanOrEqual(20);
+			expect(step * zoom).toBeLessThan(40);
+		}
+	});
+
 	it.each([
 		0, 1, 2, 3,
 	] as const)("keeps overview path endpoints and fallback strokes identical at rotation %s", (rotation) => {

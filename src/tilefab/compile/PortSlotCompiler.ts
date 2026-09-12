@@ -181,27 +181,44 @@ export class PortSlotSpatialIndex {
 			this.queryStamp = 1;
 		}
 		const size = this.chunkSizeMeters;
-		for (let z = Math.floor(bounds.minZ / size); z <= Math.floor(bounds.maxZ / size); z++) {
-			for (let x = Math.floor(bounds.minX / size); x <= Math.floor(bounds.maxX / size); x++) {
-				const chunk = findPortSlotSpatialChunk(this.chunkCoordinates, x, z);
-				if (chunk < 0) continue;
-				const start = this.chunkOffsets[chunk] as number;
-				const end = this.chunkOffsets[chunk + 1] as number;
-				for (let index = start; index < end; index++) {
-					const row = this.slotIndices[index] as number;
-					if ((this.stamps[row] as number) === this.queryStamp) continue;
-					this.stamps[row] = this.queryStamp;
-					const worldX = this.worldPositions[row * 2] as number;
-					const worldZ = this.worldPositions[row * 2 + 1] as number;
-					if (
-						worldX >= bounds.minX &&
-						worldX <= bounds.maxX &&
-						worldZ >= bounds.minZ &&
-						worldZ <= bounds.maxZ
-					) {
-						target.push(row);
-					}
+		const minX = Math.floor(bounds.minX / size),
+			maxX = Math.floor(bounds.maxX / size);
+		const minZ = Math.floor(bounds.minZ / size),
+			maxZ = Math.floor(bounds.maxZ / size);
+		if (![minX, maxX, minZ, maxZ].every(Number.isSafeInteger) || minX > maxX || minZ > maxZ)
+			return target;
+		const visitChunk = (chunk: number): void => {
+			const start = this.chunkOffsets[chunk] as number;
+			const end = this.chunkOffsets[chunk + 1] as number;
+			for (let index = start; index < end; index++) {
+				const row = this.slotIndices[index] as number;
+				if ((this.stamps[row] as number) === this.queryStamp) continue;
+				this.stamps[row] = this.queryStamp;
+				const worldX = this.worldPositions[row * 2] as number;
+				const worldZ = this.worldPositions[row * 2 + 1] as number;
+				if (
+					worldX >= bounds.minX &&
+					worldX <= bounds.maxX &&
+					worldZ >= bounds.minZ &&
+					worldZ <= bounds.maxZ
+				)
+					target.push(row);
+			}
+		};
+		const chunks = this.chunkOffsets.length - 1;
+		if ((maxX - minX + 1) * (maxZ - minZ + 1) <= chunks * 3 + 16) {
+			for (let z = minZ; z <= maxZ; z++) {
+				for (let x = minX; x <= maxX; x++) {
+					const chunk = findPortSlotSpatialChunk(this.chunkCoordinates, x, z);
+					if (chunk >= 0) visitChunk(chunk);
 				}
+			}
+		} else {
+			// Canonical typed chunks already have the same z/x order as the dense traversal.
+			for (let chunk = 0; chunk < chunks; chunk++) {
+				const x = this.chunkCoordinates[chunk * 2] as number;
+				const z = this.chunkCoordinates[chunk * 2 + 1] as number;
+				if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) visitChunk(chunk);
 			}
 		}
 		return target;

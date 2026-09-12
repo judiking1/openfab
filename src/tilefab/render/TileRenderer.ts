@@ -52,6 +52,7 @@ import {
 	type RailTemplatePlacementFeedback,
 	type RailTemplatePlacementHandle,
 } from "../compile/RailTemplatePlacementFeedback";
+import { visitSparseGridBuckets } from "../compile/SparseGridQuery";
 import type {
 	StaticFabOrganizationOutlineBounds,
 	StaticFabOrganizationOutlineIndex,
@@ -283,8 +284,9 @@ export function overviewFlowMarkerBucket(
 	return `${Math.floor(worldX / cellMeters)}:${Math.floor(worldY / cellMeters)}:${direction}`;
 }
 
-export function gridMajorStepForZoom(zoomPixelsPerMeter: number): 5 | 10 | 20 {
+export function gridMajorStepForZoom(zoomPixelsPerMeter: number): number {
 	if (!Number.isFinite(zoomPixelsPerMeter) || zoomPixelsPerMeter <= 0) return 5;
+	if (zoomPixelsPerMeter < 1) return 20 * 2 ** Math.ceil(-Math.log2(zoomPixelsPerMeter));
 	if (zoomPixelsPerMeter < 3) return 20;
 	if (zoomPixelsPerMeter < 6) return 10;
 	return 5;
@@ -4087,10 +4089,11 @@ export class TileRenderer {
 		const maxChunkX = Math.floor(bounds.maxX / ADVANCED_SWITCH_INDEX_CHUNK_SIZE);
 		const minChunkY = Math.floor(bounds.minY / ADVANCED_SWITCH_INDEX_CHUNK_SIZE);
 		const maxChunkY = Math.floor(bounds.maxY / ADVANCED_SWITCH_INDEX_CHUNK_SIZE);
-		for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY++) {
-			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-				const bucket = this.advancedSwitchBuckets.get(cellKey(chunkX, chunkY));
-				if (!bucket) continue;
+		visitSparseGridBuckets(
+			this.advancedSwitchBuckets,
+			{ minX: minChunkX, maxX: maxChunkX, minY: minChunkY, maxY: maxChunkY },
+			",",
+			(bucket) => {
 				for (const index of bucket) {
 					if (this.advancedSwitchVisitStamps[index] === generation) continue;
 					this.advancedSwitchVisitStamps[index] = generation;
@@ -4098,8 +4101,8 @@ export class TileRenderer {
 					if (!visual || !boundsOverlap(visual.bounds, bounds)) continue;
 					visible.push(visual);
 				}
-			}
-		}
+			},
+		);
 		this.visibleAdvancedSwitchCount = visible.length;
 		return visible;
 	}
@@ -7323,17 +7326,18 @@ export class TileRenderer {
 		const maxChunkX = Math.floor(bounds.maxX / ISSUE_CORRIDOR_INDEX_CHUNK_SIZE);
 		const minChunkY = Math.floor(bounds.minY / ISSUE_CORRIDOR_INDEX_CHUNK_SIZE);
 		const maxChunkY = Math.floor(bounds.maxY / ISSUE_CORRIDOR_INDEX_CHUNK_SIZE);
-		for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY++) {
-			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-				const bucket = index.buckets.get(cellKey(chunkX, chunkY));
-				if (!bucket) continue;
+		visitSparseGridBuckets(
+			index.buckets,
+			{ minX: minChunkX, maxX: maxChunkX, minY: minChunkY, maxY: maxChunkY },
+			",",
+			(bucket) => {
 				for (const segmentIndex of bucket) {
 					if (index.visitStamps[segmentIndex] === generation) continue;
 					index.visitStamps[segmentIndex] = generation;
 					candidates.push(segmentIndex);
 				}
-			}
-		}
+			},
+		);
 		candidates.sort((left, right) => left - right);
 		this.issueCorridorCandidateSegments = candidates.length;
 		return candidates;
@@ -8279,10 +8283,11 @@ function visibleOrganizationGhostMarkerIndices(
 	const maxChunkX = Math.floor(bounds.maxX / ORGANIZATION_BUNDLE_GHOST_CHUNK_METERS);
 	const minChunkZ = Math.floor(bounds.minY / ORGANIZATION_BUNDLE_GHOST_CHUNK_METERS);
 	const maxChunkZ = Math.floor(bounds.maxY / ORGANIZATION_BUNDLE_GHOST_CHUNK_METERS);
-	for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-		for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-			const chunk = presentation.markerChunks.get(`${chunkX}:${chunkZ}`);
-			if (!chunk) continue;
+	visitSparseGridBuckets(
+		presentation.markerChunks,
+		{ minX: minChunkX, maxX: maxChunkX, minY: minChunkZ, maxY: maxChunkZ },
+		":",
+		(chunk) => {
 			for (const index of chunk) {
 				const marker = presentation.markers[index];
 				if (
@@ -8295,8 +8300,8 @@ function visibleOrganizationGhostMarkerIndices(
 					indices.push(index);
 				}
 			}
-		}
-	}
+		},
+	);
 	return indices;
 }
 

@@ -64,6 +64,21 @@ describe("PortEquipmentPresentation", () => {
 		expect(index.nearest(16, 1, 0.01)).toMatchObject({ row: 5, portId: 19, equipmentGroupId: 6 });
 		expect(index.nearest(16, 0.9, 0.2)).toMatchObject({ row: 5, portId: 19 });
 		expect(index.nearest(16, 0, 1)).toMatchObject({ row: 4, portId: 3, distanceMeters: 1 });
+		expect(
+			index
+				.query({
+					minX: -2_147_483_648,
+					maxX: 2_147_483_647,
+					minZ: -2_147_483_648,
+					maxZ: 2_147_483_647,
+				})
+				.sort((a, b) => a - b),
+		).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+		expect(index.nearest(16, 0, 2_147_483_647)).toMatchObject({
+			row: 4,
+			portId: 3,
+			distanceMeters: 1,
+		});
 	});
 
 	it("keeps radius boundaries and stable ID ties when picking directly across chunks", () => {
@@ -470,6 +485,14 @@ describe("PortEquipmentPresentation", () => {
 		const index = new PortEquipmentSpatialIndex(presentation);
 
 		expect(presentation.bodySectionCount).toBe(2);
+		expect(
+			index.queryBodySections({
+				minX: -2_147_483_648,
+				maxX: 2_147_483_647,
+				minZ: -2_147_483_648,
+				maxZ: 2_147_483_647,
+			}),
+		).toEqual([0, 1]);
 		expect([...presentation.portBodySectionRows]).toEqual([0, 0, 1, 1]);
 		expect([...presentation.bodySectionPortOffsets]).toEqual([0, 2, 4]);
 		expect([...presentation.bodySectionPortRows]).toEqual([0, 1, 2, 3]);

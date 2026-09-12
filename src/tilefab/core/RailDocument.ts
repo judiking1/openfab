@@ -1217,7 +1217,11 @@ export class RailDocument {
 	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
 		this.lastCommandError = null;
 		const source = captureRailDocumentPortEquipmentSource(this);
-		const cooperative = createRailDocumentCommitCooperativeController(this, source, options);
+		// Leave headroom for a compiler/index operation that crosses the deadline on slower devices.
+		const cooperative = createRailDocumentCommitCooperativeController(this, source, {
+			...options,
+			sliceMilliseconds: options.sliceMilliseconds ?? 2,
+		});
 		const totalStartedAt = cooperative.readTime(0);
 		try {
 			cooperative.assertCurrent();
@@ -1324,6 +1328,9 @@ export class RailDocument {
 				nextOrganizations,
 				nextRelationships,
 				check,
+				// Ownership compilation and membership validation can each spend several milliseconds
+				// in 128 operations. Recheck the same deadline more often before publishing additions.
+				32,
 			);
 			const nextImpactIndex = consumeStaticFabOrganizationImpactIndex(
 				activation.organizationActivation,

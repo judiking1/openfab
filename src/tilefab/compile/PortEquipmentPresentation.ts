@@ -6,6 +6,7 @@ import {
 	compilePortEquipmentResolvedPositionCapability,
 	type PortEquipmentResolvedPositionCapability,
 } from "./PortEquipmentResolvedPositions";
+import { visitSparseGridBuckets } from "./SparseGridQuery";
 import { type StkBodySweep, StkBodySweepIndex } from "./StkBodySweep";
 
 export const PORT_EQUIPMENT_GROUP_PRESENTATION_MODE = {
@@ -202,10 +203,11 @@ export class PortEquipmentSpatialIndex {
 		const maxChunkZ = Math.floor((worldZ + radiusMeters) / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		let nearestRow = -1;
 		let nearestDistance = radiusMeters;
-		for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-				const rows = this.pickChunks.get(`${chunkX}:${chunkZ}`);
-				if (!rows) continue;
+		visitSparseGridBuckets(
+			this.pickChunks,
+			{ minX: minChunkX, maxX: maxChunkX, minY: minChunkZ, maxY: maxChunkZ },
+			":",
+			(rows) => {
 				for (let index = 0; index < rows.length; index++) {
 					const row = rows[index] as number;
 					const dx = (this.presentation.worldPositions[row * 2] as number) - worldX;
@@ -225,8 +227,8 @@ export class PortEquipmentSpatialIndex {
 					nearestRow = row;
 					nearestDistance = distance;
 				}
-			}
-		}
+			},
+		);
 		if (nearestRow < 0) return null;
 		return Object.freeze({
 			row: nearestRow,
@@ -243,10 +245,11 @@ export class PortEquipmentSpatialIndex {
 		const maxChunkX = Math.floor(bounds.maxX / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		const minChunkZ = Math.floor(bounds.minZ / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		const maxChunkZ = Math.floor(bounds.maxZ / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
-		for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-				const rows = this.chunks.get(`${chunkX}:${chunkZ}`);
-				if (!rows) continue;
+		visitSparseGridBuckets(
+			this.chunks,
+			{ minX: minChunkX, maxX: maxChunkX, minY: minChunkZ, maxY: maxChunkZ },
+			":",
+			(rows) => {
 				for (const row of rows) {
 					const worldX = this.presentation.worldPositions[row * 2] as number;
 					const worldZ = this.presentation.worldPositions[row * 2 + 1] as number;
@@ -259,8 +262,8 @@ export class PortEquipmentSpatialIndex {
 						target.push(row);
 					}
 				}
-			}
-		}
+			},
+		);
 		return target;
 	}
 
@@ -288,10 +291,11 @@ export class PortEquipmentSpatialIndex {
 		const maxChunkX = Math.floor(bounds.maxX / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		const minChunkZ = Math.floor(bounds.minZ / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		const maxChunkZ = Math.floor(bounds.maxZ / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
-		for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
-			for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
-				const rows = this.groupChunks.get(`${chunkX}:${chunkZ}`);
-				if (!rows) continue;
+		visitSparseGridBuckets(
+			this.groupChunks,
+			{ minX: minChunkX, maxX: maxChunkX, minY: minChunkZ, maxY: maxChunkZ },
+			":",
+			(rows) => {
 				for (const sectionRow of rows) {
 					if ((this.bodySectionVisitStamps[sectionRow] as number) === generation) continue;
 					this.bodySectionVisitStamps[sectionRow] = generation;
@@ -299,8 +303,8 @@ export class PortEquipmentSpatialIndex {
 						target.push(sectionRow);
 					}
 				}
-			}
-		}
+			},
+		);
 		target.sort((left, right) => left - right);
 		return target;
 	}

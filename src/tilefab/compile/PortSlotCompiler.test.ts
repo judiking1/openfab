@@ -394,6 +394,22 @@ describe("PortSlotCompiler", () => {
 		).toBe(row);
 	});
 
+	it("keeps typed slot query order across an extreme sparse viewport", () => {
+		const slots = compileBasePortSlots(compilePhysicalRail(straightDocument(80).map), "OHB");
+		const index = new PortSlotSpatialIndex(slots);
+		const narrow = [...index.query({ minX: -1, maxX: 81, minZ: -4, maxZ: 4 })];
+		expect(
+			index.query({
+				minX: -2_147_483_648,
+				maxX: 2_147_483_647,
+				minZ: -2_147_483_648,
+				maxZ: 2_147_483_647,
+			}),
+		).toEqual(narrow);
+		expect(narrow).toHaveLength(slots.count);
+		expect(index.query({ minX: 1, maxX: 0, minZ: 0, maxZ: 1 })).toEqual([]);
+	});
+
 	it("keeps query membership private after exposed slot and snapshot buffers mutate", () => {
 		const slots = compileBasePortSlots(compilePhysicalRail(straightDocument(80).map), "OHB");
 		const index = new PortSlotSpatialIndex(slots);
