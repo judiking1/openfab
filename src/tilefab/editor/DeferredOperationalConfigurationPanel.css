@@ -1,0 +1,37 @@
+.tilefab-operational-loading-backdrop {
+	position: absolute;
+	inset: 0;
+	z-index: 160;
+	display: grid;
+	place-items: center;
+	padding: 18px;
+	background: rgb(5 8 9 / 78%);
+}
+
+.tilefab-operational-loading {
+	width: min(440px, 100%);
+	max-height: 100%;
+	overflow: auto;
+	padding: 20px;
+	border: 1px solid #405154;
+	border-radius: 7px;
+	color: #dbe5e6;
+	background: #0b1011;
+}
+
+.tilefab-operational-loading h2 {
+	font-size: 16px;
+}
+
+.tilefab-operational-loading p {
+	line-height: 1.6;
+}
+
+.tilefab-operational-loading button {
+	min-width: 64px;
+	min-height: 44px;
+	border: 1px solid #405154;
+	border-radius: 4px;
+	color: #dbe5e6;
+	background: #132326;
+}

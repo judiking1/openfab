@@ -146,7 +146,7 @@ export function ContextualBlueprintSaveDialog({
 					</span>
 					<div className="tilefab-contextual-save-title">
 						<small>{sourceKind}</small>
-						<strong id="tilefab-contextual-save-title">SAVE BLUEPRINT</strong>
+						<strong id="tilefab-contextual-save-title">청사진 보관</strong>
 					</div>
 					<button type="button" aria-label="청사진 저장 취소" disabled={busy} onClick={onCancel}>
 						<X size={16} />
@@ -156,13 +156,13 @@ export function ContextualBlueprintSaveDialog({
 				<div id="tilefab-contextual-save-summary" className="tilefab-contextual-save-summary">
 					<strong className="tilefab-contextual-save-summary-name">{source.label}</strong>
 					<span className="tilefab-contextual-save-summary-metrics">
-						{source.moduleCount.toLocaleString()} MODULES · {source.edgeCount.toLocaleString()}{" "}
-						EDGES
+						모듈 {source.moduleCount.toLocaleString()}개 · 레일 {source.edgeCount.toLocaleString()}
+						개
 						{source.equipmentGroupCount > 0
-							? ` · ${source.equipmentGroupCount.toLocaleString()} EQ · ${source.portCount.toLocaleString()} PORTS`
+							? ` · 장비 ${source.equipmentGroupCount.toLocaleString()}개 · 포트 ${source.portCount.toLocaleString()}개`
 							: ""}
 						{source.organizationCount > 0
-							? ` · ${source.organizationCount.toLocaleString()} ORG`
+							? ` · 조직 ${source.organizationCount.toLocaleString()}개`
 							: ""}
 					</span>
 				</div>
@@ -178,7 +178,7 @@ export function ContextualBlueprintSaveDialog({
 				<form onSubmit={submit}>
 					<div className="tilefab-contextual-save-fields">
 						<label>
-							<span>NAME</span>
+							<span>이름</span>
 							<input
 								ref={nameRef}
 								value={draft.name}
@@ -198,7 +198,7 @@ export function ContextualBlueprintSaveDialog({
 							/>
 						</label>
 						<label>
-							<span>FOLDER</span>
+							<span>폴더</span>
 							<input
 								ref={folderRef}
 								value={draft.folder}
@@ -210,7 +210,7 @@ export function ContextualBlueprintSaveDialog({
 										? "tilefab-contextual-save-feedback"
 										: undefined
 								}
-								placeholder="Root"
+								placeholder="최상위 폴더"
 								disabled={busy}
 								onChange={(event) => onFolder(event.currentTarget.value)}
 								onBlur={(event) =>
@@ -221,13 +221,13 @@ export function ContextualBlueprintSaveDialog({
 					</div>
 
 					<fieldset className="tilefab-contextual-save-destination">
-						<legend>DESTINATION</legend>
+						<legend>보관 위치</legend>
 						<div className="tilefab-contextual-save-destination-options">
 							<DestinationOption
 								active={draft.destination === "project"}
 								icon={<LibraryBig size={15} />}
-								label="THIS PROJECT"
-								detail="PROJECT BLUEPRINTS"
+								label="이 프로젝트"
+								detail="프로젝트 파일에 포함"
 								testId="contextual-save-project"
 								disabled={busy}
 								onChoose={() => onDestination("project")}
@@ -235,8 +235,8 @@ export function ContextualBlueprintSaveDialog({
 							<DestinationOption
 								active={draft.destination === "user-library"}
 								icon={<FolderOpen size={15} />}
-								label="MY LIBRARY"
-								detail="BROWSER LOCAL"
+								label="내 라이브러리"
+								detail="이 브라우저에 보관"
 								testId="contextual-save-user-library"
 								disabled={busy}
 								onChoose={() => onDestination("user-library")}
@@ -250,7 +250,7 @@ export function ContextualBlueprintSaveDialog({
 						disabled={busy || draft.destination !== "user-library"}
 					>
 						<legend>
-							<Bookmark size={13} /> QUICK SLOT <small>OPTIONAL</small>
+							<Bookmark size={13} /> 빠른 선택 번호 <small>선택 사항</small>
 						</legend>
 						<div className="tilefab-contextual-save-slot-options">
 							<button
@@ -261,7 +261,7 @@ export function ContextualBlueprintSaveDialog({
 								data-testid="contextual-save-quick-slot-none"
 								onClick={() => onQuickSlot(null)}
 							>
-								NONE
+								없음
 							</button>
 							{CONTEXTUAL_BLUEPRINT_QUICK_SLOTS.map((slot) => {
 								const occupied = occupiedQuickSlots.has(slot);
@@ -269,14 +269,16 @@ export function ContextualBlueprintSaveDialog({
 									<button
 										key={slot}
 										type="button"
-										aria-label={`Quick slot ${slot}${occupied ? " 사용 중" : ""}`}
+										aria-label={`빠른 선택 ${slot}${occupied ? " 사용 중" : ""}`}
 										className="tilefab-contextual-save-slot"
 										aria-pressed={draft.quickSlot === slot}
 										data-active={draft.quickSlot === slot}
 										data-occupied={occupied}
 										data-testid={`contextual-save-quick-slot-${slot}`}
 										title={
-											occupied ? `Slot ${slot} · ${occupiedQuickSlots.get(slot)}` : `Slot ${slot}`
+											occupied
+												? `빠른 선택 ${slot} · ${occupiedQuickSlots.get(slot)}`
+												: `빠른 선택 ${slot}`
 										}
 										disabled={busy || occupied}
 										onClick={() => onQuickSlot(slot)}
@@ -301,7 +303,7 @@ export function ContextualBlueprintSaveDialog({
 					</div>
 					<footer>
 						<button type="button" disabled={busy} onClick={onCancel}>
-							CANCEL
+							취소
 						</button>
 						<button
 							type="submit"
@@ -311,10 +313,10 @@ export function ContextualBlueprintSaveDialog({
 						>
 							<Save size={15} />
 							{busy
-								? "SAVING"
+								? "보관 중"
 								: draft.destination === "project"
-									? "ADD TO PROJECT BLUEPRINTS"
-									: "SAVE TO MY LIBRARY"}
+									? "프로젝트에 청사진 추가"
+									: "내 라이브러리에 보관"}
 							<kbd>⌘/CTRL S</kbd>
 						</button>
 					</footer>
@@ -361,11 +363,11 @@ function DestinationOption({
 }
 
 function sourceKindLabel(kind: ContextualBlueprintSaveSourceSummary["kind"]): string {
-	if (kind === "area-selection") return "SELECTION";
-	if (kind === "organization-selection") return "ORGANIZATION SELECTION";
-	if (kind === "area-ghost") return "HELD BLUEPRINT";
-	if (kind === "organization-ghost") return "HELD ORGANIZATION";
-	return "WHOLE MAP";
+	if (kind === "area-selection") return "선택한 영역";
+	if (kind === "organization-selection") return "선택한 FAB 조직";
+	if (kind === "area-ghost") return "배치 중인 구조";
+	if (kind === "organization-ghost") return "배치 중인 FAB 조직";
+	return "프로젝트 전체 구조";
 }
 
 function trapTabNavigation(event: KeyboardEvent<HTMLElement>, root: HTMLElement | null): void {

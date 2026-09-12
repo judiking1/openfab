@@ -17,6 +17,15 @@ import {
 	type StaticFabArrangementPlanIssueCode,
 } from "../core/StaticFabArrangementPlan";
 import {
+	applyStaticFabAssemblyRelationshipMutations,
+	type StaticFabAssemblyRelationshipStateV1,
+	staticFabAssemblyRelationshipStateSourceError,
+} from "../core/StaticFabAssemblyRelationship";
+import {
+	planStaticFabAssemblyRelationshipRelocation,
+	type StaticFabAssemblyRelocationTranslations,
+} from "../core/StaticFabAssemblyRelationshipRelocation";
+import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
@@ -52,6 +61,7 @@ export function planStaticFabArrangement(
 	ownership: RailModuleOwnershipIndex,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	patchSequence: number,
 	roots: readonly ResolvedStaticFabArrangementRoot[],
 	arrangement: StaticFabArrangementResult,
@@ -61,25 +71,34 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			"INVALID_ARRANGEMENT",
 			"편집 순서가 유효하지 않습니다",
 		);
 	}
 	if (!arrangement.valid) {
-		return invalid(map, patchSequence, organizations, "INVALID_ARRANGEMENT", arrangement.reason);
+		return invalid(
+			map,
+			patchSequence,
+			organizations,
+			relationships,
+			"INVALID_ARRANGEMENT",
+			arrangement.reason,
+		);
 	}
 	if (roots.length === 0) {
 		return invalid(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			"EMPTY_SELECTION",
 			"정렬할 정적 FAB 루트가 없습니다",
 		);
 	}
 	const moves = resolveRootMoves(roots, arrangement);
 	if (typeof moves === "string") {
-		return invalid(map, patchSequence, organizations, "INVALID_ARRANGEMENT", moves);
+		return invalid(map, patchSequence, organizations, relationships, "INVALID_ARRANGEMENT", moves);
 	}
 	for (const move of moves) {
 		const staleReason = staticFabSelectionStaleReason(
@@ -90,7 +109,14 @@ export function planStaticFabArrangement(
 			move.root.selection,
 		);
 		if (staleReason) {
-			return invalid(map, patchSequence, organizations, "STALE_SELECTION", staleReason);
+			return invalid(
+				map,
+				patchSequence,
+				organizations,
+				relationships,
+				"STALE_SELECTION",
+				staleReason,
+			);
 		}
 	}
 
@@ -100,6 +126,7 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			selected.code,
 			selected.reason,
 			selected.conflicts,
@@ -110,6 +137,7 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			"LIMIT_EXCEEDED",
 			`한 번에 이동할 수 있는 레일 edge ${STATIC_FAB_ARRANGEMENT_MAX_RAIL_EDGES.toLocaleString()}개를 초과했습니다`,
 		);
@@ -119,10 +147,39 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			"LIMIT_EXCEEDED",
 			`한 번에 이동할 수 있는 포트 ${STATIC_FAB_ARRANGEMENT_MAX_PORTS.toLocaleString()}개를 초과했습니다`,
 		);
 	}
+
+	const relationshipMotion = relationshipTranslations(moves, selected.edges);
+	let relationshipPlan: ReturnType<typeof planStaticFabAssemblyRelationshipRelocation>;
+	try {
+		relationshipPlan = planStaticFabAssemblyRelationshipRelocation(
+			organizations,
+			relationships,
+			relationshipMotion,
+		);
+	} catch (error) {
+		return invalid(
+			map,
+			patchSequence,
+			organizations,
+			relationships,
+			"RELATIONSHIP_INVALID",
+			errorMessage(error, "조립 관계 이동을 검증할 수 없습니다"),
+		);
+	}
+	if (!relationshipPlan.valid)
+		return invalid(
+			map,
+			patchSequence,
+			organizations,
+			relationships,
+			relationshipPlan.code,
+			relationshipPlan.reason,
+		);
 
 	const external = externalAttachmentCells(map, selected.edges, selected.sourceCellCoordinates);
 	if (external.length > 0) {
@@ -130,6 +187,7 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			"EXTERNAL_ATTACHMENT",
 			"선택 루트가 이동하지 않는 레일과 연결되어 있습니다 · 상위 폐쇄 루프를 함께 선택하세요",
 			external,
@@ -141,6 +199,7 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			targetCheck.code,
 			targetCheck.reason,
 			targetCheck.conflicts,
@@ -149,11 +208,25 @@ export function planStaticFabArrangement(
 
 	const railMutations = buildTranslatedRailMutations(map, selected.edges);
 	if (typeof railMutations === "string") {
-		return invalid(map, patchSequence, organizations, "TOPOLOGY_INVALID", railMutations);
+		return invalid(
+			map,
+			patchSequence,
+			organizations,
+			relationships,
+			"TOPOLOGY_INVALID",
+			railMutations,
+		);
 	}
 	const topologyError = railMutationTopologyError(map, railMutations, selected.switchMutations);
 	if (topologyError) {
-		return invalid(map, patchSequence, organizations, "TOPOLOGY_INVALID", topologyError);
+		return invalid(
+			map,
+			patchSequence,
+			organizations,
+			relationships,
+			"TOPOLOGY_INVALID",
+			topologyError,
+		);
 	}
 
 	let prospectiveMap: TileMap;
@@ -165,6 +238,7 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			"TOPOLOGY_INVALID",
 			errorMessage(error, "정렬 레일 topology를 적용할 수 없습니다"),
 		);
@@ -176,7 +250,14 @@ export function planStaticFabArrangement(
 	);
 	const equipmentError = portEquipmentLayoutError(prospectiveMap, prospectiveEquipment);
 	if (equipmentError) {
-		return invalid(map, patchSequence, organizations, "PORT_LAYOUT_INVALID", equipmentError);
+		return invalid(
+			map,
+			patchSequence,
+			organizations,
+			relationships,
+			"PORT_LAYOUT_INVALID",
+			equipmentError,
+		);
 	}
 
 	const organizationPlan = planOrganizationRelocation(
@@ -198,6 +279,7 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			"ORGANIZATION_INVALID",
 			errorMessage(error, "정적 FAB 조직 membership을 이동할 수 없습니다"),
 		);
@@ -208,8 +290,46 @@ export function planStaticFabArrangement(
 		prospectiveOrganizations,
 	);
 	if (organizationError) {
-		return invalid(map, patchSequence, organizations, "ORGANIZATION_INVALID", organizationError);
+		return invalid(
+			map,
+			patchSequence,
+			organizations,
+			relationships,
+			"ORGANIZATION_INVALID",
+			organizationError,
+		);
 	}
+	try {
+		const prospectiveRelationships = applyStaticFabAssemblyRelationshipMutations(
+			relationships,
+			relationshipPlan.mutations,
+			relationships.nextRelationshipId,
+		);
+		const error = staticFabAssemblyRelationshipStateSourceError(
+			prospectiveMap,
+			prospectiveOrganizations,
+			prospectiveRelationships,
+		);
+		if (error)
+			return invalid(
+				map,
+				patchSequence,
+				organizations,
+				relationships,
+				"RELATIONSHIP_INVALID",
+				error,
+			);
+	} catch (error) {
+		return invalid(
+			map,
+			patchSequence,
+			organizations,
+			relationships,
+			"RELATIONSHIP_INVALID",
+			errorMessage(error, "이동 후 조립 관계가 유효하지 않습니다"),
+		);
+	}
+
 	try {
 		const sourceLayout = compilePhysicalRail(map);
 		const prospectiveLayout = compilePhysicalRail(prospectiveMap);
@@ -222,6 +342,7 @@ export function planStaticFabArrangement(
 				map,
 				patchSequence,
 				organizations,
+				relationships,
 				"CLEARANCE_INVALID",
 				"정렬 후 기존에 없던 레일 물리 간섭이 생깁니다",
 				clearanceConflicts,
@@ -232,6 +353,7 @@ export function planStaticFabArrangement(
 			map,
 			patchSequence,
 			organizations,
+			relationships,
 			"COMPILE_FAILURE",
 			errorMessage(error, "정렬 후 물리 레일을 컴파일할 수 없습니다"),
 		);
@@ -254,6 +376,9 @@ export function planStaticFabArrangement(
 		switchMutations: selected.switchMutations,
 		portMutations: selected.portMutations,
 		equipmentGroupMutations: Object.freeze([]),
+		relationshipMutations: relationshipPlan.mutations,
+		nextRelationshipIdBefore: relationships.nextRelationshipId,
+		nextRelationshipIdAfter: relationships.nextRelationshipId,
 		organizationMutations: organizationPlan.mutations,
 		organizationImpactAuthorizations: organizationPlan.affectedOrganizationIds,
 		nextOrganizationIdBefore: organizations.nextOrganizationId,
@@ -273,6 +398,29 @@ export function planStaticFabArrangement(
 			affectedOrganizationIds: organizationPlan.affectedOrganizationIds,
 		}),
 	});
+}
+
+function relationshipTranslations(
+	moves: readonly RootMove[],
+	edges: readonly SelectedRailEdge[],
+): StaticFabAssemblyRelocationTranslations {
+	const byRoot = new Map(
+		moves.map((move) => [move.root.key, Object.freeze({ x: move.deltaX, y: move.deltaZ })]),
+	);
+	const railEdges = new Map<string, Cell>();
+	const advancedSwitches = new Map<number, Cell>();
+	const equipmentGroups = new Map<number, Cell>();
+	for (const edge of edges) {
+		const translation = byRoot.get(edge.rootKey);
+		if (!translation) throw new Error("Missing resolved arrangement root translation.");
+		railEdges.set(staticFabOrganizationEdgeKey(edge.edge), translation);
+	}
+	for (const move of moves) {
+		const translation = Object.freeze({ x: move.deltaX, y: move.deltaZ });
+		for (const id of move.root.advancedSwitchIds) advancedSwitches.set(id, translation);
+		for (const id of move.root.equipmentGroupIds) equipmentGroups.set(id, translation);
+	}
+	return { railEdges, advancedSwitches, equipmentGroups };
 }
 
 function resolveRootMoves(
@@ -715,6 +863,7 @@ function invalid(
 	map: TileMap,
 	patchSequence: number,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 	issueCode: StaticFabArrangementPlanIssueCode,
 	reason: string,
 	conflicts: readonly Cell[] = [],
@@ -733,6 +882,9 @@ function invalid(
 		switchMutations: Object.freeze([]),
 		portMutations: Object.freeze([]),
 		equipmentGroupMutations: Object.freeze([]),
+		relationshipMutations: Object.freeze([]),
+		nextRelationshipIdBefore: relationships.nextRelationshipId,
+		nextRelationshipIdAfter: relationships.nextRelationshipId,
 		organizationMutations: Object.freeze([]),
 		organizationImpactAuthorizations: Object.freeze([]),
 		nextOrganizationIdBefore: organizations.nextOrganizationId,

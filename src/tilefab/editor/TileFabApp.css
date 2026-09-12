@@ -4669,6 +4669,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-multi-place-status,
 .tilefab-area-stamp-auto-pose,
+.tilefab-held-blueprint-save,
 .tilefab-placement-exit {
 	display: inline-flex;
 	height: 36px;
@@ -13316,7 +13317,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 .tilefab-app:is(
 		[data-organization-bundle-active="true"],
 		[data-area-stamp-modules]:not([data-area-stamp-modules="0"])
-	):has(.tilefab-placement-failure)
+	)
 	.tilefab-hierarchy-handoff-dock {
 	bottom: var(--tilefab-placement-hints-bottom, 86px);
 }
@@ -13380,4 +13381,73 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	line-height: 1.4;
 	white-space: normal;
 	overflow-wrap: anywhere;
+}
+
+.tilefab-arrangement-historybar {
+	position: absolute;
+	z-index: 5;
+	bottom: 10px;
+	left: 58px;
+	width: min(500px, calc(100% - 68px));
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 7px;
+	border: 1px solid #354143;
+	border-radius: 5px;
+	background: rgb(14 20 21 / 96%);
+}
+.tilefab-arrangement-history-copy {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.tilefab-arrangement-history-cancel {
+	min-width: 80px;
+	min-height: 44px;
+	flex-shrink: 0;
+	border: 1px solid #45595c;
+	border-radius: 4px;
+	background: #172326;
+	color: #e3f6f7;
+}
+
+.tilefab-arrangementbar[data-phase="rejected"] .tilefab-arrangement-reason {
+	white-space: normal;
+	overflow: visible;
+	overflow-wrap: anywhere;
+	text-overflow: clip;
+}
+@media (min-width: 1181px) {
+	.tilefab-arrangementbar[data-phase="rejected"] {
+		height: auto;
+		min-height: 50px;
+		flex-wrap: wrap;
+	}
+	.tilefab-arrangementbar[data-phase="rejected"] .tilefab-arrangement-feedback {
+		flex-basis: 100%;
+		max-width: none;
+		order: 3;
+		margin-block: 5px;
+	}
+}
+
+.tilefab-held-blueprint-save {
+	min-width: 0;
+	min-height: 44px;
+	height: auto;
+	justify-content: center;
+	padding-block: 6px;
+	white-space: normal;
+	cursor: pointer;
+}
+.tilefab-held-blueprint-save:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.tilefab-buildbar[data-organization-bundle]:not([data-organization-bundle=""]),
+.tilefab-buildbar[data-area-stamp-modules]:not([data-area-stamp-modules="0"]) {
+	max-height: min(340px, calc(100% - 90px));
 }

@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import {
+	createRailMirrorHistoryLedgerEntry,
+	createRailMirrorHistoryMutationLedgerEntryCooperatively,
+} from "./RailPatchHistory";
+import {
+	applyStaticFabAssemblyRelationshipMutationsSteps,
 	copyStaticFabAssemblyRelationshipRecord,
 	copyStaticFabAssemblyRelationshipRecordSteps,
+	copyStaticFabAssemblyRelationshipState,
 	remapStaticFabAssemblyRelationshipRecord,
 	remapStaticFabAssemblyRelationshipRecordSteps,
 	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD,
 	type StaticFabAssemblyRelationshipRecordV1,
 	type StaticFabAssemblyScopedEdgeV1,
 	staticFabAssemblyRelationshipStateShapeError,
+	staticFabAssemblyRelationshipTransitionFootprintSteps,
 } from "./StaticFabAssemblyRelationship";
 import { assertStaticFabOrganizationBundleRelationshipBudgetSteps } from "./StaticFabOrganizationBundleRelationships";
 
@@ -139,6 +146,110 @@ describe("cooperative assembly relationship remapping", () => {
 		expect(() =>
 			remapStaticFabAssemblyRelationshipRecord(record, { ...options, organizationIds: collision }),
 		).toThrow(/같은 ID로 합칠/);
+	});
+});
+
+describe("maximum reversible relationship preparation", () => {
+	it("bounds full before-value and late-difference comparison for a maximum-size record", () => {
+		const before = attachment(STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD - 8);
+		const changed = structuredClone(before);
+		const leg = required(required(changed.connectionGroups[0]).legs[0]);
+		const last = required(leg.exclusiveCutEdges.at(-1));
+		if (last.scope.kind === "PARENT_DIRECT") throw new Error("Expected participant cut");
+		(last.scope as { directOwnerOrganizationIds: readonly number[] }).directOwnerOrganizationIds = [
+			2, 3,
+		];
+		const after = copyStaticFabAssemblyRelationshipRecord(changed);
+		const source = copyStaticFabAssemblyRelationshipState({
+			nextRelationshipId: 2,
+			records: [before],
+		});
+		const mutations = Object.freeze([Object.freeze({ id: 1, before, after })]);
+		const task = createCooperativeTask(
+			applyStaticFabAssemblyRelationshipMutationsSteps(source, mutations, 2),
+		);
+		let slices = 0,
+			maximumSlice = 0;
+		while (!task.done) {
+			const start = performance.now();
+			task.step(64);
+			maximumSlice = Math.max(maximumSlice, performance.now() - start);
+			slices++;
+		}
+		expect(slices).toBeGreaterThan(3000);
+		expect(maximumSlice).toBeLessThan(50);
+		const result = task.finish();
+		expect(result.records[0]).toBe(after);
+		expect(source.records[0]).toEqual(before);
+		expect(result.nextRelationshipId).toBe(2);
+		const noOp = createCooperativeTask(
+			staticFabAssemblyRelationshipTransitionFootprintSteps(
+				Object.freeze([
+					Object.freeze({ id: 1, before, after: copyStaticFabAssemblyRelationshipRecord(before) }),
+				]),
+			),
+		);
+		let rejected = false,
+			noOpSlices = 0;
+		while (!noOp.done) {
+			const start = performance.now();
+			try {
+				noOp.step(64);
+			} catch (error) {
+				expect(String(error)).toContain("no-op");
+				rejected = true;
+				break;
+			}
+			expect(performance.now() - start).toBeLessThan(50);
+			noOpSlices++;
+		}
+		expect(rejected).toBe(true);
+		expect(noOpSlices).toBeGreaterThan(2000);
+	});
+	it("prepares both maximum-record history fingerprints with the exact existing V5 digest", async () => {
+		const before = attachment(STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD - 8);
+		const after = remapStaticFabAssemblyRelationshipRecord(before, {
+			relationshipId: 1,
+			organizationIds: new Map([
+				[1, 1],
+				[2, 2],
+			]),
+			quarterTurns: 0,
+			offset: { x: 7, y: -3 },
+		});
+		const empty = Object.freeze([]);
+		const transition = Object.freeze({
+			changes: empty,
+			switchChanges: empty,
+			portChanges: empty,
+			equipmentGroupChanges: empty,
+			organizationChanges: empty,
+			organizationNextIdBefore: 3,
+			organizationNextIdAfter: 3,
+			organizationImpactAuthorizations: empty,
+			relationshipChanges: Object.freeze([Object.freeze({ id: 1, before, after })]),
+			relationshipNextIdBefore: 2,
+			relationshipNextIdAfter: 2,
+			operationalConfigurationPatch: null,
+		});
+		const expected = createRailMirrorHistoryLedgerEntry("arrange-static-fab", transition);
+		let checkpoints = 0,
+			maximumSlice = 0,
+			last = performance.now();
+		const actual = await createRailMirrorHistoryMutationLedgerEntryCooperatively(
+			"arrange-static-fab",
+			transition,
+			async () => {
+				maximumSlice = Math.max(maximumSlice, performance.now() - last);
+				checkpoints++;
+				last = performance.now();
+			},
+			64,
+		);
+		expect(actual).toEqual(expected);
+		expect(actual.relationshipEdgeReferences).toBe(131072);
+		expect(checkpoints).toBeGreaterThan(5000);
+		expect(maximumSlice).toBeLessThan(50);
 	});
 });
 

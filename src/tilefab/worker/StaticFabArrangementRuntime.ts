@@ -16,6 +16,10 @@ import {
 } from "../core/StaticFabArrangementCommand";
 import type { StaticFabArrangementPlan } from "../core/StaticFabArrangementPlan";
 import {
+	applyStaticFabAssemblyRelationshipMutations,
+	staticFabAssemblyRelationshipStateSourceError,
+} from "../core/StaticFabAssemblyRelationship";
+import {
 	applyStaticFabOrganizationMutations,
 	staticFabOrganizationStateError,
 } from "../core/StaticFabOrganization";
@@ -85,6 +89,7 @@ export function initializeStaticFabArrangementRuntimeSession(
 		nextPortId: snapshot.portEquipment.nextPortId,
 		nextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 		nextOrganizationId: snapshot.organizations.nextOrganizationId,
+		nextRelationshipId: snapshot.relationships.nextRelationshipId,
 	});
 	return Object.freeze({
 		session: {
@@ -166,6 +171,7 @@ function prepareStaticFabArrangementCandidate(
 		ownership,
 		source.portEquipment,
 		source.organizations,
+		source.relationships,
 		source.getPatchSequence(),
 		resolution.roots,
 		arrangement,
@@ -208,6 +214,18 @@ function prepareStaticFabArrangementCandidate(
 			prospectiveOrganizations,
 		);
 		if (organizationIssue) throw new Error(organizationIssue);
+		const prospectiveRelationships = applyStaticFabAssemblyRelationshipMutations(
+			source.relationships,
+			plan.relationshipMutations,
+			plan.nextRelationshipIdAfter,
+		);
+		const relationshipIssue = staticFabAssemblyRelationshipStateSourceError(
+			prospectiveMap,
+			prospectiveOrganizations,
+			prospectiveRelationships,
+		);
+		if (relationshipIssue) throw new Error(relationshipIssue);
+
 		const prospectiveLayout = compilePhysicalRail(prospectiveMap);
 		assertPortSlotCapacity(prospectiveLayout);
 		for (const port of prospectiveEquipment.ports) {
@@ -236,7 +254,7 @@ function prepareStaticFabArrangementCandidate(
 			prospectiveMap,
 			prospectiveEquipment,
 			prospectiveOrganizations,
-			source.relationships,
+			prospectiveRelationships,
 		);
 		return Object.freeze({
 			plan,
@@ -250,6 +268,7 @@ function prepareStaticFabArrangementCandidate(
 				sourceNextPortId: sourceIdentity.nextPortId,
 				sourceNextEquipmentGroupId: sourceIdentity.nextEquipmentGroupId,
 				sourceNextOrganizationId: sourceIdentity.nextOrganizationId,
+				sourceNextRelationshipId: sourceIdentity.nextRelationshipId,
 				intentFingerprint,
 				planFingerprint: staticFabArrangementPlanFingerprint(plan),
 				prospectiveChecksum,
@@ -257,6 +276,7 @@ function prepareStaticFabArrangementCandidate(
 				prospectiveNextPortId: prospectiveEquipment.nextPortId,
 				prospectiveNextEquipmentGroupId: prospectiveEquipment.nextEquipmentGroupId,
 				prospectiveNextOrganizationId: prospectiveOrganizations.nextOrganizationId,
+				prospectiveNextRelationshipId: prospectiveRelationships.nextRelationshipId,
 			}),
 			valid: true,
 			failureCode: null,
@@ -288,6 +308,7 @@ function compactPlan(plan: StaticFabArrangementPlan): StaticFabArrangementPlan {
 		portMutations: Object.freeze([]),
 		equipmentGroupMutations: Object.freeze([]),
 		organizationMutations: Object.freeze([]),
+		relationshipMutations: Object.freeze([]),
 		organizationImpactAuthorizations: Object.freeze([]),
 		valid: false,
 		arrangement: null,

@@ -166,6 +166,9 @@ const DEFAULT_CANDIDATE_DEPENDENCIES: RailEditorStartupCandidateDependencies = {
 };
 
 const RAIL_EDITOR_STARTUP_OPERATION_BUDGET = 128;
+// Snapshot activation reconstructs relationship ownership as well as records.
+// Smaller batches leave headroom between the 4 ms yield target and the 8 ms UI gate.
+const RAIL_EDITOR_STARTUP_SNAPSHOT_OPERATION_BUDGET = 64;
 
 interface RailStartupMirrorSnapshotAuthority {
 	readonly activation: RailStartupActivation;
@@ -359,7 +362,7 @@ async function activateRailEditorStartupInternal(
 		adoption.authority,
 		yieldIfNeeded,
 		checkCancelled,
-		RAIL_EDITOR_STARTUP_OPERATION_BUDGET,
+		RAIL_EDITOR_STARTUP_SNAPSHOT_OPERATION_BUDGET,
 	);
 	const { map, portEquipment, organizations, relationships } = snapshotActivation;
 	let releasedSnapshot: RailMirrorSnapshot | null = null;

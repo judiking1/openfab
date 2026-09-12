@@ -9,7 +9,7 @@ import {
 } from "../core/OperationalConfiguration";
 import type { RailDocument, RailPatchEvent } from "../core/RailDocument";
 import {
-	adoptRailMirrorSnapshotCaptureHandoff,
+	adoptRailMirrorSnapshotCaptureHandoffCooperatively,
 	captureRailMirrorSnapshot,
 	checksumRailMap,
 	checksumRailMirrorSnapshot,
@@ -18,6 +18,7 @@ import {
 	RailChecksumAccumulator,
 	type RailMirrorSnapshot,
 	type RailMirrorSnapshotCaptureHandoff,
+	revokeRailMirrorSnapshotCaptureAuthority,
 	revokeRailMirrorSnapshotCaptureHandoff,
 } from "./RailMirrorChecksum";
 import {
@@ -35,6 +36,7 @@ import {
 	encodeRailPatchEvent,
 	encodeReviewedPortEquipmentRailPatchEventCooperatively,
 	encodeStaticFabAdditionRailPatchEventCooperatively,
+	encodeStaticFabMutationRailPatchEventCooperatively,
 	type MainToRailMirrorMessage,
 	type RailMirrorToMainMessage,
 	railMirrorSnapshotTransfers,
@@ -162,11 +164,18 @@ export interface RailWorkerAuthoredReadyExpectation {
 	readonly revision: number;
 }
 
-export interface RailPreparedAdditionPatchLease {
+export interface RailPreparedStaticPatchLease {
 	readonly isCurrent: () => boolean;
 }
 
+export type RailPreparedAdditionPatchLease = RailPreparedStaticPatchLease;
+
 export interface RailWorkerBridgeHandle {
+	prepareStaticFabMutationPatchCooperatively?(
+		event: RailPatchEvent,
+		checkpoint: () => Promise<void>,
+		operationBudget?: number,
+	): Promise<RailPreparedStaticPatchLease>;
 	getState(): RailWorkerBridgeState;
 	prepareStaticFabAdditionPatchCooperatively?(
 		event: RailPatchEvent,
@@ -380,6 +389,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 	private automaticResyncs = 0;
 	private disposed = false;
 	private readonly readyWaiters = new Set<RailWorkerReadyWaiter>();
+	private readonly admittingSnapshotCaptures = new Set<number>();
 	private readonly snapshotCaptureWaiters = new Map<number, RailWorkerSnapshotCaptureWaiter>();
 	private readonly abandonedSnapshotCaptures = new Map<
 		number,
@@ -496,12 +506,30 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		checkpoint: () => Promise<void>,
 		operationBudget = 128,
 	): Promise<RailPreparedAdditionPatchLease> {
+		return this.prepareStaticFabPatchCooperatively(event, checkpoint, operationBudget, true);
+	}
+
+	/** Bind a reversible six-domain packet to the exact source generation before publication. */
+	async prepareStaticFabMutationPatchCooperatively(
+		event: RailPatchEvent,
+		checkpoint: () => Promise<void>,
+		operationBudget = 128,
+	): Promise<RailPreparedStaticPatchLease> {
+		return this.prepareStaticFabPatchCooperatively(event, checkpoint, operationBudget, false);
+	}
+
+	private async prepareStaticFabPatchCooperatively(
+		event: RailPatchEvent,
+		checkpoint: () => Promise<void>,
+		operationBudget: number,
+		additionsOnly: boolean,
+	): Promise<RailPreparedStaticPatchLease> {
 		const epoch = this.epoch;
 		const baseSequence = this.latestSentSequence;
 		const sourceMap = this.document.map;
 		const sourceGeneration = sourceMap.getMutationGeneration();
 		const operationalConfiguration = this.document.operationalConfiguration;
-		// This is the exact fingerprint of the latest sent authored generation. Static additions
+		// This is the exact fingerprint of the latest sent authored generation. Static mutations
 		// preserve that same immutable operational state; recomputing it at publication is unnecessary.
 		const operationalConfigurationFingerprint =
 			this.state.targetOperationalConfigurationFingerprint;
@@ -514,16 +542,15 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			sourceMap.getRevision() === event.baseRevision &&
 			this.document.operationalConfiguration === operationalConfiguration;
 		const check = async () => {
-			if (!sourceIsCurrent()) throw new Error("Rail Worker addition preparation became stale.");
+			if (!sourceIsCurrent()) throw new Error("Rail Worker static patch preparation became stale.");
 			await checkpoint();
-			if (!sourceIsCurrent()) throw new Error("Rail Worker addition preparation became stale.");
+			if (!sourceIsCurrent()) throw new Error("Rail Worker static patch preparation became stale.");
 		};
 		await check();
-		const encoded = await encodeStaticFabAdditionRailPatchEventCooperatively(
-			event,
-			check,
-			operationBudget,
-		);
+		const encode = additionsOnly
+			? encodeStaticFabAdditionRailPatchEventCooperatively
+			: encodeStaticFabMutationRailPatchEventCooperatively;
+		const encoded = await encode(event, check, operationBudget);
 		const digest = await checksumRailPatchResultCooperatively(
 			sourceChecksum,
 			event,
@@ -1040,7 +1067,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			message.type === "RAIL_SNAPSHOT_CAPTURED" ||
 			message.type === "RAIL_SNAPSHOT_CAPTURE_FAILED"
 		) {
-			this.handleSnapshotCaptureMessage(message);
+			void this.handleSnapshotCaptureMessage(message);
 			return;
 		}
 		if (
@@ -1117,12 +1144,12 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		});
 	}
 
-	private handleSnapshotCaptureMessage(
+	private async handleSnapshotCaptureMessage(
 		message: Extract<
 			RailMirrorToMainMessage,
 			{ type: "RAIL_SNAPSHOT_CAPTURED" | "RAIL_SNAPSHOT_CAPTURE_FAILED" }
 		>,
-	): void {
+	): Promise<void> {
 		const waiter = this.snapshotCaptureWaiters.get(message.requestId);
 		if (!waiter) {
 			const abandoned = this.abandonedSnapshotCaptures.get(message.requestId);
@@ -1139,6 +1166,20 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			this.recover(`Authoritative rail snapshot capture failed: ${message.message}`, true);
 			return;
 		}
+		if (this.admittingSnapshotCaptures.has(message.requestId)) return;
+		this.admittingSnapshotCaptures.add(message.requestId);
+		let sliceStarted = performance.now();
+		const checkpoint = async () => {
+			if (
+				this.snapshotCaptureWaiters.get(message.requestId) !== waiter ||
+				!this.snapshotCaptureWaiterIsCurrent(waiter)
+			)
+				throw new Error("Snapshot capture was cancelled during admission.");
+			if (performance.now() - sliceStarted >= 4) {
+				await new Promise<void>((resolve) => setTimeout(resolve, 0));
+				sliceStarted = performance.now();
+			}
+		};
 		let accepted = false;
 		try {
 			accepted =
@@ -1151,11 +1192,27 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				message.snapshot.portEquipment.nextEquipmentGroupId === waiter.nextEquipmentGroupId &&
 				message.snapshot.organizations.nextOrganizationId === waiter.nextOrganizationId &&
 				message.snapshot.relationships.nextRelationshipId === waiter.nextRelationshipId &&
-				adoptRailMirrorSnapshotCaptureHandoff(waiter.handoff, message.snapshot);
+				(await adoptRailMirrorSnapshotCaptureHandoffCooperatively(
+					waiter.handoff,
+					message.snapshot,
+					checkpoint,
+				)) &&
+				this.snapshotCaptureWaiterIsCurrent(waiter);
 		} catch {
 			accepted = false;
 		}
+		this.admittingSnapshotCaptures.delete(message.requestId);
+		if (this.snapshotCaptureWaiters.get(message.requestId) !== waiter) {
+			revokeRailMirrorSnapshotCaptureAuthority(message.snapshot);
+			const abandoned = this.abandonedSnapshotCaptures.get(message.requestId);
+			if (abandoned) {
+				clearTimeout(abandoned.timeout);
+				this.abandonedSnapshotCaptures.delete(message.requestId);
+			}
+			return;
+		}
 		if (!accepted) {
+			revokeRailMirrorSnapshotCaptureAuthority(message.snapshot);
 			this.rejectSnapshotCapture(
 				message.requestId,
 				new Error("Rail mirror returned a stale or malformed authored snapshot handoff."),

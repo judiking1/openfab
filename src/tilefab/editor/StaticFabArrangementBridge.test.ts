@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { emptyPortEquipmentState } from "../core/EquipmentGroup";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
@@ -25,6 +25,7 @@ import {
 	prepareStaticFabArrangementInSession,
 	type StaticFabArrangementRuntimeSession,
 } from "../worker/StaticFabArrangementRuntime";
+import { encodeStaticFabArrangementTransport } from "../worker/StaticFabArrangementTransport";
 import {
 	StaticFabArrangementBridge,
 	type StaticFabArrangementLiveState,
@@ -95,7 +96,7 @@ class InlineSessionWorker implements StaticFabArrangementWorkerPort {
 				sessionId: request.sessionId,
 				requestId: request.requestId,
 				sourcePlanIndex: result.sourcePlanIndex,
-				prepared: result.prepared,
+				prepared: encodeStaticFabArrangementTransport(result.prepared),
 			};
 		}
 		this.onmessage?.({
@@ -150,6 +151,31 @@ class ThrowingOptionPostWorker extends InlineSessionWorker {
 }
 
 describe("StaticFabArrangementBridge", () => {
+	it("canonicalizes transferred organization rows before cooperative checksum and commit", async () => {
+		const fixture = arrangementFixture(true);
+		const worker = new InlineSessionWorker();
+		const bridge = new StaticFabArrangementBridge(() => worker);
+		startSession(bridge, fixture);
+		const result = await bridge.prepare({ intent: fixture.intent });
+		expect(result.certified).toBe(true);
+		expect(result.plan?.organizationMutations).toHaveLength(1);
+		if (!result.plan) throw new Error("Missing plan");
+		expect(
+			(
+				await fixture.document.commitStaticFabArrangementCooperatively(result.plan, {
+					checkpoint: async () => {},
+					now: () => 0,
+				})
+			).committed,
+		).toBe(true);
+		expect(
+			fixture.document.organizations.records[0]?.membership.railEdges.every(
+				(edge) => edge.from.y === 0 && edge.to.y === 0,
+			),
+		).toBe(true);
+		bridge.dispose();
+	});
+
 	it("hydrates one Worker source and certifies repeated option intents without retransferring it", async () => {
 		const fixture = arrangementFixture();
 		const worker = new InlineSessionWorker();
@@ -186,17 +212,24 @@ describe("StaticFabArrangementBridge", () => {
 	it("independently rejects a forged prospective checksum and disposes the session", async () => {
 		const fixture = arrangementFixture();
 		const worker = new InlineSessionWorker((response) => {
-			if (response.type !== "STATIC_FAB_ARRANGEMENT_PREPARED" || !response.prepared.ticket) {
+			if (
+				response.type !== "STATIC_FAB_ARRANGEMENT_PREPARED" ||
+				response.prepared.kind !== "movement" ||
+				!response.prepared.prepared.ticket
+			) {
 				return response;
 			}
-			const checksum = response.prepared.ticket.prospectiveChecksum;
+			const checksum = response.prepared.prepared.ticket.prospectiveChecksum;
 			return {
 				...response,
 				prepared: {
 					...response.prepared,
-					ticket: {
-						...response.prepared.ticket,
-						prospectiveChecksum: `${checksum[0] === "0" ? "1" : "0"}${checksum.slice(1)}`,
+					prepared: {
+						...response.prepared.prepared,
+						ticket: {
+							...response.prepared.prepared.ticket,
+							prospectiveChecksum: `${checksum[0] === "0" ? "1" : "0"}${checksum.slice(1)}`,
+						},
 					},
 				},
 			};
@@ -213,17 +246,20 @@ describe("StaticFabArrangementBridge", () => {
 	it("rejects malformed prepared data before adoption", async () => {
 		const fixture = arrangementFixture();
 		const worker = new InlineSessionWorker((response) =>
-			response.type === "STATIC_FAB_ARRANGEMENT_PREPARED"
+			response.type === "STATIC_FAB_ARRANGEMENT_PREPARED" && response.prepared.kind === "movement"
 				? {
 						...response,
-						prepared: { ...response.prepared, conflictCount: 0.5 },
+						prepared: {
+							...response.prepared,
+							prepared: { ...response.prepared.prepared, conflictCount: 0.5 },
+						},
 					}
 				: response,
 		);
 		const bridge = new StaticFabArrangementBridge(() => worker);
 		startSession(bridge, fixture);
 
-		await expect(bridge.prepare({ intent: fixture.intent })).rejects.toThrow("malformed data");
+		await expect(bridge.prepare({ intent: fixture.intent })).rejects.toThrow("conflict count");
 		expect(worker.terminated).toBe(true);
 	});
 
@@ -249,7 +285,7 @@ describe("StaticFabArrangementBridge", () => {
 	it("rejects a prepared response whose source plan index skips the session sequence", async () => {
 		const fixture = arrangementFixture();
 		const worker = new InlineSessionWorker((response) =>
-			response.type === "STATIC_FAB_ARRANGEMENT_PREPARED"
+			response.type === "STATIC_FAB_ARRANGEMENT_PREPARED" && response.prepared.kind === "movement"
 				? { ...response, sourcePlanIndex: response.sourcePlanIndex + 1 }
 				: response,
 		);
@@ -313,12 +349,62 @@ describe("StaticFabArrangementBridge", () => {
 
 		worker.deliverNext();
 		expect(worker.terminated).toBe(false);
-		expect(worker.requests).toHaveLength(3);
+		await expect.poll(() => worker.requests.length).toBe(3);
 		worker.deliverNext();
 		const prepared = await latest;
 		expect(prepared.certified).toBe(true);
 		expect(prepared.sourcePlanIndex).toBe(2);
 		expect(worker.terminated).toBe(false);
+	});
+
+	it("cancels received response admission while a newer option remains usable", async () => {
+		const fixture = arrangementFixture();
+		const worker = new ManualSessionWorker();
+		const bridge = new StaticFabArrangementBridge(() => worker);
+		startSession(bridge, fixture);
+		worker.deliverNext();
+		const first = bridge.prepare({ intent: fixture.intent });
+		const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
+		worker.deliverNext();
+		const latest = bridge.prepare({ intent: withMode(fixture.intent, "ALIGN_CENTER") });
+		worker.deliverNext();
+		await rejected;
+		await expect(latest).resolves.toMatchObject({ certified: true, sourcePlanIndex: 2 });
+		expect(worker.terminated).toBe(false);
+		bridge.dispose();
+	});
+
+	it("preserves a newer option when cancellation interrupts the previous plan checksum", async () => {
+		const fixture = arrangementFixture(),
+			worker = new ManualSessionWorker();
+		const bridge = new StaticFabArrangementBridge(() => worker);
+		startSession(bridge, fixture);
+		worker.deliverNext();
+		const checksumModule = await import("../worker/RailMirrorChecksum");
+		const original = checksumModule.checksumRailPatchResultCooperatively;
+		let latest: ReturnType<typeof bridge.prepare> | undefined;
+		const spy = vi
+			.spyOn(checksumModule, "checksumRailPatchResultCooperatively")
+			.mockImplementationOnce(async (...args) => {
+				latest = bridge.prepare({ intent: withMode(fixture.intent, "ALIGN_CENTER") });
+				void latest.catch(() => {});
+				return original(...args);
+			});
+		try {
+			const first = bridge.prepare({ intent: fixture.intent });
+			const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
+			worker.deliverNext();
+			await rejected;
+			await expect.poll(() => latest !== undefined).toBe(true);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(worker.terminated).toBe(false);
+			worker.deliverNext();
+			if (!latest) throw new Error("Latest option was not requested during checksum preparation");
+			await expect(latest).resolves.toMatchObject({ certified: true, sourcePlanIndex: 2 });
+		} finally {
+			spy.mockRestore();
+			bridge.dispose();
+		}
 	});
 
 	it("treats an error from a cancelled in-flight option as stale and runs the latest option", async () => {
@@ -335,7 +421,7 @@ describe("StaticFabArrangementBridge", () => {
 
 		worker.deliverNextAsError();
 		expect(worker.terminated).toBe(false);
-		expect(worker.requests).toHaveLength(3);
+		await expect.poll(() => worker.requests.length).toBe(3);
 		worker.deliverNext();
 
 		await expect(latest).resolves.toMatchObject({ certified: true, sourcePlanIndex: 2 });
@@ -402,7 +488,7 @@ interface ArrangementFixture {
 	readonly intent: StaticFabArrangementCommandIntent;
 }
 
-function arrangementFixture(): ArrangementFixture {
+function arrangementFixture(withOrganizations = false): ArrangementFixture {
 	const map = new TileMap();
 	const first = planRailConstruction(new TileMap(), { x: 0, y: 0 }, { x: 8, y: 0 });
 	const second = planRailConstruction(new TileMap(), { x: 20, y: 10 }, { x: 28, y: 10 });
@@ -412,7 +498,26 @@ function arrangementFixture(): ArrangementFixture {
 		map,
 		0,
 		emptyPortEquipmentState(),
-		emptyStaticFabOrganizationState(),
+		withOrganizations
+			? {
+					nextOrganizationId: 2,
+					records: [
+						{
+							id: 1,
+							kind: "BAY",
+							name: "Moving Bay",
+							parentOrganizationIds: [],
+							membership: {
+								railEdges: buildRailModuleOwnershipIndex(map)
+									.modules.filter((module) => moduleAtZ(module, 10))
+									.flatMap((module) => module.eraseEdges),
+								advancedSwitchIds: [],
+								equipmentGroupIds: [],
+							},
+						},
+					],
+				}
+			: emptyStaticFabOrganizationState(),
 	);
 	const modules = buildRailModuleOwnershipIndex(document.map).modules;
 	const components = [

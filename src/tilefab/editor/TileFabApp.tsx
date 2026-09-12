@@ -957,6 +957,7 @@ import {
 	type RailEditorStartupModel,
 	type RailStartupActivationMetrics,
 } from "./RailEditorStartup";
+import { createStaticFabArrangementCheckpoint } from "./StaticFabArrangementCheckpoint";
 import {
 	railReadinessIssueCorridorAt,
 	railReadinessIssueGuide,
@@ -976,6 +977,7 @@ import {
 	assemblyRailTemplateGallery,
 	contextualRailTemplates,
 } from "./RailTemplateSurfacePolicy";
+import { captureOpenFabProjectSnapshot } from "./OpenFabProjectSnapshotCapture";
 import { RailStartupBridge, RailStartupCancelledError } from "./RailStartupBridge";
 import {
 	type ReadinessPathIdentityIndexBinding,
@@ -1046,7 +1048,7 @@ import {
 	type StaticFabNavigatorModel,
 	type StaticFabNavigatorTab,
 } from "./StaticFabNavigator";
-import { OperationalConfigurationPanel } from "./OperationalConfigurationPanel";
+import { DeferredOperationalConfigurationPanel } from "./DeferredOperationalConfigurationPanel";
 import { OPENFAB_RELEASE_CAPABILITIES } from "./OpenFabReleaseCapabilities";
 import { SimulationReadinessCertificationCard } from "./SimulationReadinessCertificationCard";
 import { SimulationResidentScenarioActiveRunCard } from "./SimulationResidentScenarioActiveRunCard";
@@ -1089,6 +1091,7 @@ import {
 	stkDraftReviewPresentation,
 	stkTemplatePresentation,
 } from "./StkDraftPresentation";
+import { stkDraftFrameTranslation } from "./StkDraftFraming";
 import {
 	type SyntheticFabProjectActivationExpectation,
 	syntheticFabProjectActivationMismatches,
@@ -1693,7 +1696,7 @@ interface ContextPaletteState {
 }
 
 type StaticFabArrangementSource = "SELECTION" | "ORGANIZATIONS";
-type StaticFabArrangementPhase = "planning" | "certified" | "rejected";
+type StaticFabArrangementPhase = "capturing" | "planning" | "committing" | "certified" | "rejected";
 
 interface StaticFabArrangementUiState {
 	readonly source: StaticFabArrangementSource;
@@ -1710,6 +1713,7 @@ interface StaticFabArrangementUiState {
 }
 
 interface StaticFabArrangementBinding {
+	readonly mapMutationGeneration: number;
 	readonly source: StaticFabArrangementSource;
 	readonly document: RailDocument;
 	readonly map: TileMap;
@@ -2264,6 +2268,9 @@ export default function TileFabApp(): React.ReactElement {
 	const workerBridgeDocumentRef = useRef<RailDocument | null>(null);
 	const staticFabArrangementBridgeRef = useRef<StaticFabArrangementBridge | null>(null);
 	const staticFabArrangementBindingRef = useRef<StaticFabArrangementBinding | null>(null);
+	const staticFabArrangementCaptureRef = useRef<AbortController | null>(null);
+	const staticFabArrangementHistoryRef = useRef<AbortController | null>(null);
+	const [staticFabArrangementHistory, setStaticFabArrangementHistory] = useState<"undo" | "redo" | null>(null);
 	const staticFabArrangementPlanRef = useRef<StaticFabArrangementPlan | null>(null);
 	const staticFabArrangementPreviewRef = useRef<StaticFabArrangementPreviewArtifact | null>(null);
 	const staticFabArrangementRequestRef = useRef(0);
@@ -3961,7 +3968,7 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildPreferences?.lastEntryChoice === "guided" &&
 		startupState.status === "ready";
 	const guidedBuildExperienceActive = guidedBuildOpen || guidedBuildResumeAvailable;
-	const staticFabExclusiveCommandActive =
+	const staticFabExclusiveCommandActive = staticFabArrangementHistory !== null ||
 		operationalConfigurationOpen ||
 		stationProposalReview !== null ||
 		staticFabArrangement !== null ||
@@ -4622,6 +4629,20 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildRevealsConstructionBar(guidedBuildEvaluation) ||
 		buildMode !== "route" ||
 		bend !== "auto";
+	const constructionBarVisible =
+		!staticFabArrangement &&
+		!staticFabAssemblyConnector &&
+		(tool === "build" || tool === "reshape") &&
+		!guidedBuildPracticeHandoffConstructionBarHidden &&
+		!guidedBuildOrganizationSelectionConstructionBarHidden &&
+		(!guidedBuildExperienceActive ||
+			guidedBuildConstructionBarRevealed ||
+			tool === "reshape" ||
+			templateSession !== null ||
+			areaStampSession !== null ||
+			organizationBundlePlacementSession !== null ||
+			stampSession !== null) &&
+		!areaSelection;
 	const guidedBuildRouteBendControlsRevealed =
 		guidedBuildRevealsRouteBendControls(guidedBuildEvaluation);
 	const [starterDialogOpen, setStarterDialogOpen] = useState(false);
@@ -5229,6 +5250,8 @@ export default function TileFabApp(): React.ReactElement {
 					window.clearTimeout(staticFabArrangementRequestTimerRef.current);
 					staticFabArrangementRequestTimerRef.current = null;
 				}
+					staticFabArrangementHistoryRef.current?.abort();
+					staticFabArrangementCaptureRef.current?.abort();
 				staticFabArrangementBridgeRef.current?.dispose();
 				staticFabArrangementBridgeRef.current = null;
 				staticFabAssemblyConnectorBridgeRef.current?.dispose();
@@ -5322,55 +5345,73 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			return;
 		}
-		let cancelled = false;
+		const controller = new AbortController();
 		const timeout = window.setTimeout(() => {
-			const model = editorModelRef.current;
-			const manifest = updateOpenFabProjectManifest(projectSession.manifest, projectIdentity.now());
-			const snapshot = captureRailMirrorSnapshot(
-				model.document.map,
-				model.document.getPatchSequence(),
-				model.document.portEquipment,
-				model.document.organizations,
-				model.document.relationships,
-			).snapshot;
-			const view = captureProjectView(
-				canvasRef.current,
-				rendererRef.current,
-				cameraRef.current,
-				railPresentationModeRef.current,
-			);
-			void autosaveSerializer
-				.serialize(
-					snapshot,
+			const document = editorModelRef.current.document;
+			const mirror = workerBridgeRef.current;
+			const isCurrent = (): boolean =>
+				!controller.signal.aborted &&
+				!modelSyncPendingRef.current &&
+				editorModelRef.current.document === document &&
+				workerBridgeDocumentRef.current === document &&
+				workerBridgeRef.current === mirror;
+			let assertCurrent = (): void => {
+				if (!isCurrent()) throw new RailStartupCancelledError();
+			};
+			const saveRecovery = async (): Promise<void> => {
+				assertCurrent();
+				if (!mirror) throw new Error("자동 복구를 위한 레일 동기화를 기다립니다");
+				const manifest = updateOpenFabProjectManifest(projectSession.manifest, projectIdentity.now());
+				const view = captureProjectView(
+					canvasRef.current,
+					rendererRef.current,
+					cameraRef.current,
+					railPresentationModeRef.current,
+				);
+				const capture = await captureOpenFabProjectSnapshot(
+					document,
+					mirror,
+					controller.signal,
+					isCurrent,
+				);
+				assertCurrent = capture.assertCurrent;
+				assertCurrent();
+				const result = await autosaveSerializer.serialize(
+					capture.snapshot,
 					manifest,
 					view,
 					projectBlueprints,
-					model.document.operationalConfiguration,
-				)
-				.then(async (result) => {
-					if (cancelled) return;
-					await projectPersistence.putRecovery({
-						projectId: manifest.id,
-						name: manifest.name,
-						updatedAt: manifest.updatedAt,
-						authoredChecksum: result.authoredChecksum,
-						json: result.json,
-					});
-					if (canvasRef.current) {
-						delete canvasRef.current.dataset.autosaveError;
-						canvasRef.current.dataset.autosaveCharacters = String(result.characterCount);
-					}
-				})
-				.catch((error: unknown) => {
-					if (!(error instanceof RailStartupCancelledError)) {
-						const message = error instanceof Error ? error.message : "알 수 없는 자동 복구 오류";
-						if (canvasRef.current) canvasRef.current.dataset.autosaveError = message;
-						setStatus(`자동 복구 저장 실패 · ${message}`);
-					}
+					capture.operations,
+				);
+				assertCurrent();
+				await projectPersistence.putRecovery({
+					projectId: manifest.id,
+					name: manifest.name,
+					updatedAt: manifest.updatedAt,
+					authoredChecksum: result.authoredChecksum,
+					json: result.json,
 				});
+				// A database write already in flight cannot be aborted; obsolete UI updates can.
+				assertCurrent();
+				if (canvasRef.current) {
+					delete canvasRef.current.dataset.autosaveError;
+					canvasRef.current.dataset.autosaveCharacters = String(result.characterCount);
+				}
+			};
+			void saveRecovery().catch((error: unknown) => {
+				try {
+					assertCurrent();
+				} catch {
+					return;
+				}
+				if (error instanceof RailStartupCancelledError) return;
+				const message = error instanceof Error ? error.message : "알 수 없는 자동 복구 오류";
+				if (canvasRef.current) canvasRef.current.dataset.autosaveError = message;
+				setStatus(`자동 복구 저장 실패 · ${message}`);
+			});
 		}, PROJECT_AUTOSAVE_DELAY_MILLISECONDS);
 		return () => {
-			cancelled = true;
+			controller.abort();
 			window.clearTimeout(timeout);
 			autosaveSerializer.cancel();
 		};
@@ -5869,16 +5910,19 @@ export default function TileFabApp(): React.ReactElement {
 		organizationBundlePlacementSession,
 	]);
 	useLayoutEffect(() => {
-		if (!organizationBundlePlacementSession && !areaStampSession) return;
+		if (!constructionBarVisible || (!organizationBundlePlacementSession && !areaStampSession)) return;
 		const workspace = canvasRef.current?.closest<HTMLElement>(".tilefab-workspace");
 		const bar = workspace?.querySelector<HTMLElement>('[data-testid="rail-buildbar"]');
 		if (!workspace || !bar) return;
 		const property = "--tilefab-placement-hints-bottom";
 		const measure = (): void => {
-			const clearance = workspace.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 10;
-			const value = `${Math.ceil(clearance)}px`;
+			const barBounds = bar.getBoundingClientRect();
+			const value = bar.isConnected && barBounds.height > 0
+				? `${Math.ceil(workspace.getBoundingClientRect().bottom - barBounds.top + 10)}px`
+				: "";
 			if (workspace.style.getPropertyValue(property) === value) return;
-			workspace.style.setProperty(property, value);
+			if (value) workspace.style.setProperty(property, value);
+			else workspace.style.removeProperty(property);
 			scheduleRenderRef.current();
 		};
 		measure();
@@ -5889,7 +5933,7 @@ export default function TileFabApp(): React.ReactElement {
 			observer.disconnect();
 			workspace.style.removeProperty(property);
 		};
-	}, [organizationBundlePlacementSession, areaStampSession]);
+	}, [constructionBarVisible, organizationBundlePlacementSession, areaStampSession]);
 	const updateTemplatePoseLock = (next: RailTemplatePoseLock): void => {
 		templatePoseLockRef.current = next;
 		templatePointerResolutionRef.current = null;
@@ -6332,6 +6376,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const closeContextPalette = (): void => updateContextPalette(null);
 	const blockStaticFabExclusiveCommand = (): boolean => {
+		if (staticFabArrangementHistoryRef.current) { setStatus("정렬 이력 처리를 기다리거나 Esc로 취소하세요"); return true; }
 		if (operationalConfigurationOpen) {
 			setStatus("운영 설정 편집기를 적용하거나 되돌린 뒤 닫으세요");
 			scheduleRender();
@@ -8381,6 +8426,7 @@ export default function TileFabApp(): React.ReactElement {
 			model.document === binding.document &&
 			model.map === binding.map &&
 			model.map.getRevision() === binding.revision &&
+			model.map.getMutationGeneration() === binding.mapMutationGeneration &&
 			model.document.getPatchSequence() === binding.patchSequence
 		);
 	};
@@ -8392,6 +8438,8 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const cancelStaticFabArrangement = (message?: string): void => {
+		staticFabArrangementCaptureRef.current?.abort();
+		staticFabArrangementCaptureRef.current = null;
 		if (staticFabArrangementRequestTimerRef.current !== null) {
 			window.clearTimeout(staticFabArrangementRequestTimerRef.current);
 			staticFabArrangementRequestTimerRef.current = null;
@@ -8697,52 +8745,82 @@ export default function TileFabApp(): React.ReactElement {
 			source: organizationIds.length > 0 ? "ORGANIZATIONS" : "SELECTION",
 			document: model.document,
 			map: model.map,
+			mapMutationGeneration: model.map.getMutationGeneration(),
 			portEquipmentPresentation: portEquipmentPresentationRef.current,
 			modelGeneration: model.generation,
 			revision: model.map.getRevision(),
 			patchSequence: model.document.getPatchSequence(),
 			roots: resolution.roots,
 		});
-		let snapshot: ReturnType<typeof captureRailMirrorSnapshot>["snapshot"];
-		try {
-			snapshot = captureRailMirrorSnapshot(
-				binding.document.map,
-				binding.document.getPatchSequence(),
-				binding.document.portEquipment,
-				binding.document.organizations,
-				binding.document.relationships,
-			).snapshot;
-		} catch (error) {
-			setStatus(error instanceof Error ? error.message : "정렬 스냅샷을 만들 수 없습니다");
+		cancelStaticFabArrangement();
+		const mirror = workerBridgeRef.current;
+		if (!mirror || workerBridgeDocumentRef.current !== binding.document) {
+			setStatus("Rail Worker가 준비된 뒤 정렬을 다시 시작하세요");
 			return;
 		}
-		staticFabArrangementBridgeRef.current?.dispose();
-		staticFabArrangementBridgeRef.current = null;
-		const bridge = new StaticFabArrangementBridge();
-		try {
-			bridge.startSession({
-				snapshot,
-				getCurrentState: () => ({
-					map: binding.document.map,
-					patchSequence: binding.document.getPatchSequence(),
-					portEquipment: binding.document.portEquipment,
-					organizations: binding.document.organizations,
-					relationships: binding.document.relationships,
-				}),
-			});
-		} catch (error) {
-			bridge.dispose();
-			setStatus(error instanceof Error ? error.message : "정렬 Worker 세션을 시작할 수 없습니다");
-			return;
-		}
-		staticFabArrangementBridgeRef.current = bridge;
+		const capture = new AbortController();
+		staticFabArrangementCaptureRef.current = capture;
 		staticFabArrangementBindingRef.current = binding;
-		updateEditorActivity("assemble");
-		requestStaticFabArrangement(binding, recommendation.axis, recommendation.mode);
+		const requestId = ++staticFabArrangementRequestRef.current;
+		publishStaticFabArrangementUi(
+			Object.freeze({
+				source: binding.source,
+				axis: recommendation.axis,
+				mode: recommendation.mode,
+				rootCount: binding.roots.length,
+				phase: "capturing",
+				reason: "정렬할 FAB 데이터를 준비하고 있습니다 · Esc로 취소",
+				conflictCount: 0,
+				workerRoundTripMilliseconds: null,
+				sessionHydrationMilliseconds: null,
+				sessionCompilationMilliseconds: null,
+				sourcePlanIndex: null,
+			}),
+		);
+		const current = () =>
+			!capture.signal.aborted &&
+			requestId === staticFabArrangementRequestRef.current &&
+			staticFabArrangementBindingRef.current === binding &&
+			staticFabArrangementBindingIsCurrent(binding) &&
+			workerBridgeRef.current === mirror &&
+			projectOperationControllerRef.current === null;
+		void mirror
+			.captureCurrentSnapshot(capture.signal)
+			.then((snapshot) => {
+				if (!current()) {
+					if (
+						requestId === staticFabArrangementRequestRef.current &&
+						staticFabArrangementBindingRef.current === binding
+					)
+						cancelStaticFabArrangement("FAB 데이터가 변경되어 정렬 준비를 취소했습니다");
+					return;
+				}
+				const bridge = new StaticFabArrangementBridge();
+				staticFabArrangementBridgeRef.current = bridge;
+				bridge.startSession({
+					snapshot,
+					getCurrentState: () => ({
+						map: binding.document.map,
+						patchSequence: binding.document.getPatchSequence(),
+						portEquipment: binding.document.portEquipment,
+						organizations: binding.document.organizations,
+						relationships: binding.document.relationships,
+					}),
+				});
+				staticFabArrangementCaptureRef.current = null;
+				updateEditorActivity("assemble");
+				requestStaticFabArrangement(binding, recommendation.axis, recommendation.mode);
+			})
+			.catch((error) => {
+				if (requestId !== staticFabArrangementRequestRef.current || capture.signal.aborted) return;
+				cancelStaticFabArrangement(
+					error instanceof Error ? error.message : "정렬 데이터를 준비하지 못했습니다",
+				);
+			});
 		const arrangementBounds = unionStaticFabArrangementRootBounds(binding.roots);
 		requestAnimationFrame(() => {
 			const canvas = canvasRef.current;
-			if (!canvas) return;
+			if (!canvas || staticFabArrangementBindingRef.current !== binding) return;
 			canvas.focus();
 			fitCameraToBounds(
 				arrangementBounds,
@@ -8759,14 +8837,28 @@ export default function TileFabApp(): React.ReactElement {
 	const setStaticFabArrangementAxis = (axis: StaticFabArrangementAxis): void => {
 		const binding = staticFabArrangementBindingRef.current;
 		const current = staticFabArrangementUiRef.current;
-		if (!binding || !current || current.axis === axis) return;
+		if (
+			!binding ||
+			!current ||
+			current.phase === "capturing" ||
+			current.phase === "committing" ||
+			current.axis === axis
+		)
+			return;
 		requestStaticFabArrangement(binding, axis, current.mode);
 	};
 
 	const setStaticFabArrangementMode = (mode: StaticFabArrangementMode): void => {
 		const binding = staticFabArrangementBindingRef.current;
 		const current = staticFabArrangementUiRef.current;
-		if (!binding || !current || current.mode === mode) return;
+		if (
+			!binding ||
+			!current ||
+			current.phase === "capturing" ||
+			current.phase === "committing" ||
+			current.mode === mode
+		)
+			return;
 		if ((mode === "DISTRIBUTE_CENTERS" || mode === "DISTRIBUTE_GAPS") && binding.roots.length < 3) {
 			setStatus("균등 분배는 서로 독립적인 FAB 루트가 3개 이상일 때 사용할 수 있습니다");
 			return;
@@ -8779,7 +8871,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (event.detail > 0) requestAnimationFrame(() => canvasRef.current?.focus());
 	};
 
-	const applyStaticFabArrangement = (): void => {
+	const applyStaticFabArrangement = async (): Promise<void> => {
 		const binding = staticFabArrangementBindingRef.current;
 		const plan = staticFabArrangementPlanRef.current;
 		const preview = staticFabArrangementPreviewRef.current;
@@ -8806,28 +8898,83 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus("이동 후 선택 identity를 준비하지 못해 배치를 적용하지 않았습니다");
 			return;
 		}
-		const success = binding.document.commitStaticFabArrangement(plan);
-		if (!success) {
-			cancelStaticFabArrangement("정렬 인증이 만료되어 현재 선택에서 다시 검증해야 합니다");
-			requestAnimationFrame(() => canvasRef.current?.focus());
+		const mirror = workerBridgeRef.current;
+		const preparePatch = mirror?.prepareStaticFabMutationPatchCooperatively?.bind(mirror);
+		if (
+			!mirror ||
+			!preparePatch ||
+			workerBridgeDocumentRef.current !== binding.document ||
+			projectOperationControllerRef.current !== null
+		) {
+			setStatus("프로젝트와 Rail Worker가 준비된 뒤 정렬을 적용하세요");
 			return;
 		}
-		const reason = plan.reason;
-		cancelStaticFabArrangement();
-		if (binding.source === "SELECTION" && targetSelectionIdentity) {
-			pendingStaticFabArrangementSelectionRef.current = Object.freeze({
-				document: binding.document,
-				patchSequence: binding.document.getPatchSequence(),
-				targetCellIdentity: targetSelectionIdentity,
-				equipmentGroupIds: Object.freeze(
-					[...new Set(binding.roots.flatMap((root) => root.equipmentGroupIds))].sort(
-						(left, right) => left - right,
-					),
-				),
+		const requestId = staticFabArrangementRequestRef.current;
+		const ownsRequest = () =>
+			requestId === staticFabArrangementRequestRef.current &&
+			staticFabArrangementBindingRef.current === binding;
+		let patchIsCurrent: (() => boolean) | null = null;
+		publishStaticFabArrangementUi(
+			Object.freeze({
+				...current,
+				phase: "committing",
+				reason: "정렬 적용을 준비하고 있습니다 · Esc로 취소",
+			}),
+		);
+		try {
+			const checkpoint = createStaticFabArrangementCheckpoint();
+			await checkpoint();
+			const result = await binding.document.commitStaticFabArrangementCooperatively(plan, {
+				checkpoint,
+				now: performanceNow,
+				checkCancelled: () => {
+					if (
+						!ownsRequest() ||
+						!staticFabArrangementBindingIsCurrent(binding) ||
+						workerBridgeRef.current !== mirror ||
+						projectOperationControllerRef.current !== null ||
+						(patchIsCurrent !== null && !patchIsCurrent())
+					)
+						throw new Error("문서 또는 정렬 요청이 변경되어 적용을 취소했습니다");
+				},
+				preparePatch: async (event, checkpoint) => {
+					const lease = await preparePatch(event, checkpoint);
+					patchIsCurrent = lease.isCurrent;
+				},
 			});
+			if (!ownsRequest()) return;
+			if (!result.committed) {
+				cancelStaticFabArrangement("정렬 인증이 만료되어 다시 검증해야 합니다");
+				return;
+			}
+			if (canvasRef.current) {
+				canvasRef.current.dataset.arrangementCommitMaxSliceMs =
+					result.timings?.maximumPreparationSliceMilliseconds?.toFixed(3) ?? "";
+				canvasRef.current.dataset.arrangementCommitPublicationMs =
+					result.timings?.patchPublicationMilliseconds.toFixed(3) ?? "";
+			}
+			const reason = plan.reason;
+			cancelStaticFabArrangement();
+			if (binding.source === "SELECTION" && targetSelectionIdentity) {
+				pendingStaticFabArrangementSelectionRef.current = Object.freeze({
+					document: binding.document,
+					patchSequence: binding.document.getPatchSequence(),
+					targetCellIdentity: targetSelectionIdentity,
+					equipmentGroupIds: Object.freeze(
+						[...new Set(binding.roots.flatMap((root) => root.equipmentGroupIds))].sort(
+							(left, right) => left - right,
+						),
+					),
+				});
+			}
+			syncModelUi(`${reason} · 한 번의 실행 취소 가능한 명령으로 적용했습니다`);
+			requestAnimationFrame(() => canvasRef.current?.focus());
+		} catch (error) {
+			if (ownsRequest())
+				cancelStaticFabArrangement(
+					error instanceof Error ? error.message : "정렬을 적용하지 못했습니다",
+				);
 		}
-		syncModelUi(`${reason} · 한 번의 실행 취소 가능한 명령으로 적용했습니다`);
-		requestAnimationFrame(() => canvasRef.current?.focus());
 	};
 
 	const cancelPendingBlueprintPlacementForHistory = (): boolean => {
@@ -8836,6 +8983,7 @@ export default function TileFabApp(): React.ReactElement {
 		return true;
 	};
 	const editorMutationWaitBlockedReason = (): string | null => {
+		if (staticFabArrangementHistoryRef.current) return "정렬 이력 처리를 기다리거나 Esc로 취소하세요";
 		if (startupState.status !== "ready") return "프로젝트 시작이 끝난 뒤 편집을 시작하세요";
 		if (projectOperationControllerRef.current !== null || projectSession.operation !== "idle") {
 			return "프로젝트 작업이 끝난 뒤 편집을 계속하세요";
@@ -10476,6 +10624,7 @@ export default function TileFabApp(): React.ReactElement {
 			? { legal: eqSelection.valid, reason: eqSelection.reason }
 			: undefined;
 		presentGuidedPortKeyboardSession(next, evaluation, !repeat);
+		if (next.portType === "STK") requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 		if (next.scope === "guided") {
 			const summary = guidedPortKeyboardRowPresentation(next, evaluation);
 			if (!repeat) setStatus(summary.replace(/^키보드 /, ""));
@@ -10618,7 +10767,7 @@ export default function TileFabApp(): React.ReactElement {
 				draft.selection.rows.length >= 2
 			) {
 				presentGuidedPortKeyboardSession(session, { legal: true, reason: "선택 검토 후 생성" });
-				setStatus(`${draft.selection.rows.length}개 Port 선택 · 선택을 확인한 뒤 STK 생성 또는 Shift+Enter`);
+				setStatus(`${draft.selection.rows.length}개 Port 선택 · 선택을 확인한 뒤 Stocker 생성 또는 Shift+Enter`);
 			} else {
 				presentGuidedPortKeyboardSession(session, {
 					legal: draft?.selection.valid === true && draft.selection.rejectedRow === null,
@@ -10630,7 +10779,7 @@ export default function TileFabApp(): React.ReactElement {
 						selectedCount === 0
 							? "첫 Port 선택 해제 · 방향키/WASD로 슬롯 이동 · Enter로 다시 선택"
 							: draft?.selection.canComplete
-								? `${selectedCount}개 Port 선택 · Shift+Enter 또는 STK 생성으로 확정`
+								? `${selectedCount}개 Port 선택 · Shift+Enter 또는 Stocker 생성으로 확정`
 								: `${selectedCount}개 Port 선택 · ${stkDraftReasonLabel(draft?.selection.reason ?? "다음 Port를 선택하세요")} · 방향키/WASD 후 Enter로 추가`,
 					);
 				} else {
@@ -11151,7 +11300,71 @@ export default function TileFabApp(): React.ReactElement {
 		return true;
 	};
 
-	const handleUndo = (): boolean => {
+	const replayArrangementHistory = async (direction: "undo" | "redo"): Promise<boolean> => {
+		const document = railDocument,
+			mirror = workerBridgeRef.current;
+		const preparePatch = mirror?.prepareStaticFabMutationPatchCooperatively?.bind(mirror);
+		if (
+			!mirror ||
+			!preparePatch ||
+			workerBridgeDocumentRef.current !== document ||
+			projectOperationControllerRef.current !== null
+		)
+			return false;
+		const controller = new AbortController();
+		staticFabArrangementHistoryRef.current = controller;
+		setStaticFabArrangementHistory(direction);
+		const sequence = document.getPatchSequence();
+		let patchIsCurrent: (() => boolean) | null = null;
+		const label = direction === "undo" ? "실행 취소" : "다시 실행";
+		setStatus(`정렬 ${label}를 준비하고 있습니다 · Esc로 취소`);
+		try {
+			const checkpoint = createStaticFabArrangementCheckpoint();
+			await checkpoint();
+			const result = await document.replayStaticFabArrangementCooperatively(direction, {
+				checkpoint,
+				now: performanceNow,
+				checkCancelled: () => {
+					if (
+						controller.signal.aborted ||
+						staticFabArrangementHistoryRef.current !== controller ||
+						editorModelRef.current.document !== document ||
+						document.getPatchSequence() !== sequence ||
+						workerBridgeRef.current !== mirror ||
+						projectOperationControllerRef.current !== null ||
+						(patchIsCurrent !== null && !patchIsCurrent())
+					)
+						throw new Error(`정렬 ${label} 준비를 취소했습니다`);
+				},
+				preparePatch: async (event, checkpoint) => {
+					const lease = await preparePatch(event, checkpoint);
+					patchIsCurrent = lease.isCurrent;
+				},
+			});
+			if (canvasRef.current && result.committed) {
+				canvasRef.current.dataset.arrangementHistoryDirection = direction;
+				canvasRef.current.dataset.arrangementHistoryMaxSliceMs =
+					result.timings?.maximumPreparationSliceMilliseconds?.toFixed(3) ?? "";
+				canvasRef.current.dataset.arrangementHistoryPublicationMs =
+					result.timings?.patchPublicationMilliseconds.toFixed(3) ?? "";
+			}
+			return result.committed;
+		} catch (error) {
+			if (
+				staticFabArrangementHistoryRef.current === controller &&
+				editorModelRef.current.document === document
+			)
+				setStatus(error instanceof Error ? error.message : `정렬 ${label}를 완료하지 못했습니다`);
+			return false;
+		} finally {
+			if (staticFabArrangementHistoryRef.current === controller) {
+				staticFabArrangementHistoryRef.current = null;
+				setStaticFabArrangementHistory(null);
+			}
+		}
+	};
+
+	const handleUndo = async (): Promise<boolean> => {
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return false;
 		if (blockStaticFabExclusiveCommand()) return false;
 		const bankHistoryReceipt = connectedBayBankHistoryReceiptRef.current;
@@ -11218,7 +11431,7 @@ export default function TileFabApp(): React.ReactElement {
 			? null
 			: removedOrganizationContextRef.current;
 		if (!retained) clearTransientConstruction();
-		if (!railDocument.undo()) return false;
+		if (railDocument.canReplayStaticFabArrangement("undo")) { if (!(await replayArrangementHistory("undo"))) return false; } else if (!railDocument.undo()) return false;
 		const duplicatedAssemblyUndoProjection = duplicatedAssemblyUndoCandidate
 			? ordinaryDuplicatedAssemblyUndoProjection(duplicatedAssemblyUndoCandidate, {
 					document: railDocument,
@@ -11331,7 +11544,7 @@ export default function TileFabApp(): React.ReactElement {
 		return true;
 	};
 
-	const handleRedo = (): void => {
+	const handleRedo = async (): Promise<void> => {
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const bankHistoryReceipt = connectedBayBankHistoryReceiptRef.current;
@@ -11407,7 +11620,7 @@ export default function TileFabApp(): React.ReactElement {
 			? null
 			: removedOrganizationContextRef.current;
 		if (!retained) clearTransientConstruction();
-		if (!railDocument.redo()) return;
+		if (railDocument.canReplayStaticFabArrangement("redo")) { if (!(await replayArrangementHistory("redo"))) return; } else if (!railDocument.redo()) return;
 		const duplicatedAssemblyRedoProjection = duplicatedAssemblyRedoCandidate
 			? ordinaryDuplicatedAssemblyRedoProjection(duplicatedAssemblyRedoCandidate, {
 					document: railDocument,
@@ -11643,6 +11856,7 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		keyboardActionsRef.current = {
 			cancel: () => {
+				if (staticFabArrangementHistoryRef.current) { staticFabArrangementHistoryRef.current.abort(); setStatus("정렬 이력 처리를 취소하고 있습니다"); return; }
 				if (inspectAreaKeyboardSessionRef.current) {
 					cancelInspectAreaKeyboardRef.current("키보드 부분 선택을 취소했습니다", true);
 					return;
@@ -11806,7 +12020,6 @@ export default function TileFabApp(): React.ReactElement {
 					setStatus("프로젝트 작업과 Worker 동기화를 완료한 뒤 저장하세요");
 					return;
 				}
-				if (requestContextualBlueprintSave("context")) return;
 				void handleSaveProject();
 			},
 			saveTextEditingContext: (target) => {
@@ -11815,10 +12028,10 @@ export default function TileFabApp(): React.ReactElement {
 					return;
 				}
 				if (target.closest(".tilefab-blueprint-library")) {
-					setStatus("라이브러리 검색 입력 중에는 청사진 저장 명령을 실행하지 않습니다");
+					setStatus("검색 입력을 마친 뒤 프로젝트 저장을 실행하세요");
 					return;
 				}
-				setStatus("텍스트 입력을 완료한 뒤 청사진 저장 명령을 실행하세요");
+				setStatus("텍스트 입력을 완료한 뒤 프로젝트 저장을 실행하세요");
 			},
 			deleteSelection: () => deleteSelected(),
 			placeFavoriteBlueprint: (index) => {
@@ -15886,6 +16099,7 @@ export default function TileFabApp(): React.ReactElement {
 			),
 		);
 		updateStkDraftSession({ ...draft, selection });
+		requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 		const reason = stkDraftReasonLabel(selection.reason);
 		setStatus(reason);
 		if (previewReadoutRef.current) previewReadoutRef.current.textContent = reason;
@@ -15957,7 +16171,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (!draft.selection.canComplete || draft.selection.rows.length < guidedStkMinimumPorts) {
 			setStatus(draft.selection.rows.length < guidedStkMinimumPorts
-				? `Port ${guidedStkMinimumPorts}개를 선택한 뒤 STK를 생성하세요`
+				? `Port ${guidedStkMinimumPorts}개를 선택한 뒤 Stocker를 생성하세요`
 				: stkDraftReasonLabel(draft.selection.reason));
 			return;
 		}
@@ -18951,30 +19165,37 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus("OpenFab 프로젝트 파일을 준비합니다");
 			const model = editorModelRef.current;
 			const manifest = updateOpenFabProjectManifest(projectSession.manifest, projectIdentity.now());
-			const snapshot = captureRailMirrorSnapshot(
-				model.document.map,
-				model.document.getPatchSequence(),
-				model.document.portEquipment,
-				model.document.organizations,
-				model.document.relationships,
-			).snapshot;
 			const view = captureProjectView(
 				canvasRef.current,
 				rendererRef.current,
 				cameraRef.current,
 				railPresentationModeRef.current,
 			);
+			const mirror = workerBridgeRef.current;
+			if (!mirror) throw new Error("프로젝트 저장을 위한 레일 동기화를 기다립니다");
+			const capture = await captureOpenFabProjectSnapshot(
+				model.document,
+				mirror,
+				controller.signal,
+				() =>
+					projectOperationControllerRef.current === controller &&
+					editorModelRef.current.document === model.document &&
+					workerBridgeDocumentRef.current === model.document &&
+					workerBridgeRef.current === mirror &&
+					!modelSyncPendingRef.current,
+			);
+			capture.assertCurrent();
 			const savedOperationalConfigurationFingerprint = checksumOperationalConfigurationState(
-				model.document.operationalConfiguration,
+				capture.operations,
 			);
 			const serialized = await projectSerializer.serialize(
-				snapshot,
+				capture.snapshot,
 				manifest,
 				view,
 				projectBlueprints,
-				model.document.operationalConfiguration,
+				capture.operations,
 			);
-			if (controller.signal.aborted) throw new RailStartupCancelledError();
+			capture.assertCurrent();
 			setStatus("OpenFab 프로젝트 파일을 저장합니다");
 			let reference = forceSaveAs ? null : projectSession.fileReference;
 			let written = false;
@@ -19047,7 +19268,9 @@ export default function TileFabApp(): React.ReactElement {
 			setProjectOperation("idle");
 			return "saved";
 		} catch (error) {
-			finishFailedProjectOperation(error);
+			if (projectOperationControllerRef.current === controller) {
+				finishFailedProjectOperation(error);
+			}
 			return "failed";
 		} finally {
 			if (projectOperationControllerRef.current === controller) {
@@ -26837,7 +27060,7 @@ export default function TileFabApp(): React.ReactElement {
 	const basePortAuthoringInstruction =
 		tool === "stk"
 			? activePortLegalSlotCount === 0
-				? "배치 가능 슬롯 없음 · STK가 연결될 직선 레일을 먼저 만드세요"
+				? activePortAuthoringPresentation?.instruction ?? ""
 				: stkDraftReview.instruction
 			: tool === "eq" &&
 				guidedPortKeyboard !== null &&
@@ -28757,7 +28980,7 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(`${equipmentAuthoringContinuationStatus(continuation)} · Esc로 배치 종료`);
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
-	const restoreDeletedEquipment = (): void => {
+	const restoreDeletedEquipment = async (): Promise<void> => {
 		const recovery = equipmentDeletionRecovery;
 		if (
 			!recovery ||
@@ -28770,7 +28993,7 @@ export default function TileFabApp(): React.ReactElement {
 			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 			return;
 		}
-		if (!handleUndo()) {
+		if (!(await handleUndo())) {
 			setStatus("현재 작업을 먼저 마친 뒤 이 철거를 되돌리세요");
 			requestAnimationFrame(() =>
 				equipmentDeletionRecoveryUndoRef.current?.focus({ preventScroll: true }),
@@ -29226,11 +29449,27 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		eqMembershipFrameDeferredRef.current = false;
+		const camera = cameraRef.current;
+		const renderer = rendererRef.current;
+		const insets = fitMapInsets(canvas);
+		const frameStkRows = (slots: CompiledPortSlots, rows: readonly number[], currentRow: number): boolean | null => {
+			const toScreen = (row: number) => renderer.worldToScreen({
+				x: slots.worldPositions[row * 2] as number,
+				y: slots.worldPositions[row * 2 + 1] as number,
+			}, camera);
+			const translation = stkDraftFrameTranslation(rows.map(toScreen), toScreen(currentRow), visibleCanvasFrame(canvas, insets));
+			if (!translation) return null;
+			camera.offsetX += translation.x;
+			camera.offsetY += translation.y;
+			return translation.x !== 0 || translation.y !== 0;
+		};
 		let moved = false;
 		const membership = portEquipmentMembershipEditSessionRef.current;
 		if (membership) {
 			if (!isCurrentPortEquipmentMembershipEdit(membership)) return;
-			moved = centerWorldPointIfObscured(
+			moved = (membership.portType === "STK"
+				? frameStkRows(membership.slots, membership.selection.rows, membership.keyboardRow)
+				: null) ?? centerWorldPointIfObscured(
 				membership.slots.worldPositions[membership.keyboardRow * 2] as number,
 				membership.slots.worldPositions[membership.keyboardRow * 2 + 1] as number,
 				canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas),
@@ -29238,9 +29477,11 @@ export default function TileFabApp(): React.ReactElement {
 		} else if (equipmentWorkspaceActive) {
 			const session = guidedPortKeyboardSessionRef.current;
 			if (!session || !guidedPortKeyboardSessionCurrent(session)) return;
-			moved = centerPortKeyboardRowIfObscured(
-				session, canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas),
-			);
+			const draft = stkDraftSessionRef.current;
+			moved = (session.portType === "STK" && draft && isCurrentStkDraft(draft)
+				&& draft.slots === session.binding.slots
+				? frameStkRows(draft.slots, draft.selection.rows, session.currentRow)
+				: null) ?? centerPortKeyboardRowIfObscured(session, canvas, camera, renderer, insets);
 		} else if (portEquipmentInspectorVisible && selectedPortDetails) {
 			// Explicit Fit keeps the complete map in view as the Inspector changes size.
 			if (fittedMapCameraRef.current) {
@@ -29575,7 +29816,7 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			const next = moveGuidedPortKeyboardCursor(current, marker.portSlotRow);
 			presentGuidedPortKeyboardSession(next);
-			setStatus("STK 첫 Port 선택 완료 · 추천 슬롯에서 Enter로 추가한 뒤 STK 생성");
+			setStatus("Stocker 첫 포트 선택 완료 · 추천 슬롯에서 Enter로 추가한 뒤 Stocker 생성");
 			requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
 			scheduleRender();
 			return;
@@ -29790,6 +30031,19 @@ export default function TileFabApp(): React.ReactElement {
 			</button>
 		</>
 	) : null;
+	const heldBlueprintSaveAction = (
+		<button
+			type="button"
+			className="tilefab-held-blueprint-save"
+			data-testid="save-held-blueprint"
+			aria-label="배치 중인 구조를 청사진으로 저장"
+			disabled={projectBusy || modelSyncPending || userBlueprintLibraryBusy !== null}
+			onClick={(event) => requestContextualBlueprintSave("context", event.currentTarget)}
+			title="현재 방향과 구성을 청사진으로 보관합니다. 전체 파일 저장은 프로젝트 저장을 사용하세요."
+		>
+			<Save size={14} aria-hidden="true" /> 청사진으로 저장
+		</button>
+	);
 	const hierarchyHandoffDock = ordinaryStaticFabIssueRecheckContext
 		? ordinaryStaticFabIssueRecheck
 			? (
@@ -31140,7 +31394,7 @@ export default function TileFabApp(): React.ReactElement {
 					data-testid="guided-port-target"
 					data-port-slot-row={guidedPortTargetMarker?.portSlotRow ?? ""}
 					role="note"
-					aria-label={tool === "stk" ? "다음 STK Port 선택" : "OHB Port 선택"}
+					aria-label={tool === "stk" ? "다음 Stocker 포트 선택" : "OHB Port 선택"}
 				>
 					{tool === "stk" ? (
 						<span>{`${(stkDraftSelection?.rows.length ?? 0) + 1} 선택`}</span>
@@ -32005,8 +32259,8 @@ export default function TileFabApp(): React.ReactElement {
 					</div>
 				) : null}
 
-				{startupReady && operationalConfigurationOpen ? (
-					<OperationalConfigurationPanel
+				{OPENFAB_RELEASE_CAPABILITIES.simulation && startupReady && operationalConfigurationOpen ? (
+					<DeferredOperationalConfigurationPanel
 						key={operationalConfigurationFingerprint}
 						configuration={editorModel.operationalConfiguration}
 						portEquipment={activePortEquipment}
@@ -32960,13 +33214,13 @@ export default function TileFabApp(): React.ReactElement {
 								) : null}
 								{!guidedBuildExperienceActive || guidedBuildVisibleEquipmentToolIds.includes("stk") || tool === "stk" ? (
 									<ToolButton
-										label="STK 포트 그룹 배치"
+										label="Stocker 포트 그룹 배치"
 										active={tool === "stk"}
 										disabled={staticFabExclusiveCommandActive}
-										caption={!guidedBuildOpen ? "STK Port 그룹" : undefined}
-										captionDescription={!guidedBuildOpen ? "금색 ◇ CENTER · 선택 후 STK 생성" : undefined}
-										compactCaption="STK"
-										guidedCaption={guidedBuildOpen ? "3 · STK · 입출고 2개" : undefined}
+										caption={!guidedBuildOpen ? "Stocker · 포트 선택" : undefined}
+										captionDescription={!guidedBuildOpen ? "금색 ◇ 포트 · 선택 후 Stocker 생성" : undefined}
+										compactCaption="Stocker"
+										guidedCaption={guidedBuildOpen ? "3 · Stocker · 입출고 2개" : undefined}
 										guidedTarget={
 											guidedBuildPrimaryTarget?.kind === "equipment-tool" &&
 											guidedBuildPrimaryTarget.tool === "stk"
@@ -33622,7 +33876,7 @@ export default function TileFabApp(): React.ReactElement {
 									}
 									title="선택한 레일·장비 또는 FAB 조직의 저장 옵션 열기"
 								>
-									<Save size={14} /> SAVE CURRENT
+									<Save size={14} /> 선택을 청사진으로 저장
 								</button>
 								<button
 									type="button"
@@ -33648,7 +33902,7 @@ export default function TileFabApp(): React.ReactElement {
 											: "저장할 레일이 없습니다"
 									}
 								>
-									<SaveAll size={14} /> SAVE WHOLE MAP
+									<SaveAll size={14} /> 전체를 청사진으로 저장
 								</button>
 							</div>
 						</section>
@@ -35143,6 +35397,7 @@ export default function TileFabApp(): React.ReactElement {
 				{ordinaryBuildSurfaceHandoff &&
 				ordinaryBuildSurfaceHandoffKind &&
 				ordinaryBuildSurfaceHandoffDescriptionId &&
+					!staticFabArrangementHistory &&
 				!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
 				!staticFabSemanticBayMutation &&
@@ -35218,7 +35473,8 @@ export default function TileFabApp(): React.ReactElement {
 					</fieldset>
 				) : null}
 
-				{!staticFabArrangement &&
+				{!staticFabArrangementHistory &&
+					!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
 				!staticFabSemanticBayMutation &&
 				!staticFabBayFlowEdit &&
@@ -35432,6 +35688,12 @@ export default function TileFabApp(): React.ReactElement {
 					</>
 				) : null}
 
+				{staticFabArrangementHistory ? (
+					<section className="tilefab-arrangement-historybar" data-testid="static-fab-arrangement-history" aria-label="정렬 이력 처리" aria-busy="true">
+						<p className="tilefab-arrangement-history-copy" role="status">정렬 {staticFabArrangementHistory === "undo" ? "실행 취소" : "다시 실행"} 준비 중</p>
+						<button className="tilefab-arrangement-history-cancel" type="button" aria-label="정렬 이력 처리 취소" onClick={() => staticFabArrangementHistoryRef.current?.abort()}>취소 <kbd>ESC</kbd></button>
+					</section>
+				) : null}
 				{staticFabArrangement ? (
 					<section
 						className="tilefab-buildbar tilefab-arrangementbar"
@@ -35442,10 +35704,10 @@ export default function TileFabApp(): React.ReactElement {
 						data-mode={staticFabArrangement.mode}
 						data-source-plan-index={staticFabArrangement.sourcePlanIndex ?? undefined}
 						aria-label="정적 FAB 정렬 및 분배"
-						aria-busy={staticFabArrangement.phase === "planning"}
+						aria-busy={staticFabArrangement.phase === "planning" || staticFabArrangement.phase === "capturing" || staticFabArrangement.phase === "committing"}
 					>
 						<header className="tilefab-arrangement-summary">
-							{staticFabArrangement.phase === "planning" ? (
+							{staticFabArrangement.phase === "planning" || staticFabArrangement.phase === "capturing" || staticFabArrangement.phase === "committing" ? (
 								<RefreshCcw size={15} aria-hidden="true" />
 							) : staticFabArrangement.phase === "certified" ? (
 								<Check size={15} aria-hidden="true" />
@@ -35467,7 +35729,7 @@ export default function TileFabApp(): React.ReactElement {
 								</small>
 							</span>
 						</header>
-						<fieldset className="tilefab-segmented tilefab-arrangement-axis" aria-label="정렬 축">
+						<fieldset className="tilefab-segmented tilefab-arrangement-axis" aria-label="정렬 축" disabled={staticFabArrangement.phase === "capturing" || staticFabArrangement.phase === "committing"}>
 							<button
 								type="button"
 								data-active={staticFabArrangement.axis === "X"}
@@ -35498,6 +35760,7 @@ export default function TileFabApp(): React.ReactElement {
 						<fieldset
 							className="tilefab-segmented tilefab-arrangement-modes"
 							aria-label="정렬 및 분배 방식"
+							disabled={staticFabArrangement.phase === "capturing" || staticFabArrangement.phase === "committing"}
 						>
 							{STATIC_FAB_ARRANGEMENT_MODES.map((mode, index) => {
 								const distribution = mode === "DISTRIBUTE_CENTERS" || mode === "DISTRIBUTE_GAPS";
@@ -35541,7 +35804,7 @@ export default function TileFabApp(): React.ReactElement {
 							aria-atomic="true"
 						>
 							<strong>
-								{staticFabArrangement.phase === "planning"
+								{staticFabArrangement.phase === "capturing" ? "FAB 준비 중" : staticFabArrangement.phase === "committing" ? "정렬 적용 준비 중" : staticFabArrangement.phase === "planning"
 									? "배치 검사 중"
 									: staticFabArrangement.phase === "certified"
 										? "적용 가능"
@@ -35549,7 +35812,7 @@ export default function TileFabApp(): React.ReactElement {
 											? `충돌 ${staticFabArrangement.conflictCount}곳`
 											: "적용할 수 없음"}
 							</strong>
-							<span title={staticFabArrangement.reason}>{staticFabArrangement.reason}</span>
+							<span className="tilefab-arrangement-reason" title={staticFabArrangement.reason}>{staticFabArrangement.reason}</span>
 							{staticFabArrangement.rootCount < 3 && (
 								<span>간격 맞춤: 구조 3개 이상 필요</span>
 							)}
@@ -35674,19 +35937,7 @@ export default function TileFabApp(): React.ReactElement {
 					</fieldset>
 				) : null}
 
-				{!staticFabArrangement &&
-				!staticFabAssemblyConnector &&
-				(tool === "build" || tool === "reshape") &&
-				!guidedBuildPracticeHandoffConstructionBarHidden &&
-				!guidedBuildOrganizationSelectionConstructionBarHidden &&
-				(!guidedBuildExperienceActive ||
-					guidedBuildConstructionBarRevealed ||
-					tool === "reshape" ||
-					templateSession !== null ||
-					areaStampSession !== null ||
-					organizationBundlePlacementSession !== null ||
-					stampSession !== null) &&
-				!areaSelection ? (
+				{constructionBarVisible ? (
 					<div
 						className="tilefab-buildbar"
 						data-testid="rail-buildbar"
@@ -36023,6 +36274,7 @@ export default function TileFabApp(): React.ReactElement {
 										<RotateCw size={14} />
 									</button>
 								</fieldset>
+								{heldBlueprintSaveAction}
 								{!duplicatedTwinBayConnectorHandoff && !duplicatedBayBankConnectorHandoff
 									? organizationBundlePlacementExitAction
 									: null}
@@ -36118,6 +36370,7 @@ export default function TileFabApp(): React.ReactElement {
 									<span>진행 방향</span>
 									<strong>{areaStampSession.pose.reverseFlow ? "반전" : "원본 유지"}</strong>
 								</button>
+								{heldBlueprintSaveAction}
 								<button
 									type="button"
 									className="tilefab-placement-exit"
@@ -36527,7 +36780,7 @@ export default function TileFabApp(): React.ReactElement {
 										(ohbPlacementIntent
 											? "OHB 이동·복제 취소"
 											: tool === "stk"
-												? "STK 배치 종료"
+												? "Stocker 배치 종료"
 												: "Port 배치 종료")
 									}
 									data-exit-scope={ordinaryEqRowExit ? "eq-row" : "port-authoring"}
@@ -36548,7 +36801,7 @@ export default function TileFabApp(): React.ReactElement {
 										(ohbPlacementIntent
 											? "이동·복제 취소"
 											: tool === "stk"
-												? "STK 배치 종료"
+												? "Stocker 배치 종료"
 												: "Port 배치 종료")}
 								</button>
 							) : null
@@ -36637,10 +36890,10 @@ export default function TileFabApp(): React.ReactElement {
 									{tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
 										<fieldset
 											className="tilefab-segmented tilefab-stk-templates"
-											aria-label="STK 포트 템플릿"
+											aria-label="Stocker 포트 구성"
 											aria-describedby="tilefab-port-authoring-instruction"
 										>
-											<legend>Port 구성</legend>
+											<legend>포트 구성</legend>
 											{STK_AUTHORING_TEMPLATES.map((template) => (
 												<button
 													type="button"
@@ -36648,21 +36901,15 @@ export default function TileFabApp(): React.ReactElement {
 													data-testid={`stk-template-${template}`}
 													data-active={stkTemplate === template}
 													aria-pressed={stkTemplate === template}
-													aria-label={`${stkTemplatePresentation(template).label}: ${template === "FLEX" && guidedStkMinimumPorts === 2 ? "이번 Guide에서는 Port 2개 선택" : stkTemplatePresentation(template).requirement}`}
+													aria-label={`${stkTemplatePresentation(template).label}: ${template === "FLEX" && guidedStkMinimumPorts === 2 ? "이번 가이드에서는 포트 2개 선택" : stkTemplatePresentation(template).requirement}`}
 													onClick={() => setStkTemplate(template)}
 													title={
 														template === "FLEX" && guidedStkMinimumPorts === 2
-															? "이번 Guide에서는 Port 2개 선택"
+															? "이번 가이드에서는 포트 2개 선택"
 															: stkTemplatePresentation(template).requirement
 													}
 												>
-													{template === "FLEX"
-														? "자유 선택"
-														: template === "FOUR_PORT"
-															? "연속 4개"
-															: template === "SIX_PORT"
-																? "연속 6개"
-																: "양쪽 짝(B2B)"}
+													{stkTemplatePresentation(template).label}
 												</button>
 											))}
 										</fieldset>
@@ -36687,8 +36934,8 @@ export default function TileFabApp(): React.ReactElement {
 										type="button"
 										className="tilefab-stk-cancel"
 										data-testid="stk-cancel"
-										aria-label="선택한 STK Port 모두 취소"
-										title="선택한 STK Port 모두 취소"
+										aria-label="선택한 Stocker 포트 모두 취소"
+										title="선택한 Stocker 포트 모두 취소"
 										aria-keyshortcuts="Escape"
 										disabled={!stkDraftSelection?.rows.length}
 										onClick={() =>
@@ -36722,7 +36969,7 @@ export default function TileFabApp(): React.ReactElement {
 										}
 										onClick={completeStkDraft}
 									>
-										<Check size={13} /> STK 생성
+										<Check size={13} /> Stocker 생성
 									</button>
 								</fieldset>
 							) : null
@@ -39035,7 +39282,7 @@ function deriveEditorActionHints(context: {
 				? [editorActionHint("reverse-blueprint", "placement.reverse-flow", "진행 방향 반전")]
 				: []),
 			...(repeatPlacementActive
-				? [editorActionHint("save-held-blueprint", "project.save-context", "청사진 저장")]
+				? [editorActionHint("save-project-during-placement", "project.save-context", "프로젝트 저장")]
 				: []),
 			editorActionHint("recall-blueprint", "blueprint.paste-recent", "최근 청사진"),
 			editorActionHint("cycle-blueprint", "blueprint.cycle-recent", "최근 기록 전환"),
@@ -39073,9 +39320,9 @@ function deriveEditorActionHints(context: {
 				context.hasEquipmentSelection ? "정적 FAB 잘라내기" : "선택 레일 잘라내기",
 			),
 			editorActionHint(
-				"save-selection",
+				"save-project",
 				"project.save-context",
-				context.areaSelectionCopyable ? "청사진 저장" : "저장 조건 확인",
+				"프로젝트 저장",
 			),
 			editorActionHint(
 				"delete-selection",
@@ -39116,7 +39363,7 @@ function deriveEditorActionHints(context: {
 				editorActionHint(
 					"complete-stk",
 					"equipment.complete-stk",
-					context.stkDraftActive ? "STK 생성" : "Port 선택 후 STK 생성",
+					context.stkDraftActive ? "Stocker 생성" : "Port 선택 후 Stocker 생성",
 				),
 				editorActionHint(
 					"cancel-stk",
@@ -39130,8 +39377,8 @@ function deriveEditorActionHints(context: {
 			{
 				id: "complete-stk",
 				commandIds: Object.freeze([]),
-				inputs: ["STK 생성"],
-				action: context.stkDraftActive ? "STK 생성" : "Port 선택 후 STK 생성",
+				inputs: ["Stocker 생성"],
+				action: context.stkDraftActive ? "Stocker 생성" : "Port 선택 후 Stocker 생성",
 			},
 			editorActionHint(
 				"cancel-stk",
@@ -40610,10 +40857,7 @@ function railTemplatePreviewSvgGeometry(
 
 function stkAuthoringTemplateLabel(template: StkEquipmentTemplate): string {
 	if (template === "CUSTOM") return "CUSTOM (LEGACY)";
-	if (template === "FLEX") return "FLEX";
-	if (template === "FOUR_PORT") return "4 PORT";
-	if (template === "SIX_PORT") return "6 PORT";
-	return "B2B";
+	return stkTemplatePresentation(template).label;
 }
 
 function advancedSwitchProfileTitle(profileClass: AdvancedSwitchProfileClass): string {

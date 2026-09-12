@@ -55,7 +55,7 @@ export function ordinaryPortKeyboardEscapePresentation(
 	if (portType === "STK" && selectedPortCount > 0) {
 		return Object.freeze({
 			action: "reset-stk-draft",
-			message: `STK Port ${selectedPortCount}개 선택을 초기화했습니다 · 첫 Port부터 다시 선택하세요`,
+			message: `Stocker 포트 ${selectedPortCount}개 선택을 초기화했습니다 · 첫 Port부터 다시 선택하세요`,
 		});
 	}
 	return Object.freeze({
@@ -193,7 +193,7 @@ export function guidedPortKeyboardOperationInstruction(
 			: "방향키 또는 WASD로 STK 슬롯을 고르고 Enter로 포트를 추가하세요. Esc는 Port 배치를 종료합니다.";
 	}
 	if (portType === "STK") {
-		return "강조된 슬롯에서 Enter로 Port를 선택하세요. 선택을 확인한 뒤 STK 생성 또는 Shift+Enter로 생성합니다. Esc는 선택을 초기화합니다.";
+		return "강조된 슬롯에서 Enter로 Port를 선택하세요. 선택을 확인한 뒤 Stocker 생성 또는 Shift+Enter로 생성합니다. Esc는 선택을 초기화합니다.";
 	}
 	if (portType === "OHB" && scope === "ordinary") {
 		return "방향키 또는 WASD로 OHB 슬롯을 고르고 Enter로 배치하세요. Esc는 Port 배치를 종료합니다.";

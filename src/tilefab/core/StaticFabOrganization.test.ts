@@ -21,6 +21,7 @@ import type { Direction } from "./railShape";
 import {
 	applyStaticFabOrganizationAdditionsSteps,
 	applyStaticFabOrganizationMutations,
+	applyStaticFabOrganizationMutationsSteps,
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
 	copyStaticFabOrganizationState,
@@ -53,6 +54,161 @@ import { createStaticFabSelection } from "./StaticFabSelection";
 import { encodeRailCell } from "./TileMap";
 
 describe("StaticFabOrganization", () => {
+	it("prepares mixed canonical replacements with exact cursors, reversal and cancellation", () => {
+		const make = (id: number) =>
+			copyStaticFabOrganizationRecord({
+				id,
+				kind: "AREA",
+				name: `Synthetic ${id}`,
+				membership: {
+					railEdges: [{ from: { x: id * 10, y: 0 }, to: { x: id * 10 + 1, y: 0 } }],
+					advancedSwitchIds: [],
+					equipmentGroupIds: [],
+				},
+			});
+		const first = make(1),
+			second = make(2),
+			untouched = make(3),
+			added = make(5);
+		const source = copyStaticFabOrganizationState({
+			nextOrganizationId: 4,
+			records: [first, second, untouched],
+		});
+		const moved = copyStaticFabOrganizationRecord({
+			...first,
+			membership: {
+				...first.membership,
+				railEdges: [{ from: { x: 10, y: 20 }, to: { x: 11, y: 20 } }],
+			},
+		});
+		const changes = Object.freeze([
+			Object.freeze({ id: 1, before: first, after: moved }),
+			Object.freeze({ id: 2, before: second, after: null }),
+			Object.freeze({ id: 5, before: null, after: added }),
+		]);
+		const snapshot = JSON.stringify(source);
+		const expected = applyStaticFabOrganizationMutations(source, changes, 6);
+		const task = createCooperativeTask(
+			applyStaticFabOrganizationMutationsSteps(source, changes, 6),
+		);
+		let checkpoints = 0;
+		while (!task.done) {
+			task.step(1);
+			checkpoints++;
+			expect(JSON.stringify(source)).toBe(snapshot);
+		}
+		const result = task.finish();
+		expect(result).toEqual(expected);
+		expect(result.records[1]).toBe(source.records[2]);
+		expect(isCanonicalStaticFabOrganizationState(result)).toBe(true);
+		const reversed = Object.freeze(
+			changes.map((change) =>
+				Object.freeze({ ...change, before: change.after, after: change.before }),
+			),
+		);
+		expect(
+			completeCooperativeSteps(applyStaticFabOrganizationMutationsSteps(result, reversed, 6)),
+		).toEqual({ ...source, nextOrganizationId: 6 });
+		for (let cancelAt = 0; cancelAt < checkpoints - 1; cancelAt++) {
+			const cancelled = applyStaticFabOrganizationMutationsSteps(source, changes, 6);
+			for (let i = 0; i <= cancelAt; i++) cancelled.next();
+			cancelled.return(source);
+			expect(JSON.stringify(source)).toBe(snapshot);
+		}
+		const invalidChanges = [
+			Object.freeze([changes[0], changes[0]]),
+			Object.freeze([Object.freeze({ id: 1, before: moved, after: first })]),
+			Object.freeze([Object.freeze({ id: 1, before: first, after: first })]),
+			Object.freeze([
+				Object.freeze({
+					id: 1,
+					before: first,
+					after: copyStaticFabOrganizationRecord({ ...moved, parentOrganizationIds: [99] }),
+				}),
+			]),
+			Object.freeze([
+				Object.freeze({
+					id: 1,
+					before: first,
+					after: copyStaticFabOrganizationRecord({ ...moved, name: second.name }),
+				}),
+			]),
+		];
+		for (const invalid of invalidChanges)
+			expect(() =>
+				completeCooperativeSteps(
+					applyStaticFabOrganizationMutationsSteps(source, invalid as typeof changes, 4),
+				),
+			).toThrow();
+		expect(() =>
+			completeCooperativeSteps(applyStaticFabOrganizationMutationsSteps(source, changes, 7)),
+		).toThrow(/ID/);
+		expect(() =>
+			completeCooperativeSteps(applyStaticFabOrganizationMutationsSteps(source, [...changes], 6)),
+		).toThrow(/immutable/);
+	});
+	it("schedules full wide before/no-op comparison and rejects a difference at the last edge", () => {
+		const record = copyStaticFabOrganizationRecord({
+			id: 1,
+			kind: "AREA",
+			name: "Synthetic wide",
+			membership: {
+				railEdges: Array.from({ length: 100001 }, (_, x) => ({
+					from: { x, y: 0 },
+					to: { x: x + 1, y: 0 },
+				})),
+				advancedSwitchIds: [],
+				equipmentGroupIds: [],
+			},
+		});
+		const source = copyStaticFabOrganizationState({ nextOrganizationId: 2, records: [record] });
+		const before = copyStaticFabOrganizationRecord(record);
+		const moved = copyStaticFabOrganizationRecord({
+			...record,
+			membership: {
+				...record.membership,
+				railEdges: record.membership.railEdges.map((edge, index) =>
+					index === record.membership.railEdges.length - 1
+						? { from: { x: edge.from.x, y: 10 }, to: { x: edge.to.x, y: 10 } }
+						: edge,
+				),
+			},
+		});
+		const changes = Object.freeze([Object.freeze({ id: 1, before, after: moved })]);
+		const task = createCooperativeTask(
+			applyStaticFabOrganizationMutationsSteps(source, changes, 2),
+		);
+		let maximum = 0,
+			slices = 0;
+		while (!task.done) {
+			const started = performance.now();
+			task.step(128);
+			maximum = Math.max(maximum, performance.now() - started);
+			slices++;
+		}
+		expect(maximum).toBeLessThan(50);
+		expect(slices).toBeGreaterThan(1000);
+		expect(task.finish().records[0]).toBe(moved);
+		expect(source.records[0]?.membership.railEdges.at(-1)?.from.y).toBe(0);
+		expect(() =>
+			completeCooperativeSteps(
+				applyStaticFabOrganizationMutationsSteps(
+					source,
+					Object.freeze([Object.freeze({ id: 1, before: moved, after: record })]),
+					2,
+				),
+			),
+		).toThrow(/before/);
+		expect(() =>
+			completeCooperativeSteps(
+				applyStaticFabOrganizationMutationsSteps(
+					source,
+					Object.freeze([Object.freeze({ id: 1, before, after: record })]),
+					2,
+				),
+			),
+		).toThrow(/no-op/);
+	});
 	it("privately merges immutable additions with exact cursors and complete hierarchy validation", () => {
 		const membership = {
 			railEdges: [{ from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }],

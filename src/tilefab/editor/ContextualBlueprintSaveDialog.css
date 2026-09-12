@@ -14,6 +14,7 @@
 	width: min(540px, 100%);
 	max-height: calc(100dvh - 36px);
 	overflow: auto;
+	scroll-padding-bottom: 76px;
 	border: 1px solid #526064;
 	border-radius: 6px;
 	color: #dfe8e8;
@@ -276,9 +277,14 @@
 }
 
 .tilefab-contextual-blueprint-save footer {
+	position: sticky;
+	z-index: 1;
+	bottom: 0;
 	display: grid;
 	grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
 	gap: 7px;
+	padding-block: 8px;
+	background: #111718;
 }
 
 .tilefab-contextual-blueprint-save footer button {

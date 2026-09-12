@@ -16,7 +16,7 @@ const initialFiles = new Set();
 collectStaticEntry(entries[0][0]);
 
 const deferredSourcePattern =
-	/(?:StaticFabInspection3DView|SimulationReadinessBridge|SimulationOperationalConfiguration|synthetic-fab-presets)/;
+	/(?:StaticFabInspection3DView|SimulationReadinessBridge|SimulationOperationalConfiguration|\/OperationalConfigurationPanel\.tsx$|synthetic-fab-presets)/;
 const deferredInitialKeys = [...initialKeys].filter(
 	(key) => deferredSourcePattern.test(key) || manifest[key]?.name === "StaticFabArrangementBridge",
 );

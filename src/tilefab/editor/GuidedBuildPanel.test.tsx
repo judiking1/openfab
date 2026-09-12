@@ -562,7 +562,7 @@ describe("GuidedBuildPanel", () => {
 			},
 			true,
 		);
-		expect(stkActiveMarkup).toContain("선택을 확인한 뒤 STK 생성 또는 Shift+Enter");
+		expect(stkActiveMarkup).toContain("선택을 확인한 뒤 Stocker 생성 또는 Shift+Enter");
 		expect(stkActiveMarkup).not.toContain("선택하면 그룹이 완성됩니다");
 		expect(keyboardMarkup).toContain('data-testid="guided-build-keyboard-port-hint"');
 		expect(keyboardMarkup).toContain("KEYBOARD EQ");

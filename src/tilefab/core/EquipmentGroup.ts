@@ -1,3 +1,4 @@
+import { stableSortSteps } from "./CooperativeSort";
 import { completeCooperativeSteps } from "./CooperativeTask";
 import {
 	copyPortRecord,
@@ -718,6 +719,107 @@ export function applyPortEquipmentMutations(
 	const error = portEquipmentStateError(next);
 	if (error) throw new Error(error);
 	return copyPortEquipmentState(next);
+}
+
+/**
+ * Prepare a reciprocal replacement privately. The caller owns stable immutable mutations and
+ * source-generation checks across checkpoints; no state is published by this iterator.
+ * Equipment records have at most 64 port IDs, so record copy/validation is bounded.
+ */
+export function* applyPortEquipmentMutationsSteps(
+	current: PortEquipmentState,
+	portChanges: readonly PortMutation[],
+	equipmentGroupChanges: readonly EquipmentGroupMutation[],
+): Generator<void, PortEquipmentState> {
+	if (!isCanonicalPortEquipmentState(current))
+		throw new Error("Prepared port mutations require canonical source.");
+	if (!Object.isFrozen(portChanges) || !Object.isFrozen(equipmentGroupChanges))
+		throw new Error("Prepared port/group mutation arrays must be immutable.");
+	if (portChanges.length === 0 && equipmentGroupChanges.length === 0) return current;
+	const ports = new Map<number, PortRecord>();
+	for (const port of current.ports) {
+		yield;
+		ports.set(port.id, port);
+	}
+	const equipmentGroups = new Map<number, EquipmentGroupRecord>();
+	for (const group of current.equipmentGroups) {
+		yield;
+		equipmentGroups.set(group.id, group);
+	}
+	const touchedPorts = new Set<number>();
+	const touchedGroups = new Set<number>();
+	let nextPortId = current.nextPortId;
+	let nextEquipmentGroupId = current.nextEquipmentGroupId;
+	for (const change of portChanges) {
+		yield;
+		if (!Object.isFrozen(change)) throw new Error("Prepared port mutations must be immutable.");
+		if (change.before) copyPortRecord(change.before);
+		if (change.after) copyPortRecord(change.after);
+		if (touchedPorts.has(change.id)) throw new Error(`Port ${change.id} changes more than once.`);
+		touchedPorts.add(change.id);
+		if (!change.before && !change.after) throw new Error(`Port ${change.id} mutation is empty.`);
+		if (
+			(change.before && change.before.id !== change.id) ||
+			(change.after && change.after.id !== change.id) ||
+			portRecordEquals(change.before, change.after) ||
+			!portRecordEquals(ports.get(change.id), change.before)
+		) {
+			throw new Error(`Port ${change.id} mutation before/after values are invalid.`);
+		}
+		if (change.after) {
+			ports.set(change.id, copyPortRecord(change.after));
+			nextPortId = Math.max(nextPortId, change.id + 1);
+		} else ports.delete(change.id);
+	}
+	for (const change of equipmentGroupChanges) {
+		yield;
+		if (!Object.isFrozen(change))
+			throw new Error("Prepared equipment mutations must be immutable.");
+		// Validated equipment records have at most 64 port IDs, including legacy CUSTOM records.
+		if (change.before) copyEquipmentGroupRecord(change.before);
+		if (change.after) copyEquipmentGroupRecord(change.after);
+		if (touchedGroups.has(change.id)) {
+			throw new Error(`Equipment group ${change.id} changes more than once.`);
+		}
+		touchedGroups.add(change.id);
+		if (!change.before && !change.after) {
+			throw new Error(`Equipment group ${change.id} mutation is empty.`);
+		}
+		if (
+			(change.before && change.before.id !== change.id) ||
+			(change.after && change.after.id !== change.id) ||
+			equipmentGroupEquals(change.before, change.after) ||
+			!equipmentGroupEquals(equipmentGroups.get(change.id), change.before)
+		) {
+			throw new Error(`Equipment group ${change.id} mutation before/after values are invalid.`);
+		}
+		if (change.after) {
+			equipmentGroups.set(change.id, copyEquipmentGroupRecord(change.after));
+			nextEquipmentGroupId = Math.max(nextEquipmentGroupId, change.id + 1);
+		} else equipmentGroups.delete(change.id);
+	}
+	const sortedPorts: PortRecord[] = [];
+	for (const port of ports.values()) {
+		yield;
+		sortedPorts.push(port);
+	}
+	const sortedGroups: EquipmentGroupRecord[] = [];
+	for (const group of equipmentGroups.values()) {
+		yield;
+		sortedGroups.push(group);
+	}
+	yield* stableSortSteps(sortedPorts, (left, right) => left.id - right.id);
+	yield* stableSortSteps(sortedGroups, (left, right) => left.id - right.id);
+	const builder = createCanonicalPortEquipmentStateBuilder(nextPortId, nextEquipmentGroupId);
+	for (const port of sortedPorts) {
+		yield;
+		builder.addPort(port);
+	}
+	for (const group of sortedGroups) {
+		yield;
+		builder.addEquipmentGroup(group);
+	}
+	return builder.finish();
 }
 
 /**

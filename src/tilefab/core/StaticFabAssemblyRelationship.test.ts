@@ -6,6 +6,7 @@ import { directionBetween, oppositeDirection } from "./railShape";
 import {
 	applyStaticFabAssemblyRelationshipAdditionsSteps,
 	applyStaticFabAssemblyRelationshipMutations,
+	applyStaticFabAssemblyRelationshipMutationsSteps,
 	checksumStaticFabAssemblyRelationshipRecord,
 	checksumStaticFabAssemblyRelationshipState,
 	copyStaticFabAssemblyRelationshipRecord,
@@ -13,6 +14,7 @@ import {
 	createStaticFabAssemblyRelationshipState,
 	emptyStaticFabAssemblyRelationshipState,
 	isCanonicalStaticFabAssemblyRelationshipState,
+	remapStaticFabAssemblyRelationshipRecord,
 	reverseStaticFabAssemblyRelationshipMutations,
 	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_CANONICAL_BYTES_PER_TRANSITION,
 	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD,
@@ -30,6 +32,7 @@ import {
 	staticFabAssemblyRelationshipStateShapeError,
 	staticFabAssemblyRelationshipStateSourceError,
 	staticFabAssemblyRelationshipTransitionFootprint,
+	staticFabAssemblyRelationshipTransitionFootprintSteps,
 } from "./StaticFabAssemblyRelationship";
 import {
 	type StaticFabOrganizationState,
@@ -96,6 +99,137 @@ describe("StaticFabAssemblyRelationship", () => {
 			completeCooperativeSteps(staticFabAssemblyRelationshipAdditionFootprintSteps(mutable)),
 		).toThrow();
 		expect(source.records).toHaveLength(0);
+	});
+	it("prepares mixed existing-ID changes with the same footprint, ordering and cursor as synchronous application", () => {
+		const { source, mutations } = mixedMutationFixture();
+		const before = JSON.stringify(source);
+		const footprint = completeCooperativeSteps(
+			staticFabAssemblyRelationshipTransitionFootprintSteps(mutations),
+		);
+		expect(footprint).toEqual(staticFabAssemblyRelationshipTransitionFootprint(mutations));
+		const candidate = completeCooperativeSteps(
+			applyStaticFabAssemblyRelationshipMutationsSteps(source, mutations, 6),
+		);
+		expect(candidate).toEqual(applyStaticFabAssemblyRelationshipMutations(source, mutations, 6));
+		expect(candidate.records.map((record) => record.id)).toEqual([1, 3, 5]);
+		expect(candidate.nextRelationshipId).toBe(6);
+		expect(candidate.records[1]).toBe(source.records[2]);
+		expect(isCanonicalStaticFabAssemblyRelationshipState(candidate)).toBe(true);
+		expect(JSON.stringify(source)).toBe(before);
+		expect(
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipMutationsSteps(source, Object.freeze([]), 1),
+			),
+		).toBe(source);
+		expect(
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipMutationsSteps(candidate, Object.freeze([]), 2),
+			),
+		).toBe(candidate);
+		const restored = completeCooperativeSteps(
+			applyStaticFabAssemblyRelationshipMutationsSteps(
+				candidate,
+				reverseStaticFabAssemblyRelationshipMutations(mutations),
+				4,
+			),
+		);
+		expect(restored.records).toEqual(source.records);
+		expect(restored.nextRelationshipId).toBe(6);
+		for (const limits of [
+			{ maximumEdgeReferences: footprint.edgeReferenceCount - 1 },
+			{ maximumOwnerIds: footprint.ownerIdCount - 1 },
+			{ maximumCanonicalBytes: footprint.canonicalByteCount - 1 },
+		]) {
+			expect(() =>
+				completeCooperativeSteps(
+					staticFabAssemblyRelationshipTransitionFootprintSteps(mutations, limits),
+				),
+			).toThrow();
+		}
+	});
+	it("rejects stale, duplicate and no-op immutable changes without modifying source", () => {
+		const { source, mutations } = mixedMutationFixture();
+		const before = JSON.stringify(source);
+		const current = source.records[0];
+		if (!current) throw new Error("Missing mutation source");
+		const stale = copyStaticFabAssemblyRelationshipRecord({
+			...current,
+			parentOrganizationId: 999,
+		});
+		const changed = mutations.find((mutation) => mutation.id === 1)?.after;
+		if (!changed) throw new Error("Missing changed record");
+		for (const invalid of [
+			Object.freeze([...mutations, mutations[0] as StaticFabAssemblyRelationshipMutationV1]),
+			Object.freeze([Object.freeze({ id: 1, before: stale, after: changed })]),
+			Object.freeze([
+				Object.freeze({
+					id: 1,
+					before: current,
+					after: copyStaticFabAssemblyRelationshipRecord(current),
+				}),
+			]),
+			Object.freeze([Object.freeze({ id: 1, before: null, after: changed })]),
+		])
+			expect(() =>
+				completeCooperativeSteps(
+					applyStaticFabAssemblyRelationshipMutationsSteps(source, invalid, 6),
+				),
+			).toThrow();
+		expect(() =>
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipMutationsSteps(source, mutations, 4),
+			),
+		).toThrow();
+		expect(JSON.stringify(source)).toBe(before);
+	});
+	it("rejects mutable nested records and accessor-backed frozen mutation arrays", () => {
+		const { source, mutations } = mixedMutationFixture();
+		const mutable = Object.freeze(
+			mutations.map((mutation) =>
+				Object.freeze({
+					...mutation,
+					after: mutation.after ? structuredClone(mutation.after) : null,
+				}),
+			),
+		);
+		expect(() =>
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipMutationsSteps(source, mutable, 6),
+			),
+		).toThrow();
+		let reads = 0;
+		const accessor: StaticFabAssemblyRelationshipMutationV1[] = [];
+		Object.defineProperty(accessor, 0, {
+			get() {
+				reads++;
+				return mutations[0];
+			},
+			enumerable: true,
+		});
+		Object.freeze(accessor);
+		expect(() =>
+			completeCooperativeSteps(staticFabAssemblyRelationshipTransitionFootprintSteps(accessor)),
+		).toThrow(/data property/);
+		expect(reads).toBe(0);
+		expect(() =>
+			completeCooperativeSteps(
+				applyStaticFabAssemblyRelationshipMutationsSteps({ ...source }, mutations, 6),
+			),
+		).toThrow(/canonical/);
+	});
+	it("can abandon a general relationship mutation at every checkpoint without publishing partial state", () => {
+		const { source, mutations } = mixedMutationFixture();
+		const before = JSON.stringify(source);
+		const all = applyStaticFabAssemblyRelationshipMutationsSteps(source, mutations, 6);
+		let count = 0;
+		while (!all.next().done) count++;
+		expect(count).toBeGreaterThan(mutations.length);
+		for (let stop = 0; stop <= count; stop++) {
+			const steps = applyStaticFabAssemblyRelationshipMutationsSteps(source, mutations, 6);
+			for (let i = 0; i < stop; i++) expect(steps.next().done).toBe(false);
+			steps.return(undefined as never);
+			expect(JSON.stringify(source)).toBe(before);
+		}
 	});
 	it("constructs the empty canonical state", () => {
 		const state = emptyStaticFabAssemblyRelationshipState();
@@ -730,6 +864,35 @@ describe("StaticFabAssemblyRelationship", () => {
 		).toBeNull();
 	});
 });
+
+function mixedMutationFixture() {
+	const base = copyStaticFabAssemblyRelationshipRecord(contactOnlyState().records[0]);
+	const record = (id: number, offset = 0) =>
+		remapStaticFabAssemblyRelationshipRecord(base, {
+			relationshipId: id,
+			organizationIds: new Map([
+				[1, id * 10 + 1],
+				[2, id * 10 + 2],
+				[3, id * 10 + 3],
+			]),
+			quarterTurns: 0,
+			offset: { x: id * 100 + offset, y: 0 },
+		});
+	const first = record(1);
+	const second = record(2);
+	const third = record(3);
+	return {
+		source: copyStaticFabAssemblyRelationshipState({
+			nextRelationshipId: 4,
+			records: [first, second, third],
+		}),
+		mutations: Object.freeze([
+			Object.freeze({ id: 2, before: second, after: null }),
+			Object.freeze({ id: 5, before: null, after: record(5) }),
+			Object.freeze({ id: 1, before: first, after: record(1, 20) }),
+		]),
+	};
+}
 
 function contactOnlyState(): StaticFabAssemblyRelationshipStateV1 {
 	return {

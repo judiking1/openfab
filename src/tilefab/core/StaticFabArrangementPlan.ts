@@ -7,11 +7,12 @@ import type {
 	StaticFabArrangementMode,
 	StaticFabArrangementTranslation,
 } from "./StaticFabArrangement";
+import type { StaticFabAssemblyRelationshipMutationV1 } from "./StaticFabAssemblyRelationship";
 import type { StaticFabOrganizationMutation } from "./StaticFabOrganization";
 import type { Cell } from "./TileMap";
 
 export const STATIC_FAB_ARRANGEMENT_PLAN_KIND = "arrange-static-fab" as const;
-export const STATIC_FAB_ARRANGEMENT_PLAN_VERSION = 1 as const;
+export const STATIC_FAB_ARRANGEMENT_PLAN_VERSION = 2 as const;
 
 export type StaticFabArrangementPlanIssueCode =
 	| "INVALID_ARRANGEMENT"
@@ -29,6 +30,9 @@ export type StaticFabArrangementPlanIssueCode =
 	| "PORT_LAYOUT_INVALID"
 	| "CLEARANCE_INVALID"
 	| "ORGANIZATION_INVALID"
+	| "PARTIAL_RELATIONSHIP"
+	| "INCOMPATIBLE_RELATIONSHIP_TRANSFORMS"
+	| "RELATIONSHIP_INVALID"
 	| "COMPILE_FAILURE";
 
 export interface StaticFabArrangementPlanMetadata {
@@ -63,6 +67,9 @@ export interface StaticFabArrangementPlan {
 	readonly switchMutations: readonly AdvancedSwitchMutation[];
 	readonly portMutations: readonly PortMutation[];
 	readonly equipmentGroupMutations: readonly EquipmentGroupMutation[];
+	readonly relationshipMutations: readonly StaticFabAssemblyRelationshipMutationV1[];
+	readonly nextRelationshipIdBefore: number;
+	readonly nextRelationshipIdAfter: number;
 	readonly organizationMutations: readonly StaticFabOrganizationMutation[];
 	readonly organizationImpactAuthorizations: readonly number[];
 	readonly nextOrganizationIdBefore: number;

@@ -50,6 +50,7 @@ import {
 } from "./PortEquipmentSoA";
 import {
 	createStaticFabAssemblyRelationshipSnapshot,
+	createStaticFabAssemblyRelationshipSnapshotHydrator,
 	hydrateStaticFabAssemblyRelationshipSnapshot,
 	type StaticFabAssemblyRelationshipSnapshot,
 } from "./StaticFabAssemblyRelationshipSoA";
@@ -112,6 +113,7 @@ export interface RailChecksumPatchInput {
 }
 
 interface RailMirrorSnapshotCaptureAuthority {
+	readonly mapMutationGeneration: number;
 	readonly map: TileMap;
 	readonly sequence: number;
 	readonly portEquipment: PortEquipmentState;
@@ -123,6 +125,7 @@ interface RailMirrorSnapshotCaptureAuthority {
 
 const capturedSnapshotAuthorities = new WeakMap<object, RailMirrorSnapshotCaptureAuthority>();
 const pendingSnapshotCaptureHandoffs = new WeakMap<object, RailMirrorSnapshotCaptureAuthority>();
+const adoptingSnapshotCaptureHandoffs = new WeakMap<object, RailMirrorSnapshotCaptureAuthority>();
 const EMPTY_CAPTURE_RELATIONSHIPS = emptyStaticFabAssemblyRelationshipState();
 
 const HASH_SEED_A = 0x811c9dc5;
@@ -598,6 +601,7 @@ export function captureRailMirrorSnapshot(
 		snapshot,
 		Object.freeze({
 			map,
+			mapMutationGeneration: map.getMutationGeneration(),
 			sequence,
 			portEquipment,
 			organizations,
@@ -640,7 +644,15 @@ export function issueRailMirrorSnapshotCaptureHandoff(
 	const token = Object.freeze({});
 	pendingSnapshotCaptureHandoffs.set(
 		token,
-		Object.freeze({ map, sequence, portEquipment, organizations, relationships, checksum }),
+		Object.freeze({
+			map,
+			mapMutationGeneration: map.getMutationGeneration(),
+			sequence,
+			portEquipment,
+			organizations,
+			relationships,
+			checksum,
+		}),
 	);
 	return Object.freeze({ token });
 }
@@ -664,10 +676,50 @@ export function adoptRailMirrorSnapshotCaptureHandoff(
 	return true;
 }
 
+/** Keep transferred wide relationship validation cancellable without issuing partial authority. */
+export async function adoptRailMirrorSnapshotCaptureHandoffCooperatively(
+	handoff: RailMirrorSnapshotCaptureHandoff,
+	snapshot: RailMirrorSnapshot,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<boolean> {
+	const token = handoff.token;
+	const authority = pendingSnapshotCaptureHandoffs.get(token);
+	pendingSnapshotCaptureHandoffs.delete(token);
+	if (!authority) return false;
+	adoptingSnapshotCaptureHandoffs.set(token, authority);
+	try {
+		const task = createCooperativeTask(snapshotMatchesCaptureHandoffSteps(snapshot, authority));
+		while (!task.done) {
+			task.step(operationBudget);
+			await checkpoint();
+			if (
+				adoptingSnapshotCaptureHandoffs.get(token) !== authority ||
+				authority.map.getMutationGeneration() !== authority.mapMutationGeneration
+			)
+				return false;
+		}
+		if (
+			!task.finish() ||
+			adoptingSnapshotCaptureHandoffs.get(token) !== authority ||
+			authority.map.getMutationGeneration() !== authority.mapMutationGeneration
+		)
+			return false;
+		capturedSnapshotAuthorities.set(
+			snapshot,
+			Object.freeze({ ...authority, relationshipSnapshot: snapshot.relationships }),
+		);
+		return true;
+	} finally {
+		adoptingSnapshotCaptureHandoffs.delete(token);
+	}
+}
+
 export function revokeRailMirrorSnapshotCaptureHandoff(
 	handoff: RailMirrorSnapshotCaptureHandoff,
 ): void {
 	pendingSnapshotCaptureHandoffs.delete(handoff.token);
+	adoptingSnapshotCaptureHandoffs.delete(handoff.token);
 }
 
 /**
@@ -686,6 +738,7 @@ export function consumeRailMirrorSnapshotCaptureAuthority(
 	capturedSnapshotAuthorities.delete(snapshot);
 	return (
 		authority?.map === map &&
+		authority.mapMutationGeneration === map.getMutationGeneration() &&
 		authority.sequence === sequence &&
 		authority.portEquipment === portEquipment &&
 		authority.organizations === organizations &&
@@ -711,9 +764,22 @@ function snapshotMatchesCaptureHandoff(
 	snapshot: RailMirrorSnapshot,
 	authority: RailMirrorSnapshotCaptureAuthority,
 ): boolean {
+	const task = createCooperativeTask(snapshotMatchesCaptureHandoffSteps(snapshot, authority));
+	while (!task.done) {
+		task.step(4096);
+		/* Synchronous compatibility for Worker and small direct callers. */
+	}
+	return task.finish();
+}
+
+function* snapshotMatchesCaptureHandoffSteps(
+	snapshot: RailMirrorSnapshot,
+	authority: RailMirrorSnapshotCaptureAuthority,
+): Generator<void, boolean> {
 	try {
 		const checksum = RailChecksumAccumulator.fromDigest(authority.checksum);
 		if (
+			authority.map.getMutationGeneration() !== authority.mapMutationGeneration ||
 			authority.map.getRevision() !== snapshot.revision ||
 			authority.map.getAdvancedSwitchIdCursor() !== snapshot.nextAdvancedSwitchId ||
 			authority.portEquipment.nextPortId !== snapshot.portEquipment.nextPortId ||
@@ -741,7 +807,12 @@ function snapshotMatchesCaptureHandoff(
 		);
 		validatePortEquipmentSnapshotShape(snapshot.portEquipment);
 		validateStaticFabOrganizationSnapshotStructure(snapshot.organizations);
-		const relationships = hydrateStaticFabAssemblyRelationshipSnapshot(snapshot.relationships);
+		const hydrator = createStaticFabAssemblyRelationshipSnapshotHydrator(snapshot.relationships);
+		while (!hydrator.done) {
+			hydrator.step(1);
+			yield;
+		}
+		const relationships = hydrator.finish();
 		return (
 			snapshot.portEquipment.portIds.length === checksum.portCount &&
 			snapshot.portEquipment.equipmentGroupIds.length === checksum.equipmentGroupCount &&

@@ -8,6 +8,7 @@ import { createCooperativeTask } from "./CooperativeTask";
 import {
 	applyPortEquipmentAdditionsCooperatively,
 	applyPortEquipmentMutations,
+	applyPortEquipmentMutationsSteps,
 	copyEquipmentGroupRecord,
 	copyPortEquipmentState,
 	type EquipmentGroupMutation,
@@ -66,6 +67,7 @@ import {
 	createRailMirrorHistoryAdditionLedgerEntryCooperatively,
 	createRailMirrorHistoryLedgerEntry,
 	createRailMirrorHistoryLedgerEntryCooperatively,
+	createRailMirrorHistoryMutationLedgerEntryCooperatively,
 	prepareRailHistoryAppendSteps,
 	type RailMirrorHistoryLedger,
 	type RailMirrorHistoryLedgerEntry,
@@ -97,6 +99,7 @@ import {
 import {
 	applyStaticFabAssemblyRelationshipAdditionsSteps,
 	applyStaticFabAssemblyRelationshipMutations,
+	applyStaticFabAssemblyRelationshipMutationsSteps,
 	assertStaticFabAssemblyRelationshipStateSource,
 	copyStaticFabAssemblyRelationshipRecord,
 	copyStaticFabAssemblyRelationshipState,
@@ -127,6 +130,7 @@ import type { StaticFabMutationPlan } from "./StaticFabBlueprint";
 import {
 	applyStaticFabOrganizationAdditionsSteps,
 	applyStaticFabOrganizationMutations,
+	applyStaticFabOrganizationMutationsSteps,
 	assertStaticFabOrganizationState,
 	copyStaticFabOrganizationState,
 	emptyStaticFabOrganizationState,
@@ -1828,7 +1832,8 @@ export class RailDocument {
 			plan.mutations.length === 0 &&
 			plan.switchMutations.length === 0 &&
 			plan.portMutations.length === 0 &&
-			plan.organizationMutations.length === 0
+			plan.organizationMutations.length === 0 &&
+			plan.relationshipMutations.length === 0
 		) {
 			return this.rejectCommand("정렬 변경 내용이 없습니다", "정렬을 거부했습니다");
 		}
@@ -1861,12 +1866,20 @@ export class RailDocument {
 		}
 		if (
 			plan.nextOrganizationIdBefore !== this.organizations.nextOrganizationId ||
-			plan.nextOrganizationIdAfter !== this.organizations.nextOrganizationId
+			plan.nextOrganizationIdAfter !== this.organizations.nextOrganizationId ||
+			plan.nextRelationshipIdBefore !== this.relationships.nextRelationshipId ||
+			plan.nextRelationshipIdAfter !== this.relationships.nextRelationshipId
 		) {
 			return this.rejectCommand("정렬은 조직 ID 세대를 변경할 수 없습니다", "정렬을 거부했습니다");
 		}
 		if (
-			!isStaticFabArrangementPlanIssuedFor(plan, this.map, this.portEquipment, this.organizations)
+			!isStaticFabArrangementPlanIssuedFor(
+				plan,
+				this.map,
+				this.portEquipment,
+				this.organizations,
+				this.relationships,
+			)
 		) {
 			return this.rejectCommand(
 				"다른 문서 또는 이전 상태에서 발급된 정적 FAB 정렬 계획입니다",
@@ -1895,6 +1908,12 @@ export class RailDocument {
 			plan.nextOrganizationIdBefore,
 			plan.nextOrganizationIdAfter,
 			plan.organizationImpactAuthorizations,
+			null,
+			null,
+			null,
+			plan.relationshipMutations,
+			plan.nextRelationshipIdBefore,
+			plan.nextRelationshipIdAfter,
 		);
 		if (validateAdvancedSwitchPatch(this.map, entry.changes, entry.switchChanges).length > 0) {
 			return this.rejectCommand(
@@ -1926,6 +1945,7 @@ export class RailDocument {
 				this.map,
 				this.portEquipment,
 				this.organizations,
+				this.relationships,
 			)
 		) {
 			return this.rejectCommand(
@@ -1944,6 +1964,12 @@ export class RailDocument {
 				entry.organizationNextIdAfter,
 				false,
 				entry.organizationImpactAuthorizations,
+				null,
+				null,
+				null,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
 			);
 		} catch (error) {
 			return this.rejectCommand(error, "정적 FAB 정렬을 원자적으로 적용할 수 없습니다");
@@ -1960,8 +1986,497 @@ export class RailDocument {
 			entry.organizationNextIdBefore,
 			entry.organizationNextIdAfter,
 			entry.organizationImpactAuthorizations,
+			undefined,
+			null,
+			entry.relationshipChanges,
+			entry.relationshipNextIdBefore,
+			entry.relationshipNextIdAfter,
 		);
 		return true;
+	}
+
+	/** Prepare all six authored domains, history and transport before publishing one existing-ID arrangement command. */
+	async commitStaticFabArrangementCooperatively(
+		input: StaticFabArrangementPlan,
+		options: RailDocumentCooperativeCommitOptions,
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		this.lastCommandError = null;
+		const source = captureRailDocumentPortEquipmentSource(this);
+		const cooperative = createRailDocumentCommitCooperativeController(this, source, options);
+		const totalStartedAt = cooperative.readTime(0);
+		try {
+			cooperative.assertCurrent();
+			const plan = input;
+			if (
+				!consumeCertifiedStaticFabArrangementPlanIssuedFor(
+					plan,
+					source.map,
+					source.portEquipment,
+					source.organizations,
+					source.relationships,
+				)
+			)
+				return cooperativeCommitRejected();
+			const authorityFinishedAt = cooperative.readTime(totalStartedAt);
+			if (!plan) return cooperativeCommitRejected();
+			cooperative.assertCurrent();
+			if (
+				!plan.valid ||
+				!plan.arrangement ||
+				plan.equipmentGroupMutations.length !== 0 ||
+				(plan.mutations.length === 0 &&
+					plan.switchMutations.length === 0 &&
+					plan.portMutations.length === 0 &&
+					plan.organizationMutations.length === 0 &&
+					plan.relationshipMutations.length === 0) ||
+				plan.baseRevision !== source.revision ||
+				plan.basePatchSequence !== source.patchSequence ||
+				plan.nextOrganizationIdBefore !== source.organizations.nextOrganizationId ||
+				plan.nextOrganizationIdAfter !== source.organizations.nextOrganizationId ||
+				plan.nextRelationshipIdBefore !== source.relationships.nextRelationshipId ||
+				plan.nextRelationshipIdAfter !== source.relationships.nextRelationshipId
+			)
+				return cooperativeCommitRejected();
+			const check = cooperative.checkTime;
+			await finishDocumentPreparationSteps(this.assertArrangementProtectionSteps(plan), check);
+			const customError = await legacyCustomEquipmentMutationErrorCooperatively(
+				plan.portMutations,
+				plan.equipmentGroupMutations,
+				this.legacyCustomEquipment,
+				check,
+			);
+			if (customError) throw new Error(customError);
+			const topology = await finishDocumentPreparationSteps(
+				validateAdvancedSwitchPatchSteps(source.map, plan.mutations, plan.switchMutations),
+				check,
+			);
+			if (topology.length > 0) throw new Error("정렬의 고급 스위치 topology가 변경되었습니다");
+			const commandValidationFinishedAt = cooperative.readTime(authorityFinishedAt);
+
+			const transition = Object.freeze({
+				kind: STATIC_FAB_ARRANGEMENT_PLAN_KIND,
+				changes: plan.mutations,
+				switchChanges: plan.switchMutations,
+				portChanges: plan.portMutations,
+				equipmentGroupChanges: plan.equipmentGroupMutations,
+				organizationChanges: plan.organizationMutations,
+				organizationNextIdBefore: plan.nextOrganizationIdBefore,
+				organizationNextIdAfter: plan.nextOrganizationIdAfter,
+				relationshipChanges: plan.relationshipMutations,
+				relationshipNextIdBefore: plan.nextRelationshipIdBefore,
+				relationshipNextIdAfter: plan.nextRelationshipIdAfter,
+				organizationImpactAuthorizations: plan.organizationImpactAuthorizations,
+				operationalConfigurationPatch: null,
+				staticFabAssemblyConnectorEvidence: null,
+				staticFabBayFlowEditEvidence: null,
+			});
+			const mirrorHistoryEntry = await createRailMirrorHistoryMutationLedgerEntryCooperatively(
+				transition.kind,
+				transition,
+				check,
+			);
+			const entry: HistoryEntry = Object.freeze({ ...transition, mirrorHistoryEntry });
+			const nextUndoStack = await finishDocumentPreparationSteps(
+				prepareRailHistoryAppendSteps(
+					this.undoStack,
+					entry,
+					(candidate) => candidate.mirrorHistoryEntry,
+				),
+				check,
+			);
+			const historyCreationFinishedAt = cooperative.readTime(commandValidationFinishedAt);
+			const nextMap = await finishDocumentPreparationSteps(
+				source.map.createMutationCandidateSteps(entry.changes, entry.switchChanges),
+				check,
+			);
+			const nextPortEquipment = await finishDocumentPreparationSteps(
+				applyPortEquipmentMutationsSteps(
+					source.portEquipment,
+					entry.portChanges,
+					entry.equipmentGroupChanges,
+				),
+				check,
+			);
+			await assertPortEquipmentLayoutCooperatively(nextMap, nextPortEquipment, check);
+			const nextOrganizations = await finishDocumentPreparationSteps(
+				applyStaticFabOrganizationMutationsSteps(
+					source.organizations,
+					entry.organizationChanges,
+					entry.organizationNextIdAfter,
+				),
+				check,
+			);
+			const nextRelationships = await finishDocumentPreparationSteps(
+				applyStaticFabAssemblyRelationshipMutationsSteps(
+					source.relationships,
+					entry.relationshipChanges,
+					entry.relationshipNextIdAfter,
+				),
+				check,
+			);
+			const activation = await validateStaticFabAssemblyRelationshipSourceActivation(
+				nextMap,
+				nextPortEquipment,
+				nextOrganizations,
+				nextRelationships,
+				check,
+			);
+			const nextImpactIndex = consumeStaticFabOrganizationImpactIndex(
+				activation.organizationActivation,
+				nextMap,
+				nextPortEquipment,
+				nextOrganizations,
+			);
+			const stateApplicationFinishedAt = cooperative.readTime(historyCreationFinishedAt);
+			// These arrays come exclusively from the consumed, owned plan. Do not recopy wide descendants.
+			const event: RailPatchEvent = Object.freeze({
+				sequence: source.patchSequence + 1,
+				kind: entry.kind,
+				baseRevision: source.revision,
+				revision: nextMap.getRevision(),
+				changes: entry.changes,
+				switchChanges: entry.switchChanges,
+				portChanges: entry.portChanges,
+				equipmentGroupChanges: entry.equipmentGroupChanges,
+				organizationChanges: entry.organizationChanges,
+				organizationNextIdBefore: entry.organizationNextIdBefore,
+				organizationNextIdAfter: entry.organizationNextIdAfter,
+				relationshipChanges: entry.relationshipChanges,
+				relationshipNextIdBefore: entry.relationshipNextIdBefore,
+				relationshipNextIdAfter: entry.relationshipNextIdAfter,
+				organizationImpactAuthorizations: entry.organizationImpactAuthorizations,
+				operationalConfigurationPatch: null,
+			});
+			await options.preparePatch?.(event, check);
+			const patchPreparationFinishedAt = cooperative.readTime(stateApplicationFinishedAt);
+			const maximumPreparationSliceMilliseconds = cooperative.maximumSliceAt(
+				patchPreparationFinishedAt,
+			);
+			cooperative.assertCurrent();
+			// No callbacks or awaits until all truth, history and sequence are installed.
+			this.currentMap = nextMap;
+			this.currentPortEquipment = nextPortEquipment;
+			this.currentOrganizations = nextOrganizations;
+			this.currentRelationships = nextRelationships;
+			this.organizationImpactIndex = nextImpactIndex;
+			this.undoStack = nextUndoStack;
+			this.redoStack = [];
+			let publicationError: string | undefined;
+			this.publishPatchEvent(event, (error) => {
+				publicationError ??=
+					error instanceof Error && error.message
+						? error.message
+						: "문서 변경 통지를 완료하지 못했습니다";
+			});
+			const finishedAt = cooperative.readTime(patchPreparationFinishedAt);
+			return Object.freeze({
+				committed: true,
+				...(publicationError ? { publicationError } : {}),
+				timings: Object.freeze({
+					maximumPreparationSliceMilliseconds,
+					authorityConsumptionMilliseconds: authorityFinishedAt - totalStartedAt,
+					commandValidationMilliseconds: commandValidationFinishedAt - authorityFinishedAt,
+					historyCreationMilliseconds: historyCreationFinishedAt - commandValidationFinishedAt,
+					stateApplicationMilliseconds: stateApplicationFinishedAt - historyCreationFinishedAt,
+					patchPreparationMilliseconds: patchPreparationFinishedAt - stateApplicationFinishedAt,
+					historyPublicationMilliseconds: null,
+					patchPublicationMilliseconds: finishedAt - patchPreparationFinishedAt,
+					totalMilliseconds: finishedAt - totalStartedAt,
+				}),
+			});
+		} catch (error) {
+			if (error instanceof RailDocumentCommitSourceChangedError) return cooperativeCommitRejected();
+			throw error;
+		}
+	}
+
+	/** Replay only the owned existing-ID Arrangement entry at the requested history boundary. */
+	canReplayStaticFabArrangement(direction: "undo" | "redo"): boolean {
+		return (
+			(direction === "undo" ? this.undoStack : this.redoStack).at(-1)?.kind ===
+			STATIC_FAB_ARRANGEMENT_PLAN_KIND
+		);
+	}
+
+	async replayStaticFabArrangementCooperatively(
+		direction: "undo" | "redo",
+		options: RailDocumentCooperativeCommitOptions,
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		this.lastCommandError = null;
+		if (direction !== "undo" && direction !== "redo") return cooperativeCommitRejected();
+		const source = captureRailDocumentPortEquipmentSource(this);
+		const cooperative = createRailDocumentCommitCooperativeController(this, source, options);
+		const totalStartedAt = cooperative.readTime(0);
+		const sourceUndo = this.undoStack,
+			sourceRedo = this.redoStack;
+		const original = (direction === "undo" ? sourceUndo : sourceRedo).at(-1);
+		if (
+			!original ||
+			original.kind !== STATIC_FAB_ARRANGEMENT_PLAN_KIND ||
+			original.operationalConfigurationPatch ||
+			original.staticFabAssemblyConnectorEvidence ||
+			original.staticFabBayFlowEditEvidence
+		)
+			return cooperativeCommitRejected();
+		try {
+			cooperative.assertCurrent();
+			const check = cooperative.checkTime;
+			const entry = await finishDocumentPreparationSteps(
+				arrangementHistoryTransitionSteps(
+					original,
+					direction,
+					source.organizations.nextOrganizationId,
+					source.relationships.nextRelationshipId,
+				),
+				check,
+			);
+			const authorityFinishedAt = cooperative.readTime(totalStartedAt);
+			await finishDocumentPreparationSteps(
+				this.assertArrangementProtectionSteps({
+					mutations: entry.changes,
+					switchMutations: entry.switchChanges,
+					portMutations: entry.portChanges,
+					equipmentGroupMutations: entry.equipmentGroupChanges,
+					organizationMutations: entry.organizationChanges,
+					relationshipMutations: entry.relationshipChanges,
+					organizationImpactAuthorizations: entry.organizationImpactAuthorizations,
+					arrangement: { affectedOrganizationIds: entry.organizationImpactAuthorizations },
+				}),
+				check,
+			);
+			const customError = await legacyCustomEquipmentMutationErrorCooperatively(
+				entry.portChanges,
+				entry.equipmentGroupChanges,
+				this.legacyCustomEquipment,
+				check,
+			);
+			if (customError) throw new Error(customError);
+			const topology = await finishDocumentPreparationSteps(
+				validateAdvancedSwitchPatchSteps(source.map, entry.changes, entry.switchChanges),
+				check,
+			);
+			if (topology.length) throw new Error("정렬 이력의 스위치 topology가 변경되었습니다");
+			const commandValidationFinishedAt = cooperative.readTime(authorityFinishedAt);
+			const nextUndoStack = await finishDocumentPreparationSteps(
+				copyArrangementHistoryStackSteps(
+					sourceUndo,
+					direction === "undo",
+					direction === "redo" ? original : null,
+				),
+				check,
+			);
+			const nextRedoStack = await finishDocumentPreparationSteps(
+				copyArrangementHistoryStackSteps(
+					sourceRedo,
+					direction === "redo",
+					direction === "undo" ? original : null,
+				),
+				check,
+			);
+			const historyCreationFinishedAt = cooperative.readTime(commandValidationFinishedAt);
+			const nextMap = await finishDocumentPreparationSteps(
+				source.map.createMutationCandidateSteps(entry.changes, entry.switchChanges),
+				check,
+			);
+			const nextPortEquipment = await finishDocumentPreparationSteps(
+				applyPortEquipmentMutationsSteps(
+					source.portEquipment,
+					entry.portChanges,
+					entry.equipmentGroupChanges,
+				),
+				check,
+			);
+			await assertPortEquipmentLayoutCooperatively(nextMap, nextPortEquipment, check);
+			const nextOrganizations = await finishDocumentPreparationSteps(
+				applyStaticFabOrganizationMutationsSteps(
+					source.organizations,
+					entry.organizationChanges,
+					entry.organizationNextIdAfter,
+				),
+				check,
+			);
+			const nextRelationships = await finishDocumentPreparationSteps(
+				applyStaticFabAssemblyRelationshipMutationsSteps(
+					source.relationships,
+					entry.relationshipChanges,
+					entry.relationshipNextIdAfter,
+				),
+				check,
+			);
+			const activation = await validateStaticFabAssemblyRelationshipSourceActivation(
+				nextMap,
+				nextPortEquipment,
+				nextOrganizations,
+				nextRelationships,
+				check,
+			);
+			const nextImpactIndex = consumeStaticFabOrganizationImpactIndex(
+				activation.organizationActivation,
+				nextMap,
+				nextPortEquipment,
+				nextOrganizations,
+			);
+			const stateApplicationFinishedAt = cooperative.readTime(historyCreationFinishedAt);
+			// Reuse the private immutable history records; wide descendants were validated cooperatively.
+			const event: RailPatchEvent = Object.freeze({
+				sequence: source.patchSequence + 1,
+				kind: direction,
+				historyOriginKind: original.kind,
+				baseRevision: source.revision,
+				revision: nextMap.getRevision(),
+				changes: entry.changes,
+				switchChanges: entry.switchChanges,
+				portChanges: entry.portChanges,
+				equipmentGroupChanges: entry.equipmentGroupChanges,
+				organizationChanges: entry.organizationChanges,
+				organizationNextIdBefore: entry.organizationNextIdBefore,
+				organizationNextIdAfter: entry.organizationNextIdAfter,
+				relationshipChanges: entry.relationshipChanges,
+				relationshipNextIdBefore: entry.relationshipNextIdBefore,
+				relationshipNextIdAfter: entry.relationshipNextIdAfter,
+				organizationImpactAuthorizations: entry.organizationImpactAuthorizations,
+				operationalConfigurationPatch: null,
+			});
+			await options.preparePatch?.(event, check);
+			const patchPreparationFinishedAt = cooperative.readTime(stateApplicationFinishedAt);
+			const maximumPreparationSliceMilliseconds = cooperative.maximumSliceAt(
+				patchPreparationFinishedAt,
+			);
+			cooperative.assertCurrent();
+			if (
+				this.undoStack !== sourceUndo ||
+				this.redoStack !== sourceRedo ||
+				(direction === "undo" ? this.undoStack : this.redoStack).at(-1) !== original
+			)
+				return cooperativeCommitRejected();
+			// No callbacks or awaits until all truth, history and sequence are installed.
+			this.currentMap = nextMap;
+			this.currentPortEquipment = nextPortEquipment;
+			this.currentOrganizations = nextOrganizations;
+			this.currentRelationships = nextRelationships;
+			this.organizationImpactIndex = nextImpactIndex;
+			this.undoStack = nextUndoStack;
+			this.redoStack = nextRedoStack;
+			let publicationError: string | undefined;
+			this.publishPatchEvent(event, (error) => {
+				publicationError ??=
+					error instanceof Error && error.message
+						? error.message
+						: "문서 변경 통지를 완료하지 못했습니다";
+			});
+			const finishedAt = cooperative.readTime(patchPreparationFinishedAt);
+			return Object.freeze({
+				committed: true,
+				...(publicationError ? { publicationError } : {}),
+				timings: Object.freeze({
+					maximumPreparationSliceMilliseconds,
+					authorityConsumptionMilliseconds: authorityFinishedAt - totalStartedAt,
+					commandValidationMilliseconds: commandValidationFinishedAt - authorityFinishedAt,
+					historyCreationMilliseconds: historyCreationFinishedAt - commandValidationFinishedAt,
+					stateApplicationMilliseconds: stateApplicationFinishedAt - historyCreationFinishedAt,
+					patchPreparationMilliseconds: patchPreparationFinishedAt - stateApplicationFinishedAt,
+					historyPublicationMilliseconds: null,
+					patchPublicationMilliseconds: finishedAt - patchPreparationFinishedAt,
+					totalMilliseconds: finishedAt - totalStartedAt,
+				}),
+			});
+		} catch (error) {
+			if (error instanceof RailDocumentCommitSourceChangedError) return cooperativeCommitRejected();
+			throw error;
+		}
+	}
+
+	private *assertArrangementProtectionSteps(
+		plan: Pick<
+			StaticFabArrangementPlan,
+			| "mutations"
+			| "switchMutations"
+			| "portMutations"
+			| "equipmentGroupMutations"
+			| "organizationMutations"
+			| "relationshipMutations"
+			| "organizationImpactAuthorizations"
+		> & { readonly arrangement: { readonly affectedOrganizationIds: readonly number[] } | null },
+	): Generator<void> {
+		if (!plan.arrangement || plan.equipmentGroupMutations.length !== 0)
+			throw new Error("정렬은 장비 그룹의 기존 ID와 레코드를 유지해야 합니다");
+		const authorized = new Set<number>();
+		const expected = plan.arrangement.affectedOrganizationIds;
+		if (expected.length !== plan.organizationImpactAuthorizations.length)
+			throw new Error("정렬 보호 인증 metadata가 일치하지 않습니다");
+		let previous = 0;
+		for (let i = 0; i < expected.length; i++) {
+			yield;
+			const id = plan.organizationImpactAuthorizations[i];
+			if (!Number.isSafeInteger(id) || id <= previous || id > 0x7fffffff || id !== expected[i])
+				throw new Error("정렬 보호 인증 ID가 canonical하지 않습니다");
+			previous = id;
+			authorized.add(id);
+		}
+		const actual = new Set<number>();
+		for (const change of plan.mutations) {
+			yield;
+			for (const owner of this.organizationImpactIndex.organizationOwnersForCell(
+				change.x,
+				change.y,
+			)) {
+				yield;
+				actual.add(owner.organizationId);
+			}
+		}
+		for (const change of plan.switchMutations) {
+			yield;
+			if (
+				!change.before ||
+				!change.after ||
+				change.id !== change.before.id ||
+				change.id !== change.after.id
+			)
+				throw new Error("정렬은 기존 스위치 ID를 유지해야 합니다");
+			for (const owner of this.organizationImpactIndex.organizationOwnersForSwitch(change.id)) {
+				yield;
+				actual.add(owner.organizationId);
+			}
+		}
+		// Source and candidate reciprocal Port states prove these group IDs; group records never change.
+		for (const change of plan.portMutations) {
+			yield;
+			if (
+				!change.before ||
+				!change.after ||
+				change.before.equipmentGroupId !== change.after.equipmentGroupId ||
+				change.before.id !== change.id ||
+				change.after.id !== change.id
+			)
+				throw new Error("정렬은 기존 Port와 장비 그룹 ID를 유지해야 합니다");
+			for (const owner of this.organizationImpactIndex.organizationOwnersForEquipmentGroup(
+				change.before.equipmentGroupId,
+			)) {
+				yield;
+				actual.add(owner.organizationId);
+			}
+		}
+		if (actual.size !== authorized.size)
+			throw new Error("정렬의 보호 인증 범위가 실제 변경과 다릅니다");
+		for (const id of actual) {
+			yield;
+			if (!authorized.has(id)) throw new Error("정렬의 보호 인증에 누락된 조직이 있습니다");
+		}
+		for (const change of plan.organizationMutations) {
+			yield;
+			if (!change.before || !change.after || !authorized.has(change.id))
+				throw new Error("정렬은 인증된 기존 조직 ID를 유지해야 합니다");
+		}
+		for (const change of plan.relationshipMutations) {
+			yield;
+			if (
+				!change.before ||
+				!change.after ||
+				change.before.id !== change.id ||
+				change.after.id !== change.id
+			)
+				throw new Error("정렬은 기존 조립 관계 ID를 유지해야 합니다");
+		}
 	}
 
 	/** Commit semantic organization metadata without rebuilding authored rail geometry. */
@@ -3290,4 +3805,66 @@ function staticFabSemanticBayMutationCommitError(
 		return "Bay Delete review의 장비·스위치 제거 범위가 실제 변경과 다릅니다";
 	}
 	return null;
+}
+
+function* copyArrangementHistoryStackSteps(
+	source: readonly HistoryEntry[],
+	removeLast: boolean,
+	append: HistoryEntry | null,
+): Generator<void, HistoryEntry[]> {
+	const next: HistoryEntry[] = [];
+	for (let i = 0; i < source.length - (removeLast ? 1 : 0); i++) {
+		yield;
+		next.push(source[i]);
+	}
+	if (append) next.push(append);
+	return next;
+}
+function* reverseImmutableHistoryRecordsSteps<T>(
+	changes: readonly { readonly id: number; readonly before: T | null; readonly after: T | null }[],
+): Generator<
+	void,
+	readonly { readonly id: number; readonly before: T | null; readonly after: T | null }[]
+> {
+	const reversed = [];
+	for (const change of changes) {
+		yield;
+		reversed.push(Object.freeze({ id: change.id, before: change.after, after: change.before }));
+	}
+	return Object.freeze(reversed);
+}
+function* arrangementHistoryTransitionSteps(
+	entry: HistoryEntry,
+	direction: "undo" | "redo",
+	organizationNextId: number,
+	relationshipNextId: number,
+): Generator<void, HistoryEntry> {
+	if (direction === "redo")
+		return Object.freeze({
+			...entry,
+			organizationNextIdBefore: organizationNextId,
+			organizationNextIdAfter: organizationNextId,
+			relationshipNextIdBefore: relationshipNextId,
+			relationshipNextIdAfter: relationshipNextId,
+		});
+	const changes: RailMutation[] = [];
+	for (const change of entry.changes) {
+		yield;
+		changes.push(
+			Object.freeze({ x: change.x, y: change.y, before: change.after, after: change.before }),
+		);
+	}
+	return Object.freeze({
+		...entry,
+		changes: Object.freeze(changes),
+		switchChanges: yield* reverseImmutableHistoryRecordsSteps(entry.switchChanges),
+		portChanges: yield* reverseImmutableHistoryRecordsSteps(entry.portChanges),
+		equipmentGroupChanges: yield* reverseImmutableHistoryRecordsSteps(entry.equipmentGroupChanges),
+		organizationChanges: yield* reverseImmutableHistoryRecordsSteps(entry.organizationChanges),
+		relationshipChanges: yield* reverseImmutableHistoryRecordsSteps(entry.relationshipChanges),
+		organizationNextIdBefore: organizationNextId,
+		organizationNextIdAfter: organizationNextId,
+		relationshipNextIdBefore: relationshipNextId,
+		relationshipNextIdAfter: relationshipNextId,
+	});
 }

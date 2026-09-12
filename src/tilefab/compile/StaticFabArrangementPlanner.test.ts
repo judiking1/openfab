@@ -16,9 +16,11 @@ import {
 	STATIC_FAB_ARRANGEMENT_VERSION,
 	solveStaticFabArrangement,
 } from "../core/StaticFabArrangement";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
+	copyStaticFabOrganizationState,
 	type StaticFabOrganizationMembership,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
@@ -59,6 +61,7 @@ describe("StaticFabArrangementPlanner", () => {
 			ownership,
 			equipment,
 			organizations,
+			emptyStaticFabAssemblyRelationshipState(),
 			0,
 			roots,
 			arrangement,
@@ -149,6 +152,7 @@ describe("StaticFabArrangementPlanner", () => {
 			ownership,
 			emptyPortEquipmentState(),
 			organizationState([]),
+			emptyStaticFabAssemblyRelationshipState(),
 			0,
 			roots,
 			arrangement,
@@ -185,6 +189,7 @@ describe("StaticFabArrangementPlanner", () => {
 			ownership,
 			emptyPortEquipmentState(),
 			organizationState([]),
+			emptyStaticFabAssemblyRelationshipState(),
 			0,
 			roots,
 			arrangement,
@@ -213,6 +218,7 @@ describe("StaticFabArrangementPlanner", () => {
 			ownership,
 			emptyPortEquipmentState(),
 			organizationState([]),
+			emptyStaticFabAssemblyRelationshipState(),
 			0,
 			roots,
 			arrangement,
@@ -243,6 +249,7 @@ describe("StaticFabArrangementPlanner", () => {
 			ownership,
 			emptyPortEquipmentState(),
 			organizationState([]),
+			emptyStaticFabAssemblyRelationshipState(),
 			0,
 			roots,
 			arrangement,
@@ -286,6 +293,7 @@ describe("StaticFabArrangementPlanner", () => {
 			ownership,
 			emptyPortEquipmentState(),
 			organizationState([]),
+			emptyStaticFabAssemblyRelationshipState(),
 			0,
 			roots,
 			arrangement,
@@ -395,7 +403,7 @@ function membership(
 function organizationState(
 	records: readonly StaticFabOrganizationRecord[],
 ): StaticFabOrganizationState {
-	return Object.freeze({
+	return copyStaticFabOrganizationState({
 		nextOrganizationId:
 			records.length === 0 ? 1 : Math.max(...records.map((record) => record.id)) + 1,
 		records: Object.freeze([...records]),

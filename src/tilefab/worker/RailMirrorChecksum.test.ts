@@ -9,6 +9,7 @@ import {
 } from "../core/StaticFabOrganization";
 import {
 	adoptRailMirrorSnapshotCaptureHandoff,
+	adoptRailMirrorSnapshotCaptureHandoffCooperatively,
 	captureRailMirrorSnapshot,
 	checksumRailMap,
 	checksumRailMapCooperatively,
@@ -215,6 +216,65 @@ describe("RailMirrorSnapshot capture authority", () => {
 				document.relationships,
 			),
 		).toBe(true);
+	});
+
+	it.each([
+		"accept",
+		"revoke",
+		"rollback",
+	] as const)("cooperative snapshot admission preserves one-shot authority on %s", async (action) => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 3, y: 0 })),
+		).toBe(true);
+		const snapshot = structuredClone(
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot,
+		);
+		const handoff = issueRailMirrorSnapshotCaptureHandoff(
+			document.map,
+			document.getPatchSequence(),
+			document.portEquipment,
+			document.organizations,
+			document.relationships,
+			snapshot.checksum,
+		);
+		let checkpoints = 0;
+		const accepted = await adoptRailMirrorSnapshotCaptureHandoffCooperatively(
+			handoff,
+			snapshot,
+			async () => {
+				if (++checkpoints !== 1) return;
+				if (action === "revoke") revokeRailMirrorSnapshotCaptureHandoff(handoff);
+				if (action === "rollback") {
+					const checkpoint = document.map.createMutationCheckpoint();
+					const change = { x: -99, y: -99, before: 0, after: document.map.getEncoded(0, 0) };
+					document.map.applyAtomicMutations([change], []);
+					document.map.rollbackAtomicMutations([change], [], checkpoint);
+				}
+			},
+			1,
+		);
+		expect(checkpoints).toBeGreaterThan(0);
+		expect(accepted).toBe(action === "accept");
+		expect(
+			await adoptRailMirrorSnapshotCaptureHandoffCooperatively(handoff, snapshot, async () => {}),
+		).toBe(false);
+		expect(
+			consumeRailMirrorSnapshotCaptureAuthority(
+				snapshot,
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(action === "accept");
 	});
 
 	it("consumes a handoff token once even when a Proxy alternates token reads", () => {

@@ -3,9 +3,10 @@ import type { StaticFabArrangementCommandIntent } from "../core/StaticFabArrange
 import type { StaticFabArrangementPlan } from "../core/StaticFabArrangementPlan";
 import type { Cell } from "../core/TileMap";
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
+import type { StaticFabArrangementTransport } from "./StaticFabArrangementTransport";
 
 export const STATIC_FAB_ARRANGEMENT_CONFLICT_LIMIT = 512;
-export const STATIC_FAB_ARRANGEMENT_SESSION_VERSION = 3;
+export const STATIC_FAB_ARRANGEMENT_SESSION_VERSION = 5;
 
 export type StaticFabArrangementFailureCode =
 	| "snapshot"
@@ -23,6 +24,7 @@ export interface StaticFabArrangementSessionSourceIdentity {
 	readonly nextPortId: number;
 	readonly nextEquipmentGroupId: number;
 	readonly nextOrganizationId: number;
+	readonly nextRelationshipId: number;
 }
 
 export interface InitializeStaticFabArrangementSessionRequest {
@@ -61,7 +63,7 @@ export interface StaticFabArrangementPreparedResponse {
 	readonly sessionId: number;
 	readonly requestId: number;
 	readonly sourcePlanIndex: number;
-	readonly prepared: PreparedStaticFabArrangement;
+	readonly prepared: StaticFabArrangementTransport;
 }
 
 export interface StaticFabArrangementSessionReadyResponse {

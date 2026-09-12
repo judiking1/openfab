@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const artifactRoot = path.join(root, "artifacts", "openfab-live-demo");
+const artifactRoot = path.resolve(
+	process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR ?? path.join(root, "artifacts", "openfab-live-demo"),
+);
 const distRoot = path.join(root, "dist");
 const host = "127.0.0.1";
 const requestedPort = Number(process.env.OPENFAB_LIVE_DEMO_PORT ?? 0);

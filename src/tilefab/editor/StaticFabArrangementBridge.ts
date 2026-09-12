@@ -1,6 +1,8 @@
+import { createCooperativeTask } from "../core/CooperativeTask";
 import type { PortEquipmentState } from "../core/EquipmentGroup";
 import {
-	adoptStaticFabArrangementWorkerPlan,
+	adoptStaticFabArrangementWorkerPlanCooperatively,
+	copyStaticFabArrangementWorkerPlanSteps,
 	issueStaticFabArrangementPermit,
 	revokeStaticFabArrangementPermit,
 	type StaticFabArrangementPermit,
@@ -15,7 +17,7 @@ import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAsse
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import {
-	checksumRailPatchResult,
+	checksumRailPatchResultCooperatively,
 	consumeRailMirrorSnapshotCaptureAuthority,
 	type RailMirrorSnapshot,
 } from "../worker/RailMirrorChecksum";
@@ -26,8 +28,9 @@ import {
 	type StaticFabArrangementWorkerRequest,
 	type StaticFabArrangementWorkerResponse,
 } from "../worker/StaticFabArrangementProtocol";
-import { staticFabArrangementPreparedShapeError } from "../worker/StaticFabArrangementResponseValidator";
+import { decodeStaticFabArrangementTransport } from "../worker/StaticFabArrangementTransport";
 import { collectTransferableBuffers } from "../worker/TransferableBuffers";
+import { createStaticFabArrangementCheckpoint } from "./StaticFabArrangementCheckpoint";
 
 export interface StaticFabArrangementWorkerPort {
 	onmessage: ((event: MessageEvent<StaticFabArrangementWorkerResponse>) => void) | null;
@@ -69,6 +72,7 @@ export interface ValidatedStaticFabArrangement {
 type SessionPhase = "idle" | "initializing" | "ready";
 
 interface SessionSourceBinding {
+	readonly mapMutationGeneration: number;
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
@@ -85,6 +89,7 @@ interface PendingArrangementRequest {
 	readonly resolve: (result: ValidatedStaticFabArrangement) => void;
 	readonly reject: (error: Error) => void;
 	posted: boolean;
+	processing: boolean;
 	sourcePlanIndex: number;
 	requestStartedAt: number;
 }
@@ -141,6 +146,7 @@ export class StaticFabArrangementBridge {
 
 		const source: SessionSourceBinding = Object.freeze({
 			map: live.map,
+			mapMutationGeneration: live.map.getMutationGeneration(),
 			portEquipment: live.portEquipment,
 			organizations: live.organizations,
 			relationships: live.relationships,
@@ -218,6 +224,7 @@ export class StaticFabArrangementBridge {
 			live.portEquipment,
 			live.patchSequence,
 			live.organizations,
+			live.relationships,
 			intent,
 			source.identity.checksum,
 		);
@@ -231,6 +238,7 @@ export class StaticFabArrangementBridge {
 				resolve,
 				reject,
 				posted: false,
+				processing: false,
 				sourcePlanIndex: 0,
 				requestStartedAt: 0,
 			};
@@ -242,7 +250,10 @@ export class StaticFabArrangementBridge {
 		const pending = this.pending;
 		if (!pending) return;
 		this.pending = null;
-		if (pending.posted) this.ignoredRequests.set(pending.requestId, pending.sourcePlanIndex);
+		if (pending.processing) {
+			this.inFlightRequestId = null;
+			this.clearRequestTimeout();
+		} else if (pending.posted) this.ignoredRequests.set(pending.requestId, pending.sourcePlanIndex);
 		revokeStaticFabArrangementPermit(pending.permit);
 		pending.reject(cancelledError());
 	}
@@ -278,7 +289,7 @@ export class StaticFabArrangementBridge {
 			this.failSession(new Error("Static FAB arrangement Worker returned an unknown response."));
 			return;
 		}
-		this.handlePrepared(response);
+		void this.handlePrepared(response);
 	}
 
 	private handleSessionReady(response: Record<string, unknown>): void {
@@ -332,7 +343,18 @@ export class StaticFabArrangementBridge {
 		);
 	}
 
-	private handlePrepared(response: Record<string, unknown>): void {
+	private async handlePrepared(response: Record<string, unknown>): Promise<void> {
+		const sessionId = this.sessionId;
+		const yieldAdmission = createStaticFabArrangementCheckpoint();
+		let lastYield = performance.now();
+		const checkpoint = async () => {
+			if (this.sessionId !== sessionId) throw cancelledError();
+			if (performance.now() - lastYield >= 4) {
+				await yieldAdmission();
+				lastYield = performance.now();
+			}
+			if (this.sessionId !== sessionId) throw cancelledError();
+		};
 		if (!positiveSafeInteger(response.sourcePlanIndex)) {
 			this.failSession(new Error("Static FAB arrangement Worker returned an invalid plan index."));
 			return;
@@ -346,14 +368,17 @@ export class StaticFabArrangementBridge {
 				return;
 			}
 			this.ignoredRequests.delete(response.requestId as number);
-			const ignoredShapeError = staticFabArrangementPreparedShapeError(response.prepared);
-			if (ignoredPlanIndex !== response.sourcePlanIndex || ignoredShapeError) {
+			try {
+				await decodeStaticFabArrangementTransport(response.prepared, checkpoint);
+			} catch (error) {
+				if (this.sessionId === sessionId)
+					this.failSession(workerError(error, "Stale arrangement admission failed."));
+				return;
+			}
+			if (this.sessionId !== sessionId) return;
+			if (ignoredPlanIndex !== response.sourcePlanIndex) {
 				this.failSession(
-					new Error(
-						ignoredShapeError
-							? `Static FAB arrangement Worker returned malformed stale data: ${ignoredShapeError}.`
-							: "Static FAB arrangement Worker returned a mismatched stale plan index.",
-					),
+					new Error("Static FAB arrangement Worker returned a mismatched stale plan index."),
 				);
 				return;
 			}
@@ -377,71 +402,98 @@ export class StaticFabArrangementBridge {
 			);
 			return;
 		}
-		const workerRoundTripMilliseconds = performance.now() - pending.requestStartedAt;
-		const responseValidationStartedAt = performance.now();
-		const preparedValidation = validateWorkerPrepared(
-			response.prepared,
-			pending.permit.ticketId,
-			source.identity,
-			pending.expectedIntentFingerprint,
-		);
-		if (preparedValidation instanceof Error) {
-			this.failSession(preparedValidation);
+		if (pending.processing) {
+			this.failSession(new Error("Static FAB arrangement Worker returned a duplicate result."));
 			return;
 		}
-		const responseValidationMilliseconds = performance.now() - responseValidationStartedAt;
-		const accepted = response.prepared as PreparedStaticFabArrangement;
-		if (!sessionSourceMatchesLiveState(source)) {
-			this.failSession(new Error("Static FAB arrangement source changed before plan adoption."));
-			return;
-		}
-
-		this.pending = null;
-		this.inFlightRequestId = null;
-		this.clearRequestTimeout();
-		let adoptedPlan: StaticFabArrangementPlan | null = null;
-		const adoptionStartedAt = performance.now();
-		if (
-			accepted.valid &&
-			accepted.plan &&
-			accepted.ticket &&
-			preparedValidation.prospectiveChecksum !== null
-		) {
-			const live = source.getCurrentState();
-			try {
-				adoptedPlan = adoptStaticFabArrangementWorkerPlan(
-					pending.permit,
-					accepted.ticket,
-					accepted.plan,
-					preparedValidation.prospectiveChecksum,
-					live.map,
-					live.portEquipment,
-					live.patchSequence,
-					live.organizations,
-					pending.intent,
-				);
-			} catch (error) {
-				const failure = workerError(error, "Static FAB arrangement adoption failed.");
-				this.closeSession(failure);
-				pending.reject(failure);
+		pending.processing = true;
+		const currentCheckpoint = async () => {
+			if (this.pending !== pending || this.source !== source) throw cancelledError();
+			if (!sessionSourceMatchesLiveState(source))
+				throw new Error("Static FAB arrangement source changed during admission.");
+			await checkpoint();
+			if (this.pending !== pending || this.source !== source) throw cancelledError();
+			if (!sessionSourceMatchesLiveState(source))
+				throw new Error("Static FAB arrangement source changed during admission.");
+		};
+		try {
+			const workerRoundTripMilliseconds = performance.now() - pending.requestStartedAt;
+			const responseValidationStartedAt = performance.now();
+			const preparedValidation = await validateWorkerPrepared(
+				await decodeStaticFabArrangementTransport(response.prepared, currentCheckpoint),
+				pending.permit.ticketId,
+				source.identity,
+				pending.expectedIntentFingerprint,
+				currentCheckpoint,
+			);
+			// A cancelled checksum can return an error after a newer option has taken ownership.
+			if (this.pending !== pending || this.source !== source || this.sessionId !== sessionId)
+				return;
+			if (preparedValidation instanceof Error) {
+				this.failSession(preparedValidation);
 				return;
 			}
-		} else {
-			revokeStaticFabArrangementPermit(pending.permit);
+			const responseValidationMilliseconds = performance.now() - responseValidationStartedAt;
+			const accepted = preparedValidation.prepared;
+			if (!sessionSourceMatchesLiveState(source)) {
+				this.failSession(new Error("Static FAB arrangement source changed before plan adoption."));
+				return;
+			}
+
+			let adoptedPlan: StaticFabArrangementPlan | null = null;
+			const adoptionStartedAt = performance.now();
+			if (
+				accepted.valid &&
+				accepted.plan &&
+				accepted.ticket &&
+				preparedValidation.prospectiveChecksum !== null
+			) {
+				const live = source.getCurrentState();
+				try {
+					adoptedPlan = await adoptStaticFabArrangementWorkerPlanCooperatively(
+						pending.permit,
+						accepted.ticket,
+						accepted.plan,
+						preparedValidation.prospectiveChecksum,
+						live.map,
+						live.portEquipment,
+						live.patchSequence,
+						live.organizations,
+						live.relationships,
+						pending.intent,
+						currentCheckpoint,
+					);
+				} catch (error) {
+					if (this.pending !== pending || this.sessionId !== sessionId) return;
+					const failure = workerError(error, "Static FAB arrangement adoption failed.");
+					this.closeSession(failure);
+					pending.reject(failure);
+					return;
+				}
+			} else {
+				revokeStaticFabArrangementPermit(pending.permit);
+			}
+			await currentCheckpoint();
+			this.pending = null;
+			this.inFlightRequestId = null;
+			this.clearRequestTimeout();
+			pending.resolve(
+				Object.freeze({
+					plan: adoptedPlan ?? accepted.plan,
+					validation: accepted,
+					certified: adoptedPlan !== null,
+					workerRoundTripMilliseconds,
+					responseValidationMilliseconds,
+					adoptionMilliseconds: performance.now() - adoptionStartedAt,
+					sessionHydrationMilliseconds: this.sessionHydrationMilliseconds,
+					sessionCompilationMilliseconds: this.sessionCompilationMilliseconds,
+					sourcePlanIndex: pending.sourcePlanIndex,
+				}),
+			);
+		} catch (error) {
+			if (this.pending === pending && this.sessionId === sessionId)
+				this.failSession(workerError(error, "Static FAB arrangement admission failed."));
 		}
-		pending.resolve(
-			Object.freeze({
-				plan: adoptedPlan ?? accepted.plan,
-				validation: accepted,
-				certified: adoptedPlan !== null,
-				workerRoundTripMilliseconds,
-				responseValidationMilliseconds,
-				adoptionMilliseconds: performance.now() - adoptionStartedAt,
-				sessionHydrationMilliseconds: this.sessionHydrationMilliseconds,
-				sessionCompilationMilliseconds: this.sessionCompilationMilliseconds,
-				sourcePlanIndex: pending.sourcePlanIndex,
-			}),
-		);
 	}
 
 	private postPending(): void {
@@ -542,22 +594,25 @@ export class StaticFabArrangementBridge {
 	}
 }
 
-function validateWorkerPrepared(
-	value: unknown,
+async function validateWorkerPrepared(
+	prepared: PreparedStaticFabArrangement,
 	expectedTicketId: number,
 	source: StaticFabArrangementSessionSourceIdentity,
 	expectedIntentFingerprint: string,
-): Error | { readonly prospectiveChecksum: string | null } {
-	const shapeError = staticFabArrangementPreparedShapeError(value);
-	if (shapeError) {
-		return new Error(`Static FAB arrangement Worker returned malformed data: ${shapeError}.`);
-	}
-	const prepared = value as PreparedStaticFabArrangement;
-	if (!prepared.valid) return Object.freeze({ prospectiveChecksum: null });
+	checkpoint: () => Promise<void>,
+): Promise<
+	| Error
+	| { readonly prospectiveChecksum: string | null; readonly prepared: PreparedStaticFabArrangement }
+> {
+	if (!prepared.valid) return Object.freeze({ prospectiveChecksum: null, prepared });
 	if (!prepared.plan || !prepared.ticket) {
 		return new Error("Static FAB arrangement Worker omitted its exact plan or ticket.");
 	}
-	const { plan, ticket } = prepared;
+	const { ticket } = prepared;
+	const plan = await finishArrangementAdmission(
+		copyStaticFabArrangementWorkerPlanSteps(prepared.plan),
+		checkpoint,
+	);
 	if (
 		ticket.ticketId !== expectedTicketId ||
 		ticket.sourceRevision !== source.revision ||
@@ -567,34 +622,45 @@ function validateWorkerPrepared(
 		ticket.sourceNextPortId !== source.nextPortId ||
 		ticket.sourceNextEquipmentGroupId !== source.nextEquipmentGroupId ||
 		ticket.sourceNextOrganizationId !== source.nextOrganizationId ||
+		ticket.sourceNextRelationshipId !== source.nextRelationshipId ||
 		ticket.intentFingerprint !== expectedIntentFingerprint ||
 		ticket.prospectiveNextAdvancedSwitchId !== source.nextAdvancedSwitchId ||
 		ticket.prospectiveNextPortId !== source.nextPortId ||
 		ticket.prospectiveNextEquipmentGroupId !== source.nextEquipmentGroupId ||
 		ticket.prospectiveNextOrganizationId !== source.nextOrganizationId ||
+		ticket.prospectiveNextRelationshipId !== source.nextRelationshipId ||
 		plan.baseRevision !== source.revision ||
 		plan.basePatchSequence !== source.sequence ||
 		plan.nextOrganizationIdBefore !== source.nextOrganizationId ||
-		plan.nextOrganizationIdAfter !== source.nextOrganizationId
+		plan.nextOrganizationIdAfter !== source.nextOrganizationId ||
+		plan.nextRelationshipIdBefore !== source.nextRelationshipId ||
+		plan.nextRelationshipIdAfter !== source.nextRelationshipId
 	) {
 		return new Error("Static FAB arrangement Worker returned a corrupted one-shot ticket.");
 	}
 	let prospectiveChecksum: string;
 	try {
-		prospectiveChecksum = checksumRailPatchResult(source.checksum, {
-			changes: plan.mutations,
-			switchChanges: plan.switchMutations,
-			portChanges: plan.portMutations,
-			equipmentGroupChanges: plan.equipmentGroupMutations,
-			organizationChanges: plan.organizationMutations,
-			organizationNextIdBefore: plan.nextOrganizationIdBefore,
-			organizationNextIdAfter: plan.nextOrganizationIdAfter,
-		});
+		prospectiveChecksum = await checksumRailPatchResultCooperatively(
+			source.checksum,
+			{
+				changes: plan.mutations,
+				switchChanges: plan.switchMutations,
+				portChanges: plan.portMutations,
+				equipmentGroupChanges: plan.equipmentGroupMutations,
+				organizationChanges: plan.organizationMutations,
+				organizationNextIdBefore: plan.nextOrganizationIdBefore,
+				organizationNextIdAfter: plan.nextOrganizationIdAfter,
+				relationshipChanges: plan.relationshipMutations,
+				relationshipNextIdBefore: plan.nextRelationshipIdBefore,
+				relationshipNextIdAfter: plan.nextRelationshipIdAfter,
+			},
+			checkpoint,
+		);
 	} catch {
 		return new Error("Static FAB arrangement Worker returned a malformed exact plan.");
 	}
 	return ticket.prospectiveChecksum === prospectiveChecksum
-		? Object.freeze({ prospectiveChecksum })
+		? Object.freeze({ prospectiveChecksum, prepared: Object.freeze({ ...prepared, plan }) })
 		: new Error("Static FAB arrangement Worker returned a divergent prospective checksum.");
 }
 
@@ -609,6 +675,7 @@ function sourceIdentityFromSnapshot(
 		nextPortId: snapshot.portEquipment.nextPortId,
 		nextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 		nextOrganizationId: snapshot.organizations.nextOrganizationId,
+		nextRelationshipId: snapshot.relationships.nextRelationshipId,
 	});
 }
 
@@ -623,6 +690,7 @@ function sessionSourceMatchesLiveState(source: SessionSourceBinding): boolean {
 	const live = source.getCurrentState();
 	return (
 		live.map === source.map &&
+		live.map.getMutationGeneration() === source.mapMutationGeneration &&
 		live.portEquipment === source.portEquipment &&
 		live.organizations === source.organizations &&
 		live.relationships === source.relationships &&
@@ -640,7 +708,8 @@ function sourceIdentityMatchesLiveState(
 		state.map.getAdvancedSwitchIdCursor() === source.nextAdvancedSwitchId &&
 		state.portEquipment.nextPortId === source.nextPortId &&
 		state.portEquipment.nextEquipmentGroupId === source.nextEquipmentGroupId &&
-		state.organizations.nextOrganizationId === source.nextOrganizationId
+		state.organizations.nextOrganizationId === source.nextOrganizationId &&
+		state.relationships.nextRelationshipId === source.nextRelationshipId
 	);
 }
 
@@ -656,7 +725,8 @@ function sameSourceIdentity(
 		value.nextAdvancedSwitchId === expected.nextAdvancedSwitchId &&
 		value.nextPortId === expected.nextPortId &&
 		value.nextEquipmentGroupId === expected.nextEquipmentGroupId &&
-		value.nextOrganizationId === expected.nextOrganizationId
+		value.nextOrganizationId === expected.nextOrganizationId &&
+		value.nextRelationshipId === expected.nextRelationshipId
 	);
 }
 
@@ -678,4 +748,16 @@ function workerError(error: unknown, fallback: string): Error {
 
 function cancelledError(): DOMException {
 	return new DOMException("Static FAB arrangement planning cancelled.", "AbortError");
+}
+
+async function finishArrangementAdmission<T>(
+	steps: Generator<void, T>,
+	checkpoint: () => Promise<void>,
+): Promise<T> {
+	const task = createCooperativeTask(steps);
+	while (!task.done) {
+		task.step(128);
+		await checkpoint();
+	}
+	return task.finish();
 }

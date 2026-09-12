@@ -124,9 +124,10 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		sequence: 4,
 		activity: "equip",
 		eyebrow: "MISSION 4 · PORTS",
-		title: "Port-first 장비",
-		objective: "OHB, EQ, STK의 대표 Port를 기존 레일의 합법 슬롯에 배치하세요.",
-		rationale: "장비 객체는 Port의 위치·방향·그룹에서 파생되며 별도 좌표로 먼저 만들지 않습니다.",
+		title: "입출고 지점과 장비",
+		objective: "레일에서 입출고 지점(포트)을 골라 OHB, EQ, Stocker를 만드세요.",
+		rationale:
+			"포트는 장비가 화물을 주고받는 지점입니다. 레일에서 포트를 고르면 장비의 위치와 방향이 정해집니다.",
 		primaryCommandId: "canvas.primary-click",
 	}),
 	Object.freeze({
@@ -246,6 +247,8 @@ export interface GuidedBuildBayGuidanceEvidence {
 }
 
 export type GuidedBuildArrangementGuidancePhase =
+	| "capturing"
+	| "committing"
 	| "inactive"
 	| "planning"
 	| "certified"
@@ -846,15 +849,16 @@ function guidedBuildMissionPrompt(
 	if (!equipmentKindComplete("STK", evidence.equipment.STK)) {
 		return Object.freeze({
 			eyebrow: "MISSION 4 · PORTS · 3/3",
-			title: "STK Port 그룹 배치",
-			objective: "STK 도구로 진입·배출 Port를 선택해 대표 Stocker 그룹을 완성하세요.",
+			title: "Stocker 생성",
+			objective:
+				"Stocker 도구로 입출고 포트를 선택한 뒤 Stocker 생성을 눌러 보관 장비를 완성하세요.",
 			rationale: definition.rationale,
 			primaryCommandId: "canvas.primary-click",
 			suggestedAction: "stk",
-			suggestedActionLabel: "장비 · STK 열기",
+			suggestedActionLabel: "장비 · Stocker 열기",
 			progressCue: guidedBuildPortProgressCue(
 				evidence.equipment,
-				"왼쪽의 강조된 STK · 입출고 Port를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 STK 생성을 누르세요.",
+				"왼쪽의 강조된 Stocker · 입출고 포트를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 Stocker 생성을 누르세요.",
 			),
 		});
 	}
@@ -1010,7 +1014,9 @@ function guidedBuildBayBankPrompt(
 					? "충돌 없이 정렬된 미리보기를 APPLY로 적용하세요."
 					: guidance.arrangementPhase === "rejected"
 						? "현재 옵션은 적용할 수 없습니다. 강조된 취소로 두 Twin Bay 선택을 유지한 뒤 복제 Bay 위치를 바꾸세요."
-						: "두 Twin Bay의 정렬 미리보기가 준비될 때까지 기다리세요.",
+						: guidance.arrangementPhase === "committing"
+							? "두 Twin Bay의 정렬을 적용하고 있습니다. 취소하려면 Esc를 누르세요."
+							: "두 Twin Bay의 정렬 미리보기가 준비될 때까지 기다리세요.",
 				guidance.arrangementPhase === "certified"
 					? "command.apply"
 					: guidance.arrangementPhase === "rejected"
@@ -1159,7 +1165,9 @@ function guidedBuildInterbayPrompt(
 					? "충돌 없이 정렬된 미리보기를 APPLY로 적용하세요."
 					: guidance.arrangementPhase === "rejected"
 						? "현재 옵션은 적용할 수 없습니다. 강조된 취소로 두 Bay Bank 선택을 유지한 뒤 복제 Bay Bank 위치를 바꾸세요."
-						: "두 Bay Bank의 정렬 미리보기가 준비될 때까지 기다리세요.",
+						: guidance.arrangementPhase === "committing"
+							? "두 Bay Bank의 정렬을 적용하고 있습니다. 취소하려면 Esc를 누르세요."
+							: "두 Bay Bank의 정렬 미리보기가 준비될 때까지 기다리세요.",
 				guidance.arrangementPhase === "certified"
 					? "command.apply"
 					: guidance.arrangementPhase === "rejected"

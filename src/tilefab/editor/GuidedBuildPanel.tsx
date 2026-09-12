@@ -681,7 +681,7 @@ function activeSuggestedActionInstruction(
 		return "EQ 도구가 준비됐습니다. 같은 직선의 시작점과 끝점을 차례로 클릭하세요. 드래그하거나 각 위치에서 Enter로 확정해도 됩니다.";
 	}
 	if (action === "stk") {
-		return "STK 도구가 준비됐습니다. 표시된 Port 개수 조건에 맞춰 클릭 또는 Enter로 선택하세요. 선택을 확인한 뒤 STK 생성 또는 Shift+Enter로 만듭니다.";
+		return "Stocker 도구가 준비됐습니다. 표시된 포트 개수 조건에 맞춰 클릭 또는 Enter로 선택하세요. 선택을 확인한 뒤 Stocker 생성 또는 Shift+Enter로 만듭니다.";
 	}
 	return fallback;
 }

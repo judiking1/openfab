@@ -15,6 +15,7 @@ import { createRailAreaSelectionFromOwnerships } from "./RailAreaSelection";
 import { buildRailModuleOwnershipIndex, type RailModuleOwnership } from "./RailModuleOwnership";
 import {
 	adoptStaticFabArrangementWorkerPlan,
+	adoptStaticFabArrangementWorkerPlanCooperatively,
 	consumeCertifiedStaticFabArrangementPlanIssuedFor,
 	isIssuedStaticFabArrangementPlan,
 	isStaticFabArrangementPlanIssuedFor,
@@ -28,6 +29,10 @@ import {
 	type StaticFabArrangementCommandIntent,
 	staticFabArrangementCommandFingerprint,
 } from "./StaticFabArrangementCommand";
+import {
+	emptyStaticFabAssemblyRelationshipState,
+	type StaticFabAssemblyRelationshipStateV1,
+} from "./StaticFabAssemblyRelationship";
 import {
 	emptyStaticFabOrganizationState,
 	type StaticFabOrganizationState,
@@ -51,6 +56,7 @@ describe("StaticFabArrangementCertification", () => {
 				proof.fixture.portEquipment,
 				proof.fixture.patchSequence,
 				proof.fixture.organizations,
+				proof.fixture.relationships,
 				proof.fixture.intent,
 			),
 		).toThrow(/missing|consumed/i);
@@ -64,6 +70,7 @@ describe("StaticFabArrangementCertification", () => {
 			proof.fixture.portEquipment,
 			proof.fixture.patchSequence,
 			proof.fixture.organizations,
+			proof.fixture.relationships,
 			proof.fixture.intent,
 		);
 
@@ -77,6 +84,7 @@ describe("StaticFabArrangementCertification", () => {
 				proof.fixture.map,
 				proof.fixture.portEquipment,
 				proof.fixture.organizations,
+				proof.fixture.relationships,
 			),
 		).toBe(true);
 		expect(
@@ -85,6 +93,7 @@ describe("StaticFabArrangementCertification", () => {
 				proof.fixture.map,
 				proof.fixture.portEquipment,
 				proof.fixture.organizations,
+				proof.fixture.relationships,
 			),
 		).toBe(true);
 		expect(
@@ -93,6 +102,7 @@ describe("StaticFabArrangementCertification", () => {
 				proof.fixture.map,
 				proof.fixture.portEquipment,
 				proof.fixture.organizations,
+				proof.fixture.relationships,
 			),
 		).toBe(false);
 		expect(isIssuedStaticFabArrangementPlan(adopted)).toBe(false);
@@ -106,6 +116,7 @@ describe("StaticFabArrangementCertification", () => {
 				proof.fixture.portEquipment,
 				proof.fixture.patchSequence,
 				proof.fixture.organizations,
+				proof.fixture.relationships,
 				proof.fixture.intent,
 			),
 		).toThrow(/missing|consumed/i);
@@ -123,6 +134,7 @@ describe("StaticFabArrangementCertification", () => {
 				checksumProof.fixture.portEquipment,
 				checksumProof.fixture.patchSequence,
 				checksumProof.fixture.organizations,
+				checksumProof.fixture.relationships,
 				checksumProof.fixture.intent,
 			),
 		).toThrow(/ticket|permit/i);
@@ -136,6 +148,7 @@ describe("StaticFabArrangementCertification", () => {
 				checksumProof.fixture.portEquipment,
 				checksumProof.fixture.patchSequence,
 				checksumProof.fixture.organizations,
+				checksumProof.fixture.relationships,
 				checksumProof.fixture.intent,
 			),
 		).toThrow(/missing|consumed/i);
@@ -156,6 +169,7 @@ describe("StaticFabArrangementCertification", () => {
 				planProof.fixture.portEquipment,
 				planProof.fixture.patchSequence,
 				planProof.fixture.organizations,
+				planProof.fixture.relationships,
 				planProof.fixture.intent,
 			),
 		).toThrow(/fingerprint diverged/i);
@@ -169,6 +183,7 @@ describe("StaticFabArrangementCertification", () => {
 				planProof.fixture.portEquipment,
 				planProof.fixture.patchSequence,
 				planProof.fixture.organizations,
+				planProof.fixture.relationships,
 				planProof.fixture.intent,
 			),
 		).toThrow(/missing|consumed/i);
@@ -188,6 +203,7 @@ describe("StaticFabArrangementCertification", () => {
 				intentProof.fixture.portEquipment,
 				intentProof.fixture.patchSequence,
 				intentProof.fixture.organizations,
+				intentProof.fixture.relationships,
 				changedIntent,
 			),
 		).toThrow(/no longer matches/i);
@@ -205,6 +221,7 @@ describe("StaticFabArrangementCertification", () => {
 			proof.fixture.portEquipment,
 			proof.fixture.patchSequence,
 			proof.fixture.organizations,
+			proof.fixture.relationships,
 			proof.fixture.intent,
 		);
 		const certifiedFingerprint = staticFabArrangementPlanFingerprint(adopted);
@@ -236,6 +253,7 @@ describe("StaticFabArrangementCertification", () => {
 				proof.fixture.map,
 				proof.fixture.portEquipment,
 				proof.fixture.organizations,
+				proof.fixture.relationships,
 			),
 		).toBe(true);
 	});
@@ -253,6 +271,7 @@ describe("StaticFabArrangementCertification", () => {
 				revoked.fixture.portEquipment,
 				revoked.fixture.patchSequence,
 				revoked.fixture.organizations,
+				revoked.fixture.relationships,
 				revoked.fixture.intent,
 			),
 		).toThrow(/missing|consumed/i);
@@ -269,9 +288,53 @@ describe("StaticFabArrangementCertification", () => {
 				stale.fixture.portEquipment,
 				stale.fixture.patchSequence,
 				stale.fixture.organizations,
+				stale.fixture.relationships,
 				stale.fixture.intent,
 			),
 		).toThrow(/no longer matches/i);
+	});
+	it("revokes cooperative adoption at the first, middle and final checkpoint and rejects rollback ABA", async () => {
+		const adopt = (proof: ReturnType<typeof workerProof>, checkpoint: () => Promise<void>) =>
+			adoptStaticFabArrangementWorkerPlanCooperatively(
+				proof.permit,
+				proof.ticket,
+				structuredClone(proof.plan),
+				proof.ticket.prospectiveChecksum,
+				proof.fixture.map,
+				proof.fixture.portEquipment,
+				proof.fixture.patchSequence,
+				proof.fixture.organizations,
+				proof.fixture.relationships,
+				proof.fixture.intent,
+				checkpoint,
+				1,
+			);
+		let count = 0;
+		const baseline = workerProof();
+		const owned = await adopt(baseline, async () => {
+			count++;
+		});
+		expect(staticFabArrangementPlanFingerprint(owned)).toBe(baseline.ticket.planFingerprint);
+		expect(count).toBeGreaterThan(20);
+		for (const stop of [1, Math.floor(count / 2), count]) {
+			const proof = workerProof();
+			let visited = 0;
+			await expect(
+				adopt(proof, async () => {
+					if (++visited === stop) revokeStaticFabArrangementPermit(proof.permit);
+				}),
+			).rejects.toThrow(/stale|cancelled/);
+			await expect(adopt(proof, async () => {})).rejects.toThrow(/consumed/);
+		}
+		const proof = workerProof();
+		const map = proof.fixture.map;
+		const savedRevision = map.getRevision(),
+			checkpoint = map.createMutationCheckpoint();
+		const change = { x: -99, y: -99, before: 0, after: map.getEncoded(0, 0) };
+		map.applyAtomicMutations([change], []);
+		map.rollbackAtomicMutations([change], [], checkpoint);
+		expect(map.getRevision()).toBe(savedRevision);
+		await expect(adopt(proof, async () => {})).rejects.toThrow(/no longer matches/);
 	});
 });
 
@@ -279,6 +342,7 @@ interface CertificationFixture {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly patchSequence: number;
 	readonly intent: StaticFabArrangementCommandIntent;
 	readonly snapshot: ReturnType<typeof captureRailMirrorSnapshot>["snapshot"];
@@ -291,6 +355,7 @@ function workerProof() {
 		fixture.portEquipment,
 		fixture.patchSequence,
 		fixture.organizations,
+		fixture.relationships,
 		fixture.intent,
 		fixture.snapshot.checksum,
 	);
@@ -321,6 +386,7 @@ function certificationFixture(): CertificationFixture {
 	addLine(map, { x: 20, y: 10 }, { x: 28, y: 10 });
 	const portEquipment = emptyPortEquipmentState();
 	const organizations = emptyStaticFabOrganizationState();
+	const relationships = emptyStaticFabAssemblyRelationshipState();
 	const patchSequence = 23;
 	const ownership = buildRailModuleOwnershipIndex(map);
 	const intent = arrangementIntent(map, ownership.modules, portEquipment, patchSequence);
@@ -329,8 +395,9 @@ function certificationFixture(): CertificationFixture {
 		patchSequence,
 		portEquipment,
 		organizations,
+		relationships,
 	).snapshot;
-	return { map, portEquipment, organizations, patchSequence, intent, snapshot };
+	return { map, portEquipment, organizations, relationships, patchSequence, intent, snapshot };
 }
 
 function arrangementIntent(

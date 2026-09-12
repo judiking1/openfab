@@ -52,6 +52,7 @@ describe("RailDocument static FAB arrangement", () => {
 			document.portEquipment,
 			document.getPatchSequence(),
 			document.organizations,
+			document.relationships,
 			intent,
 			capture.snapshot.checksum,
 		);
@@ -78,6 +79,7 @@ describe("RailDocument static FAB arrangement", () => {
 			document.portEquipment,
 			document.getPatchSequence(),
 			document.organizations,
+			document.relationships,
 			intent,
 		);
 		const events: RailPatchEvent[] = [];

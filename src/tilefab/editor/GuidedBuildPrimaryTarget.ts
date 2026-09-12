@@ -183,7 +183,7 @@ function resolvePortTarget(
 			id: "activity:equip",
 			kind: "activity",
 			activity: "equip",
-			instruction: `왼쪽에서 장비 · 장비를 선택하세요. 그러면 ${equipmentTool.toUpperCase()} Port 도구가 열립니다.`,
+			instruction: `왼쪽에서 장비 · 장비를 선택하세요. 그러면 ${equipmentTool === "stk" ? "Stocker" : equipmentTool.toUpperCase()} 포트 도구가 열립니다.`,
 		});
 	}
 	if (context.tool !== equipmentTool) {
@@ -191,7 +191,7 @@ function resolvePortTarget(
 			id: `tool:${equipmentTool}`,
 			kind: "equipment-tool",
 			tool: equipmentTool,
-			instruction: `${portToolLabel(equipmentTool)}를 선택하세요. 선택 직후 Canvas의 첫 합법 슬롯으로 안내합니다.`,
+			instruction: `${portToolLabel(equipmentTool)}를 선택하세요. 선택하면 캔버스의 포트 후보로 안내합니다. 현재 위치의 배치 가능 여부를 확인하세요.`,
 		});
 	}
 	if (equipmentTool === "stk" && context.stkDraftReady) {
@@ -199,7 +199,7 @@ function resolvePortTarget(
 			id: "command:stk.complete",
 			kind: "equipment-complete",
 			instruction:
-				"Port 선택을 확인한 뒤 아래 ‘STK 생성’을 누르세요. Canvas에서는 Shift+Enter로 생성할 수 있습니다.",
+				"Port 선택을 확인한 뒤 아래 ‘Stocker 생성’을 누르세요. Canvas에서는 Shift+Enter로 생성할 수 있습니다.",
 		});
 	}
 	if (!context.portCanvasActionable) return null;
@@ -255,7 +255,7 @@ function guidedEquipmentTool(
 function portToolLabel(tool: "ohb" | "eq" | "stk"): string {
 	if (tool === "ohb") return "강조된 OHB · 레일 옆 Port 1개";
 	if (tool === "eq") return "강조된 EQ · 같은 직선 Port 행";
-	return "강조된 STK · 입고/출고 Port 2개";
+	return "강조된 Stocker · 입출고 포트 2개";
 }
 
 function portCanvasInstruction(tool: "ohb" | "eq" | "stk"): string {
@@ -265,5 +265,5 @@ function portCanvasInstruction(tool: "ohb" | "eq" | "stk"): string {
 	if (tool === "eq") {
 		return "‘1 시작’과 ‘2 끝’을 차례로 클릭하면 EQ 행을 만듭니다. 두 점 사이를 드래그하거나 각 위치에서 Enter를 눌러도 됩니다.";
 	}
-	return "아래 Port 개수 조건에 맞춰 금색 마름모를 클릭하거나 강조점에서 Enter로 선택하세요. 선택을 확인한 뒤 ‘STK 생성’ 또는 Shift+Enter로 생성합니다.";
+	return "아래 포트 개수 조건에 맞춰 금색 마름모를 클릭하거나 강조점에서 Enter로 선택하세요. 선택을 확인한 뒤 ‘Stocker 생성’ 또는 Shift+Enter로 생성합니다.";
 }

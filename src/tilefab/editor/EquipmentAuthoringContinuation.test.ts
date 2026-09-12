@@ -39,11 +39,11 @@ describe("EquipmentAuthoringContinuation", () => {
 		expect(continuation).toMatchObject({
 			tool: "stk",
 			groupLabel: "STK-8",
-			buttonLabel: "같은 템플릿으로 새 STK 배치",
+			buttonLabel: "같은 구성으로 새 Stocker 배치",
 			template: "FOUR_PORT",
 			customTemplateFallback: false,
 		});
-		expect(equipmentAuthoringContinuationStatus(continuation)).toBe("새 STK 배치 · FOUR_PORT");
+		expect(equipmentAuthoringContinuationStatus(continuation)).toBe("새 Stocker 배치 · 연속 4개");
 		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("같은 설정으로");
 	});
 
@@ -58,11 +58,11 @@ describe("EquipmentAuthoringContinuation", () => {
 		expect(continuation).toMatchObject({
 			tool: "stk",
 			template: "FLEX",
-			buttonLabel: "FLEX로 새 STK 배치",
+			buttonLabel: "자유 선택으로 새 Stocker 배치",
 			customTemplateFallback: true,
 		});
 		expect(equipmentAuthoringContinuationStatus(continuation)).toContain(
-			"CUSTOM은 직접 재현할 수 없어 FLEX",
+			"이전 CUSTOM 구성 대신 자유 선택",
 		);
 		expect(equipmentAuthoringContinuationExplanation(continuation)).toContain("자유 선택(FLEX)");
 	});

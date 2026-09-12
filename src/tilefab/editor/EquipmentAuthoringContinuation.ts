@@ -1,4 +1,5 @@
 import type { EquipmentGroupRecord, StkAuthoringTemplate } from "../core/EquipmentGroup";
+import { stkTemplatePresentation } from "./StkDraftPresentation";
 
 export type EquipmentAuthoringTool = "ohb" | "eq" | "stk";
 
@@ -46,7 +47,10 @@ export function equipmentAuthoringContinuation(
 	return Object.freeze({
 		tool: "stk",
 		groupLabel,
-		buttonLabel: group.template === "CUSTOM" ? "FLEX로 새 STK 배치" : "같은 템플릿으로 새 STK 배치",
+		buttonLabel:
+			group.template === "CUSTOM"
+				? "자유 선택으로 새 Stocker 배치"
+				: "같은 구성으로 새 Stocker 배치",
 		template: group.template === "CUSTOM" ? "FLEX" : group.template,
 		customTemplateFallback: group.template === "CUSTOM",
 	});
@@ -69,8 +73,8 @@ export function equipmentAuthoringContinuationStatus(
 	}
 	if (continuation.tool === "stk") {
 		return continuation.customTemplateFallback
-			? "새 STK 배치 · CUSTOM은 직접 재현할 수 없어 FLEX로 시작합니다"
-			: `새 STK 배치 · ${continuation.template}`;
+			? "새 Stocker 배치 · 이전 CUSTOM 구성 대신 자유 선택으로 시작합니다"
+			: `새 Stocker 배치 · ${stkTemplatePresentation(continuation.template).label}`;
 	}
 	return "새 OHB 배치 · 원하는 합법 슬롯을 선택하세요";
 }

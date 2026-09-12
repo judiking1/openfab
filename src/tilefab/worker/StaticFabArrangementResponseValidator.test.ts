@@ -3,21 +3,15 @@ import {
 	resolveStaticFabSelectionArrangementRoots,
 	staticFabArrangementCommandFromRoots,
 } from "../compile/StaticFabArrangementRoots";
-import type { AdvancedSwitchRecord } from "../core/AdvancedSwitch";
 import { emptyPortEquipmentState } from "../core/EquipmentGroup";
 import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
-import type { PortRecord } from "../core/PortRecord";
 import { planRailConstruction } from "../core/paint";
 import { createRailAreaSelectionFromOwnerships } from "../core/RailAreaSelection";
 import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
 import { DIR_E, DIR_N } from "../core/railShape";
-import { staticFabArrangementPlanFingerprint } from "../core/StaticFabArrangementCertification";
 import { staticFabArrangementCommandFingerprint } from "../core/StaticFabArrangementCommand";
 import type { StaticFabArrangementPlan } from "../core/StaticFabArrangementPlan";
-import {
-	emptyStaticFabOrganizationState,
-	type StaticFabOrganizationRecord,
-} from "../core/StaticFabOrganization";
+import { emptyStaticFabOrganizationState } from "../core/StaticFabOrganization";
 import { createStaticFabSelection } from "../core/StaticFabSelection";
 import { encodeRailCell, TileMap } from "../core/TileMap";
 import { captureRailMirrorSnapshot, checksumRailMap } from "./RailMirrorChecksum";
@@ -34,6 +28,7 @@ import {
 	initializeStaticFabArrangementRuntimeSession,
 	prepareStaticFabArrangementInSession,
 } from "./StaticFabArrangementRuntime";
+import { validPreparedArrangement } from "./StaticFabArrangementTestFixture";
 
 describe("StaticFabArrangementResponseValidator", () => {
 	it("accepts one exact existing-ID relocation response", () => {
@@ -310,173 +305,6 @@ describe("StaticFabArrangementResponseValidator", () => {
 		expectError(missingAuthorization, "metadata");
 	});
 });
-
-function validPreparedArrangement(): PreparedStaticFabArrangement {
-	const railChecksums = actualRailChecksums();
-	const sourceRailStart = encodeRailCell({ incoming: 0, outgoing: DIR_E });
-	const sourceRailEnd = encodeRailCell({ incoming: 8, outgoing: 0 });
-	const beforeSwitch: AdvancedSwitchRecord = {
-		id: 1,
-		profileClass: "A",
-		origin: { x: 20, y: 10 },
-		forward: DIR_E,
-		lateral: DIR_N,
-		movementMask: 0b1111,
-	};
-	const afterSwitch: AdvancedSwitchRecord = {
-		...beforeSwitch,
-		origin: { x: 20, y: 0 },
-	};
-	const beforePort: PortRecord = {
-		id: 1,
-		equipmentGroupId: 1,
-		route: { kind: "CARDINAL_CELL", x: 10, z: 10, from: 0, to: DIR_E },
-		stationMillimeters: 0,
-		side: "CENTER",
-		lateralOffsetMillimeters: 0,
-		direction: "WITH_TRAVEL",
-		portType: "OHB",
-		barcode: "PORT-1",
-	};
-	const afterPort: PortRecord = {
-		...beforePort,
-		route: { kind: "CARDINAL_CELL", x: 10, z: 0, from: 0, to: DIR_E },
-	};
-	const beforeOrganization: StaticFabOrganizationRecord = {
-		id: 1,
-		kind: "BAY",
-		name: "Bay One",
-		parentOrganizationIds: [],
-		properties: { description: "", color: "CYAN" },
-		membership: {
-			railEdges: [{ from: { x: 10, y: 10 }, to: { x: 11, y: 10 } }],
-			advancedSwitchIds: [1],
-			equipmentGroupIds: [1],
-		},
-	};
-	const afterOrganization: StaticFabOrganizationRecord = {
-		...beforeOrganization,
-		membership: {
-			...beforeOrganization.membership,
-			railEdges: [{ from: { x: 10, y: 0 }, to: { x: 11, y: 0 } }],
-		},
-	};
-	const plan: StaticFabArrangementPlan = {
-		kind: "arrange-static-fab",
-		baseRevision: 3,
-		basePatchSequence: 7,
-		valid: true,
-		reason: "2 roots arranged",
-		issueCode: null,
-		cells: [
-			{ x: 0, y: 0 },
-			{ x: 1, y: 0 },
-			{ x: 10, y: 0 },
-			{ x: 11, y: 0 },
-			{ x: 20, y: 0 },
-			{ x: 10, y: 10 },
-			{ x: 11, y: 10 },
-			{ x: 20, y: 10 },
-		],
-		conflicts: [],
-		mutations: [
-			{ x: 10, y: 0, before: 0, after: sourceRailStart },
-			{ x: 11, y: 0, before: 0, after: sourceRailEnd },
-			{ x: 10, y: 10, before: sourceRailStart, after: 0 },
-			{ x: 11, y: 10, before: sourceRailEnd, after: 0 },
-		],
-		switchMutations: [{ id: 1, before: beforeSwitch, after: afterSwitch }],
-		portMutations: [{ id: 1, before: beforePort, after: afterPort }],
-		equipmentGroupMutations: [],
-		organizationMutations: [{ id: 1, before: beforeOrganization, after: afterOrganization }],
-		organizationImpactAuthorizations: [1],
-		nextOrganizationIdBefore: 2,
-		nextOrganizationIdAfter: 2,
-		arrangement: {
-			version: 1,
-			axis: "Z",
-			mode: "ALIGN_MIN",
-			translations: [
-				{
-					key: "root-a",
-					deltaX: 0,
-					deltaZ: 0,
-					before: { minX: 0, minZ: 0, maxXExclusive: 2, maxZExclusive: 1 },
-					after: { minX: 0, minZ: 0, maxXExclusive: 2, maxZExclusive: 1 },
-				},
-				{
-					key: "root-b",
-					deltaX: 0,
-					deltaZ: -10,
-					before: { minX: 10, minZ: 10, maxXExclusive: 22, maxZExclusive: 11 },
-					after: { minX: 10, minZ: 0, maxXExclusive: 22, maxZExclusive: 1 },
-				},
-			],
-			maximumSnapErrorMeters: 0,
-			rootCount: 2,
-			moduleCount: 2,
-			railEdgeCount: 2,
-			advancedSwitchCount: 1,
-			portCount: 1,
-			equipmentGroupCount: 1,
-			affectedOrganizationIds: [1],
-		},
-	};
-	return {
-		plan,
-		ticket: {
-			ticketId: 41,
-			validationLevel: "exact",
-			sourceRevision: plan.baseRevision,
-			sourcePatchSequence: plan.basePatchSequence,
-			sourceChecksum: railChecksums.source,
-			sourceNextAdvancedSwitchId: 2,
-			sourceNextPortId: 2,
-			sourceNextEquipmentGroupId: 2,
-			sourceNextOrganizationId: 2,
-			intentFingerprint: checksum("intent"),
-			planFingerprint: staticFabArrangementPlanFingerprint(plan),
-			prospectiveChecksum: railChecksums.prospective,
-			prospectiveNextAdvancedSwitchId: 2,
-			prospectiveNextPortId: 2,
-			prospectiveNextEquipmentGroupId: 2,
-			prospectiveNextOrganizationId: 2,
-		},
-		valid: true,
-		failureCode: null,
-		reason: plan.reason,
-		conflictCells: [],
-		conflictCount: 0,
-		planningMilliseconds: 1,
-		validationMilliseconds: 2,
-	};
-}
-
-function actualRailChecksums(): { readonly source: string; readonly prospective: string } {
-	const source = new TileMap();
-	const prospective = source.clone();
-	prospective.applyAtomicMutations(
-		[
-			{
-				x: 0,
-				y: 0,
-				before: 0,
-				after: encodeRailCell({ incoming: 0, outgoing: DIR_E }),
-			},
-			{
-				x: 1,
-				y: 0,
-				before: 0,
-				after: encodeRailCell({ incoming: 8, outgoing: 0 }),
-			},
-		],
-		[],
-	);
-	return {
-		source: captureRailMirrorSnapshot(source, 0).snapshot.checksum,
-		prospective: checksumRailMap(prospective),
-	};
-}
 
 function addLine(
 	map: TileMap,

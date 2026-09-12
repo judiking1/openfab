@@ -479,6 +479,97 @@ export class TileMap {
 		this.advanceMutationGeneration();
 	}
 
+	/** Prepare an unpublished raw mutation candidate. The caller owns stable inputs, topology
+	 * validation and one-shot publication authority. Existing-ID switch swaps are simultaneous.
+	 */
+	createMutationCandidateSteps(
+		cellMutations: readonly TileMapCellMutation[],
+		switchMutations: readonly AdvancedSwitchMutation[],
+	): Generator<void, TileMap> {
+		const steps = function* (source: TileMap): Generator<void, TileMap> {
+			const copy = yield* source.cloneCandidateSteps();
+			const cellKeys = new Set<string>();
+			for (const mutation of cellMutations) {
+				const { x, y, before, after } = mutation;
+				const key = cellKey(x, y);
+				if (cellKeys.has(key)) throw new Error(`Duplicate rail cell mutation at ${key}.`);
+				cellKeys.add(key);
+				if (
+					!Number.isSafeInteger(x) ||
+					!Number.isSafeInteger(y) ||
+					!Number.isInteger(before) ||
+					before < 0 ||
+					before > 0xff ||
+					!Number.isInteger(after) ||
+					after < 0 ||
+					after > 0xff ||
+					before === after ||
+					copy.getEncoded(x, y) !== before
+				) {
+					throw new Error(`Rail cell ${key} before/after values are invalid.`);
+				}
+				copy.setEncoded(x, y, after);
+				yield;
+			}
+			const normalized: AdvancedSwitchMutation[] = [];
+			const ids = new Set<number>();
+			let nextId = copy.nextAdvancedSwitchId;
+			for (const mutation of switchMutations) {
+				if (ids.has(mutation.id))
+					throw new Error(`Duplicate advanced switch mutation for id ${mutation.id}.`);
+				ids.add(mutation.id);
+				const current = copy.advancedSwitches.get(mutation.id) ?? null;
+				if (!advancedSwitchEquals(current, mutation.before))
+					throw new Error(`Advanced switch ${mutation.id} before-value mismatch.`);
+				const after = mutation.after ? copyAdvancedSwitch(mutation.after) : null;
+				if ((after?.id ?? mutation.before?.id ?? mutation.id) !== mutation.id)
+					throw new Error(`Advanced switch mutation id ${mutation.id} does not match its record.`);
+				if (advancedSwitchEquals(current, after))
+					throw new Error(`Advanced switch mutation ${mutation.id} is empty.`);
+				normalized.push({ id: mutation.id, before: current, after });
+				if (after) nextId = Math.max(nextId, after.id + 1);
+				yield;
+			}
+			copy.assertCanAdvanceMutationGeneration(
+				normalized.length + (nextId !== copy.nextAdvancedSwitchId ? 1 : 0),
+			);
+			for (const mutation of normalized) {
+				if (mutation.before) {
+					copy.advancedSwitches.delete(mutation.id);
+					for (const cell of deriveAdvancedSwitchGeometry(mutation.before).claimedCells) {
+						const key = cellKey(cell.x, cell.y);
+						if (copy.advancedSwitchClaims.get(key) === mutation.id)
+							copy.advancedSwitchClaims.delete(key);
+					}
+				}
+				yield;
+			}
+			for (const mutation of normalized) {
+				if (mutation.after) {
+					for (const cell of deriveAdvancedSwitchGeometry(mutation.after).claimedCells) {
+						const key = cellKey(cell.x, cell.y);
+						const ownerId = copy.advancedSwitchClaims.get(key);
+						if (ownerId !== undefined && ownerId !== mutation.id)
+							throw new Error(
+								`Advanced switch ${mutation.id} overlaps switch ${ownerId} at ${cell.x},${cell.y}.`,
+							);
+						copy.advancedSwitchClaims.set(key, mutation.id);
+					}
+					copy.advancedSwitches.set(mutation.id, mutation.after);
+				}
+				yield;
+			}
+			copy.revision += normalized.length;
+			copy.advanceMutationGeneration(normalized.length);
+			if (nextId !== copy.nextAdvancedSwitchId) {
+				copy.nextAdvancedSwitchId = nextId;
+				copy.advanceMutationGeneration();
+			}
+			return copy;
+		};
+		return this.guardTraversalGeneration(steps(this), this.revision, this.mutationGeneration);
+	}
+
 	/** Prepare an unpublished addition-only candidate; the caller owns command certification. */
 	createAdditionCandidateSteps(
 		cellAdditions: readonly TileMapCellMutation[],

@@ -33,16 +33,16 @@ export function stkDraftReviewPresentation(
 	const ready = !!selection?.canComplete && count >= minimumPortCount;
 	const requirement =
 		template === "FLEX" && minimumPortCount > 1
-			? `이번 Guide에서는 Port ${minimumPortCount}개 선택`
+			? `이번 가이드에서는 포트 ${minimumPortCount}개 선택`
 			: stkTemplatePresentation(template).requirement;
 	const issue =
 		selection && (!selection.valid || selection.rejectedRow !== null)
-			? stkDraftReasonLabel(selection.reason)
+			? `${ready && selection.rejectedRow !== null ? `추가 선택은 반영하지 않았습니다. 기존 ${count}개로 생성할 수 있습니다. ` : ""}${stkDraftReasonLabel(selection.reason)}`
 			: null;
 	return {
 		title: `Stocker · ${count}개 Port 선택`,
 		instruction: ready
-			? "선택을 확인한 뒤 STK 생성 · Shift+Enter도 가능"
+			? "선택을 확인한 뒤 Stocker 생성 · Shift+Enter도 가능"
 			: keyboardTargetActive
 				? `${requirement} · 금색 슬롯 클릭 또는 방향키 후 Enter`
 				: `${requirement} · 금색 슬롯 클릭 · 키보드는 배치 시작 버튼을 누르세요`,
@@ -53,16 +53,16 @@ export function stkDraftReviewPresentation(
 
 export function stkTemplatePresentation(template: StkAuthoringTemplate): StkTemplatePresentation {
 	if (template === "FLEX") {
-		return Object.freeze({ label: "FLEX", requirement: "원하는 CENTER Port 1개 이상" });
+		return Object.freeze({ label: "자유 선택", requirement: "레일 중앙 포트 1개 이상" });
 	}
 	if (template === "FOUR_PORT") {
-		return Object.freeze({ label: "4 PORT", requirement: "같은 직선 레일의 연속 4개" });
+		return Object.freeze({ label: "연속 4개", requirement: "같은 직선 레일의 연속 4개" });
 	}
 	if (template === "SIX_PORT") {
-		return Object.freeze({ label: "6 PORT", requirement: "같은 직선 레일의 연속 6개" });
+		return Object.freeze({ label: "연속 6개", requirement: "같은 직선 레일의 연속 6개" });
 	}
 	return Object.freeze({
-		label: "B2B",
+		label: "양쪽 짝(B2B)",
 		requirement: "반대 방향 평행 레일의 정렬된 짝 · 짝수 4개 이상",
 	});
 }
@@ -76,14 +76,14 @@ export function stkDraftAuthoringInstruction(
 		throw new RangeError("STK authoring legal slot count must be a non-negative safe integer.");
 	}
 	if (legalSlotCount === 0) {
-		return "배치 가능 슬롯 없음 · STK가 연결될 직선 레일을 먼저 만드세요";
+		return "배치 가능 슬롯 없음 · Stocker가 연결될 직선 레일을 먼저 만드세요";
 	}
 	const templateCopy = stkTemplatePresentation(template);
 	if (!selection || selection.rows.length === 0) {
-		return `${templateCopy.label} · ${templateCopy.requirement} · 포인터: 금색 ◇ CENTER 클릭으로 첫 Port 선택 · 키보드: 방향키/WASD 이동 → Enter · Esc STK 배치 종료`;
+		return `${templateCopy.label} · ${templateCopy.requirement} · 포인터: 금색 ◇ 포트 클릭으로 첫 Port 선택 · 키보드: 방향키/WASD 이동 → Enter · Esc Stocker 배치 종료`;
 	}
 	const draft = stkDraftStatusPresentation(selection);
-	return `${draft.label} · ${templateCopy.label} 조건: ${templateCopy.requirement} · 포인터: 금색 ◇ CENTER 클릭으로 추가·제거 · 키보드: 방향키/WASD 이동 → Enter · 준비되면 STK 생성 · Esc 선택 초기화 · 다시 Esc STK 배치 종료`;
+	return `${draft.label} · ${templateCopy.label} 조건: ${templateCopy.requirement} · 포인터: 금색 ◇ 포트 클릭으로 추가·제거 · 키보드: 방향키/WASD 이동 → Enter · 준비되면 Stocker 생성 · Esc 선택 초기화 · 다시 Esc Stocker 배치 종료`;
 }
 
 export function stkDraftKeyboardTargetLabel(
@@ -110,16 +110,16 @@ export function stkOverviewCoachPresentation(
 				zoomActionLabel: "첫 Port 확대",
 			})
 		: Object.freeze({
-				instruction: `${templateRequirement} · 포인터: 금색 원 클릭으로 추가·제거 · 키보드: Enter · 준비되면 STK 생성`,
+				instruction: `${templateRequirement} · 포인터: 금색 원 클릭으로 추가·제거 · 키보드: Enter · 준비되면 Stocker 생성`,
 				zoomActionLabel: "현재 Port 확대",
 			});
 }
 
 function stkOverviewTemplateRequirement(template: StkAuthoringTemplate): string {
-	if (template === "FLEX") return "FLEX · 1개 이상";
-	if (template === "FOUR_PORT") return "4 PORT · 연속 4개";
-	if (template === "SIX_PORT") return "6 PORT · 연속 6개";
-	return "B2B · 정렬된 짝수 4개 이상";
+	if (template === "FLEX") return "자유 선택 · 1개 이상";
+	if (template === "FOUR_PORT") return "연속 4개 · 같은 직선";
+	if (template === "SIX_PORT") return "연속 6개 · 같은 직선";
+	return "양쪽 짝(B2B) · 정렬된 짝수 4개 이상";
 }
 
 export function stkDraftStatusPresentation(
@@ -135,8 +135,8 @@ export function stkDraftStatusPresentation(
 	const reason = stkDraftReasonLabel(selection.reason);
 	if (selection.rejectedRow !== null && selection.canComplete) {
 		return Object.freeze({
-			label: `${selection.rows.length} PORT 선택 · Shift+Enter / STK 생성 · 추가 실패: ${reason}`,
-			reason: `선택한 위치는 추가하지 않았습니다. 기존 ${selection.rows.length}개 포트 드래프트로 STK를 생성할 수 있습니다. ${reason}`,
+			label: `${selection.rows.length} PORT 선택 · Shift+Enter / Stocker 생성 · 추가 실패: ${reason}`,
+			reason: `선택한 위치는 추가하지 않았습니다. 기존 ${selection.rows.length}개 포트 드래프트로 Stocker를 생성할 수 있습니다. ${reason}`,
 			state: "blocked",
 		});
 	}
@@ -150,7 +150,7 @@ export function stkDraftStatusPresentation(
 	if (selection.canComplete) {
 		const railRuns = `${selection.laneCount} RAIL ${selection.laneCount === 1 ? "RUN" : "RUNS"}`;
 		return Object.freeze({
-			label: `${selection.rows.length} PORT 선택 · ${railRuns} · Shift+Enter / STK 생성`,
+			label: `${selection.rows.length} PORT 선택 · ${railRuns} · Shift+Enter / Stocker 생성`,
 			reason,
 			state: "ready",
 		});
@@ -171,8 +171,8 @@ export function stkDraftReasonLabel(reason: string): string {
 			"must have aligned, paired port stations",
 			"B2B 포트는 양쪽 레일의 같은 위치에 짝지어야 합니다",
 		],
-		["requires exactly four ports", "4 PORT 템플릿은 포트 4개가 필요합니다"],
-		["requires exactly six ports", "6 PORT 템플릿은 포트 6개가 필요합니다"],
+		["requires exactly four ports", "연속 4개 구성은 포트 4개가 필요합니다"],
+		["requires exactly six ports", "연속 6개 구성은 포트 6개가 필요합니다"],
 		[
 			"requires an even port count of at least four",
 			"B2B는 양쪽을 합쳐 짝수 포트 4개 이상이 필요합니다",

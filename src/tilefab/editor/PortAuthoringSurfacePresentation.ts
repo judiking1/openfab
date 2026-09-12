@@ -70,13 +70,13 @@ export function portAuthoringSurfacePresentation(
 		});
 	}
 	return Object.freeze({
-		toolCaption: "STK Port 그룹",
-		toolDescription: "금색 ◇ CENTER · 선택 후 STK 생성",
-		buildbarTitle: "STK PORT GROUP",
+		toolCaption: "Stocker · 포트 선택",
+		toolDescription: "금색 ◇ 포트 · 선택 후 Stocker 생성",
+		buildbarTitle: "Stocker · 보관 장비",
 		instruction:
 			legalSlotCount > 0
-				? `금색 ◇ CENTER ${count}개 · STK에 연결할 Port 슬롯을 선택한 뒤 STK 생성`
-				: "배치 가능 슬롯 없음 · STK가 연결될 직선 레일을 먼저 만드세요",
+				? `포트 후보 ${count}곳 · 금색 ◇ 선택 후 Stocker 생성`
+				: "배치 가능 슬롯 없음 · Stocker가 연결될 직선 레일을 먼저 만드세요",
 		configurationAvailable,
 		prerequisiteAction,
 	});

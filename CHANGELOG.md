@@ -8,17 +8,37 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ### Changed
 
+- Project Save shortcuts now save the whole project regardless of selection. Held area and FAB
+  organization Blueprints have explicit storage buttons, with clearer storage destinations and
+  visible save/cancel actions on short screens.
+- Arrangement preserves explicit assembly relationships through certified Apply and cancellable
+  Undo/Redo. Large result snapshots use owned columns and cooperative admission.
+
 - Guided Build groups the existing journey into Quick Start, Equip, Reuse, and Advanced FAB
   chapters, with clearer pause/resume, Help, keyboard focus, and recovery through ordinary commands.
 - Ordinary Rail and Port authoring, Assembly handoffs, Checks, and project menus provide clearer
   keyboard feedback and compact layouts while preserving the same atomic edit and Undo/Redo paths.
-- Native project schema v11 preserves explicit assembly relationship state and allocator cursors
+- Native project schema v12 preserves explicit assembly relationship state and allocator cursors
   through save/load, history, and Worker synchronization. Older projects migrate to empty
   relationship state; automatic relationship producers and Detach remain disabled.
 - Relationship snapshot hydration and checksums run in cancellable bounded steps. Final document
   adoption reuses completed relationship validation, and whole-map copying retains less memory.
 
 ### Fixed
+
+- Optional operational settings load only when opened, keeping their editor and stylesheet out
+  of initial loading. Loading and download failure remain closeable with keyboard focus retained.
+
+- Equipment menus, Guide and Help explain the physical meaning of ports and the distinct OHB,
+  EQ and Stocker creation actions. Stocker configurations use readable names without changing
+  persisted template values; rejected additions explain when the existing selection is still usable.
+- Stocker creation and port membership editing keep the complete selected range visible when it
+  fits at the current zoom, including compact screens. Oversized ranges retain cursor following.
+
+- Automatic recovery and native Project Save obtain validated snapshots from the mirror without
+  synchronously copying the full authored map on the UI thread. Incomplete layouts remain saveable,
+  and obsolete recovery requests cannot publish late success/error feedback.
+- Next-step FAB guidance clears wrapped copy controls at intermediate and compact screen widths.
 
 - Native Save cancellation preserves the pending user action and exposes a truthful retry path.
 - Guided and ordinary FAB editing retain exact selection, placement, and recovery context through

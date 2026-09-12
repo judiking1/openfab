@@ -12,6 +12,8 @@ import {
 	prepareStaticFabArrangementInSession,
 	type StaticFabArrangementRuntimeSession,
 } from "./StaticFabArrangementRuntime";
+import { encodeStaticFabArrangementTransport } from "./StaticFabArrangementTransport";
+import { collectTransferableBuffers } from "./TransferableBuffers";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 let activeSession: Readonly<{
@@ -72,9 +74,9 @@ function prepareCandidate(request: PrepareStaticFabArrangementRequest): void {
 		sessionId: request.sessionId,
 		requestId: request.requestId,
 		sourcePlanIndex: result.sourcePlanIndex,
-		prepared: result.prepared,
+		prepared: encodeStaticFabArrangementTransport(result.prepared),
 	};
-	scope.postMessage(response);
+	scope.postMessage(response, collectTransferableBuffers(response.prepared));
 }
 
 function validateEnvelope(request: StaticFabArrangementWorkerRequest): void {

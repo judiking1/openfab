@@ -94,7 +94,7 @@ describe("GuidedPortKeyboardSession", () => {
 		);
 		expect(ordinaryPortKeyboardEscapePresentation("STK", "choose-slot", 3)).toEqual({
 			action: "reset-stk-draft",
-			message: "STK Port 3개 선택을 초기화했습니다 · 첫 Port부터 다시 선택하세요",
+			message: "Stocker 포트 3개 선택을 초기화했습니다 · 첫 Port부터 다시 선택하세요",
 		});
 	});
 
@@ -109,7 +109,7 @@ describe("GuidedPortKeyboardSession", () => {
 			"Esc는 미확정 행만 취소",
 		);
 		expect(guidedPortKeyboardOperationInstruction("STK", "choose-slot", "guided", 2)).toContain(
-			"STK 생성 또는 Shift+Enter",
+			"Stocker 생성 또는 Shift+Enter",
 		);
 		expect(guidedPortKeyboardOperationInstruction("STK", "choose-slot", "ordinary", 0)).toContain(
 			"Esc는 Port 배치를 종료",

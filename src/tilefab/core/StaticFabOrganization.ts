@@ -871,6 +871,117 @@ export function applyStaticFabOrganizationMutations(
 		: nextState;
 }
 
+/** Prepare reversible canonical membership changes without copying a wide record synchronously. */
+export function* applyStaticFabOrganizationMutationsSteps(
+	state: StaticFabOrganizationState,
+	mutations: readonly StaticFabOrganizationMutation[],
+	nextOrganizationId: number,
+): Generator<void, StaticFabOrganizationState> {
+	if (!isCanonicalStaticFabOrganizationState(state) || !isPositiveInt32(nextOrganizationId))
+		throw new Error("Prepared organization edits require canonical source and a positive cursor.");
+	if (!Array.isArray(mutations) || !Object.isFrozen(mutations))
+		throw new Error("Prepared organization mutations must be immutable.");
+	const records = new Map<number, StaticFabOrganizationRecord>();
+	for (const record of state.records) {
+		yield;
+		records.set(record.id, record);
+	}
+	const touched = new Set<number>();
+	let expectedNextId = state.nextOrganizationId;
+	for (let i = 0; i < mutations.length; i++) {
+		yield;
+		if (!Object.hasOwn(Object.getOwnPropertyDescriptor(mutations, i) ?? {}, "value"))
+			throw new Error("Prepared organization mutations require data properties.");
+		const mutation = mutations[i];
+		if (
+			!mutation ||
+			!Object.isFrozen(mutation) ||
+			!["id", "before", "after"].every((key) =>
+				Object.hasOwn(Object.getOwnPropertyDescriptor(mutation, key) ?? {}, "value"),
+			)
+		)
+			throw new Error("Prepared organization mutations must be immutable data records.");
+		if (
+			!isPositiveInt32(mutation.id) ||
+			touched.has(mutation.id) ||
+			(!mutation.before && !mutation.after)
+		)
+			throw new Error("Prepared organization mutation IDs must be unique and nonempty.");
+		touched.add(mutation.id);
+		for (const record of [mutation.before, mutation.after])
+			if (
+				record !== null &&
+				(!isCanonicalStaticFabOrganizationRecord(record) || record.id !== mutation.id)
+			)
+				throw new Error(
+					"Prepared organization mutations require canonical records with matching IDs.",
+				);
+		if (!(yield* canonicalOrganizationRecordEqualsSteps(records.get(mutation.id), mutation.before)))
+			throw new Error(`조직 ${mutation.id} 변경의 before 값이 현재 문서와 다릅니다`);
+		if (yield* canonicalOrganizationRecordEqualsSteps(mutation.before, mutation.after))
+			throw new Error(`조직 ${mutation.id} 변경은 no-op입니다`);
+		if (mutation.after) records.set(mutation.id, mutation.after);
+		else records.delete(mutation.id);
+		if (!mutation.before && mutation.after)
+			expectedNextId = Math.max(expectedNextId, mutation.id + 1);
+	}
+	if (nextOrganizationId !== expectedNextId)
+		throw new Error(`다음 정적 FAB 조직 ID는 ${expectedNextId}이어야 합니다`);
+	const sorted: StaticFabOrganizationRecord[] = [];
+	for (const record of records.values()) {
+		yield;
+		sorted.push(record);
+	}
+	yield* stableSortSteps(sorted, (left, right) => left.id - right.id);
+	const candidate = Object.freeze({ nextOrganizationId, records: Object.freeze(sorted) });
+	const error = yield* staticFabOrganizationStateShapeErrorSteps(candidate);
+	if (error) throw new Error(error);
+	return brandCanonicalStaticFabOrganizationState(candidate);
+}
+
+/** Inputs are canonical immutable records admitted before comparison. */
+function* canonicalOrganizationRecordEqualsSteps(
+	left: StaticFabOrganizationRecord | null | undefined,
+	right: StaticFabOrganizationRecord | null | undefined,
+): Generator<void, boolean> {
+	if (!left || !right) return left == null && right == null;
+	if (left === right) return true;
+	if (
+		left.id !== right.id ||
+		left.kind !== right.kind ||
+		left.name !== right.name ||
+		!numberArrayEquals(
+			staticFabOrganizationParentIds(left),
+			staticFabOrganizationParentIds(right),
+		) ||
+		staticFabOrganizationProperties(left).description !==
+			staticFabOrganizationProperties(right).description ||
+		staticFabOrganizationProperties(left).color !== staticFabOrganizationProperties(right).color
+	)
+		return false;
+	const lm = left.membership,
+		rm = right.membership;
+	if (
+		lm.railEdges.length !== rm.railEdges.length ||
+		lm.advancedSwitchIds.length !== rm.advancedSwitchIds.length ||
+		lm.equipmentGroupIds.length !== rm.equipmentGroupIds.length
+	)
+		return false;
+	for (let i = 0; i < lm.railEdges.length; i++) {
+		yield;
+		if (!directedRailEdgeEquals(lm.railEdges[i], rm.railEdges[i])) return false;
+	}
+	for (const [a, b] of [
+		[lm.advancedSwitchIds, rm.advancedSwitchIds],
+		[lm.equipmentGroupIds, rm.equipmentGroupIds],
+	] as const)
+		for (let i = 0; i < a.length; i++) {
+			yield;
+			if (a[i] !== b[i]) return false;
+		}
+	return true;
+}
+
 export function reverseStaticFabOrganizationMutations(
 	mutations: readonly StaticFabOrganizationMutation[],
 ): readonly StaticFabOrganizationMutation[] {
@@ -993,7 +1104,7 @@ function staticFabOrganizationRecordShapeError(record: StaticFabOrganizationReco
 	return completeCooperativeSteps(staticFabOrganizationRecordShapeErrorSteps(record));
 }
 
-function* staticFabOrganizationRecordShapeErrorSteps(
+export function* staticFabOrganizationRecordShapeErrorSteps(
 	record: StaticFabOrganizationRecord,
 ): Generator<void, string | null> {
 	const headerError = staticFabOrganizationRecordHeaderError(record);

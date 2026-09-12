@@ -8,7 +8,10 @@ import type { OperationalConfigurationState } from "../core/OperationalConfigura
 import type { OperationalConfigurationPatch } from "../core/OperationalConfigurationMutation";
 import type { RailMutation } from "../core/paint";
 import type { RailHistoryOriginKind, RailPatchEvent, RailPatchKind } from "../core/RailDocument";
-import type { RailMirrorHistoryLedger } from "../core/RailPatchHistory";
+import {
+	assertImmutableStaticRailPatchTransitionSteps,
+	type RailMirrorHistoryLedger,
+} from "../core/RailPatchHistory";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import {
 	type AdvancedSwitchRecordFieldsSoA,
@@ -34,6 +37,7 @@ import {
 	decodeStaticFabAssemblyRelationshipPatch,
 	encodeStaticFabAssemblyRelationshipAdditionsCooperatively,
 	encodeStaticFabAssemblyRelationshipPatch,
+	encodeStaticFabAssemblyRelationshipPatchCooperatively,
 	type StaticFabAssemblyRelationshipPatchSoA,
 	staticFabAssemblyRelationshipSnapshotTransfers,
 } from "./StaticFabAssemblyRelationshipSoA";
@@ -41,6 +45,7 @@ import {
 	decodeStaticFabOrganizationPatch,
 	encodeStaticFabOrganizationAdditionsCooperatively,
 	encodeStaticFabOrganizationPatch,
+	encodeStaticFabOrganizationPatchCooperatively,
 	type StaticFabOrganizationPatchSoA,
 	staticFabOrganizationSnapshotTransfers,
 } from "./StaticFabOrganizationSoA";
@@ -390,6 +395,67 @@ export async function encodeStaticFabAdditionRailPatchEventCooperatively(
 		organizations,
 		relationships,
 		new Int32Array(0),
+	);
+}
+
+/** Prepare all six immutable static domains for a reversible command or history event. */
+export async function encodeStaticFabMutationRailPatchEventCooperatively(
+	event: RailPatchEvent,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<EncodedRailPatch> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
+		throw new RangeError("Rail mutation encoding operation budget must be positive.");
+	const finish = async <T>(steps: Generator<void, T>): Promise<T> => {
+		const task = createCooperativeTask(steps);
+		while (!task.done) {
+			task.step(operationBudget);
+			await checkpoint();
+		}
+		return task.finish();
+	};
+	await finish(assertImmutableStaticRailPatchTransitionSteps(event));
+	const rail = await finish(createRailPatchRailFieldsSteps(event));
+	const portEquipment = await encodePortEquipmentPatchCooperatively(
+		event.portChanges,
+		event.equipmentGroupChanges,
+		checkpoint,
+		operationBudget,
+	);
+	const organizations = await encodeStaticFabOrganizationPatchCooperatively(
+		event.organizationChanges,
+		event.organizationNextIdBefore,
+		event.organizationNextIdAfter,
+		checkpoint,
+		operationBudget,
+	);
+	const relationships = await encodeStaticFabAssemblyRelationshipPatchCooperatively(
+		event.relationshipChanges,
+		event.relationshipNextIdBefore,
+		event.relationshipNextIdAfter,
+		checkpoint,
+		operationBudget,
+	);
+	const authorizations = new Int32Array(event.organizationImpactAuthorizations?.length ?? 0);
+	const fillAuthorizations = function* (): Generator<void> {
+		let previous = 0;
+		for (let i = 0; i < authorizations.length; i++) {
+			yield;
+			const id = event.organizationImpactAuthorizations?.[i];
+			if (id === undefined || !Number.isSafeInteger(id) || id <= previous || id > 0x7fffffff)
+				throw new Error("Organization impact authorizations must be canonical positive int32 IDs.");
+			authorizations[i] = id;
+			previous = id;
+		}
+	};
+	await finish(fillAuthorizations());
+	return assembleEncodedRailPatch(
+		event,
+		rail,
+		portEquipment,
+		organizations,
+		relationships,
+		authorizations,
 	);
 }
 

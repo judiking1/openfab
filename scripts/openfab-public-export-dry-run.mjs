@@ -91,7 +91,17 @@ try {
 	currentGate = "public-bundle";
 	await run("pnpm", ["run", "check:public-bundle"], temporaryRoot);
 	currentGate = "production-smoke";
-	await run("pnpm", ["run", "test:live-demo"], temporaryRoot);
+	await run("pnpm", ["run", "test:live-demo"], temporaryRoot, {
+		...process.env,
+		...(process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR
+			? {
+					OPENFAB_ACCEPTANCE_ARTIFACT_DIR: path.join(
+						process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR,
+						"production-smoke",
+					),
+				}
+			: {}),
+	});
 	currentGate = "source-cleanliness";
 	await capture("git", ["diff", "--quiet"], temporaryRoot);
 

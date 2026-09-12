@@ -12,6 +12,7 @@ import {
 	type StaticFabAssemblyRelationshipRecordV1,
 	staticFabAssemblyRelationshipAdditionFootprintSteps,
 	staticFabAssemblyRelationshipTransitionFootprint,
+	staticFabAssemblyRelationshipTransitionFootprintSteps,
 } from "./StaticFabAssemblyRelationship";
 import {
 	isCanonicalStaticFabOrganizationRecord,
@@ -281,6 +282,130 @@ export async function createRailMirrorHistoryLedgerEntryCooperatively(
 		relationshipOwnerIds: footprint.ownerIdCount,
 		relationshipCanonicalBytes: footprint.canonicalByteCount,
 	});
+}
+
+/** Prepare reciprocal V5 fingerprints and complete before/after budgets for immutable static edits. */
+export async function createRailMirrorHistoryMutationLedgerEntryCooperatively(
+	originKind: RailHistoryOriginKind,
+	transition: RailPatchTransition,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<RailMirrorHistoryLedgerEntry> {
+	await finishHistorySteps(
+		assertImmutableStaticRailPatchTransitionSteps(transition),
+		checkpoint,
+		operationBudget,
+	);
+	const footprint = await finishHistorySteps(
+		staticFabAssemblyRelationshipTransitionFootprintSteps(
+			transition.relationshipChanges ?? Object.freeze([]),
+		),
+		checkpoint,
+		operationBudget,
+	);
+	const forwardFingerprint = await finishHistorySteps(
+		transitionFingerprintSteps(transition, false, true),
+		checkpoint,
+		operationBudget,
+	);
+	const reverseFingerprint = await finishHistorySteps(
+		transitionFingerprintSteps(transition, true, true),
+		checkpoint,
+		operationBudget,
+	);
+	return Object.freeze({
+		originKind,
+		forwardFingerprint,
+		reverseFingerprint,
+		relationshipEdgeReferences: footprint.edgeReferenceCount,
+		relationshipOwnerIds: footprint.ownerIdCount,
+		relationshipCanonicalBytes: footprint.canonicalByteCount,
+	});
+}
+
+/**
+ * Check the immutable static transition envelope. Relationship records require their separate
+ * bounded footprint admission. This grants neither topology validity nor publication authority.
+ */
+export function* assertImmutableStaticRailPatchTransitionSteps(
+	transition: RailPatchTransition,
+): Generator<void> {
+	assertFrozenDataRecord(transition);
+	if ((transition.operationalConfigurationPatch ?? null) !== null)
+		throw new Error("Prepared mutation history requires static-only changes.");
+	assertFrozenDataArray(transition.changes);
+	for (let i = 0; i < transition.changes.length; i++) {
+		yield;
+		assertDataArrayItem(transition.changes, i);
+		assertFrozenDataRecord(transition.changes[i]);
+	}
+	for (const [kind, changes] of [
+		["switch", transition.switchChanges],
+		["port", transition.portChanges],
+		["equipment", transition.equipmentGroupChanges],
+		["organization", transition.organizationChanges],
+	] as const) {
+		assertFrozenDataArray(changes);
+		for (let i = 0; i < changes.length; i++) {
+			yield;
+			assertDataArrayItem(changes, i);
+			const change = changes[i];
+			assertFrozenDataRecord(change);
+			if (!change) throw new Error("Missing prepared history mutation.");
+			for (const record of [change.before, change.after]) {
+				if (record === null) continue;
+				assertFrozenDataRecord(record);
+				if (kind === "organization") {
+					if (!isCanonicalStaticFabOrganizationRecord(record as StaticFabOrganizationRecord))
+						throw new Error("Prepared history requires canonical organizations.");
+				} else if (kind === "switch")
+					assertFrozenDataRecord((record as AdvancedSwitchRecord).origin);
+				else if (kind === "port") assertFrozenDataRecord((record as PortRecord).route);
+				else {
+					const ids = (record as EquipmentGroupRecord).portIds;
+					assertFrozenDataArray(ids);
+					for (let j = 0; j < ids.length; j++) {
+						yield;
+						assertDataArrayItem(ids, j);
+					}
+				}
+			}
+		}
+	}
+	const authorizations = transition.organizationImpactAuthorizations ?? Object.freeze([]);
+	assertFrozenDataArray(authorizations);
+	for (let i = 0; i < authorizations.length; i++) {
+		yield;
+		assertDataArrayItem(authorizations, i);
+	}
+}
+
+function assertFrozenDataRecord(
+	value: unknown,
+): asserts value is Readonly<Record<string, unknown>> {
+	if (
+		!value ||
+		typeof value !== "object" ||
+		!Object.isFrozen(value) ||
+		(Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
+	)
+		throw new Error("Prepared history records must be immutable data objects.");
+	for (const key of Reflect.ownKeys(value))
+		if (!Object.hasOwn(Object.getOwnPropertyDescriptor(value, key) ?? {}, "value"))
+			throw new Error("Prepared history records must contain data properties.");
+}
+function assertFrozenDataArray(value: unknown): asserts value is readonly unknown[] {
+	if (
+		!Array.isArray(value) ||
+		Object.getPrototypeOf(value) !== Array.prototype ||
+		!Object.isFrozen(value) ||
+		[Symbol.iterator, "map", "some", "every", "forEach"].some((key) => Object.hasOwn(value, key))
+	)
+		throw new Error("Prepared history arrays must be immutable data arrays.");
+}
+function assertDataArrayItem(values: readonly unknown[], index: number): void {
+	if (!Object.hasOwn(Object.getOwnPropertyDescriptor(values, index) ?? {}, "value"))
+		throw new Error("Prepared history arrays must contain data properties.");
 }
 
 /** Fully bounded deep-record ledger preparation for immutable addition-only commands. */

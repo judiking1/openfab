@@ -380,6 +380,21 @@ export function readPortRecord(snapshot: PortEquipmentSnapshot, index: number): 
 	return readPortFromFields(snapshot.portIds[index] as number, snapshot.ports, index);
 }
 
+/** Decode one owned, shape-checked row without inventing a partial reciprocal equipment state. */
+export function readPortRecordFields(
+	id: number,
+	fields: PortRecordFieldsSoA,
+	index: number,
+): PortRecord {
+	validateIndex(index, fields.routeKinds.length, "port");
+	if (
+		fields.routeKinds[index] !== ROUTE_CARDINAL &&
+		fields.routeKinds[index] !== ROUTE_ADVANCED_SWITCH
+	)
+		throw new Error("Unknown port route kind.");
+	return readPortFromFields(id, fields, index);
+}
+
 function readPortFromFields(id: number, fields: PortRecordFieldsSoA, index: number): PortRecord {
 	const routeKind = fields.routeKinds[index] as number;
 	return copyPortRecord({

@@ -39,14 +39,14 @@ export function EquipmentAuthoringWorkspace({
 					{heading}
 					<p>
 						{intent === "move"
-							? "선택한 장비를 새 Port 위치로 옮깁니다."
+							? "입출고 지점(포트)을 골라 장비 전체를 옮깁니다."
 							: intent === "copy"
-								? "선택한 장비를 새 Port 위치에 복제합니다."
+								? "입출고 지점(포트)을 골라 장비 전체를 복제합니다."
 								: portType === "OHB"
-									? "Port 한 곳에 OHB 하나를 만듭니다."
+									? "입출고 지점(포트) 한 곳을 고르면 OHB가 생성됩니다."
 									: portType === "EQ"
-										? "직선의 여러 Port를 한 공정 장비에 연결합니다."
-										: "선택한 Port를 하나의 Stocker로 묶습니다."}
+										? "같은 직선의 입출고 지점(포트)에서 시작과 끝을 고르면 EQ가 생성됩니다."
+										: "입출고 지점(포트)을 고른 뒤 ‘Stocker 생성’을 누르세요."}
 					</p>
 				</div>
 				{exit}

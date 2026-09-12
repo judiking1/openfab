@@ -304,7 +304,7 @@ async function placePublicServiceEquipment(activePage) {
 	);
 	await activePage.getByTestId("rail-canvas").press("Escape");
 
-	await clickActivityCommand(activePage, "equip", "STK 포트 그룹 배치");
+	await clickActivityCommand(activePage, "equip", "Stocker 포트 그룹 배치");
 	await activePage.getByTestId("stk-template-FLEX").click();
 	await activePage.getByRole("button", { name: "전체 보기", exact: true }).click();
 	await activePage.waitForTimeout(120);

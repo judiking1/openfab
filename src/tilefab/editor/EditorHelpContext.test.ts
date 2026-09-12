@@ -19,11 +19,11 @@ describe("deriveEditorHelpContext", () => {
 		expect(build.steps.map((step) => step.label)).toEqual(["1 · 그리기", "2 · 방향", "3 · 재사용"]);
 		expect(build.summary).toContain("빈 곳 어디서든");
 		expect(build.steps[0]?.description).toContain("독립적으로 시작");
-		expect(equip.eyebrow).toBe("장비 · PORT FIRST");
-		expect(equip.summary).toContain("Port 위치");
+		expect(equip.eyebrow).toBe("장비 · OHB/EQ/Stocker");
+		expect(equip.summary).toContain("입출고 지점이 포트");
 		expect(equip.steps[0]?.description).toContain("클릭하면 OHB가 생성");
-		expect(equip.steps[1]?.description).toContain("시작 Port와 끝 Port를 차례로 클릭");
-		expect(equip.steps[2]?.description).toContain("STK 생성을 누르세요");
+		expect(equip.steps[1]?.description).toContain("시작 포트와 끝 포트를 차례로 클릭");
+		expect(equip.steps[2]?.description).toContain("Stocker 생성을 누르세요");
 	});
 
 	it.each([

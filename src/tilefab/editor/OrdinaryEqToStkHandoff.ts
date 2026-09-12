@@ -11,19 +11,19 @@ export interface OrdinaryEqToStkHandoffContext {
 
 export interface OrdinaryEqToStkHandoffPresentation {
 	readonly label: "다음 · Stocker 배치";
-	readonly instruction: "Port 선택 → STK 생성";
+	readonly instruction: "포트 선택 → Stocker 생성";
 	readonly ariaLabel: "다음 장비: Stocker 배치";
 	readonly description: string;
 }
 
 export const ORDINARY_STK_HANDOFF_ENTRY_STATUS =
-	"Stocker 배치 · 현재 Port 구성의 요구 개수만큼 선택한 뒤 STK 생성";
+	"Stocker 배치 · 현재 포트 구성의 요구 개수만큼 선택한 뒤 Stocker 생성";
 
 const NEXT_STK_HANDOFF = Object.freeze({
 	label: "다음 · Stocker 배치",
-	instruction: "Port 선택 → STK 생성",
+	instruction: "포트 선택 → Stocker 생성",
 	ariaLabel: "다음 장비: Stocker 배치",
-	description: "현재 Port 구성과 요구 개수를 확인하고 금색 ◇를 선택한 뒤 STK 생성을 누르세요.",
+	description: "현재 포트 구성과 요구 개수를 확인하고 금색 ◇를 선택한 뒤 Stocker 생성을 누르세요.",
 }) satisfies OrdinaryEqToStkHandoffPresentation;
 
 /**

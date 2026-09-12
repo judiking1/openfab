@@ -11,6 +11,17 @@ import {
 import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/OpenFabProjectCodec";
 import { captureRailMirrorSnapshot, checksumRailPatchResult } from "../worker/RailMirrorChecksum";
 import { RailPatchMirror } from "../worker/RailPatchMirror";
+import {
+	decodeRailPatchSoA,
+	encodeRailPatchEvent,
+	encodeStaticFabMutationRailPatchEventCooperatively,
+} from "../worker/railMirrorProtocol";
+import { STATIC_FAB_ARRANGEMENT_SESSION_VERSION } from "../worker/StaticFabArrangementProtocol";
+import { staticFabArrangementPreparedShapeError } from "../worker/StaticFabArrangementResponseValidator";
+import {
+	initializeStaticFabArrangementRuntimeSession,
+	prepareStaticFabArrangementInSession,
+} from "../worker/StaticFabArrangementRuntime";
 import { hydrateStaticFabAssemblyRelationshipSnapshot } from "../worker/StaticFabAssemblyRelationshipSoA";
 import { STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION } from "../worker/StaticFabOrganizationBundlePlacementProtocol";
 import { staticFabOrganizationBundlePlacementPreparedShapeError } from "../worker/StaticFabOrganizationBundlePlacementResponseValidator";
@@ -21,9 +32,19 @@ import {
 } from "../worker/StaticFabOrganizationBundlePlacementTransport";
 import { collectTransferableBuffers } from "../worker/TransferableBuffers";
 import { emptyPortEquipmentState } from "./EquipmentGroup";
-import { planRailPath } from "./paint";
+import { planRailConstruction, planRailPath } from "./paint";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
 import { buildRailModuleOwnershipIndex, planRailModuleBulldoze } from "./RailModuleOwnership";
+import { STATIC_FAB_ARRANGEMENT_VERSION } from "./StaticFabArrangement";
+import {
+	adoptStaticFabArrangementWorkerPlanCooperatively,
+	issueStaticFabArrangementPermit,
+} from "./StaticFabArrangementCertification";
+import {
+	STATIC_FAB_ARRANGEMENT_COMMAND_VERSION,
+	type StaticFabArrangementCommandIntent,
+	staticFabArrangementCommandFingerprint,
+} from "./StaticFabArrangementCommand";
 import {
 	discoverStaticFabAssemblyGateways,
 	discoverStaticFabOuterCirculationGateways,
@@ -36,6 +57,7 @@ import {
 } from "./StaticFabAssemblyConnector";
 import { describeStaticFabAssemblyConnectorRelationship } from "./StaticFabAssemblyConnectorRelationshipDescriptor";
 import {
+	applyStaticFabAssemblyRelationshipMutations,
 	copyStaticFabAssemblyRelationshipState,
 	emptyStaticFabAssemblyRelationshipState,
 	remapStaticFabAssemblyRelationshipRecord,
@@ -44,6 +66,7 @@ import {
 	staticFabAssemblyRelationshipStateSourceError,
 } from "./StaticFabAssemblyRelationship";
 import { validateStaticFabAssemblyRelationshipSourceActivation } from "./StaticFabAssemblyRelationshipActivation";
+import { planStaticFabAssemblyRelationshipRelocation } from "./StaticFabAssemblyRelationshipRelocation";
 import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
@@ -348,6 +371,82 @@ describe("explicit Connector relationship descriptors", () => {
 		if (!captured.valid) throw new Error(captured.reason);
 		await verifyNestedPortablePlacement(final, canonical, captured.bundle, quarterTurns);
 	});
+	it("relocates all four nested relationships against the translated authored source", () => {
+		const { final, canonical } = createNestedConnectorFixture();
+		const source = JSON.stringify({ organizations: final.organizations, relationships: canonical });
+		const delta = { x: 31, y: -47 };
+		const railEdges = new Map<string, Cell>();
+		for (const record of final.organizations.records)
+			for (const edge of record.membership.railEdges)
+				railEdges.set(staticFabOrganizationEdgeKey(edge), delta);
+		const translations = {
+			railEdges,
+			advancedSwitches: new Map<number, Cell>(),
+			equipmentGroups: new Map<number, Cell>(),
+		};
+		const result = planStaticFabAssemblyRelationshipRelocation(
+			final.organizations,
+			canonical,
+			translations,
+		);
+		expect(result.valid).toBe(true);
+		if (!result.valid) throw new Error(result.reason);
+		expect(result.mutations.map((mutation) => mutation.id)).toEqual([1, 2, 3, 4]);
+		expect(result.nextRelationshipId).toBe(5);
+		expect(final.map.advancedSwitchCount).toBe(0);
+		expect(final.portEquipment.equipmentGroups).toHaveLength(0);
+		expect(final.portEquipment.ports).toHaveLength(0);
+		const movedMap = new TileMap();
+		final.map.forEachRail((x, y, _rail, encoded) =>
+			movedMap.setEncoded(x + delta.x, y + delta.y, encoded),
+		);
+		const move = (cell: Cell): Cell => ({ x: cell.x + delta.x, y: cell.y + delta.y });
+		const movedOrganizations = copyStaticFabOrganizationState({
+			...final.organizations,
+			records: final.organizations.records.map((record) => ({
+				...record,
+				membership: {
+					...record.membership,
+					railEdges: record.membership.railEdges.map((edge) => ({
+						from: move(edge.from),
+						to: move(edge.to),
+					})),
+				},
+			})),
+		});
+		const movedRelationships = applyStaticFabAssemblyRelationshipMutations(
+			canonical,
+			result.mutations,
+			result.nextRelationshipId,
+		);
+		expect(
+			staticFabAssemblyRelationshipStateSourceError(
+				movedMap,
+				movedOrganizations,
+				movedRelationships,
+			),
+		).toBeNull();
+		expect(
+			staticFabAssemblyRelationshipStateSourceError(
+				final.map,
+				final.organizations,
+				movedRelationships,
+			),
+		).not.toBeNull();
+		const cut = required(canonical.records[0]?.connectionGroups[0]?.legs[0]?.exclusiveCutEdges[0]);
+		railEdges.delete(staticFabOrganizationEdgeKey(cut.edge));
+		const incomplete = planStaticFabAssemblyRelationshipRelocation(
+			final.organizations,
+			canonical,
+			translations,
+		);
+		expect(incomplete.valid).toBe(false);
+		expect(incomplete.mutations).toHaveLength(0);
+		expect(JSON.stringify({ organizations: final.organizations, relationships: canonical })).toBe(
+			source,
+		);
+	});
+
 	it("rejects unavailable IDs, stale organization cursors and forged path order without mutation", () => {
 		const source = placeProductionBays([
 			{ x: 0, y: 0 },
@@ -388,6 +487,304 @@ describe("explicit Connector relationship descriptors", () => {
 			describeStaticFabAssemblyConnectorRelationship(source.organizations, invalid, 1),
 		).toThrow(/유효한/);
 		expect(JSON.stringify({ organizations: source.organizations, plan: result.plan })).toBe(before);
+	});
+	it.each([
+		"sync",
+		"cooperative",
+	] as const)("arranges a complete four-relationship FAB through %s commit, mirror, history and native replay", async (mode) => {
+		const { document, permit, prepared, intent, snapshot } = nestedArrangementProof();
+		expect(prepared.valid, prepared.reason).toBe(true);
+		const plan = required(prepared.plan),
+			ticket = required(prepared.ticket);
+		expect(plan.relationshipMutations.map((change) => change.id)).toEqual([1, 2, 3, 4]);
+		expect(staticFabArrangementPreparedShapeError(structuredClone(prepared))).toBeNull();
+		const checksum = snapshot.checksum;
+		const beforeRelationships = document.relationships;
+		let checkpoints = 0;
+		const certified = await adoptStaticFabArrangementWorkerPlanCooperatively(
+			permit,
+			ticket,
+			structuredClone(plan),
+			ticket.prospectiveChecksum,
+			document.map,
+			document.portEquipment,
+			document.getPatchSequence(),
+			document.organizations,
+			document.relationships,
+			intent,
+			async () => {
+				checkpoints++;
+			},
+			32,
+		);
+		const mirror = new RailPatchMirror();
+		mirror.sync(snapshot);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		const packetByEvent = new Map<RailPatchEvent, ReturnType<typeof encodeRailPatchEvent>>();
+		if (mode === "cooperative") {
+			const result = await document.commitStaticFabArrangementCooperatively(certified, {
+				checkpoint: async () => {
+					checkpoints++;
+				},
+				now: () => checkpoints * 5,
+				preparePatch: async (event, checkpoint) => {
+					expect(events).toHaveLength(0);
+					expect(document.relationships).toBe(beforeRelationships);
+					packetByEvent.set(
+						event,
+						await encodeStaticFabMutationRailPatchEventCooperatively(event, checkpoint),
+					);
+				},
+			});
+			expect(result.committed).toBe(true);
+		} else expect(document.commitStaticFabArrangement(certified)).toBe(true);
+		expect(checkpoints).toBeGreaterThan(10);
+		expect(events).toHaveLength(1);
+		const assertMirror = (index: number) => {
+			const event = required(events[index]);
+			const packet = packetByEvent.get(event) ?? encodeRailPatchEvent(event);
+			expect(mirror.applyPatch(decodeRailPatchSoA(packet.patch)).checksum).toBe(
+				captureRailMirrorSnapshot(
+					document.map,
+					document.getPatchSequence(),
+					document.portEquipment,
+					document.organizations,
+					document.relationships,
+				).snapshot.checksum,
+			);
+			expect(
+				staticFabAssemblyRelationshipStateSourceError(
+					document.map,
+					document.organizations,
+					document.relationships,
+				),
+			).toBeNull();
+		};
+		assertMirror(0);
+		const moved = document.relationships;
+		expect(moved.nextRelationshipId).toBe(5);
+		expect(moved).not.toEqual(beforeRelationships);
+		expect(
+			mode === "sync"
+				? document.undo()
+				: (
+						await document.replayStaticFabArrangementCooperatively("undo", {
+							checkpoint: async () => {},
+							now: () => 0,
+							preparePatch: async (event, checkpoint) => {
+								packetByEvent.set(
+									event,
+									await encodeStaticFabMutationRailPatchEventCooperatively(event, checkpoint),
+								);
+							},
+						})
+					).committed,
+		).toBe(true);
+		expect(events).toHaveLength(2);
+		assertMirror(1);
+		expect(document.relationships).toEqual(beforeRelationships);
+		expect(
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot.checksum,
+		).toBe(checksum);
+		expect(
+			mode === "sync"
+				? document.redo()
+				: (
+						await document.replayStaticFabArrangementCooperatively("redo", {
+							checkpoint: async () => {},
+							now: () => 0,
+							preparePatch: async (event, checkpoint) => {
+								packetByEvent.set(
+									event,
+									await encodeStaticFabMutationRailPatchEventCooperatively(event, checkpoint),
+								);
+							},
+						})
+					).committed,
+		).toBe(true);
+		expect(events).toHaveLength(3);
+		assertMirror(2);
+		expect(document.relationships).toEqual(moved);
+		const project = captureOpenFabProject(document, {
+			manifest: createOpenFabProjectManifest(
+				"arranged-nested",
+				"Arranged nested FAB",
+				"2026-09-13T00:00:00.000Z",
+			),
+		});
+		const reopened = createRailSnapshotFromOpenFabProject(
+			parseOpenFabProjectJson(serializeOpenFabProject(project)).project,
+		);
+		expect(hydrateStaticFabAssemblyRelationshipSnapshot(reopened.relationships)).toEqual(moved);
+		expect(reopened.checksum).toBe(ticket.prospectiveChecksum);
+	});
+
+	it.each([
+		"undo",
+		"redo",
+	] as const)("keeps the %s boundary and retries after cancelling prepared relationship history", async (direction) => {
+		const { document, permit, prepared, intent } = nestedArrangementProof();
+		const ticket = required(prepared.ticket);
+		const certified = await adoptStaticFabArrangementWorkerPlanCooperatively(
+			permit,
+			ticket,
+			structuredClone(required(prepared.plan)),
+			ticket.prospectiveChecksum,
+			document.map,
+			document.portEquipment,
+			document.getPatchSequence(),
+			document.organizations,
+			document.relationships,
+			intent,
+			async () => {},
+		);
+		expect(document.commitStaticFabArrangement(certified)).toBe(true);
+		if (direction === "redo") expect(document.undo()).toBe(true);
+		const before = {
+			map: document.map,
+			ports: document.portEquipment,
+			organizations: document.organizations,
+			relationships: document.relationships,
+			sequence: document.getPatchSequence(),
+			canUndo: document.canUndo,
+			canRedo: document.canRedo,
+		};
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		let cancelled = false;
+		await expect(
+			document.replayStaticFabArrangementCooperatively(direction, {
+				checkpoint: async () => {},
+				now: () => 0,
+				preparePatch: async (event, checkpoint) => {
+					await encodeStaticFabMutationRailPatchEventCooperatively(event, checkpoint);
+					cancelled = true;
+				},
+				checkCancelled: () => {
+					if (cancelled) throw new Error("history cancelled after transport preparation");
+				},
+			}),
+		).rejects.toThrow("history cancelled after transport preparation");
+		expect(document.map).toBe(before.map);
+		expect(document.portEquipment).toBe(before.ports);
+		expect(document.organizations).toBe(before.organizations);
+		expect(document.relationships).toBe(before.relationships);
+		expect(document.getPatchSequence()).toBe(before.sequence);
+		expect(document.canUndo).toBe(before.canUndo);
+		expect(document.canRedo).toBe(before.canRedo);
+		expect(document.canReplayStaticFabArrangement(direction)).toBe(true);
+		expect(events).toHaveLength(0);
+		const result = await document.replayStaticFabArrangementCooperatively(direction, {
+			checkpoint: async () => {},
+			now: () => 0,
+		});
+		expect(result.committed).toBe(true);
+		expect(events).toHaveLength(1);
+		expect(events[0].kind).toBe(direction);
+		expect(document.getPatchSequence()).toBe(before.sequence + 1);
+	});
+
+	it("rejects rollback ABA during arrangement history preparation and keeps the original history available", async () => {
+		const { document, permit, prepared, intent } = nestedArrangementProof();
+		const ticket = required(prepared.ticket);
+		const certified = await adoptStaticFabArrangementWorkerPlanCooperatively(
+			permit,
+			ticket,
+			structuredClone(required(prepared.plan)),
+			ticket.prospectiveChecksum,
+			document.map,
+			document.portEquipment,
+			document.getPatchSequence(),
+			document.organizations,
+			document.relationships,
+			intent,
+			async () => {},
+		);
+		expect(document.commitStaticFabArrangement(certified)).toBe(true);
+		const before = document.map,
+			sequence = document.getPatchSequence(),
+			relationships = document.relationships;
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		const result = await document.replayStaticFabArrangementCooperatively("undo", {
+			checkpoint: async () => {},
+			now: () => 0,
+			preparePatch: async () => {
+				const checkpoint = before.createMutationCheckpoint();
+				const change = { x: -999, y: -999, before: 0, after: 17 };
+				before.applyAtomicMutations([change], []);
+				before.rollbackAtomicMutations([change], [], checkpoint);
+			},
+		});
+		expect(result.committed).toBe(false);
+		expect(document.map).toBe(before);
+		expect(document.relationships).toBe(relationships);
+		expect(document.getPatchSequence()).toBe(sequence);
+		expect(events).toHaveLength(0);
+		expect(document.canReplayStaticFabArrangement("undo")).toBe(true);
+	});
+
+	it("cancels nested arrangement at prepared-packet handoff without publishing any authored state", async () => {
+		const { document, permit, prepared, intent } = nestedArrangementProof();
+		const plan = required(prepared.plan),
+			ticket = required(prepared.ticket);
+		const certified = await adoptStaticFabArrangementWorkerPlanCooperatively(
+			permit,
+			ticket,
+			structuredClone(plan),
+			ticket.prospectiveChecksum,
+			document.map,
+			document.portEquipment,
+			document.getPatchSequence(),
+			document.organizations,
+			document.relationships,
+			intent,
+			async () => {},
+		);
+		const source = {
+			map: document.map,
+			portEquipment: document.portEquipment,
+			organizations: document.organizations,
+			relationships: document.relationships,
+			sequence: document.getPatchSequence(),
+		};
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		let cancelled = false;
+		await expect(
+			document.commitStaticFabArrangementCooperatively(certified, {
+				checkpoint: async () => {},
+				now: () => 0,
+				checkCancelled: () => {
+					if (cancelled) throw new Error("cancelled at packet handoff");
+				},
+				preparePatch: async () => {
+					cancelled = true;
+				},
+			}),
+		).rejects.toThrow("cancelled at packet handoff");
+		expect(document.map).toBe(source.map);
+		expect(document.portEquipment).toBe(source.portEquipment);
+		expect(document.organizations).toBe(source.organizations);
+		expect(document.relationships).toBe(source.relationships);
+		expect(document.getPatchSequence()).toBe(source.sequence);
+		expect(events).toHaveLength(0);
+		expect(document.undo()).toBe(false);
+		expect(
+			(
+				await document.commitStaticFabArrangementCooperatively(certified, {
+					checkpoint: async () => {},
+					now: () => 0,
+				})
+			).committed,
+		).toBe(false);
 	});
 });
 
@@ -1059,4 +1456,62 @@ async function verifyNestedPortablePlacement(
 	expect(hydrateStaticFabAssemblyRelationshipSnapshot(restored.relationships)).toEqual(
 		document.relationships,
 	);
+}
+
+function nestedArrangementProof() {
+	const { final, canonical } = createNestedConnectorFixture();
+	const map = final.map.clone();
+	const line = planRailConstruction(new TileMap(), { x: -1000, y: -200 }, { x: -990, y: -200 });
+	if (!line.valid) throw new Error(line.reason);
+	map.applyAtomicMutations(line.mutations, []);
+	const document = RailDocument.fromLoadedMap(
+		map,
+		17,
+		final.portEquipment,
+		final.organizations,
+		undefined,
+		canonical,
+	);
+	const ownership = buildRailModuleOwnershipIndex(map);
+	const modules = [
+		ownership.modules.filter((module) => module.footprintCells.some((cell) => cell.x < -500)),
+		ownership.modules.filter((module) => module.footprintCells.every((cell) => cell.x >= -500)),
+	];
+	const intent: StaticFabArrangementCommandIntent = {
+		version: STATIC_FAB_ARRANGEMENT_COMMAND_VERSION,
+		arrangementVersion: STATIC_FAB_ARRANGEMENT_VERSION,
+		axis: "Z",
+		mode: "ALIGN_MIN",
+		roots: modules.map((group) => ({
+			kind: "STATIC_COMPONENT",
+			moduleKeys: group.map((module) => module.key).sort(),
+		})),
+	};
+	const snapshot = captureRailMirrorSnapshot(
+		document.map,
+		document.getPatchSequence(),
+		document.portEquipment,
+		document.organizations,
+		document.relationships,
+	).snapshot;
+	const permit = issueStaticFabArrangementPermit(
+		document.map,
+		document.portEquipment,
+		document.getPatchSequence(),
+		document.organizations,
+		document.relationships,
+		intent,
+		snapshot.checksum,
+	);
+	const session = initializeStaticFabArrangementRuntimeSession(snapshot).session;
+	const prepared = prepareStaticFabArrangementInSession(session, {
+		type: "PREPARE_STATIC_FAB_ARRANGEMENT",
+		version: STATIC_FAB_ARRANGEMENT_SESSION_VERSION,
+		sessionId: 1,
+		requestId: 1,
+		ticketId: permit.ticketId,
+		intent,
+		expectedIntentFingerprint: staticFabArrangementCommandFingerprint(intent),
+	}).prepared;
+	return { document, permit, prepared, intent, snapshot };
 }

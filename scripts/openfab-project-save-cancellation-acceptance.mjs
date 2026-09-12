@@ -23,6 +23,7 @@ const result = {
 	guardStatus: "",
 	pickerCalls: 0,
 	guardRetryable: false,
+	selectionShortcuts: [],
 };
 
 try {
@@ -64,6 +65,47 @@ try {
 	assertEqual(await readSavePickerCalls(page), 1, "direct cancellation picker count");
 	result.directStatus = directStatus;
 
+	const canvas = page.getByTestId("rail-canvas");
+	await canvas.focus();
+	await page.keyboard.press("Control+A");
+	await page.waitForFunction(
+		() => Number(document.querySelector(".tilefab-app")?.dataset.areaSelectionModules) > 0,
+		undefined,
+		{ timeout: 10_000 },
+	);
+	const selectedModules = await page
+		.locator(".tilefab-app")
+		.getAttribute("data-area-selection-modules");
+	for (const shortcut of ["Control+S", "Meta+S"]) {
+		const expectedCalls = (await readSavePickerCalls(page)) + 1;
+		await canvas.focus();
+		await page.keyboard.press(shortcut);
+		await page.waitForFunction(
+			(expected) =>
+				window.__openFabSavePickerCalls === expected &&
+				document.querySelector(".tilefab-app")?.dataset.projectOperation === "idle",
+			expectedCalls,
+			{ timeout: 10_000 },
+		);
+		assertEqual(
+			await page.getByTestId("contextual-blueprint-save-dialog").isVisible(),
+			false,
+			`${shortcut} saves the project rather than opening a Blueprint dialog`,
+		);
+		assertInvariantEquality(
+			await readCancellationInvariants(page),
+			before,
+			`${shortcut} selected project cancellation`,
+		);
+		assertEqual(
+			await page.locator(".tilefab-app").getAttribute("data-area-selection-modules"),
+			selectedModules,
+			`${shortcut} preserves selected rail modules`,
+		);
+		result.selectionShortcuts.push(shortcut);
+	}
+	const callsBeforeGuard = await readSavePickerCalls(page);
+
 	await page.getByRole("button", { name: "프로젝트 열기", exact: true }).click();
 	const guard = page.getByRole("dialog", { name: "저장되지 않은 변경 사항", exact: true });
 	await guard.waitFor({ state: "visible" });
@@ -85,13 +127,19 @@ try {
 	const afterGuard = await readCancellationInvariants(page);
 	assertInvariantEquality(afterGuard, before, "guarded chooser cancellation");
 	assertEqual(afterGuard.pendingProjectAction, "open", "pending transition remains selected");
-	assertEqual(await readSavePickerCalls(page), 2, "guarded cancellation picker count");
+	assertEqual(
+		await readSavePickerCalls(page),
+		callsBeforeGuard + 1,
+		"guarded cancellation picker count",
+	);
 	result.guardStatus = guardStatus;
 
 	await saveAndContinue.press("Enter");
-	await page.waitForFunction(() => window.__openFabSavePickerCalls === 3, undefined, {
-		timeout: 10_000,
-	});
+	await page.waitForFunction(
+		(expected) => window.__openFabSavePickerCalls === expected,
+		callsBeforeGuard + 2,
+		{ timeout: 10_000 },
+	);
 	await page.waitForFunction(
 		() => document.activeElement?.classList.contains("tilefab-project-guard-save") === true,
 		undefined,
@@ -166,6 +214,7 @@ async function readCancellationInvariants(activePage) {
 		const canvas = document.querySelector('[data-testid="rail-canvas"]');
 		return {
 			projectId: canvas?.dataset.projectId ?? "",
+			projectBlueprints: app?.dataset.projectBlueprints ?? "",
 			projectDirty: canvas?.dataset.projectDirty ?? "",
 			projectFile: canvas?.dataset.projectFile ?? "",
 			projectOperation: app?.dataset.projectOperation ?? "",
@@ -183,6 +232,7 @@ async function readCancellationInvariants(activePage) {
 function assertInvariantEquality(actual, expected, phase) {
 	for (const key of [
 		"projectId",
+		"projectBlueprints",
 		"projectDirty",
 		"projectFile",
 		"physicalPaths",

@@ -28,7 +28,7 @@ describe("portAuthoringSurfacePresentation", () => {
 			"포트 후보 2곳 · 시작점과 끝점 클릭 · 드래그도 가능",
 		);
 		expect(portAuthoringSurfacePresentation("STK", 3, 3).instruction).toBe(
-			"금색 ◇ CENTER 3개 · STK에 연결할 Port 슬롯을 선택한 뒤 STK 생성",
+			"포트 후보 3곳 · 금색 ◇ 선택 후 Stocker 생성",
 		);
 	});
 
@@ -45,7 +45,7 @@ describe("portAuthoringSurfacePresentation", () => {
 		);
 		expect(portAuthoringSurfacePresentation("EQ", 0, 0).instruction).toContain("연속된 직선 레일");
 		expect(portAuthoringSurfacePresentation("STK", 0, 0).instruction).toContain(
-			"STK가 연결될 직선 레일",
+			"Stocker가 연결될 직선 레일",
 		);
 		for (const portType of ["OHB", "EQ", "STK"] as const) {
 			expect(portAuthoringSurfacePresentation(portType, 0, 0).configurationAvailable).toBe(false);

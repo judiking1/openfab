@@ -509,7 +509,12 @@ export async function encodeStaticFabOrganizationAdditionsCooperatively(
 	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
 		throw new RangeError("Organization encoding operation budget must be positive.");
 	const task = createCooperativeTask(
-		encodeOrganizationAdditionSteps(mutations, nextOrganizationIdBefore, nextOrganizationIdAfter),
+		encodeOrganizationPatchSteps(
+			mutations,
+			nextOrganizationIdBefore,
+			nextOrganizationIdAfter,
+			true,
+		),
 	);
 	while (!task.done) {
 		task.step(operationBudget);
@@ -518,39 +523,91 @@ export async function encodeStaticFabOrganizationAdditionsCooperatively(
 	return task.finish();
 }
 
-function* encodeOrganizationAdditionSteps(
+/** Encode full canonical before/after rows without synchronously copying wide membership. */
+export async function encodeStaticFabOrganizationPatchCooperatively(
 	mutations: readonly StaticFabOrganizationMutation[],
 	nextOrganizationIdBefore: number,
 	nextOrganizationIdAfter: number,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<EncodedStaticFabOrganizationPatch> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
+		throw new RangeError("Organization encoding operation budget must be positive.");
+	const task = createCooperativeTask(
+		encodeOrganizationPatchSteps(
+			mutations,
+			nextOrganizationIdBefore,
+			nextOrganizationIdAfter,
+			false,
+		),
+	);
+	while (!task.done) {
+		task.step(operationBudget);
+		await checkpoint();
+	}
+	return task.finish();
+}
+
+function* encodeOrganizationPatchSteps(
+	mutations: readonly StaticFabOrganizationMutation[],
+	nextOrganizationIdBefore: number,
+	nextOrganizationIdAfter: number,
+	additionsOnly: boolean,
 ): Generator<void, EncodedStaticFabOrganizationPatch> {
+	validatePositiveInt32(nextOrganizationIdBefore, "organization patch before cursor");
+	validatePositiveInt32(nextOrganizationIdAfter, "organization patch after cursor");
 	if (!Array.isArray(mutations) || !Object.isFrozen(mutations))
-		throw new Error("Organization additions must be immutable.");
+		throw new Error("Organization mutations must be immutable.");
 	const organizationIds = new Int32Array(mutations.length);
 	const operationCodes = new Uint8Array(mutations.length);
 	const beforePresent = new Uint8Array(mutations.length);
 	const afterPresent = new Uint8Array(mutations.length);
 	const emptyNames: string[] = [];
 	const emptyRecords: null[] = [];
-	const records: StaticFabOrganizationRecord[] = [];
-	const seen = new Set<number>();
+	const beforeRecords: (StaticFabOrganizationRecord | null)[] = [];
+	const afterRecords: (StaticFabOrganizationRecord | null)[] = [];
+	let previousId = 0;
 	for (let index = 0; index < mutations.length; index++) {
 		yield;
+		if (!Object.hasOwn(Object.getOwnPropertyDescriptor(mutations, index) ?? {}, "value"))
+			throw new Error("Organization mutations must contain data properties.");
 		const change = mutations[index] as StaticFabOrganizationMutation;
 		if (
+			!change ||
 			!Object.isFrozen(change) ||
-			change.before !== null ||
-			!change.after ||
-			!isCanonicalStaticFabOrganizationRecord(change.after) ||
-			change.id !== change.after.id ||
-			seen.has(change.id)
+			!["id", "before", "after"].every((key) =>
+				Object.hasOwn(Object.getOwnPropertyDescriptor(change, key) ?? {}, "value"),
+			)
 		)
-			throw new Error("Prepared organization encoding requires unique canonical additions.");
-		seen.add(change.id);
+			throw new Error("Organization mutations must be immutable data records.");
+		if (
+			change.id <= previousId ||
+			(!change.before && !change.after) ||
+			(additionsOnly && (change.before !== null || !change.after))
+		)
+			throw new Error("Prepared organization encoding requires canonical nonempty mutations.");
+		for (const [record, cursor] of [
+			[change.before, nextOrganizationIdBefore],
+			[change.after, nextOrganizationIdAfter],
+		] as const) {
+			if (
+				record !== null &&
+				(!isCanonicalStaticFabOrganizationRecord(record) ||
+					record.id !== change.id ||
+					record.id >= cursor)
+			)
+				throw new Error(
+					"Prepared organization encoding requires canonical records below their cursor.",
+				);
+		}
+		previousId = change.id;
 		organizationIds[index] = change.id;
-		afterPresent[index] = 1;
+		beforePresent[index] = change.before ? 1 : 0;
+		afterPresent[index] = change.after ? 1 : 0;
 		emptyNames.push("");
 		emptyRecords.push(null);
-		records.push(change.after);
+		beforeRecords.push(change.before);
+		afterRecords.push(change.after);
 	}
 	const fields: StaticFabOrganizationPatchSoA = Object.freeze({
 		schemaVersion: STATIC_FAB_ORGANIZATION_PATCH_SCHEMA_VERSION,
@@ -567,9 +624,9 @@ function* encodeOrganizationAdditionSteps(
 		nextOrganizationIdBefore,
 		nextOrganizationIdAfter,
 		beforePresent,
-		before: yield* createRecordFieldsSteps(emptyRecords, true),
+		before: yield* createRecordFieldsSteps(beforeRecords, true),
 		afterPresent,
-		after: yield* createRecordFieldsSteps(records, true),
+		after: yield* createRecordFieldsSteps(afterRecords, true),
 	});
 	return Object.freeze({ fields, transfer: staticFabOrganizationPatchTransfers(fields) });
 }

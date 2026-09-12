@@ -31,6 +31,7 @@ import {
 	type StaticFabAssemblySeamIncidenceV1,
 	staticFabAssemblyRelationshipAdditionFootprintSteps,
 	staticFabAssemblyRelationshipTransitionFootprint,
+	staticFabAssemblyRelationshipTransitionFootprintSteps,
 } from "../core/StaticFabAssemblyRelationship";
 import { assertTransferableTypedArray as assertTypedArray } from "./TransferableTypedArray";
 
@@ -406,7 +407,12 @@ export async function encodeStaticFabAssemblyRelationshipAdditionsCooperatively(
 	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
 		throw new RangeError("Relationship encoding operation budget must be positive.");
 	const task = createCooperativeTask(
-		encodeAdditionPatchSteps(mutations, nextRelationshipIdBefore, nextRelationshipIdAfter),
+		encodeRelationshipPatchSteps(
+			mutations,
+			nextRelationshipIdBefore,
+			nextRelationshipIdAfter,
+			true,
+		),
 	);
 	while (!task.done) {
 		task.step(operationBudget);
@@ -415,12 +421,41 @@ export async function encodeStaticFabAssemblyRelationshipAdditionsCooperatively(
 	return task.finish();
 }
 
-function* encodeAdditionPatchSteps(
+/** Encode full immutable before/after records using the existing reversible wire format. */
+export async function encodeStaticFabAssemblyRelationshipPatchCooperatively(
 	mutations: readonly StaticFabAssemblyRelationshipMutationV1[],
 	nextRelationshipIdBefore: number,
 	nextRelationshipIdAfter: number,
+	checkpoint: () => Promise<void>,
+	operationBudget = 128,
+): Promise<EncodedStaticFabAssemblyRelationshipPatch> {
+	if (!Number.isSafeInteger(operationBudget) || operationBudget <= 0)
+		throw new RangeError("Relationship encoding operation budget must be positive.");
+	const task = createCooperativeTask(
+		encodeRelationshipPatchSteps(
+			mutations,
+			nextRelationshipIdBefore,
+			nextRelationshipIdAfter,
+			false,
+		),
+	);
+	while (!task.done) {
+		task.step(operationBudget);
+		await checkpoint();
+	}
+	return task.finish();
+}
+
+function* encodeRelationshipPatchSteps(
+	mutations: readonly StaticFabAssemblyRelationshipMutationV1[],
+	nextRelationshipIdBefore: number,
+	nextRelationshipIdAfter: number,
+	additionsOnly: boolean,
 ): Generator<void, EncodedStaticFabAssemblyRelationshipPatch> {
-	yield* staticFabAssemblyRelationshipAdditionFootprintSteps(mutations, {
+	const footprintSteps = additionsOnly
+		? staticFabAssemblyRelationshipAdditionFootprintSteps
+		: staticFabAssemblyRelationshipTransitionFootprintSteps;
+	yield* footprintSteps(mutations, {
 		maximumEdgeReferences: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_MAX_EDGE_REFERENCES,
 		maximumOwnerIds: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_MAX_OWNER_IDS,
 		maximumCanonicalBytes: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_MAX_CANONICAL_BYTES,
@@ -432,8 +467,8 @@ function* encodeAdditionPatchSteps(
 	const relationshipIds = new Int32Array(mutations.length);
 	const beforePresent = new Uint8Array(mutations.length);
 	const afterPresent = new Uint8Array(mutations.length);
-	const beforeRecords: null[] = [];
-	const afterRecords: StaticFabAssemblyRelationshipRecordV1[] = [];
+	const beforeRecords: (StaticFabAssemblyRelationshipRecordV1 | null)[] = [];
+	const afterRecords: (StaticFabAssemblyRelationshipRecordV1 | null)[] = [];
 	let previousId = 0;
 	for (let index = 0; index < mutations.length; index++) {
 		yield;
@@ -442,9 +477,10 @@ function* encodeAdditionPatchSteps(
 			throw new Error("Static FAB assembly relationship patch ids must be in canonical order.");
 		previousId = mutation.id;
 		relationshipIds[index] = mutation.id;
-		afterPresent[index] = 1;
-		beforeRecords.push(null);
-		afterRecords.push(mutation.after as StaticFabAssemblyRelationshipRecordV1);
+		beforePresent[index] = mutation.before ? 1 : 0;
+		afterPresent[index] = mutation.after ? 1 : 0;
+		beforeRecords.push(mutation.before);
+		afterRecords.push(mutation.after);
 	}
 	const fields: StaticFabAssemblyRelationshipPatchSoA = Object.freeze({
 		schemaVersion: STATIC_FAB_ASSEMBLY_RELATIONSHIP_PATCH_SCHEMA_VERSION,

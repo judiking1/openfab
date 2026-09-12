@@ -786,14 +786,14 @@ try {
 	);
 	assertEqual(
 		await desktopPage
-			.getByRole("radio", { name: "THIS PROJECT PROJECT BLUEPRINTS", exact: true })
+			.getByRole("radio", { name: "이 프로젝트 프로젝트 파일에 포함", exact: true })
 			.count(),
 		1,
 		"contextual blueprint destination names the project-owned blueprint collection",
 	);
 	assertEqual(
 		await desktopPage
-			.getByRole("button", { name: "ADD TO PROJECT BLUEPRINTS ⌘/CTRL S", exact: true })
+			.getByRole("button", { name: "프로젝트에 청사진 추가 ⌘/CTRL S", exact: true })
 			.count(),
 		1,
 		"contextual blueprint primary action does not claim to save the project file",
@@ -877,15 +877,13 @@ try {
 		"organization direct save kind",
 	);
 	const duplicateOrganizationSaveBefore = await readMetrics(desktopPage);
-	const activeUserBlueprintTab = desktopPage.getByTestId("blueprint-user-tab");
-	await activeUserBlueprintTab.focus();
-	await desktopPage.keyboard.press("Control+S");
+	await desktopPage.getByTestId("save-area-blueprint").click();
 	const duplicateOrganizationDialog = desktopPage.getByTestId("contextual-blueprint-save-dialog");
 	await duplicateOrganizationDialog.waitFor({ state: "visible" });
 	assertEqual(
 		await duplicateOrganizationDialog.getAttribute("data-destination"),
 		"user-library",
-		"Ctrl+S follows active browser-local destination",
+		"explicit Blueprint action follows active browser-local destination",
 	);
 	assertEqual(
 		await duplicateOrganizationDialog.getAttribute("data-source-kind"),
@@ -940,15 +938,15 @@ try {
 	await duplicateOrganizationError.press("Escape");
 	await duplicateOrganizationDialog.waitFor({ state: "hidden" });
 	await desktopPage.waitForFunction(
-		() => document.activeElement?.id === "tilefab-blueprint-tab-user",
+		() => document.activeElement?.getAttribute("data-testid") === "save-area-blueprint",
 		undefined,
 		{ timeout: 10_000 },
 	);
 	await desktopPage.waitForTimeout(50);
 	assertEqual(
-		await desktopPage.evaluate(() => document.activeElement?.id),
-		"tilefab-blueprint-tab-user",
-		"duplicate organization save restores active tab focus",
+		await desktopPage.evaluate(() => document.activeElement?.getAttribute("data-testid")),
+		"save-area-blueprint",
+		"duplicate organization save restores its explicit trigger focus",
 	);
 	await deleteUserBlueprintRecord(
 		desktopPage,
@@ -1110,9 +1108,7 @@ try {
 	);
 	await assertOrganizationPlacementToolbarLayout(desktopPage);
 	const organizationGhostSaveBefore = await readMetrics(desktopPage);
-	const organizationGhostCanvas = desktopPage.getByTestId("rail-canvas");
-	await organizationGhostCanvas.focus();
-	await desktopPage.keyboard.press("Control+S");
+	await desktopPage.getByTestId("save-held-blueprint").click();
 	const organizationGhostSaveDialog = desktopPage.getByTestId("contextual-blueprint-save-dialog");
 	await organizationGhostSaveDialog.waitFor({ state: "visible" });
 	assertEqual(
@@ -1125,7 +1121,7 @@ try {
 	await desktopPage.waitForFunction(
 		() =>
 			document.querySelector('[data-testid="tilefab-app"]')?.dataset.organizationBundleActive ===
-				"true" && document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+				"true" && document.activeElement?.getAttribute("data-testid") === "save-held-blueprint",
 		undefined,
 		{ timeout: 10_000 },
 	);
@@ -1810,9 +1806,7 @@ try {
 		"factory pattern remains active for repeat placement",
 	);
 	const heldPatternBeforeSave = await readMetrics(desktopPage);
-	const heldPatternCanvas = desktopPage.getByTestId("rail-canvas");
-	await heldPatternCanvas.focus();
-	await desktopPage.keyboard.press("Control+S");
+	await desktopPage.getByTestId("save-held-blueprint").click();
 	const heldPatternSaveDialog = desktopPage.getByTestId("contextual-blueprint-save-dialog");
 	await heldPatternSaveDialog.waitFor({ state: "visible" });
 	assertEqual(
@@ -1823,7 +1817,7 @@ try {
 	await desktopPage.keyboard.press("Escape");
 	await heldPatternSaveDialog.waitFor({ state: "hidden" });
 	await desktopPage.waitForFunction(
-		() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+		() => document.activeElement?.getAttribute("data-testid") === "save-held-blueprint",
 		undefined,
 		{ timeout: 10_000 },
 	);
@@ -1863,8 +1857,7 @@ try {
 	const transformedProjectBlueprintJsonBefore = await desktopPage.evaluate(() =>
 		JSON.stringify(window.__tileFab?.getProjectBlueprints?.()),
 	);
-	await heldPatternCanvas.focus();
-	await desktopPage.keyboard.press("Control+S");
+	await desktopPage.getByTestId("save-held-blueprint").click();
 	await completeContextualBlueprintSave(desktopPage, {
 		name: "Acceptance Rotated Reverse Shift",
 		folder: "Acceptance/Transformed",
@@ -4040,9 +4033,9 @@ async function auditOrdinaryNoSlotPortPrerequisite(page, viewport, canvas) {
 		},
 		{
 			tool: "stk",
-			toolLabel: "STK 포트 그룹 배치",
+			toolLabel: "Stocker 포트 그룹 배치",
 			portType: "STK",
-			prerequisiteCopy: "STK가 연결될 직선 레일",
+			prerequisiteCopy: "Stocker가 연결될 직선 레일",
 			statusPrerequisiteCopy: "직선 레일을 먼저",
 		},
 	];
@@ -4259,7 +4252,7 @@ async function auditOrdinaryNoSlotPortPrerequisite(page, viewport, canvas) {
 
 async function auditOrdinaryNoSlotStkInstructionOwnership(page, viewport, canvas) {
 	const baseline = await readMetrics(page);
-	await clickActivityCommand(page, "equip", "STK 포트 그룹 배치");
+	await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
 	await page.waitForFunction(
 		() => {
 			const app = document.querySelector('[data-testid="tilefab-app"]');
@@ -4282,7 +4275,7 @@ async function auditOrdinaryNoSlotStkInstructionOwnership(page, viewport, canvas
 	);
 	const buildbar = page.locator('.tilefab-port-buildbar[data-port-type="STK"]');
 	const instruction = await buildbar.locator(".tilefab-port-authoring-instruction").innerText();
-	for (const copy of ["배치 가능 슬롯 없음", "STK가 연결될 직선 레일을 먼저 만드세요"]) {
+	for (const copy of ["배치 가능 슬롯 없음", "Stocker가 연결될 직선 레일을 먼저 만드세요"]) {
 		assertIncludes(instruction, copy, `ordinary no-slot STK explains ${copy} ${viewport.label}`);
 	}
 	const controlIds = ["ordinary-port-authoring-exit", "ordinary-port-build-prerequisite"];
@@ -4549,7 +4542,7 @@ async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
 				"2",
 				`ordinary hierarchy exact EQ/OHB prerequisite ${viewport.label}`,
 			);
-			await clickActivityCommand(page, "equip", "STK 포트 그룹 배치");
+			await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
 			await page.getByTestId("stk-template-FLEX").click();
 			await waitForLegalPortSlots(page);
 			const stkBefore = await readMetrics(page);
@@ -4718,7 +4711,7 @@ async function auditOrdinaryNoSlotPortRecoverySeparation(browserInstance) {
 			for (const spec of [
 				{ tool: "ohb", toolLabel: "OHB 포트 배치", portType: "OHB" },
 				{ tool: "eq", toolLabel: "EQ 포트 행 배치", portType: "EQ" },
-				{ tool: "stk", toolLabel: "STK 포트 그룹 배치", portType: "STK" },
+				{ tool: "stk", toolLabel: "Stocker 포트 그룹 배치", portType: "STK" },
 			]) {
 				await clickActivityCommand(page, "equip", spec.toolLabel);
 				const buildbar = page.locator(`.tilefab-port-buildbar[data-port-type="${spec.portType}"]`);
@@ -5972,7 +5965,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 				`${viewport.label} factory EQ overview exit`,
 			);
 
-			await clickActivityCommand(page, "equip", "STK 포트 그룹 배치");
+			await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
 			await waitForLegalPortSlots(page);
 			await fitControl.click();
 			await page.evaluate(
@@ -6623,7 +6616,7 @@ async function exerciseStkWaitStateCompleteRegression(browserInstance) {
 		await panel.getByRole("button", { name: "Guided Build 종료" }).click();
 		await panel.waitFor({ state: "hidden" });
 		await page.getByTestId("editor-activity-equip").click();
-		await page.getByRole("button", { name: "STK 포트 그룹 배치", exact: true }).click();
+		await page.getByRole("button", { name: "Stocker 포트 그룹 배치", exact: true }).click();
 		await waitForLegalPortSlots(page);
 		await page.waitForFunction(
 			() => {
@@ -7676,7 +7669,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		assertEqual(
 			await page
-				.getByRole("button", { name: "STK 포트 그룹 배치", exact: true })
+				.getByRole("button", { name: "Stocker 포트 그룹 배치", exact: true })
 				.getAttribute("data-guided-target"),
 			"true",
 			"Guided EQ completion pulses only the next STK tool",
@@ -7690,7 +7683,7 @@ async function exerciseGuidedPortHandoffRegression(
 
 		const beforeStkMarkerFingerprint =
 			(await page.getByTestId("rail-canvas").getAttribute("data-guided-canvas-markers")) ?? "";
-		const stkTool = page.getByRole("button", { name: "STK 포트 그룹 배치", exact: true });
+		const stkTool = page.getByRole("button", { name: "Stocker 포트 그룹 배치", exact: true });
 		assertEqual(
 			await stkTool.getByText("다음 단계 도구", { exact: true }).count(),
 			1,
@@ -7712,8 +7705,8 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		assertEqual(
 			await page
-				.getByRole("button", { name: "STK 포트 그룹 배치", exact: true })
-				.getByText("3 · STK · 입출고 2개", { exact: true })
+				.getByRole("button", { name: "Stocker 포트 그룹 배치", exact: true })
+				.getByText("3 · Stocker · 입출고 2개", { exact: true })
 				.count(),
 			1,
 			"Guided Port exposes the STK tool caption",
@@ -7797,7 +7790,7 @@ async function exerciseGuidedPortHandoffRegression(
 					?.textContent?.includes("현재 2개 선택") === true,
 		);
 
-		await page.getByRole("button", { name: "선택한 STK Port 모두 취소", exact: true }).click();
+		await page.getByRole("button", { name: "선택한 Stocker 포트 모두 취소", exact: true }).click();
 		await page.waitForFunction(
 			() => {
 				const canvas = document.querySelector('[data-testid="rail-canvas"]');
@@ -9345,6 +9338,21 @@ async function exerciseGuidedPortHandoffRegression(
 		await page.evaluate(
 			() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 		);
+		await compactCameraControls
+			.getByRole("button", { name: "전체 화면 맞춤", exact: true })
+			.click();
+		const sourceBounds = (
+			await page.getByTestId("rail-canvas").getAttribute("data-fitted-map-bounds")
+		)
+			?.split(",")
+			.map(Number);
+		if (
+			!sourceBounds ||
+			sourceBounds.length !== 4 ||
+			sourceBounds.some((value) => !Number.isFinite(value))
+		) {
+			throw new Error("Guided Reuse has no fitted source bounds for separate placement.");
+		}
 		await compactCameraControls.getByRole("button", { name: "화면 축소", exact: true }).click();
 		await compactCameraControls.getByRole("button", { name: "화면 축소", exact: true }).click();
 		const duplicateBefore = await readMetrics(page);
@@ -9366,12 +9374,35 @@ async function exerciseGuidedPortHandoffRegression(
 			x: placementCanvasBox.x + placementCanvasBox.width - 42,
 			y: (placementBandTop + placementBandBottom) / 2,
 		};
-		await page.mouse.move(panOrigin.x, panOrigin.y);
-		await page.mouse.down({ button: "right" });
-		await page.mouse.move(panOrigin.x, Math.max(placementBandTop + 8, panOrigin.y - 110), {
-			steps: 8,
-		});
-		await page.mouse.up({ button: "right" });
+		// Follow the Guide's separate-copy instruction. A shared-trunk merge is legal ordinary
+		// authoring, but is not a second independent practice Loop. Reserve the entire ghost's
+		// possible rotated extent, rather than relying on a toolbar-dependent fixed pan distance.
+		const ghostExtent =
+			Math.max(sourceBounds[2] - sourceBounds[0], sourceBounds[3] - sourceBounds[1]) + 2;
+		let sourceClearsPlacementBand = false;
+		for (let attempt = 0; attempt < 8; attempt++) {
+			const sourceBottom = await screenPointForWorld(page, {
+				x: sourceBounds[2] + 1,
+				y: sourceBounds[3] + 1,
+			});
+			const zoom = Number(await page.getByTestId("rail-canvas").getAttribute("data-camera-zoom"));
+			if (sourceBottom.y + ghostExtent * zoom + 24 < placementBandTop) {
+				sourceClearsPlacementBand = true;
+				break;
+			}
+			await page.mouse.move(panOrigin.x, placementBandBottom - 8);
+			await page.mouse.down({ button: "right" });
+			await page.mouse.move(panOrigin.x, placementBandTop + 8, { steps: 8 });
+			await page.mouse.up({ button: "right" });
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+		}
+		assertEqual(
+			sourceClearsPlacementBand,
+			true,
+			"Guided Reuse exposes space for an independent copy",
+		);
 		let duplicateCommitted = false;
 		let duplicateCommitPoint = null;
 		const placementCues = new Set();
@@ -9436,6 +9467,12 @@ async function exerciseGuidedPortHandoffRegression(
 				metrics.equipmentPorts === "12",
 			{ timeout: 10_000 },
 		);
+		assertEqual(
+			Number(duplicated.authoredEdges),
+			Number(duplicateBefore.authoredEdges) * 2,
+			"Guided Reuse retains two complete independent rail copies",
+		);
+		assertEqual(duplicated.strongComponents, "2", "Guided Reuse creates two separate closed Loops");
 		await page.waitForFunction(
 			() =>
 				document
@@ -13110,7 +13147,7 @@ async function exerciseGuidedPortHandoffRegression(
 			JSON.stringify([
 				"OHB 포트 배치",
 				"EQ 포트 행 배치",
-				"STK 포트 그룹 배치",
+				"Stocker 포트 그룹 배치",
 				"Station proposal 가져오기",
 			]),
 			"ordinary Equip primary-first tool order",
@@ -13123,8 +13160,8 @@ async function exerciseGuidedPortHandoffRegression(
 			"레일 옆 원",
 			"EQ Port 행",
 			"같은 직선 레일",
-			"STK Port 그룹",
-			"금색 ◇ CENTER",
+			"Stocker · 포트 선택",
+			"금색 ◇ 포트",
 			"고급 가져오기",
 		]) {
 			if (!ordinaryEquipToolCopy.includes(visibleCopy)) {
@@ -13273,7 +13310,7 @@ async function exerciseGuidedPortHandoffRegression(
 					);
 				}
 				const stkTool = page.getByRole("button", {
-					name: "STK 포트 그룹 배치",
+					name: "Stocker 포트 그룹 배치",
 					exact: true,
 				});
 				await stkTool.focus();
@@ -13399,7 +13436,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		for (const [toolLabel, portType] of [
 			["EQ 포트 행 배치", "EQ"],
-			["STK 포트 그룹 배치", "STK"],
+			["Stocker 포트 그룹 배치", "STK"],
 		]) {
 			await clickActivityCommand(page, "equip", toolLabel);
 			await page.waitForFunction((expectedPortType) => {
@@ -14283,7 +14320,7 @@ async function exerciseGuidedPortHandoffRegression(
 						.innerText();
 					for (const copy of [
 						"Stocker · 0개 Port 선택",
-						"원하는 CENTER Port 1개 이상",
+						"레일 중앙 포트 1개 이상",
 						"금색 슬롯 클릭",
 						"방향키",
 						"Enter",
@@ -14558,7 +14595,7 @@ async function exerciseGuidedPortHandoffRegression(
 					const stkReadyInstruction = await responsiveBuildbar
 						.locator(".tilefab-port-authoring-instruction")
 						.innerText();
-					for (const copy of ["2개 Port 선택", "STK 생성", "Shift+Enter"]) {
+					for (const copy of ["2개 Port 선택", "Stocker 생성", "Shift+Enter"]) {
 						assertIncludes(stkReadyInstruction, copy, `ordinary STK ready phase ${viewport.label}`);
 					}
 					for (const control of [
@@ -15033,6 +15070,19 @@ async function exerciseGuidedPortHandoffRegression(
 			stkWorkerSequence: stkPlaced.workerSequence,
 		});
 	} catch (error) {
+		await writeFile(
+			path.join(artifactRoot, `guided-port-handoff-${practiceTransitionMode}-failure.json`),
+			JSON.stringify(
+				{
+					metrics: await readMetrics(page),
+					guide: await page.evaluate(
+						() => document.querySelector('[data-testid="guided-build-panel"]')?.textContent ?? null,
+					),
+				},
+				null,
+				2,
+			),
+		);
 		await page.screenshot({
 			path: path.join(artifactRoot, `guided-port-handoff-${practiceTransitionMode}-failure.png`),
 		});
@@ -15989,7 +16039,7 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 	);
 	recordPhase4Checkpoint("large-fab-eq-membership", eqMembershipRedone);
 
-	await clickActivityCommand(page, "equip", "STK 포트 그룹 배치");
+	await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
 	await page.getByTestId("stk-template-FLEX").click();
 	await waitForLegalPortSlots(page);
 	const stkWorlds = [];
@@ -16878,7 +16928,7 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 		"connected-selection",
 		"clone-selection",
 		"cut-selection",
-		"save-selection",
+		"save-project",
 		"delete-selection",
 	];
 	for (const hintId of selectionHintIds) {
@@ -16947,8 +16997,7 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 		JSON.stringify(window.__tileFab?.getProjectBlueprints?.()),
 	);
 	await page.getByRole("button", { name: "청사진 라이브러리 닫기" }).click();
-	await page.getByTestId("rail-canvas").focus();
-	await page.keyboard.press("Control+S");
+	await page.getByTestId("save-rail-area-blueprint").click();
 	await completeContextualBlueprintSave(page, {
 		name: "Phase 4 Mixed Bay",
 		folder: "Acceptance",
@@ -20437,7 +20486,7 @@ async function exercisePortEquipmentMembershipAuthoring(page) {
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.waitForTimeout(100);
 
-	await clickActivityCommand(page, "equip", "STK 포트 그룹 배치");
+	await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
 	await page.getByTestId("stk-template-FLEX").click();
 	await waitForLegalPortSlots(page);
 	const selectedStkSlots = [];
@@ -20766,6 +20815,27 @@ async function saveSelectionAsBlueprint(page, name, folder) {
 			true,
 			"390px contextual save horizontal overflow",
 		);
+		await page.setViewportSize({ width: 390, height: 600 });
+		await dialog.getByTestId("contextual-save-user-library").click();
+		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+		for (const control of await dialog.locator("footer button").all()) {
+			await assertLocatorInsideViewport(page, control);
+			await assertLocatorOwnsHitArea(
+				control,
+				"600px local Blueprint storage footer remains usable",
+			);
+		}
+		await dialog.hover();
+		await page.mouse.wheel(0, 400);
+		await page.waitForTimeout(100);
+		for (const control of await dialog.locator("footer button").all()) {
+			await assertLocatorInsideViewport(page, control);
+			await assertLocatorOwnsHitArea(
+				control,
+				"scrolled local Blueprint storage footer remains usable",
+			);
+		}
+		await dialog.getByTestId("contextual-save-project").click();
 		await page.setViewportSize(previousViewport ?? { width: 1440, height: 900 });
 		await page.waitForTimeout(50);
 		await page.keyboard.press("Escape");
@@ -20838,7 +20908,7 @@ async function exerciseBlueprintClipboardShortcuts(page) {
 	assertEqual(
 		await savedTab.getAttribute("aria-selected"),
 		"true",
-		"saved blueprint tab after Ctrl+S",
+		"saved blueprint tab after explicit Blueprint storage",
 	);
 	await page.getByRole("button", { name: "청사진 라이브러리 닫기" }).click();
 	const selectionInspector = page.getByTestId("rail-area-selection-inspector");
@@ -26057,7 +26127,7 @@ async function exerciseCompactLayout(page) {
 		["assemble", ["내 청사진"]],
 		[
 			"equip",
-			["Station proposal 가져오기", "OHB 포트 배치", "EQ 포트 행 배치", "STK 포트 그룹 배치"],
+			["Station proposal 가져오기", "OHB 포트 배치", "EQ 포트 행 배치", "Stocker 포트 그룹 배치"],
 		],
 		["inspect", ["FAB 내비게이터", "선택 및 정보", "상황별 편집 명령"]],
 	]) {
@@ -29478,7 +29548,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		);
 		assertEqual(
 			(await stkRecommendation.locator("small").innerText()).trim(),
-			"Port 선택 → STK 생성",
+			"포트 선택 → Stocker 생성",
 			`ordinary EQ contextual STK recommendation pointer task ${viewportLabel}`,
 		);
 		assertEqual(
@@ -29488,7 +29558,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		);
 		assertIncludes(
 			await inspector.locator("#tilefab-eq-to-stk-handoff-description").innerText(),
-			"현재 Port 구성과 요구 개수를 확인하고",
+			"현재 포트 구성과 요구 개수를 확인하고",
 			`ordinary EQ contextual STK recommendation description ${viewportLabel}`,
 		);
 		const hierarchy = await inspector.evaluate((element) => {
@@ -32425,7 +32495,24 @@ async function exerciseOrdinaryDuplicatedBayBankConnectorHandoff(
 			0,
 			`ordinary Bay Bank Redo suppresses the competing Rail-area inspector ${viewport.width}px`,
 		);
+		assertEqual(
+			await page.getByTestId("rail-buildbar").count(),
+			0,
+			`ordinary Bay Bank Redo selected state removes the placement bar ${viewport.width}px`,
+		);
+		assertEqual(
+			await page
+				.locator(".tilefab-workspace")
+				.evaluate((element) => element.style.getPropertyValue("--tilefab-placement-hints-bottom")),
+			"",
+			`ordinary Bay Bank Redo clears removed-bar clearance ${viewport.width}px`,
+		);
 		await assertLocatorInsideViewport(page, handoffOwner);
+		if (viewport.width === 390) {
+			await page.screenshot({
+				path: path.join(artifactRoot, `ordinary-bay-bank-redo-handoff-${viewportLabel}-390.png`),
+			});
+		}
 	}
 	await page.setViewportSize({ width: activationWidth, height: sourceViewportHeight });
 	await page.evaluate(
@@ -34170,7 +34257,7 @@ async function exerciseOrdinaryStrictStkSafeFrame(page) {
 	for (const specification of [
 		{
 			template: "FOUR_PORT",
-			label: "4 PORT",
+			label: "연속 4개",
 			requirement: "같은 직선 레일의 연속 4개",
 			portCount: 4,
 			resetActivation: "enter",
@@ -34179,7 +34266,7 @@ async function exerciseOrdinaryStrictStkSafeFrame(page) {
 		},
 		{
 			template: "SIX_PORT",
-			label: "6 PORT",
+			label: "연속 6개",
 			requirement: "같은 직선 레일의 연속 6개",
 			portCount: 6,
 			resetActivation: "pointer",
@@ -34188,7 +34275,7 @@ async function exerciseOrdinaryStrictStkSafeFrame(page) {
 		},
 		{
 			template: "BACK_TO_BACK",
-			label: "B2B",
+			label: "양쪽 짝(B2B)",
 			requirement: "반대 방향 평행 레일의 정렬된 짝",
 			portCount: 4,
 			resetActivation: "space",
@@ -34198,7 +34285,7 @@ async function exerciseOrdinaryStrictStkSafeFrame(page) {
 	]) {
 		reportAcceptanceProgress(`strict STK ${specification.label} start`);
 		await page.setViewportSize({ width: 390, height: 844 });
-		await clickActivityCommand(page, "equip", "STK 포트 그룹 배치");
+		await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
 		await page.waitForFunction(
 			() =>
 				document.querySelector(".tilefab-app")?.getAttribute("data-port-keyboard-scope") ===
@@ -35046,7 +35133,7 @@ async function resetAndRebuildOrdinaryStrictStk(page, candidatePlan, baseline, s
 	);
 	assertEqual(
 		await page.locator(".tilefab-statusbar > span[aria-live]").innerText(),
-		`STK Port ${specification.portCount}개 선택을 초기화했습니다 · 첫 Port부터 다시 선택하세요`,
+		`Stocker 포트 ${specification.portCount}개 선택을 초기화했습니다 · 첫 Port부터 다시 선택하세요`,
 		`${specification.label} full reset explains the exact cleared selection`,
 	);
 	assertProjectUnchanged(
@@ -35091,6 +35178,7 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 					{ width: 1500, height: 900, label: "1500x900" },
 				]
 			: [
+					{ width: 390, height: 600, label: "390x600" },
 					{ width: 390, height: 844, label: "390x844" },
 					{ width: 520, height: 844, label: "520x844" },
 					{ width: 521, height: 844, label: "521x844" },
@@ -35159,7 +35247,7 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 		await page.waitForTimeout(120);
 		const buildbar = page.locator('.tilefab-port-buildbar[data-port-type="STK"]');
 		const instruction = await buildbar.locator(".tilefab-port-authoring-instruction").innerText();
-		for (const copy of [`${specification.portCount}개 Port 선택`, "STK 생성", "Shift+Enter"]) {
+		for (const copy of [`${specification.portCount}개 Port 선택`, "Stocker 생성", "Shift+Enter"]) {
 			assertIncludes(instruction, copy, `${specification.label} copy ${viewport.label}`);
 		}
 		assertEqual(
@@ -35476,6 +35564,7 @@ async function assertOrdinaryStrictStkSafeFrame(page, candidates, templateLabel,
 			localX,
 			localY,
 			frame: { left, right, top, bottom, width, height },
+			canvasOrigin: { x: canvasRect.left, y: canvasRect.top },
 			insideSafeFrame:
 				Number.isFinite(localX) &&
 				Number.isFinite(localY) &&
@@ -35503,6 +35592,34 @@ async function assertOrdinaryStrictStkSafeFrame(page, candidates, templateLabel,
 		throw new Error(
 			`${templateLabel} current row leaves the usable safe frame at ${viewportLabel}: ${JSON.stringify({ safeFrame, projectedRows })}.`,
 		);
+	}
+	const { frame, canvasOrigin, localX, localY } = safeFrame;
+	const bounds = {
+		left: Math.min(canvasOrigin.x + localX - 64, ...projectedRows.map((point) => point.x - 28)),
+		right: Math.max(canvasOrigin.x + localX + 64, ...projectedRows.map((point) => point.x + 28)),
+		top: Math.min(canvasOrigin.y + localY - 52, ...projectedRows.map((point) => point.y - 28)),
+		bottom: Math.max(canvasOrigin.y + localY + 28, ...projectedRows.map((point) => point.y + 28)),
+	};
+	// Sparse FLEX/B2B selections can exceed the available frame at the user's current zoom.
+	// When the complete range fits, every selected marker must be visible, not just the cursor.
+	if (bounds.right - bounds.left <= frame.width && bounds.bottom - bounds.top <= frame.height) {
+		if (
+			bounds.left < canvasOrigin.x + frame.left - 1 ||
+			bounds.right > canvasOrigin.x + frame.left + frame.width + 1 ||
+			bounds.top < canvasOrigin.y + frame.top - 1 ||
+			bounds.bottom > canvasOrigin.y + frame.top + frame.height + 1 ||
+			projectedRows.some((point) => !point.inside || !point.hitCanvas)
+		) {
+			await page.screenshot({
+				path: path.join(
+					artifactRoot,
+					`stk-selected-range-clipped-${templateLabel}-${viewportLabel}.png`,
+				),
+			});
+			throw new Error(
+				`${templateLabel} selected range is clipped at ${viewportLabel}: ${JSON.stringify({ bounds, safeFrame, projectedRows })}`,
+			);
+		}
 	}
 }
 
@@ -35991,7 +36108,7 @@ async function exerciseSelectedEquipmentRepeatEntry(page, portType, viewportLabe
 	assertAtLeast(bounds.width, 44, `ordinary ${portType} repeat width ${viewportLabel}`);
 	assertAtLeast(bounds.height, 44, `ordinary ${portType} repeat height ${viewportLabel}`);
 	const expectedLabel =
-		portType === "EQ" ? "같은 설정으로 새 EQ 배치" : "같은 템플릿으로 새 STK 배치";
+		portType === "EQ" ? "같은 설정으로 새 EQ 배치" : "같은 구성으로 새 Stocker 배치";
 	assertEqual(
 		(await repeat.innerText()).trim(),
 		expectedLabel,
@@ -36072,7 +36189,7 @@ async function exerciseEqToStkRecommendedEntry(
 	expectCompletedModuleHandoff = false,
 ) {
 	const recommendation = page.getByTestId("ordinary-next-stk-handoff");
-	const directStkTool = page.getByRole("button", { name: "STK 포트 그룹 배치", exact: true });
+	const directStkTool = page.getByRole("button", { name: "Stocker 포트 그룹 배치", exact: true });
 	const pointerJourney = ["390x844", "760x900", "1024x900", "1440x900"].includes(viewportLabel);
 	reportAcceptanceProgress(`ordinary EQ to STK ${viewportLabel}:start`);
 	assertEqual(
@@ -36257,7 +36374,7 @@ async function exerciseEqToStkRecommendedEntry(
 		);
 		assertEqual(
 			(await recommendation.locator("small").innerText()).trim(),
-			"Port 선택 → STK 생성",
+			"포트 선택 → Stocker 생성",
 			`ordinary EQ to STK re-entry promise stays template-neutral ${viewportLabel}`,
 		);
 		assertProjectUnchanged(
@@ -36388,7 +36505,7 @@ async function exerciseEqToStkRecommendedEntry(
 			`ordinary EQ to STK pointer rebuild ${viewportLabel}`,
 		);
 		const readyInstruction = await stkInstruction.innerText();
-		for (const phrase of ["1개 Port 선택", "선택을 확인한 뒤 STK 생성", "Shift+Enter"]) {
+		for (const phrase of ["1개 Port 선택", "선택을 확인한 뒤 Stocker 생성", "Shift+Enter"]) {
 			assertIncludes(
 				readyInstruction,
 				phrase,
@@ -37971,6 +38088,7 @@ async function assertOrganizationPlacementToolbarLayout(page) {
 			{ width: 1440, height: 900 },
 			{ width: 1024, height: 900 },
 			{ width: 820, height: 900 },
+			{ width: 820, height: 600 },
 			{ width: 760, height: 900 },
 			{ width: 651, height: 900 },
 			{ width: 650, height: 900 },
@@ -37986,8 +38104,8 @@ async function assertOrganizationPlacementToolbarLayout(page) {
 			await assertLocatorInsideViewport(page, page.getByTestId("organization-bundle-summary"));
 			await assertMetricMapScale(page, `${width}px copy toolbar`, width > 650);
 			const failure = page.getByTestId("organization-bundle-placement-failure");
-			if (await failure.isVisible()) {
-				await assertLocatorInsideViewport(page, failure);
+			if (await failure.isVisible()) await assertLocatorInsideViewport(page, failure);
+			{
 				const dock = page.locator(".tilefab-hierarchy-handoff-dock:visible");
 				if (await dock.count()) {
 					const dockBounds = await dock.boundingBox();
@@ -37995,7 +38113,7 @@ async function assertOrganizationPlacementToolbarLayout(page) {
 					assertAtMost(
 						(dockBounds?.y ?? Infinity) + (dockBounds?.height ?? Infinity),
 						(barBounds?.y ?? 0) - 8,
-						`${width}px next-task dock clears the copy failure notice`,
+						`${width}px next-task dock clears the copy controls`,
 					);
 				}
 			}
@@ -38004,9 +38122,7 @@ async function assertOrganizationPlacementToolbarLayout(page) {
 				const bounds = await control.boundingBox();
 				assertAtLeast(bounds?.width ?? 0, 44, `${width}px organization placement control width`);
 				assertAtLeast(bounds?.height ?? 0, 44, `${width}px organization placement control height`);
-				if (await failure.isVisible()) {
-					await assertLocatorOwnsHitArea(control, `${width}px rejected copy control hit area`);
-				}
+				await assertLocatorOwnsHitArea(control, `${width}px copy control hit area`);
 			}
 		}
 	} finally {
@@ -39006,7 +39122,7 @@ async function assertOrdinaryPortToolDensity(
 	const expectedTools = [
 		["OHB 포트 배치", "OHB"],
 		["EQ 포트 행 배치", "EQ"],
-		["STK 포트 그룹 배치", "STK"],
+		["Stocker 포트 그룹 배치", "Stocker"],
 		["Station proposal 가져오기", "IMPORT"],
 	];
 	for (const [toolLabel, compactCaption] of expectedTools) {
@@ -43166,7 +43282,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			const nextStkHandoff = page.getByTestId("ordinary-next-stk-handoff");
 			assertEqual(
 				(await nextStkHandoff.locator("small").innerText()).trim(),
-				"Port 선택 → STK 생성",
+				"포트 선택 → Stocker 생성",
 				`${viewport.label} recommended STK handoff previews the complete pointer task`,
 			);
 			const eqAfterStkJourney = await exerciseEqToStkRecommendedEntry(
@@ -44819,7 +44935,7 @@ async function exerciseRecoveryAwareStartGate(activeBrowser) {
 			for (const [portType, label] of [
 				["OHB", "OHB 포트 배치"],
 				["EQ", "EQ 포트 행 배치"],
-				["STK", "STK 포트 그룹 배치"],
+				["STK", "Stocker 포트 그룹 배치"],
 			]) {
 				await clickActivityCommand(page, "equip", label);
 				await page.evaluate(

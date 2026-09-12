@@ -1,18 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { createCooperativeTask } from "./CooperativeTask";
+import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import {
 	applyPortEquipmentAdditionsCooperatively,
 	applyPortEquipmentMutations,
+	applyPortEquipmentMutationsSteps,
 	collectPortEquipmentIntegrityIssues,
 	copyEquipmentGroupRecord,
 	copyPortEquipmentState,
 	emptyPortEquipmentState,
 	equipmentGroupError,
+	isCanonicalPortEquipmentState,
 	type PortEquipmentState,
 	portEquipmentStateError,
 	portEquipmentStateErrorSteps,
 } from "./EquipmentGroup";
-import { type PortRecord, portRecordError } from "./PortRecord";
+import { copyPortRecord, type PortRecord, portRecordError } from "./PortRecord";
 import { DIR_E, DIR_W } from "./railShape";
 
 describe("port and equipment-group authored records", () => {
@@ -59,6 +61,177 @@ describe("port and equipment-group authored records", () => {
 			expect(task.finish()).toBe(expected);
 			expect(portEquipmentStateError(state)).toBe(expected);
 		}
+	});
+	it("privately prepares reciprocal relocation, removal, addition and reversal with the same cursors", () => {
+		const base = copyPortEquipmentState(ohbState());
+		const first = base.ports[0];
+		const group = base.equipmentGroups[0];
+		if (!first || !group) throw new Error("Missing OHB");
+		const second = copyPortRecord({ ...first, id: 2, equipmentGroupId: 2, barcode: "Synthetic-2" });
+		const secondGroup = copyEquipmentGroupRecord({ ...group, id: 2, portIds: [2] });
+		const source = copyPortEquipmentState({
+			...base,
+			nextPortId: 3,
+			nextEquipmentGroupId: 3,
+			ports: [first, second],
+			equipmentGroups: [group, secondGroup],
+		});
+		const portChanges = Object.freeze([
+			Object.freeze({
+				id: 1,
+				before: first,
+				after: copyPortRecord({
+					...first,
+					route: { kind: "CARDINAL_CELL", x: 10, z: 20, from: DIR_W, to: DIR_E },
+				}),
+			}),
+			Object.freeze({ id: 2, before: second, after: null }),
+			Object.freeze({
+				id: 5,
+				before: null,
+				after: copyPortRecord({ ...second, id: 5, equipmentGroupId: 5 }),
+			}),
+		]);
+		const groupChanges = Object.freeze([
+			Object.freeze({ id: 2, before: secondGroup, after: null }),
+			Object.freeze({
+				id: 5,
+				before: null,
+				after: copyEquipmentGroupRecord({ ...secondGroup, id: 5, portIds: [5] }),
+			}),
+		]);
+		const identity = JSON.stringify(source);
+		const expected = applyPortEquipmentMutations(source, portChanges, groupChanges);
+		const steps = applyPortEquipmentMutationsSteps(source, portChanges, groupChanges);
+		let checkpoints = 0;
+		for (let step = steps.next(); !step.done; step = steps.next()) {
+			checkpoints++;
+			expect(JSON.stringify(source)).toBe(identity);
+		}
+		const candidate = completeCooperativeSteps(
+			applyPortEquipmentMutationsSteps(source, portChanges, groupChanges),
+		);
+		expect(candidate).toEqual(expected);
+		expect(isCanonicalPortEquipmentState(candidate)).toBe(true);
+		expect(candidate.nextPortId).toBe(6);
+		expect(candidate.nextEquipmentGroupId).toBe(6);
+		const reversePorts = Object.freeze(
+			portChanges.map((change) =>
+				Object.freeze({ ...change, before: change.after, after: change.before }),
+			),
+		);
+		const reverseGroups = Object.freeze(
+			groupChanges.map((change) =>
+				Object.freeze({ ...change, before: change.after, after: change.before }),
+			),
+		);
+		const restored = completeCooperativeSteps(
+			applyPortEquipmentMutationsSteps(candidate, reversePorts, reverseGroups),
+		);
+		expect(restored).toEqual({ ...source, nextPortId: 6, nextEquipmentGroupId: 6 });
+		for (let cancelAt = 0; cancelAt < checkpoints; cancelAt++) {
+			const cancelled = applyPortEquipmentMutationsSteps(source, portChanges, groupChanges);
+			for (let i = 0; i <= cancelAt; i++) cancelled.next();
+			cancelled.return(source);
+			expect(JSON.stringify(source)).toBe(identity);
+		}
+	});
+	it("rejects stale ports, broken reciprocal ownership, duplicate barcodes and repeated changes privately", () => {
+		const source = copyPortEquipmentState(ohbState());
+		const port = source.ports[0];
+		if (!port) throw new Error("Missing port");
+		const move = Object.freeze({
+			id: port.id,
+			before: port,
+			after: copyPortRecord({ ...port, barcode: "Changed" }),
+		});
+		const empty = Object.freeze([]);
+		const batches = [
+			Object.freeze([move, move]),
+			Object.freeze([
+				Object.freeze({ ...move, before: copyPortRecord({ ...port, barcode: "Stale" }) }),
+			]),
+			Object.freeze([Object.freeze({ ...move, after: port })]),
+			Object.freeze([Object.freeze({ ...move, after: null })]),
+			Object.freeze([
+				Object.freeze({ ...move, after: copyPortRecord({ ...port, equipmentGroupId: 2 }) }),
+			]),
+		];
+		for (const changes of batches)
+			expect(() =>
+				completeCooperativeSteps(applyPortEquipmentMutationsSteps(source, changes, empty)),
+			).toThrow();
+		const duplicate = Object.freeze([
+			move,
+			Object.freeze({
+				id: 2,
+				before: null,
+				after: copyPortRecord({ ...port, id: 2, equipmentGroupId: 2, barcode: "Changed" }),
+			}),
+		]);
+		const groups = Object.freeze([
+			Object.freeze({
+				id: 2,
+				before: null,
+				after: copyEquipmentGroupRecord({ id: 2, kind: "OHB", template: "SINGLE", portIds: [2] }),
+			}),
+		]);
+		expect(() =>
+			completeCooperativeSteps(applyPortEquipmentMutationsSteps(source, duplicate, groups)),
+		).toThrow(/barcode/);
+		expect(source.ports[0]).toBe(port);
+		expect(completeCooperativeSteps(applyPortEquipmentMutationsSteps(source, empty, empty))).toBe(
+			source,
+		);
+		expect(() =>
+			completeCooperativeSteps(applyPortEquipmentMutationsSteps({ ...source }, empty, empty)),
+		).toThrow(/canonical/);
+	});
+	it("bounds traversal and sorting over a 10001-station candidate", () => {
+		const base = ohbState();
+		const count = 10001;
+		const first = base.ports[0];
+		if (!first) throw new Error("Missing port");
+		const source = copyPortEquipmentState({
+			nextPortId: count + 1,
+			nextEquipmentGroupId: count + 1,
+			ports: Array.from({ length: count }, (_, i) => ({
+				...first,
+				id: i + 1,
+				equipmentGroupId: i + 1,
+				barcode: null,
+			})),
+			equipmentGroups: Array.from({ length: count }, (_, i) => ({
+				id: i + 1,
+				kind: "OHB",
+				template: "SINGLE",
+				portIds: [i + 1],
+			})),
+		});
+		const last = source.ports.at(-1);
+		if (!last) throw new Error("Missing final port");
+		const changes = Object.freeze([
+			Object.freeze({
+				id: count,
+				before: last,
+				after: copyPortRecord({ ...last, barcode: "Synthetic-final" }),
+			}),
+		]);
+		const task = createCooperativeTask(
+			applyPortEquipmentMutationsSteps(source, changes, Object.freeze([])),
+		);
+		let slices = 0,
+			maximum = 0;
+		while (!task.done) {
+			const started = performance.now();
+			task.step(37);
+			maximum = Math.max(maximum, performance.now() - started);
+			slices++;
+		}
+		expect(slices).toBeGreaterThan(1000);
+		expect(maximum).toBeLessThan(50);
+		expect(task.finish().ports.at(-1)?.barcode).toBe("Synthetic-final");
+		expect(source.ports.at(-1)?.barcode).toBeNull();
 	});
 	it("copies one valid OHB station as canonical immutable authored data", () => {
 		const state = ohbState();

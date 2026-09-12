@@ -105,7 +105,9 @@ describe("RailWorkerBridge", () => {
 	it.each([
 		"edit",
 		"dispose",
-	])("revokes prepared addition publication on %s and rejects stale preparation", async (change) => {
+		"mutation-edit",
+		"mutation-dispose",
+	])("revokes prepared static publication on %s and rejects stale preparation", async (change) => {
 		const source = new RailDocument();
 		let event: Parameters<Parameters<RailDocument["subscribe"]>[0]>[0] | null = null;
 		source.subscribe((value) => {
@@ -121,15 +123,16 @@ describe("RailWorkerBridge", () => {
 			() => worker,
 		);
 		await bridge.waitUntilReady(readyExpectation(document));
-		const lease = await bridge.prepareStaticFabAdditionPatchCooperatively(event, async () => {}, 1);
+		const prepare = change.startsWith("mutation-")
+			? bridge.prepareStaticFabMutationPatchCooperatively.bind(bridge)
+			: bridge.prepareStaticFabAdditionPatchCooperatively.bind(bridge);
+		const lease = await prepare(event, async () => {}, 1);
 		expect(lease.isCurrent()).toBe(true);
-		if (change === "edit")
+		if (change.endsWith("edit"))
 			document.commit(planRailConstruction(document.map, { x: -10, y: -10 }, { x: -6, y: -10 }));
 		else bridge.dispose();
 		expect(lease.isCurrent()).toBe(false);
-		await expect(
-			bridge.prepareStaticFabAdditionPatchCooperatively(event, async () => {}),
-		).rejects.toThrow("stale");
+		await expect(prepare(event, async () => {})).rejects.toThrow("stale");
 		bridge.dispose();
 	});
 	it("ACKs operational configuration edit, undo, and redo through the live bridge", async () => {
@@ -540,6 +543,39 @@ describe("RailWorkerBridge", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+		bridge.dispose();
+	});
+
+	it("cancels snapshot admission after delivery without recovering the healthy mirror", async () => {
+		const document = new RailDocument();
+		const port = new InProcessRailWorker();
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => port,
+		);
+		await bridge.waitUntilReady(readyExpectation(document));
+		const original = port.onmessage;
+		const controller = new AbortController();
+		let received = false;
+		port.onmessage = (event) => {
+			original?.(event);
+			if (event.data.type === "RAIL_SNAPSHOT_CAPTURED") {
+				received = true;
+				controller.abort();
+			}
+		};
+		await expect(bridge.captureCurrentSnapshot(controller.signal)).rejects.toMatchObject({
+			name: "AbortError",
+		});
+		await flushWorkerMessages();
+		expect(received).toBe(true);
+		expect(port.terminated).toBe(false);
+		expect(bridge.getState()).toMatchObject({ status: "ready", epoch: 1 });
+		port.onmessage = original;
+		await expect(bridge.captureCurrentSnapshot()).resolves.toMatchObject({
+			sequence: document.getPatchSequence(),
+		});
 		bridge.dispose();
 	});
 
@@ -1379,6 +1415,7 @@ describe("RailWorkerBridge", () => {
 	it.each([
 		"reviewed",
 		"addition",
+		"mutation",
 	])("spends a cooperatively prepared %s packet on the exact published event", async (encoding) => {
 		const document = new RailDocument();
 		expect(
@@ -1416,11 +1453,11 @@ describe("RailWorkerBridge", () => {
 				if (encoding === "reviewed")
 					await bridge.prepareReviewedPortEquipmentPatchCooperatively(event, checkpoint, 1);
 				else {
-					const lease = await bridge.prepareStaticFabAdditionPatchCooperatively(
-						event,
-						checkpoint,
-						1,
-					);
+					const prepare =
+						encoding === "addition"
+							? bridge.prepareStaticFabAdditionPatchCooperatively.bind(bridge)
+							: bridge.prepareStaticFabMutationPatchCooperatively.bind(bridge);
+					const lease = await prepare(event, checkpoint, 1);
 					expect(lease.isCurrent()).toBe(true);
 				}
 			},

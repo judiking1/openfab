@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	copyStaticFabOrganizationRecord,
 	copyStaticFabOrganizationState,
 	isCanonicalStaticFabOrganizationState,
 	type StaticFabOrganizationState,
@@ -11,6 +12,7 @@ import {
 	decodeStaticFabOrganizationPatch,
 	encodeStaticFabOrganizationAdditionsCooperatively,
 	encodeStaticFabOrganizationPatch,
+	encodeStaticFabOrganizationPatchCooperatively,
 	hydrateStaticFabOrganizationDiagnosticSnapshot,
 	hydrateStaticFabOrganizationSnapshot,
 	STATIC_FAB_ORGANIZATION_PATCH_OPERATIONS,
@@ -70,6 +72,113 @@ describe("StaticFabOrganizationSoA", () => {
 				1,
 			),
 		).rejects.toBe(cancelled);
+	});
+	it("encodes wide relocation, removal and addition as exact reversible FULL rows", async () => {
+		const before = copyStaticFabOrganizationState(largeAreaFixture(10001)).records[0];
+		if (!before) throw new Error("Missing organization");
+		const after = copyStaticFabOrganizationRecord({
+			...before,
+			membership: {
+				...before.membership,
+				railEdges: before.membership.railEdges.map((edge) => ({
+					from: { x: edge.from.x, y: 10 },
+					to: { x: edge.to.x, y: 10 },
+				})),
+			},
+		});
+		const removed = copyStaticFabOrganizationRecord({ ...before, id: 2 });
+		const added = copyStaticFabOrganizationRecord({ ...after, id: 3 });
+		const mutations = Object.freeze([
+			Object.freeze({ id: 1, before, after }),
+			Object.freeze({ id: 2, before: removed, after: null }),
+			Object.freeze({ id: 3, before: null, after: added }),
+		]);
+		for (const changes of [
+			mutations,
+			Object.freeze(
+				mutations.map((change) =>
+					Object.freeze({ ...change, before: change.after, after: change.before }),
+				),
+			),
+		]) {
+			const expected = encodeStaticFabOrganizationPatch(changes, 4, 4);
+			let checkpoints = 0;
+			const encoded = await encodeStaticFabOrganizationPatchCooperatively(
+				changes,
+				4,
+				4,
+				async () => {
+					checkpoints++;
+				},
+				37,
+			);
+			expect(checkpoints).toBeGreaterThan(1000);
+			expect(encoded.fields).toEqual(expected.fields);
+			expect(encoded.transfer.map((buffer) => new Uint8Array(buffer))).toEqual(
+				expected.transfer.map((buffer) => new Uint8Array(buffer)),
+			);
+			expect(new Set(encoded.transfer).size).toBe(encoded.transfer.length);
+			expect(
+				decodeStaticFabOrganizationPatch(
+					structuredClone(encoded.fields, { transfer: encoded.transfer }),
+				),
+			).toEqual(changes);
+		}
+	});
+	it("rejects mutable, accessor, misordered and stale-cursor organization packets before returning buffers", async () => {
+		const before = copyStaticFabOrganizationState(fixture()).records[0];
+		if (!before) throw new Error("Missing organization");
+		const remove = Object.freeze({ id: before.id, before, after: null });
+		const changes = Object.freeze([remove]);
+		let reads = 0;
+		const accessor = Object.freeze(
+			Object.defineProperty([], 0, {
+				get() {
+					reads++;
+					return remove;
+				},
+			}),
+		);
+		for (const invalid of [
+			[remove],
+			accessor,
+			Object.freeze([remove, remove]),
+			Object.freeze([Object.freeze({ ...remove, before: { ...before } })]),
+		])
+			await expect(
+				encodeStaticFabOrganizationPatchCooperatively(invalid, 3, 3, async () => {}),
+			).rejects.toThrow();
+		expect(reads).toBe(0);
+		await expect(
+			encodeStaticFabOrganizationPatchCooperatively(changes, 1, 3, async () => {}),
+		).rejects.toThrow(/cursor/);
+		await expect(
+			encodeStaticFabOrganizationPatchCooperatively(changes, 3, 3, async () => {}, 0),
+		).rejects.toThrow(/positive/);
+		let checkpoints = 0;
+		await encodeStaticFabOrganizationPatchCooperatively(
+			changes,
+			3,
+			3,
+			async () => {
+				checkpoints++;
+			},
+			1,
+		);
+		for (const cancelAt of [1, Math.ceil(checkpoints / 2), checkpoints]) {
+			let steps = 0;
+			await expect(
+				encodeStaticFabOrganizationPatchCooperatively(
+					changes,
+					3,
+					3,
+					async () => {
+						if (++steps === cancelAt) throw new Error("cancelled");
+					},
+					1,
+				),
+			).rejects.toThrow("cancelled");
+		}
 	});
 	it("round-trips canonical organization membership through CSR typed buffers", () => {
 		const canonical = copyStaticFabOrganizationState(fixture());

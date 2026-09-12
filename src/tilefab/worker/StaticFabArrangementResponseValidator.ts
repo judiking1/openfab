@@ -8,6 +8,8 @@ import {
 	advancedSwitchRecordError,
 	deriveAdvancedSwitchGeometry,
 } from "../core/AdvancedSwitch";
+import { completeCooperativeSteps } from "../core/CooperativeTask";
+import { freezeTransferDataContainersSteps } from "../core/ImmutableDataContainers";
 import { PORT_RECORD_MAX_ID, type PortRecord, portRecordError } from "../core/PortRecord";
 import type { RailMutation } from "../core/paint";
 import { classifyRailCell } from "../core/RailCellClassification";
@@ -18,7 +20,7 @@ import {
 } from "../core/StaticFabArrangement";
 import {
 	type StaticFabArrangementWorkerTicket,
-	staticFabArrangementPlanFingerprint,
+	staticFabArrangementPlanFingerprintSteps,
 } from "../core/StaticFabArrangementCertification";
 import { STATIC_FAB_ARRANGEMENT_COMMAND_MAX_KEY_LENGTH } from "../core/StaticFabArrangementCommand";
 import {
@@ -28,11 +30,17 @@ import {
 	type StaticFabArrangementPlanMetadata,
 } from "../core/StaticFabArrangementPlan";
 import {
-	replaceStaticFabOrganizationRecordMembership,
+	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_RECORDS,
+	type StaticFabAssemblyRelationshipMutationV1,
+	staticFabAssemblyRelationshipStateShapeErrorSteps,
+	staticFabAssemblyRelationshipTransitionFootprintSteps,
+} from "../core/StaticFabAssemblyRelationship";
+import {
 	STATIC_FAB_ORGANIZATION_KINDS,
 	type StaticFabOrganizationRecord,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
+	staticFabOrganizationRecordShapeErrorSteps,
 } from "../core/StaticFabOrganization";
 import { type Cell, decodeRailCell } from "../core/TileMap";
 import { STATIC_FAB_ARRANGEMENT_CONFLICT_LIMIT } from "./StaticFabArrangementProtocol";
@@ -46,11 +54,11 @@ export const STATIC_FAB_ARRANGEMENT_MAX_PLAN_CELLS =
 	STATIC_FAB_ARRANGEMENT_MAX_RAIL_EDGES * 4 + STATIC_FAB_ARRANGEMENT_MAX_ADVANCED_SWITCHES * 32;
 export const STATIC_FAB_ARRANGEMENT_MAX_RESPONSE_TEXT = 4_096;
 
-const MAX_ORGANIZATION_RAIL_EDGE_REFERENCES =
+export const MAX_ORGANIZATION_RAIL_EDGE_REFERENCES =
 	STATIC_FAB_ARRANGEMENT_MAX_RAIL_EDGES * STATIC_FAB_ORGANIZATION_KINDS.length * 2;
-const MAX_ORGANIZATION_SWITCH_REFERENCES =
+export const MAX_ORGANIZATION_SWITCH_REFERENCES =
 	STATIC_FAB_ARRANGEMENT_MAX_ADVANCED_SWITCHES * STATIC_FAB_ORGANIZATION_KINDS.length * 2;
-const MAX_ORGANIZATION_GROUP_REFERENCES =
+export const MAX_ORGANIZATION_GROUP_REFERENCES =
 	STATIC_FAB_ARRANGEMENT_MAX_EQUIPMENT_GROUPS * STATIC_FAB_ORGANIZATION_KINDS.length * 2;
 const RECORD_ID_CURSOR_MAX = PORT_RECORD_MAX_ID + 1;
 const ORDERED_FINGERPRINT_PATTERN = /^[0-9a-f]{8}:[0-9a-f]{8}$/;
@@ -61,7 +69,9 @@ const RAIL_CHECKSUM_PATTERN = /^(?:[0-9a-f]{8}:){11}[0-9a-f]{8}$/;
  * Worker. Passing this check does not grant commit authority; the opaque one-shot permit still
  * binds the result to the live document.
  */
-export function staticFabArrangementPreparedShapeError(value: unknown): string | null {
+export function* staticFabArrangementPreparedEnvelopeShapeErrorSteps(
+	value: unknown,
+): Generator<void, string | null> {
 	if (!isRecord(value)) return "prepared arrangement payload must be an object";
 	if (typeof value.valid !== "boolean") return "prepared arrangement validity must be boolean";
 	if (!validFailureCode(value.failureCode, value.valid)) {
@@ -70,7 +80,7 @@ export function staticFabArrangementPreparedShapeError(value: unknown): string |
 	if (!boundedText(value.reason, STATIC_FAB_ARRANGEMENT_MAX_RESPONSE_TEXT)) {
 		return "prepared arrangement reason exceeds its text budget";
 	}
-	const conflictError = canonicalCellArrayError(
+	const conflictError = yield* canonicalCellArrayError(
 		value.conflictCells,
 		STATIC_FAB_ARRANGEMENT_CONFLICT_LIMIT,
 		"prepared arrangement conflicts",
@@ -94,12 +104,21 @@ export function staticFabArrangementPreparedShapeError(value: unknown): string |
 		return "valid prepared arrangement carried conflicts";
 	}
 
+	return null;
+}
+
+export function* staticFabArrangementPreparedShapeErrorSteps(
+	value: unknown,
+): Generator<void, string | null> {
+	const envelopeError = yield* staticFabArrangementPreparedEnvelopeShapeErrorSteps(value);
+	if (envelopeError) return envelopeError;
+	if (!isRecord(value)) return "prepared arrangement payload must be an object";
 	if (value.plan === null) {
 		if (value.valid) return "valid prepared arrangement omitted its plan";
 		return value.ticket === null ? null : "rejected prepared arrangement carried a ticket";
 	}
 	const mode = value.valid ? "full" : "compact";
-	const planError = arrangementPlanShapeError(value.plan, mode);
+	const planError = yield* arrangementPlanShapeError(value.plan, mode);
 	if (planError) return planError;
 	const plan = value.plan as StaticFabArrangementPlan;
 	if (plan.valid !== value.valid) return "prepared arrangement and plan validity disagree";
@@ -109,13 +128,16 @@ export function staticFabArrangementPreparedShapeError(value: unknown): string |
 	if (value.reason !== plan.reason)
 		return "valid prepared arrangement reason does not match its plan";
 	if (!isRecord(value.ticket)) return "valid prepared arrangement omitted its ticket";
-	return arrangementTicketShapeError(
+	return yield* arrangementTicketShapeError(
 		value.ticket as unknown as StaticFabArrangementWorkerTicket,
 		plan,
 	);
 }
 
-function arrangementPlanShapeError(value: unknown, mode: "compact" | "full"): string | null {
+export function staticFabArrangementPlanHeaderShapeError(
+	value: unknown,
+	mode: "compact" | "full",
+): string | null {
 	if (!isRecord(value) || value.kind !== STATIC_FAB_ARRANGEMENT_PLAN_KIND) {
 		return "arrangement plan kind is invalid";
 	}
@@ -129,11 +151,24 @@ function arrangementPlanShapeError(value: unknown, mode: "compact" | "full"): st
 		!nonNegativeSafeInteger(value.basePatchSequence) ||
 		!positiveInt32(value.nextOrganizationIdBefore) ||
 		!positiveInt32(value.nextOrganizationIdAfter) ||
+		!positiveInt32(value.nextRelationshipIdBefore) ||
+		!positiveInt32(value.nextRelationshipIdAfter) ||
+		value.nextRelationshipIdBefore !== value.nextRelationshipIdAfter ||
 		value.nextOrganizationIdBefore !== value.nextOrganizationIdAfter ||
 		!validPlanIssueCode(value.issueCode, value.valid)
 	) {
 		return "arrangement plan scalar fields are invalid";
 	}
+	return null;
+}
+
+function* arrangementPlanShapeError(
+	value: unknown,
+	mode: "compact" | "full",
+): Generator<void, string | null> {
+	const headerError = staticFabArrangementPlanHeaderShapeError(value, mode);
+	if (headerError) return headerError;
+	if (!isRecord(value)) return "arrangement plan kind is invalid";
 	if (
 		!Array.isArray(value.cells) ||
 		!Array.isArray(value.conflicts) ||
@@ -142,6 +177,7 @@ function arrangementPlanShapeError(value: unknown, mode: "compact" | "full"): st
 		!Array.isArray(value.portMutations) ||
 		!Array.isArray(value.equipmentGroupMutations) ||
 		!Array.isArray(value.organizationMutations) ||
+		!Array.isArray(value.relationshipMutations) ||
 		!Array.isArray(value.organizationImpactAuthorizations)
 	) {
 		return "arrangement plan mutation arrays are missing";
@@ -150,9 +186,13 @@ function arrangementPlanShapeError(value: unknown, mode: "compact" | "full"): st
 		mode === "compact"
 			? STATIC_FAB_ARRANGEMENT_CONFLICT_LIMIT
 			: STATIC_FAB_ARRANGEMENT_MAX_PLAN_CELLS;
-	const cellsError = canonicalCellArrayError(value.cells, maximumCells, "arrangement plan cells");
+	const cellsError = yield* canonicalCellArrayError(
+		value.cells,
+		maximumCells,
+		"arrangement plan cells",
+	);
 	if (cellsError) return cellsError;
-	const conflictsError = canonicalCellArrayError(
+	const conflictsError = yield* canonicalCellArrayError(
 		value.conflicts,
 		STATIC_FAB_ARRANGEMENT_CONFLICT_LIMIT,
 		"arrangement plan conflicts",
@@ -166,6 +206,7 @@ function arrangementPlanShapeError(value: unknown, mode: "compact" | "full"): st
 			value.portMutations.length === 0 &&
 			value.equipmentGroupMutations.length === 0 &&
 			value.organizationMutations.length === 0 &&
+			value.relationshipMutations.length === 0 &&
 			value.organizationImpactAuthorizations.length === 0
 			? null
 			: "compact rejected arrangement carried authored mutations";
@@ -179,6 +220,7 @@ function arrangementPlanShapeError(value: unknown, mode: "compact" | "full"): st
 		value.portMutations.length > STATIC_FAB_ARRANGEMENT_MAX_PORTS ||
 		value.equipmentGroupMutations.length !== 0 ||
 		value.organizationMutations.length > STATIC_FAB_ARRANGEMENT_MAX_ORGANIZATIONS ||
+		value.relationshipMutations.length > STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_RECORDS ||
 		value.organizationImpactAuthorizations.length > STATIC_FAB_ARRANGEMENT_MAX_ORGANIZATIONS
 	) {
 		return "full arrangement plan exceeds its mutation budget";
@@ -187,38 +229,54 @@ function arrangementPlanShapeError(value: unknown, mode: "compact" | "full"): st
 		value.mutations.length === 0 &&
 		value.switchMutations.length === 0 &&
 		value.portMutations.length === 0 &&
-		value.organizationMutations.length === 0
+		value.organizationMutations.length === 0 &&
+		value.relationshipMutations.length === 0
 	) {
 		return "full arrangement plan contains no authored change";
 	}
-	const authorizationError = canonicalPositiveIdArrayError(
+	const authorizationError = yield* canonicalPositiveIdArrayError(
 		value.organizationImpactAuthorizations,
 		"arrangement organization authorizations",
 	);
 	if (authorizationError) return authorizationError;
-	const metadataError = arrangementMetadataShapeError(value.arrangement);
+	const metadataError = yield* staticFabArrangementMetadataShapeErrorSteps(value.arrangement);
 	if (metadataError) return metadataError;
 	const metadata = value.arrangement as StaticFabArrangementPlanMetadata;
-	const metadataConsistencyError = arrangementMetadataMatchesPlan(
+	const metadataConsistencyError = yield* arrangementMetadataMatchesPlan(
 		metadata,
 		value as unknown as StaticFabArrangementPlan,
 	);
 	if (metadataConsistencyError) return metadataConsistencyError;
 
-	const cellKeys = new Set((value.cells as readonly Cell[]).map(cellCoordinateKey));
-	const railError = relocationRailMutationsError(value.mutations, cellKeys);
+	const cellKeys = new Set<string>();
+	for (const cell of value.cells as readonly Cell[]) {
+		yield;
+		cellKeys.add(cellCoordinateKey(cell));
+	}
+	const railError = yield* relocationRailMutationsError(value.mutations, cellKeys);
 	if (railError) return railError;
-	const switchError = relocationSwitchMutationsError(value.switchMutations, metadata.translations);
+	const switchError = yield* relocationSwitchMutationsError(
+		value.switchMutations,
+		metadata.translations,
+	);
 	if (switchError) return switchError;
-	const portError = relocationPortMutationsError(value.portMutations, metadata.translations);
+	const portError = yield* relocationPortMutationsError(value.portMutations, metadata.translations);
 	if (portError) return portError;
-	return relocationOrganizationMutationsError(
+	const organizationError = yield* relocationOrganizationMutationsError(
 		value.organizationMutations,
 		value.organizationImpactAuthorizations,
 	);
+	if (organizationError) return organizationError;
+	return yield* relocationRelationshipMutationsError(
+		value.relationshipMutations,
+		value.nextRelationshipIdBefore as number,
+		metadata.translations,
+	);
 }
 
-function arrangementMetadataShapeError(value: unknown): string | null {
+export function* staticFabArrangementMetadataShapeErrorSteps(
+	value: unknown,
+): Generator<void, string | null> {
 	if (!isRecord(value)) return "arrangement plan metadata is missing";
 	if (
 		value.version !== STATIC_FAB_ARRANGEMENT_PLAN_VERSION ||
@@ -252,7 +310,7 @@ function arrangementMetadataShapeError(value: unknown): string | null {
 	const minimumRoots =
 		value.mode === "DISTRIBUTE_CENTERS" || value.mode === "DISTRIBUTE_GAPS" ? 3 : 2;
 	if (value.rootCount < minimumRoots) return "arrangement plan has too few roots for its mode";
-	const affectedError = canonicalPositiveIdArrayError(
+	const affectedError = yield* canonicalPositiveIdArrayError(
 		value.affectedOrganizationIds,
 		"arrangement affected organization ids",
 	);
@@ -261,6 +319,7 @@ function arrangementMetadataShapeError(value: unknown): string | null {
 	let previousKey = "";
 	let changed = false;
 	for (let index = 0; index < value.translations.length; index++) {
+		yield;
 		const translation = value.translations[index];
 		const error = arrangementTranslationShapeError(translation, value.axis);
 		if (error) return error;
@@ -303,15 +362,18 @@ function arrangementTranslationShapeError(value: unknown, axis: "X" | "Z"): stri
 	return null;
 }
 
-function arrangementMetadataMatchesPlan(
+function* arrangementMetadataMatchesPlan(
 	metadata: StaticFabArrangementPlanMetadata,
 	plan: StaticFabArrangementPlan,
-): string | null {
+): Generator<void, string | null> {
 	if (
 		plan.switchMutations.length > metadata.advancedSwitchCount ||
 		plan.portMutations.length > metadata.portCount ||
 		plan.organizationMutations.length > metadata.affectedOrganizationIds.length ||
-		!sameNumberArray(plan.organizationImpactAuthorizations, metadata.affectedOrganizationIds)
+		!(yield* sameNumberArray(
+			plan.organizationImpactAuthorizations,
+			metadata.affectedOrganizationIds,
+		))
 	) {
 		return "arrangement metadata does not match its authored mutations";
 	}
@@ -321,9 +383,17 @@ function arrangementMetadataMatchesPlan(
 		: "arrangement organization mutation lacks exact impact authorization";
 }
 
-function arrangementTicketShapeError(
-	ticket: StaticFabArrangementWorkerTicket,
-	plan: StaticFabArrangementPlan,
+export function staticFabArrangementTicketHeaderShapeError(
+	ticket: unknown,
+	plan: Pick<
+		StaticFabArrangementPlan,
+		| "baseRevision"
+		| "basePatchSequence"
+		| "nextOrganizationIdBefore"
+		| "nextOrganizationIdAfter"
+		| "nextRelationshipIdBefore"
+		| "nextRelationshipIdAfter"
+	>,
 ): string | null {
 	if (
 		!isRecord(ticket) ||
@@ -336,13 +406,15 @@ function arrangementTicketShapeError(
 		!recordCursor(ticket.sourceNextPortId) ||
 		!recordCursor(ticket.sourceNextEquipmentGroupId) ||
 		!positiveInt32(ticket.sourceNextOrganizationId) ||
+		!positiveInt32(ticket.sourceNextRelationshipId) ||
 		!orderedFingerprint(ticket.intentFingerprint) ||
 		!orderedFingerprint(ticket.planFingerprint) ||
 		!railChecksum(ticket.prospectiveChecksum) ||
 		!recordCursor(ticket.prospectiveNextAdvancedSwitchId) ||
 		!recordCursor(ticket.prospectiveNextPortId) ||
 		!recordCursor(ticket.prospectiveNextEquipmentGroupId) ||
-		!positiveInt32(ticket.prospectiveNextOrganizationId)
+		!positiveInt32(ticket.prospectiveNextOrganizationId) ||
+		!positiveInt32(ticket.prospectiveNextRelationshipId)
 	) {
 		return "arrangement ticket fields are invalid";
 	}
@@ -350,6 +422,8 @@ function arrangementTicketShapeError(
 		ticket.sourceRevision !== plan.baseRevision ||
 		ticket.sourcePatchSequence !== plan.basePatchSequence ||
 		ticket.sourceNextOrganizationId !== plan.nextOrganizationIdBefore ||
+		ticket.sourceNextRelationshipId !== plan.nextRelationshipIdBefore ||
+		ticket.prospectiveNextRelationshipId !== plan.nextRelationshipIdAfter ||
 		ticket.prospectiveNextOrganizationId !== plan.nextOrganizationIdAfter
 	) {
 		return "arrangement ticket does not bind the supplied plan";
@@ -358,13 +432,23 @@ function arrangementTicketShapeError(
 		ticket.prospectiveNextAdvancedSwitchId !== ticket.sourceNextAdvancedSwitchId ||
 		ticket.prospectiveNextPortId !== ticket.sourceNextPortId ||
 		ticket.prospectiveNextEquipmentGroupId !== ticket.sourceNextEquipmentGroupId ||
-		ticket.prospectiveNextOrganizationId !== ticket.sourceNextOrganizationId
+		ticket.prospectiveNextOrganizationId !== ticket.sourceNextOrganizationId ||
+		ticket.prospectiveNextRelationshipId !== ticket.sourceNextRelationshipId
 	) {
 		return "arrangement ticket advanced an existing-ID cursor";
 	}
+	return null;
+}
+
+function* arrangementTicketShapeError(
+	ticket: StaticFabArrangementWorkerTicket,
+	plan: StaticFabArrangementPlan,
+): Generator<void, string | null> {
+	const headerError = staticFabArrangementTicketHeaderShapeError(ticket, plan);
+	if (headerError) return headerError;
 	let planFingerprint: string;
 	try {
-		planFingerprint = staticFabArrangementPlanFingerprint(plan);
+		planFingerprint = yield* staticFabArrangementPlanFingerprintSteps(plan);
 	} catch {
 		return "arrangement plan fingerprint could not be recomputed";
 	}
@@ -373,13 +457,14 @@ function arrangementTicketShapeError(
 		: "arrangement ticket plan fingerprint does not match the supplied plan";
 }
 
-function relocationRailMutationsError(
+function* relocationRailMutationsError(
 	value: unknown,
 	planCells: ReadonlySet<string>,
-): string | null {
+): Generator<void, string | null> {
 	if (!Array.isArray(value)) return "arrangement rail mutations are missing";
 	let previous: RailMutation | null = null;
 	for (let index = 0; index < value.length; index++) {
+		yield;
 		const mutation = value[index];
 		if (
 			!isRecord(mutation) ||
@@ -401,13 +486,14 @@ function relocationRailMutationsError(
 	return null;
 }
 
-function relocationSwitchMutationsError(
+function* relocationSwitchMutationsError(
 	value: unknown,
 	translations: readonly StaticFabArrangementTranslation[],
-): string | null {
+): Generator<void, string | null> {
 	if (!Array.isArray(value)) return "arrangement switch mutations are missing";
 	let previousId = 0;
 	for (let index = 0; index < value.length; index++) {
+		yield;
 		const mutation = value[index];
 		if (!isRecord(mutation) || !positiveInt32(mutation.id) || mutation.id <= previousId) {
 			return "arrangement switch mutations are not unique and canonical";
@@ -438,13 +524,14 @@ function relocationSwitchMutationsError(
 	return null;
 }
 
-function relocationPortMutationsError(
+function* relocationPortMutationsError(
 	value: unknown,
 	translations: readonly StaticFabArrangementTranslation[],
-): string | null {
+): Generator<void, string | null> {
 	if (!Array.isArray(value)) return "arrangement port mutations are missing";
 	let previousId = 0;
 	for (let index = 0; index < value.length; index++) {
+		yield;
 		const mutation = value[index];
 		if (!isRecord(mutation) || !positiveInt32(mutation.id) || mutation.id <= previousId) {
 			return "arrangement port mutations are not unique and canonical";
@@ -486,10 +573,10 @@ function relocationPortMutationsError(
 	return null;
 }
 
-function relocationOrganizationMutationsError(
+function* relocationOrganizationMutationsError(
 	value: unknown,
 	authorizations: unknown,
-): string | null {
+): Generator<void, string | null> {
 	if (!Array.isArray(value) || !Array.isArray(authorizations)) {
 		return "arrangement organization mutations are missing";
 	}
@@ -499,6 +586,7 @@ function relocationOrganizationMutationsError(
 	let switchReferences = 0;
 	let groupReferences = 0;
 	for (let index = 0; index < value.length; index++) {
+		yield;
 		const mutation = value[index];
 		if (!isRecord(mutation) || !positiveInt32(mutation.id) || mutation.id <= previousId) {
 			return "arrangement organization mutations are not unique and canonical";
@@ -514,8 +602,8 @@ function relocationOrganizationMutationsError(
 		if (mutation.id !== before.id || mutation.id !== after.id) {
 			return "arrangement organization mutation changed its existing ID";
 		}
-		const beforeError = staticFabOrganizationRecordShapeError(before);
-		const afterError = staticFabOrganizationRecordShapeError(after);
+		const beforeError = yield* staticFabOrganizationRecordShapeError(before);
+		const afterError = yield* staticFabOrganizationRecordShapeError(after);
 		if (beforeError || afterError) {
 			return `arrangement organization record is invalid: ${beforeError ?? afterError}`;
 		}
@@ -531,12 +619,12 @@ function relocationOrganizationMutationsError(
 		) {
 			return "arrangement organization references exceed their aggregate budget";
 		}
-		if (!sameOrganizationIdentityAndMetadata(before, after)) {
+		if (!(yield* sameOrganizationIdentityAndMetadata(before, after))) {
 			return "arrangement organization mutation changed immutable metadata or entity membership";
 		}
 		if (
 			before.membership.railEdges.length !== after.membership.railEdges.length ||
-			sameDirectedEdgeArray(before.membership.railEdges, after.membership.railEdges)
+			(yield* sameDirectedEdgeArray(before.membership.railEdges, after.membership.railEdges))
 		) {
 			return "arrangement organization mutation did not preserve and relocate rail membership";
 		}
@@ -570,7 +658,9 @@ function portRecordShapeError(record: PortRecord): string | null {
 	}
 }
 
-function staticFabOrganizationRecordShapeError(record: StaticFabOrganizationRecord): string | null {
+function* staticFabOrganizationRecordShapeError(
+	record: StaticFabOrganizationRecord,
+): Generator<void, string | null> {
 	if (!isRecord(record) || !isRecord(record.membership)) return "record shape is malformed";
 	const membership = record.membership;
 	if (
@@ -584,39 +674,45 @@ function staticFabOrganizationRecordShapeError(record: StaticFabOrganizationReco
 		return "membership exceeds its per-record budget";
 	}
 	try {
-		replaceStaticFabOrganizationRecordMembership(record, membership);
-		return null;
+		return yield* staticFabOrganizationRecordShapeErrorSteps(record);
 	} catch {
 		return "record shape is malformed";
 	}
 }
 
-function sameOrganizationIdentityAndMetadata(
+function* sameOrganizationIdentityAndMetadata(
 	before: StaticFabOrganizationRecord,
 	after: StaticFabOrganizationRecord,
-): boolean {
+): Generator<void, boolean> {
 	const beforeProperties = staticFabOrganizationProperties(before);
 	const afterProperties = staticFabOrganizationProperties(after);
 	return (
 		before.kind === after.kind &&
 		before.name === after.name &&
-		sameNumberArray(
+		(yield* sameNumberArray(
 			staticFabOrganizationParentIds(before),
 			staticFabOrganizationParentIds(after),
-		) &&
+		)) &&
 		beforeProperties.description === afterProperties.description &&
 		beforeProperties.color === afterProperties.color &&
-		sameNumberArray(before.membership.advancedSwitchIds, after.membership.advancedSwitchIds) &&
-		sameNumberArray(before.membership.equipmentGroupIds, after.membership.equipmentGroupIds)
+		(yield* sameNumberArray(
+			before.membership.advancedSwitchIds,
+			after.membership.advancedSwitchIds,
+		)) &&
+		(yield* sameNumberArray(
+			before.membership.equipmentGroupIds,
+			after.membership.equipmentGroupIds,
+		))
 	);
 }
 
-function sameDirectedEdgeArray(
+function* sameDirectedEdgeArray(
 	left: StaticFabOrganizationRecord["membership"]["railEdges"],
 	right: StaticFabOrganizationRecord["membership"]["railEdges"],
-): boolean {
+): Generator<void, boolean> {
 	if (left.length !== right.length) return false;
 	for (let index = 0; index < left.length; index++) {
+		yield;
 		const first = left[index];
 		const second = right[index];
 		if (
@@ -646,11 +742,16 @@ function matchesOneTranslation(
 	);
 }
 
-function canonicalCellArrayError(value: unknown, maximum: number, label: string): string | null {
+function* canonicalCellArrayError(
+	value: unknown,
+	maximum: number,
+	label: string,
+): Generator<void, string | null> {
 	if (!Array.isArray(value)) return `${label} must be an array`;
 	if (value.length > maximum) return `${label} exceed their budget`;
 	let previous: Cell | null = null;
 	for (let index = 0; index < value.length; index++) {
+		yield;
 		const cell = value[index];
 		if (!isCell(cell)) return `${label} contain an invalid coordinate`;
 		if (previous && compareCells(previous, cell) >= 0) {
@@ -661,10 +762,14 @@ function canonicalCellArrayError(value: unknown, maximum: number, label: string)
 	return null;
 }
 
-function canonicalPositiveIdArrayError(value: unknown, label: string): string | null {
+function* canonicalPositiveIdArrayError(
+	value: unknown,
+	label: string,
+): Generator<void, string | null> {
 	if (!Array.isArray(value)) return `${label} must be an array`;
 	let previous = 0;
 	for (let index = 0; index < value.length; index++) {
+		yield;
 		const id = value[index];
 		if (!positiveInt32(id) || id <= previous) return `${label} are not unique and canonical`;
 		previous = id;
@@ -720,6 +825,9 @@ function validPlanIssueCode(value: unknown, valid: boolean): boolean {
 		value === "PORT_LAYOUT_INVALID" ||
 		value === "CLEARANCE_INVALID" ||
 		value === "ORGANIZATION_INVALID" ||
+		value === "PARTIAL_RELATIONSHIP" ||
+		value === "INCOMPATIBLE_RELATIONSHIP_TRANSFORMS" ||
+		value === "RELATIONSHIP_INVALID" ||
 		value === "COMPILE_FAILURE"
 	);
 }
@@ -799,9 +907,13 @@ function isInt32(value: unknown): value is number {
 	);
 }
 
-function sameNumberArray(left: readonly number[], right: readonly number[]): boolean {
+function* sameNumberArray(
+	left: readonly number[],
+	right: readonly number[],
+): Generator<void, boolean> {
 	if (left.length !== right.length) return false;
 	for (let index = 0; index < left.length; index++) {
+		yield;
 		if (left[index] !== right[index]) return false;
 	}
 	return true;
@@ -821,4 +933,115 @@ function cellCoordinateKey(cell: Cell): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function staticFabArrangementPreparedShapeError(value: unknown): string | null {
+	return completeCooperativeSteps(staticFabArrangementPreparedShapeErrorSteps(value));
+}
+
+function* relocationRelationshipMutationsError(
+	value: unknown[],
+	nextRelationshipId: number,
+	translations: readonly StaticFabArrangementTranslation[],
+): Generator<void, string | null> {
+	const before = [],
+		after = [];
+	let previous = 0;
+	for (const mutation of value) {
+		yield;
+		if (
+			!isRecord(mutation) ||
+			!positiveInt32(mutation.id) ||
+			mutation.id <= previous ||
+			!isRecord(mutation.before) ||
+			!isRecord(mutation.after) ||
+			mutation.before.id !== mutation.id ||
+			mutation.after.id !== mutation.id
+		)
+			return "arrangement relationship mutation must preserve a unique existing ID";
+		previous = mutation.id;
+		before.push(mutation.before);
+		after.push(mutation.after);
+	}
+	// Validate both complete sides before freezing or hashing any received graph.
+	for (const records of [before, after]) {
+		const error = yield* staticFabAssemblyRelationshipStateShapeErrorSteps({
+			nextRelationshipId,
+			records,
+		} as unknown as import("../core/StaticFabAssemblyRelationship").StaticFabAssemblyRelationshipStateV1);
+		if (error) return `arrangement relationship record is invalid: ${error}`;
+	}
+	yield* freezeTransferDataContainersSteps(value);
+	const changes = value as unknown as readonly StaticFabAssemblyRelationshipMutationV1[];
+	try {
+		yield* staticFabAssemblyRelationshipTransitionFootprintSteps(changes);
+	} catch {
+		return "arrangement relationship transition exceeds its budget or is invalid";
+	}
+	for (const mutation of changes) {
+		yield;
+		const first = yield* firstRelationshipPoint(mutation.before);
+		const second = yield* firstRelationshipPoint(mutation.after);
+		if (!first || !second || !matchesOneTranslation(first, second, translations))
+			return "arrangement relationship must use one existing root translation";
+		if (
+			!(yield* sameTranslatedRelationshipData(
+				mutation.before,
+				mutation.after,
+				second.x - first.x,
+				second.y - first.y,
+			))
+		)
+			return "arrangement relationship changed more than its coordinates";
+	}
+	return null;
+}
+
+/** Shape validation above bounds object arity; traverse arrays one item at a time. */
+function* sameTranslatedRelationshipData(
+	before: unknown,
+	after: unknown,
+	dx: number,
+	dy: number,
+): Generator<void, boolean> {
+	yield;
+	if (Array.isArray(before)) {
+		if (!Array.isArray(after) || before.length !== after.length) return false;
+		for (let i = 0; i < before.length; i++)
+			if (!(yield* sameTranslatedRelationshipData(before[i], after[i], dx, dy))) return false;
+		return true;
+	}
+	if (isRecord(before)) {
+		if (!isRecord(after)) return false;
+		const keys = Object.keys(before);
+		if (keys.length !== Object.keys(after).length) return false;
+		for (const key of keys) {
+			yield;
+			if (!Object.hasOwn(after, key)) return false;
+			// The relationship grammar uses x/y only in directed-edge endpoint coordinates.
+			if ((key === "x" || key === "y") && typeof before[key] === "number") {
+				if (after[key] !== before[key] + (key === "x" ? dx : dy)) return false;
+			} else if (!(yield* sameTranslatedRelationshipData(before[key], after[key], dx, dy)))
+				return false;
+		}
+		return true;
+	}
+	return before === after;
+}
+
+function* firstRelationshipPoint(value: unknown): Generator<void, Cell | null> {
+	yield;
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			const point = yield* firstRelationshipPoint(item);
+			if (point) return point;
+		}
+	} else if (isRecord(value)) {
+		if (isCell(value)) return value;
+		for (const key of Object.keys(value)) {
+			const point = yield* firstRelationshipPoint(value[key]);
+			if (point) return point;
+		}
+	}
+	return null;
 }

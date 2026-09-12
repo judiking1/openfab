@@ -462,7 +462,7 @@ describe("GuidedBuildMission", () => {
 			label: "Port-first 진행",
 			value: "OHB 1/1 · EQ 2/2 · STK 0/2",
 			instruction:
-				"왼쪽의 강조된 STK · 입출고 Port를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 STK 생성을 누르세요.",
+				"왼쪽의 강조된 Stocker · 입출고 포트를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 Stocker 생성을 누르세요.",
 		});
 		expect(guidedBuildRevealedEquipmentToolIds(afterEq)).toEqual(["stk"]);
 		expect(afterPorts.complete).toBe(false);

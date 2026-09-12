@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { createCooperativeTask } from "../core/CooperativeTask";
 import type { DirectedRailEdge } from "../core/RailModuleOwnership";
+import { staticFabArrangementPlanFingerprint } from "../core/StaticFabArrangementCertification";
+import {
+	STATIC_FAB_ARRANGEMENT_PLAN_VERSION,
+	type StaticFabArrangementPlan,
+} from "../core/StaticFabArrangementPlan";
 import {
 	adoptStaticFabAssemblyRelationshipStateSteps,
 	applyStaticFabAssemblyRelationshipMutations,
 	checksumStaticFabAssemblyRelationshipState,
+	copyStaticFabAssemblyRelationshipRecord,
 	createStaticFabAssemblyRelationshipState,
 	isCanonicalStaticFabAssemblyRelationshipState,
+	remapStaticFabAssemblyRelationshipRecord,
 	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_EDGE_REFERENCES_PER_RECORD,
 	type StaticFabAssemblyRelationshipLegV1,
 	type StaticFabAssemblyRelationshipMutationV1,
@@ -19,12 +26,14 @@ import {
 	checksumRailPatchResultCooperatively,
 	RailChecksumAccumulator,
 } from "./RailMirrorChecksum";
+import { staticFabArrangementPreparedShapeErrorSteps } from "./StaticFabArrangementResponseValidator";
 import {
 	createStaticFabAssemblyRelationshipSnapshot,
 	createStaticFabAssemblyRelationshipSnapshotHydrator,
 	decodeStaticFabAssemblyRelationshipPatch,
 	encodeStaticFabAssemblyRelationshipAdditionsCooperatively,
 	encodeStaticFabAssemblyRelationshipPatch,
+	encodeStaticFabAssemblyRelationshipPatchCooperatively,
 	hydrateStaticFabAssemblyRelationshipSnapshot,
 	type StaticFabAssemblyRelationshipPatchSoA,
 	type StaticFabAssemblyRelationshipSnapshot,
@@ -35,6 +44,139 @@ import {
 } from "./StaticFabAssemblyRelationshipSoA";
 
 describe("StaticFabAssemblyRelationshipSoA", () => {
+	it("admits and fingerprints a maximum before/after arrangement relationship in bounded slices", () => {
+		const before = createStaticFabAssemblyRelationshipState(maximumRecordState()).records[0];
+		if (!before) throw new Error("Missing maximum record");
+		const ids = new Map<number, number>();
+		for (let id = 1; id <= 65; id++) ids.set(id, id);
+		const after = remapStaticFabAssemblyRelationshipRecord(before, {
+			relationshipId: before.id,
+			organizationIds: ids,
+			quarterTurns: 0,
+			offset: { x: 0, y: 10 },
+		});
+		const plan: StaticFabArrangementPlan = {
+			kind: "arrange-static-fab",
+			baseRevision: 1,
+			basePatchSequence: 1,
+			valid: true,
+			reason: "Move relationship fixture",
+			issueCode: null,
+			cells: [
+				{ x: 0, y: 0 },
+				{ x: 0, y: 10 },
+			],
+			conflicts: [],
+			mutations: [
+				{ x: 0, y: 0, before: 1, after: 0 },
+				{ x: 0, y: 10, before: 0, after: 1 },
+			],
+			switchMutations: [],
+			portMutations: [],
+			equipmentGroupMutations: [],
+			organizationMutations: [],
+			organizationImpactAuthorizations: [],
+			nextOrganizationIdBefore: 66,
+			nextOrganizationIdAfter: 66,
+			relationshipMutations: [{ id: 1, before, after }],
+			nextRelationshipIdBefore: 2,
+			nextRelationshipIdAfter: 2,
+			arrangement: {
+				version: STATIC_FAB_ARRANGEMENT_PLAN_VERSION,
+				axis: "Z",
+				mode: "ALIGN_MIN",
+				rootCount: 2,
+				moduleCount: 2,
+				railEdgeCount: 2,
+				advancedSwitchCount: 0,
+				portCount: 0,
+				equipmentGroupCount: 0,
+				affectedOrganizationIds: [],
+				maximumSnapErrorMeters: 0,
+				translations: [
+					{
+						key: "a",
+						deltaX: 0,
+						deltaZ: 0,
+						before: { minX: -20, minZ: 10, maxXExclusive: -10, maxZExclusive: 11 },
+						after: { minX: -20, minZ: 10, maxXExclusive: -10, maxZExclusive: 11 },
+					},
+					{
+						key: "b",
+						deltaX: 0,
+						deltaZ: 10,
+						before: { minX: 0, minZ: 0, maxXExclusive: 10, maxZExclusive: 1 },
+						after: { minX: 0, minZ: 10, maxXExclusive: 10, maxZExclusive: 11 },
+					},
+				],
+			},
+		};
+		const railChecksum = Array(12).fill("00000000").join(":");
+		const prepared = {
+			plan,
+			valid: true,
+			failureCode: null,
+			reason: plan.reason,
+			conflictCells: [],
+			conflictCount: 0,
+			planningMilliseconds: 0,
+			validationMilliseconds: 0,
+			ticket: {
+				ticketId: 1,
+				validationLevel: "exact",
+				sourceRevision: 1,
+				sourcePatchSequence: 1,
+				sourceChecksum: railChecksum,
+				sourceNextAdvancedSwitchId: 1,
+				sourceNextPortId: 1,
+				sourceNextEquipmentGroupId: 1,
+				sourceNextOrganizationId: 66,
+				sourceNextRelationshipId: 2,
+				intentFingerprint: "00000000:00000000",
+				planFingerprint: staticFabArrangementPlanFingerprint(plan),
+				prospectiveChecksum: railChecksum,
+				prospectiveNextAdvancedSwitchId: 1,
+				prospectiveNextPortId: 1,
+				prospectiveNextEquipmentGroupId: 1,
+				prospectiveNextOrganizationId: 66,
+				prospectiveNextRelationshipId: 2,
+			},
+		};
+		const task = createCooperativeTask(
+			staticFabArrangementPreparedShapeErrorSteps(structuredClone(prepared)),
+		);
+		let slices = 0,
+			maximum = 0;
+		while (!task.done) {
+			const start = performance.now();
+			task.step(128);
+			maximum = Math.max(maximum, performance.now() - start);
+			slices++;
+		}
+		expect(task.finish()).toBeNull();
+		expect(slices).toBeGreaterThan(1000);
+		expect(maximum).toBeLessThan(50);
+		const forged = structuredClone(prepared);
+		const changed = forged.plan.relationshipMutations[0].after;
+		// Shift only the last cut coordinate: a matching ticket hash must not bless a non-rigid move.
+		const mutable = changed as unknown as {
+			connectionGroups: Array<{
+				legs: Array<{
+					exclusiveCutEdges: Array<{
+						edge: { from: { x: number; y: number }; to: { x: number; y: number } };
+					}>;
+				}>;
+			}>;
+		};
+		const last = mutable.connectionGroups[0].legs[0].exclusiveCutEdges.at(-1);
+		if (!last) throw new Error("Missing cut");
+		last.edge.from.y++;
+		last.edge.to.y++;
+		const bad = createCooperativeTask(staticFabArrangementPreparedShapeErrorSteps(forged));
+		while (!bad.done) bad.step(128);
+		expect(bad.finish()).not.toBeNull();
+	});
+
 	it.each([
 		"reciprocal",
 		"maximum",
@@ -83,6 +225,118 @@ describe("StaticFabAssemblyRelationshipSoA", () => {
 		await expect(
 			encodeStaticFabAssemblyRelationshipAdditionsCooperatively(mutations, 1, 1, async () => {}),
 		).rejects.toThrow("cursor");
+	});
+	it("encodes maximum before/after records, removals and additions with reversible exact bytes", async () => {
+		const before = createStaticFabAssemblyRelationshipState(maximumRecordState()).records[0];
+		if (!before) throw new Error("Missing maximum record");
+		const after = copyStaticFabAssemblyRelationshipRecord({ ...before, parentOrganizationId: 900 });
+		const small = createStaticFabAssemblyRelationshipState(reciprocalState()).records[0];
+		if (!small) throw new Error("Missing reciprocal record");
+		const removed = remapStaticFabAssemblyRelationshipRecord(small, {
+			relationshipId: 2,
+			organizationIds: new Map([
+				[1, 901],
+				[2, 902],
+				[3, 903],
+			]),
+			quarterTurns: 0,
+			offset: { x: 0, y: 1000 },
+		});
+		const added = remapStaticFabAssemblyRelationshipRecord(small, {
+			relationshipId: 3,
+			organizationIds: new Map([
+				[1, 1001],
+				[2, 1002],
+				[3, 1003],
+			]),
+			quarterTurns: 0,
+			offset: { x: 0, y: 2000 },
+		});
+		const mutations = Object.freeze([
+			Object.freeze({ id: 1, before, after }),
+			Object.freeze({ id: 2, before: removed, after: null }),
+			Object.freeze({ id: 3, before: null, after: added }),
+		]);
+		for (const changes of [
+			mutations,
+			Object.freeze(
+				mutations.map((change) =>
+					Object.freeze({ ...change, before: change.after, after: change.before }),
+				),
+			),
+		]) {
+			const expected = encodeStaticFabAssemblyRelationshipPatch(changes, 4, 4);
+			let checkpoints = 0;
+			let sliceStart = performance.now();
+			let maximumSlice = 0;
+			const encoded = await encodeStaticFabAssemblyRelationshipPatchCooperatively(
+				changes,
+				4,
+				4,
+				async () => {
+					maximumSlice = Math.max(maximumSlice, performance.now() - sliceStart);
+					checkpoints++;
+					sliceStart = performance.now();
+				},
+				128,
+			);
+			expect(maximumSlice).toBeLessThan(50);
+			expect(checkpoints).toBeGreaterThan(1000);
+			expect(encoded.fields).toEqual(expected.fields);
+			expect(encoded.transfer.map((buffer) => new Uint8Array(buffer))).toEqual(
+				expected.transfer.map((buffer) => new Uint8Array(buffer)),
+			);
+			expect(new Set(encoded.transfer).size).toBe(encoded.transfer.length);
+			expect(
+				decodeStaticFabAssemblyRelationshipPatch(
+					structuredClone(encoded.fields, { transfer: encoded.transfer }),
+				),
+			).toEqual(changes);
+		}
+	});
+	it("rejects unstable, noncanonical or cancelled reversible relationship packets", async () => {
+		const record = createStaticFabAssemblyRelationshipState(reciprocalState()).records[0];
+		if (!record) throw new Error("Missing record");
+		const remove = Object.freeze({ id: record.id, before: record, after: null });
+		const mutations = Object.freeze([remove]);
+		let checkpoints = 0;
+		await encodeStaticFabAssemblyRelationshipPatchCooperatively(
+			mutations,
+			2,
+			2,
+			async () => {
+				checkpoints++;
+			},
+			7,
+		);
+		for (const cancelAt of [1, Math.ceil(checkpoints / 2), checkpoints]) {
+			let steps = 0;
+			await expect(
+				encodeStaticFabAssemblyRelationshipPatchCooperatively(
+					mutations,
+					2,
+					2,
+					async () => {
+						if (++steps === cancelAt) throw new Error("cancelled");
+					},
+					7,
+				),
+			).rejects.toThrow("cancelled");
+		}
+		for (const invalid of [
+			[remove],
+			Object.freeze([remove, remove]),
+			Object.freeze([Object.freeze({ ...remove, after: record })]),
+		])
+			await expect(
+				encodeStaticFabAssemblyRelationshipPatchCooperatively(invalid, 2, 2, async () => {}),
+			).rejects.toThrow();
+		await expect(
+			encodeStaticFabAssemblyRelationshipPatchCooperatively(mutations, 1, 2, async () => {}),
+		).rejects.toThrow(/cursor/);
+		await expect(
+			encodeStaticFabAssemblyRelationshipPatchCooperatively(mutations, 2, 2, async () => {}, 0),
+		).rejects.toThrow(/positive/);
 	});
 	it("round-trips canonical records through a unique transferable edge-index snapshot", () => {
 		const source = createStaticFabAssemblyRelationshipState(reciprocalState());

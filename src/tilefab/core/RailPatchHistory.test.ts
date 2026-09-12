@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+	decodeRailPatchSoA,
+	encodeRailPatchEvent,
+	encodeStaticFabMutationRailPatchEventCooperatively,
+} from "../worker/railMirrorProtocol";
+import { copyAdvancedSwitch } from "./AdvancedSwitch";
+import { copyPortRecord } from "./PortRecord";
+import type { RailPatchEvent } from "./RailDocument";
+import {
 	appendBoundedRailHistoryEntry,
 	copyRailMirrorHistoryLedger,
 	createRailMirrorHistoryAdditionLedgerEntryCooperatively,
 	createRailMirrorHistoryLedgerEntry,
 	createRailMirrorHistoryLedgerEntryCooperatively,
+	createRailMirrorHistoryMutationLedgerEntryCooperatively,
 	RAIL_MIRROR_HISTORY_ENTRY_LIMIT,
 	RAIL_MIRROR_HISTORY_RELATIONSHIP_CANONICAL_BYTE_LIMIT,
 	type RailMirrorHistoryLedgerEntry,
+	type RailPatchTransition,
 	railPatchTransitionFingerprint,
 	railPatchTransitionFingerprintCooperatively,
 	trimRailMirrorHistoryRelationshipBudget,
@@ -114,6 +124,181 @@ describe("RailPatchHistory", () => {
 				async () => {},
 			),
 		).rejects.toThrow("immutable");
+	});
+	it("prepares identical forward/reverse ledgers for immutable static edits in all six domains", async () => {
+		const transition = mixedStaticHistoryTransition();
+		const before = JSON.stringify(transition);
+		let checkpoints = 0;
+		const prepared = await createRailMirrorHistoryMutationLedgerEntryCooperatively(
+			"arrange-static-fab",
+			transition,
+			async () => {
+				checkpoints++;
+			},
+			32,
+		);
+		expect(prepared).toEqual(createRailMirrorHistoryLedgerEntry("arrange-static-fab", transition));
+		expect(prepared.forwardFingerprint).not.toBe(prepared.reverseFingerprint);
+		expect(prepared.relationshipEdgeReferences).toBe(4);
+		expect(checkpoints).toBeGreaterThan(100);
+		expect(JSON.stringify(transition)).toBe(before);
+		const cancel = new Error("cancel existing-ID history preparation");
+		await expect(
+			createRailMirrorHistoryMutationLedgerEntryCooperatively(
+				"arrange-static-fab",
+				transition,
+				async () => {
+					throw cancel;
+				},
+				1,
+			),
+		).rejects.toBe(cancel);
+		expect(JSON.stringify(transition)).toBe(before);
+		await expect(
+			createRailMirrorHistoryMutationLedgerEntryCooperatively(
+				"arrange-static-fab",
+				transition,
+				async () => {},
+				0,
+			),
+		).rejects.toThrow(/positive/);
+	});
+	it("preserves the V5 ledger through all six typed mutation domains and reciprocal history packets", async () => {
+		const transition = mixedStaticHistoryTransition();
+		const event: RailPatchEvent = Object.freeze({
+			...transition,
+			sequence: 2,
+			baseRevision: 1,
+			revision: 2,
+			kind: "arrange-static-fab",
+			relationshipChanges: transition.relationshipChanges ?? Object.freeze([]),
+			relationshipNextIdBefore: 2,
+			relationshipNextIdAfter: 2,
+		});
+		const reverse = <T extends { before: unknown; after: unknown }>(changes: readonly T[]) =>
+			Object.freeze(
+				changes.map((change) =>
+					Object.freeze({ ...change, before: change.after, after: change.before }),
+				),
+			);
+		const undo: RailPatchEvent = Object.freeze({
+			...event,
+			kind: "undo",
+			historyOriginKind: "arrange-static-fab",
+			changes: reverse(event.changes),
+			switchChanges: reverse(event.switchChanges),
+			portChanges: reverse(event.portChanges),
+			equipmentGroupChanges: reverse(event.equipmentGroupChanges),
+			organizationChanges: reverse(event.organizationChanges),
+			relationshipChanges: reverse(event.relationshipChanges),
+		});
+		for (const current of [
+			event,
+			undo,
+			Object.freeze({
+				...event,
+				kind: "redo" as const,
+				historyOriginKind: "arrange-static-fab" as const,
+			}),
+		]) {
+			const expected = encodeRailPatchEvent(current);
+			const encoded = await encodeStaticFabMutationRailPatchEventCooperatively(
+				current,
+				async () => {},
+				37,
+			);
+			expect(encoded.patch).toEqual(expected.patch);
+			expect(
+				encoded.transfer.map((buffer) => {
+					if (!(buffer instanceof ArrayBuffer)) throw new Error("Expected transferable bytes");
+					return new Uint8Array(buffer);
+				}),
+			).toEqual(
+				expected.transfer.map((buffer) => {
+					if (!(buffer instanceof ArrayBuffer)) throw new Error("Expected transferable bytes");
+					return new Uint8Array(buffer);
+				}),
+			);
+			expect(new Set(encoded.transfer).size).toBe(encoded.transfer.length);
+			const decoded = decodeRailPatchSoA(
+				structuredClone(encoded.patch, { transfer: encoded.transfer }),
+			);
+			expect(railPatchTransitionFingerprint(decoded)).toBe(railPatchTransitionFingerprint(current));
+			expect(decoded.historyOriginKind).toBe(current.historyOriginKind);
+		}
+		await expect(
+			encodeStaticFabMutationRailPatchEventCooperatively(
+				Object.freeze({ ...event, organizationImpactAuthorizations: Object.freeze([1, 1]) }),
+				async () => {},
+			),
+		).rejects.toThrow(/canonical/);
+		let checkpoints = 0;
+		await encodeStaticFabMutationRailPatchEventCooperatively(
+			event,
+			async () => {
+				checkpoints++;
+			},
+			37,
+		);
+		let cancelledSteps = 0;
+		await expect(
+			encodeStaticFabMutationRailPatchEventCooperatively(
+				event,
+				async () => {
+					if (++cancelledSteps === checkpoints) throw new Error("cancel final packet");
+				},
+				37,
+			),
+		).rejects.toThrow("cancel final packet");
+	});
+	it("rejects mutable nested history values and accessors before hashing an unstable transition", async () => {
+		const transition = mixedStaticHistoryTransition();
+		const groupChange = transition.equipmentGroupChanges[0];
+		const portChange = transition.portChanges[0];
+		if (!groupChange?.after || !portChange?.after)
+			throw new Error("Missing history fixture records");
+		const mutableGroups = Object.freeze({
+			...transition,
+			equipmentGroupChanges: Object.freeze([
+				Object.freeze({
+					...groupChange,
+					after: Object.freeze({ ...groupChange.after, portIds: [1, 2, 3] }),
+				}),
+			]),
+		});
+		const mutableRoute = Object.freeze({
+			...transition,
+			portChanges: Object.freeze([
+				Object.freeze({
+					...portChange,
+					after: Object.freeze({ ...portChange.after, route: { ...portChange.after.route } }),
+				}),
+			]),
+		});
+		let reads = 0;
+		const accessor: number[] = [];
+		Object.defineProperty(accessor, 0, {
+			get() {
+				reads++;
+				return 1;
+			},
+			enumerable: true,
+		});
+		Object.freeze(accessor);
+		const accessorAuthorization = Object.freeze({
+			...transition,
+			organizationImpactAuthorizations: accessor,
+		});
+		for (const invalid of [{ ...transition }, mutableGroups, mutableRoute, accessorAuthorization]) {
+			await expect(
+				createRailMirrorHistoryMutationLedgerEntryCooperatively(
+					"arrange-static-fab",
+					invalid,
+					async () => {},
+				),
+			).rejects.toThrow(/immutable|data properties/);
+		}
+		expect(reads).toBe(0);
 	});
 	it("keeps the newest entries when a bounded authored history reaches capacity", () => {
 		const history = [1, 2, 3];
@@ -413,6 +598,108 @@ describe("RailPatchHistory", () => {
 		expect(Object.isFrozen(copied.undo[0])).toBe(true);
 	});
 });
+
+function mixedStaticHistoryTransition(): RailPatchTransition {
+	const relationship = copyStaticFabAssemblyRelationshipRecord(relationshipRecord());
+	const organization = copyStaticFabOrganizationRecord({
+		id: 1,
+		kind: "AREA",
+		name: "Synthetic move",
+		membership: {
+			railEdges: Array.from({ length: 2049 }, (_, x) => ({
+				from: { x, y: 0 },
+				to: { x: x + 1, y: 0 },
+			})),
+			advancedSwitchIds: [1],
+			equipmentGroupIds: [1],
+		},
+	});
+	const movedOrganization = copyStaticFabOrganizationRecord({
+		...organization,
+		membership: {
+			...organization.membership,
+			railEdges: organization.membership.railEdges.map((edge) => ({
+				from: { x: edge.from.x + 10, y: edge.from.y },
+				to: { x: edge.to.x + 10, y: edge.to.y },
+			})),
+		},
+	});
+	const sw = copyAdvancedSwitch({
+		id: 1,
+		profileClass: "B",
+		origin: { x: 0, y: 0 },
+		forward: 2,
+		lateral: 4,
+		movementMask: 15,
+	});
+	const port = copyPortRecord({
+		id: 1,
+		equipmentGroupId: 1,
+		route: { kind: "CARDINAL_CELL", x: 0, z: 0, from: 8, to: 2 },
+		stationMillimeters: 500,
+		side: "LEFT",
+		lateralOffsetMillimeters: 1000,
+		direction: "WITH_TRAVEL",
+		portType: "EQ",
+		barcode: null,
+	});
+	const group = Object.freeze({
+		id: 1,
+		kind: "EQ" as const,
+		portIds: Object.freeze([1, 2, 3]),
+		pitchMillimeters: 1000,
+		recipe: "Synthetic source",
+	});
+	return Object.freeze({
+		changes: Object.freeze([
+			Object.freeze({ x: 0, y: 0, before: 0x82, after: 0 }),
+			Object.freeze({ x: 10, y: 0, before: 0, after: 0x82 }),
+		]),
+		switchChanges: Object.freeze([
+			Object.freeze({
+				id: 1,
+				before: sw,
+				after: copyAdvancedSwitch({ ...sw, origin: { x: 10, y: 0 } }),
+			}),
+		]),
+		portChanges: Object.freeze([
+			Object.freeze({
+				id: 1,
+				before: port,
+				after: copyPortRecord({
+					...port,
+					route: { kind: "CARDINAL_CELL", x: 10, z: 0, from: 8, to: 2 },
+				}),
+			}),
+		]),
+		equipmentGroupChanges: Object.freeze([
+			Object.freeze({
+				id: 1,
+				before: group,
+				after: Object.freeze({ ...group, recipe: "Synthetic changed" }),
+			}),
+		]),
+		organizationChanges: Object.freeze([
+			Object.freeze({ id: 1, before: organization, after: movedOrganization }),
+		]),
+		organizationNextIdBefore: 3,
+		organizationNextIdAfter: 3,
+		organizationImpactAuthorizations: Object.freeze([1]),
+		relationshipChanges: Object.freeze([
+			Object.freeze({
+				id: 1,
+				before: relationship,
+				after: copyStaticFabAssemblyRelationshipRecord({
+					...relationship,
+					parentOrganizationId: 3,
+				}),
+			}),
+		]),
+		relationshipNextIdBefore: 2,
+		relationshipNextIdAfter: 2,
+		operationalConfigurationPatch: null,
+	});
+}
 
 function organizationTransition(
 	before: StaticFabOrganizationRecord,
