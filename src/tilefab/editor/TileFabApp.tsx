@@ -514,6 +514,7 @@ import {
 import {
 	createOpenFabProjectManifest,
 	OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER,
+	OPENFAB_PROJECT_VIEW_MAX_ZOOM_PIXELS_PER_METER,
 	type OpenFabProjectManifest,
 	type OpenFabProjectView,
 	updateOpenFabProjectManifest,
@@ -844,7 +845,8 @@ import {
 } from "./GuidedPortKeyboardSession";
 import { guidedBuildPracticeTransitionPresentation } from "./GuidedBuildPracticeTransitionPresentation";
 import { portAuthoringSurfacePresentation } from "./PortAuthoringSurfacePresentation";
-import { applyTileFabCameraZoom } from "./TileFabCameraZoom";
+import { applyTileFabCameraZoom, fitTileFabCameraZoom } from "./TileFabCameraZoom";
+import { railPointerPlanningIssue, rejectedRailPointerPlan } from "./RailPointerPlanning";
 import { tileFabMapScale } from "./TileFabMapScale";
 import { scrollFocusedInspectorDisclosure } from "./InspectorDisclosureFocus";
 import {
@@ -1990,10 +1992,10 @@ const ORGANIZATION_DETAIL_TABS = ["overview", "relations", "properties"] as cons
 const ORGANIZATION_LIBRARY_RESULT_LIMIT = 250;
 
 const INITIAL_ZOOM = 38;
-const MIN_ZOOM = 1;
-const FIT_MIN_ZOOM = 0.25;
-const PORT_AUTHORING_FIT_MIN_ZOOM = 0.2;
-const MAX_ZOOM = 96;
+const MIN_ZOOM = OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER;
+const FIT_MIN_ZOOM = OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER;
+const PORT_AUTHORING_FIT_MIN_ZOOM = OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER;
+const MAX_ZOOM = OPENFAB_PROJECT_VIEW_MAX_ZOOM_PIXELS_PER_METER;
 const PORT_KEYBOARD_TARGET_SAFE_MARGIN = 28;
 const ORDINARY_STK_ACQUISITION_MIN_ZOOM = 28;
 const ASYNC_MODEL_DERIVATION_CELL_THRESHOLD = 10_000;
@@ -11180,8 +11182,11 @@ export default function TileFabApp(): React.ReactElement {
 						bendRef.current === "horizontal-first" ||
 						(bendRef.current === "auto" &&
 							Math.abs(current.x - drag.start.x) >= Math.abs(current.y - drag.start.y));
-					const cells = lShapedPath(drag.start, current, horizontalFirst);
-					let plan = planRailErase(activeMap, cells);
+					const pointerIssue = railPointerPlanningIssue(drag.start, current);
+					const cells = pointerIssue ? [] : lShapedPath(drag.start, current, horizontalFirst);
+					let plan: RailErasePlan = pointerIssue
+						? { ...rejectedRailPointerPlan(activeMap.getRevision(), pointerIssue), kind: "erase", switchMutations: [] }
+						: planRailErase(activeMap, cells);
 					const invalidatedPorts = railPatchInvalidatedPorts(
 						activeMap,
 						plan.mutations,
@@ -29449,6 +29454,11 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		eqMembershipFrameDeferredRef.current = false;
+		// A late dock resize must preserve explicit whole-map Fit instead of following one Port.
+		if (fittedMapCameraRef.current) {
+			fitMapRef.current();
+			return;
+		}
 		const camera = cameraRef.current;
 		const renderer = rendererRef.current;
 		const insets = fitMapInsets(canvas);
@@ -29483,11 +29493,6 @@ export default function TileFabApp(): React.ReactElement {
 				? frameStkRows(draft.slots, draft.selection.rows, session.currentRow)
 				: null) ?? centerPortKeyboardRowIfObscured(session, canvas, camera, renderer, insets);
 		} else if (portEquipmentInspectorVisible && selectedPortDetails) {
-			// Explicit Fit keeps the complete map in view as the Inspector changes size.
-			if (fittedMapCameraRef.current) {
-				fitMapRef.current();
-				return;
-			}
 			const presentation = portEquipmentPresentationRef.current;
 			const row = presentation?.portIds.indexOf(selectedPortDetails.port.id) ?? -1;
 			if (!presentation || row < 0) return;
@@ -39909,6 +39914,11 @@ function planActiveBuild(
 	networkLinkContext: RailNetworkLinkAnchorContext | null = null,
 	planningLevel: "preview" | "exact" = "preview",
 ): RailConstructionPlan {
+	const plansPointerPath =
+		!stampSession && !areaStampSession && !templateSession &&
+		(mode === "route" || mode === "network-link");
+	const pointerIssue = railPointerPlanningIssue(start, current, plansPointerPath ? "path" : "direction");
+	if (pointerIssue) return rejectedRailPointerPlan(map.getRevision(), pointerIssue);
 	if (stampSession) {
 		return planRailModuleStamp(map, stampSession.template, start, stampSession.pose);
 	}
@@ -40906,6 +40916,8 @@ function planReshape(
 	preference: BendPreference,
 ): RailReplacementPlan {
 	if (!intent) throw new Error("reshape tool requires an edit intent");
+	const pointerIssue = railPointerPlanningIssue(intent.origin, target);
+	if (pointerIssue) return { ...rejectedRailPointerPlan(map.getRevision(), pointerIssue), kind: "edit" };
 	if (intent.kind === "corner") return planMoveCorner(map, intent.origin, target, preference);
 	if (intent.kind === "endpoint") return planMoveEndpoint(map, intent.origin, target, preference);
 	return planOffsetStraight(map, intent.origin, target);
@@ -41255,10 +41267,6 @@ function fitCameraToExtentBounds(
 	extentAdjustment: 0 | 1,
 	minimumZoom = FIT_MIN_ZOOM,
 ): void {
-	const worldSpanX = Math.max(1, bounds.maxX - bounds.minX + extentAdjustment + paddingMeters * 2);
-	const worldSpanY = Math.max(1, bounds.maxY - bounds.minY + extentAdjustment + paddingMeters * 2);
-	const spanX = camera.rotation % 2 === 0 ? worldSpanX : worldSpanY;
-	const spanY = camera.rotation % 2 === 0 ? worldSpanY : worldSpanX;
 	let leftInset = Math.min(canvas.clientWidth, Math.max(0, insets.left ?? 0));
 	let rightInset = Math.min(canvas.clientWidth, Math.max(0, insets.right ?? 0));
 	const horizontalInset = leftInset + rightInset;
@@ -41279,9 +41287,13 @@ function fitCameraToExtentBounds(
 	}
 	const usableWidth = Math.max(1, canvas.clientWidth - leftInset - rightInset);
 	const usableHeight = Math.max(1, canvas.clientHeight - topInset - bottomInset);
-	camera.zoom = Math.min(
-		MAX_ZOOM,
-		Math.max(minimumZoom, Math.min(usableWidth / spanX, usableHeight / spanY)),
+	camera.zoom = fitTileFabCameraZoom(
+		bounds,
+		{ width: usableWidth, height: usableHeight },
+		camera.rotation,
+		paddingMeters,
+		extentAdjustment,
+		{ minimum: minimumZoom, maximum: MAX_ZOOM },
 	);
 	const centerX = (bounds.minX + bounds.maxX + extentAdjustment) / 2;
 	const centerY = (bounds.minY + bounds.maxY + extentAdjustment) / 2;

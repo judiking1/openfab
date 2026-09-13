@@ -25,6 +25,65 @@ import {
 import { compilePortEquipmentShellPresentation } from "./PortEquipmentShellPresentation";
 
 describe("PortEquipmentPresentation", () => {
+	it("picks markers before body lookup while retaining every section and body tie", () => {
+		const document = new RailDocument();
+		const empty = compilePortEquipmentPresentation(
+			compilePhysicalRail(document.map),
+			document.portEquipment,
+		);
+		let bodyBoundsReads = 0;
+		const bounds = Float32Array.of(
+			-0.5,
+			-0.5,
+			0.5,
+			0.5,
+			15.5,
+			-0.5,
+			16.5,
+			0.5,
+			-0.5,
+			-0.5,
+			0.5,
+			0.5,
+		);
+		const presentation: CompiledPortEquipmentPresentation = {
+			...empty,
+			count: 3,
+			equipmentGroupCount: 3,
+			bodySectionCount: 3,
+			portIds: Int32Array.of(1, 2, 3),
+			equipmentGroupIds: Int32Array.of(1, 2, 3),
+			groupIds: Int32Array.of(1, 2, 3),
+			worldPositions: Float32Array.of(0, 0, 16, 0, 0, 0),
+			bodySectionGroupRows: Uint32Array.of(0, 1, 2),
+			bodySectionCenters: Float32Array.of(0, 0, 16, 0, 0, 0),
+			bodySectionTangents: Float32Array.of(1, 0, 1, 0, 1, 0),
+			bodySectionHalfExtents: Float32Array.of(0.5, 0.5, 0.5, 0.5, 0.5, 0.5),
+			get bodySectionBounds() {
+				bodyBoundsReads++;
+				return bounds;
+			},
+			portBodySectionRows: Uint32Array.of(0, 1, 2),
+			bodySectionPortOffsets: Uint32Array.of(0, 1, 2, 3),
+			bodySectionPortRows: Uint32Array.of(0, 1, 2),
+		};
+		const index = new PortEquipmentSpatialIndex(presentation);
+		expect(index.nearest(0, 0, 0.1)).toMatchObject({ portId: 1, equipmentGroupId: 1 });
+		expect(bodyBoundsReads).toBe(0);
+		for (let repeat = 0; repeat < 2; repeat++) {
+			expect(index.queryBodySections({ minX: -1, minZ: -1, maxX: 17, maxZ: 1 })).toEqual([0, 1, 2]);
+			expect(index.groupAt(0.4, 0.1)).toMatchObject({ portId: 1, equipmentGroupId: 1 });
+			expect(index.groupAt(16.4, 0.1)).toMatchObject({ portId: 2, equipmentGroupId: 2 });
+			expect(index.nearest(0, 0, 0.1)).toMatchObject({ portId: 1 });
+		}
+		const malformed = new PortEquipmentSpatialIndex({
+			...presentation,
+			portBodySectionRows: Uint32Array.of(0, 0, 2),
+		});
+		expect(malformed.nearest(0, 0, 0.1)).toMatchObject({ portId: 1 });
+		expect(malformed.groupAt(0.4, 0.1)).toBeNull();
+	});
+
 	it("keeps every render row while resolving coincident picks by stable ID at different positions", () => {
 		const document = new RailDocument();
 		const empty = compilePortEquipmentPresentation(

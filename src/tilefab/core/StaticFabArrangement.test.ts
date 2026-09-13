@@ -20,7 +20,7 @@ describe("StaticFabArrangement", () => {
 		expect(delta(max, "b")).toEqual({ x: 0, z: 0 });
 	});
 
-	it("snaps mixed-parity center alignment with symmetric ties-to-even rounding", () => {
+	it("keeps mixed-parity centers within half a meter in one stable shared frame", () => {
 		const result = solve("X", "ALIGN_CENTER", [
 			root("negative-half", -4, 0, -1, 1),
 			root("center", 0, 0, 2, 1),
@@ -28,9 +28,84 @@ describe("StaticFabArrangement", () => {
 		]);
 		expect(result).toMatchObject({ valid: true, maximumSnapErrorMeters: 0.5 });
 		if (!result.valid) throw new Error(result.reason);
-		expect(delta(result, "negative-half").x).toBe(4);
+		expect(delta(result, "negative-half").x).toBe(3);
 		expect(delta(result, "center").x).toBe(0);
 		expect(delta(result, "positive-half").x).toBe(-4);
+		expect(
+			solve(
+				"X",
+				"ALIGN_CENTER",
+				result.translations.map(({ key, after }) => ({ key, bounds: after })),
+			),
+		).toMatchObject({ valid: false, code: "NO_CHANGE" });
+	});
+
+	it("aligns equal-parity centers exactly across odd offsets and stays aligned on re-entry", () => {
+		for (const axis of ["X", "Z"] as const) {
+			for (const origin of [-103, -2, 0, 101]) {
+				for (const size of [2, 3, 28, 29]) {
+					const roots =
+						axis === "X"
+							? [
+									root("a", origin, 0, origin + size, 2),
+									root("b", origin + 5, 10, origin + size + 5, 12),
+								]
+							: [
+									root("a", 0, origin, 2, origin + size),
+									root("b", 10, origin + 5, 12, origin + size + 5),
+								];
+					const result = solve(axis, "ALIGN_CENTER", roots);
+					if (!result.valid) throw new Error(result.reason);
+					const centers = result.translations.map(({ after }) =>
+						axis === "X" ? after.minX + after.maxXExclusive : after.minZ + after.maxZExclusive,
+					);
+					expect(centers[0]).toBe(centers[1]);
+					expect(result.maximumSnapErrorMeters).toBeLessThanOrEqual(0.5);
+					expect(translationMap(solve(axis, "ALIGN_CENTER", [...roots].reverse()))).toEqual(
+						translationMap(result),
+					);
+					expect(
+						solve(
+							axis,
+							"ALIGN_CENTER",
+							result.translations.map(({ key, after }) => ({ key, bounds: after })),
+						),
+					).toMatchObject({ valid: false, code: "NO_CHANGE" });
+				}
+			}
+		}
+	});
+
+	it("bounds mixed-width alignment error and makes every parity combination idempotent", () => {
+		for (const origin of [-2_147_483_600, -11, 0, 2_147_483_500]) {
+			for (let width = 1; width <= 8; width++) {
+				for (let offset = 1; offset <= 6; offset++) {
+					const roots = [
+						root("a", origin, 0, origin + width, 2),
+						root("b", origin + offset, 10, origin + offset + 5, 12),
+						root("c", origin - offset, 20, origin - offset + 3, 22),
+					];
+					const result = solve("X", "ALIGN_CENTER", roots);
+					if (!result.valid) {
+						expect(result.code).toBe("NO_CHANGE");
+						continue;
+					}
+					expect(result.maximumSnapErrorMeters).toBeLessThanOrEqual(0.5);
+					const centers = result.translations.map(({ after }) => after.minX + after.maxXExclusive);
+					expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
+					expect(translationMap(solve("X", "ALIGN_CENTER", [...roots].reverse()))).toEqual(
+						translationMap(result),
+					);
+					expect(
+						solve(
+							"X",
+							"ALIGN_CENTER",
+							result.translations.map(({ key, after }) => ({ key, bounds: after })),
+						),
+					).toMatchObject({ valid: false, code: "NO_CHANGE" });
+				}
+			}
+		}
 	});
 
 	it("distributes centers while keeping geometric endpoints fixed", () => {

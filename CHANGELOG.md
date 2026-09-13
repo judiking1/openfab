@@ -18,13 +18,25 @@ All notable public OpenFab changes will be documented here. The format follows
   chapters, with clearer pause/resume, Help, keyboard focus, and recovery through ordinary commands.
 - Ordinary Rail and Port authoring, Assembly handoffs, Checks, and project menus provide clearer
   keyboard feedback and compact layouts while preserving the same atomic edit and Undo/Redo paths.
-- Native project schema v12 preserves explicit assembly relationship state and allocator cursors
-  through save/load, history, and Worker synchronization. Older projects migrate to empty
+- Native project schema v13 preserves explicit assembly relationship state and allocator cursors
+  through save/load, history, and Worker synchronization. Projects older than schema v11 migrate to empty
   relationship state; automatic relationship producers and Detach remain disabled.
 - Relationship snapshot hydration and checksums run in cancellable bounded steps. Final document
   adoption reuses completed relationship validation, and whole-map copying retains less memory.
 
 ### Fixed
+
+- Center alignment uses a shared snapped frame, preventing a one-meter offset between equal-size
+  blocks and allowing Guided Build to advance from Bank alignment to Interbay connection.
+  Mixed-size blocks keep at most half a meter of center error; repeated alignment is a no-op.
+
+- Whole View fits widely spaced projects inside the available workspace, with screen-space
+  margins for rail strokes, and retains the full view when equipment panels resize. Native v13 preserves the full camera range and migrates v12 without
+  changing authored data. Zoom controls and saved views share that range.
+- Direct rail drawing, erasing and reshaping reject gestures longer than 4,096m before allocating
+  a path, with instructions to zoom in and split the edit. Project and Blueprint sizes are unchanged.
+- First port picking prepares marker lookup independently of equipment-body lookup. Body selection
+  retains complete section membership validation and stable-ID tie resolution.
 
 - Large relationship validation avoids long temporary visitation-table pauses. Organization
   bundle placement yields earlier during ownership and membership checks before atomic publication.

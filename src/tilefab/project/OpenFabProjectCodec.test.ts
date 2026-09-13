@@ -63,6 +63,7 @@ import {
 	createPortEquipmentStateFromOpenFabProject,
 	createRailSnapshotFromOpenFabProject,
 	OPENFAB_PROJECT_KIND,
+	OPENFAB_PROJECT_VIEW_MAX_ABSOLUTE_CENTER_METERS,
 	OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER,
 	type OpenFabProject,
 	updateOpenFabProjectManifest,
@@ -175,7 +176,7 @@ describe("OpenFab project codec", () => {
 		);
 		const parsed = parseOpenFabProjectJson(serialized);
 
-		expect(parsed.project.schemaVersion).toBe(12);
+		expect(parsed.project.schemaVersion).toBe(13);
 		expect(parsed.project.operations).toEqual(operations);
 		expect(Object.isFrozen(parsed.project.operations)).toBe(true);
 		expect(Object.isFrozen(parsed.project.operations.vehicleProfile)).toBe(true);
@@ -248,7 +249,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(9);
-		expect(migrated.project.schemaVersion).toBe(12);
+		expect(migrated.project.schemaVersion).toBe(13);
 		expect(migrated.project.operations).toMatchObject({
 			schemaVersion: 2,
 			nextResidentHomeSlotId: 1,
@@ -287,7 +288,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(10);
-		expect(migrated.project.schemaVersion).toBe(12);
+		expect(migrated.project.schemaVersion).toBe(13);
 		expect(migrated.project.relationships).toEqual({
 			schemaVersion: 1,
 			nextRelationshipId: 1,
@@ -310,7 +311,7 @@ describe("OpenFab project codec", () => {
 		};
 		const migrated = parseOpenFabProjectValue(legacy);
 		expect(migrated.migratedFromVersion).toBe(11);
-		expect(migrated.project.schemaVersion).toBe(12);
+		expect(migrated.project.schemaVersion).toBe(13);
 		expect(migrated.project.relationships).toEqual(current.relationships);
 		const blueprint = migrated.project.blueprints.records[0];
 		if (blueprint?.kind !== "STATIC_FAB_ORGANIZATION") throw new Error("Missing migrated bundle");
@@ -390,7 +391,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(8);
-		expect(migrated.project.schemaVersion).toBe(12);
+		expect(migrated.project.schemaVersion).toBe(13);
 		expect(migrated.project.operations).toEqual(emptyOperationalConfigurationState());
 		expect(
 			parseOpenFabProjectJson(serializeOpenFabProject(migrated.project)).migratedFromVersion,
@@ -425,7 +426,7 @@ describe("OpenFab project codec", () => {
 		const parsed = parseOpenFabProjectJson(serializeOpenFabProject(project));
 		const snapshot = createRailSnapshotFromOpenFabProject(parsed.project);
 
-		expect(project.schemaVersion).toBe(12);
+		expect(project.schemaVersion).toBe(13);
 		expect(parsed.migratedFromVersion).toBeNull();
 		expect(parsed.project.areas).toEqual({
 			schemaVersion: 2,
@@ -553,6 +554,66 @@ describe("OpenFab project codec", () => {
 		expect(loadedPayload.readiness.fingerprint).toBe(beforePayload.readiness.fingerprint);
 		expect(loadedPayload.snapshot.revision).toBe(beforePayload.snapshot.revision);
 		expect(loadedPayload.snapshot.sequence).toBe(beforePayload.snapshot.sequence);
+	});
+
+	it("migrates native v12 without changing authored state or saved camera", () => {
+		const current = captureOpenFabProject(relationshipPersistenceDocument(), {
+			manifest: MANIFEST,
+			view: {
+				center: [240, 320],
+				zoomPixelsPerMeter: 0.25,
+				quarterTurns: 0,
+				railPresentation: "profiled",
+			},
+		});
+		const migrated = parseOpenFabProjectValue({ ...current, schemaVersion: 12 });
+		expect(migrated.migratedFromVersion).toBe(12);
+		expect(migrated.project).toEqual(current);
+		const startupProject = captureOpenFabProject(new RailDocument(), {
+			manifest: MANIFEST,
+			view: current.view,
+		});
+		const payload = compileRailStartup({
+			kind: "project-json",
+			json: JSON.stringify({ ...startupProject, schemaVersion: 12 }),
+		});
+		expect(payload.source).toMatchObject({
+			kind: "project",
+			schemaVersion: 13,
+			migratedFromVersion: 12,
+			view: current.view,
+		});
+		expect(payload.authoredChecksum).toBe(
+			createRailSnapshotFromOpenFabProject(startupProject).checksum,
+		);
+	});
+
+	it("preserves a wide camera outside authored cells without expanding the rail coordinate domain", () => {
+		const current = captureOpenFabProject(new RailDocument(), {
+			manifest: MANIFEST,
+			view: {
+				center: [2 ** 34, -(2 ** 34)],
+				zoomPixelsPerMeter: 2 ** -26,
+				quarterTurns: 0,
+				railPresentation: "profiled",
+			},
+		});
+		expect(parseOpenFabProjectJson(serializeOpenFabProject(current)).project).toEqual(current);
+		for (const center of [
+			Infinity,
+			Number.NaN,
+			OPENFAB_PROJECT_VIEW_MAX_ABSOLUTE_CENTER_METERS * 2,
+		]) {
+			expect(() =>
+				parseOpenFabProjectValue({ ...current, view: { ...current.view, center: [center, 0] } }),
+			).toThrow(OpenFabProjectParseError);
+		}
+		expect(() =>
+			parseOpenFabProjectValue({
+				...current,
+				rail: { ...current.rail, cells: [[2 ** 31, 0, 0x22]] },
+			}),
+		).toThrow(OpenFabProjectParseError);
 	});
 
 	it("round-trips the fitted overview zoom required by a factory-scale map", () => {
@@ -808,7 +869,7 @@ describe("OpenFab project codec", () => {
 		expect(loadedSnapshot.sequence).toBe(beforeSnapshot.sequence);
 		expect(loadedPayload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 12,
+			schemaVersion: 13,
 			migratedFromVersion: null,
 		});
 
@@ -871,7 +932,7 @@ describe("OpenFab project codec", () => {
 		});
 
 		expect(parsed.migratedFromVersion).toBe(2);
-		expect(parsed.project.schemaVersion).toBe(12);
+		expect(parsed.project.schemaVersion).toBe(13);
 		expect(parsed.project.equipment.records).toEqual([
 			{ id: 1, kind: "STK", template: "CUSTOM", portIds: [1, 2] },
 		]);
@@ -927,7 +988,7 @@ describe("OpenFab project codec", () => {
 		};
 		const v1Result = parseOpenFabProjectValue(v1);
 		expect(v1Result.migratedFromVersion).toBe(1);
-		expect(v1Result.project.schemaVersion).toBe(12);
+		expect(v1Result.project.schemaVersion).toBe(13);
 		expect(v1Result.project.ports).toEqual({ schemaVersion: 1, nextPortId: 1, records: [] });
 		expect(v1Result.project.equipment).toEqual({
 			schemaVersion: 1,
@@ -951,7 +1012,7 @@ describe("OpenFab project codec", () => {
 
 		const result = parseOpenFabProjectValue(v0);
 		expect(result.migratedFromVersion).toBe(0);
-		expect(result.project.schemaVersion).toBe(12);
+		expect(result.project.schemaVersion).toBe(13);
 		expect(result.project.ports.records).toEqual([]);
 		expect(result.project.equipment.records).toEqual([]);
 		expect(result.project.areas.records).toEqual([]);
@@ -1006,7 +1067,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(4);
-		expect(migrated.project.schemaVersion).toBe(12);
+		expect(migrated.project.schemaVersion).toBe(13);
 		expect(migrated.project.blueprints).toEqual({ schemaVersion: 4, records: [blueprint] });
 	});
 
@@ -1026,7 +1087,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(5);
-		expect(migrated.project.schemaVersion).toBe(12);
+		expect(migrated.project.schemaVersion).toBe(13);
 		expect(migrated.project.areas).toEqual({
 			schemaVersion: 2,
 			nextOrganizationId: 1,
@@ -1082,7 +1143,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(6);
-		expect(migrated.project.schemaVersion).toBe(12);
+		expect(migrated.project.schemaVersion).toBe(13);
 		expect(migrated.project.areas).toMatchObject({ schemaVersion: 2, nextOrganizationId: 2 });
 		expect(migrated.project.areas.records[0]).toMatchObject({
 			kind: "BAY",
@@ -1181,7 +1242,7 @@ describe("OpenFab project codec", () => {
 		const serialized = serializeOpenFabProject(project);
 		const parsed = parseOpenFabProjectJson(serialized);
 
-		expect(parsed.project.schemaVersion).toBe(12);
+		expect(parsed.project.schemaVersion).toBe(13);
 		expect(parsed.project.blueprints.schemaVersion).toBe(4);
 		expect(parsed.project.blueprints.records).toEqual([blueprint]);
 		expect(parsed.project.blueprints.records[0]?.kind).toBe("STATIC_FAB_ORGANIZATION");
@@ -1259,7 +1320,7 @@ describe("OpenFab project codec", () => {
 		const reparsed = parseOpenFabProjectJson(serialized);
 
 		expect(upgraded.migratedFromVersion).toBe(7);
-		expect(upgraded.project.schemaVersion).toBe(12);
+		expect(upgraded.project.schemaVersion).toBe(13);
 		expect(upgraded.project.blueprints.schemaVersion).toBe(4);
 		expect(upgraded.project.blueprints.records).toEqual(records);
 		expect(reparsed.migratedFromVersion).toBeNull();

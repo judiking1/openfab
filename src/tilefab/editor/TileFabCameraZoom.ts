@@ -39,3 +39,25 @@ export function applyTileFabCameraZoom(
 	camera.zoom = nextZoom;
 	return true;
 }
+
+/** Fit into the unobstructed frame with 12px for strokes/markers, even far below 1px/m. */
+export function fitTileFabCameraZoom(
+	bounds: Readonly<{ minX: number; minY: number; maxX: number; maxY: number }>,
+	frame: Readonly<{ width: number; height: number }>,
+	rotation: Camera["rotation"],
+	paddingMeters: number,
+	extentAdjustment: 0 | 1,
+	zoomBounds: TileFabCameraZoomBounds,
+): number {
+	const worldSpanX = Math.max(1, bounds.maxX - bounds.minX + extentAdjustment + paddingMeters * 2);
+	const worldSpanY = Math.max(1, bounds.maxY - bounds.minY + extentAdjustment + paddingMeters * 2);
+	const spanX = rotation % 2 === 0 ? worldSpanX : worldSpanY;
+	const spanY = rotation % 2 === 0 ? worldSpanY : worldSpanX;
+	return Math.min(
+		zoomBounds.maximum,
+		Math.max(
+			zoomBounds.minimum,
+			Math.min(Math.max(1, frame.width - 24) / spanX, Math.max(1, frame.height - 24) / spanY),
+		),
+	);
+}

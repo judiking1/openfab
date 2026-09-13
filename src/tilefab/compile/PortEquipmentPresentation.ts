@@ -84,13 +84,13 @@ export class PortEquipmentSpatialIndex {
 	private readonly presentation: CompiledPortEquipmentPresentation;
 	private readonly chunks: ReadonlyMap<string, Uint32Array>;
 	private readonly pickChunks: ReadonlyMap<string, Uint32Array>;
-	private readonly groupChunks: ReadonlyMap<string, Uint32Array>;
+	private groupChunks: ReadonlyMap<string, Uint32Array> | null = null;
 	private readonly groupCandidates: number[] = [];
 	private readonly groupVisitStamps: Uint32Array;
 	private groupVisitGeneration = 0;
 	private readonly bodySectionVisitStamps: Uint32Array;
 	private bodySectionVisitGeneration = 0;
-	private readonly bodySectionPortMappingValid: boolean;
+	private bodySectionPortMappingValid = false;
 
 	constructor(presentation: CompiledPortEquipmentPresentation) {
 		this.presentation = presentation;
@@ -153,6 +153,14 @@ export class PortEquipmentSpatialIndex {
 			}
 		}
 		this.pickChunks = pickChunks;
+		this.groupVisitStamps = new Uint32Array(presentation.equipmentGroupCount);
+		this.bodySectionVisitStamps = new Uint32Array(presentation.bodySectionCount);
+	}
+
+	/** Marker input needs only marker buckets; build body geometry lookup on its first consumer. */
+	private bodyChunks(): ReadonlyMap<string, Uint32Array> {
+		if (this.groupChunks) return this.groupChunks;
+		const presentation = this.presentation;
 		const mutableGroups = new Map<string, number[]>();
 		for (let sectionRow = 0; sectionRow < presentation.bodySectionCount; sectionRow++) {
 			const offset = sectionRow * 4;
@@ -183,9 +191,8 @@ export class PortEquipmentSpatialIndex {
 		this.groupChunks = new Map(
 			[...mutableGroups.entries()].map(([key, rows]) => [key, Uint32Array.from(rows)] as const),
 		);
-		this.groupVisitStamps = new Uint32Array(presentation.equipmentGroupCount);
-		this.bodySectionVisitStamps = new Uint32Array(presentation.bodySectionCount);
 		this.bodySectionPortMappingValid = hasValidPortEquipmentBodySectionMapping(presentation);
+		return this.groupChunks;
 	}
 
 	nearest(worldX: number, worldZ: number, radiusMeters: number): PortEquipmentHit | null {
@@ -292,7 +299,7 @@ export class PortEquipmentSpatialIndex {
 		const minChunkZ = Math.floor(bounds.minZ / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		const maxChunkZ = Math.floor(bounds.maxZ / PORT_EQUIPMENT_SPATIAL_CHUNK_METERS);
 		visitSparseGridBuckets(
-			this.groupChunks,
+			this.bodyChunks(),
 			{ minX: minChunkX, maxX: maxChunkX, minY: minChunkZ, maxY: maxChunkZ },
 			":",
 			(rows) => {
@@ -312,7 +319,6 @@ export class PortEquipmentSpatialIndex {
 	/** Resolve a click on a derived group body to one stable representative member port. */
 	groupAt(worldX: number, worldZ: number, paddingMeters = 0): PortEquipmentHit | null {
 		if (
-			!this.bodySectionPortMappingValid ||
 			!Number.isFinite(worldX) ||
 			!Number.isFinite(worldZ) ||
 			!Number.isFinite(paddingMeters) ||
@@ -320,6 +326,8 @@ export class PortEquipmentSpatialIndex {
 		) {
 			return null;
 		}
+		this.bodyChunks();
+		if (!this.bodySectionPortMappingValid) return null;
 		this.queryBodySections(
 			{
 				minX: worldX - paddingMeters,

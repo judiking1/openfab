@@ -5866,6 +5866,26 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 				page,
 				`${viewport.label} factory EQ Fit`,
 			);
+			const eqDockResizeClearance = [];
+			if (viewport.width === 1440 || viewport.width === 390) {
+				const options = page.locator(
+					'.tilefab-equipment-workspace[data-port-type="EQ"] .tilefab-equipment-options',
+				);
+				for (const expanded of [true, false]) {
+					await options.locator("summary").click();
+					assertEqual(
+						(await options.getAttribute("open")) !== null,
+						expanded,
+						`${viewport.label} EQ options open state`,
+					);
+					eqDockResizeClearance.push(
+						await assertOrdinaryPortFittedMapClearsControls(
+							page,
+							`${viewport.label} factory EQ Fit after options ${expanded ? "open" : "close"}`,
+						),
+					);
+				}
+			}
 			const eqOverview = await page.getByTestId("rail-canvas").evaluate((canvas) => ({
 				cameraZoom: Number(window.__tileFab?.camera?.zoom),
 				portSlotCount: Number(canvas.dataset.portSlotCount),
@@ -6003,11 +6023,16 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 						new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 				);
 				const afterOut = await page.evaluate(() => Number(window.__tileFab?.camera?.zoom));
-				assertAtMost(afterOut, before, "390x844 overview zoom-out is never zoom-in");
+				assertAtMost(afterOut, before - 0.001, "390x844 overview zoom-out decreases scale");
 				await zoomIn.click();
 				await page.waitForTimeout(300);
 				const afterIn = await page.evaluate(() => Number(window.__tileFab?.camera?.zoom));
-				assertAtLeast(afterIn, before + 0.001, "390x844 overview zoom-in is monotonic");
+				assertAtLeast(afterIn, afterOut + 0.001, "390x844 overview zoom-in increases scale");
+				assertAtMost(
+					Math.abs(afterIn - before),
+					1e-9,
+					"390x844 overview zoom-out/in restores the original scale",
+				);
 				assertAtMost(afterIn, 1, "390x844 overview zoom-in remains monotonic below detail scale");
 				await fitControl.click();
 				await page.waitForFunction(
@@ -6332,7 +6357,7 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 				Object.freeze({
 					label: viewport.label,
 					ohbOverview: Object.freeze({ ...ohbOverview, ohbFittedMapClearance }),
-					eqOverview: Object.freeze({ ...eqOverview, eqFittedMapClearance }),
+					eqOverview: Object.freeze({ ...eqOverview, eqFittedMapClearance, eqDockResizeClearance }),
 					modality,
 					modalityEvidence,
 					...proof,
@@ -39528,89 +39553,129 @@ async function assertOrdinaryEqDockControlsVisible(page, viewport, label) {
 }
 
 async function assertOrdinaryPortFittedMapClearsControls(page, label) {
-	const canvas = page.getByTestId("rail-canvas");
-	const encodedBounds = await canvas.getAttribute("data-fitted-map-bounds");
-	const bounds = encodedBounds?.split(",").map(Number);
-	if (!bounds || bounds.length !== 4 || bounds.some((value) => !Number.isFinite(value))) {
-		throw new Error(`${label} has no valid fitted map bounds: ${encodedBounds ?? "missing"}.`);
-	}
+	// Camera changes schedule Canvas/DOM rendering; never compare corners and markers from different frames.
+	const snapshot = await page.evaluate(async () => {
+		const read = () => {
+			const api = window.__tileFab;
+			const camera = api?.camera;
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+			if (!camera || !(canvas instanceof HTMLCanvasElement) || !(marker instanceof HTMLElement))
+				return null;
+			const bounds = canvas.dataset.fittedMapBounds?.split(",").map(Number);
+			if (!bounds || bounds.length !== 4 || bounds.some((value) => !Number.isFinite(value)))
+				return null;
+			const canvasBounds = canvas.getBoundingClientRect();
+			const project = (x, y) => {
+				const rotated =
+					camera.rotation === 1
+						? [-y, x]
+						: camera.rotation === 2
+							? [-x, -y]
+							: camera.rotation === 3
+								? [y, -x]
+								: [x, y];
+				return {
+					x: canvasBounds.left + camera.offsetX + rotated[0] * camera.zoom,
+					y: canvasBounds.top + camera.offsetY + rotated[1] * camera.zoom,
+				};
+			};
+			const corners = [project(bounds[0], bounds[1]), project(bounds[2] + 1, bounds[3] + 1)];
+			const map = {
+				left: Math.min(...corners.map((point) => point.x)),
+				right: Math.max(...corners.map((point) => point.x)),
+				top: Math.min(...corners.map((point) => point.y)),
+				bottom: Math.max(...corners.map((point) => point.y)),
+			};
+			const row = Number(canvas.dataset.guidedPortKeyboardRow);
+			const slots =
+				api.getEditorModel().portSlotArtifacts[canvas.dataset.guidedPortKeyboardType]?.slots;
+			if (!slots || !Number.isInteger(row) || row < 0 || row >= slots.count) return null;
+			const target = project(slots.worldPositions[row * 2], slots.worldPositions[row * 2 + 1]);
+			const markerBounds = marker.getBoundingClientRect();
+			if (
+				Math.abs(markerBounds.left + markerBounds.width / 2 - target.x) > 0.05 ||
+				Math.abs(markerBounds.top + markerBounds.height / 2 - target.y) > 0.05 ||
+				Math.abs(Number(canvas.dataset.cameraZoom) - camera.zoom) > 0.00051 ||
+				Math.abs(Number(canvas.dataset.cameraOffsetX) - camera.offsetX) > 0.00051 ||
+				Math.abs(Number(canvas.dataset.cameraOffsetY) - camera.offsetY) > 0.00051
+			)
+				return null;
+			const toRect = (element) => {
+				const rect = element.getBoundingClientRect();
+				return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+			};
+			const selectors = [
+				".tilefab-tools",
+				".tilefab-camera-controls",
+				".tilefab-pattern-browser",
+				".tilefab-blueprint-library",
+				".tilefab-guided-build-panel",
+				".tilefab-inspector",
+				".tilefab-readiness",
+				".tilefab-organization-library",
+				".tilefab-navigator-panel",
+				".tilefab-action-hints",
+				".tilefab-buildbar",
+				".tilefab-assembly-connector",
+			];
+			const seen = new Set();
+			const obstructions = [];
+			for (const selector of selectors) {
+				for (const element of document.querySelectorAll(selector)) {
+					if (
+						!(element instanceof HTMLElement) ||
+						element.offsetParent === null ||
+						seen.has(element)
+					) {
+						continue;
+					}
+					seen.add(element);
+					const rect = element.getBoundingClientRect();
+					if (
+						rect.right <= canvasBounds.left ||
+						rect.left >= canvasBounds.right ||
+						rect.bottom <= canvasBounds.top ||
+						rect.top >= canvasBounds.bottom
+					) {
+						continue;
+					}
+					obstructions.push({ selector, rect: toRect(element) });
+				}
+			}
+			const caption = marker.querySelector("span");
+			return {
+				map,
+				portTargetReframed: canvas.dataset.fitPortTargetReframed,
+				layout: {
+					viewport: { width: innerWidth, height: innerHeight },
+					canvas: toRect(canvas),
+					marker: toRect(marker),
+					label: caption instanceof HTMLElement ? toRect(caption) : null,
+					obstructions,
+				},
+			};
+		};
+		let previous = null;
+		let stableFrames = 0;
+		const deadline = performance.now() + 10_000;
+		while (performance.now() < deadline) {
+			await new Promise(requestAnimationFrame);
+			const current = read();
+			const encoded = current ? JSON.stringify(current) : null;
+			stableFrames = encoded !== null && encoded === previous ? stableFrames + 1 : 0;
+			// Dock ResizeObserver -> camera frame -> rendered marker spans successive frames.
+			if (stableFrames >= 2) return current;
+			previous = encoded;
+		}
+		throw new Error("Whole View camera, rendered marker and dock did not settle together.");
+	});
+	const { map, layout } = snapshot;
 	assertEqual(
-		await canvas.getAttribute("data-fit-port-target-reframed"),
+		snapshot.portTargetReframed,
 		"false",
 		`${label} preserves complete-map Fit without target-only fallback pan`,
 	);
-	const [minX, minY, maxX, maxY] = bounds;
-	const [firstCorner, secondCorner] = await Promise.all([
-		screenPointForWorld(page, { x: minX, y: minY }),
-		screenPointForWorld(page, { x: maxX + 1, y: maxY + 1 }),
-	]);
-	const map = {
-		left: Math.min(firstCorner.x, secondCorner.x),
-		right: Math.max(firstCorner.x, secondCorner.x),
-		top: Math.min(firstCorner.y, secondCorner.y),
-		bottom: Math.max(firstCorner.y, secondCorner.y),
-	};
-	const layout = await page.evaluate(() => {
-		const toRect = (element) => {
-			const bounds = element.getBoundingClientRect();
-			return {
-				left: bounds.left,
-				right: bounds.right,
-				top: bounds.top,
-				bottom: bounds.bottom,
-			};
-		};
-		const canvas = document.querySelector('[data-testid="rail-canvas"]');
-		const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
-		if (!(canvas instanceof HTMLCanvasElement) || !(marker instanceof HTMLElement)) return null;
-		const canvasBounds = canvas.getBoundingClientRect();
-		const selectors = [
-			".tilefab-tools",
-			".tilefab-camera-controls",
-			".tilefab-pattern-browser",
-			".tilefab-blueprint-library",
-			".tilefab-guided-build-panel",
-			".tilefab-inspector",
-			".tilefab-readiness",
-			".tilefab-organization-library",
-			".tilefab-navigator-panel",
-			".tilefab-action-hints",
-			".tilefab-buildbar",
-			".tilefab-assembly-connector",
-		];
-		const seen = new Set();
-		const obstructions = [];
-		for (const selector of selectors) {
-			for (const element of document.querySelectorAll(selector)) {
-				if (
-					!(element instanceof HTMLElement) ||
-					element.offsetParent === null ||
-					seen.has(element)
-				) {
-					continue;
-				}
-				seen.add(element);
-				const rect = element.getBoundingClientRect();
-				if (
-					rect.right <= canvasBounds.left ||
-					rect.left >= canvasBounds.right ||
-					rect.bottom <= canvasBounds.top ||
-					rect.top >= canvasBounds.bottom
-				) {
-					continue;
-				}
-				obstructions.push({ selector, rect: toRect(element) });
-			}
-		}
-		const label = marker.querySelector("span");
-		return {
-			viewport: { width: innerWidth, height: innerHeight },
-			canvas: toRect(canvas),
-			marker: toRect(marker),
-			label: label instanceof HTMLElement ? toRect(label) : null,
-			obstructions,
-		};
-	});
 	if (!layout?.label) throw new Error(`${label} cannot resolve its Canvas/current-target layout.`);
 	const overlaps = (left, right) =>
 		left.left < right.right &&

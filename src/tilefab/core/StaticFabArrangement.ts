@@ -75,8 +75,9 @@ const MAXIMUM_ROOT_KEY_LENGTH = 256;
 /**
  * Solve one deterministic grid arrangement without reading or mutating project state.
  *
- * Distribution keeps the first and last geometric roots fixed. Fractional ideal translations are
- * rounded to the nearest meter with ties going to the even integer, symmetrically for negatives.
+ * Center alignment uses a shared snapped frame so equal-parity extents share an exact center.
+ * Distribution keeps the first and last geometric roots fixed and rounds fractional translations
+ * to the nearest meter with ties going to the even integer, symmetrically for negatives.
  */
 export function solveStaticFabArrangement(intent: unknown): StaticFabArrangementResult {
 	if (!isRecord(intent)) return failure("INVALID_INTENT", "정렬 요청 형식이 유효하지 않습니다");
@@ -188,6 +189,14 @@ function alignmentDeltas(
 	const minimum = Math.min(...roots.map((root) => axisMinimum(root.bounds, axis)));
 	const maximum = Math.max(...roots.map((root) => axisMaximum(root.bounds, axis)));
 	const targetCenterTwice = minimum + maximum;
+	const maximumExtent = Math.max(
+		...roots.map((root) => axisMaximum(root.bounds, axis) - axisMinimum(root.bounds, axis)),
+	);
+	// Snap the shared widest frame once, then center each root inside it. Rounding each
+	// displacement separately can leave identical roots one meter apart after ALIGN_CENTER.
+	// Mixed-parity widths use the upper half-meter center; all bounds stay inside the widest
+	// frame, so repeating alignment is a no-op even when exact mixed-parity alignment is impossible.
+	const targetMinimum = Math.floor((targetCenterTwice - maximumExtent) / 2);
 	const byKey = new Map<string, number>();
 	let maximumSnapErrorMeters = 0;
 	for (const root of roots) {
@@ -196,10 +205,12 @@ function alignmentDeltas(
 				? minimum - axisMinimum(root.bounds, axis)
 				: mode === "ALIGN_MAX"
 					? maximum - axisMaximum(root.bounds, axis)
-					: roundRationalTiesToEven(
-							BigInt(targetCenterTwice - axisCenterTwice(root.bounds, axis)),
-							2n,
-						);
+					: targetMinimum +
+						Math.ceil(
+							(maximumExtent - (axisMaximum(root.bounds, axis) - axisMinimum(root.bounds, axis))) /
+								2,
+						) -
+						axisMinimum(root.bounds, axis);
 		byKey.set(root.key, delta);
 		if (mode === "ALIGN_CENTER") {
 			const resultingCenterTwice = axisCenterTwice(root.bounds, axis) + delta * 2;

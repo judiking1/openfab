@@ -65,15 +65,19 @@ import {
 } from "./OpenFabProjectRelationships";
 
 export const OPENFAB_PROJECT_KIND = "openfab/tilefab-project" as const;
-export const OPENFAB_PROJECT_SCHEMA_VERSION = 12 as const;
+export const OPENFAB_PROJECT_SCHEMA_VERSION = 13 as const;
 export const OPENFAB_RAIL_GRAMMAR = "directed-cardinal-1m-v1" as const;
 export const OPENFAB_RAIL_CELL_ENCODING = "incoming-low-outgoing-high-v1" as const;
 export const OPENFAB_RAIL_CELL_SIZE_MILLIMETERS = 1_000 as const;
 export const OPENFAB_RESERVED_SECTION_SCHEMA_VERSION = 0 as const;
 export const OPENFAB_PORT_SECTION_SCHEMA_VERSION = 1 as const;
 export const OPENFAB_EQUIPMENT_SECTION_SCHEMA_VERSION = 1 as const;
-export const OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER = 0.25;
+// Fits the complete signed-int32 coordinate domain even in a compact unobstructed viewport.
+export const OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER = 2 ** -30;
 export const OPENFAB_PROJECT_VIEW_MAX_ZOOM_PIXELS_PER_METER = 512;
+// Camera centers may lie outside authored int32 cells when chrome offsets a very wide overview.
+// Retain enough numeric headroom for grid iteration and sub-cell projection at maximum zoom.
+export const OPENFAB_PROJECT_VIEW_MAX_ABSOLUTE_CENTER_METERS = 2 ** 46;
 
 export const OPENFAB_PROJECT_DIRECTION_NAMES = ["N", "E", "S", "W"] as const;
 

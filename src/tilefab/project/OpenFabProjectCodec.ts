@@ -95,6 +95,7 @@ import {
 	OPENFAB_PROJECT_DIRECTION_NAMES,
 	OPENFAB_PROJECT_KIND,
 	OPENFAB_PROJECT_SCHEMA_VERSION,
+	OPENFAB_PROJECT_VIEW_MAX_ABSOLUTE_CENTER_METERS,
 	OPENFAB_PROJECT_VIEW_MAX_ZOOM_PIXELS_PER_METER,
 	OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER,
 	OPENFAB_RAIL_CELL_ENCODING,
@@ -181,7 +182,7 @@ export class OpenFabProjectParseError extends Error {
 
 export interface OpenFabProjectParseResult {
 	readonly project: OpenFabProject;
-	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | null;
+	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | null;
 }
 
 export function parseOpenFabProjectJson(source: string): OpenFabProjectParseResult {
@@ -206,11 +207,17 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	const schemaVersion = expectInteger(root.schemaVersion, "$.schemaVersion");
 	if (schemaVersion === OPENFAB_PROJECT_SCHEMA_VERSION) {
-		return Object.freeze({ project: validateVersionTwelve(root), migratedFromVersion: null });
+		return Object.freeze({ project: validateVersionThirteen(root), migratedFromVersion: null });
+	}
+	if (schemaVersion === 12) {
+		return Object.freeze({
+			project: validateVersionThirteen({ ...root, schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION }),
+			migratedFromVersion: 12,
+		});
 	}
 	if (schemaVersion === 11) {
 		return Object.freeze({
-			project: validateVersionTwelve({
+			project: validateVersionThirteen({
 				...root,
 				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 				blueprints: migrateBlueprintSectionV3(root.blueprints),
@@ -298,7 +305,7 @@ export function serializeOpenFabProject(
 	) {
 		throw new Error("OpenFab project serialization limit is invalid.");
 	}
-	const normalized = validateVersionTwelve(expectRecord(project, "$", "INVALID_ROOT"));
+	const normalized = validateVersionThirteen(expectRecord(project, "$", "INVALID_ROOT"));
 	const sorted = sortJsonObjectKeys(normalized);
 	const characterLength = prettyJsonCharacterLength(sorted) + 1;
 	if (characterLength > maximumCharacters) {
@@ -365,7 +372,7 @@ export function parseOpenFabProjectBlueprintValue(value: unknown): OpenFabProjec
 	return record;
 }
 
-function validateVersionTwelve(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function validateVersionThirteen(root: Readonly<Record<string, unknown>>): OpenFabProject {
 	expectExactKeys(
 		root,
 		[
@@ -412,7 +419,7 @@ function validateVersionTwelve(root: Readonly<Record<string, unknown>>): OpenFab
 }
 
 function migrateVersionTen(project: OpenFabProjectVersionTen): OpenFabProject {
-	return validateVersionTwelve({
+	return validateVersionThirteen({
 		...project,
 		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 		relationships: createEmptyOpenFabProjectRelationshipSection(),
@@ -2990,8 +2997,11 @@ function validateView(value: unknown): OpenFabProjectView {
 	if (center.length !== 2) fail("INVALID_FIELD", "$.view.center", "view center must be [x, z]");
 	const centerX = expectFiniteNumber(center[0], "$.view.center[0]");
 	const centerZ = expectFiniteNumber(center[1], "$.view.center[1]");
-	if (Math.abs(centerX) > 0x7fffffff || Math.abs(centerZ) > 0x7fffffff) {
-		fail("INVALID_FIELD", "$.view.center", "view center is outside the authored coordinate domain");
+	if (
+		Math.abs(centerX) > OPENFAB_PROJECT_VIEW_MAX_ABSOLUTE_CENTER_METERS ||
+		Math.abs(centerZ) > OPENFAB_PROJECT_VIEW_MAX_ABSOLUTE_CENTER_METERS
+	) {
+		fail("INVALID_FIELD", "$.view.center", "view center is outside the supported camera domain");
 	}
 	const zoomPixelsPerMeter = expectFiniteNumber(
 		view.zoomPixelsPerMeter,
