@@ -29,6 +29,11 @@ jobs:
       - run: pnpm check:core
       - run: pnpm test -- --run
       - run: pnpm build
+      - name: Install Korean fonts for browser evidence
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes fonts-noto-cjk
+          test -n "$(fc-list :lang=ko family)"
       - run: pnpm test:live-demo
       - run: pnpm lint
       - run: pnpm check:release-identity
@@ -50,6 +55,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # The clean export runs the complete authoring journey, bundle audit, and production smoke.
+      - name: Install Korean fonts for browser evidence
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes fonts-noto-cjk
+          test -n "$(fc-list :lang=ko family)"
       - run: pnpm check:public-export
         env:
           OPENFAB_PUBLIC_EXPORT_EVIDENCE_DIR: ${{ runner.temp }}/openfab-public-export-evidence

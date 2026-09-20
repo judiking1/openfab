@@ -7,7 +7,14 @@ import {
 	Minus,
 	X,
 } from "lucide-react";
-import { type KeyboardEvent, type RefObject, useId, useRef, useState } from "react";
+import {
+	type KeyboardEvent,
+	type RefObject,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { editorCommand, editorCommandHintBinding } from "./EditorCommandRegistry";
 import {
 	deriveGuidedBuildChapters,
@@ -44,6 +51,13 @@ export interface GuidedBuildKeyboardPortState {
 
 export interface GuidedBuildPanelProps {
 	readonly evaluation: GuidedBuildEvaluation;
+	readonly copyRecovery?: Readonly<{
+		phase: "waiting" | "choice";
+		busy: boolean;
+		canRetry: boolean;
+		error: string | null;
+	}> | null;
+	readonly onRetryCopy?: () => void;
 	readonly practiceGraduated?: boolean;
 	readonly currentEquipmentGroupCount?: number;
 	readonly currentPortCount?: number;
@@ -78,6 +92,8 @@ export interface GuidedBuildPanelProps {
 
 export function GuidedBuildPanel({
 	evaluation,
+	copyRecovery = null,
+	onRetryCopy,
 	practiceGraduated = false,
 	currentEquipmentGroupCount = 0,
 	currentPortCount = 0,
@@ -131,6 +147,69 @@ export function GuidedBuildPanel({
 		readonly currentMissionId: GuidedBuildEvaluation["currentMissionId"];
 		readonly sequence: number;
 	} | null>(null);
+	const copyRetryRef = useRef<HTMLButtonElement>(null);
+	useLayoutEffect(() => {
+		if (copyRecovery?.phase !== "choice") return;
+		const active = document.activeElement;
+		if (active !== document.body && active?.getAttribute("data-testid") !== "rail-canvas") return;
+		copyRetryRef.current?.focus({ preventScroll: true });
+	}, [copyRecovery?.phase]);
+	if (copyRecovery) {
+		return (
+			<aside
+				className="tilefab-guided-build-panel"
+				data-testid="guided-build-panel"
+				data-current-mission="copy-recovery"
+				aria-labelledby="guided-copy-recovery-title"
+			>
+				<header>
+					<span>
+						<GraduationCap size={17} />
+					</span>
+					<div>
+						<small>복사 연습</small>
+						<strong id="guided-copy-recovery-title">복사 결과 확인</strong>
+					</div>
+					<div className="tilefab-guided-build-window-actions">
+						<button
+							type="button"
+							aria-label="Guided Build 최소화"
+							onClick={onMinimize}
+							disabled={copyRecovery.busy}
+						>
+							<Minus size={14} /> 접기
+						</button>
+					</div>
+				</header>
+				<div className="tilefab-guided-build-mission">
+					<p role="status">
+						{copyRecovery.phase === "waiting"
+							? "복사는 완료됐습니다. 동기화 후 연습 조건을 확인합니다."
+							: "복사는 정상적으로 완료됐지만, 이 연습의 ‘원본과 떨어진 Loop와 장비 복제’ 조건은 아직 충족하지 않았습니다."}
+					</p>
+					<p>
+						이번 복사만 되돌려 다시 배치하거나, 현재 결과를 유지하고 일반 편집을 계속할 수 있습니다.
+					</p>
+					{copyRecovery.error ? <p role="alert">{copyRecovery.error}</p> : null}
+					<div className="tilefab-guided-build-actions tilefab-guided-build-copy-actions">
+						<button
+							ref={copyRetryRef}
+							type="button"
+							onClick={onRetryCopy}
+							disabled={
+								copyRecovery.phase !== "choice" || copyRecovery.busy || !copyRecovery.canRetry
+							}
+						>
+							{copyRecovery.busy ? "되돌리는 중…" : "이번 복사 되돌리고 재시도"}
+						</button>
+						<button type="button" onClick={onExit} disabled={copyRecovery.busy}>
+							결과 유지하고 가이드 종료
+						</button>
+					</div>
+				</div>
+			</aside>
+		);
+	}
 	const current = evaluation.missions.find((mission) => mission.status === "current") ?? null;
 	const missionCount = evaluation.missions.length;
 	const currentSequence = evaluation.complete ? missionCount : (current?.definition.sequence ?? 1);

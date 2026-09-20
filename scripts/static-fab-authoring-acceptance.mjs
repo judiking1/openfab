@@ -7218,6 +7218,129 @@ async function exerciseStkWaitStateCompleteRegression(browserInstance) {
 	}
 }
 
+async function exerciseGuidedCopyRecovery(page, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	const panel = page.getByTestId("guided-build-panel");
+	const before = await readMetrics(page);
+	const { bounds } = await readRailGeometry(page);
+	if (!bounds) throw new Error("Guided copy recovery requires the authored practice Loop.");
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.getByTestId("copy-selection-command").click();
+	await page.getByTestId("area-stamp-exit").waitFor({ state: "visible" });
+	const sharedTrunk = {
+		x: bounds.minX + Math.floor((bounds.maxX - bounds.minX) / 2),
+		y: bounds.minY,
+	};
+	await centerWorld(page, sharedTrunk);
+	await moveToWorld(page, sharedTrunk);
+	await page.waitForFunction(
+		() => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			return canvas?.getAttribute("data-draft-preview-valid") === "true";
+		},
+		undefined,
+		{ timeout: 10_000 },
+	);
+	const point = await screenPointForWorld(page, sharedTrunk);
+	assertEqual(
+		await page.evaluate(
+			({ x, y }) => document.elementFromPoint(x, y)?.getAttribute("data-testid"),
+			point,
+		),
+		"rail-canvas",
+		"Connected copy visible Canvas target",
+	);
+	await page.mouse.click(point.x, point.y);
+	const copied = await waitForWorker(
+		page,
+		(metrics) => Number(metrics.modelSequence) === Number(before.modelSequence) + 1,
+		{ timeout: 10_000 },
+	);
+	assertSingleGuidedPortCommit(copied, before, "Connected equipped Loop copy");
+	assertEqual(
+		Number(copied.equipmentGroups),
+		Number(before.equipmentGroups) * 2,
+		"Connected copy keeps all equipment",
+	);
+	await page.waitForFunction(
+		() =>
+			document
+				.querySelector('[data-testid="guided-build-panel"]')
+				?.getAttribute("data-current-mission") === "copy-recovery",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	const retry = panel.getByRole("button", { name: "이번 복사 되돌리고 재시도", exact: true });
+	const keep = panel.getByRole("button", { name: "결과 유지하고 가이드 종료", exact: true });
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 390, height: 844 },
+		{ width: 760, height: 900 },
+		{ width: 1440, height: 900 },
+	]) {
+		await page.setViewportSize(viewport);
+		await assertLocatorInsideViewport(page, panel);
+		for (const control of [retry, keep]) {
+			await assertLocatorInsideViewport(page, control);
+			const box = await control.boundingBox();
+			if (!box || box.height < 44 || box.width < 44)
+				throw new Error("Copy recovery target is smaller than 44px.");
+			assertEqual(
+				await control.evaluate((element) => {
+					const rect = element.getBoundingClientRect();
+					return element.contains(
+						document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+					);
+				}),
+				true,
+				"Copy recovery control receives pointer input",
+			);
+		}
+		await page.screenshot({
+			path: path.join(
+				artifactRoot,
+				`guided-copy-recovery-${label}-${viewport.width}x${viewport.height}.png`,
+			),
+		});
+	}
+	await panel.getByRole("button", { name: "Guided Build 최소화", exact: true }).click();
+	await panel.waitFor({ state: "hidden" });
+	assertIncludes(
+		await page.getByTestId("guided-build-resume").innerText(),
+		"복사 결과 확인",
+		"Collapsed Guide retains copy recovery",
+	);
+	assertProjectUnchanged(await readMetrics(page), copied, "Minimize preserves connected copy");
+	await page.getByTestId("guided-build-resume").click();
+	if (label === "save") await retry.press("Enter");
+	else await retry.click();
+	const restored = await waitForWorker(
+		page,
+		(metrics) => Number(metrics.modelSequence) === Number(copied.modelSequence) + 1,
+		{ timeout: 10_000 },
+	);
+	assertEqual(restored.modelChecksum, before.modelChecksum, "Retry restores exact source checksum");
+	assertEqual(
+		restored.equipmentGroups,
+		before.equipmentGroups,
+		"Retry preserves original equipment",
+	);
+	assertEqual(restored.workerSimulationReady, "false", "Copy recovery preserves simulation gate");
+	await page.waitForFunction(
+		() =>
+			document
+				.querySelector('[data-testid="guided-build-panel"]')
+				?.getAttribute("data-current-mission") === "reuse-loop",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	await canvas.focus();
+	await canvas.press("Enter");
+	await page.getByTestId("connected-selection-command").click();
+	await page.getByTestId("copy-selection-command").waitFor({ state: "visible" });
+	await page.setViewportSize({ width: 390, height: 844 });
+}
+
 async function exerciseGuidedPortHandoffRegression(
 	browserInstance,
 	practiceTransitionMode = "save",
@@ -9767,6 +9890,7 @@ async function exerciseGuidedPortHandoffRegression(
 			visibleCancelBefore,
 			"Guided Reuse visible placement cancel",
 		);
+		await exerciseGuidedCopyRecovery(page, practiceTransitionMode);
 		await copySelectionCommand.click();
 		await page.waitForFunction(
 			() =>
@@ -29319,6 +29443,27 @@ function assertSingleGuidedPortCommit(actual, before, phase) {
 async function advanceOrdinaryEqKeyboardToLegalEnd(page, phase) {
 	const canvas = page.getByTestId("rail-canvas");
 	const marker = page.getByTestId("ordinary-port-keyboard-target");
+	// Legal slot diagnostics can still describe the previous tool until its next paint.
+	// Bind the route to the painted EQ cursor before checking focus/Enter stability.
+	await page.waitForFunction(
+		() => {
+			const target = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+			const row = target?.getAttribute("data-port-slot-row");
+			return (
+				target?.getAttribute("data-port-type") === "EQ" &&
+				target.getAttribute("data-phase") === "choose-slot" &&
+				row !== null &&
+				row !== undefined &&
+				row !== "" &&
+				Number.isSafeInteger(Number(row)) &&
+				Number(row) >= 0 &&
+				target.style.left !== "" &&
+				target.style.top !== ""
+			);
+		},
+		undefined,
+		{ timeout: 10_000 },
+	);
 	const route = await page.evaluate(() => {
 		const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
 		const slots = window.__tileFab?.getEditorModel().portSlotArtifacts.EQ?.slots;

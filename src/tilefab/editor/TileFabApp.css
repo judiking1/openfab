@@ -1606,7 +1606,7 @@
 	border-radius: 4px;
 	color: #b8c7c9;
 	background: #182022;
-	font-size: 9px;
+	font-size: var(--tilefab-guided-action-font-size, 9px);
 	cursor: pointer;
 }
 
@@ -1615,6 +1615,11 @@
 	border-color: #4a858b;
 	color: #e2fafc;
 	background: #1a3437;
+}
+
+.tilefab-guided-build-copy-actions {
+	--tilefab-guided-action-font-size: 13px;
+	flex-direction: column;
 }
 
 .tilefab-guided-build-actions button:focus-visible,

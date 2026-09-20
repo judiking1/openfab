@@ -947,6 +947,16 @@ import {
 	rejectedRailConstructionAnchor,
 } from "./RailConstructionContinuation";
 import { DeferredProductionBayModulePanel } from "./DeferredProductionBayModulePanel";
+import {
+	captureGuidedBuildCopySource,
+	completeGuidedBuildCopy,
+	guidedBuildCopyReceiptIsCurrent,
+	guidedBuildCopyRecoveryPhase,
+	GuidedBuildCopyUndo,
+	type GuidedBuildCopyReceipt,
+	type GuidedBuildCopySource,
+	type GuidedBuildCopyRecoveryContext,
+} from "./GuidedBuildCopyRecovery";
 import { nextProjectMenuIndex } from "./ProjectMenuNavigation";
 import {
 	describeOpenFabProjectSaveCancellation,
@@ -1661,6 +1671,7 @@ interface RailAreaStampSession {
 		readonly tool: EditorTool;
 		readonly patchSequence: number;
 		readonly staticFabSelection: StaticFabSelection | null;
+		readonly guidedCopySource: GuidedBuildCopySource | null;
 	}>;
 }
 
@@ -3413,6 +3424,11 @@ export default function TileFabApp(): React.ReactElement {
 	const [openFabStartDialogOpen, setOpenFabStartDialogOpen] = useState(false);
 	const openFabStartReturnFocusRef = useRef<HTMLElement | null>(null);
 	const [guidedBuildOpen, setGuidedBuildOpen] = useState(false);
+	const [guidedBuildCopyReceipt, setGuidedBuildCopyReceipt] = useState<GuidedBuildCopyReceipt | null>(null);
+	const guidedBuildCopyReceiptRef = useRef<GuidedBuildCopyReceipt | null>(null);
+	const [guidedBuildCopyUndo] = useState(() => new GuidedBuildCopyUndo());
+	const [guidedBuildCopyUndoPending, setGuidedBuildCopyUndoPending] = useState(false);
+	const [guidedBuildCopyRecoveryError, setGuidedBuildCopyRecoveryError] = useState<string | null>(null);
 	const [guidedBuildReviewing, setGuidedBuildReviewing] = useState(false);
 	const guidedRailKeyboardSessionRef = useRef<GuidedRailKeyboardSession | null>(null);
 	const guidedRailKeyboardEntryRef = useRef<HTMLButtonElement | null>(null);
@@ -3836,14 +3852,39 @@ export default function TileFabApp(): React.ReactElement {
 			projectSession.manifest.id,
 		],
 	);
+	const guidedBuildCopySequence = railDocument.getPatchSequence();
+	const guidedBuildCopySettled = !modelSyncPending && editorModel === editorModelRef.current &&
+		workerBridgeDocumentRef.current === railDocument && workerState.status === "ready" &&
+		workerState.sequence === guidedBuildCopySequence && workerState.checksum === editorModel.authoredChecksum;
+	const guidedBuildReuseComplete = guidedBuildEvaluation.missions.some(
+		(mission) => mission.definition.id === "reuse-loop" && mission.conditionMet,
+	);
+	const guidedBuildCopyPhase = guidedBuildCopyRecoveryPhase(guidedBuildCopyReceipt, {
+		document: railDocument, patchSequence: guidedBuildCopySequence, checksum: editorModel.authoredChecksum,
+		settled: guidedBuildCopySettled, reuseComplete: guidedBuildReuseComplete,
+		canUndo: railDocument.canUndo, commandsAvailable: true,
+	});
+	const guidedBuildCopyRecovering = guidedBuildCopyPhase !== null;
+	useEffect(() => {
+		if (!guidedBuildCopyReceipt ||
+			(guidedBuildCopyReceiptIsCurrent(guidedBuildCopyReceipt, { document: railDocument, patchSequence: guidedBuildCopySequence }) &&
+				!(guidedBuildCopySettled && guidedBuildReuseComplete))) return;
+		if (guidedBuildCopyReceiptRef.current === guidedBuildCopyReceipt) guidedBuildCopyReceiptRef.current = null;
+		setGuidedBuildCopyReceipt((current) => current === guidedBuildCopyReceipt ? null : current);
+	}, [guidedBuildCopyReceipt, railDocument, guidedBuildCopySequence, guidedBuildCopySettled, guidedBuildReuseComplete]);
 	const guidedBuildChapterSummary = useMemo(
 		() => deriveGuidedBuildChapters(guidedBuildEvaluation),
 		[guidedBuildEvaluation],
 	);
 	const guidedBuildCurrentChapterEvaluation = guidedBuildCurrentChapter(guidedBuildChapterSummary);
-	const guidedBuildCurrentChapterLabel =
-		guidedBuildCurrentChapterEvaluation?.definition.label ?? "ADVANCED FAB";
+	const guidedBuildCurrentChapterLabel = guidedBuildCopyRecovering
+		? "복사 결과 확인"
+		: (guidedBuildCurrentChapterEvaluation?.definition.label ?? "ADVANCED FAB");
 	useEffect(() => {
+		if (guidedBuildCopyRecovering) {
+			setGuidedBuildChapterCheckpoint(null);
+			return;
+		}
 		const previousChapterId = guidedBuildPreviousChapterRef.current;
 		const nextChapterId = guidedBuildChapterSummary.currentChapterId;
 		const guidedBuildWasOpen = guidedBuildWasOpenRef.current;
@@ -3858,7 +3899,7 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		guidedBuildPreviousChapterRef.current = nextChapterId;
 		guidedBuildWasOpenRef.current = guidedBuildOpen;
-	}, [guidedBuildChapterSummary.currentChapterId, guidedBuildOpen]);
+	}, [guidedBuildChapterSummary.currentChapterId, guidedBuildOpen, guidedBuildCopyRecovering]);
 	useEffect(() => {
 		if (!guidedBuildChapterCheckpoint) return;
 		setStatus(
@@ -3948,7 +3989,7 @@ export default function TileFabApp(): React.ReactElement {
 		() => guidedBuildRevealedEquipmentToolIds(guidedBuildEvaluation),
 		[guidedBuildEvaluation],
 	);
-	const guidedBuildCurrentMission =
+	const guidedBuildCurrentMission = guidedBuildCopyRecovering ? null :
 		guidedBuildEvaluation.missions.find((mission) => mission.status === "current") ?? null;
 	const guidedBuildCurrentPrompt = guidedBuildCurrentMission?.prompt ?? null;
 	const guidedBuildReviewMissionIdRef = useRef(guidedBuildEvaluation.currentMissionId);
@@ -4006,13 +4047,15 @@ export default function TileFabApp(): React.ReactElement {
 	]);
 	const guidedBuildCurrentSequence = guidedBuildEvaluation.complete
 		? guidedBuildEvaluation.missions.length
-		: (guidedBuildCurrentMission?.definition.sequence ?? 1);
+		: ((guidedBuildCopyRecovering
+			? guidedBuildEvaluation.missions.find((mission) => mission.definition.id === "reuse-loop")
+			: guidedBuildCurrentMission)?.definition.sequence ?? 1);
 	const guidedBuildResumeAvailable =
 		!guidedBuildOpen &&
 		!guidedBuildEvaluation.complete &&
 		guidedBuildPreferences?.lastEntryChoice === "guided" &&
 		startupState.status === "ready";
-	const guidedBuildExperienceActive = guidedBuildOpen || guidedBuildResumeAvailable;
+	const guidedBuildExperienceActive = !guidedBuildCopyRecovering && (guidedBuildOpen || guidedBuildResumeAvailable);
 	const staticFabExclusiveCommandActive = staticFabMutationHistory !== null ||
 		operationalConfigurationOpen ||
 		stationProposalReview !== null ||
@@ -4214,7 +4257,7 @@ export default function TileFabApp(): React.ReactElement {
 		stkDraftSelection, stkTemplate, guidedStkMinimumPorts, guidedPortKeyboard?.portType === "STK",
 	);
 	const stkDraftReady = stkDraftReview.ready;
-	const guidedBuildPrimaryTarget = guidedBuildPlacementSessionActive || guidedBuildReviewing
+	const guidedBuildPrimaryTarget = guidedBuildCopyRecovering || guidedBuildPlacementSessionActive || guidedBuildReviewing
 		? null
 		: resolveGuidedBuildPrimaryTarget({
 				open: guidedBuildOpen,
@@ -4235,7 +4278,7 @@ export default function TileFabApp(): React.ReactElement {
 				reuseCopySelectionActionable: guidedReuseCopySelectionActionable,
 			});
 	const guidedBuildPrimaryTargetInstruction =
-		guidedBuildPlacementSessionActive
+		guidedBuildCopyRecovering || guidedBuildPlacementSessionActive
 			? null
 			: (guidedBuildPrimaryTarget?.instruction ??
 				(guidedBuildPrimaryTargetManaged
@@ -4264,7 +4307,7 @@ export default function TileFabApp(): React.ReactElement {
 									: "다음 실제 편집 대상을 준비하고 있습니다."
 					: null));
 	const guidedBuildCurrentTargetActivity =
-		guidedBuildChapterCheckpoint ||
+		guidedBuildCopyRecovering || guidedBuildChapterCheckpoint ||
 		guidedBuildReviewing ||
 		guidedBuildPlacementSessionActive ||
 		guidedBuildOrganizationPickerSurfaceOpen ||
@@ -6302,6 +6345,15 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const completeGuidedAreaStampSingleCommit = (session: RailAreaStampSession): void => {
 		if (areaStampSessionRef.current !== session) return;
+		const document = editorModelRef.current.document;
+		const receipt = completeGuidedBuildCopy(session.returnContext?.guidedCopySource, {
+			document, patchSequence: document.getPatchSequence(),
+		});
+		if (receipt) {
+			guidedBuildCopyReceiptRef.current = receipt;
+			setGuidedBuildCopyReceipt(receipt);
+			setGuidedBuildCopyRecoveryError(null);
+		}
 		dragRef.current = null;
 		pendingDragCellRef.current = null;
 		closureSnapRef.current = null;
@@ -6318,7 +6370,7 @@ export default function TileFabApp(): React.ReactElement {
 			updateEditorActivity(returnContext.activity);
 		}
 		if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
-		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+		if (!receipt) requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const updateStaticFabOrganizationOverlapSelection = (
 		next: StaticFabOrganizationOverlapSelection | null,
@@ -21398,6 +21450,13 @@ export default function TileFabApp(): React.ReactElement {
 						tool: toolRef.current,
 						patchSequence: editorModelRef.current.document.getPatchSequence(),
 						staticFabSelection: staticFabSelectionRef.current,
+						guidedCopySource: captureGuidedBuildCopySource({
+							document: editorModelRef.current.document,
+							patchSequence: editorModelRef.current.document.getPatchSequence(),
+							checksum: editorModelRef.current.authoredChecksum,
+						}, { guided: guidedBuildExperienceActive, missionId: guidedBuildEvaluation.currentMissionId,
+							origin, settled: guidedBuildCopySettled && !modelSyncPendingRef.current,
+							template: staticFabTemplate }),
 					})
 				: undefined;
 		clearTransientConstruction();
@@ -29493,6 +29552,51 @@ export default function TileFabApp(): React.ReactElement {
 		setProjectMenuOpen(false);
 		setOpenFabStartDialogOpen(true);
 	};
+	const retryGuidedBuildCopy = async (): Promise<void> => {
+		const receipt = guidedBuildCopyReceiptRef.current;
+		if (!receipt || guidedBuildCopyUndo.isPending) return;
+		const trigger = document.activeElement;
+		const read = (): GuidedBuildCopyRecoveryContext => {
+			const model = editorModelRef.current;
+			const source = model.document;
+			const mirror = workerBridgeDocumentRef.current === source ? workerBridgeRef.current?.getState() : null;
+			return {
+				document: source, patchSequence: source.getPatchSequence(), checksum: model.authoredChecksum,
+				settled: !modelSyncPendingRef.current && mirror?.status === "ready" &&
+					mirror.sequence === source.getPatchSequence() && mirror.checksum === model.authoredChecksum,
+				reuseComplete: guidedBuildReuseComplete,
+				canUndo: source.canUndo,
+				commandsAvailable: guidedBuildCopyReceiptRef.current === receipt &&
+					guidedBuildInputBlockedReason() === null && !areaStampSessionRef.current &&
+					!organizationBundlePlacementSessionRef.current && !blueprintPlacementPendingRef.current,
+			};
+		};
+		const attempt = guidedBuildCopyUndo.retry(receipt, read, handleUndo);
+		setGuidedBuildCopyUndoPending(guidedBuildCopyUndo.isPending);
+		setGuidedBuildCopyRecoveryError(null);
+		try {
+			const outcome = await attempt;
+			if (outcome === "restored") {
+				if (guidedBuildCopyReceiptRef.current === receipt) guidedBuildCopyReceiptRef.current = null;
+				setGuidedBuildCopyReceipt((current) => current === receipt ? null : current);
+				setStatus("이번 복사를 되돌렸습니다 · 원본 Loop를 다시 선택하고 떨어진 위치에 복제하세요");
+				requestAnimationFrame(() => {
+					const current = editorModelRef.current.document;
+					if (current !== receipt.document || current.getPatchSequence() !== receipt.patchSequence + 1) return;
+					if (document.activeElement !== trigger && document.activeElement !== document.body) return;
+					canvasRef.current?.focus({ preventScroll: true });
+				});
+			} else if (guidedBuildCopyReceiptIsCurrent(receipt, read())) {
+				setGuidedBuildCopyRecoveryError("현재 편집이나 동기화가 끝난 뒤 다시 시도하세요. 복사 결과는 유지됩니다.");
+			}
+		} catch (error) {
+			if (guidedBuildCopyReceiptIsCurrent(receipt, read())) {
+				setGuidedBuildCopyRecoveryError(error instanceof Error ? error.message : "복사를 되돌리지 못했습니다. 다시 시도하세요.");
+			}
+		} finally {
+			setGuidedBuildCopyUndoPending(guidedBuildCopyUndo.isPending);
+		}
+	};
 	const restoreCanvasFocusAfterAction = (): void => {
 		const previousFocus = document.activeElement;
 		requestAnimationFrame(() => {
@@ -29515,6 +29619,8 @@ export default function TileFabApp(): React.ReactElement {
 		restoreCanvasFocusAfterAction();
 	};
 	const exitGuidedBuild = (): void => {
+		guidedBuildCopyReceiptRef.current = null;
+		setGuidedBuildCopyReceipt(null);
 		recordGuidedBuildChoice("dismissed");
 		guidedBuildWasOpenRef.current = false;
 		setGuidedBuildReviewing(false);
@@ -30766,7 +30872,7 @@ export default function TileFabApp(): React.ReactElement {
 								>
 									<GraduationCap size={14} />{" "}
 									{guidedBuildResumeAvailable
-										? `가이드 계속하기 · ${guidedBuildCurrentChapterLabel} · ${guidedBuildCurrentSequence}/${guidedBuildEvaluation.missions.length}`
+										? guidedBuildCopyRecovering ? "복사 결과 확인 계속하기" : `가이드 계속하기 · ${guidedBuildCurrentChapterLabel} · ${guidedBuildCurrentSequence}/${guidedBuildEvaluation.missions.length}`
 										: "시작 방법 선택 · Guided Build 추천"}
 								</button>
 								<button
@@ -30888,13 +30994,13 @@ export default function TileFabApp(): React.ReactElement {
 							type="button"
 							className="tilefab-guided-build-resume"
 							data-testid="guided-build-resume"
-							title={`Guided Build · ${guidedBuildCurrentChapterLabel} · ${guidedBuildCurrentSequence}/${guidedBuildEvaluation.missions.length} 계속하기`}
+							title={guidedBuildCopyRecovering ? "복사 결과 확인 계속하기" : `Guided Build · ${guidedBuildCurrentChapterLabel} · ${guidedBuildCurrentSequence}/${guidedBuildEvaluation.missions.length} 계속하기`}
 							onClick={resumeGuidedBuild}
 						>
 							<GraduationCap size={15} />
 							<span>
 								<strong>GUIDED · {guidedBuildCurrentChapterLabel}</strong>
-								<small>{guidedBuildCurrentSequence}/{guidedBuildEvaluation.missions.length} · 계속하기</small>
+								<small>{guidedBuildCopyRecovering ? "계속하기" : `${guidedBuildCurrentSequence}/${guidedBuildEvaluation.missions.length} · 계속하기`}</small>
 							</span>
 						</button>
 					) : null}
@@ -31146,7 +31252,7 @@ export default function TileFabApp(): React.ReactElement {
 								: "available",
 						currentSequence: guidedBuildCurrentSequence,
 						missionCount: guidedBuildEvaluation.missions.length,
-						currentTitle:
+						currentTitle: guidedBuildCopyRecovering ? "복사 결과 확인" :
 							guidedBuildCurrentPrompt?.title ??
 							(guidedBuildEvaluation.complete ? "완료" : "첫 단계"),
 						currentChapterLabel: guidedBuildCurrentChapterLabel,
@@ -32110,6 +32216,13 @@ export default function TileFabApp(): React.ReactElement {
 					<DeferredGuidedBuildPanel
 						key={guidedBuildEvaluation.currentMissionId ?? "complete"}
 						evaluation={guidedBuildEvaluation}
+						copyRecovery={guidedBuildCopyPhase ? {
+							phase: guidedBuildCopyPhase,
+							busy: guidedBuildCopyUndoPending,
+							canRetry: guidedBuildCommandsActionable && railDocument.canUndo,
+							error: guidedBuildCopyRecoveryError,
+						} : null}
+						onRetryCopy={() => void retryGuidedBuildCopy()}
 						practiceGraduated={
 							guidedBuildPreferences?.graduatedProjectId === projectSession.manifest.id
 						}
@@ -32127,7 +32240,7 @@ export default function TileFabApp(): React.ReactElement {
 						primaryTargetInstruction={guidedBuildPrimaryTargetInstruction}
 						primaryTargetManaged={guidedBuildPrimaryTargetManaged}
 						primaryTargetActionable={guidedBuildCommandsActionable}
-						chapterCheckpointId={guidedBuildChapterCheckpoint}
+						chapterCheckpointId={guidedBuildCopyRecovering ? null : guidedBuildChapterCheckpoint}
 						keyboardRail={
 							guidedRailKeyboard?.scope === "guided"
 								? {
