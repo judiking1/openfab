@@ -2083,6 +2083,8 @@ interface MutableValueRef<Value> {
 }
 
 interface EditorSurfaceRestorationOptions {
+	readonly assemblyReviewPhase: string;
+	readonly modelSyncPending: boolean;
 	readonly actionHintsObstructionIdentity: string;
 	readonly actionHintsRaised: boolean;
 	readonly compactEditorViewport: boolean;
@@ -2091,9 +2093,10 @@ interface EditorSurfaceRestorationOptions {
 	readonly compactInspectorExpanded: boolean;
 	readonly contextualInspectorVisible: boolean;
 	readonly editorToolDescriptionsExpanded: boolean;
-	readonly cameraFitScopeRef: MutableValueRef<"map" | "stk-selection" | null>;
+	readonly cameraFitScopeRef: MutableValueRef<"map" | "stk-selection" | "assembly-review" | null>;
 	readonly fitMapRef: MutableValueRef<() => void>;
 	readonly fitStkSelectionRef: MutableValueRef<() => boolean>;
+	readonly fitAssemblyReviewRef: MutableValueRef<() => boolean>;
 	readonly canvasRef: MutableValueRef<HTMLCanvasElement | null>;
 	readonly guidedPortKeyboardSessionRef: MutableValueRef<GuidedPortKeyboardSession | null>;
 	readonly cameraRef: MutableValueRef<Camera>;
@@ -2110,6 +2113,8 @@ interface EditorSurfaceRestorationOptions {
  * value, including superseded factory-scale derived models, reachable until another commit.
  */
 function useEditorSurfaceRestoration({
+	assemblyReviewPhase,
+	modelSyncPending,
 	actionHintsObstructionIdentity,
 	actionHintsRaised,
 	compactEditorViewport,
@@ -2121,6 +2126,7 @@ function useEditorSurfaceRestoration({
 	cameraFitScopeRef,
 	fitMapRef,
 	fitStkSelectionRef,
+	fitAssemblyReviewRef,
 	canvasRef,
 	guidedPortKeyboardSessionRef,
 	cameraRef,
@@ -2143,6 +2149,19 @@ function useEditorSurfaceRestoration({
 				const contextualInspector = document.querySelector<HTMLElement>(
 					'.tilefab-inspector[data-compact-layout="bottom-sheet"]',
 				);
+				if (cameraFitScopeRef.current === "assembly-review") {
+					const connector = document.querySelector<HTMLElement>(".tilefab-assembly-connector");
+					if (
+						!modelSyncPending &&
+						activityNavigation?.dataset.toolDensity === expectedDensity &&
+						(assemblyReviewPhase === "inactive"
+							? connector === null
+							: connector?.dataset.phase === assemblyReviewPhase)
+					) {
+						fitAssemblyReviewRef.current();
+					}
+					return;
+				}
 				if (
 					window.matchMedia("(max-width: 520px)").matches ===
 						expectedCompactInspectorCollisionViewport &&
@@ -2187,6 +2206,8 @@ function useEditorSurfaceRestoration({
 			if (secondFrame !== 0) cancelAnimationFrame(secondFrame);
 		};
 	}, [
+		assemblyReviewPhase,
+		modelSyncPending,
 		actionHintsObstructionIdentity,
 		actionHintsRaised,
 		compactEditorViewport,
@@ -2198,6 +2219,7 @@ function useEditorSurfaceRestoration({
 		cameraFitScopeRef,
 		fitMapRef,
 		fitStkSelectionRef,
+		fitAssemblyReviewRef,
 		canvasRef,
 		guidedPortKeyboardSessionRef,
 		cameraRef,
@@ -2346,9 +2368,12 @@ export default function TileFabApp(): React.ReactElement {
 	const closureSnapRef = useRef<Cell | null>(null);
 	const closureSnapRadiusPixelsRef = useRef(0);
 	const panRef = useRef<PanState | null>(null);
-	const cameraFitScopeRef = useRef<"map" | "stk-selection" | null>(null);
+	const cameraFitScopeRef = useRef<"map" | "stk-selection" | "assembly-review" | null>(null);
 	const fitMapRef = useRef<() => void>(() => undefined);
 	const fitStkSelectionRef = useRef<() => boolean>(() => false);
+	const fitAssemblyReviewRef = useRef<() => boolean>(() => false);
+	const assemblyReviewBoundsRef =
+		useRef<ReturnType<typeof staticFabAssemblyConnectorSelectionBounds>>(null);
 	const inspectAreaDragRef = useRef<InspectAreaDragState | null>(null);
 	const inspectAreaKeyboardSessionRef = useRef<InspectAreaKeyboardSession | null>(null);
 	const inspectAreaKeyboardReadoutRef = useRef<HTMLParagraphElement | null>(null);
@@ -3128,10 +3153,12 @@ export default function TileFabApp(): React.ReactElement {
 	const [eqRecipe, setEqRecipeState] = useState("");
 	const [stkTemplate, setStkTemplateState] = useState<StkAuthoringTemplate>("FLEX");
 	const [stkDraftSelection, setStkDraftSelection] = useState<StkDraftSelection | null>(null);
-	const [history, setHistory] = useState<HistoryState>({
+	// Shared-rail model publication may be a transition. Read the same document as the visible
+	// equipment counts so an urgent render cannot show a committed Port with stale history flags.
+	const history: HistoryState = {
 		canUndo: railDocument.canUndo,
 		canRedo: railDocument.canRedo,
-	});
+	};
 	const [status, setStatus] = useState(
 		scaleProbeCellCount > 0
 			? `${scaleProbeCellCount.toLocaleString()}셀 맵을 Worker에서 준비합니다`
@@ -4914,7 +4941,6 @@ export default function TileFabApp(): React.ReactElement {
 				setPatternResizeDraft(null);
 				if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
 				setEditorModel(nextModel);
-				setHistory({ canUndo: false, canRedo: false });
 				setWorkerState(candidate.workerState);
 				setStartupState((current) => ({
 					status: "ready",
@@ -6139,6 +6165,41 @@ export default function TileFabApp(): React.ReactElement {
 		rendererRef.current.invalidateStatic();
 		scheduleRender();
 	};
+	fitAssemblyReviewRef.current = (): boolean => {
+		const canvas = canvasRef.current;
+		if (!canvas || modelSyncPendingRef.current || cameraFitScopeRef.current !== "assembly-review") {
+			return false;
+		}
+		const reviewing = staticFabAssemblyConnectorUiRef.current !== null;
+		const panel = canvas.closest(".tilefab-workspace")
+			?.querySelector<HTMLElement>(".tilefab-assembly-connector");
+		if (reviewing
+			? panel?.dataset.phase !== staticFabAssemblyConnectorUiRef.current?.session.phase
+			: panel !== null
+		) return false;
+		const originalBounds = assemblyReviewBoundsRef.current;
+		if (!originalBounds) return false;
+		const selectedBounds = !reviewing ? staticFabSelectionRef.current?.rail.bounds : null;
+		// Parent direct ownership covers its new links, while the opening frame covers both children.
+		const bounds = selectedBounds
+			? {
+				minX: Math.min(originalBounds.minX, selectedBounds.minX),
+				minY: Math.min(originalBounds.minY, selectedBounds.minY),
+				maxX: Math.max(originalBounds.maxX, selectedBounds.maxX),
+				maxY: Math.max(originalBounds.maxY, selectedBounds.maxY),
+			}
+			: originalBounds;
+		fitCameraToBounds(bounds, canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas), 4);
+		// Close against settled chrome once. Subsequent selection/history preserves the user's view.
+		if (!reviewing) {
+			cameraFitScopeRef.current = null;
+			assemblyReviewBoundsRef.current = null;
+		}
+		cameraReadyRef.current = true;
+		rendererRef.current.invalidateStatic();
+		scheduleRender();
+		return true;
+	};
 	const updateOrganizationMultiSelection = (
 		next: StaticFabOrganizationMultiSelectionState,
 	): void => {
@@ -6685,7 +6746,6 @@ export default function TileFabApp(): React.ReactElement {
 			setReadinessIssueLocation(nextLocation);
 		}
 		publishUiState(() => {
-			setHistory({ canUndo: document.canUndo, canRedo: document.canRedo });
 			setStatus(message);
 		});
 		if (
@@ -6931,7 +6991,6 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus(document.getLastCommandError() ?? "운영 설정 변경을 적용하지 못했습니다");
 			return false;
 		}
-		setHistory({ canUndo: document.canUndo, canRedo: document.canRedo });
 		syncModelUiNow(message);
 		return true;
 	};
@@ -6985,7 +7044,6 @@ export default function TileFabApp(): React.ReactElement {
 		modelDerivationBridgeRef.current = bridge;
 		modelSyncPendingRef.current = true;
 		setModelSyncPending(true);
-		setHistory({ canUndo: document.canUndo, canRedo: document.canRedo });
 		const dispatchStartedAt = performanceNow();
 		const mirrorBridge =
 			workerBridgeDocumentRef.current === document ? workerBridgeRef.current : null;
@@ -8293,6 +8351,8 @@ export default function TileFabApp(): React.ReactElement {
 		message?: string,
 		options: Readonly<{ scheduleCanvas?: boolean }> = {},
 	): void => {
+		if (cameraFitScopeRef.current === "assembly-review") cameraFitScopeRef.current = null;
+		assemblyReviewBoundsRef.current = null;
 		let finalMessage = message;
 		const activeAreaStampSession = areaStampSessionRef.current;
 		const blueprintPlacementWasActive =
@@ -13235,7 +13295,9 @@ export default function TileFabApp(): React.ReactElement {
 						: null;
 				const arrangementBinding = staticFabArrangementBindingRef.current;
 				const currentModel = editorModelRef.current;
-				if (organizationFramingBounds) {
+				if (cameraFitScopeRef.current === "assembly-review") {
+					fitAssemblyReviewRef.current();
+				} else if (organizationFramingBounds) {
 					const previousZoom = cameraRef.current.zoom;
 					const insets = fitMapInsets(canvas);
 					fitCameraToBounds(
@@ -15065,6 +15127,8 @@ export default function TileFabApp(): React.ReactElement {
 			model.document.organizations,
 			organizationIds,
 		);
+		assemblyReviewBoundsRef.current = connectorBounds;
+		cameraFitScopeRef.current = "assembly-review";
 		updateEditorActivity("assemble");
 		publishStaticFabAssemblyConnector({ session, plan: null });
 		requestAnimationFrame(() => {
@@ -15142,21 +15206,6 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(
 			`${staticFabAssemblyConnectorGatewayPrompt(hierarchyRole, purpose, false)} · Worker 준비 중`,
 		);
-		requestAnimationFrame(() => {
-			const canvas = canvasRef.current;
-			if (!canvas || !connectorBounds) return;
-			fitCameraToBounds(
-				connectorBounds,
-				canvas,
-				cameraRef.current,
-				rendererRef.current,
-				fitMapInsets(canvas),
-				canvas.clientWidth <= 430 ? 36 : 4,
-			);
-			cameraReadyRef.current = true;
-			rendererRef.current.invalidateStatic();
-			scheduleRender();
-		});
 	};
 
 	const startStaticFabAssemblyConnector = (): void =>
@@ -18825,7 +18874,6 @@ export default function TileFabApp(): React.ReactElement {
 		setPatternResizeDraft(null);
 		if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
 		setEditorModel(nextModel);
-		setHistory({ canUndo: false, canRedo: false });
 		setWorkerState(prepared.candidate.workerState);
 		setStartupState({
 			status: "ready",
@@ -29775,6 +29823,7 @@ export default function TileFabApp(): React.ReactElement {
 		contextualInspectorVisible,
 		templatePaletteOpen,
 		compactPortViewport: compactInspectorCollisionViewport,
+		assemblyConnectorActive: staticFabAssemblyConnector !== null,
 		ordinaryPortAuthoringActive:
 			!guidedBuildExperienceActive &&
 			editorActivity === "equip" &&
@@ -29799,6 +29848,8 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	}, [compactPortToolContextActive, compactPortToolDescriptionsExpanded]);
 	useEditorSurfaceRestoration({
+		assemblyReviewPhase: staticFabAssemblyConnector?.session.phase ?? "inactive",
+		modelSyncPending,
 		actionHintsObstructionIdentity,
 		actionHintsRaised,
 		compactEditorViewport,
@@ -29810,6 +29861,7 @@ export default function TileFabApp(): React.ReactElement {
 		cameraFitScopeRef,
 		fitMapRef,
 		fitStkSelectionRef,
+		fitAssemblyReviewRef,
 		canvasRef,
 		guidedPortKeyboardSessionRef,
 		cameraRef,

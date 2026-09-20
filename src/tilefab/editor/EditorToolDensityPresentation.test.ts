@@ -8,11 +8,26 @@ const BASE = Object.freeze({
 	compactInspectorCollisionViewport: true,
 	contextualInspectorVisible: false,
 	templatePaletteOpen: false,
+	assemblyConnectorActive: false,
 	compactPortViewport: true,
 	ordinaryPortAuthoringActive: false,
 });
 
 describe("editorToolDensityPresentation", () => {
+	it("temporarily compacts connection review without changing the ordinary preference", () => {
+		expect(
+			editorToolDensityPresentation({ ...BASE, assemblyConnectorActive: true }).hardConstraint,
+		).toBe("연결 검토 중에는 캔버스 공간을 확보합니다");
+		expect(editorToolDensityPresentation(BASE).hardConstraint).toBeNull();
+		expect(
+			editorToolDensityPresentation({
+				...BASE,
+				assemblyConnectorActive: true,
+				compactNavigatorViewport: false,
+			}).hardConstraint,
+		).toBeNull();
+	});
+
 	it("keeps the ordinary editor preference in charge outside a compact Port task", () => {
 		expect(editorToolDensityPresentation(BASE)).toEqual({
 			hardConstraint: null,

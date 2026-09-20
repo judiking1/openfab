@@ -1,4 +1,4 @@
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { createCooperativeTask } from "../core/CooperativeTask";
 import type { DirectedRailEdge } from "../core/RailModuleOwnership";
 import { staticFabArrangementPlanFingerprint } from "../core/StaticFabArrangementCertification";
@@ -47,8 +47,37 @@ import {
 	validateStaticFabAssemblyRelationshipSnapshotStructure,
 } from "./StaticFabAssemblyRelationshipSoA";
 
+// Keep Node-only diagnostics local to this test. Application/core typechecking must not gain
+// ambient Node APIs merely to observe the CI runtime's cold admission loop.
+interface AdmissionGcEntry {
+	readonly startTime: number;
+	readonly duration: number;
+}
+interface AdmissionGcObserver {
+	observe(options: { entryTypes: string[] }): void;
+	takeRecords(): AdmissionGcEntry[];
+	disconnect(): void;
+}
+interface AdmissionRuntime {
+	readonly version: string;
+	readonly platform: string;
+	readonly arch: string;
+	memoryUsage(): Record<"rss" | "heapTotal" | "heapUsed" | "external" | "arrayBuffers", number>;
+	resourceUsage(): { voluntaryContextSwitches: number; involuntaryContextSwitches: number };
+	cpuUsage(previous?: { user: number; system: number }): { user: number; system: number };
+}
+
 describe("StaticFabAssemblyRelationshipSoA", () => {
-	it("admits and fingerprints a maximum before/after arrangement relationship in bounded slices", () => {
+	it("admits and fingerprints a maximum before/after arrangement relationship in bounded slices", async () => {
+		const { PerformanceObserver } = await vi.importActual<{
+			PerformanceObserver: new (
+				onEntries: (list: { getEntries(): AdmissionGcEntry[] }) => void,
+			) => AdmissionGcObserver;
+		}>("node:perf_hooks");
+		const { setImmediate } = await vi.importActual<{ setImmediate(): Promise<void> }>(
+			"node:timers/promises",
+		);
+		const runtime = await vi.importActual<AdmissionRuntime>("node:process");
 		const before = createStaticFabAssemblyRelationshipState(maximumRecordState()).records[0];
 		if (!before) throw new Error("Missing maximum record");
 		const ids = new Map<number, number>();
@@ -149,22 +178,83 @@ describe("StaticFabAssemblyRelationshipSoA", () => {
 		const task = createCooperativeTask(
 			staticFabArrangementPreparedShapeErrorSteps(structuredClone(prepared)),
 		);
+		// Observe the original cold synchronous loop. Deliver diagnostics only after all measured
+		// work; neither an event-loop yield, warm-up, GC request nor retry changes its 50 ms gate.
+		const gcEntries: AdmissionGcEntry[] = [];
+		const observer = new PerformanceObserver((list) => {
+			for (const entry of list.getEntries()) gcEntries.push(entry);
+		});
+		const memoryBefore = runtime.memoryUsage();
+		const resourceBefore = runtime.resourceUsage();
+		const cpuBefore = runtime.cpuUsage();
+		observer.observe({ entryTypes: ["gc"] });
 		let slices = 0,
 			maximumSliceIndex = 0,
-			maximum = 0;
-		while (!task.done) {
-			const start = performance.now();
-			task.step(128);
-			const elapsed = performance.now() - start;
-			if (elapsed > maximum) {
-				maximum = elapsed;
-				maximumSliceIndex = slices;
+			maximum = 0,
+			maximumStart = 0;
+		const admissionStart = performance.now();
+		let admissionEnd = admissionStart;
+		let memoryAfter = memoryBefore;
+		let resourceAfter = resourceBefore;
+		let cpu = { user: 0, system: 0 };
+		try {
+			while (!task.done) {
+				const start = performance.now();
+				task.step(128);
+				const elapsed = performance.now() - start;
+				if (elapsed > maximum) {
+					maximum = elapsed;
+					maximumSliceIndex = slices;
+					maximumStart = start;
+				}
+				slices++;
 			}
-			slices++;
+			admissionEnd = performance.now();
+			cpu = runtime.cpuUsage(cpuBefore);
+			resourceAfter = runtime.resourceUsage();
+			memoryAfter = runtime.memoryUsage();
+			await setImmediate();
+			await setImmediate();
+			for (const entry of observer.takeRecords()) gcEntries.push(entry);
+		} finally {
+			observer.disconnect();
 		}
+		const measuredGc = gcEntries.filter(
+			(entry) =>
+				entry.startTime < admissionEnd && entry.startTime + entry.duration > admissionStart,
+		);
+		const diagnostics = {
+			runtime: runtime.version,
+			platform: runtime.platform,
+			arch: runtime.arch,
+			maximum,
+			maximumSliceIndex,
+			slices,
+			maximumStart,
+			admissionMilliseconds: admissionEnd - admissionStart,
+			cpuMicroseconds: cpu,
+			memoryBefore,
+			memoryAfter,
+			voluntaryContextSwitches:
+				resourceAfter.voluntaryContextSwitches - resourceBefore.voluntaryContextSwitches,
+			involuntaryContextSwitches:
+				resourceAfter.involuntaryContextSwitches - resourceBefore.involuntaryContextSwitches,
+			gcCount: measuredGc.length,
+			gcMilliseconds: measuredGc.reduce((total, entry) => total + entry.duration, 0),
+			// Overlap is evidence of timing, not proof that GC caused all of the wall-clock delay.
+			maximumOverlappingGc: measuredGc
+				.filter(
+					(entry) =>
+						entry.startTime < maximumStart + maximum &&
+						entry.startTime + entry.duration > maximumStart,
+				)
+				.map((entry) => ({ start: entry.startTime, duration: entry.duration })),
+		};
+		console.info("Maximum relationship admission diagnostics", JSON.stringify(diagnostics));
+		gcEntries.length = 0;
 		expect(task.finish()).toBeNull();
 		expect(slices).toBeGreaterThan(1000);
-		expect(maximum, JSON.stringify({ maximumSliceIndex, slices })).toBeLessThan(50);
+		expect(maximum, JSON.stringify(diagnostics)).toBeLessThan(50);
 		const forged = structuredClone(prepared);
 		const changed = forged.plan.relationshipMutations[0].after;
 		// Shift only the last cut coordinate: a matching ticket hash must not bless a non-rigid move.

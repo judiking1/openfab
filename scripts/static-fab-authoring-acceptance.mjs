@@ -4564,18 +4564,126 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 				{ timeout: 20000 },
 			);
 			assertEqual(await panel.count(), 0, `catalog settings cannot cover Connector ${label}`);
+			const reviewFrame = await waitForCompactBayFrame(page, true);
+			assertEqual(
+				reviewFrame.density,
+				viewport.width <= 760 ? "compact" : "expanded",
+				`review menu density ${label}`,
+			);
 			await page.screenshot({
 				path: path.join(artifactRoot, `bay-configuration-connector-${label}.png`),
 			});
 			const before = await readMetrics(page);
 			await connector.locator(".tilefab-assembly-connector-cancel").click();
 			await connector.waitFor({ state: "hidden" });
+			const cancelledFrame = await waitForCompactBayFrame(page, false);
+			assertEqual(cancelledFrame.density, "expanded", `review restores menu preference ${label}`);
+			await page.screenshot({
+				path: path.join(artifactRoot, `bay-configuration-cancelled-${label}.png`),
+			});
 			assertProjectUnchanged(
 				await readMetrics(page),
 				before,
 				`Connector cancellation preserves configured Bay placement ${label}`,
 			);
-			proofs.push({ viewport, ...target, sequence: before.workerSequence });
+			await page.getByTestId("editor-tool-description-toggle").click();
+			assertEqual(
+				await page.locator(".tilefab-tools").getAttribute("data-tool-density-preference"),
+				"compact",
+				`explicit compact preference ${label}`,
+			);
+			await connect.click();
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="static-fab-assembly-connector-panel"]')
+						?.getAttribute("data-phase") === "ready",
+			);
+			const manualFrame = await waitForCompactBayFrame(page, true);
+			await page.mouse.move(
+				(manualFrame.map.left + manualFrame.map.right) / 2,
+				(manualFrame.map.top + manualFrame.map.bottom) / 2,
+			);
+			await page.mouse.wheel(0, -160);
+			await page.waitForFunction((zoom) => window.__tileFab.camera.zoom !== zoom, manualFrame.zoom);
+			const manualCamera = await page.evaluate(() => ({ ...window.__tileFab.camera }));
+			await connector.locator(".tilefab-assembly-connector-cancel").click();
+			await connector.waitFor({ state: "hidden" });
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			assertEqual(
+				JSON.stringify(await page.evaluate(() => ({ ...window.__tileFab.camera }))),
+				JSON.stringify(manualCamera),
+				`manual zoom survives review cancellation ${label}`,
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				before,
+				`manual review cancellation ${label}`,
+			);
+			assertEqual(
+				await page.locator(".tilefab-tools").getAttribute("data-tool-density"),
+				"compact",
+				`compact preference survives review ${label}`,
+			);
+			await page.getByTestId("editor-tool-description-toggle").click();
+			await connect.click();
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="static-fab-assembly-connector-panel"]')
+						?.getAttribute("data-phase") === "ready",
+			);
+			await waitForCompactBayFrame(page, true);
+			await connector.getByRole("button", { name: /적용 · APPLY/ }).click();
+			await connector.waitFor({ state: "hidden" });
+			await waitForWorker(
+				page,
+				(metrics) =>
+					metrics.modelRelationships === "1" &&
+					Number(metrics.workerSequence) === Number(before.workerSequence) + 1,
+			);
+			const appliedFrame = await waitForCompactBayFrame(page, false);
+			const applied = await readMetrics(page);
+			assertEqual(applied.modelRelationships, "1", `explicit relationship after Apply ${label}`);
+			assertEqual(applied.workerSimulationReady, "false", `static authoring only ${label}`);
+			await page.screenshot({
+				path: path.join(artifactRoot, `bay-configuration-applied-${label}.png`),
+			});
+			await page.getByRole("button", { name: "실행 취소", exact: true }).click();
+			await waitForWorker(
+				page,
+				(metrics) =>
+					metrics.modelRelationships === "0" &&
+					Number(metrics.workerSequence) === Number(before.workerSequence) + 2,
+			);
+			await waitForCompactBayFrame(page, false);
+			assertEqual((await readMetrics(page)).modelRelationships, "0", `relationship Undo ${label}`);
+			await canvas.press("ControlOrMeta+Shift+z");
+			await waitForWorker(
+				page,
+				(metrics) =>
+					metrics.modelRelationships === "1" &&
+					Number(metrics.workerSequence) === Number(before.workerSequence) + 3,
+			);
+			await waitForCompactBayFrame(page, false);
+			const redone = await readMetrics(page);
+			assertEqual(redone.modelChecksum, applied.modelChecksum, `relationship Redo ${label}`);
+			assertEqual(
+				redone.workerChecksum,
+				applied.modelChecksum,
+				`relationship mirror parity ${label}`,
+			);
+			proofs.push({
+				viewport,
+				...target,
+				sequence: before.workerSequence,
+				reviewFrame,
+				cancelledFrame,
+				appliedFrame,
+				manualCamera,
+			});
 		} catch (error) {
 			await page
 				.screenshot({ path: path.join(artifactRoot, `bay-configuration-failure-${label}.png`) })
@@ -4587,6 +4695,65 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 		}
 	}
 	return proofs;
+}
+
+async function waitForCompactBayFrame(page, reviewing) {
+	const handle = await page.waitForFunction(
+		(review) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const tools = document.querySelector(".tilefab-tools");
+			const connector = document.querySelector(".tilefab-assembly-connector");
+			if (
+				!canvas ||
+				!tools ||
+				Boolean(connector) !== review ||
+				canvas.dataset.modelSyncPending === "true"
+			)
+				return false;
+			const api = window.__tileFab;
+			const bounds = api.getEditorModel().map.bounds();
+			const rect = canvas.getBoundingClientRect();
+			const corners = [
+				{ x: bounds.minX, y: bounds.minY },
+				{ x: bounds.maxX + 1, y: bounds.maxY + 1 },
+			].map((point) => api.renderer.worldToScreen(point, api.camera));
+			const map = {
+				left: Math.min(...corners.map((point) => point.x)) + rect.left,
+				right: Math.max(...corners.map((point) => point.x)) + rect.left,
+				top: Math.min(...corners.map((point) => point.y)) + rect.top,
+				bottom: Math.max(...corners.map((point) => point.y)) + rect.top,
+			};
+			if (
+				map.left < rect.left + 8 ||
+				map.right > rect.right - 8 ||
+				map.top < rect.top + 8 ||
+				map.bottom > rect.bottom - 8
+			)
+				return false;
+			if (review && innerWidth === 390 && map.right - map.left < 240) return false;
+			for (const element of document.querySelectorAll(
+				".tilefab-tools,.tilefab-camera-controls,.tilefab-action-hints,.tilefab-buildbar,.tilefab-assembly-connector",
+			)) {
+				if (element.offsetParent === null) continue;
+				const overlay = element.getBoundingClientRect();
+				if (
+					map.left < overlay.right &&
+					map.right > overlay.left &&
+					map.top < overlay.bottom &&
+					map.bottom > overlay.top
+				)
+					return false;
+			}
+			return { map, density: tools.dataset.toolDensity, zoom: api.camera.zoom };
+		},
+		reviewing,
+		{ timeout: 10000 },
+	);
+	try {
+		return await handle.jsonValue();
+	} finally {
+		await handle.dispose();
+	}
 }
 
 async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
@@ -13375,6 +13542,23 @@ async function exerciseGuidedPortHandoffRegression(
 					"OHB",
 					`ordinary OHB frame latch ${viewport.label}`,
 				);
+				const historyPublication = await page.evaluateHandle((expectedGroups) => {
+					const app = document.querySelector(".tilefab-app");
+					const samples = [];
+					let mismatches = 0;
+					const observer = new MutationObserver(() => {
+						if (app.dataset.equipmentGroups !== String(expectedGroups)) return;
+						const expected = String(window.__tileFab.getDocument().canUndo);
+						const actual = app.dataset.historyCanUndo;
+						if (actual !== expected) mismatches++;
+						if (samples.length < 16) samples.push({ expected, actual });
+					});
+					observer.observe(app, {
+						attributes: true,
+						attributeFilter: ["data-equipment-groups", "data-history-can-undo"],
+					});
+					return { observer, samples, mismatches: () => mismatches };
+				}, Number(frameLatchBaseline.equipmentGroups) + 1);
 				const frameLatch = await dispatchOrdinaryPortArrowAndEnterInOneTask(
 					page,
 					frameLatchMove.key,
@@ -13423,6 +13607,21 @@ async function exerciseGuidedPortHandoffRegression(
 					frameLatchCommitted,
 					frameLatchBaseline,
 					`ordinary OHB same-task Enter ${viewport.label}`,
+				);
+				const historyPaints = await historyPublication.evaluate((trace) => {
+					trace.observer.disconnect();
+					return { samples: trace.samples, mismatches: trace.mismatches() };
+				});
+				await historyPublication.dispose();
+				assertAtLeast(
+					historyPaints.samples.length,
+					1,
+					`ordinary OHB history publication observed ${viewport.label}`,
+				);
+				assertEqual(
+					historyPaints.mismatches,
+					0,
+					`ordinary OHB rendered equipment and history agree ${viewport.label}`,
 				);
 				assertEqual(
 					await authoredPortSlotRow(page, Number(frameLatchBaseline.modelNextPortId), "OHB"),

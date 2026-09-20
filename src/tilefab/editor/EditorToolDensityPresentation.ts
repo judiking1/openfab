@@ -5,6 +5,7 @@ export interface EditorToolDensityPresentationInput {
 	readonly compactInspectorCollisionViewport: boolean;
 	readonly contextualInspectorVisible: boolean;
 	readonly templatePaletteOpen: boolean;
+	readonly assemblyConnectorActive: boolean;
 	readonly compactPortViewport: boolean;
 	readonly ordinaryPortAuthoringActive: boolean;
 }
@@ -31,7 +32,9 @@ export function editorToolDensityPresentation(
 				? "Inspector가 열려 있어 도구 설명을 접었습니다"
 				: input.templatePaletteOpen
 					? "조립 패널이 열려 있어 도구 설명을 접었습니다"
-					: null;
+					: input.compactNavigatorViewport && input.assemblyConnectorActive
+						? "연결 검토 중에는 캔버스 공간을 확보합니다"
+						: null;
 	const ordinaryPortContextActive = input.compactPortViewport && input.ordinaryPortAuthoringActive;
 	return Object.freeze({
 		hardConstraint,
