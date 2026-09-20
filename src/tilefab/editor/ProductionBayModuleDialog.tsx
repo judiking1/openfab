@@ -10,6 +10,8 @@ import {
 	productionBayModuleRequest,
 } from "../compile/ProductionBayModuleCatalog";
 import { planProductionBayModule } from "../core/ProductionBayModulePlanner";
+import singleBaySchematic from "./assets/production-bay-single.svg?no-inline";
+import twinBaySchematic from "./assets/production-bay-twin.svg?no-inline";
 import "./ProductionBayModuleDialog.css";
 
 interface ProductionBayModulePanelProps {
@@ -343,41 +345,15 @@ function ProductionBayMiniature({
 	loops,
 	compact = false,
 }: Readonly<{ loops: 1 | 2; compact?: boolean }>): React.ReactElement {
-	const markerId = useId().replaceAll(":", "");
 	return (
-		<svg
+		<img
 			className="tilefab-production-bay-miniature"
 			data-compact={compact}
-			viewBox="0 0 120 72"
-			role={compact ? undefined : "img"}
-			aria-label={compact ? undefined : `${loops}-Process-Loop Production Bay schematic`}
+			src={loops === 1 ? singleBaySchematic : twinBaySchematic}
+			width={120}
+			height={72}
+			alt={compact ? "" : `${loops}-Process-Loop Production Bay schematic`}
 			aria-hidden={compact || undefined}
-		>
-			<defs>
-				<marker
-					id={markerId}
-					viewBox="0 0 6 6"
-					refX="5"
-					refY="3"
-					markerWidth="5"
-					markerHeight="5"
-					orient="auto"
-				>
-					<path d="M0 0L6 3L0 6Z" />
-				</marker>
-			</defs>
-			<rect className="shell" x="6" y="6" width="108" height="60" rx="10" />
-			{loops === 1 ? (
-				<rect className="process" x="25" y="20" width="70" height="32" rx="7" />
-			) : (
-				<>
-					<rect className="process" x="24" y="15" width="72" height="18" rx="5" />
-					<rect className="process" x="24" y="39" width="72" height="18" rx="5" />
-				</>
-			)}
-			<path className="gateway" d={loops === 1 ? "M6 25H25M95 47H114" : "M6 21H24M96 51H114"} />
-			<path className="flow" d="M18 6H51" markerEnd={`url(#${markerId})`} />
-			<path className="flow" d="M102 66H69" markerEnd={`url(#${markerId})`} />
-		</svg>
+		/>
 	);
 }

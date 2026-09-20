@@ -114,6 +114,13 @@ export type StaticFabAssemblyRelationshipEdgeScopeV1 =
 			readonly directOwnerOrganizationIds: readonly number[];
 	  };
 
+type ParentDirectScope = Readonly<{ kind: "PARENT_DIRECT" }>;
+
+/** Reuse within one output record, while keeping every copy independent from its source. */
+export function createStaticFabAssemblyParentDirectScope(): ParentDirectScope {
+	return Object.freeze({ kind: "PARENT_DIRECT" });
+}
+
 export interface StaticFabAssemblyScopedEdgeV1 {
 	readonly edge: DirectedRailEdge;
 	readonly scope: StaticFabAssemblyRelationshipEdgeScopeV1;
@@ -200,6 +207,7 @@ export function* copyStaticFabAssemblyRelationshipRecordSteps(
 		true,
 	);
 	if (typeof result === "string") throw new Error(`조립 관계 ${record?.id ?? "?"}: ${result}`);
+	const parentScope = createStaticFabAssemblyParentDirectScope();
 	const groups: StaticFabAssemblyRelationshipConnectionGroupV1[] = [];
 	for (const group of record.connectionGroups) {
 		yield;
@@ -213,12 +221,18 @@ export function* copyStaticFabAssemblyRelationshipRecordSteps(
 					exclusiveCutEdges: yield* copyRelationshipItemsSteps(
 						leg.exclusiveCutEdges,
 						copyScopedEdge,
+						parentScope,
 					),
 					endpointSupports: yield* copyRelationshipItemsSteps(
 						leg.endpointSupports,
 						copyEndpointSupport,
+						parentScope,
 					),
-					seamContacts: yield* copyRelationshipItemsSteps(leg.seamContacts, copySeamContact),
+					seamContacts: yield* copyRelationshipItemsSteps(
+						leg.seamContacts,
+						copySeamContact,
+						parentScope,
+					),
 				}),
 			);
 		}
@@ -230,12 +244,13 @@ export function* copyStaticFabAssemblyRelationshipRecordSteps(
 /** Validated items contain at most three incidences and 64 direct owners per scoped edge. */
 function* copyRelationshipItemsSteps<T>(
 	items: readonly T[],
-	copy: (item: T) => T,
+	copy: (item: T, parentScope: ParentDirectScope) => T,
+	parentScope: ParentDirectScope,
 ): Generator<void, readonly T[]> {
 	const copied: T[] = [];
 	for (const item of items) {
 		yield;
-		copied.push(copy(item));
+		copied.push(copy(item, parentScope));
 	}
 	return Object.freeze(copied);
 }
@@ -277,6 +292,7 @@ export function* remapStaticFabAssemblyRelationshipRecordSteps(
 	if (!isPositiveInt32(record.id) || record.id >= 2_147_483_647) {
 		throw new Error("변환할 조립 관계의 원본 ID가 유효하지 않습니다");
 	}
+	const parentScope = createStaticFabAssemblyParentDirectScope();
 	const resolvedIds = new Map<number, number>();
 	const sourcesByTarget = new Map<number, number>();
 	const organizationId = (sourceId: number): number => {
@@ -307,7 +323,7 @@ export function* remapStaticFabAssemblyRelationshipRecordSteps(
 	): Generator<void, StaticFabAssemblyScopedEdgeV1> {
 		yield;
 		let scope: StaticFabAssemblyRelationshipEdgeScopeV1;
-		if (source.scope.kind === "PARENT_DIRECT") scope = Object.freeze({ kind: "PARENT_DIRECT" });
+		if (source.scope.kind === "PARENT_DIRECT") scope = parentScope;
 		else {
 			const ids: number[] = [];
 			for (const id of source.scope.directOwnerOrganizationIds) {
@@ -2209,13 +2225,14 @@ function addScopedEdgeToChecksum(
 function copyRecord(
 	record: StaticFabAssemblyRelationshipRecordV1,
 ): StaticFabAssemblyRelationshipRecordV1 {
+	const parentScope = createStaticFabAssemblyParentDirectScope();
 	return copyRecordWithGroups(
 		record,
 		Object.freeze(
 			record.connectionGroups.map((group) =>
 				Object.freeze({
 					ordinal: group.ordinal,
-					legs: Object.freeze(group.legs.map(copyLeg)),
+					legs: Object.freeze(group.legs.map((leg) => copyLeg(leg, parentScope))),
 				}),
 			),
 		),
@@ -2240,35 +2257,49 @@ function copyRecordWithGroups(
 	});
 }
 
-function copyLeg(leg: StaticFabAssemblyRelationshipLegV1): StaticFabAssemblyRelationshipLegV1 {
+function copyLeg(
+	leg: StaticFabAssemblyRelationshipLegV1,
+	parentScope: ParentDirectScope,
+): StaticFabAssemblyRelationshipLegV1 {
 	return Object.freeze({
 		ordinal: leg.ordinal,
 		directionRole: leg.directionRole,
-		exclusiveCutEdges: Object.freeze(leg.exclusiveCutEdges.map(copyScopedEdge)),
-		endpointSupports: Object.freeze(leg.endpointSupports.map(copyEndpointSupport)),
-		seamContacts: Object.freeze(leg.seamContacts.map(copySeamContact)),
+		exclusiveCutEdges: Object.freeze(
+			leg.exclusiveCutEdges.map((scoped) => copyScopedEdge(scoped, parentScope)),
+		),
+		endpointSupports: Object.freeze(
+			leg.endpointSupports.map((endpoint) => copyEndpointSupport(endpoint, parentScope)),
+		),
+		seamContacts: Object.freeze(leg.seamContacts.map((seam) => copySeamContact(seam, parentScope))),
 	});
 }
 
 function copyEndpointSupport(
 	endpoint: StaticFabAssemblyEndpointSupportV1,
+	parentScope: ParentDirectScope,
 ): StaticFabAssemblyEndpointSupportV1 {
 	return Object.freeze({
-		support: copyScopedEdge(endpoint.support),
+		support: copyScopedEdge(endpoint.support, parentScope),
 		adjacentExclusiveCutEdgeIndex: endpoint.adjacentExclusiveCutEdgeIndex,
 		position: endpoint.position,
 	});
 }
 
-function copySeamContact(seam: StaticFabAssemblySeamContactV1): StaticFabAssemblySeamContactV1 {
+function copySeamContact(
+	seam: StaticFabAssemblySeamContactV1,
+	parentScope: ParentDirectScope,
+): StaticFabAssemblySeamContactV1 {
 	return Object.freeze({
 		role: seam.role,
-		incidences: Object.freeze(seam.incidences.map(copySeamIncidence)),
+		incidences: Object.freeze(
+			seam.incidences.map((incidence) => copySeamIncidence(incidence, parentScope)),
+		),
 	});
 }
 
 function copySeamIncidence(
 	incidence: StaticFabAssemblySeamIncidenceV1,
+	parentScope: ParentDirectScope,
 ): StaticFabAssemblySeamIncidenceV1 {
 	return Object.freeze({
 		incidence: incidence.incidence,
@@ -2280,15 +2311,18 @@ function copySeamIncidence(
 					})
 				: Object.freeze({
 						kind: incidence.binding.kind,
-						scopedEdge: copyScopedEdge(incidence.binding.scopedEdge),
+						scopedEdge: copyScopedEdge(incidence.binding.scopedEdge, parentScope),
 					}),
 	});
 }
 
-function copyScopedEdge(scoped: StaticFabAssemblyScopedEdgeV1): StaticFabAssemblyScopedEdgeV1 {
+function copyScopedEdge(
+	scoped: StaticFabAssemblyScopedEdgeV1,
+	parentScope: ParentDirectScope,
+): StaticFabAssemblyScopedEdgeV1 {
 	const scope =
 		scoped.scope.kind === "PARENT_DIRECT"
-			? Object.freeze({ kind: scoped.scope.kind })
+			? parentScope
 			: Object.freeze({
 					kind: scoped.scope.kind,
 					participantIndex: scoped.scope.participantIndex,

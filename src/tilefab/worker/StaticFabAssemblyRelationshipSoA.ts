@@ -9,6 +9,7 @@ import {
 	adoptStaticFabAssemblyRelationshipStateSteps,
 	copyStaticFabAssemblyRelationshipRecord,
 	copyStaticFabAssemblyRelationshipState,
+	createStaticFabAssemblyParentDirectScope,
 	createStaticFabAssemblyRelationshipState,
 	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_CANONICAL_BYTES,
 	STATIC_FAB_ASSEMBLY_RELATIONSHIP_MAX_DIRECT_OWNER_IDS_PER_SCOPE,
@@ -1036,11 +1037,11 @@ function* readRecordSteps(
 	recordIndex: number,
 	fields: StaticFabAssemblyRelationshipRecordFieldsSoA,
 ): Generator<void, StaticFabAssemblyRelationshipRecordV1> {
+	const parentScope = createStaticFabAssemblyParentDirectScope();
 	const readScoped = (index: number): StaticFabAssemblyScopedEdgeV1 => {
 		const edge = readEdge(fields.edgeCoordinates, fields.scopedEdges.edgeIndexes[index] as number);
 		const scopeKind = readTag(SCOPE_KINDS, fields.scopedEdges.scopeKinds[index] as number, "scope");
-		if (scopeKind === "PARENT_DIRECT")
-			return freezeScopedEdge({ edge, scope: { kind: scopeKind } });
+		if (scopeKind === "PARENT_DIRECT") return freezeScopedEdge({ edge, scope: parentScope });
 		const ownerStart = fields.scopedEdges.directOwnerOffsets[index] as number;
 		const ownerEnd = fields.scopedEdges.directOwnerOffsets[index + 1] as number;
 		return freezeScopedEdge({

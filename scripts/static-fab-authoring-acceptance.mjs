@@ -4508,6 +4508,20 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 			await page.getByTestId("production-bay-module-browser").click();
 			const panel = page.getByTestId("production-bay-module-panel");
 			await panel.waitFor({ state: "visible" });
+			await page.waitForFunction(() => {
+				const images = document.querySelectorAll(
+					'[data-testid="production-bay-module-panel"] img.tilefab-production-bay-miniature',
+				);
+				return (
+					images.length === 3 &&
+					[...images].every((image) => image.complete && image.naturalWidth > 0)
+				);
+			});
+			assertEqual(
+				await panel.getByRole("img", { name: "2-Process-Loop Production Bay schematic" }).count(),
+				1,
+				`accessible loaded Bay schematic ${label}`,
+			);
 			const canvas = page.getByTestId("rail-canvas");
 			await canvas.focus();
 			await canvas.press("Enter");
@@ -4645,12 +4659,49 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 					Number(metrics.workerSequence) === Number(before.workerSequence) + 1,
 			);
 			const appliedFrame = await waitForCompactBayFrame(page, false);
+			await page.getByTestId("editor-tool-description-toggle").click();
+			const appliedCompactFrame = await waitForCompactBayFrame(
+				page,
+				false,
+				viewport.width === 390 ? 240 : 0,
+			);
+			assertEqual(appliedCompactFrame.density, "compact", `closed review compact menu ${label}`);
+			if (viewport.width === 390) {
+				assertAtLeast(
+					appliedCompactFrame.map.right - appliedCompactFrame.map.left,
+					240,
+					`closed review retains framing through later menu commits ${label}`,
+				);
+			}
+			await page.getByTestId("editor-tool-description-toggle").click();
+			await waitForCompactBayFrame(page, false);
+			const appliedCamera = await page.evaluate(() => ({ ...window.__tileFab.camera }));
 			const applied = await readMetrics(page);
 			assertEqual(applied.modelRelationships, "1", `explicit relationship after Apply ${label}`);
 			assertEqual(applied.workerSimulationReady, "false", `static authoring only ${label}`);
 			await page.screenshot({
 				path: path.join(artifactRoot, `bay-configuration-applied-${label}.png`),
 			});
+			await page.mouse.move(
+				(appliedFrame.map.left + appliedFrame.map.right) / 2,
+				(appliedFrame.map.top + appliedFrame.map.bottom) / 2,
+			);
+			await page.mouse.wheel(0, 160);
+			await page.waitForFunction(
+				(zoom) => window.__tileFab.camera.zoom !== zoom,
+				appliedCamera.zoom,
+			);
+			const closedManualCamera = await page.evaluate(() => ({ ...window.__tileFab.camera }));
+			await page.getByTestId("editor-tool-description-toggle").click();
+			await page.getByTestId("editor-tool-description-toggle").click();
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			assertEqual(
+				JSON.stringify(await page.evaluate(() => ({ ...window.__tileFab.camera }))),
+				JSON.stringify(closedManualCamera),
+				`later menu commits preserve manual camera input ${label}`,
+			);
 			await page.getByRole("button", { name: "실행 취소", exact: true }).click();
 			await waitForWorker(
 				page,
@@ -4675,6 +4726,11 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 				applied.modelChecksum,
 				`relationship mirror parity ${label}`,
 			);
+			assertEqual(
+				JSON.stringify(await page.evaluate(() => ({ ...window.__tileFab.camera }))),
+				JSON.stringify(closedManualCamera),
+				`history preserves the manual camera ${label}`,
+			);
 			proofs.push({
 				viewport,
 				...target,
@@ -4682,9 +4738,35 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 				reviewFrame,
 				cancelledFrame,
 				appliedFrame,
+				appliedCompactFrame,
+				appliedCamera,
+				closedManualCamera,
 				manualCamera,
 			});
 		} catch (error) {
+			await page
+				.evaluate(() => ({
+					camera: { ...window.__tileFab.camera },
+					bounds: window.__tileFab.getEditorModel().map.bounds(),
+					canvas: { ...document.querySelector('[data-testid="rail-canvas"]')?.dataset },
+					overlays: [
+						...document.querySelectorAll(
+							".tilefab-tools,.tilefab-camera-controls,.tilefab-action-hints,.tilefab-buildbar,.tilefab-assembly-connector",
+						),
+					].map((element) => ({
+						className: element.className,
+						dataset: { ...element.dataset },
+						visible: element.offsetParent !== null,
+						rect: element.getBoundingClientRect().toJSON(),
+					})),
+				}))
+				.then((diagnostic) =>
+					writeFile(
+						path.join(artifactRoot, `bay-configuration-failure-${label}.json`),
+						JSON.stringify(diagnostic, null, 2),
+					),
+				)
+				.catch(() => undefined);
 			await page
 				.screenshot({ path: path.join(artifactRoot, `bay-configuration-failure-${label}.png`) })
 				.catch(() => undefined);
@@ -4697,9 +4779,9 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 	return proofs;
 }
 
-async function waitForCompactBayFrame(page, reviewing) {
+async function waitForCompactBayFrame(page, reviewing, minimumWidth = 0) {
 	const handle = await page.waitForFunction(
-		(review) => {
+		({ review, minimum }) => {
 			const canvas = document.querySelector('[data-testid="rail-canvas"]');
 			const tools = document.querySelector(".tilefab-tools");
 			const connector = document.querySelector(".tilefab-assembly-connector");
@@ -4731,6 +4813,7 @@ async function waitForCompactBayFrame(page, reviewing) {
 			)
 				return false;
 			if (review && innerWidth === 390 && map.right - map.left < 240) return false;
+			if (map.right - map.left < minimum) return false;
 			for (const element of document.querySelectorAll(
 				".tilefab-tools,.tilefab-camera-controls,.tilefab-action-hints,.tilefab-buildbar,.tilefab-assembly-connector",
 			)) {
@@ -4746,7 +4829,7 @@ async function waitForCompactBayFrame(page, reviewing) {
 			}
 			return { map, density: tools.dataset.toolDensity, zoom: api.camera.zoom };
 		},
-		reviewing,
+		{ review: reviewing, minimum: minimumWidth },
 		{ timeout: 10000 },
 	);
 	try {

@@ -19,9 +19,11 @@ const { stdout } = await execFileAsync("git", ["ls-files", "-z"], {
 const trackedFiles = stdout.split("\0").filter(Boolean).sort();
 const tracked = new Set(trackedFiles);
 const declaredPaths = new Set(
-	[...provenance.artifacts, ...provenance.historicalMigrationFixtures].map(
-		(artifact) => artifact.path,
-	),
+	[
+		...provenance.artifacts,
+		...provenance.historicalMigrationFixtures,
+		...provenance.authoredUiIllustrations,
+	].map((artifact) => artifact.path),
 );
 const dataBearingFiles = trackedFiles.filter(isPublicDataBearingFile);
 const failures = [];
@@ -76,6 +78,25 @@ for (const artifact of provenance.artifacts) {
 	}
 }
 
+for (const illustration of provenance.authoredUiIllustrations) {
+	if (!tracked.has(illustration.presentationSource)) {
+		failures.push(
+			`illustration presentation source is not tracked: ${illustration.presentationSource}`,
+		);
+	}
+	try {
+		const bytes = await readFile(path.join(root, illustration.path));
+		totalBytes += bytes.byteLength;
+		if (createHash("sha256").update(bytes).digest("hex") !== illustration.sha256) {
+			failures.push(`authored illustration checksum drift: ${illustration.path}`);
+		}
+	} catch (error) {
+		failures.push(
+			`authored illustration cannot be read: ${illustration.path} (${error.code ?? "error"})`,
+		);
+	}
+}
+
 for (const fixture of provenance.historicalMigrationFixtures) {
 	if (!tracked.has(fixture.fixtureSource))
 		failures.push(`historical fixture source is not tracked: ${fixture.fixtureSource}`);
@@ -114,6 +135,7 @@ console.log(
 		`${dataBearingFiles.length} public data-bearing files`,
 		`${provenance.artifacts.length} independently generated artifacts`,
 		`${provenance.historicalMigrationFixtures.length} historical synthetic migration fixtures`,
+		`${provenance.authoredUiIllustrations.length} independently authored UI illustrations`,
 		`${totalBytes} bytes`,
 		"0 external input files",
 	].join(" | "),
@@ -134,8 +156,8 @@ function isPublicDataBearingFile(file) {
 }
 
 function validateProvenance(candidate) {
-	if (!candidate || candidate.schemaVersion !== 2) {
-		throw new Error("Synthetic fixture provenance schemaVersion must be 2.");
+	if (!candidate || candidate.schemaVersion !== 3) {
+		throw new Error("Synthetic fixture provenance schemaVersion must be 3.");
 	}
 	if (candidate.classification !== "INDEPENDENT_SYNTHETIC_CODE_GENERATED") {
 		throw new Error("Synthetic fixture provenance requires the independent synthetic class.");
@@ -204,6 +226,27 @@ function validateProvenance(candidate) {
 			);
 		}
 		paths.add(fixture.path);
+	}
+	if (!Array.isArray(candidate.authoredUiIllustrations)) {
+		throw new Error("Authored UI illustration declarations are missing.");
+	}
+	for (const illustration of candidate.authoredUiIllustrations) {
+		if (
+			!illustration ||
+			!isSafeRepositoryPath(illustration.path) ||
+			!/^src\/tilefab\/editor\/assets\/[a-z0-9-]+\.svg$/.test(illustration.path) ||
+			!isSafeRepositoryPath(illustration.presentationSource) ||
+			!illustration.presentationSource.startsWith("src/tilefab/editor/") ||
+			!illustration.presentationSource.endsWith(".tsx") ||
+			illustration.kind !== "INDEPENDENT_GENERIC_UI_SCHEMATIC" ||
+			!/^[a-f0-9]{64}$/.test(illustration.sha256) ||
+			typeof illustration.description !== "string" ||
+			!illustration.description ||
+			paths.has(illustration.path)
+		) {
+			throw new Error("Authored UI illustration provenance contains an invalid or duplicate row.");
+		}
+		paths.add(illustration.path);
 	}
 }
 

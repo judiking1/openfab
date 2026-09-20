@@ -24,6 +24,7 @@ import {
 	type StaticFabAssemblyRelationshipStateV1,
 	type StaticFabAssemblyScopedEdgeV1,
 	staticFabAssemblyRelationshipStateEquals,
+	staticFabAssemblyRelationshipTransitionFootprint,
 } from "../core/StaticFabAssemblyRelationship";
 import {
 	checksumRailPatchResult,
@@ -863,7 +864,109 @@ describe("StaticFabAssemblyRelationshipSoA", () => {
 			/edge-reference budget/,
 		);
 	});
+	it("shares immutable parent-kind values within each independent copied, remapped or hydrated record", () => {
+		const source = reciprocalState();
+		const canonical = createStaticFabAssemblyRelationshipState(source);
+		const first = canonical.records[0];
+		assert(first);
+		const remapped = remapStaticFabAssemblyRelationshipRecord(first, {
+			relationshipId: first.id,
+			organizationIds: new Map([
+				[1, 1],
+				[2, 2],
+				[3, 3],
+			]),
+			quarterTurns: 0,
+			offset: { x: 0, y: 0 },
+		});
+		const snapshot = createStaticFabAssemblyRelationshipSnapshot(source);
+		const states = [
+			canonical,
+			createStaticFabAssemblyRelationshipState({
+				nextRelationshipId: 2,
+				records: [copyStaticFabAssemblyRelationshipRecord(first)],
+			}),
+			{ nextRelationshipId: 2, records: [remapped] },
+			hydrateStaticFabAssemblyRelationshipSnapshot(structuredClone(snapshot)),
+		];
+		const expectedJson = JSON.stringify(source);
+		const expectedChecksum = checksumStaticFabAssemblyRelationshipState(source);
+		const sourceRecord = source.records[0];
+		assert(sourceRecord);
+		const expectedFootprint = staticFabAssemblyRelationshipTransitionFootprint([
+			{ id: sourceRecord.id, before: null, after: sourceRecord },
+		]);
+		const sourceEdges = allScopedEdges(source);
+		expect(
+			new Set(
+				states.map(
+					(state) =>
+						allScopedEdges(state).find((edge) => edge.scope.kind === "PARENT_DIRECT")?.scope,
+				),
+			).size,
+		).toBe(states.length);
+		for (const state of states) {
+			expect(JSON.stringify(state)).toBe(expectedJson);
+			expect(checksumStaticFabAssemblyRelationshipState(state)).toBe(expectedChecksum);
+			expect(createStaticFabAssemblyRelationshipSnapshot(state)).toEqual(snapshot);
+			const edges = allScopedEdges(state);
+			const parents = edges.filter((edge) => edge.scope.kind === "PARENT_DIRECT");
+			expect(parents.length).toBeGreaterThan(1);
+			expect(new Set(parents.map((edge) => edge.scope)).size).toBe(1);
+			for (const [index, edge] of edges.entries()) {
+				expect(edge.edge).not.toBe(sourceEdges[index]?.edge);
+				expect(edge.scope).not.toBe(sourceEdges[index]?.scope);
+				expect(Object.isFrozen(edge.scope)).toBe(true);
+				expect(Reflect.set(edge.scope, "kind", "invalid")).toBe(false);
+			}
+			const clone = structuredClone(state);
+			const cloneParent = allScopedEdges(clone).find((edge) => edge.scope.kind === "PARENT_DIRECT");
+			assert(cloneParent);
+			expect(Reflect.set(cloneParent.scope, "kind", "invalid")).toBe(true);
+			expect(checksumStaticFabAssemblyRelationshipState(state)).toBe(expectedChecksum);
+			const record = state.records[0];
+			assert(record);
+			expect(
+				staticFabAssemblyRelationshipTransitionFootprint([
+					{ id: record.id, before: null, after: record },
+				]),
+			).toEqual(expectedFootprint);
+		}
+		const sourceParent = sourceEdges.find((edge) => edge.scope.kind === "PARENT_DIRECT");
+		assert(sourceParent);
+		Reflect.set(sourceParent.scope, "kind", "invalid");
+		for (const state of states) expect(JSON.stringify(state)).toBe(expectedJson);
+	});
+
+	it("rejects malformed parent scopes before canonical scope sharing can discard fields", () => {
+		const source = reciprocalState();
+		const parent = allScopedEdges(source).find((edge) => edge.scope.kind === "PARENT_DIRECT");
+		assert(parent);
+		Reflect.set(parent.scope, "participantIndex", 0);
+		expect(() => createStaticFabAssemblyRelationshipState(source)).toThrow(/parent-direct scope/);
+		const record = source.records[0];
+		assert(record);
+		expect(() => copyStaticFabAssemblyRelationshipRecord(record)).toThrow(/parent-direct scope/);
+	});
 });
+
+function allScopedEdges(
+	state: StaticFabAssemblyRelationshipStateV1,
+): StaticFabAssemblyScopedEdgeV1[] {
+	return state.records.flatMap((record) =>
+		record.connectionGroups.flatMap((group) =>
+			group.legs.flatMap((leg) => [
+				...leg.exclusiveCutEdges,
+				...leg.endpointSupports.map((endpoint) => endpoint.support),
+				...leg.seamContacts.flatMap((seam) =>
+					seam.incidences.flatMap((incidence) =>
+						incidence.binding.kind === "WITNESS" ? [incidence.binding.scopedEdge] : [],
+					),
+				),
+			]),
+		),
+	);
+}
 
 function reciprocalState(): StaticFabAssemblyRelationshipStateV1 {
 	return {

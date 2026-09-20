@@ -150,37 +150,6 @@
 	width: 50px;
 }
 
-.tilefab-production-bay-miniature :where(.shell, .process, .gateway) {
-	fill: none;
-	stroke-linecap: round;
-	stroke-linejoin: round;
-}
-
-.tilefab-production-bay-miniature .shell {
-	stroke: #8fe0e4;
-	stroke-width: 3;
-}
-
-.tilefab-production-bay-miniature .process {
-	stroke: #64b8bd;
-	stroke-width: 2.5;
-}
-
-.tilefab-production-bay-miniature .gateway {
-	stroke: #d7ad57;
-	stroke-width: 2.5;
-}
-
-.tilefab-production-bay-miniature .flow {
-	fill: none;
-	stroke: #f0c76f;
-	stroke-width: 1.8;
-}
-
-.tilefab-production-bay-miniature marker path {
-	fill: #f0c76f;
-}
-
 .tilefab-production-bay-preview {
 	display: grid;
 	grid-template-columns: 146px minmax(0, 1fr);

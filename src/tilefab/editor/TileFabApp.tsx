@@ -2084,6 +2084,7 @@ interface MutableValueRef<Value> {
 
 interface EditorSurfaceRestorationOptions {
 	readonly assemblyReviewPhase: string;
+	readonly assemblyReviewModelGeneration: number | null;
 	readonly modelSyncPending: boolean;
 	readonly actionHintsObstructionIdentity: string;
 	readonly actionHintsRaised: boolean;
@@ -2114,6 +2115,7 @@ interface EditorSurfaceRestorationOptions {
  */
 function useEditorSurfaceRestoration({
 	assemblyReviewPhase,
+	assemblyReviewModelGeneration,
 	modelSyncPending,
 	actionHintsObstructionIdentity,
 	actionHintsRaised,
@@ -2153,6 +2155,7 @@ function useEditorSurfaceRestoration({
 					const connector = document.querySelector<HTMLElement>(".tilefab-assembly-connector");
 					if (
 						!modelSyncPending &&
+						canvasRef.current?.dataset.modelGeneration === String(assemblyReviewModelGeneration) &&
 						activityNavigation?.dataset.toolDensity === expectedDensity &&
 						(assemblyReviewPhase === "inactive"
 							? connector === null
@@ -2207,6 +2210,7 @@ function useEditorSurfaceRestoration({
 		};
 	}, [
 		assemblyReviewPhase,
+		assemblyReviewModelGeneration,
 		modelSyncPending,
 		actionHintsObstructionIdentity,
 		actionHintsRaised,
@@ -2374,6 +2378,11 @@ export default function TileFabApp(): React.ReactElement {
 	const fitAssemblyReviewRef = useRef<() => boolean>(() => false);
 	const assemblyReviewBoundsRef =
 		useRef<ReturnType<typeof staticFabAssemblyConnectorSelectionBounds>>(null);
+	const assemblyReviewClosedFrameRef = useRef<Readonly<{
+		document: RailDocument;
+		patchSequence: number;
+		selection: StaticFabSelection | null;
+	}> | null>(null);
 	const inspectAreaDragRef = useRef<InspectAreaDragState | null>(null);
 	const inspectAreaKeyboardSessionRef = useRef<InspectAreaKeyboardSession | null>(null);
 	const inspectAreaKeyboardReadoutRef = useRef<HTMLParagraphElement | null>(null);
@@ -6179,6 +6188,30 @@ export default function TileFabApp(): React.ReactElement {
 		) return false;
 		const originalBounds = assemblyReviewBoundsRef.current;
 		if (!originalBounds) return false;
+		if (!reviewing) {
+			const model = editorModelRef.current;
+			const document = model.document;
+			// Closing the panel precedes publication of the committed model and its selection.
+			if (model.organizations !== document.organizations ||
+				model.relationships !== document.relationships ||
+				pendingConnectedBayBankSelectionRef.current ||
+				pendingConnectedFabSelectionRef.current ||
+				pendingResilientFabLoopSelectionRef.current) return false;
+			const owner = assemblyReviewClosedFrameRef.current;
+			if (owner && (owner.document !== document ||
+				owner.patchSequence !== document.getPatchSequence() ||
+				owner.selection !== staticFabSelectionRef.current)) {
+				cameraFitScopeRef.current = null;
+				assemblyReviewBoundsRef.current = null;
+				assemblyReviewClosedFrameRef.current = null;
+				return false;
+			}
+			assemblyReviewClosedFrameRef.current ??= {
+				document,
+				patchSequence: document.getPatchSequence(),
+				selection: staticFabSelectionRef.current,
+			};
+		}
 		const selectedBounds = !reviewing ? staticFabSelectionRef.current?.rail.bounds : null;
 		// Parent direct ownership covers its new links, while the opening frame covers both children.
 		const bounds = selectedBounds
@@ -6190,11 +6223,8 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			: originalBounds;
 		fitCameraToBounds(bounds, canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas), 4);
-		// Close against settled chrome once. Subsequent selection/history preserves the user's view.
-		if (!reviewing) {
-			cameraFitScopeRef.current = null;
-			assemblyReviewBoundsRef.current = null;
-		}
+		// Retain framing across later chrome commits; two animation frames cannot settle a React
+		// transition. Manual camera input, a new task, selection or authored sequence ends ownership.
 		cameraReadyRef.current = true;
 		rendererRef.current.invalidateStatic();
 		scheduleRender();
@@ -8353,6 +8383,7 @@ export default function TileFabApp(): React.ReactElement {
 	): void => {
 		if (cameraFitScopeRef.current === "assembly-review") cameraFitScopeRef.current = null;
 		assemblyReviewBoundsRef.current = null;
+		assemblyReviewClosedFrameRef.current = null;
 		let finalMessage = message;
 		const activeAreaStampSession = areaStampSessionRef.current;
 		const blueprintPlacementWasActive =
@@ -15128,6 +15159,7 @@ export default function TileFabApp(): React.ReactElement {
 			organizationIds,
 		);
 		assemblyReviewBoundsRef.current = connectorBounds;
+		assemblyReviewClosedFrameRef.current = null;
 		cameraFitScopeRef.current = "assembly-review";
 		updateEditorActivity("assemble");
 		publishStaticFabAssemblyConnector({ session, plan: null });
@@ -29849,6 +29881,9 @@ export default function TileFabApp(): React.ReactElement {
 	}, [compactPortToolContextActive, compactPortToolDescriptionsExpanded]);
 	useEditorSurfaceRestoration({
 		assemblyReviewPhase: staticFabAssemblyConnector?.session.phase ?? "inactive",
+		assemblyReviewModelGeneration: cameraFitScopeRef.current === "assembly-review"
+			? editorModel.generation
+			: null,
 		modelSyncPending,
 		actionHintsObstructionIdentity,
 		actionHintsRaised,

@@ -65,7 +65,7 @@
     "check:runtime-scale": "npm run test:runtime-scale",
     "check:release-identity": "node scripts/openfab-release-identity-audit.mjs",
     "check:dependency-licenses": "node scripts/openfab-production-dependency-license-audit.mjs",
-    "check:fixture-provenance": "node scripts/openfab-public-fixture-provenance-audit.mjs",
+    "check:fixture-provenance": "node --test scripts/openfab-public-fixture-provenance-audit.cases.mjs && node scripts/openfab-public-fixture-provenance-audit.mjs",
     "check:public-safety": "node scripts/openfab-public-safety-audit.mjs",
     "check:public-export": "node scripts/openfab-public-export-dry-run.mjs",
     "check:public-release": "npm run check:release-identity && npm run check:dependency-licenses && npm run check:fixture-provenance && node scripts/openfab-public-safety-audit.mjs --strict-release",
