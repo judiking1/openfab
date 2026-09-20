@@ -17,6 +17,7 @@ import {
 	directionBetween,
 	moveCell,
 } from "./railShape";
+import type { StaticFabAssemblyRelationshipMutationV1 } from "./StaticFabAssemblyRelationship";
 import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
@@ -39,7 +40,7 @@ import {
 import { staticFabBankPairHasResilientCirculation } from "./StaticFabOuterCirculation";
 import { type Cell, cellKey, decodeRailCell, type TileMap } from "./TileMap";
 
-export const STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION = 3 as const;
+export const STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION = 4 as const;
 export const STATIC_FAB_ASSEMBLY_CONNECTOR_PATCH_KIND = "connect-static-fab-assemblies" as const;
 export const STATIC_FAB_ASSEMBLY_CONNECTOR_MAXIMUM_GAP_METERS = 512;
 export const STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT = 64;
@@ -121,7 +122,15 @@ export type StaticFabAssemblyConnectorPlan = RailNetworkLinkPlan & {
 	readonly nextOrganizationIdBefore: number;
 	readonly nextOrganizationIdAfter: number;
 	readonly assemblyConnector: StaticFabAssemblyConnectorMetadata;
+	/** Geometry planning alone carries no relationship production or commit authority. */
+	readonly relationshipProduction: StaticFabAssemblyConnectorRelationshipProduction | null;
 };
+
+export interface StaticFabAssemblyConnectorRelationshipProduction {
+	readonly nextRelationshipIdBefore: number;
+	readonly nextRelationshipIdAfter: number;
+	readonly mutations: readonly StaticFabAssemblyRelationshipMutationV1[];
+}
 
 export interface StaticFabAssemblyConnectorProspectiveState {
 	readonly map: TileMap;
@@ -830,6 +839,7 @@ export function planStaticFabAssemblyConnectorWithProspectiveState(
 
 		const plan = Object.freeze({
 			...networkLink,
+			relationshipProduction: null,
 			switchMutations: Object.freeze([]),
 			basePatchSequence,
 			organizationImpactAuthorizations,
@@ -1602,6 +1612,7 @@ function rejected(
 	return Object.freeze({
 		plan: Object.freeze({
 			...networkLink,
+			relationshipProduction: null,
 			valid: false,
 			reason,
 			issueCode: "topology" as const,

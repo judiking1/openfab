@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	certifyProductionBayModuleCatalogRequest,
 	defaultProductionBayModuleCatalogRequest,
 } from "../compile/ProductionBayModuleCatalog";
 import { emptyPortEquipmentState } from "../core/EquipmentGroup";
 import { analyzeRailNetwork } from "../core/network";
-import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
+import {
+	RailDocument,
+	type RailDocumentCooperativeCommitOptions,
+	type RailPatchEvent,
+} from "../core/RailDocument";
 import {
 	discoverStaticFabAssemblyGateways,
 	discoverStaticFabOuterCirculationGateways,
@@ -13,8 +17,17 @@ import {
 	STATIC_FAB_ASSEMBLY_CONNECTOR_PATCH_KIND,
 	STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION,
 	type StaticFabAssemblyConnectorIntent,
+	type StaticFabAssemblyConnectorPlan,
 } from "../core/StaticFabAssemblyConnector";
-import { isIssuedStaticFabAssemblyConnectorPlan } from "../core/StaticFabAssemblyConnectorCertification";
+import {
+	adoptStaticFabAssemblyConnectorWorkerPlanCooperatively,
+	consumeCertifiedStaticFabAssemblyConnectorPlanIssuedFor,
+	isIssuedStaticFabAssemblyConnectorPlan,
+	issueStaticFabAssemblyConnectorPermit,
+	revokeStaticFabAssemblyConnectorPermit,
+	staticFabAssemblyConnectorIntentFingerprint,
+	staticFabAssemblyConnectorPlanFingerprint,
+} from "../core/StaticFabAssemblyConnectorCertification";
 import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	deriveStaticFabOrganizationSemanticRoles,
@@ -26,8 +39,15 @@ import {
 } from "../core/StaticFabOrganizationBundlePlacement";
 import { staticFabBankPairHasResilientCirculation } from "../core/StaticFabOuterCirculation";
 import { TileMap } from "../core/TileMap";
+import {
+	captureOpenFabProject,
+	createOpenFabProjectManifest,
+	createRailSnapshotFromOpenFabProject,
+} from "../project/OpenFabProject";
+import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/OpenFabProjectCodec";
 import { captureRailMirrorSnapshot, checksumRailMap } from "../worker/RailMirrorChecksum";
 import { RailPatchMirror } from "../worker/RailPatchMirror";
+import { decodeRailPatchSoA, encodeRailPatchEvent } from "../worker/railMirrorProtocol";
 import {
 	type PrepareBoundStaticFabAssemblyConnectorRequest,
 	STATIC_FAB_ASSEMBLY_CONNECTOR_PROTOCOL_VERSION,
@@ -36,9 +56,11 @@ import {
 } from "../worker/StaticFabAssemblyConnectorProtocol";
 import {
 	hydrateStaticFabAssemblyConnectorSession,
+	prepareStaticFabAssemblyConnector,
 	prepareStaticFabAssemblyConnectorInSession,
 	type StaticFabAssemblyConnectorRuntimeSession,
 } from "../worker/StaticFabAssemblyConnectorRuntime";
+import { hydrateStaticFabAssemblyRelationshipSnapshot } from "../worker/StaticFabAssemblyRelationshipSoA";
 import {
 	appliedConnectedBayBankEvidence,
 	appliedConnectedBayBankEvidenceIsCurrent,
@@ -119,6 +141,7 @@ class RuntimeWorker implements StaticFabAssemblyConnectorWorkerPort {
 					sourceNextPortId: snapshot.portEquipment.nextPortId,
 					sourceNextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 					sourceNextOrganizationId: snapshot.organizations.nextOrganizationId,
+					sourceNextRelationshipId: snapshot.relationships.nextRelationshipId,
 					hydrationMilliseconds: 1,
 				},
 			} as MessageEvent<StaticFabAssemblyConnectorWorkerResponse>);
@@ -162,7 +185,28 @@ class MalformedWorker extends RuntimeWorker {
 	}
 }
 
-describe("StaticFabAssemblyConnectorBridge", () => {
+describe.each([
+	"sync",
+	"cooperative",
+] as const)("StaticFabAssemblyConnectorBridge (%s document)", (mode) => {
+	const commit = async (document: RailDocument, plan: StaticFabAssemblyConnectorPlan) =>
+		mode === "sync"
+			? document.commitStaticFabAssemblyConnector(plan)
+			: (
+					await document.commitStaticFabAssemblyConnectorCooperatively(
+						plan,
+						documentTestScheduler(),
+					)
+				).committed;
+	const replay = async (document: RailDocument, direction: "undo" | "redo") =>
+		mode === "sync"
+			? document[direction]()
+			: (
+					await document.replayStaticFabAssemblyConnectorCooperatively(
+						direction,
+						documentTestScheduler(),
+					)
+				).committed;
 	it("hydrates one persistent Worker and commits rail plus hierarchy as one replay-safe event", async () => {
 		const document = productionBayDocument();
 		const mirrorSnapshot = captureRailMirrorSnapshot(
@@ -205,15 +249,15 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 			document.portEquipment,
 			document.organizations,
 		);
-		expect(foreign.commitStaticFabAssemblyConnector(prepared.plan)).toBe(false);
+		expect(await commit(foreign, prepared.plan)).toBe(false);
 		expect(isIssuedStaticFabAssemblyConnectorPlan(prepared.plan)).toBe(true);
 
 		expect(
-			document.commitStaticFabAssemblyConnector(prepared.plan),
+			await commit(document, prepared.plan),
 			document.getLastCommandError() ?? "Assembly Connector commit failed",
 		).toBe(true);
 		expect(isIssuedStaticFabAssemblyConnectorPlan(prepared.plan)).toBe(false);
-		expect(document.commitStaticFabAssemblyConnector(prepared.plan)).toBe(false);
+		expect(await commit(document, prepared.plan)).toBe(false);
 		expect(events).toHaveLength(1);
 		expect(events[0]).toMatchObject({
 			sequence: sourceSequence + 1,
@@ -229,26 +273,32 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 		expect(events[0]?.switchChanges).toEqual([]);
 		expect(events[0]?.portChanges).toEqual([]);
 		expect(events[0]?.equipmentGroupChanges).toEqual([]);
-		expect(mirror.applyPatch(events[0] as RailPatchEvent).checksum).toBe(
-			documentChecksum(document),
-		);
+		expect(document.relationships.records).toHaveLength(1);
+		expect(document.relationships.nextRelationshipId).toBe(2);
+		expect(events[0]?.relationshipChanges).toEqual(prepared.plan.relationshipProduction?.mutations);
+		expect(
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(events[0] as RailPatchEvent).patch))
+				.checksum,
+		).toBe(documentChecksum(document));
 		expect(analyzeRailNetwork(document.map)).toMatchObject({
 			components: 1,
 			strongComponents: 1,
 		});
 		const connectedChecksum = documentChecksum(document);
 
-		expect(document.undo()).toBe(true);
+		expect(await replay(document, "undo")).toBe(true);
 		expect(events).toHaveLength(2);
 		expect(events[1]?.kind).toBe("undo");
 		expect(checksumRailMap(document.map)).toBe(sourceRailChecksum);
 		expect(document.organizations.records).toEqual(sourceOrganizations);
+		expect(document.relationships.records).toEqual([]);
+		expect(document.relationships.nextRelationshipId).toBe(2);
 		expect(document.canRedo).toBe(true);
 		expect(mirror.applyPatch(events[1] as RailPatchEvent).checksum).toBe(
 			documentChecksum(document),
 		);
 
-		expect(document.redo()).toBe(true);
+		expect(await replay(document, "redo")).toBe(true);
 		expect(events).toHaveLength(3);
 		expect(events[2]?.kind).toBe("redo");
 		expect(documentChecksum(document)).toBe(connectedChecksum);
@@ -256,6 +306,20 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 		expect(mirror.applyPatch(events[2] as RailPatchEvent).checksum).toBe(connectedChecksum);
 		expect(mirror.getPhysicalPublication().current.identity.revision).toBe(
 			document.map.getRevision(),
+		);
+		const project = captureOpenFabProject(document, {
+			manifest: createOpenFabProjectManifest(
+				"connector-production",
+				"Explicit Connector",
+				"2026-09-13T00:00:00.000Z",
+			),
+		});
+		const reopened = createRailSnapshotFromOpenFabProject(
+			parseOpenFabProjectJson(serializeOpenFabProject(project)).project,
+		);
+		expect(reopened.checksum).toBe(connectedChecksum);
+		expect(hydrateStaticFabAssemblyRelationshipSnapshot(reopened.relationships)).toEqual(
+			document.relationships,
 		);
 		unsubscribe();
 		bridge.dispose();
@@ -278,7 +342,7 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 		});
 		if (!firstPrepared.plan) throw new Error("Expected initial Bank Connector plan.");
 		expect(firstPrepared.plan.assemblyConnector.createdBank).toBe(true);
-		expect(document.commitStaticFabAssemblyConnector(firstPrepared.plan)).toBe(true);
+		expect(await commit(document, firstPrepared.plan)).toBe(true);
 		firstBridge.dispose();
 
 		const organizationsBeforeExtend = document.organizations;
@@ -306,17 +370,17 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 			[],
 		]);
 
-		expect(document.commitStaticFabAssemblyConnector(extendPrepared.plan)).toBe(true);
+		expect(await commit(document, extendPrepared.plan)).toBe(true);
 		expect(document.organizations.nextOrganizationId).toBe(organizationCursorBeforeExtend);
 		expect(appliedConnectedBayBankEvidenceIsCurrent(document.organizations, evidence)).toBe(true);
 		const extendedChecksum = documentChecksum(document);
 
-		expect(document.undo()).toBe(true);
+		expect(await replay(document, "undo")).toBe(true);
 		expect(document.organizations.nextOrganizationId).toBe(organizationCursorBeforeExtend);
 		expect(connectedBayBankUndoProjectionExists(document.organizations, evidence)).toBe(true);
 		expect(appliedConnectedBayBankEvidenceIsCurrent(document.organizations, evidence)).toBe(false);
 
-		expect(document.redo()).toBe(true);
+		expect(await replay(document, "redo")).toBe(true);
 		expect(documentChecksum(document)).toBe(extendedChecksum);
 		expect(document.organizations.nextOrganizationId).toBe(organizationCursorBeforeExtend);
 		expect(appliedConnectedBayBankEvidenceIsCurrent(document.organizations, evidence)).toBe(true);
@@ -325,6 +389,15 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 
 	it("binds one newly created Fab receipt to an exact real Worker plan through undo and redo", async () => {
 		const document = productionBayDocument(4);
+		const mirror = new RailPatchMirror();
+		mirror.sync(connectorBindingInput(document).snapshot);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => {
+			events.push(event);
+			expect(
+				mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch)).checksum,
+			).toBe(documentChecksum(document));
+		});
 		const bayIds = document.organizations.records
 			.filter((record) => record.kind === "BAY")
 			.map((record) => record.id);
@@ -336,7 +409,7 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 				intent: firstValidIntentFor(document, sourceId, targetId),
 			});
 			if (!prepared.plan) throw new Error("Expected an exact Bay Connector plan.");
-			expect(document.commitStaticFabAssemblyConnector(prepared.plan)).toBe(true);
+			expect(await commit(document, prepared.plan)).toBe(true);
 			bridge.dispose();
 		};
 
@@ -369,14 +442,14 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 		});
 		if (!evidence) throw new Error("Expected exact newly created Fab evidence.");
 
-		expect(document.commitStaticFabAssemblyConnector(prepared.plan)).toBe(true);
+		expect(await commit(document, prepared.plan)).toBe(true);
 		expect(document.organizations.nextOrganizationId).toBe(cursorBeforeFabApply + 1);
 		expect(appliedConnectedFabEvidenceIsCurrent(document.organizations, evidence)).toBe(true);
 		const connectedChecksum = documentChecksum(document);
-		expect(document.undo()).toBe(true);
+		expect(await replay(document, "undo")).toBe(true);
 		expect(document.organizations.nextOrganizationId).toBe(cursorBeforeFabApply + 1);
 		expect(connectedFabUndoProjectionExists(document.organizations, evidence)).toBe(true);
-		expect(document.redo()).toBe(true);
+		expect(await replay(document, "redo")).toBe(true);
 		expect(documentChecksum(document)).toBe(connectedChecksum);
 		expect(appliedConnectedFabEvidenceIsCurrent(document.organizations, evidence)).toBe(true);
 		fabBridge.dispose();
@@ -411,7 +484,7 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 			[...bankIds].sort((left, right) => left - right),
 		);
 
-		expect(document.commitStaticFabAssemblyConnector(loopPrepared.plan)).toBe(true);
+		expect(await commit(document, loopPrepared.plan)).toBe(true);
 		expect(document.organizations.nextOrganizationId).toBe(cursorBeforeFabApply + 1);
 		expect(
 			appliedResilientFabLoopEvidenceIsCurrent(document.map, document.organizations, loopEvidence),
@@ -426,16 +499,33 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 		).toBe(true);
 		const loopChecksum = documentChecksum(document);
 
-		expect(document.undo()).toBe(true);
+		expect(await replay(document, "undo")).toBe(true);
 		expect(document.organizations.nextOrganizationId).toBe(cursorBeforeFabApply + 1);
 		expect(
 			resilientFabLoopUndoProjectionExists(document.map, document.organizations, loopEvidence),
 		).toBe(true);
-		expect(document.redo()).toBe(true);
+		expect(await replay(document, "redo")).toBe(true);
 		expect(documentChecksum(document)).toBe(loopChecksum);
 		expect(
 			appliedResilientFabLoopEvidenceIsCurrent(document.map, document.organizations, loopEvidence),
 		).toBe(true);
+		expect(document.relationships.records).toHaveLength(4);
+		expect(document.relationships.nextRelationshipId).toBe(5);
+		expect(events).toHaveLength(8);
+		const project = captureOpenFabProject(document, {
+			manifest: createOpenFabProjectManifest(
+				"nested-connectors",
+				"Nested connectors",
+				"2026-09-20T00:00:00.000Z",
+			),
+		});
+		const reopened = createRailSnapshotFromOpenFabProject(
+			parseOpenFabProjectJson(serializeOpenFabProject(project)).project,
+		);
+		expect(reopened.checksum).toBe(loopChecksum);
+		expect(hydrateStaticFabAssemblyRelationshipSnapshot(reopened.relationships)).toEqual(
+			document.relationships,
+		);
 		loopBridge.dispose();
 	});
 
@@ -448,13 +538,8 @@ describe("StaticFabAssemblyConnectorBridge", () => {
 
 		expect(document.clear()).toBe(true);
 		worker.deliver();
-		const prepared = await planning;
-
-		expect(prepared.validation.valid, prepared.validation.reason).toBe(true);
-		expect(prepared.certified).toBe(false);
-		if (!prepared.plan) throw new Error("Expected the stale Worker plan for inspection.");
-		expect(isIssuedStaticFabAssemblyConnectorPlan(prepared.plan)).toBe(false);
-		expect(document.commitStaticFabAssemblyConnector(prepared.plan)).toBe(false);
+		await expect(planning).rejects.toThrow(/source changed/);
+		expect(worker.terminated).toBe(true);
 	});
 
 	it("cancels an in-flight persistent Worker and revokes its adoption permit", async () => {
@@ -687,5 +772,382 @@ function firstValidFabLoopIntentFor(
 }
 
 function documentChecksum(document: RailDocument): string {
-	return checksumRailMap(document.map, document.portEquipment, document.organizations);
+	return checksumRailMap(
+		document.map,
+		document.portEquipment,
+		document.organizations,
+		document.relationships,
+	);
+}
+
+describe("cooperative Connector relationship admission", () => {
+	it("owns the Worker plan and consumes its relationship-bound authority only once", async () => {
+		const proof = connectorAdoptionProof();
+		const before = documentChecksum(proof.document);
+		let checkpoints = 0;
+		const adopted = await adoptConnectorProof(proof, async () => {
+			checkpoints++;
+		});
+		expect(checkpoints).toBeGreaterThan(20);
+		expect(adopted).not.toBe(proof.plan);
+		expect(adopted.relationshipProduction).not.toBe(proof.plan.relationshipProduction);
+		expect(staticFabAssemblyConnectorPlanFingerprint(adopted)).toBe(proof.ticket.planFingerprint);
+		const legs = adopted.relationshipProduction?.mutations[0]?.after?.connectionGroups[0]?.legs;
+		expect(legs?.length).toBeGreaterThan(0);
+		expect(Object.isFrozen(legs)).toBe(true);
+		expect(documentChecksum(proof.document)).toBe(before);
+		expect(isIssuedStaticFabAssemblyConnectorPlan(proof.plan)).toBe(false);
+		const consume = () =>
+			consumeCertifiedStaticFabAssemblyConnectorPlanIssuedFor(
+				adopted,
+				proof.document.map,
+				proof.document.portEquipment,
+				proof.document.organizations,
+				proof.document.relationships,
+			);
+		expect(consume()).toBe(true);
+		expect(consume()).toBe(false);
+		await expect(adoptConnectorProof(proof, async () => {})).rejects.toThrow(/consumed/);
+	});
+
+	it("revokes admission at the first, middle and final checkpoint without changing the document", async () => {
+		const baseline = connectorAdoptionProof();
+		let total = 0;
+		await adoptConnectorProof(baseline, async () => {
+			total++;
+		});
+		for (const stop of [1, Math.floor(total / 2), total]) {
+			const proof = connectorAdoptionProof();
+			const before = documentChecksum(proof.document);
+			let visited = 0;
+			await expect(
+				adoptConnectorProof(proof, async () => {
+					if (++visited === stop) revokeStaticFabAssemblyConnectorPermit(proof.permit);
+				}),
+			).rejects.toThrow(/cancelled/);
+			expect(documentChecksum(proof.document)).toBe(before);
+			expect(proof.document.relationships.records).toHaveLength(0);
+			await expect(adoptConnectorProof(proof, async () => {})).rejects.toThrow(/consumed/);
+		}
+	});
+
+	it("rejects restored-revision ABA during admission and before authority consumption", async () => {
+		const rollback = (document: RailDocument) => {
+			const map = document.map,
+				revision = map.getRevision(),
+				checkpoint = map.createMutationCheckpoint();
+			const cell = document.organizations.records[0]?.membership.railEdges[0]?.from;
+			if (!cell) throw new Error("Missing source rail");
+			const change = { x: -99, y: -99, before: 0, after: map.getEncoded(cell.x, cell.y) };
+			map.applyAtomicMutations([change], []);
+			map.rollbackAtomicMutations([change], [], checkpoint);
+			expect(map.getRevision()).toBe(revision);
+		};
+		const proof = connectorAdoptionProof();
+		let first = true;
+		await expect(
+			adoptConnectorProof(proof, async () => {
+				if (first) {
+					first = false;
+					rollback(proof.document);
+				}
+			}),
+		).rejects.toThrow(/source changed/);
+		const later = connectorAdoptionProof();
+		const adopted = await adoptConnectorProof(later, async () => {});
+		rollback(later.document);
+		expect(
+			consumeCertifiedStaticFabAssemblyConnectorPlanIssuedFor(
+				adopted,
+				later.document.map,
+				later.document.portEquipment,
+				later.document.organizations,
+				later.document.relationships,
+			),
+		).toBe(false);
+	});
+
+	it.each([
+		"cursor",
+		"fingerprint",
+		"relationship",
+	] as const)("rejects a forged %s result", async (fault) => {
+		const proof = connectorAdoptionProof();
+		const corrupted = {
+			...proof,
+			ticket: {
+				...proof.ticket,
+				...(fault === "cursor"
+					? { prospectiveNextRelationshipId: proof.ticket.prospectiveNextRelationshipId + 1 }
+					: {}),
+				...(fault === "fingerprint" ? { planFingerprint: "forged" } : {}),
+			},
+			plan: fault === "relationship" ? { ...proof.plan, relationshipProduction: null } : proof.plan,
+		};
+		await expect(adoptConnectorProof(corrupted, async () => {})).rejects.toThrow();
+		expect(proof.document.relationships.records).toHaveLength(0);
+		await expect(adoptConnectorProof(proof, async () => {})).rejects.toThrow(/consumed/);
+	});
+});
+
+describe("Connector response suspension ownership", () => {
+	it.each([
+		"cancel",
+		"supersede",
+		"duplicate",
+		"source ABA",
+	] as const)("revokes the old response on %s during admission", async (action) => {
+		const document = productionBayDocument(),
+			checksum = documentChecksum(document);
+		const worker = new RuntimeWorker();
+		let entered!: () => void, resume!: () => void;
+		const suspended = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const released = new Promise<void>((resolve) => {
+			resume = resolve;
+		});
+		let first = true,
+			time = 0;
+		const clock = vi.spyOn(performance, "now").mockImplementation(() => ++time);
+		const bridge = new StaticFabAssemblyConnectorBridge(
+			() => worker,
+			30_000,
+			async () => {
+				if (!first) return;
+				first = false;
+				entered();
+				await released;
+			},
+		);
+		try {
+			await bridge.initialize(connectorBindingInput(document));
+			const input = connectorInput(document);
+			const pending = bridge.prepare(input);
+			const rejected = expect(pending).rejects.toThrow(
+				action === "duplicate"
+					? /duplicate/
+					: action === "source ABA"
+						? /source changed/
+						: /cancel|superseded/i,
+			);
+			await suspended;
+			let latest: ReturnType<StaticFabAssemblyConnectorBridge["prepare"]> | null = null;
+			if (action === "cancel") bridge.cancel();
+			if (action === "supersede") latest = bridge.prepare(input);
+			if (action === "source ABA") rollbackSourceMutation(document);
+			if (action === "duplicate") {
+				const request = worker.receivedRequest;
+				if (!request) throw new Error("Missing response identity");
+				worker.onmessage?.({
+					data: {
+						type: "STATIC_FAB_ASSEMBLY_CONNECTOR_PREPARED",
+						version: STATIC_FAB_ASSEMBLY_CONNECTOR_PROTOCOL_VERSION,
+						requestId: request.requestId,
+					},
+				} as MessageEvent<StaticFabAssemblyConnectorWorkerResponse>);
+			}
+			resume();
+			await rejected;
+			if (latest) {
+				const accepted = await latest;
+				expect(accepted.certified).toBe(true);
+				expect(worker.terminated).toBe(false);
+				expect(
+					worker.receivedRequests.filter((request) => request.type.startsWith("PREPARE")),
+				).toHaveLength(2);
+			} else expect(worker.terminated).toBe(true);
+			expect(documentChecksum(document)).toBe(checksum);
+			expect(document.relationships.records).toEqual([]);
+		} finally {
+			resume();
+			bridge.dispose();
+			clock.mockRestore();
+		}
+	});
+});
+
+describe("atomic cooperative Connector publication", () => {
+	it.each([
+		"apply",
+		"undo",
+		"redo",
+	] as const)("cancels %s at early, middle and final preparation without publishing", async (operation) => {
+		const fixture = async () => {
+			const proof = connectorAdoptionProof();
+			const plan = await adoptConnectorProof(proof, async () => {});
+			if (operation !== "apply")
+				expect(
+					(
+						await proof.document.commitStaticFabAssemblyConnectorCooperatively(
+							plan,
+							documentTestScheduler(),
+						)
+					).committed,
+				).toBe(true);
+			if (operation === "redo")
+				expect(
+					(
+						await proof.document.replayStaticFabAssemblyConnectorCooperatively(
+							"undo",
+							documentTestScheduler(),
+						)
+					).committed,
+				).toBe(true);
+			const run = (options: RailDocumentCooperativeCommitOptions) =>
+				operation === "apply"
+					? proof.document.commitStaticFabAssemblyConnectorCooperatively(plan, options)
+					: proof.document.replayStaticFabAssemblyConnectorCooperatively(operation, options);
+			return { document: proof.document, run };
+		};
+		const baseline = await fixture();
+		let total = 0;
+		expect(
+			(
+				await baseline.run(
+					documentTestScheduler(async () => {
+						total++;
+					}),
+				)
+			).committed,
+		).toBe(true);
+		expect(total).toBeGreaterThan(10);
+		for (const stop of [1, Math.floor(total / 2), total]) {
+			const { document, run } = await fixture();
+			const checksum = documentChecksum(document),
+				sequence = document.getPatchSequence();
+			const source = [
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			];
+			const history = [document.canUndo, document.canRedo];
+			const events: RailPatchEvent[] = [];
+			document.subscribe((event) => events.push(event));
+			let visited = 0;
+			await expect(
+				run(
+					documentTestScheduler(async () => {
+						if (++visited === stop) throw new Error("user cancelled");
+					}),
+				),
+			).rejects.toThrow("user cancelled");
+			expect(documentChecksum(document)).toBe(checksum);
+			expect(document.getPatchSequence()).toBe(sequence);
+			[
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			].forEach((value, index) => {
+				expect(value).toBe(source[index]);
+			});
+			expect([document.canUndo, document.canRedo]).toEqual(history);
+			expect(events).toEqual([]);
+			// Apply authority is one-shot; a cancelled replay keeps its original owned history.
+			expect((await run(documentTestScheduler())).committed).toBe(operation !== "apply");
+		}
+	});
+
+	it.each([
+		"throw",
+		"source ABA",
+	] as const)("rejects %s at typed-patch preparation without a partial document", async (fault) => {
+		const proof = connectorAdoptionProof();
+		const plan = await adoptConnectorProof(proof, async () => {});
+		const document = proof.document,
+			checksum = documentChecksum(document),
+			sequence = document.getPatchSequence();
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		let prepared = 0;
+		const commit = document.commitStaticFabAssemblyConnectorCooperatively(plan, {
+			...documentTestScheduler(),
+			preparePatch: async (event) => {
+				prepared++;
+				expect(event.relationshipChanges).toHaveLength(1);
+				expect(documentChecksum(document)).toBe(checksum);
+				if (fault === "throw") throw new Error("patch admission cancelled");
+				rollbackSourceMutation(document);
+			},
+		});
+		if (fault === "throw") await expect(commit).rejects.toThrow("patch admission cancelled");
+		else expect((await commit).committed).toBe(false);
+		expect(prepared).toBe(1);
+		expect(documentChecksum(document)).toBe(checksum);
+		expect(document.getPatchSequence()).toBe(sequence);
+		expect(events).toEqual([]);
+	});
+});
+
+function rollbackSourceMutation(document: RailDocument): void {
+	const map = document.map,
+		revision = map.getRevision(),
+		checkpoint = map.createMutationCheckpoint();
+	const cell = document.organizations.records[0]?.membership.railEdges[0]?.from;
+	if (!cell) throw new Error("Missing source rail");
+	const change = { x: -99, y: -99, before: 0, after: map.getEncoded(cell.x, cell.y) };
+	map.applyAtomicMutations([change], []);
+	map.rollbackAtomicMutations([change], [], checkpoint);
+	expect(map.getRevision()).toBe(revision);
+}
+
+function connectorAdoptionProof() {
+	const document = productionBayDocument();
+	const intent = firstValidIntent(document);
+	const snapshot = connectorBindingInput(document).snapshot;
+	const permit = issueStaticFabAssemblyConnectorPermit(
+		document.map,
+		document.portEquipment,
+		document.getPatchSequence(),
+		document.organizations,
+		intent,
+		snapshot.checksum,
+		document.relationships,
+	);
+	const prepared = prepareStaticFabAssemblyConnector({
+		type: "PREPARE_STATIC_FAB_ASSEMBLY_CONNECTOR",
+		version: STATIC_FAB_ASSEMBLY_CONNECTOR_PROTOCOL_VERSION,
+		requestId: 1,
+		ticketId: permit.ticketId,
+		intent,
+		expectedIntentFingerprint: staticFabAssemblyConnectorIntentFingerprint(intent),
+		snapshot,
+	});
+	if (!prepared.valid || !prepared.plan || !prepared.ticket) throw new Error(prepared.reason);
+	return {
+		document,
+		intent,
+		permit,
+		plan: structuredClone(prepared.plan),
+		ticket: prepared.ticket,
+	};
+}
+
+function adoptConnectorProof(
+	proof: ReturnType<typeof connectorAdoptionProof>,
+	checkpoint: () => Promise<void>,
+) {
+	return adoptStaticFabAssemblyConnectorWorkerPlanCooperatively(
+		proof.permit,
+		proof.ticket,
+		proof.plan,
+		proof.ticket.prospectiveChecksum,
+		proof.document.map,
+		proof.document.portEquipment,
+		proof.document.getPatchSequence(),
+		proof.document.organizations,
+		proof.intent,
+		proof.document.relationships,
+		checkpoint,
+		128,
+	);
+}
+
+function documentTestScheduler(
+	checkpoint: () => Promise<void> = async () => {},
+): RailDocumentCooperativeCommitOptions {
+	let time = 0;
+	return { checkpoint, now: () => ++time, sliceMilliseconds: 1 };
 }

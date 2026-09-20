@@ -12,6 +12,7 @@ import {
 	staticFabAssemblyConnectorIntentFingerprint,
 	staticFabAssemblyConnectorPlanFingerprint,
 } from "../core/StaticFabAssemblyConnectorCertification";
+import { produceStaticFabAssemblyConnectorRelationship } from "../core/StaticFabAssemblyConnectorRelationshipProduction";
 import type { Cell } from "../core/TileMap";
 import {
 	checksumRailMap,
@@ -77,6 +78,7 @@ export function prepareStaticFabAssemblyConnector(
 			expectedSourceNextPortId: request.snapshot.portEquipment.nextPortId,
 			expectedSourceNextEquipmentGroupId: request.snapshot.portEquipment.nextEquipmentGroupId,
 			expectedSourceNextOrganizationId: request.snapshot.organizations.nextOrganizationId,
+			expectedSourceNextRelationshipId: request.snapshot.relationships.nextRelationshipId,
 		},
 		session,
 		now,
@@ -97,7 +99,8 @@ export function prepareStaticFabAssemblyConnectorInSession(
 		request.expectedSourceNextAdvancedSwitchId !== snapshot.nextAdvancedSwitchId ||
 		request.expectedSourceNextPortId !== snapshot.portEquipment.nextPortId ||
 		request.expectedSourceNextEquipmentGroupId !== snapshot.portEquipment.nextEquipmentGroupId ||
-		request.expectedSourceNextOrganizationId !== snapshot.organizations.nextOrganizationId
+		request.expectedSourceNextOrganizationId !== snapshot.organizations.nextOrganizationId ||
+		request.expectedSourceNextRelationshipId !== snapshot.relationships.nextRelationshipId
 	) {
 		return rejected(
 			null,
@@ -224,11 +227,18 @@ export function prepareStaticFabAssemblyConnectorInSession(
 				}
 			}
 		}
+		const produced = produceStaticFabAssemblyConnectorRelationship(
+			source.organizations,
+			source.relationships,
+			planning,
+		);
+		const production = produced.plan.relationshipProduction;
+		if (!production) throw new Error("Connector 관계 생성 결과가 없습니다");
 		const prospectiveChecksum = checksumRailMap(
 			prospective.map,
 			prospective.portEquipment,
 			prospective.organizations,
-			source.relationships,
+			produced.relationships,
 		);
 		const incrementalChecksum = checksumRailPatchResult(snapshot.checksum, {
 			changes: plan.mutations,
@@ -238,12 +248,15 @@ export function prepareStaticFabAssemblyConnectorInSession(
 			organizationChanges: plan.organizationMutations,
 			organizationNextIdBefore: plan.nextOrganizationIdBefore,
 			organizationNextIdAfter: plan.nextOrganizationIdAfter,
+			relationshipChanges: production.mutations,
+			relationshipNextIdBefore: production.nextRelationshipIdBefore,
+			relationshipNextIdAfter: production.nextRelationshipIdAfter,
 		});
 		if (prospectiveChecksum !== incrementalChecksum) {
 			throw new Error("Assembly Connector prospective checksum diverged from its atomic patch");
 		}
 		return Object.freeze({
-			plan,
+			plan: produced.plan,
 			ticket: Object.freeze({
 				ticketId: request.ticketId,
 				validationLevel: "exact" as const,
@@ -254,13 +267,15 @@ export function prepareStaticFabAssemblyConnectorInSession(
 				sourceNextPortId: snapshot.portEquipment.nextPortId,
 				sourceNextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 				sourceNextOrganizationId: snapshot.organizations.nextOrganizationId,
+				sourceNextRelationshipId: snapshot.relationships.nextRelationshipId,
 				intentFingerprint,
-				planFingerprint: staticFabAssemblyConnectorPlanFingerprint(plan),
+				planFingerprint: staticFabAssemblyConnectorPlanFingerprint(produced.plan),
 				prospectiveChecksum,
 				prospectiveNextAdvancedSwitchId: prospective.map.getAdvancedSwitchIdCursor(),
 				prospectiveNextPortId: prospective.portEquipment.nextPortId,
 				prospectiveNextEquipmentGroupId: prospective.portEquipment.nextEquipmentGroupId,
 				prospectiveNextOrganizationId: prospective.organizations.nextOrganizationId,
+				prospectiveNextRelationshipId: produced.relationships.nextRelationshipId,
 			}),
 			valid: true,
 			failureCode: null,
@@ -290,6 +305,7 @@ function compactPlan(plan: StaticFabAssemblyConnectorPlan): StaticFabAssemblyCon
 	return Object.freeze({
 		...plan,
 		valid: false,
+		relationshipProduction: null,
 		cells: sampleCells(plan.cells),
 		conflicts: sampleCells(plan.conflicts),
 		mutations: Object.freeze([]),

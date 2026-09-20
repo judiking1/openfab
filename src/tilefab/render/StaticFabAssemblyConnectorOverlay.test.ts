@@ -3,6 +3,7 @@ import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { DIR_E, DIR_S, DIR_W, type Direction } from "../core/railShape";
 import {
 	STATIC_FAB_ASSEMBLY_CONNECTOR_MAXIMUM_GAP_METERS,
+	STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION,
 	type StaticFabAssemblyConnectorPlan,
 	type StaticFabAssemblyGatewayCandidate,
 } from "../core/StaticFabAssemblyConnector";
@@ -388,8 +389,9 @@ function connectorPlan(
 		organizationMutations: Object.freeze([]),
 		nextOrganizationIdBefore: 3,
 		nextOrganizationIdAfter: 3,
+		relationshipProduction: null,
 		assemblyConnector: {
-			version: 3,
+			version: STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION,
 			hierarchyRole: null,
 			purpose: null,
 			sourceOrganizationId: source.organizationId,

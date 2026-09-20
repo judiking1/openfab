@@ -38,6 +38,7 @@ self.onmessage = (event: MessageEvent<StaticFabAssemblyConnectorWorkerRequest>):
 				sourceNextPortId: snapshot.portEquipment.nextPortId,
 				sourceNextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 				sourceNextOrganizationId: snapshot.organizations.nextOrganizationId,
+				sourceNextRelationshipId: snapshot.relationships.nextRelationshipId,
 				hydrationMilliseconds: performance.now() - startedAt,
 			};
 			self.postMessage(response);

@@ -1,10 +1,13 @@
+import { createCooperativeTask } from "../core/CooperativeTask";
 import type { PortEquipmentState } from "../core/EquipmentGroup";
+import { freezeTransferDataContainersSteps } from "../core/ImmutableDataContainers";
 import type {
 	StaticFabAssemblyConnectorIntent,
 	StaticFabAssemblyConnectorPlan,
 } from "../core/StaticFabAssemblyConnector";
 import {
-	adoptStaticFabAssemblyConnectorWorkerPlan,
+	adoptStaticFabAssemblyConnectorWorkerPlanCooperatively,
+	copyStaticFabAssemblyConnectorWorkerPlanSteps,
 	issueStaticFabAssemblyConnectorPermit,
 	revokeStaticFabAssemblyConnectorPermit,
 	type StaticFabAssemblyConnectorPermit,
@@ -14,7 +17,7 @@ import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAsse
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import {
-	checksumRailPatchResult,
+	checksumRailPatchResultCooperatively,
 	consumeRailMirrorSnapshotCaptureAuthority,
 	type RailMirrorSnapshot,
 } from "../worker/RailMirrorChecksum";
@@ -25,8 +28,9 @@ import {
 	type StaticFabAssemblyConnectorWorkerRequest,
 	type StaticFabAssemblyConnectorWorkerResponse,
 } from "../worker/StaticFabAssemblyConnectorProtocol";
-import { staticFabAssemblyConnectorPreparedShapeError } from "../worker/StaticFabAssemblyConnectorResponseValidator";
+import { staticFabAssemblyConnectorPreparedShapeErrorSteps } from "../worker/StaticFabAssemblyConnectorResponseValidator";
 import { collectTransferableBuffers } from "../worker/TransferableBuffers";
+import { createStaticFabArrangementCheckpoint } from "./StaticFabArrangementCheckpoint";
 
 export interface StaticFabAssemblyConnectorWorkerPort {
 	onmessage: ((event: MessageEvent<StaticFabAssemblyConnectorWorkerResponse>) => void) | null;
@@ -70,15 +74,18 @@ interface StaticFabAssemblyConnectorSourceIdentity {
 	readonly nextPortId: number;
 	readonly nextEquipmentGroupId: number;
 	readonly nextOrganizationId: number;
+	readonly nextRelationshipId: number;
 }
 
 interface StaticFabAssemblyConnectorBinding {
+	readonly mapMutationGeneration: number;
 	readonly identity: StaticFabAssemblyConnectorSourceIdentity;
 	readonly source: StaticFabAssemblyConnectorLiveState;
 	readonly getCurrentState: () => StaticFabAssemblyConnectorLiveState;
 }
 
 interface ActiveStaticFabAssemblyConnectorRequest {
+	readonly processing: { started: boolean };
 	readonly requestId: number;
 	readonly permit: StaticFabAssemblyConnectorPermit;
 	readonly intent: StaticFabAssemblyConnectorIntent;
@@ -99,6 +106,7 @@ interface QueuedStaticFabAssemblyConnectorRequest {
 export class StaticFabAssemblyConnectorBridge {
 	private readonly createWorker: () => StaticFabAssemblyConnectorWorkerPort;
 	private readonly timeoutMilliseconds: number;
+	private readonly admissionCheckpoint: () => Promise<void>;
 	private worker: StaticFabAssemblyConnectorWorkerPort | null = null;
 	private binding: StaticFabAssemblyConnectorBinding | null = null;
 	private hydrationPromise: Promise<number> | null = null;
@@ -119,9 +127,11 @@ export class StaticFabAssemblyConnectorBridge {
 				type: "module",
 			}) as StaticFabAssemblyConnectorWorkerPort,
 		timeoutMilliseconds = 30_000,
+		admissionCheckpoint = createStaticFabArrangementCheckpoint(),
 	) {
 		this.createWorker = createWorker;
 		this.timeoutMilliseconds = timeoutMilliseconds;
+		this.admissionCheckpoint = admissionCheckpoint;
 	}
 
 	initialize(input: StaticFabAssemblyConnectorBindingInput): Promise<number> {
@@ -154,7 +164,12 @@ export class StaticFabAssemblyConnectorBridge {
 		const identity = snapshotIdentity(snapshot);
 		this.terminalError = null;
 		this.hydrated = false;
-		this.binding = Object.freeze({ identity, source, getCurrentState: input.getCurrentState });
+		this.binding = Object.freeze({
+			identity,
+			source,
+			getCurrentState: input.getCurrentState,
+			mapMutationGeneration: source.map.getMutationGeneration(),
+		});
 		const requestId = this.nextRequestId++;
 		const request: StaticFabAssemblyConnectorWorkerRequest = {
 			type: "HYDRATE_STATIC_FAB_ASSEMBLY_CONNECTOR",
@@ -292,9 +307,22 @@ export class StaticFabAssemblyConnectorBridge {
 		}
 		if (response.type !== "STATIC_FAB_ASSEMBLY_CONNECTOR_PREPARED") return;
 		if (requestId !== this.inFlightRequestId) return;
-		const active = this.completeInFlightRequest(requestId);
-		if (active) this.acceptPrepared(response.prepared, active);
-		this.dispatchQueued();
+		const active = this.active;
+		if (!active || active.requestId !== requestId) {
+			this.completeInFlightRequest(requestId);
+			this.dispatchQueued();
+			return;
+		}
+		if (active.processing.started) {
+			this.failWorker(new Error("Assembly Connector Worker returned a duplicate result."));
+			return;
+		}
+		active.processing.started = true;
+		void this.acceptPrepared(response.prepared, active).finally(() => {
+			if (this.inFlightRequestId !== requestId) return;
+			this.completeInFlightRequest(requestId);
+			this.dispatchQueued();
+		});
 	}
 
 	private acceptHydration(response: StaticFabAssemblyConnectorHydratedResponse): void {
@@ -313,45 +341,56 @@ export class StaticFabAssemblyConnectorBridge {
 		resolve?.(response.hydrationMilliseconds);
 	}
 
-	private acceptPrepared(
+	private async acceptPrepared(
 		preparedValue: unknown,
 		active: ActiveStaticFabAssemblyConnectorRequest,
-	): void {
+	): Promise<void> {
 		const binding = this.binding;
 		if (!binding) {
 			this.revokePermit(active.permit);
 			active.reject(new Error("Assembly Connector Worker session has ended."));
 			return;
 		}
-		const workerRoundTripMilliseconds = performance.now() - active.requestStartedAt;
-		const responseValidationStartedAt = performance.now();
-		const validation = validatePreparedResponse(
-			preparedValue,
-			active.permit.ticketId,
-			binding.identity,
-			active.intentFingerprint,
-		);
-		if (validation instanceof Error) {
-			this.revokePermit(active.permit);
-			active.reject(validation);
-			this.failWorker(validation);
-			return;
-		}
-		const accepted = preparedValue as PreparedStaticFabAssemblyConnector;
-		const responseValidationMilliseconds = performance.now() - responseValidationStartedAt;
-		const live = binding.getCurrentState();
-		const liveUnchanged = bindingMatchesLiveState(binding, live);
-		let adoptedPlan: StaticFabAssemblyConnectorPlan | null = null;
-		const adoptionStartedAt = performance.now();
-		if (
-			accepted.valid &&
-			accepted.plan &&
-			accepted.ticket &&
-			validation.prospectiveChecksum !== null &&
-			liveUnchanged
-		) {
-			try {
-				adoptedPlan = adoptStaticFabAssemblyConnectorWorkerPlan(
+		const current = () => {
+			if (this.active !== active || this.binding !== binding)
+				throw new DOMException("Assembly Connector admission cancelled.", "AbortError");
+			if (!bindingMatchesLiveState(binding, binding.getCurrentState()))
+				throw new Error("Assembly Connector source changed during admission.");
+		};
+		let lastYield = performance.now();
+		const checkpoint = async () => {
+			current();
+			if (performance.now() - lastYield >= 4) {
+				await this.admissionCheckpoint();
+				lastYield = performance.now();
+			}
+			current();
+		};
+		try {
+			current();
+			const workerRoundTripMilliseconds = performance.now() - active.requestStartedAt;
+			const responseValidationStartedAt = performance.now();
+			const validation = await validatePreparedResponse(
+				preparedValue,
+				active.permit.ticketId,
+				binding.identity,
+				active.intentFingerprint,
+				checkpoint,
+			);
+			current();
+			if (validation instanceof Error) throw validation;
+			const accepted = validation.prepared;
+			const responseValidationMilliseconds = performance.now() - responseValidationStartedAt;
+			const live = binding.getCurrentState();
+			let adoptedPlan: StaticFabAssemblyConnectorPlan | null = null;
+			const adoptionStartedAt = performance.now();
+			if (
+				accepted.valid &&
+				accepted.plan &&
+				accepted.ticket &&
+				validation.prospectiveChecksum !== null
+			) {
+				adoptedPlan = await adoptStaticFabAssemblyConnectorWorkerPlanCooperatively(
 					active.permit,
 					accepted.ticket,
 					accepted.plan,
@@ -361,24 +400,26 @@ export class StaticFabAssemblyConnectorBridge {
 					live.patchSequence,
 					live.organizations,
 					active.intent,
+					live.relationships,
+					checkpoint,
 				);
-			} catch (error) {
-				active.reject(workerError(error, "Assembly Connector plan adoption failed."));
-				return;
-			}
-		} else {
+			} else this.revokePermit(active.permit);
+			current();
+			active.resolve(
+				Object.freeze({
+					plan: adoptedPlan ?? accepted.plan,
+					validation: accepted,
+					certified: adoptedPlan !== null,
+					workerRoundTripMilliseconds,
+					responseValidationMilliseconds,
+					adoptionMilliseconds: performance.now() - adoptionStartedAt,
+				}),
+			);
+		} catch (error) {
 			this.revokePermit(active.permit);
+			if (this.active !== active || this.binding !== binding) return;
+			this.failWorker(workerError(error, "Assembly Connector plan admission failed."));
 		}
-		active.resolve(
-			Object.freeze({
-				plan: adoptedPlan ?? accepted.plan,
-				validation: accepted,
-				certified: adoptedPlan !== null,
-				workerRoundTripMilliseconds,
-				responseValidationMilliseconds,
-				adoptionMilliseconds: performance.now() - adoptionStartedAt,
-			}),
-		);
 	}
 
 	private supersedeActivePromise(): void {
@@ -425,6 +466,7 @@ export class StaticFabAssemblyConnectorBridge {
 			source.organizations,
 			input.intent,
 			binding.identity.checksum,
+			source.relationships,
 		);
 		const requestId = this.nextRequestId++;
 		const identity = binding.identity;
@@ -442,9 +484,11 @@ export class StaticFabAssemblyConnectorBridge {
 			expectedSourceNextPortId: identity.nextPortId,
 			expectedSourceNextEquipmentGroupId: identity.nextEquipmentGroupId,
 			expectedSourceNextOrganizationId: identity.nextOrganizationId,
+			expectedSourceNextRelationshipId: identity.nextRelationshipId,
 		};
 		this.inFlightRequestId = requestId;
 		this.active = Object.freeze({
+			processing: { started: false },
 			requestId,
 			permit,
 			intent: input.intent,
@@ -520,21 +564,34 @@ export class StaticFabAssemblyConnectorBridge {
 	}
 }
 
-function validatePreparedResponse(
+async function validatePreparedResponse(
 	value: unknown,
 	expectedTicketId: number,
 	source: StaticFabAssemblyConnectorSourceIdentity,
 	expectedIntentFingerprint: string,
-): Error | Readonly<{ prospectiveChecksum: string | null }> {
-	const shapeError = staticFabAssemblyConnectorPreparedShapeError(value);
+	checkpoint: () => Promise<void>,
+): Promise<
+	| Error
+	| Readonly<{ prospectiveChecksum: string | null; prepared: PreparedStaticFabAssemblyConnector }>
+> {
+	await finishConnectorAdmissionSteps(freezeTransferDataContainersSteps(value), checkpoint);
+	const shapeError = await finishConnectorAdmissionSteps(
+		staticFabAssemblyConnectorPreparedShapeErrorSteps(value),
+		checkpoint,
+	);
 	if (shapeError) {
 		return new Error(`Assembly Connector Worker returned malformed planning data: ${shapeError}.`);
 	}
 	const prepared = value as PreparedStaticFabAssemblyConnector;
-	if (!prepared.valid) return Object.freeze({ prospectiveChecksum: null });
+	if (!prepared.valid) return Object.freeze({ prospectiveChecksum: null, prepared });
 	const ticket = prepared.ticket;
-	const plan = prepared.plan;
-	if (!ticket || !plan) return new Error("Assembly Connector Worker omitted its exact result.");
+	const receivedPlan = prepared.plan;
+	if (!ticket || !receivedPlan)
+		return new Error("Assembly Connector Worker omitted its exact result.");
+	const plan = await finishConnectorAdmissionSteps(
+		copyStaticFabAssemblyConnectorWorkerPlanSteps(receivedPlan),
+		checkpoint,
+	);
 	if (
 		ticket.ticketId !== expectedTicketId ||
 		ticket.sourceRevision !== source.revision ||
@@ -544,28 +601,38 @@ function validatePreparedResponse(
 		ticket.sourceNextPortId !== source.nextPortId ||
 		ticket.sourceNextEquipmentGroupId !== source.nextEquipmentGroupId ||
 		ticket.sourceNextOrganizationId !== source.nextOrganizationId ||
+		ticket.sourceNextRelationshipId !== source.nextRelationshipId ||
 		ticket.intentFingerprint !== expectedIntentFingerprint
 	) {
 		return new Error("Assembly Connector Worker returned a corrupted one-shot ticket.");
 	}
 	let prospectiveChecksum: string;
 	try {
-		prospectiveChecksum = checksumRailPatchResult(source.checksum, {
-			changes: plan.mutations,
-			switchChanges: plan.switchMutations ?? [],
-			portChanges: [],
-			equipmentGroupChanges: [],
-			organizationChanges: plan.organizationMutations,
-			organizationNextIdBefore: plan.nextOrganizationIdBefore,
-			organizationNextIdAfter: plan.nextOrganizationIdAfter,
-		});
+		const production = plan.relationshipProduction;
+		if (!production) throw new Error("Connector relationship production is missing");
+		prospectiveChecksum = await checksumRailPatchResultCooperatively(
+			source.checksum,
+			{
+				changes: plan.mutations,
+				switchChanges: plan.switchMutations ?? [],
+				portChanges: [],
+				equipmentGroupChanges: [],
+				organizationChanges: plan.organizationMutations,
+				organizationNextIdBefore: plan.nextOrganizationIdBefore,
+				organizationNextIdAfter: plan.nextOrganizationIdAfter,
+				relationshipChanges: production.mutations,
+				relationshipNextIdBefore: production.nextRelationshipIdBefore,
+				relationshipNextIdAfter: production.nextRelationshipIdAfter,
+			},
+			checkpoint,
+		);
 	} catch {
 		return new Error("Assembly Connector Worker returned a malformed atomic patch.");
 	}
 	if (ticket.prospectiveChecksum !== prospectiveChecksum) {
 		return new Error("Assembly Connector Worker returned a divergent prospective checksum.");
 	}
-	return Object.freeze({ prospectiveChecksum });
+	return Object.freeze({ prospectiveChecksum, prepared: Object.freeze({ ...prepared, plan }) });
 }
 
 function snapshotMatchesLiveState(
@@ -592,6 +659,7 @@ function snapshotIdentity(snapshot: RailMirrorSnapshot): StaticFabAssemblyConnec
 		nextPortId: snapshot.portEquipment.nextPortId,
 		nextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 		nextOrganizationId: snapshot.organizations.nextOrganizationId,
+		nextRelationshipId: snapshot.relationships.nextRelationshipId,
 	});
 }
 
@@ -601,6 +669,7 @@ function bindingMatchesLiveState(
 ): boolean {
 	return (
 		live.map === binding.source.map &&
+		live.map.getMutationGeneration() === binding.mapMutationGeneration &&
 		live.portEquipment === binding.source.portEquipment &&
 		live.organizations === binding.source.organizations &&
 		live.relationships === binding.source.relationships &&
@@ -609,7 +678,8 @@ function bindingMatchesLiveState(
 		live.map.getAdvancedSwitchIdCursor() === binding.identity.nextAdvancedSwitchId &&
 		live.portEquipment.nextPortId === binding.identity.nextPortId &&
 		live.portEquipment.nextEquipmentGroupId === binding.identity.nextEquipmentGroupId &&
-		live.organizations.nextOrganizationId === binding.identity.nextOrganizationId
+		live.organizations.nextOrganizationId === binding.identity.nextOrganizationId &&
+		live.relationships.nextRelationshipId === binding.identity.nextRelationshipId
 	);
 }
 
@@ -625,6 +695,7 @@ function hydratedResponseError(
 		response.sourceNextPortId !== identity.nextPortId ||
 		response.sourceNextEquipmentGroupId !== identity.nextEquipmentGroupId ||
 		response.sourceNextOrganizationId !== identity.nextOrganizationId ||
+		response.sourceNextRelationshipId !== identity.nextRelationshipId ||
 		!Number.isFinite(response.hydrationMilliseconds) ||
 		response.hydrationMilliseconds < 0
 	);
@@ -636,4 +707,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function workerError(error: unknown, fallback: string): Error {
 	return error instanceof Error ? error : new Error(fallback);
+}
+
+async function finishConnectorAdmissionSteps<T>(
+	steps: Generator<void, T>,
+	checkpoint: () => Promise<void>,
+): Promise<T> {
+	const task = createCooperativeTask(steps);
+	while (!task.done) {
+		task.step(128);
+		await checkpoint();
+	}
+	return task.finish();
 }

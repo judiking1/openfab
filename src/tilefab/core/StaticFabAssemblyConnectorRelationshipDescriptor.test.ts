@@ -56,6 +56,7 @@ import {
 	staticFabAssemblyInterbayConnectorHierarchyEligibility,
 } from "./StaticFabAssemblyConnector";
 import { describeStaticFabAssemblyConnectorRelationship } from "./StaticFabAssemblyConnectorRelationshipDescriptor";
+import { produceStaticFabAssemblyConnectorRelationship } from "./StaticFabAssemblyConnectorRelationshipProduction";
 import {
 	applyStaticFabAssemblyRelationshipMutations,
 	copyStaticFabAssemblyRelationshipState,
@@ -802,8 +803,14 @@ function createNestedConnectorFixture() {
 		left,
 		1,
 	).record;
+	const leftProduction = produceStaticFabAssemblyConnectorRelationship(
+		placed.organizations,
+		placed.relationships,
+		left,
+	);
+	expect(leftProduction.plan.relationshipProduction?.mutations[0]?.after).toEqual(leftRecord);
 	const middle = {
-		relationships: emptyStaticFabAssemblyRelationshipState(),
+		relationships: leftProduction.relationships,
 		...required(left.prospectiveState),
 		patchSequence: placed.patchSequence + 1,
 	};
@@ -813,8 +820,14 @@ function createNestedConnectorFixture() {
 		right,
 		2,
 	).record;
+	const rightProduction = produceStaticFabAssemblyConnectorRelationship(
+		middle.organizations,
+		middle.relationships,
+		right,
+	);
+	expect(rightProduction.plan.relationshipProduction?.mutations[0]?.after).toEqual(rightRecord);
 	const source = {
-		relationships: emptyStaticFabAssemblyRelationshipState(),
+		relationships: rightProduction.relationships,
 		...required(right.prospectiveState),
 		patchSequence: middle.patchSequence + 1,
 	};
@@ -834,8 +847,14 @@ function createNestedConnectorFixture() {
 			{ nextRelationshipId: 4, records },
 		),
 	).toBeNull();
+	const joinedProduction = produceStaticFabAssemblyConnectorRelationship(
+		source.organizations,
+		source.relationships,
+		joined,
+	);
+	expect(joinedProduction.plan.relationshipProduction?.mutations[0]?.after).toEqual(joinedRecord);
 	const fab = {
-		relationships: emptyStaticFabAssemblyRelationshipState(),
+		relationships: joinedProduction.relationships,
 		...required(joined.prospectiveState),
 		patchSequence: source.patchSequence + 1,
 	};
@@ -855,10 +874,13 @@ function createNestedConnectorFixture() {
 		),
 	).toBeNull();
 	const final = required(loop.prospectiveState);
-	const canonical = copyStaticFabAssemblyRelationshipState({
-		nextRelationshipId: 5,
-		records: [...records, loopRecord],
-	});
+	const loopProduction = produceStaticFabAssemblyConnectorRelationship(
+		fab.organizations,
+		fab.relationships,
+		loop,
+	);
+	const canonical = loopProduction.relationships;
+	expect(canonical).toEqual({ nextRelationshipId: 5, records: [...records, loopRecord] });
 	return { final, canonical, leftRecord, rightRecord, joinedRecord };
 }
 

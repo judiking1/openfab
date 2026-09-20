@@ -1,4 +1,6 @@
 import type { AdvancedSwitchMutation } from "./AdvancedSwitch";
+import { stableSortSteps } from "./CooperativeSort";
+import { completeCooperativeSteps } from "./CooperativeTask";
 import type { EquipmentGroupMutation, PortEquipmentState } from "./EquipmentGroup";
 import type { PortMutation } from "./PortRecord";
 import type { RailMutation } from "./paint";
@@ -460,6 +462,42 @@ export function unhandledStaticFabOrganizationImpacts(
 	return unhandled.length === 0 ? EMPTY_IMPACT_OWNERS : Object.freeze(unhandled);
 }
 
+/** Rail-only history replay retains the same protected membership rule as ordinary patches. */
+export function* assertStaticFabOrganizationRailImpactsHandledSteps(
+	index: StaticFabOrganizationImpactIndex,
+	impactedIds: ReadonlySet<number>,
+	organizationChanges: readonly StaticFabOrganizationMutation[],
+	railChanges: readonly RailMutation[],
+	authorizedIds: ReadonlySet<number>,
+): Generator<void> {
+	const changes = new Map<number, StaticFabOrganizationMutation>();
+	for (const change of organizationChanges) {
+		yield;
+		changes.set(change.id, change);
+	}
+	const edges = yield* changedDirectedRailEdgesSteps(railChanges);
+	const empty = new Set<number>();
+	for (const id of impactedIds) {
+		yield;
+		if (authorizedIds.has(id)) continue;
+		const change = changes.get(id);
+		if (!change?.before) throw new Error("계층 연결 이력이 보호된 조직 변경을 누락했습니다");
+		if (!change.after) continue;
+		if (
+			!(yield* organizationMembershipDeltaHandlesEveryProtectedChangeSteps(
+				index,
+				id,
+				change.before.membership,
+				change.after.membership,
+				edges,
+				empty,
+				empty,
+			))
+		)
+			throw new Error("계층 연결 이력이 보호된 레일 소유권 변경과 다릅니다");
+	}
+}
+
 function organizationMembershipDeltaHandlesEveryProtectedChange(
 	index: StaticFabOrganizationImpactIndex,
 	organizationId: number,
@@ -469,9 +507,32 @@ function organizationMembershipDeltaHandlesEveryProtectedChange(
 	changedSwitchIds: ReadonlySet<number>,
 	changedEquipmentGroupIds: ReadonlySet<number>,
 ): boolean {
+	return completeCooperativeSteps(
+		organizationMembershipDeltaHandlesEveryProtectedChangeSteps(
+			index,
+			organizationId,
+			before,
+			after,
+			changedRailEdges,
+			changedSwitchIds,
+			changedEquipmentGroupIds,
+		),
+	);
+}
+
+function* organizationMembershipDeltaHandlesEveryProtectedChangeSteps(
+	index: StaticFabOrganizationImpactIndex,
+	organizationId: number,
+	before: StaticFabOrganizationMembership,
+	after: StaticFabOrganizationMembership,
+	changedRailEdges: readonly DirectedRailEdge[],
+	changedSwitchIds: ReadonlySet<number>,
+	changedEquipmentGroupIds: ReadonlySet<number>,
+): Generator<void, boolean> {
 	if (before === after) return false;
 	let sawProtectedChange = false;
 	for (const edge of changedRailEdges) {
+		yield;
 		if (!organizationOwnsEitherEndpoint(index, organizationId, edge)) continue;
 		sawProtectedChange = true;
 		if (
@@ -481,6 +542,7 @@ function organizationMembershipDeltaHandlesEveryProtectedChange(
 		}
 	}
 	for (const switchId of changedSwitchIds) {
+		yield;
 		if (!ownersInclude(index.organizationOwnersForSwitch(switchId), organizationId)) continue;
 		sawProtectedChange = true;
 		if (
@@ -491,6 +553,7 @@ function organizationMembershipDeltaHandlesEveryProtectedChange(
 		}
 	}
 	for (const equipmentGroupId of changedEquipmentGroupIds) {
+		yield;
 		if (
 			!ownersInclude(index.organizationOwnersForEquipmentGroup(equipmentGroupId), organizationId)
 		) {
@@ -510,8 +573,15 @@ function organizationMembershipDeltaHandlesEveryProtectedChange(
 function changedDirectedRailEdges(
 	railChanges: readonly RailMutation[],
 ): readonly DirectedRailEdge[] {
+	return completeCooperativeSteps(changedDirectedRailEdgesSteps(railChanges));
+}
+
+function* changedDirectedRailEdgesSteps(
+	railChanges: readonly RailMutation[],
+): Generator<void, readonly DirectedRailEdge[]> {
 	const changedByKey = new Map<string, DirectedRailEdge>();
 	for (const change of railChanges) {
+		yield;
 		const before = decodeRailCell(change.before);
 		const after = decodeRailCell(change.after);
 		for (const direction of ALL_DIRECTIONS) {
@@ -531,7 +601,13 @@ function changedDirectedRailEdges(
 			}
 		}
 	}
-	return Object.freeze([...changedByKey.values()].sort(compareDirectedRailEdges));
+	const edges: DirectedRailEdge[] = [];
+	for (const edge of changedByKey.values()) {
+		yield;
+		edges.push(edge);
+	}
+	yield* stableSortSteps(edges, compareDirectedRailEdges);
+	return Object.freeze(edges);
 }
 
 function organizationOwnsEitherEndpoint(

@@ -322,6 +322,39 @@ export function copyStaticFabOrganizationRecord(
 	return brandCanonicalStaticFabOrganizationRecord(copy);
 }
 
+export function* copyStaticFabOrganizationRecordSteps(
+	record: StaticFabOrganizationRecord,
+): Generator<void, StaticFabOrganizationRecord> {
+	const builder = createCanonicalStaticFabOrganizationStateBuilder(record.id + 1);
+	const properties = staticFabOrganizationProperties(record);
+	for (const id of staticFabOrganizationParentIds(record)) {
+		yield;
+		builder.addParentOrganizationId(id);
+	}
+	for (const edge of record.membership.railEdges) {
+		yield;
+		builder.addRailEdge(edge);
+	}
+	for (const id of record.membership.advancedSwitchIds) {
+		yield;
+		builder.addAdvancedSwitchId(id);
+	}
+	for (const id of record.membership.equipmentGroupIds) {
+		yield;
+		builder.addEquipmentGroupId(id);
+	}
+	builder.finishRecord({
+		id: record.id,
+		kind: record.kind,
+		name: record.name,
+		description: properties.description,
+		color: properties.color,
+	});
+	const copied = builder.finish().records[0];
+	if (!copied) throw new Error("Missing copied organization.");
+	return copied;
+}
+
 const EMPTY_STATIC_FAB_ORGANIZATION_PARENT_IDS = Object.freeze([]) as readonly number[];
 const DEFAULT_STATIC_FAB_ORGANIZATION_PROPERTIES = Object.freeze({
 	description: "",

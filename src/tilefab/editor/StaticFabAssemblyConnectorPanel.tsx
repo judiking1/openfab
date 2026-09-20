@@ -357,7 +357,6 @@ export function StaticFabAssemblyConnectorPanel({
 					className="tilefab-assembly-connector-cancel"
 					style={CONTROL_SIZE}
 					aria-keyshortcuts="Escape"
-					disabled={phase === "applying"}
 					data-guided-target={recoveryPrompt?.target === "cancel" || undefined}
 					aria-describedby={recoveryPrompt?.target === "cancel" ? recoveryDescriptionId : undefined}
 					ref={recoveryPrompt?.target === "cancel" ? recoveryTargetRef : undefined}
@@ -663,7 +662,7 @@ function panelStatus(
 			if (issueCode === "ALREADY_CONNECTED") return "이미 연결됨";
 			return conflictCount > 0 ? `충돌 ${conflictCount.toLocaleString()}건` : "적용 불가";
 		case "applying":
-			return "적용 중";
+			return "적용 준비 중";
 	}
 }
 
@@ -697,7 +696,7 @@ function defaultFeedback(
 		case "rejected":
 			return "다른 연결점 조합이나 경로 방향을 시도하세요. 지도는 아직 바뀌지 않았습니다.";
 		case "applying":
-			return "인증된 연결을 한 번의 실행 취소 단위로 적용하고 있습니다.";
+			return "연결 적용을 준비하고 있습니다. 취소하거나 Esc를 눌러 중단할 수 있습니다.";
 	}
 }
 

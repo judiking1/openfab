@@ -29,12 +29,10 @@ import {
 	type StaticFabAssemblyRelationshipStateV1,
 } from "./StaticFabAssemblyRelationship";
 import {
-	createCanonicalStaticFabOrganizationStateBuilder,
+	copyStaticFabOrganizationRecordSteps,
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
-	staticFabOrganizationParentIds,
-	staticFabOrganizationProperties,
 } from "./StaticFabOrganization";
 import type { TileMap } from "./TileMap";
 
@@ -540,8 +538,8 @@ export function* copyStaticFabArrangementWorkerPlanSteps(
 		organizations.push(
 			Object.freeze({
 				id: change.id,
-				before: change.before ? yield* copyOrganizationSteps(change.before) : null,
-				after: change.after ? yield* copyOrganizationSteps(change.after) : null,
+				before: change.before ? yield* copyStaticFabOrganizationRecordSteps(change.before) : null,
+				after: change.after ? yield* copyStaticFabOrganizationRecordSteps(change.after) : null,
 			}),
 		);
 	}
@@ -600,39 +598,6 @@ export function* copyStaticFabArrangementWorkerPlanSteps(
 				})
 			: null,
 	});
-}
-
-function* copyOrganizationSteps(
-	record: StaticFabOrganizationRecord,
-): Generator<void, StaticFabOrganizationRecord> {
-	const builder = createCanonicalStaticFabOrganizationStateBuilder(record.id + 1);
-	const properties = staticFabOrganizationProperties(record);
-	for (const id of staticFabOrganizationParentIds(record)) {
-		yield;
-		builder.addParentOrganizationId(id);
-	}
-	for (const edge of record.membership.railEdges) {
-		yield;
-		builder.addRailEdge(edge);
-	}
-	for (const id of record.membership.advancedSwitchIds) {
-		yield;
-		builder.addAdvancedSwitchId(id);
-	}
-	for (const id of record.membership.equipmentGroupIds) {
-		yield;
-		builder.addEquipmentGroupId(id);
-	}
-	builder.finishRecord({
-		id: record.id,
-		kind: record.kind,
-		name: record.name,
-		description: properties.description,
-		color: properties.color,
-	});
-	const copied = builder.finish().records[0];
-	if (!copied) throw new Error("Missing adopted arrangement organization.");
-	return copied;
 }
 
 function* addAdvancedSwitchMutations(

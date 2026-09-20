@@ -234,7 +234,13 @@ export function reduceStaticFabAssemblyConnectorSession(
 				timings: action.timings,
 			});
 		case "APPLY":
-			return state.phase === "ready" ? freezeSession({ ...state, phase: "applying" }) : state;
+			return state.phase === "ready"
+				? freezeSession({
+						...state,
+						phase: "applying",
+						reason: "연결 적용을 준비하고 있습니다 · 취소 또는 Esc로 중단",
+					})
+				: state;
 	}
 }
 

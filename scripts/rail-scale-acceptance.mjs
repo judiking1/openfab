@@ -1472,6 +1472,7 @@ async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
 			"Fab Loop review launch Long Tasks",
 		);
 		const fabLoopReady = await readState();
+		const relationshipsBeforeLoop = await readAssemblyRelationships(page);
 		result.fabLoopReviewProjectNeutral =
 			fabLoopReady.documentSequence === connectedFab.documentSequence &&
 			fabLoopReady.modelChecksum === connectedFab.modelChecksum &&
@@ -1549,6 +1550,22 @@ async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
 		);
 		const fabLoopApplyPerformance = await readHierarchyLongTaskWindow(fabLoopLongTaskStartedAt);
 		const loopApplied = await readState();
+		const relationshipsAfterLoop = await readAssemblyRelationships(page);
+		assertEqual(
+			failures,
+			relationshipsAfterLoop.nextRelationshipId,
+			relationshipsBeforeLoop.nextRelationshipId + 1,
+			"Fab Loop consumes one relationship ID",
+		);
+		assertEqual(
+			failures,
+			relationshipsAfterLoop.records.length,
+			relationshipsBeforeLoop.records.length + 1,
+			"Fab Loop produces one relationship",
+		);
+		const loopUndoChecksum = checksumWithMonotonicCursors(fabLoopReady.modelChecksum, {
+			relationship: relationshipsAfterLoop.nextRelationshipId,
+		});
 		const fabLoopApplyTransitions = await page.evaluate(
 			() => globalThis.__openFabPlacedBaySync?.values ?? [],
 		);
@@ -1638,15 +1655,24 @@ async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
 					app.getAttribute("data-resilient-fab-loop-receipt-phase") === "undone"
 				);
 			},
-			{ fabId: expectedFabId, checksum: fabLoopReady.modelChecksum },
+			{ fabId: expectedFabId, checksum: loopUndoChecksum },
 			{ timeout: 60_000 },
 		);
 		const loopUndone = await readState();
 		assertEqual(
 			failures,
+			JSON.stringify(await readAssemblyRelationships(page)),
+			JSON.stringify({
+				...relationshipsBeforeLoop,
+				nextRelationshipId: relationshipsAfterLoop.nextRelationshipId,
+			}),
+			"Fab Loop Undo restores every relationship and retains its cursor",
+		);
+		assertEqual(
+			failures,
 			loopUndone.modelChecksum,
-			fabLoopReady.modelChecksum,
-			"Fab Loop Undo restores exact pre-Loop model identity",
+			loopUndoChecksum,
+			"Fab Loop Undo restores exact pre-Loop content and retains the relationship cursor",
 		);
 		await page.getByTestId("rail-canvas").focus();
 		await page.keyboard.press("Meta+Shift+z");
@@ -1674,6 +1700,12 @@ async function runPlacedTwinBayHandoffLargeMapScenario(activeBrowser) {
 			{ timeout: 60_000 },
 		);
 		const loopRedone = await readState();
+		assertEqual(
+			failures,
+			JSON.stringify(await readAssemblyRelationships(page)),
+			JSON.stringify(relationshipsAfterLoop),
+			"Fab Loop Redo restores every relationship and cursor",
+		);
 		result.fabLoopHistoryProbe = {
 			modelChecksum: loopRedone.modelChecksum === loopApplied.modelChecksum,
 			workerChecksum: loopRedone.workerChecksum === loopApplied.workerChecksum,
@@ -3761,6 +3793,7 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 		checksum: element.dataset.workerChecksum ?? "",
 		cells: Number(element.dataset.workerCells),
 	}));
+	const relationshipsBeforeApply = await readAssemblyRelationships(page);
 	const applyStartedAt = await browserNow();
 	await panel.locator(".tilefab-assembly-connector-apply").focus();
 	await page.keyboard.press("Enter");
@@ -3795,6 +3828,26 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 		};
 	});
 	windows.apply = { startedAt: applyStartedAt, endedAt: await browserNow() };
+	const relationshipsAfterApply = await readAssemblyRelationships(page);
+	const organizationCursorAfterApply = await page.evaluate(
+		() => globalThis.__tileFab.getDocument().organizations.nextOrganizationId,
+	);
+	assertEqual(
+		failures,
+		relationshipsAfterApply.nextRelationshipId,
+		relationshipsBeforeApply.nextRelationshipId + 1,
+		"Connector consumes one relationship ID",
+	);
+	assertEqual(
+		failures,
+		relationshipsAfterApply.records.length,
+		relationshipsBeforeApply.records.length + 1,
+		"Connector produces one relationship",
+	);
+	const undoChecksum = checksumWithMonotonicCursors(beforeApply.checksum, {
+		organization: organizationCursorAfterApply,
+		relationship: relationshipsAfterApply.nextRelationshipId,
+	});
 	for (const [label, actual, expected] of [
 		["Apply Worker sequence", afterApply.sequence, beforeApply.sequence + 1],
 		["Apply simulation gate", afterApply.simulationReady, "false"],
@@ -3822,29 +3875,31 @@ async function runAssemblyConnectorInteractionMatrix(page, budget, failures) {
 		"Connector Undo mirror/model readiness",
 		(source) => {
 			const target = document.querySelector('[data-testid="rail-canvas"]');
-			const restoredChecksum = target?.dataset.workerChecksum?.split(":") ?? [];
-			const sourceChecksum = source.checksum.split(":");
-			const restoredExceptMonotonicOrganizationCursor =
-				restoredChecksum.length === 12 &&
-				sourceChecksum.length === 12 &&
-				restoredChecksum[0] === "00000002" &&
-				restoredChecksum.every((field, index) => index === 7 || field === sourceChecksum[index]) &&
-				Number.parseInt(restoredChecksum[7], 16) > Number.parseInt(sourceChecksum[7], 16);
 			return (
 				target?.dataset.workerStatus === "ready" &&
 				Number(target.dataset.workerSequence) === source.sequence + 1 &&
 				Number(target.dataset.workerCells) === source.cells &&
-				restoredExceptMonotonicOrganizationCursor &&
+				target.dataset.workerChecksum === source.checksum &&
+				globalThis.__tileFab?.getEditorModel().authoredChecksum === source.checksum &&
 				target.dataset.modelSyncPending === "false"
 			);
 		},
 		{
 			sequence: afterApply.sequence,
-			checksum: beforeApply.checksum,
+			checksum: undoChecksum,
 			cells: beforeApply.cells,
 		},
 	);
 	windows.undo = { startedAt: undoStartedAt, endedAt: await browserNow() };
+	assertEqual(
+		failures,
+		JSON.stringify(await readAssemblyRelationships(page)),
+		JSON.stringify({
+			...relationshipsBeforeApply,
+			nextRelationshipId: relationshipsAfterApply.nextRelationshipId,
+		}),
+		"Connector Undo restores every relationship and retains its cursor",
+	);
 	const replacementSelectionStartedAt = await browserNow();
 	const replacementConnect = await selectAssemblyConnectorScaleBays(page);
 	await replacementConnect.click();
@@ -9919,4 +9974,33 @@ function formatBytes(value) {
 
 function formatMilliseconds(value) {
 	return Number.isFinite(value) ? `${value.toFixed(1)} ms` : "n/a";
+}
+
+async function readAssemblyRelationships(page) {
+	return page.evaluate(() => {
+		const state = globalThis.__tileFab?.getDocument()?.relationships;
+		if (!state) throw new Error("Authored relationships are unavailable");
+		return structuredClone(state);
+	});
+}
+
+function checksumWithMonotonicCursors(checksum, cursors) {
+	if (!/^(?:[0-9a-f]{8}:){11}[0-9a-f]{8}$/.test(checksum))
+		throw new Error("Invalid authored checksum");
+	const fields = checksum.split(":");
+	if (fields[0] !== "00000002") throw new Error("Unsupported checksum version");
+	for (const [kind, cursor] of Object.entries(cursors)) {
+		const index = kind === "organization" ? 7 : kind === "relationship" ? 9 : -1;
+		if (
+			index < 0 ||
+			!Number.isSafeInteger(cursor) ||
+			cursor < 1 ||
+			cursor > 0x7fffffff ||
+			cursor < Number.parseInt(fields[index], 16)
+		)
+			throw new Error("Invalid monotonic cursor expectation");
+		// Every content hash and count remains exact; only separately encoded high-water fields change.
+		fields[index] = cursor.toString(16).padStart(8, "0");
+	}
+	return fields.join(":");
 }

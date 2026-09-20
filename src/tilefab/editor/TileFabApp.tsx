@@ -2276,8 +2276,9 @@ export default function TileFabApp(): React.ReactElement {
 	const staticFabArrangementBridgeRef = useRef<StaticFabArrangementBridge | null>(null);
 	const staticFabArrangementBindingRef = useRef<StaticFabArrangementBinding | null>(null);
 	const staticFabArrangementCaptureRef = useRef<AbortController | null>(null);
-	const staticFabArrangementHistoryRef = useRef<AbortController | null>(null);
-	const [staticFabArrangementHistory, setStaticFabArrangementHistory] = useState<"undo" | "redo" | null>(null);
+	const staticFabMutationHistoryRef = useRef<AbortController | null>(null);
+	const [staticFabMutationHistory, setStaticFabMutationHistory] = useState<"undo" | "redo" | null>(null);
+	const [staticFabHistoryLabel, setStaticFabHistoryLabel] = useState("정렬");
 	const staticFabArrangementPlanRef = useRef<StaticFabArrangementPlan | null>(null);
 	const staticFabArrangementPreviewRef = useRef<StaticFabArrangementPreviewArtifact | null>(null);
 	const staticFabArrangementRequestRef = useRef(0);
@@ -3976,7 +3977,7 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildPreferences?.lastEntryChoice === "guided" &&
 		startupState.status === "ready";
 	const guidedBuildExperienceActive = guidedBuildOpen || guidedBuildResumeAvailable;
-	const staticFabExclusiveCommandActive = staticFabArrangementHistory !== null ||
+	const staticFabExclusiveCommandActive = staticFabMutationHistory !== null ||
 		operationalConfigurationOpen ||
 		stationProposalReview !== null ||
 		staticFabArrangement !== null ||
@@ -5265,7 +5266,7 @@ export default function TileFabApp(): React.ReactElement {
 					window.clearTimeout(staticFabArrangementRequestTimerRef.current);
 					staticFabArrangementRequestTimerRef.current = null;
 				}
-					staticFabArrangementHistoryRef.current?.abort();
+					staticFabMutationHistoryRef.current?.abort();
 					staticFabArrangementCaptureRef.current?.abort();
 				staticFabArrangementBridgeRef.current?.dispose();
 				staticFabArrangementBridgeRef.current = null;
@@ -6393,7 +6394,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const closeContextPalette = (): void => updateContextPalette(null);
 	const blockStaticFabExclusiveCommand = (): boolean => {
-		if (staticFabArrangementHistoryRef.current) { setStatus("정렬 이력 처리를 기다리거나 Esc로 취소하세요"); return true; }
+		if (staticFabMutationHistoryRef.current) { setStatus("편집 이력 처리를 기다리거나 Esc로 취소하세요"); return true; }
 		if (operationalConfigurationOpen) {
 			setStatus("운영 설정 편집기를 적용하거나 되돌린 뒤 닫으세요");
 			scheduleRender();
@@ -9000,7 +9001,7 @@ export default function TileFabApp(): React.ReactElement {
 		return true;
 	};
 	const editorMutationWaitBlockedReason = (): string | null => {
-		if (staticFabArrangementHistoryRef.current) return "정렬 이력 처리를 기다리거나 Esc로 취소하세요";
+		if (staticFabMutationHistoryRef.current) return "편집 이력 처리를 기다리거나 Esc로 취소하세요";
 		if (startupState.status !== "ready") return "프로젝트 시작이 끝난 뒤 편집을 시작하세요";
 		if (projectOperationControllerRef.current !== null || projectSession.operation !== "idle") {
 			return "프로젝트 작업이 끝난 뒤 편집을 계속하세요";
@@ -11322,7 +11323,7 @@ export default function TileFabApp(): React.ReactElement {
 		return true;
 	};
 
-	const replayArrangementHistory = async (direction: "undo" | "redo"): Promise<boolean> => {
+	const replayStaticFabHistory = async (direction: "undo" | "redo"): Promise<boolean> => {
 		const document = railDocument,
 			mirror = workerBridgeRef.current;
 		const preparePatch = mirror?.prepareStaticFabMutationPatchCooperatively?.bind(mirror);
@@ -11333,30 +11334,36 @@ export default function TileFabApp(): React.ReactElement {
 			projectOperationControllerRef.current !== null
 		)
 			return false;
+		const connector = document.canReplayStaticFabAssemblyConnector(direction);
+		const commandLabel = connector ? "계층 연결" : "정렬";
+		setStaticFabHistoryLabel(commandLabel);
 		const controller = new AbortController();
-		staticFabArrangementHistoryRef.current = controller;
-		setStaticFabArrangementHistory(direction);
+		staticFabMutationHistoryRef.current = controller;
+		setStaticFabMutationHistory(direction);
 		const sequence = document.getPatchSequence();
 		let patchIsCurrent: (() => boolean) | null = null;
 		const label = direction === "undo" ? "실행 취소" : "다시 실행";
-		setStatus(`정렬 ${label}를 준비하고 있습니다 · Esc로 취소`);
+		setStatus(`${commandLabel} ${label}를 준비하고 있습니다 · Esc로 취소`);
 		try {
 			const checkpoint = createStaticFabArrangementCheckpoint();
 			await checkpoint();
-			const result = await document.replayStaticFabArrangementCooperatively(direction, {
+			const replay = connector
+				? document.replayStaticFabAssemblyConnectorCooperatively.bind(document)
+				: document.replayStaticFabArrangementCooperatively.bind(document);
+			const result = await replay(direction, {
 				checkpoint,
 				now: performanceNow,
 				checkCancelled: () => {
 					if (
 						controller.signal.aborted ||
-						staticFabArrangementHistoryRef.current !== controller ||
+						staticFabMutationHistoryRef.current !== controller ||
 						editorModelRef.current.document !== document ||
 						document.getPatchSequence() !== sequence ||
 						workerBridgeRef.current !== mirror ||
 						projectOperationControllerRef.current !== null ||
 						(patchIsCurrent !== null && !patchIsCurrent())
 					)
-						throw new Error(`정렬 ${label} 준비를 취소했습니다`);
+						throw new Error(`${commandLabel} ${label} 준비를 취소했습니다`);
 				},
 				preparePatch: async (event, checkpoint) => {
 					const lease = await preparePatch(event, checkpoint);
@@ -11364,24 +11371,24 @@ export default function TileFabApp(): React.ReactElement {
 				},
 			});
 			if (canvasRef.current && result.committed) {
-				canvasRef.current.dataset.arrangementHistoryDirection = direction;
-				canvasRef.current.dataset.arrangementHistoryMaxSliceMs =
+				canvasRef.current.dataset[connector ? "assemblyConnectorHistoryDirection" : "arrangementHistoryDirection"] = direction;
+				canvasRef.current.dataset[connector ? "assemblyConnectorHistoryMaxSliceMs" : "arrangementHistoryMaxSliceMs"] =
 					result.timings?.maximumPreparationSliceMilliseconds?.toFixed(3) ?? "";
-				canvasRef.current.dataset.arrangementHistoryPublicationMs =
+				canvasRef.current.dataset[connector ? "assemblyConnectorHistoryPublicationMs" : "arrangementHistoryPublicationMs"] =
 					result.timings?.patchPublicationMilliseconds.toFixed(3) ?? "";
 			}
 			return result.committed;
 		} catch (error) {
 			if (
-				staticFabArrangementHistoryRef.current === controller &&
+				staticFabMutationHistoryRef.current === controller &&
 				editorModelRef.current.document === document
 			)
-				setStatus(error instanceof Error ? error.message : `정렬 ${label}를 완료하지 못했습니다`);
+				setStatus(error instanceof Error ? error.message : `${commandLabel} ${label}를 완료하지 못했습니다`);
 			return false;
 		} finally {
-			if (staticFabArrangementHistoryRef.current === controller) {
-				staticFabArrangementHistoryRef.current = null;
-				setStaticFabArrangementHistory(null);
+			if (staticFabMutationHistoryRef.current === controller) {
+				staticFabMutationHistoryRef.current = null;
+				setStaticFabMutationHistory(null);
 			}
 		}
 	};
@@ -11453,7 +11460,7 @@ export default function TileFabApp(): React.ReactElement {
 			? null
 			: removedOrganizationContextRef.current;
 		if (!retained) clearTransientConstruction();
-		if (railDocument.canReplayStaticFabArrangement("undo")) { if (!(await replayArrangementHistory("undo"))) return false; } else if (!railDocument.undo()) return false;
+		if ((railDocument.canReplayStaticFabArrangement("undo") || railDocument.canReplayStaticFabAssemblyConnector("undo"))) { if (!(await replayStaticFabHistory("undo"))) return false; } else if (!railDocument.undo()) return false;
 		const duplicatedAssemblyUndoProjection = duplicatedAssemblyUndoCandidate
 			? ordinaryDuplicatedAssemblyUndoProjection(duplicatedAssemblyUndoCandidate, {
 					document: railDocument,
@@ -11642,7 +11649,7 @@ export default function TileFabApp(): React.ReactElement {
 			? null
 			: removedOrganizationContextRef.current;
 		if (!retained) clearTransientConstruction();
-		if (railDocument.canReplayStaticFabArrangement("redo")) { if (!(await replayArrangementHistory("redo"))) return; } else if (!railDocument.redo()) return;
+		if ((railDocument.canReplayStaticFabArrangement("redo") || railDocument.canReplayStaticFabAssemblyConnector("redo"))) { if (!(await replayStaticFabHistory("redo"))) return; } else if (!railDocument.redo()) return;
 		const duplicatedAssemblyRedoProjection = duplicatedAssemblyRedoCandidate
 			? ordinaryDuplicatedAssemblyRedoProjection(duplicatedAssemblyRedoCandidate, {
 					document: railDocument,
@@ -11878,7 +11885,7 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		keyboardActionsRef.current = {
 			cancel: () => {
-				if (staticFabArrangementHistoryRef.current) { staticFabArrangementHistoryRef.current.abort(); setStatus("정렬 이력 처리를 취소하고 있습니다"); return; }
+				if (staticFabMutationHistoryRef.current) { staticFabMutationHistoryRef.current.abort(); setStatus("편집 이력 처리를 취소하고 있습니다"); return; }
 				if (inspectAreaKeyboardSessionRef.current) {
 					cancelInspectAreaKeyboardRef.current("키보드 부분 선택을 취소했습니다", true);
 					return;
@@ -15218,7 +15225,7 @@ export default function TileFabApp(): React.ReactElement {
 		setStaticFabAssemblyConnectorSide(cycleConnectorSide(current.session.side, delta));
 	};
 
-	const applyStaticFabAssemblyConnector = (): void => {
+	const applyStaticFabAssemblyConnector = async (): Promise<void> => {
 		const current = staticFabAssemblyConnectorUiRef.current;
 		const connectionLabel = current
 			? staticFabAssemblyConnectorConnectionLabel(
@@ -15252,11 +15259,21 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
-		publishStaticFabAssemblyConnector({
+		const document = editorModelRef.current.document;
+		const mirror = workerBridgeRef.current;
+		const preparePatch = mirror?.prepareStaticFabMutationPatchCooperatively?.bind(mirror);
+		if (!mirror || !preparePatch || workerBridgeDocumentRef.current !== document) {
+			setStatus("프로젝트와 Rail Worker가 준비된 뒤 계층 연결을 적용하세요");
+			return;
+		}
+		const applying = {
 			session: reduceStaticFabAssemblyConnectorSession(current.session, { type: "APPLY" }),
 			plan: current.plan,
-		});
-		const document = editorModelRef.current.document;
+		};
+		publishStaticFabAssemblyConnector(applying);
+		const ownsRequest = () => staticFabAssemblyConnectorUiRef.current === applying;
+		let patchIsCurrent: (() => boolean) | null = null;
+		setStatus(`${connectionLabel} 적용을 준비하고 있습니다 · Esc로 취소`);
 		const appliedBankEvidence = !guidedBuildExperienceActive
 			? appliedConnectedBayBankEvidence(current.plan, document.organizations)
 			: null;
@@ -15271,9 +15288,38 @@ export default function TileFabApp(): React.ReactElement {
 					staticFabOuterCirculationIndex,
 				)
 			: null;
-		if (!document.commitStaticFabAssemblyConnector(current.plan)) {
-			cancelStaticFabAssemblyConnectorAndRestoreFocus(
-				`${connectionLabel} 인증이 만료되었습니다 · 같은 gateway를 다시 선택하세요`,
+		try {
+			const checkpoint = createStaticFabArrangementCheckpoint();
+			await checkpoint();
+			const result = await document.commitStaticFabAssemblyConnectorCooperatively(current.plan, {
+				checkpoint,
+				now: performanceNow,
+				checkCancelled: () => {
+					if (!ownsRequest() || editorModelRef.current.document !== document ||
+						!staticFabAssemblyConnectorSessionIsCurrent(applying.session, staticFabAssemblyConnectorLiveIdentity()) ||
+						workerBridgeRef.current !== mirror || workerBridgeDocumentRef.current !== document ||
+						projectOperationControllerRef.current !== null ||
+						(patchIsCurrent !== null && !patchIsCurrent()))
+						throw new Error("문서 또는 연결 요청이 변경되어 적용을 취소했습니다");
+				},
+				preparePatch: async (event, checkpoint) => {
+					const lease = await preparePatch(event, checkpoint);
+					patchIsCurrent = lease.isCurrent;
+				},
+			});
+			if (!result.committed) {
+				if (ownsRequest()) cancelStaticFabAssemblyConnectorAndRestoreFocus(
+					`${connectionLabel} 인증이 만료되었습니다 · 같은 gateway를 다시 선택하세요`,
+				);
+				return;
+			}
+			if (canvasRef.current) {
+				canvasRef.current.dataset.assemblyConnectorCommitMaxSliceMs = result.timings?.maximumPreparationSliceMilliseconds?.toFixed(3) ?? "";
+				canvasRef.current.dataset.assemblyConnectorCommitPublicationMs = result.timings?.patchPublicationMilliseconds.toFixed(3) ?? "";
+			}
+		} catch (error) {
+			if (ownsRequest()) cancelStaticFabAssemblyConnectorAndRestoreFocus(
+				error instanceof Error ? error.message : `${connectionLabel}을 적용하지 못했습니다`,
 			);
 			return;
 		}
@@ -35481,7 +35527,7 @@ export default function TileFabApp(): React.ReactElement {
 				{ordinaryBuildSurfaceHandoff &&
 				ordinaryBuildSurfaceHandoffKind &&
 				ordinaryBuildSurfaceHandoffDescriptionId &&
-					!staticFabArrangementHistory &&
+					!staticFabMutationHistory &&
 				!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
 				!staticFabSemanticBayMutation &&
@@ -35557,7 +35603,7 @@ export default function TileFabApp(): React.ReactElement {
 					</fieldset>
 				) : null}
 
-				{!staticFabArrangementHistory &&
+				{!staticFabMutationHistory &&
 					!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
 				!staticFabSemanticBayMutation &&
@@ -35772,10 +35818,10 @@ export default function TileFabApp(): React.ReactElement {
 					</>
 				) : null}
 
-				{staticFabArrangementHistory ? (
-					<section className="tilefab-arrangement-historybar" data-testid="static-fab-arrangement-history" aria-label="정렬 이력 처리" aria-busy="true">
-						<p className="tilefab-arrangement-history-copy" role="status">정렬 {staticFabArrangementHistory === "undo" ? "실행 취소" : "다시 실행"} 준비 중</p>
-						<button className="tilefab-arrangement-history-cancel" type="button" aria-label="정렬 이력 처리 취소" onClick={() => staticFabArrangementHistoryRef.current?.abort()}>취소 <kbd>ESC</kbd></button>
+				{staticFabMutationHistory ? (
+					<section className="tilefab-arrangement-historybar" data-testid="static-fab-arrangement-history" aria-label={`${staticFabHistoryLabel} 이력 처리`} aria-busy="true">
+						<p className="tilefab-arrangement-history-copy" role="status">{staticFabHistoryLabel} {staticFabMutationHistory === "undo" ? "실행 취소" : "다시 실행"} 준비 중</p>
+						<button className="tilefab-arrangement-history-cancel" type="button" aria-label={`${staticFabHistoryLabel} 이력 처리 취소`} onClick={() => staticFabMutationHistoryRef.current?.abort()}>취소 <kbd>ESC</kbd></button>
 					</section>
 				) : null}
 				{staticFabArrangement ? (

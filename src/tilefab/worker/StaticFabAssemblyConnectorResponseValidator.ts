@@ -1,11 +1,13 @@
+import { completeCooperativeSteps } from "../core/CooperativeTask";
 import type { RailMutation } from "../core/paint";
-import type {
-	StaticFabAssemblyConnectorIssueCode,
-	StaticFabAssemblyConnectorPlan,
+import {
+	STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION,
+	type StaticFabAssemblyConnectorIssueCode,
+	type StaticFabAssemblyConnectorPlan,
 } from "../core/StaticFabAssemblyConnector";
+import { staticFabAssemblyConnectorRelationshipProductionShapeErrorSteps } from "../core/StaticFabAssemblyConnectorRelationshipProduction";
 import {
 	STATIC_FAB_ORGANIZATION_KINDS,
-	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
@@ -24,6 +26,12 @@ const MAX_ORGANIZATION_RECORD_TEXT = 500;
 
 /** Bounded structural gate applied in both the Worker and the main-thread bridge. */
 export function staticFabAssemblyConnectorPreparedShapeError(value: unknown): string | null {
+	return completeCooperativeSteps(staticFabAssemblyConnectorPreparedShapeErrorSteps(value));
+}
+
+export function* staticFabAssemblyConnectorPreparedShapeErrorSteps(
+	value: unknown,
+): Generator<void, string | null> {
 	if (!isRecord(value)) return "prepared payload must be an object";
 	if (typeof value.valid !== "boolean") return "prepared validity must be boolean";
 	if (!validFailureCode(value.failureCode, value.valid)) return "prepared failure code is invalid";
@@ -43,7 +51,10 @@ export function staticFabAssemblyConnectorPreparedShapeError(value: unknown): st
 		return "prepared diagnostics are malformed";
 	}
 	if (value.plan !== null) {
-		const planError = connectorPlanShapeError(value.plan, value.valid ? "full" : "compact");
+		const planError = yield* connectorPlanShapeErrorSteps(
+			value.plan,
+			value.valid ? "full" : "compact",
+		);
 		if (planError) return planError;
 	}
 	if (!value.valid) {
@@ -60,6 +71,13 @@ export function staticFabAssemblyConnectorPreparedShapeError(value: unknown): st
 }
 
 export function connectorPlanShapeError(value: unknown, mode: "compact" | "full"): string | null {
+	return completeCooperativeSteps(connectorPlanShapeErrorSteps(value, mode));
+}
+
+export function* connectorPlanShapeErrorSteps(
+	value: unknown,
+	mode: "compact" | "full",
+): Generator<void, string | null> {
 	if (
 		!isRecord(value) ||
 		value.kind !== "build" ||
@@ -91,10 +109,10 @@ export function connectorPlanShapeError(value: unknown, mode: "compact" | "full"
 	if (
 		value.cells.length > maximumCells ||
 		value.conflicts.length > STATIC_FAB_ASSEMBLY_CONNECTOR_CONFLICT_LIMIT ||
-		!value.cells.every(isCell) ||
-		!value.conflicts.every(isCell) ||
+		!(yield* everySteps(value.cells, isCell)) ||
+		!(yield* everySteps(value.conflicts, isCell)) ||
 		value.mutations.length > STATIC_FAB_ASSEMBLY_CONNECTOR_MAX_PLAN_CELLS ||
-		!value.mutations.every(isRailMutation) ||
+		!(yield* everySteps(value.mutations, isRailMutation)) ||
 		value.switchMutations.length !== 0 ||
 		value.organizationImpactAuthorizations.length >
 			STATIC_FAB_ASSEMBLY_CONNECTOR_MAX_ORGANIZATION_MUTATIONS ||
@@ -105,6 +123,7 @@ export function connectorPlanShapeError(value: unknown, mode: "compact" | "full"
 	}
 	if (mode === "compact") {
 		if (
+			value.relationshipProduction !== null ||
 			value.mutations.length !== 0 ||
 			value.organizationImpactAuthorizations.length !== 0 ||
 			value.organizationMutations.length !== 0
@@ -113,19 +132,23 @@ export function connectorPlanShapeError(value: unknown, mode: "compact" | "full"
 		}
 		const metadataError = connectorMetadataShapeError(value.assemblyConnector);
 		if (metadataError) return metadataError;
-		return networkLinkMetadataShapeError(value.networkLink);
+		return yield* networkLinkMetadataShapeError(value.networkLink);
 	}
+	const productionError = yield* staticFabAssemblyConnectorRelationshipProductionShapeErrorSteps(
+		value.relationshipProduction,
+	);
+	if (productionError) return productionError;
 	if (
 		value.mutations.length === 0 ||
 		value.organizationImpactAuthorizations.length === 0 ||
 		value.organizationMutations.length === 0 ||
-		!value.organizationMutations.every(isOrganizationMutation)
+		!(yield* everyGeneratorSteps(value.organizationMutations, isOrganizationMutation))
 	) {
 		return "full connector mutations are malformed";
 	}
 	const metadataError = connectorMetadataShapeError(value.assemblyConnector);
 	if (metadataError) return metadataError;
-	return networkLinkMetadataShapeError(value.networkLink);
+	return yield* networkLinkMetadataShapeError(value.networkLink);
 }
 
 function connectorTicketShapeError(
@@ -143,26 +166,30 @@ function connectorTicketShapeError(
 		!positiveInt32(ticket.sourceNextPortId) ||
 		!positiveInt32(ticket.sourceNextEquipmentGroupId) ||
 		!positiveInt32(ticket.sourceNextOrganizationId) ||
+		!positiveInt32(ticket.sourceNextRelationshipId) ||
 		!boundedFingerprint(ticket.intentFingerprint) ||
 		!boundedFingerprint(ticket.planFingerprint) ||
 		!boundedFingerprint(ticket.prospectiveChecksum) ||
 		!positiveInt32(ticket.prospectiveNextAdvancedSwitchId) ||
 		!positiveInt32(ticket.prospectiveNextPortId) ||
 		!positiveInt32(ticket.prospectiveNextEquipmentGroupId) ||
-		!positiveInt32(ticket.prospectiveNextOrganizationId)
+		!positiveInt32(ticket.prospectiveNextOrganizationId) ||
+		!positiveInt32(ticket.prospectiveNextRelationshipId)
 	) {
 		return "connector Worker ticket fields are malformed";
 	}
 	return ticket.sourceRevision === plan.baseRevision &&
 		ticket.sourcePatchSequence === plan.basePatchSequence &&
 		ticket.sourceNextOrganizationId === plan.nextOrganizationIdBefore &&
-		ticket.prospectiveNextOrganizationId === plan.nextOrganizationIdAfter
+		ticket.prospectiveNextOrganizationId === plan.nextOrganizationIdAfter &&
+		ticket.sourceNextRelationshipId === plan.relationshipProduction?.nextRelationshipIdBefore &&
+		ticket.prospectiveNextRelationshipId === plan.relationshipProduction?.nextRelationshipIdAfter
 		? null
 		: "connector Worker ticket does not bind its plan";
 }
 
 function connectorMetadataShapeError(value: Record<string, unknown>): string | null {
-	return value.version === 3 &&
+	return value.version === STATIC_FAB_ASSEMBLY_CONNECTOR_VERSION &&
 		(value.hierarchyRole === null ||
 			value.hierarchyRole === "BAY_TO_BANK" ||
 			value.hierarchyRole === "BANK_TO_FAB") &&
@@ -220,7 +247,9 @@ function connectorHierarchyMetadataCoherent(value: Record<string, unknown>): boo
 	);
 }
 
-function networkLinkMetadataShapeError(value: Record<string, unknown>): string | null {
+function* networkLinkMetadataShapeError(
+	value: Record<string, unknown>,
+): Generator<void, string | null> {
 	const cells = [
 		value.sourceDeparture,
 		value.sourceArrival,
@@ -240,25 +269,22 @@ function networkLinkMetadataShapeError(value: Record<string, unknown>): string |
 		cells.every((cell) => cell === null || isCell(cell)) &&
 		Array.isArray(value.outboundCells) &&
 		value.outboundCells.length <= STATIC_FAB_ASSEMBLY_CONNECTOR_MAX_PLAN_CELLS &&
-		value.outboundCells.every(isCell) &&
+		(yield* everySteps(value.outboundCells, isCell)) &&
 		Array.isArray(value.returnCells) &&
 		value.returnCells.length <= STATIC_FAB_ASSEMBLY_CONNECTOR_MAX_PLAN_CELLS &&
-		value.returnCells.every(isCell)
+		(yield* everySteps(value.returnCells, isCell))
 		? null
 		: "network-link metadata is malformed";
 }
 
-function isOrganizationMutation(value: unknown): value is StaticFabOrganizationMutation {
+function* isOrganizationMutation(value: unknown): Generator<void, boolean> {
 	if (!isRecord(value) || !positiveInt32(value.id)) return false;
-	if (value.before !== null && !isOrganizationRecord(value.before, value.id)) return false;
-	if (value.after !== null && !isOrganizationRecord(value.after, value.id)) return false;
+	if (value.before !== null && !(yield* isOrganizationRecord(value.before, value.id))) return false;
+	if (value.after !== null && !(yield* isOrganizationRecord(value.after, value.id))) return false;
 	return value.before !== null || value.after !== null;
 }
 
-function isOrganizationRecord(
-	value: unknown,
-	expectedId: number,
-): value is StaticFabOrganizationRecord {
+function* isOrganizationRecord(value: unknown, expectedId: number): Generator<void, boolean> {
 	if (
 		!isRecord(value) ||
 		value.id !== expectedId ||
@@ -280,11 +306,12 @@ function isOrganizationRecord(
 			!boundedText(properties.description, MAX_ORGANIZATION_RECORD_TEXT) ||
 			!boundedText(properties.color, 16) ||
 			record.membership.railEdges.length > MAX_ORGANIZATION_RAIL_EDGE_REFERENCES ||
-			!record.membership.railEdges.every(
+			!(yield* everySteps(
+				record.membership.railEdges,
 				(edge) => isCell(edge.from) && isCell(edge.to) && cardinalNeighbors(edge.from, edge.to),
-			) ||
-			!record.membership.advancedSwitchIds.every(positiveInt32) ||
-			!record.membership.equipmentGroupIds.every(positiveInt32)
+			)) ||
+			!(yield* everySteps(record.membership.advancedSwitchIds, positiveInt32)) ||
+			!(yield* everySteps(record.membership.equipmentGroupIds, positiveInt32))
 		) {
 			return false;
 		}
@@ -410,4 +437,26 @@ export function assertPreparedStaticFabAssemblyConnector(
 ): asserts value is PreparedStaticFabAssemblyConnector {
 	const error = staticFabAssemblyConnectorPreparedShapeError(value);
 	if (error) throw new Error(error);
+}
+
+function* everySteps<T>(
+	values: readonly T[],
+	predicate: (value: T) => boolean,
+): Generator<void, boolean> {
+	for (const value of values) {
+		yield;
+		if (!predicate(value)) return false;
+	}
+	return true;
+}
+
+function* everyGeneratorSteps<T>(
+	values: readonly T[],
+	predicate: (value: T) => Generator<void, boolean>,
+): Generator<void, boolean> {
+	for (const value of values) {
+		yield;
+		if (!(yield* predicate(value))) return false;
+	}
+	return true;
 }

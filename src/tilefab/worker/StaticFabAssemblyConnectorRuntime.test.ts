@@ -71,6 +71,39 @@ describe("StaticFabAssemblyConnectorRuntime", () => {
 		fabLoopFixture = exactFabLoopFixture();
 	});
 
+	it("records the explicit accepted connector without allocating in the source", () => {
+		const prepared = prepareStaticFabAssemblyConnector(
+			connectorRequest(fixture, fixture.intent, 91),
+		);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		expect(prepared.plan).toMatchObject({
+			relationshipProduction: {
+				nextRelationshipIdBefore: 1,
+				nextRelationshipIdAfter: 2,
+				mutations: [
+					{
+						id: 1,
+						before: null,
+						after: {
+							id: 1,
+							hierarchyRole: "BAY_TO_BANK",
+							purpose: "HIERARCHY_LINK",
+							participantOrganizationIds: [
+								fixture.intent.sourceOrganizationId,
+								fixture.intent.targetOrganizationId,
+							],
+						},
+					},
+				],
+			},
+		});
+		expect(prepared.ticket).toMatchObject({
+			sourceNextRelationshipId: 1,
+			prospectiveNextRelationshipId: 2,
+		});
+		expect(fixture.snapshot.relationships.nextRelationshipId).toBe(1);
+	});
+
 	it("rejects a connector that would make a currently supported source unopenable", () => {
 		const originalSlots = compilePortSlots(
 			compilePhysicalRail(fixture.map),
@@ -171,6 +204,9 @@ describe("StaticFabAssemblyConnectorRuntime", () => {
 				organizationChanges: prepared.plan.organizationMutations,
 				organizationNextIdBefore: prepared.plan.nextOrganizationIdBefore,
 				organizationNextIdAfter: prepared.plan.nextOrganizationIdAfter,
+				relationshipChanges: prepared.plan.relationshipProduction?.mutations,
+				relationshipNextIdBefore: prepared.plan.relationshipProduction?.nextRelationshipIdBefore,
+				relationshipNextIdAfter: prepared.plan.relationshipProduction?.nextRelationshipIdAfter,
 			}),
 		);
 		expect(prepared.ticket.prospectiveChecksum).not.toBe(fixture.snapshot.checksum);

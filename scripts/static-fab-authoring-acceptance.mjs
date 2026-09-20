@@ -28627,6 +28627,16 @@ async function applyRecommendedAssemblyConnectorFromButton(
 	assertEqual(applied.workerChecksum, applied.workerTargetChecksum, `${label} target checksum`);
 	assertEqual(applied.workerChecksum, applied.modelChecksum, `${label} model checksum`);
 	assertEqual(applied.workerSimulationReady, "false", `${label} simulation gate`);
+	assertEqual(
+		Number(applied.modelRelationships),
+		Number(before.modelRelationships) + 1,
+		`${label} explicit relationship count`,
+	);
+	assertEqual(
+		Number(applied.modelNextRelationshipId),
+		Number(before.modelNextRelationshipId) + 1,
+		`${label} single relationship allocation`,
+	);
 	return Object.freeze({ before, ready, applied, attempts });
 }
 
@@ -32999,6 +33009,7 @@ async function exerciseOrdinaryConnectedFabLoopHandoff(
 	);
 	const loopBeforeApply = await readMetrics(page);
 	const hierarchyBeforeLoop = await readConnectedFabHierarchy(page, expectedFabId, expectedBankIds);
+	const relationshipsBeforeLoop = await readAssemblyRelationships(page);
 	await connectorPanel.locator(".tilefab-assembly-connector-apply").click();
 	const loopApplied = await waitForWorker(
 		page,
@@ -33042,6 +33053,27 @@ async function exerciseOrdinaryConnectedFabLoopHandoff(
 		loopApplied.workerSimulationReady,
 		"false",
 		`ordinary FAB LOOP keeps simulation gated ${viewportLabel}`,
+	);
+	assertEqual(
+		Number(loopApplied.modelRelationships),
+		Number(loopBeforeApply.modelRelationships) + 1,
+		`ordinary FAB LOOP creates one explicit relationship ${viewportLabel}`,
+	);
+	assertEqual(
+		Number(loopApplied.modelNextRelationshipId),
+		Number(loopBeforeApply.modelNextRelationshipId) + 1,
+		`ordinary FAB LOOP allocates one relationship ID ${viewportLabel}`,
+	);
+	const relationshipsAfterLoop = await readAssemblyRelationships(page);
+	assertEqual(
+		relationshipsAfterLoop.records.at(-1)?.purpose,
+		"FAB_LOOP",
+		`ordinary FAB LOOP relationship purpose ${viewportLabel}`,
+	);
+	assertEqual(
+		relationshipsAfterLoop.records.at(-1)?.parentOrganizationId,
+		expectedFabId,
+		`ordinary FAB LOOP relationship parent ${viewportLabel}`,
 	);
 	const hierarchyAfterLoop = await readConnectedFabHierarchy(page, expectedFabId, expectedBankIds);
 	assertEqual(
@@ -33092,7 +33124,11 @@ async function exerciseOrdinaryConnectedFabLoopHandoff(
 		page,
 		(metrics) =>
 			Number(metrics.workerTargetSequence) === Number(loopApplied.workerTargetSequence) + 1 &&
-			metrics.modelChecksum === cancelled.modelChecksum &&
+			metrics.modelChecksum ===
+				checksumWithRelationshipCursor(
+					cancelled.modelChecksum,
+					Number(loopApplied.modelNextRelationshipId),
+				) &&
 			metrics.organizationSelectionIds === String(expectedFabId) &&
 			metrics.connectedFabLoopHandoff === "true" &&
 			metrics.connectedFabResilientLoop === "false" &&
@@ -33100,6 +33136,19 @@ async function exerciseOrdinaryConnectedFabLoopHandoff(
 			metrics.resilientFabLoopReceiptPhase === "undone" &&
 			metrics.historyCanRedo === "true",
 		{ timeout: 20_000 },
+	);
+	assertEqual(
+		JSON.stringify(await readAssemblyRelationships(page)),
+		JSON.stringify({
+			...relationshipsBeforeLoop,
+			nextRelationshipId: relationshipsAfterLoop.nextRelationshipId,
+		}),
+		`ordinary FAB LOOP Undo restores every record and retains ID high-water ${viewportLabel}`,
+	);
+	assertEqual(
+		loopUndone.workerChecksum,
+		loopUndone.modelChecksum,
+		`ordinary FAB LOOP Undo Worker parity ${viewportLabel}`,
 	);
 	await page.waitForFunction(
 		() =>
@@ -33121,6 +33170,11 @@ async function exerciseOrdinaryConnectedFabLoopHandoff(
 			metrics.resilientFabLoopReceiptPhase === "applied" &&
 			metrics.historyCanRedo === "false",
 		{ timeout: 20_000 },
+	);
+	assertEqual(
+		JSON.stringify(await readAssemblyRelationships(page)),
+		JSON.stringify(relationshipsAfterLoop),
+		`ordinary FAB LOOP Redo restores exact relationships ${viewportLabel}`,
 	);
 	await page.waitForFunction(
 		() =>
@@ -33206,6 +33260,31 @@ async function readConnectedBayBankHierarchy(page, bankOrganizationId) {
 			bankOwnedRailEdges: bank?.membership.railEdges.length ?? 0,
 		};
 	}, bankOrganizationId);
+}
+
+async function readAssemblyRelationships(page) {
+	return page.evaluate(() => {
+		const state = window.__tileFab?.getEditorModel().document.relationships;
+		if (!state) throw new Error("Authored relationships are unavailable");
+		return structuredClone(state);
+	});
+}
+
+function checksumWithRelationshipCursor(checksum, cursor) {
+	if (
+		!/^(?:[0-9a-f]{8}:){11}[0-9a-f]{8}$/.test(checksum) ||
+		!Number.isSafeInteger(cursor) ||
+		cursor < 1 ||
+		cursor > 0x7fffffff
+	)
+		throw new Error("Invalid relationship cursor expectation");
+	const fields = checksum.split(":");
+	assertEqual(fields[0], "00000002", "relationship-aware checksum version");
+	if (cursor < Number.parseInt(fields[9], 16))
+		throw new Error("Relationship cursor cannot roll back");
+	// Only the separately encoded high-water field changes; all counts and content hashes remain exact.
+	fields[9] = cursor.toString(16).padStart(8, "0");
+	return fields.join(":");
 }
 
 async function readConnectedFabHierarchy(page, fabOrganizationId, bankOrganizationIds) {
@@ -45597,6 +45676,8 @@ async function readMetrics(page) {
 			modelNextPortId: String(authoredDocument?.portEquipment.nextPortId ?? ""),
 			modelNextEquipmentGroupId: String(authoredDocument?.portEquipment.nextEquipmentGroupId ?? ""),
 			modelNextOrganizationId: String(authoredDocument?.organizations.nextOrganizationId ?? ""),
+			modelNextRelationshipId: String(authoredDocument?.relationships.nextRelationshipId ?? ""),
+			modelRelationships: String(authoredDocument?.relationships.records.length ?? ""),
 			documentCanUndo: String(authoredDocument?.canUndo ?? ""),
 			documentCanRedo: String(authoredDocument?.canRedo ?? ""),
 			workerStatus: canvas?.dataset.workerStatus ?? "",

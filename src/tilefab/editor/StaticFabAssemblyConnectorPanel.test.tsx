@@ -145,6 +145,22 @@ describe("StaticFabAssemblyConnectorPanel", () => {
 		expect(markup.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(6);
 	});
 
+	it("keeps cancellation available while the accepted connection is being prepared", () => {
+		const markup = renderToStaticMarkup(
+			<StaticFabAssemblyConnectorPanel
+				{...props({ phase: "applying", sourceCandidateIndex: 0, targetCandidateIndex: 0 })}
+			/>,
+		);
+		const cancel = markup.match(/<button[^>]*class="tilefab-assembly-connector-cancel"[^>]*>/)?.[0];
+		expect(cancel).toBeDefined();
+		expect(cancel).not.toContain("disabled");
+		expect(markup).toContain("적용 준비 중");
+		expect(markup).toContain("취소하거나 Esc");
+		expect(
+			markup.match(/<button[^>]*class="tilefab-assembly-connector-apply"[^>]*>/)?.[0],
+		).toContain("disabled");
+	});
+
 	it("exposes apply only for a certified result and reports exact patch scope", () => {
 		const markup = renderToStaticMarkup(
 			<StaticFabAssemblyConnectorPanel

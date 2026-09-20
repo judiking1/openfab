@@ -7,6 +7,10 @@ import {
 	type StaticFabArrangementPlan,
 } from "../core/StaticFabArrangementPlan";
 import {
+	copyStaticFabAssemblyConnectorRelationshipProductionSteps,
+	staticFabAssemblyConnectorRelationshipProductionShapeErrorSteps,
+} from "../core/StaticFabAssemblyConnectorRelationshipProduction";
+import {
 	adoptStaticFabAssemblyRelationshipStateSteps,
 	applyStaticFabAssemblyRelationshipMutations,
 	checksumStaticFabAssemblyRelationshipState,
@@ -146,16 +150,21 @@ describe("StaticFabAssemblyRelationshipSoA", () => {
 			staticFabArrangementPreparedShapeErrorSteps(structuredClone(prepared)),
 		);
 		let slices = 0,
+			maximumSliceIndex = 0,
 			maximum = 0;
 		while (!task.done) {
 			const start = performance.now();
 			task.step(128);
-			maximum = Math.max(maximum, performance.now() - start);
+			const elapsed = performance.now() - start;
+			if (elapsed > maximum) {
+				maximum = elapsed;
+				maximumSliceIndex = slices;
+			}
 			slices++;
 		}
 		expect(task.finish()).toBeNull();
 		expect(slices).toBeGreaterThan(1000);
-		expect(maximum).toBeLessThan(50);
+		expect(maximum, JSON.stringify({ maximumSliceIndex, slices })).toBeLessThan(50);
 		const forged = structuredClone(prepared);
 		const changed = forged.plan.relationshipMutations[0].after;
 		// Shift only the last cut coordinate: a matching ticket hash must not bless a non-rigid move.
@@ -175,6 +184,40 @@ describe("StaticFabAssemblyRelationshipSoA", () => {
 		const bad = createCooperativeTask(staticFabArrangementPreparedShapeErrorSteps(forged));
 		while (!bad.done) bad.step(128);
 		expect(bad.finish()).not.toBeNull();
+	});
+
+	it("owns a maximum explicit Connector production through bounded validation and copy slices", () => {
+		const record = createStaticFabAssemblyRelationshipState(maximumRecordState()).records[0];
+		if (!record) throw new Error("Missing maximum record");
+		const production = Object.freeze({
+			nextRelationshipIdBefore: 1,
+			nextRelationshipIdAfter: 2,
+			mutations: Object.freeze([Object.freeze({ id: 1, before: null, after: record })]),
+		});
+		function* steps() {
+			expect(
+				yield* staticFabAssemblyConnectorRelationshipProductionShapeErrorSteps(production),
+			).toBeNull();
+			return yield* copyStaticFabAssemblyConnectorRelationshipProductionSteps(production);
+		}
+		const task = createCooperativeTask(steps());
+		let slices = 0,
+			maximum = 0;
+		while (!task.done) {
+			const start = performance.now();
+			task.step(128);
+			maximum = Math.max(maximum, performance.now() - start);
+			slices++;
+		}
+		const copied = task.finish();
+		expect(slices).toBeGreaterThan(1000);
+		expect(maximum).toBeLessThan(50);
+		expect(copied).not.toBe(production);
+		expect(copied.mutations[0]?.after).not.toBe(record);
+		expect(copied).toEqual(production);
+		expect(
+			Object.isFrozen(copied.mutations[0]?.after?.connectionGroups[0]?.legs[0]?.exclusiveCutEdges),
+		).toBe(true);
 	});
 
 	it.each([
