@@ -1379,6 +1379,21 @@ interface ScopedShapeCounts {
 	readonly canonicalByteCount: number;
 }
 
+// Reuse the fixed grammar and common count result throughout large raw-payload admission.
+const SCOPED_EDGE_KEYS = Object.freeze(["edge", "scope"]);
+const PARENT_DIRECT_SCOPE_KEYS = Object.freeze(["kind"]);
+const PARTICIPANT_SCOPE_KEYS = Object.freeze([
+	"kind",
+	"participantIndex",
+	"directOwnerOrganizationIds",
+]);
+const DIRECTED_EDGE_KEYS = Object.freeze(["from", "to"]);
+const CELL_KEYS = Object.freeze(["x", "y"]);
+const PARENT_DIRECT_SHAPE_COUNTS: ScopedShapeCounts = Object.freeze({
+	ownerIdCount: 0,
+	canonicalByteCount: 20,
+});
+
 function validateScopedEdgeShape(
 	scoped: StaticFabAssemblyScopedEdgeV1,
 	participantCount: number,
@@ -1395,7 +1410,7 @@ function validateScopedEdgeShape(
 				!isFrozenRelationshipArray(scoped?.scope?.directOwnerOrganizationIds)))
 	)
 		return "scoped edge는 불변이어야 합니다";
-	if (!scoped || typeof scoped !== "object" || !hasExactKeys(scoped, ["edge", "scope"])) {
+	if (!scoped || typeof scoped !== "object" || !hasExactKeys(scoped, SCOPED_EDGE_KEYS)) {
 		return "scoped edge 필드가 V1 계약과 정확히 일치해야 합니다";
 	}
 	if (!isDirectedRailEdge(scoped.edge))
@@ -1403,14 +1418,14 @@ function validateScopedEdgeShape(
 	const scope = scoped.scope;
 	if (!scope || typeof scope !== "object") return "edge scope가 필요합니다";
 	if (scope.kind === "PARENT_DIRECT") {
-		return hasExactKeys(scope, ["kind"])
-			? { ownerIdCount: 0, canonicalByteCount: 20 }
+		return hasExactKeys(scope, PARENT_DIRECT_SCOPE_KEYS)
+			? PARENT_DIRECT_SHAPE_COUNTS
 			: "parent-direct scope에 추가 필드가 있습니다";
 	}
 	if (scope.kind !== "PARTICIPANT_EFFECTIVE" && scope.kind !== "PARENT_AND_PARTICIPANT_EFFECTIVE") {
 		return "알 수 없는 edge scope입니다";
 	}
-	if (!hasExactKeys(scope, ["kind", "participantIndex", "directOwnerOrganizationIds"])) {
+	if (!hasExactKeys(scope, PARTICIPANT_SCOPE_KEYS)) {
 		return "participant scope 필드가 V1 계약과 정확히 일치하지 않습니다";
 	}
 	if (
@@ -2536,13 +2551,13 @@ function isDirectedRailEdge(edge: DirectedRailEdge): boolean {
 	return (
 		edge !== null &&
 		typeof edge === "object" &&
-		hasExactKeys(edge, ["from", "to"]) &&
+		hasExactKeys(edge, DIRECTED_EDGE_KEYS) &&
 		edge.from !== null &&
 		typeof edge.from === "object" &&
-		hasExactKeys(edge.from, ["x", "y"]) &&
+		hasExactKeys(edge.from, CELL_KEYS) &&
 		edge.to !== null &&
 		typeof edge.to === "object" &&
-		hasExactKeys(edge.to, ["x", "y"]) &&
+		hasExactKeys(edge.to, CELL_KEYS) &&
 		isInt32(edge.from?.x) &&
 		isInt32(edge.from?.y) &&
 		isInt32(edge.to?.x) &&
@@ -2555,12 +2570,12 @@ function hasExactKeys(value: object, expectedKeys: readonly string[]): boolean {
 	const prototype = Object.getPrototypeOf(value);
 	if (prototype !== Object.prototype && prototype !== null) return false;
 	const actualKeys = Reflect.ownKeys(value);
-	return (
-		actualKeys.length === expectedKeys.length &&
-		expectedKeys.every((key) =>
-			Object.hasOwn(Object.getOwnPropertyDescriptor(value, key) ?? {}, "value"),
-		)
-	);
+	if (actualKeys.length !== expectedKeys.length) return false;
+	for (let index = 0; index < expectedKeys.length; index++) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, expectedKeys[index] as string);
+		if (!descriptor || !Object.hasOwn(descriptor, "value")) return false;
+	}
+	return true;
 }
 
 function isDirectionRole(value: string): value is StaticFabAssemblyRelationshipDirectionRole {

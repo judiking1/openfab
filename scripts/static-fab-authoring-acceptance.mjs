@@ -56,6 +56,9 @@ const FACTORY_PORT_OVERVIEW_ONLY_COMPLETE = new Error(
 const ORDINARY_HIERARCHY_CONTINUATION_ONLY_COMPLETE = new Error(
 	"Ordinary module hierarchy continuation acceptance completed.",
 );
+const COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE = new Error(
+	"Compact Bay configuration continuation completed.",
+);
 const STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE = new Error(
 	"Static FAB issue Inspector recheck acceptance completed.",
 );
@@ -103,6 +106,16 @@ try {
 	await waitForServer(`${baseUrl}/`);
 	browser = await launchBrowserWithRetry();
 	recordStep("browser-text-line-measurement", await verifyWrappedTextLineCount(browser));
+	if (process.env.OPENFAB_COMPACT_BAY_CONFIGURATION_ACCEPTANCE_ONLY === "1") {
+		recordStep(
+			"compact-bay-configuration-continuation",
+			await exerciseCompactBayConfigurationContinuation(browser),
+		);
+		assertEqual(result.consoleErrors.length, 0, "Compact Bay console errors");
+		assertEqual(result.pageErrors.length, 0, "Compact Bay page errors");
+		result.status = "PASS";
+		throw COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE;
+	}
 	if (process.env.OPENFAB_STATIC_FAB_ISSUE_RECHECK_ACCEPTANCE_ONLY === "1") {
 		const staticFabIssueRecheck = await exerciseStaticFabIssueInspectorRecheck(browser);
 		recordStep("static-fab-issue-inspector-recheck", staticFabIssueRecheck);
@@ -217,6 +230,10 @@ try {
 	recordStep("ordinary-rail-keyboard", ordinaryRailKeyboard);
 	const ordinaryRailPointer = await exerciseOrdinaryRailPointerAcceptance(browser);
 	recordStep("ordinary-rail-pointer", ordinaryRailPointer);
+	recordStep(
+		"compact-bay-configuration-continuation",
+		await exerciseCompactBayConfigurationContinuation(browser),
+	);
 	const ordinaryHierarchyContinuation = await exerciseOrdinaryModuleHierarchyContinuation(browser);
 	recordStep("ordinary-module-hierarchy-continuation", ordinaryHierarchyContinuation);
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
@@ -2603,6 +2620,7 @@ try {
 		error === ORDINARY_RAIL_POINTER_ONLY_COMPLETE ||
 		error === FACTORY_PORT_OVERVIEW_ONLY_COMPLETE ||
 		error === ORDINARY_HIERARCHY_CONTINUATION_ONLY_COMPLETE ||
+		error === COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE ||
 		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE
 	) {
 		// The opt-in focused run intentionally skips the whole-editor acceptance sequence.
@@ -4462,6 +4480,113 @@ async function recoverOrdinaryStkFromOccupiedStart(page, baseline, label) {
 	throw new Error(
 		`${label}: no usable STK target after bounded keyboard navigation: ${await page.getByTestId("guided-port-keyboard-readout").innerText()}`,
 	);
+}
+
+async function exerciseCompactBayConfigurationContinuation(browserInstance) {
+	const proofs = [];
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 390, height: 844 },
+		{ width: 760, height: 900 },
+		{ width: 1440, height: 900 },
+	]) {
+		const label = `${viewport.width}x${viewport.height}`;
+		const context = await browserInstance.newContext({ viewport });
+		const page = await context.newPage();
+		page.on("console", (message) => {
+			if (message.type() === "error") result.consoleErrors.push(message.text());
+		});
+		page.on("pageerror", (error) => result.pageErrors.push(error.message));
+		try {
+			await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(page, { physicalPaths: 0 });
+			await page
+				.getByTestId("openfab-start-dialog")
+				.getByRole("button", { name: /BLANK CANVAS/ })
+				.click();
+			await page.getByTestId("editor-activity-assemble").click();
+			await page.getByTestId("production-bay-module-browser").click();
+			const panel = page.getByTestId("production-bay-module-panel");
+			await panel.waitFor({ state: "visible" });
+			const canvas = page.getByTestId("rail-canvas");
+			await canvas.focus();
+			await canvas.press("Enter");
+			const next = page.getByTestId("ordinary-placed-twin-bay-duplicate-handoff");
+			await next.waitFor({ state: "visible" });
+			assertEqual(await next.count(), 1, `one Bay continuation ${label}`);
+			await assertLocatorInsideViewport(page, next);
+			await canvas.press("Tab");
+			const target = await next.evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return {
+					inFooter: Boolean(element.closest(".tilefab-production-bay-panel > footer")),
+					focused: document.activeElement === element,
+					height: rect.height,
+					unobscured: [5, rect.width / 2, rect.width - 5].every((x) =>
+						element.contains(document.elementFromPoint(rect.x + x, rect.y + rect.height / 2)),
+					),
+				};
+			});
+			assertEqual(target.inFooter, true, `Bay continuation stays in visible footer ${label}`);
+			assertEqual(target.focused, true, `Canvas Tab reaches visible Bay continuation ${label}`);
+			assertEqual(target.unobscured, true, `Bay continuation pointer hit area ${label}`);
+			assertAtLeast(target.height, 44, `Bay continuation target height ${label}`);
+			await page.screenshot({
+				path: path.join(artifactRoot, `bay-configuration-next-${label}.png`),
+			});
+			if (viewport.width === 760) await next.press("Enter");
+			else await next.click();
+			await panel.waitFor({ state: "hidden" });
+			await page.waitForFunction(
+				() => {
+					const canvas = document.querySelector('[data-testid="rail-canvas"]');
+					return (
+						canvas?.getAttribute("data-organization-bundle-preview-state") === "candidate" &&
+						canvas.getAttribute("data-organization-bundle-preview-anchor") !== "0,0"
+					);
+				},
+				undefined,
+				{ timeout: 10000 },
+			);
+			await canvas.focus();
+			await canvas.press("Enter");
+			const connect = page.getByTestId("ordinary-duplicated-twin-bay-connector-handoff");
+			await connect.waitFor({ state: "visible" });
+			await assertLocatorInsideViewport(page, connect);
+			await connect.click();
+			const connector = page.getByTestId("static-fab-assembly-connector-panel");
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="static-fab-assembly-connector-panel"]')
+						?.getAttribute("data-phase") === "ready",
+				undefined,
+				{ timeout: 20000 },
+			);
+			assertEqual(await panel.count(), 0, `catalog settings cannot cover Connector ${label}`);
+			await page.screenshot({
+				path: path.join(artifactRoot, `bay-configuration-connector-${label}.png`),
+			});
+			const before = await readMetrics(page);
+			await connector.locator(".tilefab-assembly-connector-cancel").click();
+			await connector.waitFor({ state: "hidden" });
+			assertProjectUnchanged(
+				await readMetrics(page),
+				before,
+				`Connector cancellation preserves configured Bay placement ${label}`,
+			);
+			proofs.push({ viewport, ...target, sequence: before.workerSequence });
+		} catch (error) {
+			await page
+				.screenshot({ path: path.join(artifactRoot, `bay-configuration-failure-${label}.png`) })
+				.catch(() => undefined);
+			throw error;
+		} finally {
+			await closeBrowserResource(page, "compact Bay configuration page");
+			await closeBrowserResource(context, "compact Bay configuration context");
+		}
+	}
+	return proofs;
 }
 
 async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
@@ -30552,7 +30677,12 @@ async function exerciseOrdinaryConnectedCopyTwinBayHandoff(
 	);
 	assertIncludes(
 		(await handoff.getAttribute("aria-label")) ?? "",
-		"Bay로 자동 승격되지 않습니다",
+		"내부 Process Loop 두 개를 가진 새 Twin Bay를 배치합니다",
+		`ordinary connected copy accessible next action ${viewportLabel}`,
+	);
+	assertIncludes(
+		await page.locator(`#${await handoff.getAttribute("aria-describedby")}`).innerText(),
+		"지금 복제한 레일·장비 묶음에는 Bay 구조가 없습니다",
 		`ordinary connected copy accessible semantic boundary ${viewportLabel}`,
 	);
 	assertEqual(
@@ -31160,8 +31290,8 @@ async function exerciseOrdinaryPlacedTwinBayDuplicateHandoff(
 	);
 	assertIncludes(
 		(await handoff.getAttribute("aria-label")) ?? "",
-		"일반 레일과 장비 연결 구조는 포함하지 않습니다",
-		`ordinary Twin Bay accessible exclusion ${viewportLabel}`,
+		"방금 배치한 Twin Bay와 내부 Process Loop 두 개를 함께 복제합니다",
+		`ordinary Twin Bay accessible copy scope ${viewportLabel}`,
 	);
 	assertEqual(
 		await handoff.evaluate((element) => getComputedStyle(element).animationIterationCount),
@@ -31461,8 +31591,8 @@ async function exerciseOrdinaryPlacedTwinBayDuplicateHandoff(
 	);
 	assertIncludes(
 		(await connectorHandoff.getAttribute("aria-label")) ?? "",
-		"Apply 전까지 프로젝트를 변경하지 않습니다",
-		`ordinary duplicated Twin Bay connector safety ${viewportLabel}`,
+		"적용하면 두 Bay가 Bay Bank로 묶입니다",
+		`ordinary duplicated Twin Bay connector result ${viewportLabel}`,
 	);
 	assertIncludes(
 		(await connectorHandoff.getAttribute("aria-label")) ?? "",

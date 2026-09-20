@@ -30,9 +30,9 @@ describe("ordinaryDuplicatedTwinBayConnectorHandoff", () => {
 			label: "다음 · 두 Twin Bay 연결",
 			instruction: "원본과 복제본을 Bay Bank로 묶기",
 			ariaLabel:
-				"다음 · 두 Twin Bay 연결. 정확히 인식된 원본 Twin Bay와 복제 Twin Bay의 반복 배치를 끝내고 CONNECT BAYS 검토를 엽니다. 연결은 Apply 전까지 프로젝트를 변경하지 않습니다",
+				"다음 · 두 Twin Bay 연결. 반복 배치를 마치고 원본과 복제본의 연결 경로를 검토합니다. 적용하면 두 Bay가 Bay Bank로 묶입니다",
 			description:
-				"현재 선택은 authored truth에서 각각 독립적인 Twin Bay로 재인식된 원본과 복제본 두 개입니다. 이 행동은 반복 복제 고스트를 닫고 기존 Worker 인증 CONNECT BAYS 검토를 열며 Apply 전에는 레일이나 조직을 변경하지 않습니다.",
+				"원본과 복제한 Twin Bay의 연결 경로를 검토합니다. 출발·도착 연결점을 고른 뒤 적용하면 두 Bay가 하나의 Bay Bank로 묶입니다.",
 		});
 	});
 
@@ -54,9 +54,9 @@ describe("ordinaryDuplicatedTwinBayConnectorHandoff", () => {
 			label: "다음 · 두 Twin Bay 연결",
 			instruction: "선택한 두 Bay를 Bay Bank로 묶기",
 			ariaLabel:
-				"다음 · 두 Twin Bay 연결. 정확히 선택된 Twin Bay 두 개의 CONNECT BAYS 검토를 엽니다. 연결은 Apply 전까지 프로젝트를 변경하지 않습니다",
+				"다음 · 두 Twin Bay 연결. 선택한 두 Bay의 연결 경로를 검토합니다. 적용하면 두 Bay가 Bay Bank로 묶입니다",
 			description:
-				"현재 선택은 authored truth에서 각각 독립적인 Twin Bay로 재인식된 두 개의 Bay입니다. 이 행동은 기존 Worker 인증 CONNECT BAYS 검토를 열며 Apply 전에는 레일이나 조직을 변경하지 않습니다.",
+				"선택한 두 Twin Bay의 연결 경로를 검토합니다. 출발·도착 연결점을 고른 뒤 적용하면 두 Bay가 하나의 Bay Bank로 묶입니다.",
 		});
 	});
 

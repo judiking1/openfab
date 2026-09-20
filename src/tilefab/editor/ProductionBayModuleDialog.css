@@ -356,12 +356,23 @@
 
 .tilefab-production-bay-panel > footer {
 	display: grid;
+	flex-shrink: 0;
 	grid-template-columns: minmax(0, 1fr) 78px 92px;
 	align-items: center;
 	gap: 6px;
 	padding: 7px 8px;
 	border-top: 1px solid #2d393b;
 	background: #111819;
+}
+
+.tilefab-production-bay-continuation {
+	min-width: 0;
+	grid-column: 1 / -1;
+}
+
+.tilefab-production-bay-continuation > button {
+	width: 100%;
+	min-width: 0;
 }
 
 .tilefab-production-bay-validation {
@@ -429,6 +440,10 @@
 }
 
 @media (max-width: 760px) {
+	.tilefab-production-bay-continuation {
+		margin-left: 44px;
+	}
+
 	.tilefab-production-bay-panel {
 		top: auto;
 		right: 8px;

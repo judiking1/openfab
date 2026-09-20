@@ -22016,6 +22016,9 @@ export default function TileFabApp(): React.ReactElement {
 			).toFixed(2);
 		}
 		if (!captured) return;
+		// The next placement is a copy of the authored selection, not the configurable catalog preview.
+		productionBayPlacementFingerprintRef.current = null;
+		setProductionBayConfiguration(null);
 		const activationStartedAt = performance.now();
 		startTransition(() => {
 			activateOrganizationBundlePlacement(
@@ -30276,6 +30279,34 @@ export default function TileFabApp(): React.ReactElement {
 					: null}
 			</fieldset>
 		) : null;
+	const placedTwinBayDuplicateAction = placedTwinBayDuplicateHandoff ? (
+		<>
+			<span
+				id="tilefab-placed-twin-bay-duplicate-handoff-description"
+				className="tilefab-sr-only"
+			>
+				{placedTwinBayDuplicateHandoff.description}
+			</span>
+			<button
+				type="button"
+				ref={placedTwinBayDuplicateHandoffRef}
+				className="tilefab-connected-copy-twin-bay-handoff tilefab-placed-twin-bay-duplicate-handoff"
+				data-testid="ordinary-placed-twin-bay-duplicate-handoff"
+				data-action={placedTwinBayDuplicateHandoff.action}
+				aria-label={placedTwinBayDuplicateHandoff.ariaLabel}
+				aria-describedby="tilefab-placed-twin-bay-duplicate-handoff-description"
+				onClick={duplicateSelectedFabAssembly}
+			>
+				<Copy size={15} aria-hidden="true" />
+				<span>
+					<strong>{placedTwinBayDuplicateHandoff.label}</strong>
+					<small>{placedTwinBayDuplicateHandoff.instruction}</small>
+				</span>
+				<ChevronRight size={15} aria-hidden="true" />
+			</button>
+		</>
+	) : null;
+
 	return (
 		<div
 			ref={appRootRef}
@@ -32150,6 +32181,7 @@ export default function TileFabApp(): React.ReactElement {
 				{productionBayConfiguration ? (
 					<ProductionBayModulePanel
 						request={productionBayConfiguration}
+						continuation={placedTwinBayDuplicateAction}
 						rotationDegrees={organizationBundlePlacementSession?.rotationDegrees ?? 0}
 						placementPending={blueprintPlacementPending}
 						onRequestChange={updateProductionBayConfiguration}
@@ -36331,33 +36363,7 @@ export default function TileFabApp(): React.ReactElement {
 										<small>안내를 확인한 뒤 다시 배치하거나 Esc로 취소하세요.</small>
 									</div>
 								) : null}
-								{placedTwinBayDuplicateHandoff ? (
-									<>
-										<span
-											id="tilefab-placed-twin-bay-duplicate-handoff-description"
-											className="tilefab-sr-only"
-										>
-											{placedTwinBayDuplicateHandoff.description}
-										</span>
-										<button
-											type="button"
-											ref={placedTwinBayDuplicateHandoffRef}
-											className="tilefab-connected-copy-twin-bay-handoff tilefab-placed-twin-bay-duplicate-handoff"
-											data-testid="ordinary-placed-twin-bay-duplicate-handoff"
-											data-action={placedTwinBayDuplicateHandoff.action}
-											aria-label={placedTwinBayDuplicateHandoff.ariaLabel}
-											aria-describedby="tilefab-placed-twin-bay-duplicate-handoff-description"
-											onClick={duplicateSelectedFabAssembly}
-										>
-											<Copy size={15} aria-hidden="true" />
-											<span>
-												<strong>{placedTwinBayDuplicateHandoff.label}</strong>
-												<small>{placedTwinBayDuplicateHandoff.instruction}</small>
-											</span>
-											<ChevronRight size={15} aria-hidden="true" />
-										</button>
-									</>
-								) : null}
+								{!productionBayConfiguration ? placedTwinBayDuplicateAction : null}
 								<span
 									className="tilefab-multi-place-status"
 									data-testid="organization-bundle-status"

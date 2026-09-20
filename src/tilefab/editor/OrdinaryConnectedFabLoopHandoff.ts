@@ -264,7 +264,7 @@ const CONNECTED_FAB_LOOP_HANDOFF = Object.freeze({
 	ariaLabel:
 		"다음 · Fab 외곽 순환 검토. 선택한 Fab의 직속 Bay Bank 두 개를 대상으로 두 번째 외곽 왕복 경로 검토를 엽니다. Apply 전에는 프로젝트가 변경되지 않으며 Escape 또는 취소로 선택한 Fab으로 돌아올 수 있습니다",
 	description:
-		"선택한 Fab의 정확한 직속 Bay Bank 두 개로 기존 FAB LOOP 검토를 엽니다. Worker 추천과 검토만으로는 프로젝트가 변경되지 않습니다.",
+		"선택한 Fab 안의 두 Bay Bank 사이에 두 번째 왕복 경로를 검토합니다. 출발·도착 연결점을 확인한 뒤 적용하세요. 취소하면 선택한 Fab으로 돌아갑니다.",
 }) satisfies OrdinaryConnectedFabLoopHandoffPresentation;
 
 export function ordinaryConnectedFabLoopHandoff(

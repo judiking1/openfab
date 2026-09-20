@@ -540,6 +540,47 @@ describe("StaticFabAssemblyRelationship", () => {
 	});
 
 	it.each([
+		"symbol",
+		"hidden field",
+		"accessor",
+		"custom prototype",
+	] as const)("rejects %s on raw edge endpoints without evaluating accessors", (kind) => {
+		const source = contactOnlyState();
+		const binding = firstLeg(source).seamContacts[0]?.incidences[0]?.binding;
+		if (binding?.kind !== "WITNESS") throw new Error("Missing endpoint witness");
+		const endpoint = binding.scopedEdge.edge.from;
+		let reads = 0;
+		if (kind === "symbol") Object.defineProperty(endpoint, Symbol("extra"), { value: 1 });
+		else if (kind === "hidden field") Object.defineProperty(endpoint, "extra", { value: 1 });
+		else if (kind === "accessor") {
+			Object.defineProperty(endpoint, "x", {
+				get: () => {
+					reads++;
+					return 4;
+				},
+			});
+		} else Object.setPrototypeOf(endpoint, { extra: 1 });
+		expect(staticFabAssemblyRelationshipStateShapeError(source)).not.toBeNull();
+		expect(reads).toBe(0);
+	});
+
+	it.each([
+		"null prototype",
+		"hidden data field",
+	] as const)("preserves valid %s endpoint data during strict shape admission", (kind) => {
+		const source = contactOnlyState();
+		const binding = firstLeg(source).seamContacts[0]?.incidences[0]?.binding;
+		if (binding?.kind !== "WITNESS") throw new Error("Missing endpoint witness");
+		const endpoint = binding.scopedEdge.edge.from;
+		if (kind === "null prototype") Object.setPrototypeOf(endpoint, null);
+		else Object.defineProperty(endpoint, "x", { value: 4, enumerable: false });
+		expect(staticFabAssemblyRelationshipStateShapeError(source)).toBeNull();
+		expect(createStaticFabAssemblyRelationshipState(source)).toEqual(
+			createStaticFabAssemblyRelationshipState(contactOnlyState()),
+		);
+	});
+
+	it.each([
 		["stale cursor", (state: StaticFabAssemblyRelationshipStateV1) => setCursor(state, 1), "다음"],
 		[
 			"duplicate managed child",

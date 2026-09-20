@@ -13,6 +13,7 @@ import { planProductionBayModule } from "../core/ProductionBayModulePlanner";
 import "./ProductionBayModuleDialog.css";
 
 interface ProductionBayModulePanelProps {
+	readonly continuation?: React.ReactNode;
 	readonly request: ProductionBayModuleCatalogRequest;
 	readonly rotationDegrees: 0 | 90 | 180 | 270;
 	readonly placementPending: boolean;
@@ -84,6 +85,7 @@ const NUMERIC_PARAMETERS: readonly Readonly<{
  * request; the app owns the canonical organization-bundle placement session and live ghost.
  */
 export function ProductionBayModulePanel({
+	continuation,
 	request,
 	rotationDegrees,
 	placementPending,
@@ -302,6 +304,9 @@ export function ProductionBayModulePanel({
 			</div>
 
 			<footer>
+				{continuation ? (
+					<div className="tilefab-production-bay-continuation">{continuation}</div>
+				) : null}
 				<span className="tilefab-production-bay-validation" role={error ? "alert" : "status"}>
 					{error ? <X size={15} /> : <Check size={15} />}
 					<strong>
@@ -309,9 +314,14 @@ export function ProductionBayModulePanel({
 							? "FIX DIMENSIONS"
 							: placementPending
 								? "CHECKING PLACEMENT"
-								: "LIVE GHOST READY"}
+								: continuation
+									? "배치 완료"
+									: "LIVE GHOST READY"}
 					</strong>
-					<small>{error ?? "LMB place · R rotate · Esc cancel"}</small>
+					<small>
+						{error ??
+							(continuation ? "전체 복제 또는 계속 배치" : "LMB place · R rotate · Esc cancel")}
+					</small>
 				</span>
 				<button type="button" className="tilefab-production-bay-cancel" onClick={onCancel}>
 					CANCEL

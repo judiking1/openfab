@@ -25,9 +25,9 @@ const CONNECTED_COPY_TWIN_BAY_HANDOFF = Object.freeze({
 	label: "다음 · 새 Twin Bay 배치",
 	instruction: "별도 인증 Twin Bay를 새로 배치 · 복제 구조는 그대로 유지",
 	ariaLabel:
-		"다음 작업: 복제 반복 배치를 끝내고 별도로 인증된 새 Twin Bay 배치를 시작합니다. 이미 확정한 복제 구조는 그대로 유지되며 Bay로 자동 승격되지 않습니다",
+		"다음 작업: 반복 배치를 마치고 내부 Process Loop 두 개를 가진 새 Twin Bay를 배치합니다",
 	description:
-		"현재 복제 구조는 레일과 장비의 연결 묶음일 뿐 Bay 조직이 아닙니다. 이 행동은 복제 반복 고스트만 끝내고, Shell과 두 Process Loop 및 Gateway를 포함하는 기존 인증 Twin Bay 생성 경로를 별도로 시작합니다.",
+		"지금 복제한 레일·장비 묶음에는 Bay 구조가 없습니다. 내부 Process Loop 두 개와 연결점을 가진 새 Twin Bay를 배치해 FAB 조립을 시작하세요.",
 }) satisfies OrdinaryConnectedCopyTwinBayHandoffPresentation;
 
 function ordinaryConnectedCopyIncludesTwinBayPrerequisites(
