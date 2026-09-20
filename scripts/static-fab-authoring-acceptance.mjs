@@ -3385,7 +3385,7 @@ async function exerciseGuidedBuildReleaseSurface(page, firstRunDialog) {
 	const guidedProgress = panel.getByRole("progressbar", {
 		name: "Guided Build 전체 미션 진행률",
 	});
-	assertEqual(await guidedProgress.getAttribute("max"), "12", "Guided canonical mission count");
+	assertEqual(await guidedProgress.getAttribute("max"), "13", "Guided canonical mission count");
 	assertEqual(
 		await panel.getByTestId("guided-build-mission-detail").count(),
 		0,
@@ -3448,7 +3448,7 @@ async function exerciseGuidedBuildReleaseSurface(page, firstRunDialog) {
 		);
 		assertEqual(
 			await guidedProgress.getAttribute("aria-valuetext"),
-			"전체 미션 2/12 · 첫 단방향 레일",
+			"전체 미션 2/13 · 첫 단방향 레일",
 			"Guided First Rail accessible mission progress",
 		);
 		assertEqual(
@@ -7425,7 +7425,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		assertIncludes(
 			await commandHelp.innerText(),
-			"레일 기초 · 2 / 12",
+			"레일 기초 · 2 / 13",
 			"Global Help names the resumable Guided chapter and canonical mission progress",
 		);
 		const guidedHelpCard = commandHelp.locator(".tilefab-command-help-guided");
@@ -7656,7 +7656,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		assertIncludes(
 			(await portResume.innerText()).trim(),
-			"4/12 · 계속하기",
+			"4/13 · 계속하기",
 			"Guided Port resume retains canonical progress",
 		);
 		await portResume.click();
@@ -7741,6 +7741,57 @@ async function exerciseGuidedPortHandoffRegression(
 		});
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.waitForTimeout(100);
+
+		const waitForGuidedPortViewportPaint = async (testId) => {
+			await page.waitForFunction(
+				async ({ id, viewport }) => {
+					const readPaint = () => {
+						const canvas = document.querySelector('[data-testid="rail-canvas"]');
+						const staticCanvas = document.querySelector('[data-testid="rail-static-canvas"]');
+						const marker = document.querySelector(`[data-testid="${id}"]`);
+						if (
+							!(canvas instanceof HTMLCanvasElement) ||
+							!(staticCanvas instanceof HTMLCanvasElement) ||
+							!(marker instanceof HTMLElement) ||
+							marker.hidden ||
+							innerWidth !== viewport.width ||
+							innerHeight !== viewport.height
+						)
+							return null;
+						for (const layer of [canvas, staticCanvas]) {
+							if (
+								layer.width !== Math.max(1, Math.round(layer.clientWidth * devicePixelRatio)) ||
+								layer.height !== Math.max(1, Math.round(layer.clientHeight * devicePixelRatio))
+							)
+								return null;
+						}
+						const role = id === "guided-port-row-start" ? "start" : "target";
+						const fingerprint = canvas.dataset.guidedCanvasMarkers ?? "";
+						const painted = fingerprint.split("|").find((value) => value.startsWith(`${role}:`));
+						if (!painted) return null;
+						const [, x, y, row] = painted.split(":");
+						if (
+							!(Math.abs(Number.parseFloat(marker.style.left) - Number(x)) <= 0.011) ||
+							!(Math.abs(Number.parseFloat(marker.style.top) - Number(y)) <= 0.011) ||
+							marker.dataset.portSlotRow !== row
+						)
+							return null;
+						return `${canvas.width}:${canvas.height}:${fingerprint}:${marker.style.left}:${marker.style.top}`;
+					};
+					const initial = readPaint();
+					if (initial === null) return false;
+					// Resize updates CSS, Canvas pixels and React's marker in separate frames.
+					// Require matching, stable paint before testing occlusion or taking a screenshot.
+					for (let frame = 0; frame < 2; frame += 1) {
+						await new Promise((resolve) => requestAnimationFrame(resolve));
+						if (readPaint() !== initial) return false;
+					}
+					return true;
+				},
+				{ id: testId, viewport: page.viewportSize() },
+				{ timeout: 10_000, polling: "raf" },
+			);
+		};
 
 		const visibleGuidedCanvasMarkerPoint = async (testId, label) => {
 			const marker = page.getByTestId(testId);
@@ -11493,8 +11544,8 @@ async function exerciseGuidedPortHandoffRegression(
 			"action:connect-bays",
 			{
 				chapter: "4/4",
-				chapterMission: "2/7",
-				overallMission: "7/12",
+				chapterMission: "2/8",
+				overallMission: "7/13",
 				work: "BAY BANK · 작업 7/8",
 				title: "두 Twin Bay 연결",
 			},
@@ -12591,8 +12642,8 @@ async function exerciseGuidedPortHandoffRegression(
 			"action:connect-banks",
 			{
 				chapter: "4/4",
-				chapterMission: "3/7",
-				overallMission: "8/12",
+				chapterMission: "3/8",
+				overallMission: "8/13",
 				work: "INTERBAY · 작업 7/8",
 				title: "두 Bay Bank 연결",
 			},
@@ -12837,6 +12888,123 @@ async function exerciseGuidedPortHandoffRegression(
 			"Guided Fab Loop retains the Bank pair",
 		);
 		await waitForEditorStatus(page, "Fab 외곽 순환을 추가했습니다");
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="guided-build-panel"]')
+					?.getAttribute("data-current-mission") === "fab-equipment",
+		);
+		const finalEquipmentBefore = await readMetrics(page);
+		assertEqual(
+			finalEquipmentBefore.equipmentGroups,
+			"0",
+			"Final FAB begins without practice equipment",
+		);
+		await panel.getByRole("button", { name: "Guided Build 최소화", exact: true }).click();
+		await page.getByTestId("guided-build-resume").click();
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="guided-build-panel"]')
+					?.getAttribute("data-current-mission") === "fab-equipment",
+		);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			finalEquipmentBefore,
+			"Final FAB guide minimize/resume",
+		);
+		for (const tool of ["ohb", "eq", "stk"]) {
+			await activateGuidedEquipmentTarget(page, tool, `Final FAB ${tool}`);
+			await waitForLegalPortSlots(page);
+			const acquisitionZoom = page.getByRole("button", {
+				name: tool === "stk" ? "첫 Port 확대" : "현재 Port 확대",
+				exact: true,
+			});
+			if (await acquisitionZoom.isVisible()) await acquisitionZoom.click();
+			const firstMarker = tool === "eq" ? "guided-port-row-start" : "guided-port-target";
+			if (tool === "ohb") {
+				for (const viewport of [
+					{ width: 390, height: 600 },
+					{ width: 390, height: 844 },
+					{ width: 760, height: 900 },
+					{ width: 1440, height: 900 },
+				]) {
+					await page.setViewportSize(viewport);
+					await waitForGuidedPortViewportPaint(firstMarker);
+					await visibleGuidedCanvasMarkerPoint(
+						firstMarker,
+						`Final FAB OHB ${viewport.width}x${viewport.height}`,
+					);
+					await page.screenshot({
+						path: path.join(
+							artifactRoot,
+							`guided-final-fab-equipment-${practiceTransitionMode}-${viewport.width}x${viewport.height}.png`,
+						),
+						fullPage: true,
+					});
+				}
+				await page.setViewportSize({ width: 390, height: 844 });
+			}
+			await waitForGuidedPortViewportPaint(firstMarker);
+			const point = await visibleGuidedCanvasMarkerPoint(
+				firstMarker,
+				`Final FAB ${tool} first Port`,
+			);
+			const firstRow = await page.getByTestId(firstMarker).getAttribute("data-port-slot-row");
+			const before = await readMetrics(page);
+			await page.mouse.click(point.x, point.y);
+			if (tool === "eq") {
+				const end = await visibleGuidedCanvasMarkerPoint(
+					"guided-port-row-end",
+					"Final FAB EQ row end",
+				);
+				await page.mouse.click(end.x, end.y);
+			} else if (tool === "stk") {
+				await page.waitForFunction((row) => {
+					const target = document.querySelector('[data-testid="guided-port-target"]');
+					return (
+						document
+							.querySelector('[data-testid="tilefab-app"]')
+							?.getAttribute("data-stk-draft-rows") === "1" &&
+						target?.getAttribute("data-port-slot-row") !== row
+					);
+				}, firstRow);
+				const next = await visibleGuidedCanvasMarkerPoint(
+					"guided-port-target",
+					"Final FAB STK second Port",
+				);
+				await page.mouse.click(next.x, next.y);
+				const complete = await assertGuidedPrimaryTarget(
+					page,
+					"command:stk.complete",
+					"Final FAB Stocker creation",
+				);
+				await complete.press("Enter");
+			}
+			const after = await waitForWorker(
+				page,
+				(metrics) => Number(metrics.equipmentGroups) === Number(before.equipmentGroups) + 1,
+			);
+			assertEqual(
+				Number(after.modelSequence),
+				Number(before.modelSequence) + 1,
+				`Final FAB ${tool} atomic commit`,
+			);
+			assertEqual(after.workerSimulationReady, "false", `Final FAB ${tool} simulation gate`);
+			if (tool === "stk") {
+				const contract = await readPortEquipmentContract(page);
+				await undoAndRedo(page, before, after, null, true);
+				assertEqual(
+					JSON.stringify(await readPortEquipmentContract(page)),
+					JSON.stringify(contract),
+					"Final FAB Stocker Undo/Redo exact contract",
+				);
+			}
+		}
+		const finalEquipmentContract = await readPortEquipmentContract(page);
+		assertEqual(finalEquipmentContract.groups.length, 3, "Final FAB authored equipment groups");
+		assertEqual(finalEquipmentContract.ports.length, 6, "Final FAB authored Ports");
+
 		const fabLoopHierarchy = await readCertifiedStarterHierarchy(page);
 		assertCertifiedTwoBankFab(fabLoopHierarchy, "Guided Fab Loop");
 		assertAtLeast(
@@ -13166,17 +13334,17 @@ async function exerciseGuidedPortHandoffRegression(
 		await reopenedFinalCheck.waitFor({ state: "visible" });
 		assertIncludes(
 			await panel.innerText(),
-			"MISSION 12 · REOPEN · FINAL CHECK",
+			"MISSION 13 · REOPEN · FINAL CHECK",
 			"Guided exact reopen final-check title",
 		);
 		assertIncludes(
 			await panel.innerText(),
-			"전체 미션 12/12 · 최종 확인",
+			"전체 미션 13/13 · 최종 확인",
 			"Guided exact reopen monotonic progress",
 		);
 		assertEqual(
 			await panel.locator("progress").getAttribute("value"),
-			"12",
+			"13",
 			"Guided exact reopen progress value",
 		);
 		await assertLocatorInsideViewport(page, reopenedFinalCheck);
@@ -13210,7 +13378,7 @@ async function exerciseGuidedPortHandoffRegression(
 		await reopenedFinalConfirmation.waitFor({ state: "visible" });
 		assertIncludes(
 			await panel.innerText(),
-			"전체 미션 12/12 · 최종 확인",
+			"전체 미션 13/13 · 최종 확인",
 			"Guided exact reopen ready progress",
 		);
 		await assertLocatorInsideViewport(page, reopenedFinalConfirmation);
@@ -13239,6 +13407,11 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		assertEqual(guidedReopened.workerChecksum, guidedSaved.workerChecksum, "Guided reopen source");
 		assertEqual(
+			JSON.stringify(await readPortEquipmentContract(page)),
+			JSON.stringify(finalEquipmentContract),
+			"Final FAB exact equipment survives save and reopen",
+		);
+		assertEqual(
 			guidedReopened.staticFabOrganizations,
 			guidedSaved.staticFabOrganizations,
 			"Guided reopen organizations",
@@ -13249,7 +13422,7 @@ async function exerciseGuidedPortHandoffRegression(
 		const completedProjectScope = panel.getByTestId("guided-build-project-scope");
 		assertIncludes(
 			await completedProjectScope.innerText(),
-			"현재 FAB · 장비 0 · Port 0",
+			"현재 FAB · 장비 3 · Port 6",
 			"Guided completion current project equipment scope",
 		);
 		assertIncludes(
@@ -14840,6 +15013,7 @@ async function exerciseGuidedPortHandoffRegression(
 						"EQ",
 						viewport.label,
 						eqResponsiveCommitted,
+						true,
 					);
 					await page.screenshot({
 						path: path.join(artifactRoot, `ordinary-eq-complete-${viewport.label}.png`),
@@ -14857,11 +15031,14 @@ async function exerciseGuidedPortHandoffRegression(
 						await clickWorld(page, selectedEqWorld);
 						await page.getByTestId("port-equipment-inspector").waitFor({ state: "visible" });
 					}
-					const eqAfterStkJourney = await exerciseEqToStkRecommendedEntry(
-						page,
-						viewport.label,
-						eqResponsiveCommitted,
+					// This completed FAB already owns a Stocker. Missing-Stocker handoff journeys
+					// remain covered by the independent ordinary pointer/keyboard fixtures.
+					assertEqual(
+						await page.getByTestId("ordinary-next-stk-handoff").count(),
+						0,
+						`completed FAB does not recommend a first Stocker ${viewport.label}`,
 					);
+					const eqAfterStkJourney = eqResponsiveCommitted;
 					await undoEquipmentCompletion(
 						page,
 						eqResponsiveBaseline,
@@ -22844,9 +23021,16 @@ async function assertRmbPlacementControls(page, expectedOrigin) {
 	);
 }
 
-async function undoAndRedo(page, before, after, expectedPlacementOrigin = null) {
+async function undoAndRedo(
+	page,
+	before,
+	after,
+	expectedPlacementOrigin = null,
+	keyboardHistory = false,
+) {
 	assertEqual(after.historyCanUndo, "true", "history can undo before undo");
-	await page.getByRole("button", { name: "실행 취소" }).click();
+	if (keyboardHistory) await page.getByTestId("rail-canvas").press("ControlOrMeta+z");
+	else await page.getByRole("button", { name: "실행 취소" }).click();
 	const undone = await waitForWorker(
 		page,
 		(metrics) =>
@@ -22876,7 +23060,8 @@ async function undoAndRedo(page, before, after, expectedPlacementOrigin = null) 
 		Number(after.workerTargetSequence) + 1,
 		"undo Worker patch sequence",
 	);
-	await page.getByRole("button", { name: "다시 실행" }).click();
+	if (keyboardHistory) await page.getByTestId("rail-canvas").press("ControlOrMeta+Shift+z");
+	else await page.getByRole("button", { name: "다시 실행" }).click();
 	const redone = await waitForWorker(
 		page,
 		(metrics) =>
@@ -30094,6 +30279,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 	portType,
 	viewportLabel,
 	completionBaseline,
+	existingStocker = false,
 ) {
 	await page.waitForFunction(
 		(expectedType) => {
@@ -30252,10 +30438,10 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 	}
 	assertEqual(
 		await stkRecommendation.count(),
-		portType === "EQ" ? 1 : 0,
+		portType === "EQ" && !existingStocker ? 1 : 0,
 		`ordinary ${portType} contextual STK recommendation count ${viewportLabel}`,
 	);
-	if (portType === "EQ") {
+	if (portType === "EQ" && !existingStocker) {
 		assertEqual(
 			(await stkRecommendation.locator("strong").innerText()).trim(),
 			"다음 · Stocker 배치",
@@ -44527,6 +44713,16 @@ async function exerciseEqClickEndpoints(page, label) {
 							.querySelector('[data-testid="rail-canvas"]')
 							?.getAttribute("data-hover-port-slot") === String(row),
 					otherLine.row,
+				);
+				await page.evaluate(
+					() =>
+						new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+				);
+				const afterFeedbackPoint = await screenPointForWorld(page, otherLine);
+				assertAtMost(
+					Math.hypot(afterFeedbackPoint.x - wrongPoint.x, afterFeedbackPoint.y - wrongPoint.y),
+					1,
+					`${label} EQ hover feedback keeps the pointed-at slot stable`,
 				);
 				await page.mouse.click(wrongPoint.x, wrongPoint.y);
 				await page.waitForFunction(() =>

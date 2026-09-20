@@ -73,12 +73,13 @@ describe("GuidedBuildMission", () => {
 			"bay-bank",
 			"interbay",
 			"fab-loop",
+			"fab-equipment",
 			"checks",
 			"project-save",
 			"project-reopen",
 		]);
 		expect(GUIDED_BUILD_FOUNDATION_MISSIONS.map((mission) => mission.sequence)).toEqual([
-			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+			1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
 		]);
 		expect(GUIDED_BUILD_FOUNDATION_MISSIONS.every(Object.isFrozen)).toBe(true);
 		expect(Object.isFrozen(GUIDED_BUILD_FOUNDATION_MISSIONS)).toBe(true);
@@ -117,6 +118,7 @@ describe("GuidedBuildMission", () => {
 			"locked",
 			"locked",
 			"locked",
+			"locked",
 		]);
 		expect(Object.isFrozen(evaluation)).toBe(true);
 		expect(Object.isFrozen(evaluation.missions)).toBe(true);
@@ -129,6 +131,7 @@ describe("GuidedBuildMission", () => {
 		expect(evaluation.missions.map((mission) => mission.status)).toEqual([
 			"complete",
 			"current",
+			"locked",
 			"locked",
 			"locked",
 			"locked",
@@ -179,6 +182,7 @@ describe("GuidedBuildMission", () => {
 			"complete",
 			"complete",
 			"current",
+			"locked",
 			"locked",
 			"locked",
 			"locked",
@@ -1156,11 +1160,41 @@ describe("GuidedBuildMission", () => {
 			primaryCommandId: "command.apply",
 		});
 		expect(complete.complete).toBe(false);
-		expect(complete.currentMissionId).toBe("checks");
+		expect(complete.currentMissionId).toBe("fab-equipment");
+	});
+
+	it("requires final FAB equipment independently of completed practice and guides the same target", () => {
+		const complete = completedThroughFabEquipment();
+		const missing = evaluateGuidedBuildFoundation(
+			evidence({
+				...complete,
+				practiceGraduated: true,
+				fabEquipment: { organizationId: 7, name: "Final FAB", equipment: equipmentEvidence() },
+			}),
+		);
+		expect(missing.currentMissionId).toBe("fab-equipment");
+		expect(guidedBuildRevealedEquipmentToolIds(missing)).toEqual(["ohb"]);
+		expect(missing.missions.find((mission) => mission.status === "current")?.prompt).toMatchObject({
+			title: "Final FAB (FAB #7) · OHB Port 배치",
+			suggestedAction: "ohb",
+		});
+		expect(evaluateGuidedBuildFoundation(evidence(complete)).currentMissionId).toBe("checks");
+		expect(
+			evaluateGuidedBuildFoundation(
+				evidence({
+					...complete,
+					fabEquipment: {
+						organizationId: null,
+						name: "",
+						equipment: equipmentEvidence({ OHB: [1, 1], EQ: [1, 2], STK: [1, 2] }),
+					},
+				}),
+			).currentMissionId,
+		).toBe("fab-equipment");
 	});
 
 	it("opens exact whole-project Checks and requires current-fingerprint acknowledgement", () => {
-		const base = completedThroughFabLoop();
+		const base = completedThroughFabEquipment();
 		const open = evaluateGuidedBuildFoundation(evidence(base));
 		const pending = evaluateGuidedBuildFoundation(
 			evidence({
@@ -1236,7 +1270,7 @@ describe("GuidedBuildMission", () => {
 	it("hands organization-protected rail findings back to CHECKS-owned repair", () => {
 		const prompt = evaluateGuidedBuildFoundation(
 			evidence({
-				...completedThroughFabLoop(),
+				...completedThroughFabEquipment(),
 				checks: checksEvidence({
 					available: true,
 					blockingIssueCount: 1,
@@ -1321,7 +1355,7 @@ describe("GuidedBuildMission", () => {
 		);
 		const reopenedBeforeFreshChecks = evaluateGuidedBuildFoundation(
 			evidence({
-				...completedThroughFabLoop(),
+				...completedThroughFabEquipment(),
 				projectPersistence: reopenedProjectEvidence(),
 			}),
 		);
@@ -1354,7 +1388,7 @@ describe("GuidedBuildMission", () => {
 			reopenedBeforeFreshChecks.missions.find((mission) => mission.definition.id === "checks")
 				?.prompt,
 		).toMatchObject({
-			eyebrow: "MISSION 12 · REOPEN · FINAL CHECK",
+			eyebrow: "MISSION 13 · REOPEN · FINAL CHECK",
 			title: "다시 연 프로젝트 최종 검사",
 			objective:
 				"방금 저장한 같은 프로젝트를 다시 열었습니다. 마지막 확인으로 CHECKS를 한 번 실행하세요.",
@@ -1440,6 +1474,11 @@ describe("GuidedBuildMission", () => {
 					interbayFabCount: 1,
 					fabBankCount: 2,
 				}),
+				fabEquipment: {
+					organizationId: 7,
+					name: "FAB 7",
+					equipment: equipmentEvidence({ OHB: [1, 1], EQ: [1, 2], STK: [1, 2] }),
+				},
 				fabLoop: fabLoopEvidence({ resilientFabLoopCount: 1, resilientBankPairCount: 1 }),
 				checks: checksEvidence({ available: true, ready: true, fingerprint: "undo-checks" }),
 				checksGuidance: checksGuidance({ acknowledgedFingerprint: "undo-checks" }),
@@ -1530,6 +1569,7 @@ function evidence(overrides: Partial<GuidedBuildEvidence> = {}): GuidedBuildEvid
 		interbay: interbayEvidence(),
 		fabLoopGuidance: fabLoopGuidance(),
 		fabLoop: fabLoopEvidence(),
+		fabEquipment: { organizationId: null, name: "", equipment: equipmentEvidence() },
 		checks: checksEvidence(),
 		checksGuidance: checksGuidance(),
 		projectPersistence: projectPersistenceEvidence(),
@@ -1537,8 +1577,13 @@ function evidence(overrides: Partial<GuidedBuildEvidence> = {}): GuidedBuildEvid
 	};
 }
 
-function completedThroughFabLoop(): Partial<GuidedBuildEvidence> {
+function completedThroughFabEquipment(): Partial<GuidedBuildEvidence> {
 	return {
+		fabEquipment: {
+			organizationId: 7,
+			name: "FAB 7",
+			equipment: equipmentEvidence({ OHB: [1, 1], EQ: [1, 2], STK: [1, 2] }),
+		},
 		...completedThroughInterbay(),
 		fabLoop: fabLoopEvidence({
 			semanticFabCount: 1,
@@ -1551,7 +1596,7 @@ function completedThroughFabLoop(): Partial<GuidedBuildEvidence> {
 
 function completedThroughChecks(): Partial<GuidedBuildEvidence> {
 	return {
-		...completedThroughFabLoop(),
+		...completedThroughFabEquipment(),
 		checks: checksEvidence({ available: true, ready: true, fingerprint: "checks-current" }),
 		checksGuidance: checksGuidance({ acknowledgedFingerprint: "checks-current" }),
 	};

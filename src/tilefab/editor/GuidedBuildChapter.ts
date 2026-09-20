@@ -65,6 +65,7 @@ export const GUIDED_BUILD_CHAPTERS = Object.freeze([
 			"bay-bank",
 			"interbay",
 			"fab-loop",
+			"fab-equipment",
 			"checks",
 			"project-save",
 			"project-reopen",

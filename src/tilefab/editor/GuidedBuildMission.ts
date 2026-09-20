@@ -9,6 +9,7 @@ import { EDITOR_ACTIVITIES, type EditorActivity } from "./EditorActivity";
 import type { EditorCommandId } from "./EditorCommandRegistry";
 import type { GuidedBuildBayBankEvidence } from "./GuidedBuildBayBankEvidence";
 import type { GuidedBuildBayEvidence } from "./GuidedBuildBayEvidence";
+import type { GuidedBuildFabEquipmentEvidence } from "./GuidedBuildEquipmentEvidence";
 import type { GuidedBuildFabLoopEvidence } from "./GuidedBuildFabLoopEvidence";
 import type { GuidedBuildInterbayEvidence } from "./GuidedBuildInterbayEvidence";
 import type { GuidedBuildRailReuseEvidence } from "./GuidedBuildRailReuseEvidence";
@@ -24,6 +25,7 @@ export const GUIDED_BUILD_FOUNDATION_MISSION_IDS = [
 	"bay-bank",
 	"interbay",
 	"fab-loop",
+	"fab-equipment",
 	"checks",
 	"project-save",
 	"project-reopen",
@@ -72,7 +74,7 @@ export interface GuidedBuildMissionPrompt {
 	readonly objective: string;
 	readonly rationale: string;
 	readonly presentation?: "connector";
-	/** Keeps a successful exact reopen visually at 12/12 while fresh CHECKS are republished. */
+	/** Keeps a successful exact reopen visually at the final mission count while fresh CHECKS are republished. */
 	readonly progressPresentation?: "reopen-final-check";
 	readonly primaryCommandId: EditorCommandId | null;
 	readonly suggestedAction: GuidedBuildSuggestedAction | null;
@@ -188,10 +190,21 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		primaryCommandId: null,
 	}),
 	Object.freeze({
-		id: "checks",
+		id: "fab-equipment",
 		sequence: 10,
+		activity: "equip",
+		eyebrow: "MISSION 10 · FAB EQUIPMENT",
+		title: "완성한 FAB에 장비 배치",
+		objective: "완성한 FAB의 레일에 OHB, EQ, Stocker를 배치하세요.",
+		rationale:
+			"연습에서 익힌 Port 배치를 실제 저장할 FAB에 적용합니다. 세 장비가 같은 FAB의 레일에 연결되어야 합니다.",
+		primaryCommandId: "canvas.primary-click",
+	}),
+	Object.freeze({
+		id: "checks",
+		sequence: 11,
 		activity: "inspect",
-		eyebrow: "MISSION 10 · CHECKS",
+		eyebrow: "MISSION 11 · CHECKS",
 		title: "정적 FAB 전체 검증",
 		objective: "CHECKS를 열어 레일·포트·장비·조직이 서로 올바르게 연결됐는지 확인하세요.",
 		rationale:
@@ -200,9 +213,9 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 	}),
 	Object.freeze({
 		id: "project-save",
-		sequence: 11,
+		sequence: 12,
 		activity: "inspect",
-		eyebrow: "MISSION 11 · SAVE",
+		eyebrow: "MISSION 12 · SAVE",
 		title: "OpenFab 프로젝트 저장",
 		objective: "현재 FAB 전체를 하나의 .openfab 프로젝트 파일로 저장하세요.",
 		rationale: ".openfab 파일에는 레일·포트·장비·조직과 프로젝트 설정이 함께 저장됩니다.",
@@ -210,9 +223,9 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 	}),
 	Object.freeze({
 		id: "project-reopen",
-		sequence: 12,
+		sequence: 13,
 		activity: "inspect",
-		eyebrow: "MISSION 12 · REOPEN",
+		eyebrow: "MISSION 13 · REOPEN",
 		title: "저장한 프로젝트 다시 열기",
 		objective: "방금 저장한 OpenFab 프로젝트 파일을 다시 열어 동일한 FAB에서 가이드를 재개하세요.",
 		rationale: "방금 저장한 파일을 직접 다시 열어 같은 FAB가 온전히 복원되는지 확인합니다.",
@@ -375,6 +388,8 @@ export interface GuidedBuildEvidence {
 	readonly fabLoopGuidance: GuidedBuildFabLoopGuidanceEvidence;
 	/** Canonical persisted two-route resilience across every direct Bank pair. */
 	readonly fabLoop: GuidedBuildFabLoopEvidence;
+	/** Complete groups physically attached to one stable authored FAB. */
+	readonly fabEquipment: GuidedBuildFabEquipmentEvidence;
 	/** Exact current-source whole-project Worker checks. */
 	readonly checks: GuidedBuildChecksEvidence;
 	/** Ephemeral review surface and source-bound user acknowledgement. */
@@ -473,7 +488,8 @@ export function guidedBuildRevealsCheckStatus(evaluation: GuidedBuildEvaluation)
 export function guidedBuildRevealedEquipmentToolIds(
 	evaluation: GuidedBuildEvaluation,
 ): readonly GuidedBuildEquipmentToolId[] {
-	const ports = evaluation.missions.find((mission) => mission.definition.id === "ports");
+	const missionId = evaluation.currentMissionId === "fab-equipment" ? "fab-equipment" : "ports";
+	const ports = evaluation.missions.find((mission) => mission.definition.id === missionId);
 	if (ports?.status === "complete" || evaluation.currentMissionId === null) {
 		return Object.freeze(["ohb", "eq", "stk"]);
 	}
@@ -495,6 +511,12 @@ export function guidedBuildSuggestedActionClearsPortSelection(
 	);
 }
 
+export function guidedBuildIsEquipmentMission(
+	missionId: GuidedBuildFoundationMissionId | null | undefined,
+): boolean {
+	return missionId === "ports" || missionId === "fab-equipment";
+}
+
 export function guidedBuildPortPlacementRetainsSelection(
 	guidedBuildOpen: boolean,
 	currentMissionId: GuidedBuildFoundationMissionId | null,
@@ -503,7 +525,7 @@ export function guidedBuildPortPlacementRetainsSelection(
 ): boolean {
 	return !(
 		guidedBuildOpen &&
-		currentMissionId === "ports" &&
+		guidedBuildIsEquipmentMission(currentMissionId) &&
 		currentSuggestedAction === completedTool
 	);
 }
@@ -622,6 +644,9 @@ export function evaluateGuidedBuildFoundation(
 		"bay-bank": evidence.bayBank.railBearingTwinBayBankCount > 0,
 		interbay: evidence.interbay.interbayFabCount > 0,
 		"fab-loop": evidence.fabLoop.resilientFabLoopCount > 0,
+		"fab-equipment":
+			evidence.fabEquipment.organizationId !== null &&
+			portEquipmentConditionMet(evidence.fabEquipment.equipment),
 		checks:
 			evidence.checks.available &&
 			evidence.checks.ready &&
@@ -815,41 +840,51 @@ function guidedBuildMissionPrompt(
 				: "검사 · Port 포함 Loop 탭",
 		});
 	}
-	if (definition.id !== "ports") return promptFromDefinition(definition, null, null);
-	if (!equipmentKindComplete("OHB", evidence.equipment.OHB)) {
+	if (!guidedBuildIsEquipmentMission(definition.id))
+		return promptFromDefinition(definition, null, null);
+	const equipment =
+		definition.id === "fab-equipment" ? evidence.fabEquipment.equipment : evidence.equipment;
+	const target =
+		definition.id === "fab-equipment"
+			? `${evidence.fabEquipment.name} (FAB #${evidence.fabEquipment.organizationId}) · `
+			: "";
+	if (!equipmentKindComplete("OHB", equipment.OHB)) {
 		return Object.freeze({
-			eyebrow: "MISSION 4 · PORTS · 1/3",
-			title: "OHB Port 배치",
-			objective: "OHB 도구로 레일의 합법 슬롯에 대표 Port를 하나 배치하세요.",
+			eyebrow: `${definition.eyebrow} · 1/3`,
+			title: `${target}OHB Port 배치`,
+			objective:
+				definition.id === "fab-equipment"
+					? "포트가 작게 보이면 ‘현재 Port 확대’를 누른 뒤, 강조된 레일 슬롯에 OHB Port 하나를 배치하세요."
+					: "OHB 도구로 레일의 합법 슬롯에 대표 Port를 하나 배치하세요.",
 			rationale: definition.rationale,
 			primaryCommandId: "canvas.primary-click",
 			suggestedAction: "ohb",
 			suggestedActionLabel: "장비 · OHB 열기",
 			progressCue: guidedBuildPortProgressCue(
-				evidence.equipment,
+				equipment,
 				"왼쪽의 강조된 OHB · 단일 Port를 선택하세요. 캔버스 포커스에서 방향키로 슬롯을 고르고 Enter로 배치하거나, 점선 고리가 있는 청록 슬롯을 클릭하세요.",
 			),
 		});
 	}
-	if (!equipmentKindComplete("EQ", evidence.equipment.EQ)) {
+	if (!equipmentKindComplete("EQ", equipment.EQ)) {
 		return Object.freeze({
-			eyebrow: "MISSION 4 · PORTS · 2/3",
-			title: "EQ Port 행 배치",
+			eyebrow: `${definition.eyebrow} · 2/3`,
+			title: `${target}EQ Port 행 배치`,
 			objective: "EQ 도구로 같은 직선 레일을 따라 두 개 이상의 Port를 한 그룹으로 배치하세요.",
 			rationale: definition.rationale,
 			primaryCommandId: "canvas.primary-click",
 			suggestedAction: "eq",
 			suggestedActionLabel: "장비 · EQ 열기",
 			progressCue: guidedBuildPortProgressCue(
-				evidence.equipment,
+				equipment,
 				"강조된 EQ · Port를 선택하세요. 청록색 1 시작과 2 끝을 차례로 클릭하거나 드래그하세요. 키보드는 시작과 끝에서 Enter를 사용합니다.",
 			),
 		});
 	}
-	if (!equipmentKindComplete("STK", evidence.equipment.STK)) {
+	if (!equipmentKindComplete("STK", equipment.STK)) {
 		return Object.freeze({
-			eyebrow: "MISSION 4 · PORTS · 3/3",
-			title: "Stocker 생성",
+			eyebrow: `${definition.eyebrow} · 3/3`,
+			title: `${target}Stocker 생성`,
 			objective:
 				"Stocker 도구로 입출고 포트를 선택한 뒤 Stocker 생성을 눌러 보관 장비를 완성하세요.",
 			rationale: definition.rationale,
@@ -857,7 +892,7 @@ function guidedBuildMissionPrompt(
 			suggestedAction: "stk",
 			suggestedActionLabel: "장비 · Stocker 열기",
 			progressCue: guidedBuildPortProgressCue(
-				evidence.equipment,
+				equipment,
 				"왼쪽의 강조된 Stocker · 입출고 포트를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 Stocker 생성을 누르세요.",
 			),
 		});
@@ -1329,7 +1364,7 @@ function guidedBuildChecksPrompt(
 		if (guidance.inspectionPending) {
 			return bankPrompt(
 				definition,
-				"MISSION 10 · CHECKS · 2/3",
+				"MISSION 11 · CHECKS · 2/3",
 				"전체 프로젝트 검사 중",
 				"현재 FAB의 레일·포트·장비·조직 관계 검사가 끝날 때까지 기다리세요.",
 				null,
@@ -1337,7 +1372,7 @@ function guidedBuildChecksPrompt(
 		}
 		return bankPrompt(
 			definition,
-			"MISSION 10 · CHECKS · 1/3",
+			"MISSION 11 · CHECKS · 1/3",
 			"CHECKS 열기",
 			"아래 검사 열기를 눌러 현재 FAB 전체 검사를 시작하세요.",
 			null,
@@ -1352,7 +1387,7 @@ function guidedBuildChecksPrompt(
 				: "";
 		return bankPrompt(
 			definition,
-			"MISSION 10 · CHECKS · FIX",
+			"MISSION 11 · CHECKS · FIX",
 			"차단 이슈 해결",
 			`${checks.blockingIssueCount}개 차단 이슈와 ${checks.followUpIssueCount}개 후속 이슈를 CHECKS에서 확인하고 일반 편집 명령으로 해결하세요.${protectedNetworkGuidance}`,
 			null,
@@ -1363,7 +1398,7 @@ function guidedBuildChecksPrompt(
 	if (!guidance.navigatorOpen) {
 		return bankPrompt(
 			definition,
-			"MISSION 10 · CHECKS · 2/3",
+			"MISSION 11 · CHECKS · 2/3",
 			"검증 결과 검토",
 			"현재 프로젝트 검사는 통과했습니다. CHECKS를 열어 각 도메인의 OK 결과를 확인하세요.",
 			null,
@@ -1373,7 +1408,7 @@ function guidedBuildChecksPrompt(
 	}
 	return bankPrompt(
 		definition,
-		"MISSION 10 · CHECKS · 3/3",
+		"MISSION 11 · CHECKS · 3/3",
 		"현재 검증 결과 확인",
 		"CHECKS에서 '0 ISSUES'와 'ALL STATIC FAB CHECKS PASSED'가 표시되는지 확인하세요.",
 		null,
@@ -1391,7 +1426,7 @@ function guidedBuildReopenFinalCheckPrompt(
 	if (!checks.available) {
 		return Object.freeze({
 			...prompt,
-			eyebrow: "MISSION 12 · REOPEN · FINAL CHECK",
+			eyebrow: "MISSION 13 · REOPEN · FINAL CHECK",
 			title: guidance.inspectionPending ? "다시 연 프로젝트 검사 중" : "다시 연 프로젝트 최종 검사",
 			objective: guidance.inspectionPending
 				? "방금 다시 연 FAB의 레일·포트·장비·조직 관계를 확인하고 있습니다."
@@ -1403,14 +1438,14 @@ function guidedBuildReopenFinalCheckPrompt(
 	if (!checks.ready) {
 		return Object.freeze({
 			...prompt,
-			eyebrow: "MISSION 12 · REOPEN · FINAL CHECK",
+			eyebrow: "MISSION 13 · REOPEN · FINAL CHECK",
 			title: "다시 연 프로젝트 문제 해결",
 			progressPresentation: "reopen-final-check",
 		});
 	}
 	return Object.freeze({
 		...prompt,
-		eyebrow: "MISSION 12 · REOPEN · FINAL CHECK",
+		eyebrow: "MISSION 13 · REOPEN · FINAL CHECK",
 		title: guidance.navigatorOpen ? "다시 연 프로젝트 최종 확인" : "최종 검사 결과 검토",
 		objective: guidance.navigatorOpen
 			? "CHECKS에서 '0 ISSUES'와 'ALL STATIC FAB CHECKS PASSED'가 표시되는지 확인하세요."
@@ -1427,7 +1462,7 @@ function guidedBuildProjectSavePrompt(
 	if (evidence.projectPersistence.operation === "saving") {
 		return bankPrompt(
 			definition,
-			"MISSION 11 · SAVE · WRITING",
+			"MISSION 12 · SAVE · WRITING",
 			"프로젝트 저장 중",
 			".openfab 파일 저장이 완료될 때까지 기다리세요.",
 			null,
@@ -1435,7 +1470,7 @@ function guidedBuildProjectSavePrompt(
 	}
 	return bankPrompt(
 		definition,
-		"MISSION 11 · SAVE",
+		"MISSION 12 · SAVE",
 		"OpenFab 프로젝트 저장",
 		"현재 FAB 전체를 하나의 .openfab 파일로 저장하세요. 일부 모듈만 보관하는 청사진 저장과는 다른 전체 프로젝트 저장입니다.",
 		null,
@@ -1451,7 +1486,7 @@ function guidedBuildProjectReopenPrompt(
 	if (evidence.projectPersistence.operation === "opening") {
 		return bankPrompt(
 			definition,
-			"MISSION 12 · REOPEN · VERIFYING",
+			"MISSION 13 · REOPEN · VERIFYING",
 			"저장 파일 검증 중",
 			"파일 내용을 확인하고 같은 FAB를 복원할 때까지 기다리세요.",
 			null,
@@ -1462,7 +1497,7 @@ function guidedBuildProjectReopenPrompt(
 		!guidedBuildProjectReopened(evidence.projectPersistence);
 	return bankPrompt(
 		definition,
-		"MISSION 12 · REOPEN",
+		"MISSION 13 · REOPEN",
 		reopenedDifferentProject ? "저장한 프로젝트 다시 선택" : "저장한 프로젝트 다시 열기",
 		reopenedDifferentProject
 			? "다른 프로젝트가 열렸습니다. 이전 단계에서 저장한 동일 프로젝트 파일을 다시 선택하세요."
@@ -1640,6 +1675,7 @@ function guidedBuildSourceKey(evidence: GuidedBuildEvidence): string {
 		evidence.navigationAcknowledged ? "oriented" : "unoriented",
 		evidence.practiceGraduated ? "practice-graduated" : "practice-active",
 		evidence.readiness.fingerprint,
+		JSON.stringify(evidence.fabEquipment),
 		...(["OHB", "EQ", "STK"] as const).map(
 			(kind) =>
 				`${kind}:${evidence.equipment[kind].groupCount}:${evidence.equipment[kind].portCount}`,

@@ -1026,6 +1026,80 @@ describe("port slot rendering", () => {
 		expect(rejectAll).toHaveBeenCalledTimes(16);
 	});
 
+	it.each([
+		"OHB",
+		"EQ",
+		"STK",
+	] as const)("keeps %s recommendations within the authored scope and repaints replacement scopes", (portType) => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 45, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifacts(physical, portType);
+		const renderer = new TileRenderer();
+		const context = createRecordingContext().context;
+		const input: Parameters<TileRenderer["render"]>[2] = {
+			map: document.map,
+			physicalPaths: physical.paths,
+			portSlots: prepared.slots,
+			portSlotSpatialIndex: prepared.spatialIndex,
+			portSlotAvailability: createPreparedPortSlotAvailabilityIndex(
+				physical,
+				prepared,
+				document.portEquipment,
+			),
+			showPortSlots: true,
+			interactionFocus: "ports",
+			ghost: null,
+			camera: { offsetX: 0, offsetY: 320, zoom: 18, rotation: 0 },
+			width: 900,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		};
+		const guidance = {
+			label: portType,
+			instruction: "Port 선택",
+			gesture: portType === "EQ" ? ("row" as const) : ("single" as const),
+			recommendedPortCount: 3,
+		};
+		for (const [minimum, maximum] of [
+			[2, 10],
+			[30, 38],
+		] as const) {
+			const scopeIncludesRow = (row: number) =>
+				(prepared.slots.routeXs[row] as number) >= minimum &&
+				(prepared.slots.routeXs[row] as number) <= maximum;
+			renderer.render(context, context, {
+				...input,
+				guidedPortPlacement: { ...guidance, scopeIncludesRow },
+			});
+			const markers = renderer.getGuidedCanvasActionMarkers();
+			expect(markers).toHaveLength(portType === "EQ" ? 2 : 1);
+			for (const marker of markers)
+				expect(scopeIncludesRow(marker.portSlotRow as number)).toBe(true);
+		}
+		renderer.render(context, context, {
+			...input,
+			guidedPortPlacement: { ...guidance, scopeIncludesRow: () => false },
+		});
+		expect(renderer.getGuidedCanvasActionMarkers()).toHaveLength(0);
+		renderer.render(context, context, {
+			...input,
+			guidedPortPlacement: { ...guidance, reservedTopPixels: 350 },
+		});
+		expect(renderer.getGuidedCanvasActionMarkers()).toHaveLength(0);
+		renderer.render(context, context, {
+			...input,
+			guidedPortPlacement: { ...guidance, reservedTopPixels: 250, reservedBottomPixels: 200 },
+		});
+		expect(renderer.getGuidedCanvasActionMarkers()).toHaveLength(portType === "EQ" ? 2 : 1);
+	});
+
 	it("projects a visible three-slot Guided EQ drag span with start and end markers", () => {
 		const document = new RailDocument();
 		expect(

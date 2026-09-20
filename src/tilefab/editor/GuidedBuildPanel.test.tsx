@@ -59,11 +59,11 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).toContain('data-current-mission="first-rail"');
 		expect(markup).toContain("첫 단방향 레일");
 		expect(markup).toContain('value="2"');
-		expect(markup).toContain('max="12"');
-		expect(markup).toContain('aria-valuetext="전체 미션 2/12 · 첫 단방향 레일"');
+		expect(markup).toContain('max="13"');
+		expect(markup).toContain('aria-valuetext="전체 미션 2/13 · 첫 단방향 레일"');
 		expect(markup).toContain("GUIDED BUILD · 챕터 1/4 · 레일 기초");
 		expect(markup).toContain("레일 기초");
-		expect(markup).toContain("미션 2/3 · 전체 미션 2/12");
+		expect(markup).toContain("미션 2/3 · 전체 미션 2/13");
 		expect(markup).not.toContain("MISSION 2 · FIRST RAIL");
 		expect(markup).not.toContain('data-testid="guided-build-mission-detail"');
 		expect(markup).not.toContain("닫힌 Process Loop: locked");
@@ -274,7 +274,7 @@ describe("GuidedBuildPanel", () => {
 		const markup = panelMarkup(evidence());
 
 		expect(markup).toContain('data-current-mission="orient"');
-		expect(markup).toContain('aria-valuetext="전체 미션 1/12 · 캔버스 익히기"');
+		expect(markup).toContain('aria-valuetext="전체 미션 1/13 · 캔버스 익히기"');
 		expect(markup).toContain("이동을 익혔어요");
 		expect(markup).toContain("TOUCH · MOUSE");
 		expect(markup).toContain("터치는 한 손가락 드래그로 이동하고");
@@ -405,6 +405,15 @@ describe("GuidedBuildPanel", () => {
 					interbayFabCount: 1,
 					fabBankCount: 2,
 				},
+				fabEquipment: {
+					organizationId: 7,
+					name: "FAB 7",
+					equipment: {
+						OHB: { groupCount: 1, portCount: 1, largestGroupPortCount: 1 },
+						EQ: { groupCount: 1, portCount: 2, largestGroupPortCount: 2 },
+						STK: { groupCount: 1, portCount: 2, largestGroupPortCount: 2 },
+					},
+				},
 				fabLoop: {
 					semanticFabCount: 1,
 					eligibleFabCount: 1,
@@ -451,7 +460,7 @@ describe("GuidedBuildPanel", () => {
 		);
 
 		expect(markup).toContain('data-current-mission="complete"');
-		expect(markup).toContain('aria-valuetext="전체 미션 12/12 · 완료"');
+		expect(markup).toContain('aria-valuetext="전체 미션 13/13 · 완료"');
 		expect(markup).toContain("첫 정적 FAB 작업 흐름 완료");
 		expect(markup).toContain("가이드 종료 · 편집 계속");
 		expect(markup).toContain('data-guided-action-id="action:continue-editing"');
@@ -531,7 +540,7 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).toContain('data-current-chapter="equip"');
 		expect(markup).toContain("GUIDED BUILD · 챕터 2/4 · 장비 배치");
 		expect(markup).toContain("EQ Port 행 배치");
-		expect(markup).toContain('aria-valuetext="전체 미션 4/12 · EQ Port 행 배치"');
+		expect(markup).toContain('aria-valuetext="전체 미션 4/13 · EQ Port 행 배치"');
 		expect(markup).toContain('data-testid="guided-build-mission-detail">PORTS · 작업 2/3');
 		expect(markup).not.toContain("MISSION 4 · PORTS · 2/3");
 		expect(markup).toContain("장비 · EQ 열기");
@@ -546,7 +555,7 @@ describe("GuidedBuildPanel", () => {
 		expect(activeMarkup).not.toContain("왼쪽의 강조된 EQ");
 		expect(workspaceMarkup).toContain('data-equipment-workspace="true"');
 		expect(workspaceMarkup).toContain("EQ Port 행 배치");
-		expect(workspaceMarkup).toContain('aria-valuetext="전체 미션 4/12 · EQ Port 행 배치"');
+		expect(workspaceMarkup).toContain('aria-valuetext="전체 미션 4/13 · EQ Port 행 배치"');
 		expect(workspaceMarkup).toContain("이 단계 도움말");
 		expect(workspaceMarkup).not.toContain('data-testid="guided-build-progress-cue"');
 		expect(workspaceMarkup).not.toContain('data-testid="guided-build-keyboard-port-hint"');
@@ -872,7 +881,7 @@ describe("GuidedBuildPanel", () => {
 		expect(activeConnector).toContain("출발 Gateway(연결 지점) 선택");
 	});
 
-	it("keeps an exact reopened project at 12/12 while fresh CHECKS are republished", () => {
+	it("keeps an exact reopened project at 13/13 while fresh CHECKS are republished", () => {
 		const markup = panelMarkup(
 			evidence({
 				...completedThroughTwinBay(),
@@ -889,6 +898,15 @@ describe("GuidedBuildPanel", () => {
 					semanticFabCount: 1,
 					interbayFabCount: 1,
 					fabBankCount: 2,
+				},
+				fabEquipment: {
+					organizationId: 7,
+					name: "FAB 7",
+					equipment: {
+						OHB: { groupCount: 1, portCount: 1, largestGroupPortCount: 1 },
+						EQ: { groupCount: 1, portCount: 2, largestGroupPortCount: 2 },
+						STK: { groupCount: 1, portCount: 2, largestGroupPortCount: 2 },
+					},
 				},
 				fabLoop: {
 					semanticFabCount: 1,
@@ -918,11 +936,11 @@ describe("GuidedBuildPanel", () => {
 
 		expect(markup).toContain('data-current-mission="checks"');
 		expect(markup).toContain("다시 연 프로젝트 최종 검사");
-		expect(markup).toContain("미션 7/7 · 전체 미션 12/12 · 최종 확인");
-		expect(markup).toContain('aria-valuetext="전체 미션 12/12 · 다시 연 프로젝트 최종 검사"');
+		expect(markup).toContain("미션 8/8 · 전체 미션 13/13 · 최종 확인");
+		expect(markup).toContain('aria-valuetext="전체 미션 13/13 · 다시 연 프로젝트 최종 검사"');
 		expect(markup).toContain("현재 미션 진행 중");
 		expect(markup).toContain("다시 연 파일 검사");
-		expect(markup).not.toContain("전체 미션 10/12");
+		expect(markup).not.toContain("전체 미션 10/13");
 	});
 });
 
@@ -1015,6 +1033,15 @@ function evidence(overrides: Partial<GuidedBuildEvidence> = {}): GuidedBuildEvid
 		interbay: interbayEvidence(),
 		fabLoopGuidance: fabLoopGuidance(),
 		fabLoop: fabLoopEvidence(),
+		fabEquipment: {
+			organizationId: null,
+			name: "",
+			equipment: {
+				OHB: { groupCount: 0, portCount: 0, largestGroupPortCount: 0 },
+				EQ: { groupCount: 0, portCount: 0, largestGroupPortCount: 0 },
+				STK: { groupCount: 0, portCount: 0, largestGroupPortCount: 0 },
+			},
+		},
 		checks: {
 			available: false,
 			ready: false,

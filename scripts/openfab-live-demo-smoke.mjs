@@ -367,10 +367,10 @@ async function readGuidedProgressiveSurface(activePage, label) {
 		name: "Guided Build 전체 미션 진행률",
 	});
 	assertEqual(await progress.getAttribute("value"), "1", `${label} current mission progress`);
-	assertEqual(await progress.getAttribute("max"), "12", `${label} mission count`);
+	assertEqual(await progress.getAttribute("max"), "13", `${label} mission count`);
 	assertEqual(
 		await progress.getAttribute("aria-valuetext"),
-		"전체 미션 1/12 · 캔버스 익히기",
+		"전체 미션 1/13 · 캔버스 익히기",
 		`${label} accessible mission progress`,
 	);
 	assertEqual(
@@ -417,7 +417,7 @@ async function readGuidedProgressiveSurface(activePage, label) {
 	const constructionBar = await activePage.getByTestId("rail-buildbar").count();
 	assertEqual(constructionBar, 0, `${label} Orient construction bar deferral`);
 	return {
-		progress: { value: 1, max: 12 },
+		progress: { value: 1, max: 13 },
 		activities,
 		assemblyLaunchers,
 		actionHints,
@@ -449,7 +449,7 @@ async function advanceToFirstRailSurface(activePage, guidedPanel) {
 	assertEqual(await progress.getAttribute("value"), "2", "First Rail current mission progress");
 	assertEqual(
 		await progress.getAttribute("aria-valuetext"),
-		"전체 미션 2/12 · 첫 단방향 레일",
+		"전체 미션 2/13 · 첫 단방향 레일",
 		"First Rail accessible mission progress",
 	);
 	assertEqual(
@@ -477,7 +477,7 @@ async function advanceToFirstRailSurface(activePage, guidedPanel) {
 	assertEqual(await railModules.count(), 0, "First Rail module-group deferral");
 	const cornerPath = activePage.getByRole("group", { name: "코너 경로" });
 	assertEqual(await cornerPath.count(), 0, "First Rail corner-path deferral");
-	return { progress: { value: 2, max: 12 }, constructionBar: 0, moduleCount: 0, cornerPath: 0 };
+	return { progress: { value: 2, max: 13 }, constructionBar: 0, moduleCount: 0, cornerPath: 0 };
 }
 
 function rectanglesOverlap(left, right) {

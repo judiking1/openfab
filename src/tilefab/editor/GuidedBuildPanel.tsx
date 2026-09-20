@@ -25,6 +25,7 @@ import {
 import { GuidedBuildChapterCheckpoint } from "./GuidedBuildChapterCheckpoint";
 import { guidedBuildInputHint } from "./GuidedBuildInputHint";
 import type { GuidedBuildEvaluation, GuidedBuildSuggestedAction } from "./GuidedBuildMission";
+import { guidedBuildIsEquipmentMission } from "./GuidedBuildMission";
 import {
 	type GuidedPortKeyboardPhase,
 	type GuidedPortKeyboardType,
@@ -304,7 +305,7 @@ export function GuidedBuildPanel({
 			: null;
 	const keyboardPortActive =
 		!reviewing &&
-		definition?.id === "ports" &&
+		guidedBuildIsEquipmentMission(definition?.id) &&
 		keyboardPort !== null &&
 		suggestedAction?.toUpperCase() === keyboardPort.portType;
 	const keyboardPortOperation = keyboardPortActive
@@ -314,7 +315,7 @@ export function GuidedBuildPanel({
 	const equipmentWorkspaceOwnsInput =
 		!reviewing &&
 		!chapterCheckpoint &&
-		definition?.id === "ports" &&
+		guidedBuildIsEquipmentMission(definition?.id) &&
 		equipmentWorkspaceType !== null &&
 		suggestedAction?.toUpperCase() === equipmentWorkspaceType;
 

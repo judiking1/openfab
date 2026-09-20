@@ -766,6 +766,7 @@ import {
 	guidedBuildOrganizationArrangementSelectionMode,
 	guidedBuildOrganizationPlacementIsHierarchyDuplicate,
 	guidedBuildOrganizationPlacementIsSingleCommit,
+	guidedBuildIsEquipmentMission,
 	guidedBuildPortPlacementRetainsSelection,
 	guidedBuildSelectionCopyPlacementIsSingleCommit,
 	guidedBuildRevealedActivities,
@@ -783,7 +784,6 @@ import {
 	guidedBuildTreatsPrimaryTouchAsPan,
 	guidedBuildUsesCompactOrganizationPicker,
 	guidedBuildVisibleOrganizationSelectionCount,
-	type GuidedBuildEquipmentEvidence,
 	type GuidedBuildSuggestedAction,
 } from "./GuidedBuildMission";
 import { resolveGuidedBuildPrimaryTarget } from "./GuidedBuildPrimaryTarget";
@@ -812,6 +812,11 @@ import {
 	EMPTY_GUIDED_BUILD_FAB_LOOP_EVIDENCE,
 	summarizeGuidedBuildFabLoopEvidence,
 } from "./GuidedBuildFabLoopEvidence";
+import {
+	createGuidedBuildFabEquipmentScope,
+	summarizeGuidedBuildEquipment,
+	summarizeGuidedBuildFabEquipment,
+} from "./GuidedBuildEquipmentEvidence";
 import { DeferredGuidedBuildPanel } from "./DeferredGuidedBuildPanel";
 import type { GuidedBuildKeyboardPortState } from "./GuidedBuildPanel";
 import {
@@ -861,7 +866,7 @@ import {
 	guidedBuildNeedsProjectEvidence,
 	recordGuidedBuildEntryChoice,
 } from "./GuidedBuildPreferences";
-import { NewFabProfileWizard } from "./NewFabProfileWizard";
+import { DeferredNewFabProfileWizard } from "./DeferredNewFabProfileWizard";
 import type { NewFabProfilePreparedBinding } from "./NewFabProfileWizardModel";
 import {
 	consumeOpenFabFabPreparedProject,
@@ -3440,6 +3445,7 @@ export default function TileFabApp(): React.ReactElement {
 	const cancelGuidedRailKeyboardForMissionChangeRef = useRef<() => void>(() => undefined);
 	const [guidedRailKeyboard, setGuidedRailKeyboard] = useState<RailKeyboardUiState | null>(null);
 	const guidedPortKeyboardSessionRef = useRef<GuidedPortKeyboardSession | null>(null);
+	const eqPointerHoverSessionRef = useRef<GuidedPortKeyboardSession | null>(null);
 	const ordinaryPortKeyboardPaintedSessionRef = useRef<GuidedPortKeyboardSession | null>(null);
 	const ordinaryPortKeyboardPendingApplyRef = useRef<GuidedPortKeyboardSession | null>(null);
 	const ordinaryPortKeyboardPendingApplyFrameRef = useRef<number | null>(null);
@@ -3546,6 +3552,23 @@ export default function TileFabApp(): React.ReactElement {
 		areaSelection !== null &&
 		staticFabSelection?.rail === areaSelection &&
 		staticFabSelection.equipmentGroups.length > 0;
+	const organizationRecordsById = useMemo(
+		() => new Map(activeOrganizations.records.map((record) => [record.id, record] as const)),
+		[activeOrganizations],
+	);
+	const organizationSemanticRoles = useMemo(
+		() => deriveStaticFabOrganizationSemanticRoles(activeOrganizations),
+		[activeOrganizations],
+	);
+	const staticFabOuterCirculationIndex = useMemo(
+		() =>
+			createStaticFabOuterCirculationIndex(
+				activeOrganizations,
+				organizationSemanticRoles,
+				organizationRecordsById,
+			),
+		[activeOrganizations, organizationRecordsById, organizationSemanticRoles],
+	);
 	const guidedBuildEquipment = useMemo(
 		() => summarizeGuidedBuildEquipment(activePortEquipment),
 		[activePortEquipment],
@@ -3670,6 +3693,15 @@ export default function TileFabApp(): React.ReactElement {
 				? summarizeGuidedBuildFabLoopEvidence(activeOrganizations)
 				: EMPTY_GUIDED_BUILD_FAB_LOOP_EVIDENCE,
 		[activeOrganizations, guidedBuildProjectEvidenceActive],
+	);
+	const guidedBuildFabEquipmentScope = useMemo(
+		() => guidedBuildProjectEvidenceActive
+			? createGuidedBuildFabEquipmentScope(staticFabOuterCirculationIndex) : null,
+		[guidedBuildProjectEvidenceActive, staticFabOuterCirculationIndex],
+	);
+	const guidedBuildFabEquipment = useMemo(
+		() => summarizeGuidedBuildFabEquipment(guidedBuildFabEquipmentScope, activePortEquipment),
+		[guidedBuildFabEquipmentScope, activePortEquipment],
 	);
 	const guidedBuildFabLoopGuidance = useMemo(() => {
 		if (!guidedBuildOpen) {
@@ -3826,6 +3858,7 @@ export default function TileFabApp(): React.ReactElement {
 				interbay: guidedBuildInterbay,
 				fabLoopGuidance: guidedBuildFabLoopGuidance,
 				fabLoop: guidedBuildFabLoop,
+				fabEquipment: guidedBuildFabEquipment,
 				checks: guidedBuildChecks,
 				checksGuidance: guidedBuildChecksGuidance,
 				projectPersistence: guidedBuildProjectPersistence,
@@ -3840,6 +3873,7 @@ export default function TileFabApp(): React.ReactElement {
 			guidedBuildInterbay,
 			guidedBuildInterbayGuidance,
 			guidedBuildFabLoop,
+			guidedBuildFabEquipment,
 			guidedBuildFabLoopGuidance,
 			guidedBuildChecks,
 			guidedBuildChecksGuidance,
@@ -4027,7 +4061,7 @@ export default function TileFabApp(): React.ReactElement {
 			ordinarySessionCurrent ||
 			(session.scope === "guided" &&
 				guidedBuildOpen &&
-				guidedBuildEvaluation.currentMissionId === "ports" &&
+				guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) &&
 				guidedBuildCurrentSuggestedAction === expectedAction &&
 				tool.toUpperCase() === session.portType &&
 				sessionBindingCurrent)
@@ -4092,7 +4126,7 @@ export default function TileFabApp(): React.ReactElement {
 		(guidedBuildOpen &&
 			(guidedBuildEvaluation.currentMissionId === "first-rail" ||
 			guidedBuildEvaluation.currentMissionId === "process-loop" ||
-			guidedBuildEvaluation.currentMissionId === "ports" ||
+			guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) ||
 			(guidedBuildEvaluation.currentMissionId === "reuse-loop" &&
 				(guidedBuildCurrentSuggestedAction === "inspect" ||
 					guidedBuildCurrentSuggestedAction === "select-connected" ||
@@ -4251,7 +4285,7 @@ export default function TileFabApp(): React.ReactElement {
 			staticFabArrangement !== null ||
 			staticFabAssemblyConnector !== null);
 	const guidedStkMinimumPorts =
-		guidedBuildOpen && guidedBuildEvaluation.currentMissionId === "ports" &&
+		guidedBuildOpen && guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) &&
 		guidedBuildCurrentSuggestedAction === "stk" ? 2 : 1;
 	const stkDraftReview = stkDraftReviewPresentation(
 		stkDraftSelection, stkTemplate, guidedStkMinimumPorts, guidedPortKeyboard?.portType === "STK",
@@ -4289,7 +4323,7 @@ export default function TileFabApp(): React.ReactElement {
 							: staticFabExclusiveCommandActive
 								? "현재 편집 검토를 적용하거나 취소하면 다음 실제 편집 대상을 강조합니다."
 								: !guidedPortCanvasActionable &&
-									guidedBuildEvaluation.currentMissionId === "ports"
+									guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId)
 									? "현재 화면에 추천할 Port 위치가 없습니다. 레일이 보이도록 화면을 이동하거나 선택을 초기화하세요."
 									: !guidedReuseSelectionCanvasActionable &&
 										guidedBuildEvaluation.currentMissionId === "reuse-loop" &&
@@ -4453,14 +4487,30 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildPanelActionTargetId,
 		projectSession.operation,
 	]);
+	const guidedBuildFabPortScopeFilter = useMemo(() => {
+		if (guidedBuildEvaluation.currentMissionId !== "fab-equipment") return undefined;
+		const portType = portTypeForTool(tool);
+		if (!portType) return undefined;
+		const slots = editorModel.portSlotArtifacts[portType].slots;
+		return (row: number): boolean => Boolean(
+			slots === portDerivedArtifactsRef.current?.slots && guidedBuildFabEquipmentScope?.acceptsRoute({
+				kind: "CARDINAL_CELL",
+				x: slots.routeXs[row] as number,
+				z: slots.routeZs[row] as number,
+				from: slots.routeFromDirections[row] as 0 | Direction,
+				to: slots.routeToDirections[row] as 0 | Direction,
+			}),
+		);
+	}, [guidedBuildEvaluation.currentMissionId, tool, editorModel.portSlotArtifacts, guidedBuildFabEquipmentScope]);
 	const guidedBuildPortPlacementCoach = useMemo(
 		() =>
 			guidedBuildExperienceActive &&
-			guidedBuildEvaluation.currentMissionId === "ports" &&
+			guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) &&
 			guidedBuildCurrentSuggestedAction === tool &&
 			!(tool === "stk" && stkDraftReady)
 				? tool === "ohb"
 					? Object.freeze({
+							scopeIncludesRow: guidedBuildFabPortScopeFilter,
 							label: "OHB · 대표 Port 1개",
 							instruction: "강조된 합법 슬롯 하나를 클릭하세요",
 							reservedLeftPixels: compactNavigatorViewport ? 64 : 180,
@@ -4469,6 +4519,7 @@ export default function TileFabApp(): React.ReactElement {
 						})
 					: tool === "eq"
 						? Object.freeze({
+								scopeIncludesRow: guidedBuildFabPortScopeFilter,
 								label: "EQ · Port 3개를 한 번에",
 								instruction: "청록색 1 시작 → 2 끝 클릭",
 								reservedLeftPixels: compactNavigatorViewport ? 64 : 180,
@@ -4477,6 +4528,7 @@ export default function TileFabApp(): React.ReactElement {
 							})
 						: tool === "stk"
 							? Object.freeze({
+									scopeIncludesRow: guidedBuildFabPortScopeFilter,
 									label: "STK · 입고와 출고 Port",
 									instruction: "강조된 슬롯 두 개를 차례로 클릭하세요",
 									reservedLeftPixels: compactNavigatorViewport ? 64 : 180,
@@ -4486,6 +4538,7 @@ export default function TileFabApp(): React.ReactElement {
 							: null
 				: null,
 		[
+			guidedBuildFabPortScopeFilter,
 			compactNavigatorViewport,
 			guidedBuildCurrentSuggestedAction,
 			guidedBuildEvaluation.currentMissionId,
@@ -10408,6 +10461,7 @@ export default function TileFabApp(): React.ReactElement {
 	cancelOrdinaryPortKeyboardDeferredApplyRef.current = cancelOrdinaryPortKeyboardDeferredApply;
 
 	function clearGuidedPortKeyboardAccessibility(): void {
+		eqPointerHoverSessionRef.current = null;
 		cancelOrdinaryPortKeyboardDeferredApply();
 		ordinaryPortKeyboardPaintedSessionRef.current = null;
 		ordinaryPortKeyboardPresentationRequestRef.current = null;
@@ -10489,6 +10543,7 @@ export default function TileFabApp(): React.ReactElement {
 		evaluation?: Readonly<{ legal: boolean; reason: string }>,
 		publishStatusOnPaint = false,
 	): void => {
+		eqPointerHoverSessionRef.current = null;
 		if (
 			ordinaryPortKeyboardPendingApplyRef.current !== null &&
 			ordinaryPortKeyboardPendingApplyRef.current !== session
@@ -12497,6 +12552,7 @@ export default function TileFabApp(): React.ReactElement {
 					: undefined;
 			if (!stkCandidateFilter) stkCandidateFilterRef.current.clear();
 			const railCoachInsets = guidedBuildRailSelectionCoach ? fitMapInsets(canvas) : null;
+			const portCoachInsets = guidedBuildPortPlacementCoach?.scopeIncludesRow ? fitMapInsets(canvas) : null;
 			rendererRef.current.render(staticContext, overlayContext, {
 				map: activeModel.map,
 				physicalPaths: activeModel.physical.paths,
@@ -12511,7 +12567,10 @@ export default function TileFabApp(): React.ReactElement {
 						}
 					: null,
 				guidedPortPlacement: guidedBuildPortPlacementCoach
-					? { ...guidedBuildPortPlacementCoach, acceptsRow: stkCandidateFilter }
+					? { ...guidedBuildPortPlacementCoach, acceptsRow: stkCandidateFilter,
+						reservedRightPixels: portCoachInsets?.right,
+						reservedTopPixels: portCoachInsets?.top,
+						reservedBottomPixels: portCoachInsets?.bottom }
 					: null,
 				guidedRailSelection: guidedBuildRailSelectionCoach && railCoachInsets
 					? { ...guidedBuildRailSelectionCoach,
@@ -12670,7 +12729,7 @@ export default function TileFabApp(): React.ReactElement {
 				cameraRef.current.zoom < ORDINARY_STK_ACQUISITION_MIN_ZOOM;
 			if (portTargetZoomButtonRef.current) {
 				portTargetZoomButtonRef.current.hidden =
-					ordinaryPortKeyboardSession?.scope !== "ordinary" ||
+					!ordinaryPortKeyboardSession ||
 					!guidedPortKeyboardSessionCurrent(ordinaryPortKeyboardSession) ||
 					(cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM && cameraFitScopeRef.current !== "stk-selection");
 			}
@@ -17797,6 +17856,7 @@ export default function TileFabApp(): React.ReactElement {
 					nextKeyboard,
 					eqSelection ? { legal: eqSelection.valid, reason: eqSelection.reason } : undefined,
 				);
+				if (nextKeyboard.portType === "EQ") eqPointerHoverSessionRef.current = nextKeyboard;
 				// Presentation also updates hoverPortSlotRef; its equality check below no longer
 				// detects this move. Paint the new keyboard target and its readout explicitly.
 				scheduleRender();
@@ -18600,12 +18660,12 @@ export default function TileFabApp(): React.ReactElement {
 		if (!canvas || !zoomMapAround(factor, canvas.clientWidth / 2, canvas.clientHeight / 2)) return;
 		setStatus(`화면 배율 ${Math.round(cameraRef.current.zoom)} px/m`);
 	};
-	const zoomOrdinaryPortTarget = (): void => {
+	const zoomCurrentPortTarget = (): void => {
 		const session = guidedPortKeyboardSessionRef.current;
 		const canvas = canvasRef.current;
 		if (
 			!canvas ||
-			session?.scope !== "ordinary" ||
+			!session ||
 			!guidedPortKeyboardSessionCurrent(session)
 		) {
 			setStatus("현재 Port 대상을 다시 선택하세요");
@@ -23206,23 +23266,6 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		return counts;
 	}, [activeOrganizations]);
-	const organizationRecordsById = useMemo(
-		() => new Map(activeOrganizations.records.map((record) => [record.id, record] as const)),
-		[activeOrganizations],
-	);
-	const organizationSemanticRoles = useMemo(
-		() => deriveStaticFabOrganizationSemanticRoles(activeOrganizations),
-		[activeOrganizations],
-	);
-	const staticFabOuterCirculationIndex = useMemo(
-		() =>
-			createStaticFabOuterCirculationIndex(
-				activeOrganizations,
-				organizationSemanticRoles,
-				organizationRecordsById,
-			),
-		[activeOrganizations, organizationRecordsById, organizationSemanticRoles],
-	);
 	const assemblyConnectorHierarchyRole: StaticFabAssemblyConnectorHierarchyRole | null =
 		organizationMultiSelection.selectedOrganizationIds.length === 2 &&
 		organizationMultiSelection.selectedOrganizationIds.every(
@@ -27334,7 +27377,7 @@ export default function TileFabApp(): React.ReactElement {
 		activePortAuthoringType !== null &&
 		activePortAuthoringPresentation !== null &&
 		(!guidedBuildOpen ||
-			(guidedBuildEvaluation.currentMissionId === "ports" &&
+			(guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) &&
 				guidedBuildCurrentSuggestedAction === tool &&
 				!guidedBuildReviewing && !guidedBuildChapterCheckpoint));
 	const activePortLegalSlotCount = activePortAuthoringType
@@ -29166,7 +29209,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const guidedSuggestedEquipmentTool =
 			guidedBuildOpen &&
-			guidedBuildEvaluation.currentMissionId === "ports" &&
+			guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) &&
 			(guidedBuildCurrentSuggestedAction === "ohb" ||
 				guidedBuildCurrentSuggestedAction === "eq" ||
 				guidedBuildCurrentSuggestedAction === "stk")
@@ -29181,7 +29224,7 @@ export default function TileFabApp(): React.ReactElement {
 		const guidedPortActivityEntry =
 			next === "equip" &&
 			guidedBuildOpen &&
-			guidedBuildEvaluation.currentMissionId === "ports" &&
+			guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) &&
 			guidedBuildCurrentSuggestedAction === nextTool;
 		if (next === "equip" && (nextTool === "ohb" || nextTool === "eq" || nextTool === "stk")) {
 			lastEquipmentToolRef.current = nextTool;
@@ -29194,7 +29237,18 @@ export default function TileFabApp(): React.ReactElement {
 		if (next === "equip" && !guidedBuildExperienceActive) {
 			startOrdinaryPortKeyboard(nextTool.toUpperCase() as GuidedPortKeyboardType);
 		} else if (guidedPortActivityEntry) {
-			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+			const entryModel = editorModelRef.current;
+			const entryCamera = { ...cameraRef.current };
+			const frameFinalFab = guidedBuildEvaluation.currentMissionId === "fab-equipment";
+			requestAnimationFrame(() => {
+				if (editorModelRef.current !== entryModel || toolRef.current !== nextTool ||
+					editorActivityRef.current !== "equip") return;
+				const camera = cameraRef.current;
+				if (frameFinalFab && camera.offsetX === entryCamera.offsetX &&
+					camera.offsetY === entryCamera.offsetY && camera.zoom === entryCamera.zoom &&
+					camera.rotation === entryCamera.rotation) fitMapRef.current();
+				canvasRef.current?.focus({ preventScroll: true });
+			});
 		}
 	};
 	const chooseExplicitEditorTool = (next: EditorTool): boolean => {
@@ -29328,7 +29382,7 @@ export default function TileFabApp(): React.ReactElement {
 		const portType = next.toUpperCase() as GuidedPortKeyboardType;
 		const guidedTarget =
 			guidedBuildOpen &&
-			guidedBuildEvaluation.currentMissionId === "ports" &&
+			guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) &&
 			guidedBuildCurrentSuggestedAction === next;
 		if (guidedTarget) guidedPortKeyboardFocusRequestRef.current = portType;
 		if (!chooseExplicitEditorTool(next)) {
@@ -29820,6 +29874,8 @@ export default function TileFabApp(): React.ReactElement {
 		} else if (equipmentWorkspaceActive) {
 			const session = guidedPortKeyboardSessionRef.current;
 			if (!session || !guidedPortKeyboardSessionCurrent(session)) return;
+			// Hover feedback can resize the dock. Do not move the pointed-at slot before its click.
+			if (eqPointerHoverSessionRef.current === session && hoverWorldRef.current !== null) return;
 			const draft = stkDraftSessionRef.current;
 			moved = (session.portType === "STK" && draft && isCurrentStkDraft(draft)
 				&& draft.slots === session.binding.slots
@@ -32357,7 +32413,7 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 
 				{newFabProfileWizardOpen ? (
-					<NewFabProfileWizard<VerifiedOpenFabFabPreparedProject>
+					<DeferredNewFabProfileWizard<VerifiedOpenFabFabPreparedProject>
 						returnFocus={newFabProfileWizardReturnFocusRef.current}
 						suspended={pendingProjectAction !== null}
 						onCancel={() => setNewFabProfileWizardOpen(false)}
@@ -37217,14 +37273,14 @@ export default function TileFabApp(): React.ReactElement {
 											<Search size={14} aria-hidden="true" /> 선택 범위 보기
 										</button>
 									) : null}
-									{!guidedBuildExperienceActive && guidedPortKeyboard?.scope === "ordinary" ? (
+									{guidedPortKeyboard && (!guidedBuildExperienceActive || guidedBuildEvaluation.currentMissionId === "fab-equipment") ? (
 										<button
 											ref={portTargetZoomButtonRef}
 											type="button"
 											className="tilefab-stk-zoom-current tilefab-equipment-zoom-current"
 											data-testid={tool === "stk" ? "ordinary-stk-zoom-in" : "ordinary-port-zoom-in"}
 											hidden={cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM && cameraFitScopeRef.current !== "stk-selection"}
-											onClick={zoomOrdinaryPortTarget}
+											onClick={zoomCurrentPortTarget}
 										>
 											<Search size={14} aria-hidden="true" />
 											{tool === "stk" ? activeStkZoomActionLabel : "현재 Port 확대"}
@@ -41990,28 +42046,6 @@ function authoritativeUserBlueprintLibraryError(
 	return null;
 }
 
-function summarizeGuidedBuildEquipment(
-	state: PortEquipmentState,
-): GuidedBuildEquipmentEvidence {
-	const summary = {
-		OHB: { groupCount: 0, portCount: 0, largestGroupPortCount: 0 },
-		EQ: { groupCount: 0, portCount: 0, largestGroupPortCount: 0 },
-		STK: { groupCount: 0, portCount: 0, largestGroupPortCount: 0 },
-	};
-	for (const group of state.equipmentGroups) {
-		summary[group.kind].groupCount += 1;
-		summary[group.kind].portCount += group.portIds.length;
-		summary[group.kind].largestGroupPortCount = Math.max(
-			summary[group.kind].largestGroupPortCount,
-			group.portIds.length,
-		);
-	}
-	return Object.freeze({
-		OHB: Object.freeze(summary.OHB),
-		EQ: Object.freeze(summary.EQ),
-		STK: Object.freeze(summary.STK),
-	});
-}
 
 function trapDialogTabNavigation(event: ReactKeyboardEvent<HTMLElement>): void {
 	if (event.key !== "Tab") return;

@@ -1,4 +1,5 @@
 import type { GuidedBuildFoundationMissionId } from "./GuidedBuildMission";
+import { guidedBuildIsEquipmentMission } from "./GuidedBuildMission";
 
 export const DEFAULT_RAIL_BUILD_STATUS = "첫 레일의 시작점을 선택하세요";
 export const RAIL_ROUTE_DRAG_STATUS = "레일 시작점에서 끝점까지 드래그하세요";
@@ -25,7 +26,7 @@ interface GuidedFirstRailPreviewInput {
 export function guidedBuildPresentedStatus(input: GuidedBuildStatusInput): string {
 	if (
 		input.guidedBuildOpen &&
-		input.currentMissionId === "ports" &&
+		guidedBuildIsEquipmentMission(input.currentMissionId) &&
 		input.suggestedActionLabel &&
 		(input.status === DEFAULT_RAIL_BUILD_STATUS || input.status === RAIL_ROUTE_DRAG_STATUS)
 	) {

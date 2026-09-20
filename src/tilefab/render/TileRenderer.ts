@@ -398,9 +398,14 @@ export interface TileRenderInput {
 		readonly label: string;
 		readonly instruction: string;
 		readonly reservedLeftPixels?: number;
+		readonly reservedRightPixels?: number;
+		readonly reservedTopPixels?: number;
+		readonly reservedBottomPixels?: number;
 		readonly gesture?: "single" | "row";
 		readonly recommendedPortCount?: number;
 		readonly acceptsRow?: (row: number) => boolean;
+		/** Cheap authored scope filter, also applied to every EQ row candidate. */
+		readonly scopeIncludesRow?: (row: number) => boolean;
 	}> | null;
 	guidedRailSelection?: Readonly<{
 		readonly label: string;
@@ -695,6 +700,7 @@ export function advancedSwitchHighlightCells(map: TileMap, cell: Cell | null): r
 /** Static rails are cached; pointer movement redraws only the lightweight overlay. */
 export class TileRenderer {
 	private staticKey = "";
+	private guidedPortScopeFilter: ((row: number) => boolean) | undefined;
 	private guidedPortCandidateFilter: ((row: number) => boolean) | undefined;
 	private staticRedraws = 0;
 	private overlayRedraws = 0;
@@ -1325,7 +1331,11 @@ export class TileRenderer {
 
 	private ensureStaticLayer(staticContext: CanvasRenderingContext2D, input: TileRenderInput): void {
 		const { map, physicalPaths, camera, width, height, dpr } = input;
-		if (this.guidedPortCandidateFilter !== input.guidedPortPlacement?.acceptsRow) {
+		if (
+			this.guidedPortCandidateFilter !== input.guidedPortPlacement?.acceptsRow ||
+			this.guidedPortScopeFilter !== input.guidedPortPlacement?.scopeIncludesRow
+		) {
+			this.guidedPortScopeFilter = input.guidedPortPlacement?.scopeIncludesRow;
 			this.guidedPortCandidateFilter = input.guidedPortPlacement?.acceptsRow;
 			this.staticKey = "";
 		}
@@ -1450,6 +1460,9 @@ export class TileRenderer {
 			input.guidedPortPlacement?.label ?? "no-port-guide",
 			input.guidedPortPlacement?.instruction ?? "",
 			String(input.guidedPortPlacement?.reservedLeftPixels ?? 0),
+			String(input.guidedPortPlacement?.reservedRightPixels ?? 0),
+			String(input.guidedPortPlacement?.reservedTopPixels ?? 0),
+			String(input.guidedPortPlacement?.reservedBottomPixels ?? 0),
 			input.guidedPortPlacement?.gesture ?? "single",
 			String(input.guidedPortPlacement?.recommendedPortCount ?? 1),
 			input.guidedRailSelection?.label ?? "no-rail-guide",
@@ -1918,14 +1931,15 @@ export class TileRenderer {
 			input.portRowDraft?.portType === slots.portType ? input.portRowDraft.selection.rows : [],
 		);
 		const candidates = this.visiblePortSlotBuffer.filter((row) => {
+			if (guidance.scopeIncludesRow && !guidance.scopeIncludesRow(row)) return false;
 			if (this.portSlotStatus(input, row) !== PORT_SLOT_STATUS.LEGAL) return false;
 			if (guidance.gesture !== "row" && selectedRows.has(row)) return false;
 			const port = this.portSlotScreenPoint(input, slots, row);
 			return (
 				port.x >= reservedLeft + markerRadius + 8 &&
-				port.x <= input.width - markerRadius - 8 &&
-				port.y >= markerRadius + 8 &&
-				port.y <= input.height - markerRadius - 8
+				port.x <= input.width - (guidance.reservedRightPixels ?? 0) - markerRadius - 8 &&
+				port.y >= (guidance.reservedTopPixels ?? 0) + markerRadius + 8 &&
+				port.y <= input.height - (guidance.reservedBottomPixels ?? 0) - markerRadius - 8
 			);
 		});
 		if (guidance.gesture !== "row") {
@@ -2042,7 +2056,12 @@ export class TileRenderer {
 			reservedLeft + 8,
 			Math.max(reservedLeft + 8, input.width - width - 8),
 		);
-		const y = clamp(anchor.y - 62, 8, Math.max(8, input.height - height - 8));
+		const minimumY = (guidance.reservedTopPixels ?? 0) + 8;
+		const y = clamp(
+			anchor.y - 62,
+			minimumY,
+			Math.max(minimumY, input.height - (guidance.reservedBottomPixels ?? 0) - height - 8),
+		);
 		ctx.fillStyle = "rgba(10, 20, 21, 0.96)";
 		ctx.strokeStyle = slots.portType === "STK" ? "#d8b95f" : "#68cfd4";
 		ctx.lineWidth = 1.5;

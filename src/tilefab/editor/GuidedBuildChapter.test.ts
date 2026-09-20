@@ -54,7 +54,7 @@ describe("chapter entry tool boundaries", () => {
 });
 
 describe("GuidedBuildChapter", () => {
-	it("partitions all 12 canonical missions once and in exact order", () => {
+	it("partitions all 13 canonical missions once and in exact order", () => {
 		const missionIds = GUIDED_BUILD_CHAPTERS.flatMap((chapter) => chapter.missionIds);
 
 		expect(missionIds).toEqual(GUIDED_BUILD_FOUNDATION_MISSION_IDS);
@@ -92,7 +92,7 @@ describe("GuidedBuildChapter", () => {
 			"quick-start:current:1/3:first-rail",
 			"equip:locked:0/1:none",
 			"reuse:locked:0/1:none",
-			"advanced-fab:locked:0/7:none",
+			"advanced-fab:locked:0/8:none",
 		]);
 		expect(guidedBuildCurrentChapter(summary)?.definition.id).toBe("quick-start");
 		expect(evaluation.missions.map((mission) => mission.status)).toEqual(before);
@@ -109,7 +109,7 @@ describe("GuidedBuildChapter", () => {
 				"quick-start:complete:3/3:none",
 				"equip:current:0/1:ports",
 				"reuse:locked:0/1:none",
-				"advanced-fab:locked:0/7:none",
+				"advanced-fab:locked:0/8:none",
 			],
 		],
 		[
@@ -120,7 +120,7 @@ describe("GuidedBuildChapter", () => {
 				"quick-start:complete:3/3:none",
 				"equip:complete:1/1:none",
 				"reuse:current:0/1:reuse-loop",
-				"advanced-fab:locked:0/7:none",
+				"advanced-fab:locked:0/8:none",
 			],
 		],
 		[
@@ -131,7 +131,7 @@ describe("GuidedBuildChapter", () => {
 				"quick-start:complete:3/3:none",
 				"equip:complete:1/1:none",
 				"reuse:complete:1/1:none",
-				"advanced-fab:current:0/7:bay",
+				"advanced-fab:current:0/8:bay",
 			],
 		],
 	] as const)("advances %s into the expected resumable chapter", (currentMissionId, expectedChapterId, completedChapterCount, expectedChapters) => {

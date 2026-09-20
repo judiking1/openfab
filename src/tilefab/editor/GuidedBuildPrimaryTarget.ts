@@ -3,6 +3,7 @@ import type {
 	GuidedBuildFoundationMissionId,
 	GuidedBuildSuggestedAction,
 } from "./GuidedBuildMission";
+import { guidedBuildIsEquipmentMission } from "./GuidedBuildMission";
 
 export type GuidedBuildPrimaryTarget =
 	| Readonly<{
@@ -86,7 +87,7 @@ export function resolveGuidedBuildPrimaryTarget(
 	if (context.currentMissionId === "first-rail" || context.currentMissionId === "process-loop") {
 		return resolveRailTarget(context);
 	}
-	if (context.currentMissionId === "ports") return resolvePortTarget(context);
+	if (guidedBuildIsEquipmentMission(context.currentMissionId)) return resolvePortTarget(context);
 	if (context.currentMissionId === "reuse-loop") {
 		if (context.suggestedAction === "inspect") return resolveReuseSelectionTarget(context);
 		if (context.suggestedAction === "select-connected") {
