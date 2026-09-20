@@ -279,3 +279,70 @@
 		transform: none;
 	}
 }
+
+.tilefab-stk-template-choice {
+	display: grid;
+	flex: 1;
+	min-width: 0;
+	gap: 4px;
+	color: #b8c7c8;
+	font-size: 12px;
+}
+.tilefab-stk-template-choice select {
+	min-height: 44px;
+	width: 100%;
+	min-width: 0;
+	padding: 8px 10px;
+	border: 1px solid #4a6768;
+	border-radius: 4px;
+	color: #e8f4f3;
+	background: #172a2b;
+	font: inherit;
+}
+.tilefab-equipment-fit-selection {
+	min-height: 44px;
+	padding: 8px;
+	border: 1px solid #4a6768;
+	border-radius: 4px;
+	color: #d9eeec;
+	background: #172a2b;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	font: inherit;
+	cursor: pointer;
+}
+.tilefab-stk-template-choice select:focus-visible,
+.tilefab-equipment-fit-selection:focus-visible {
+	outline: 2px solid #99e4e2;
+	outline-offset: 2px;
+}
+
+.tilefab-equipment-view-actions {
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	gap: 8px;
+}
+.tilefab-equipment-view-actions:empty {
+	display: none;
+}
+.tilefab-equipment-workspace .tilefab-equipment-view-actions > button {
+	flex: 1;
+	width: auto;
+	min-width: 0;
+}
+
+/* Range review keeps the active caption without covering adjacent one-metre Ports. */
+.tilefab-guided-canvas-marker--ordinary-port[data-selection-review="true"] {
+	width: var(--tilefab-port-review-size, 24px);
+	height: var(--tilefab-port-review-size, 24px);
+	background: transparent;
+	box-shadow: none;
+	animation: none;
+}
+
+.tilefab-guided-canvas-marker--ordinary-port[data-selection-review="true"]::before {
+	display: none;
+}

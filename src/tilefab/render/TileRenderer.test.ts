@@ -1924,6 +1924,38 @@ describe("port slot rendering", () => {
 			true,
 		);
 
+		// Index text must remain readable on opposing rails and after every camera quarter turn.
+		for (const rotation of [0, 1, 2, 3] as const) {
+			const recording = createRecordingContext();
+			const textAngles: number[] = [];
+			const savedAngles: number[] = [];
+			let angle = 0;
+			recording.context.save = () => {
+				savedAngles.push(angle);
+			};
+			recording.context.restore = () => {
+				angle = savedAngles.pop() ?? 0;
+			};
+			recording.context.rotate = (delta) => {
+				angle += delta;
+			};
+			const fillText = recording.context.fillText;
+			recording.context.fillText = (text, x, y) => {
+				if (/^P[1-4]$/.test(text)) textAngles.push(angle);
+				fillText(text, x, y);
+			};
+			renderer.render(createRecordingContext().context, recording.context, {
+				...input,
+				camera: { ...TEST_CAMERA, zoom: 22, rotation },
+				portRowDraft: { portType: "STK", selection: draft },
+			});
+			expect(recording.labels.filter((label) => /^P[1-4]$/.test(label))).toHaveLength(4);
+			for (const textAngle of textAngles) {
+				expect(Math.sin(textAngle)).toBeCloseTo(0);
+				expect(Math.cos(textAngle)).toBeCloseTo(1);
+			}
+		}
+
 		const ports = rows.map((row, index) =>
 			portSlotRecord(slots, row, index + 1, 9, `STK-9-P0${index + 1}`),
 		);
@@ -2027,8 +2059,18 @@ describe("port slot rendering", () => {
 			),
 		).toBe(true);
 		expect(
-			draftOverlay.strokes.filter((stroke) => stroke.style === "#e3c568" && stroke.width === 3.2),
-		).toHaveLength(4);
+			draftOverlay.strokes.filter((stroke) => stroke.style === "#e3c568" && stroke.width === 2),
+		).toHaveLength(2);
+		expect(draftOverlay.strokeRectStyles.filter((style) => style === "#e3c568")).toHaveLength(2);
+		const hoveredDraftOverlay = createRecordingContext();
+		renderer.render(draftStatic.context, hoveredDraftOverlay.context, {
+			...draftInput,
+			portRowDraft: { portType: "STK", selection: draft },
+			hoverPortSlot: rows[0],
+		});
+		expect(hoveredDraftOverlay.labels).toEqual(draftOverlay.labels);
+		expect(hoveredDraftOverlay.strokes).toEqual(draftOverlay.strokes);
+		expect(hoveredDraftOverlay.strokeRectStyles).toEqual(draftOverlay.strokeRectStyles);
 
 		const equipmentState = {
 			nextPortId: 3,

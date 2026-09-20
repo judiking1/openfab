@@ -8,6 +8,11 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ### Changed
 
+- Stocker configuration uses a labeled native menu. Selection-range review and current-port zoom
+  share a compact action row, with camera-only fitting for drafts and membership edits.
+- Wall-clock unit-test budgets run in a serial group after functional tests, retaining every
+  existing threshold and test case while avoiding competition with unrelated fixture compilation.
+
 - Project Save shortcuts now save the whole project regardless of selection. Held area and FAB
   organization Blueprints have explicit storage buttons, with clearer storage destinations and
   visible save/cancel actions on short screens.
@@ -25,6 +30,15 @@ All notable public OpenFab changes will be documented here. The format follows
   adoption reuses completed relationship validation, and whole-map copying retains less memory.
 
 ### Fixed
+
+- Canvas diagnostic attributes recover after another UI publisher changes them, preventing stale
+  organization-hover readings after menu or viewport transitions.
+
+- Stocker selection review uses clear space beside camera controls on short screens. Numbered
+  draft markers remain upright on opposing rails and camera rotations, and hover markers no longer
+  obscure selected-port labels. Closing the native configuration menu preserves the current draft.
+- Deferred Stocker actions preserve newly focused controls; Guided placement keeps supporting
+  buttons focused while the viewport changes.
 
 - Center alignment uses a shared snapped frame, preventing a one-meter offset between equal-size
   blocks and allowing Guided Build to advance from Bank alignment to Interbay connection.

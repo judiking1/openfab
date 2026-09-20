@@ -2209,6 +2209,13 @@ export class TileRenderer {
 		) {
 			return;
 		}
+		// The numbered draft marker already identifies this slot; a hover glyph would cover its label.
+		if (
+			slots.portType === "STK" &&
+			input.portRowDraft?.portType === "STK" &&
+			input.portRowDraft.selection.rows.includes(row)
+		)
+			return;
 		const rail = this.worldToScreen(
 			{
 				x: slots.railPositions[row * 2] as number,
@@ -3115,22 +3122,21 @@ export class TileRenderer {
 					? "rgba(64, 132, 183, 0.34)"
 					: "rgba(71, 211, 166, 0.34)"
 			: "rgba(236, 76, 88, 0.24)";
-		ctx.lineWidth = portType === "STK" ? (emphasized ? 3.2 : 2.4) : 1.8;
+		ctx.lineWidth = portType === "STK" ? (emphasized ? 2 : 1.6) : 1.8;
 		if (portType === "STK") {
 			ctx.shadowColor = valid ? "rgba(246, 216, 132, 0.56)" : "rgba(240, 92, 101, 0.48)";
-			ctx.shadowBlur = emphasized ? 9 : 5;
+			ctx.shadowBlur = emphasized ? 2 : 1;
 		}
 		ctx.beginPath();
 		ctx.moveTo(rail.x, rail.y);
 		ctx.lineTo(port.x, port.y);
 		ctx.stroke();
 		ctx.translate(port.x, port.y);
-		ctx.rotate(Math.atan2(tangentTip.y - port.y, tangentTip.x - port.x));
+		const tangentAngle = Math.atan2(tangentTip.y - port.y, tangentTip.x - port.x);
+		ctx.rotate(tangentAngle);
 		const width =
 			portType === "STK"
-				? emphasized
-					? clamp(input.camera.zoom * 0.48, 20, 28)
-					: clamp(input.camera.zoom * 0.38, 16, 23)
+				? clamp(input.camera.zoom * 0.5, input.camera.zoom >= 18 ? 10 : 4, emphasized ? 20 : 18)
 				: input.camera.zoom * (portType === "EQ" ? 0.22 : 0.46);
 		const height =
 			portType === "STK" ? width : input.camera.zoom * (portType === "EQ" ? 0.22 : 0.28);
@@ -3140,11 +3146,6 @@ export class TileRenderer {
 			ctx.fill();
 			ctx.stroke();
 		} else if (portType === "STK") {
-			if (emphasized) {
-				ctx.beginPath();
-				ctx.arc(0, 0, width * 0.66, 0, Math.PI * 2);
-				ctx.stroke();
-			}
 			ctx.rotate(Math.PI / 4);
 			ctx.fillRect(-width / 2, -height / 2, width, height);
 			ctx.strokeRect(-width / 2, -height / 2, width, height);
@@ -3161,7 +3162,9 @@ export class TileRenderer {
 			ctx.lineTo(-width * 0.18, height * 0.25);
 			ctx.stroke();
 		} else if (label && portType !== "OHB" && input.camera.zoom >= 18) {
-			ctx.rotate(portType === "STK" ? -Math.PI / 4 : 0);
+			// Port indices stay upright even on the opposing rail or a rotated camera.
+			ctx.rotate(portType === "STK" ? -Math.PI / 4 - tangentAngle : 0);
+			ctx.shadowBlur = 0;
 			ctx.fillStyle =
 				portType === "STK"
 					? accent === 1
@@ -3170,7 +3173,7 @@ export class TileRenderer {
 					: portType === "EQ" && accent === 2
 						? "#e6f5ff"
 						: "#eafff8";
-			ctx.font = `${portType === "STK" ? (emphasized ? "bold 11px" : "bold 10px") : "bold 7px"} ui-monospace, SFMono-Regular, Menlo, monospace`;
+			ctx.font = `${portType === "STK" ? (input.camera.zoom < 28 ? "bold 9px" : "bold 10px") : "bold 7px"} ui-monospace, SFMono-Regular, Menlo, monospace`;
 			ctx.textAlign = "center";
 			ctx.textBaseline = "middle";
 			ctx.fillText(label, 0, 0.5);

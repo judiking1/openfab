@@ -4280,10 +4280,7 @@ async function auditOrdinaryNoSlotStkInstructionOwnership(page, viewport, canvas
 	}
 	const controlIds = ["ordinary-port-authoring-exit", "ordinary-port-build-prerequisite"];
 	for (const controlId of [
-		"stk-template-FLEX",
-		"stk-template-FOUR_PORT",
-		"stk-template-SIX_PORT",
-		"stk-template-BACK_TO_BACK",
+		"stk-template-select",
 		"stk-remove-last",
 		"stk-cancel",
 		"stk-complete",
@@ -4543,7 +4540,7 @@ async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
 				`ordinary hierarchy exact EQ/OHB prerequisite ${viewport.label}`,
 			);
 			await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
-			await page.getByTestId("stk-template-FLEX").click();
+			await chooseStkTemplate(page, "FLEX");
 			await waitForLegalPortSlots(page);
 			const stkBefore = await readMetrics(page);
 			await canvas.focus();
@@ -6136,8 +6133,8 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 				`${viewport.label} STK accessible empty draft`,
 			);
 			assertEqual(
-				await page.getByTestId("stk-template-FLEX").getAttribute("aria-pressed"),
-				"true",
+				await page.getByTestId("stk-template-select").inputValue(),
+				"FLEX",
 				`${viewport.label} active STK template`,
 			);
 			const dockOverflow = await page
@@ -14215,30 +14212,26 @@ async function exerciseGuidedPortHandoffRegression(
 						`ordinary EQ responsive completion ${viewport.label}`,
 					);
 				} else {
-					const templateIds = await responsiveBuildbar
-						.locator(".tilefab-stk-templates button")
-						.evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-testid")));
+					const templateControl = page.getByTestId("stk-template-select");
+					const templateIds = await templateControl
+						.locator("option")
+						.evaluateAll((options) => options.map((option) => option.value));
 					assertEqual(
 						JSON.stringify(templateIds),
-						JSON.stringify([
-							"stk-template-FLEX",
-							"stk-template-FOUR_PORT",
-							"stk-template-SIX_PORT",
-							"stk-template-BACK_TO_BACK",
-						]),
+						JSON.stringify(["FLEX", "FOUR_PORT", "SIX_PORT", "BACK_TO_BACK"]),
 						`ordinary STK template order ${viewport.label}`,
 					);
-					for (const button of await responsiveBuildbar
-						.locator(".tilefab-stk-templates button")
-						.all()) {
-						const bounds = await button.boundingBox();
-						assertAtLeast(bounds?.width ?? 0, 44, `ordinary STK template width ${viewport.label}`);
-						assertAtLeast(
-							bounds?.height ?? 0,
-							44,
-							`ordinary STK template height ${viewport.label}`,
-						);
-					}
+					const templateBounds = await templateControl.boundingBox();
+					assertAtLeast(
+						templateBounds?.width ?? 0,
+						44,
+						`ordinary STK template width ${viewport.label}`,
+					);
+					assertAtLeast(
+						templateBounds?.height ?? 0,
+						44,
+						`ordinary STK template height ${viewport.label}`,
+					);
 					const stkTemplateChoice = {
 						"390x844": { template: "FOUR_PORT", activation: "pointer" },
 						"520x844": { template: "SIX_PORT", activation: "enter" },
@@ -14249,23 +14242,18 @@ async function exerciseGuidedPortHandoffRegression(
 						throw new Error(`Ordinary STK template choice is missing at ${viewport.label}.`);
 					}
 					const templateChoiceBaseline = await readMetrics(page);
-					const templateChoice = page.getByTestId(`stk-template-${stkTemplateChoice.template}`);
-					if (stkTemplateChoice.activation === "pointer") {
-						await templateChoice.click();
-					} else {
-						await templateChoice.focus();
-						await templateChoice.press(
-							stkTemplateChoice.activation === "space" ? "Space" : "Enter",
-						);
-					}
+					await chooseStkTemplate(
+						page,
+						stkTemplateChoice.template,
+						stkTemplateChoice.activation === "pointer" ? "select" : "keyboard",
+					);
 					await page.waitForFunction(
 						(expectedTemplate) => {
 							const canvas = document.querySelector('[data-testid="rail-canvas"]');
 							return (
 								document.activeElement === canvas &&
-								document
-									.querySelector(`[data-testid="stk-template-${expectedTemplate}"]`)
-									?.getAttribute("aria-pressed") === "true" &&
+								document.querySelector('[data-testid="stk-template-select"]')?.value ===
+									expectedTemplate &&
 								document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "0"
 							);
 						},
@@ -14286,20 +14274,18 @@ async function exerciseGuidedPortHandoffRegression(
 						fullPage: true,
 					});
 					if (stkTemplateChoice.template !== "FLEX") {
-						await page.getByTestId("stk-template-FLEX").click();
+						await chooseStkTemplate(page, "FLEX");
 						await page.waitForFunction(
 							() =>
 								document.activeElement?.getAttribute("data-testid") === "rail-canvas" &&
-								document
-									.querySelector('[data-testid="stk-template-FLEX"]')
-									?.getAttribute("aria-pressed") === "true",
+								document.querySelector('[data-testid="stk-template-select"]')?.value === "FLEX",
 							undefined,
 							{ timeout: 10_000 },
 						);
 					}
 					await assertLocatorInsideViewport(
 						page,
-						responsiveBuildbar.locator('.tilefab-stk-templates button[data-active="true"]'),
+						responsiveBuildbar.getByTestId("stk-template-select"),
 					);
 					await assertLocatorInsideViewport(page, page.getByTestId("stk-complete"));
 					const stkCompleteBounds = await page.getByTestId("stk-complete").boundingBox();
@@ -14729,12 +14715,10 @@ async function exerciseGuidedPortHandoffRegression(
 				`ordinary ${portType} entry clears stale equipment inspection`,
 			);
 			if (portType === "STK") {
-				await page.getByTestId("stk-template-FLEX").click();
+				await chooseStkTemplate(page, "FLEX");
 				await page.waitForFunction(
 					() =>
-						document
-							.querySelector('[data-testid="stk-template-FLEX"]')
-							?.getAttribute("aria-pressed") === "true" &&
+						document.querySelector('[data-testid="stk-template-select"]')?.value === "FLEX" &&
 						document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "0" &&
 						document.activeElement?.getAttribute("data-testid") === "rail-canvas",
 					undefined,
@@ -14896,7 +14880,7 @@ async function exerciseGuidedPortHandoffRegression(
 					"선택됨 · ENTER 해제",
 					"ordinary STK Canvas marker names the current Enter toggle",
 				);
-				await page.getByTestId("stk-template-FOUR_PORT").click();
+				await chooseStkTemplate(page, "FOUR_PORT");
 				await page.waitForFunction(
 					() => {
 						const app = document.querySelector(".tilefab-app");
@@ -14920,7 +14904,7 @@ async function exerciseGuidedPortHandoffRegression(
 					keyboardExitBaseline,
 					"ordinary STK template reset",
 				);
-				await page.getByTestId("stk-template-FLEX").click();
+				await chooseStkTemplate(page, "FLEX");
 				await canvas.focus();
 				await canvas.press("Enter");
 				await page.waitForFunction(
@@ -16065,7 +16049,7 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 	recordPhase4Checkpoint("large-fab-eq-membership", eqMembershipRedone);
 
 	await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
-	await page.getByTestId("stk-template-FLEX").click();
+	await chooseStkTemplate(page, "FLEX");
 	await waitForLegalPortSlots(page);
 	const stkWorlds = [];
 	stkWorlds.push(await clickAvailableStkCandidate(page, stkCandidates, 1, stkWorlds));
@@ -20512,7 +20496,7 @@ async function exercisePortEquipmentMembershipAuthoring(page) {
 	await page.waitForTimeout(100);
 
 	await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
-	await page.getByTestId("stk-template-FLEX").click();
+	await chooseStkTemplate(page, "FLEX");
 	await waitForLegalPortSlots(page);
 	const selectedStkSlots = [];
 	for (const candidate of await legalPortSlotWorlds(page, "STK")) {
@@ -34277,6 +34261,200 @@ async function exerciseResilientFabCopyRejectionFeedback(page, savedPath, fabOrg
 	await page.getByTestId("ordinary-resilient-fab-checks-handoff").waitFor({ state: "visible" });
 }
 
+async function exerciseStkSelectionReview(page, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	const baseline = await readMetrics(page);
+	const selected = await canvas.getAttribute("data-stk-draft-selected-rows");
+	const currentRow = await canvas.getAttribute("data-guided-port-keyboard-row");
+	const currentIndex = selected.split(",").indexOf(currentRow);
+	assertAtLeast(currentIndex, 0, `${label} current target belongs to the selection`);
+	const menu = page.getByTestId("stk-template-select");
+	let lastReview;
+	await menu.focus();
+	await menu.press("Escape");
+	assertEqual(
+		await menu.evaluate((e) => e === document.activeElement),
+		true,
+		`${label} menu Escape retains focus`,
+	);
+	assertEqual(
+		await canvas.getAttribute("data-stk-draft-selected-rows"),
+		selected,
+		`${label} menu Escape retains draft`,
+	);
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 886, height: 640 },
+		{ width: 1440, height: 900 },
+	]) {
+		await page.setViewportSize(viewport);
+		if (viewport.width === 390) await page.getByTestId("stk-fit-selection").click();
+		await page.waitForFunction(
+			() =>
+				document.querySelector('[data-testid="ordinary-port-keyboard-target"]')?.dataset
+					.selectionReview === "true",
+		);
+		const review = await page.evaluate(async () => {
+			const read = () => {
+				const api = window.__tileFab;
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				const rect = canvas.getBoundingClientRect();
+				const slots = api.getEditorModel().portSlotArtifacts.STK.slots;
+				const points = canvas.dataset.stkDraftSelectedRows
+					.split(",")
+					.map(Number)
+					.map((row) => {
+						const point = api.renderer.worldToScreen(
+							{ x: slots.worldPositions[row * 2], y: slots.worldPositions[row * 2 + 1] },
+							api.camera,
+						);
+						return {
+							left: rect.left + point.x - 16,
+							right: rect.left + point.x + 16,
+							top: rect.top + point.y - 16,
+							bottom: rect.top + point.y + 16,
+						};
+					});
+				const caption = document
+					.querySelector('[data-testid="ordinary-port-keyboard-target"] > span')
+					.getBoundingClientRect()
+					.toJSON();
+				const controls = [
+					...document.querySelectorAll(
+						".tilefab-camera-controls, .tilefab-tools, .tilefab-buildbar",
+					),
+				]
+					.filter((e) => e.getClientRects().length && e.offsetParent !== null)
+					.map((e) => e.getBoundingClientRect().toJSON());
+				return {
+					points,
+					caption,
+					controls,
+					canvas: rect.toJSON(),
+					zoom: api.camera.zoom,
+					renderedZoom: Number(canvas.dataset.cameraZoom),
+				};
+			};
+			let previous = "",
+				stable = 0,
+				snapshot;
+			const deadline = performance.now() + 10000;
+			do {
+				await new Promise(requestAnimationFrame);
+				snapshot = read();
+				const key = JSON.stringify(snapshot);
+				stable =
+					key === previous && Math.abs(snapshot.zoom - snapshot.renderedZoom) < 0.001
+						? stable + 1
+						: 0;
+				previous = key;
+			} while (stable < 3 && performance.now() < deadline);
+			return { ...snapshot, stable };
+		});
+		lastReview = review;
+		assertAtLeast(review.stable, 3, `${label} review settles`);
+		for (const marker of [...review.points, review.caption]) {
+			assertEqual(
+				marker.left >= review.canvas.left &&
+					marker.right <= review.canvas.right &&
+					marker.top >= review.canvas.top &&
+					marker.bottom <= review.canvas.bottom,
+				true,
+				`${label} complete review inside Canvas`,
+			);
+			for (const control of review.controls)
+				assertEqual(
+					marker.left < control.right &&
+						marker.right > control.left &&
+						marker.top < control.bottom &&
+						marker.bottom > control.top,
+					false,
+					`${label} review clears controls`,
+				);
+		}
+		assertEqual(
+			await canvas.getAttribute("data-stk-draft-selected-rows"),
+			selected,
+			`${label} review preserves rows`,
+		);
+		const after = await readMetrics(page);
+		assertProjectUnchanged(after, baseline, `${label} camera-only review`);
+		assertExactStaticFabModelIdentity(after, baseline, `${label} camera-only identity`);
+		assertEqual(
+			await page.getByTestId("ordinary-stk-zoom-in").isVisible(),
+			true,
+			`${label} current target remains available`,
+		);
+		await page.screenshot({
+			path: path.join(
+				artifactRoot,
+				`stk-selection-review-${label}-${viewport.width}x${viewport.height}.png`,
+			),
+		});
+	}
+	const point = lastReview.points[currentIndex];
+	const x = (point.left + point.right) / 2,
+		y = (point.top + point.bottom) / 2;
+	await page.mouse.move(x, y);
+	await page.mouse.wheel(0, -120);
+	await page.waitForFunction(
+		(zoom) =>
+			Number(document.querySelector('[data-testid="rail-canvas"]').dataset.cameraZoom) > zoom,
+		lastReview.zoom,
+	);
+	assertEqual(
+		await page.getByTestId("ordinary-port-keyboard-target").getAttribute("data-selection-review"),
+		"false",
+		`${label} wheel exits automatic fit`,
+	);
+	const panBefore = await canvas.getAttribute("data-camera-offset-x");
+	await page.mouse.down({ button: "middle" });
+	await page.mouse.move(x + 24, y + 12, { steps: 4 });
+	await page.mouse.up({ button: "middle" });
+	await page.waitForFunction(
+		(before) =>
+			document.querySelector('[data-testid="rail-canvas"]').dataset.cameraOffsetX !== before,
+		panBefore,
+	);
+	assertEqual(
+		await canvas.getAttribute("data-stk-draft-selected-rows"),
+		selected,
+		`${label} manual navigation preserves draft`,
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		baseline,
+		`${label} manual navigation preserves source`,
+	);
+	await page.getByTestId("stk-fit-selection").click();
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="ordinary-port-keyboard-target"]')?.dataset
+				.selectionReview === "true",
+	);
+	await page.getByTestId("ordinary-stk-zoom-in").click();
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="ordinary-port-keyboard-target"]')?.dataset
+				.selectionReview === "false",
+	);
+	assertAtLeast(
+		Number(await canvas.getAttribute("data-camera-zoom")),
+		38,
+		`${label} current target returns to detail`,
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		baseline,
+		`${label} detail zoom preserves source`,
+	);
+	assertEqual(
+		await canvas.getAttribute("data-guided-port-keyboard-row"),
+		currentRow,
+		`${label} review preserves the current target`,
+	);
+}
+
 async function exerciseOrdinaryStrictStkSafeFrame(page) {
 	const canvas = page.getByTestId("rail-canvas");
 	for (const specification of [
@@ -34318,14 +34496,11 @@ async function exerciseOrdinaryStrictStkSafeFrame(page) {
 			undefined,
 			{ timeout: 10_000 },
 		);
-		const template = page.getByTestId(`stk-template-${specification.template}`);
-		await template.click();
+		await chooseStkTemplate(page, specification.template);
 		await page.waitForFunction(
 			(expectedTemplate) =>
 				document.activeElement?.getAttribute("data-testid") === "rail-canvas" &&
-				document
-					.querySelector(`[data-testid="stk-template-${expectedTemplate}"]`)
-					?.getAttribute("aria-pressed") === "true" &&
+				document.querySelector('[data-testid="stk-template-select"]')?.value === expectedTemplate &&
 				document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "0",
 			specification.template,
 			{ timeout: 10_000 },
@@ -34414,6 +34589,7 @@ async function exerciseOrdinaryStrictStkSafeFrame(page) {
 		await selectOrdinaryStrictStkRows(page, selectionRows, baseline, specification.label);
 		await resetAndRebuildOrdinaryStrictStk(page, candidatePlan, baseline, specification);
 		await auditOrdinaryStrictStkSafeFrames(page, candidatePlan.rows, specification);
+		await exerciseStkSelectionReview(page, specification.template);
 
 		await page.setViewportSize(
 			specification.template === "SIX_PORT"
@@ -35146,9 +35322,7 @@ async function resetAndRebuildOrdinaryStrictStk(page, candidatePlan, baseline, s
 				app.getAttribute("data-stk-draft-can-complete") === "false" &&
 				canvas?.getAttribute("data-stk-draft-selected-rows") === "" &&
 				marker?.textContent?.includes("첫 Port") === true &&
-				document
-					.querySelector(`[data-testid="stk-template-${expectedTemplate}"]`)
-					?.getAttribute("aria-pressed") === "true" &&
+				document.querySelector('[data-testid="stk-template-select"]')?.value === expectedTemplate &&
 				document.querySelector('[data-testid="stk-complete"]')?.hasAttribute("disabled") === true &&
 				document.activeElement === canvas
 			);
@@ -35276,8 +35450,8 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 			assertIncludes(instruction, copy, `${specification.label} copy ${viewport.label}`);
 		}
 		assertEqual(
-			await page.getByTestId(`stk-template-${specification.template}`).getAttribute("aria-pressed"),
-			"true",
+			await page.getByTestId("stk-template-select").inputValue(),
+			specification.template,
 			`${specification.label} active template ${viewport.label}`,
 		);
 		assertEqual(
@@ -35292,10 +35466,7 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 		await assertOrdinaryStrictStkSafeFrame(page, candidates, specification.label, viewport.label);
 		const controlIds = [
 			"ordinary-port-authoring-exit",
-			"stk-template-FLEX",
-			"stk-template-FOUR_PORT",
-			"stk-template-SIX_PORT",
-			"stk-template-BACK_TO_BACK",
+			"stk-template-select",
 			"stk-remove-last",
 			"stk-cancel",
 			"stk-complete",
@@ -35337,8 +35508,8 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 				scrollTop: element.scrollTop,
 				visualOrder,
 				b2bClipAndActionSeparation: (() => {
-					const templateGroup = element.querySelector(".tilefab-stk-templates");
-					const b2b = element.querySelector('[data-testid="stk-template-BACK_TO_BACK"]');
+					const templateGroup = element.querySelector(".tilefab-stk-template-choice");
+					const b2b = element.querySelector('[data-testid="stk-template-select"]');
 					const actions = element.querySelector(".tilefab-stk-actions");
 					if (!(templateGroup && b2b && actions)) return null;
 					const templateRect = templateGroup.getBoundingClientRect();
@@ -36327,13 +36498,13 @@ async function exerciseEqToStkRecommendedEntry(
 		`ordinary EQ to STK cancellation context ${viewportLabel}`,
 	);
 	const templates = page.locator(
-		'.tilefab-port-buildbar[data-port-type="STK"] .tilefab-stk-templates button',
+		'.tilefab-port-buildbar[data-port-type="STK"] select[data-testid="stk-template-select"]',
 	);
 	assertAtLeast(await templates.count(), 1, `ordinary EQ to STK template choices ${viewportLabel}`);
 	assertEqual(
 		await page
 			.locator(
-				'.tilefab-port-buildbar[data-port-type="STK"] .tilefab-stk-templates button[data-active="true"]',
+				'.tilefab-port-buildbar[data-port-type="STK"] select[data-testid="stk-template-select"]',
 			)
 			.count(),
 		1,
@@ -36364,13 +36535,10 @@ async function exerciseEqToStkRecommendedEntry(
 	if (pointerJourney) {
 		const stkBuildbar = page.locator('.tilefab-port-buildbar[data-port-type="STK"]');
 		const stkInstruction = stkBuildbar.locator(".tilefab-port-authoring-instruction");
-		const fourPortTemplate = page.getByTestId("stk-template-FOUR_PORT");
-		await fourPortTemplate.click();
+		await chooseStkTemplate(page, "FOUR_PORT");
 		await page.waitForFunction(
 			() =>
-				document
-					.querySelector('[data-testid="stk-template-FOUR_PORT"]')
-					?.getAttribute("aria-pressed") === "true" &&
+				document.querySelector('[data-testid="stk-template-select"]')?.value === "FOUR_PORT" &&
 				document.activeElement?.getAttribute("data-testid") === "rail-canvas",
 			undefined,
 			{ timeout: 10_000 },
@@ -36416,9 +36584,7 @@ async function exerciseEqToStkRecommendedEntry(
 					app?.getAttribute("data-editor-activity") === "equip" &&
 					app.getAttribute("data-editor-tool") === "stk" &&
 					app.getAttribute("data-port-keyboard-scope") === "ordinary" &&
-					document
-						.querySelector('[data-testid="stk-template-FOUR_PORT"]')
-						?.getAttribute("aria-pressed") === "true" &&
+					document.querySelector('[data-testid="stk-template-select"]')?.value === "FOUR_PORT" &&
 					document.activeElement === canvas
 				);
 			},
@@ -36474,13 +36640,10 @@ async function exerciseEqToStkRecommendedEntry(
 				`ordinary EQ to STK initial pointer contract ${phrase} ${viewportLabel}`,
 			);
 		}
-		const flexTemplate = page.getByTestId("stk-template-FLEX");
-		await flexTemplate.click();
+		await chooseStkTemplate(page, "FLEX");
 		await page.waitForFunction(
 			() =>
-				document
-					.querySelector('[data-testid="stk-template-FLEX"]')
-					?.getAttribute("aria-pressed") === "true" &&
+				document.querySelector('[data-testid="stk-template-select"]')?.value === "FLEX" &&
 				document.activeElement?.getAttribute("data-testid") === "rail-canvas",
 			undefined,
 			{ timeout: 10_000 },
@@ -46092,4 +46255,42 @@ async function resolveChromePath() {
 		}
 	}
 	throw new Error("Chrome was not found. Set OPENFAB_CHROME_BIN to its executable path.");
+}
+
+async function chooseStkTemplate(page, value, activation = "select") {
+	const control = page.getByTestId("stk-template-select");
+	await control.focus();
+	// macOS headless Chrome does not operate its native popup with arrow keys (also on a plain select).
+	// Linux CI exercises native arrow selection; macOS uses Playwright's native select API.
+	if (activation === "keyboard" && process.platform !== "darwin") {
+		const index = ["FLEX", "FOUR_PORT", "SIX_PORT", "BACK_TO_BACK"].indexOf(value);
+		if (index < 0) throw new Error(`Unknown Stocker template: ${value}`);
+		await control.press("Home");
+		for (let step = 0; step < index; step++) await control.press("ArrowDown");
+	} else {
+		await control.selectOption(value);
+	}
+	assertEqual(await control.inputValue(), value, "Stocker native configuration value");
+	assertEqual(
+		await control.evaluate((element) => document.activeElement === element),
+		true,
+		"Stocker native configuration retains keyboard focus",
+	);
+	// Native select retains focus while React publishes the configuration. Wait for the actual
+	// Canvas target frame before returning input there; the former button did this on rAF.
+	await page.waitForFunction(
+		() => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			if (canvas?.dataset.portKeyboardScope !== "ordinary") return true;
+			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+			return (
+				canvas.dataset.guidedPortKeyboardType === "STK" &&
+				canvas.dataset.guidedPortKeyboardRow !== "" &&
+				marker?.dataset.portSlotRow === canvas.dataset.guidedPortKeyboardRow
+			);
+		},
+		undefined,
+		{ timeout: 10000 },
+	);
+	await page.getByTestId("rail-canvas").focus();
 }

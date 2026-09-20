@@ -1093,7 +1093,8 @@ import {
 	stkDraftReviewPresentation,
 	stkTemplatePresentation,
 } from "./StkDraftPresentation";
-import { stkDraftFrameTranslation } from "./StkDraftFraming";
+import { stableDomStringMap } from "./StableDomStringMap";
+import { stkDraftFrameTranslation, stkDraftSelectionFit } from "./StkDraftFraming";
 import {
 	type SyntheticFabProjectActivationExpectation,
 	syntheticFabProjectActivationMismatches,
@@ -2090,8 +2091,9 @@ interface EditorSurfaceRestorationOptions {
 	readonly compactInspectorExpanded: boolean;
 	readonly contextualInspectorVisible: boolean;
 	readonly editorToolDescriptionsExpanded: boolean;
-	readonly fittedMapCameraRef: MutableValueRef<boolean>;
+	readonly cameraFitScopeRef: MutableValueRef<"map" | "stk-selection" | null>;
 	readonly fitMapRef: MutableValueRef<() => void>;
+	readonly fitStkSelectionRef: MutableValueRef<() => boolean>;
 	readonly canvasRef: MutableValueRef<HTMLCanvasElement | null>;
 	readonly guidedPortKeyboardSessionRef: MutableValueRef<GuidedPortKeyboardSession | null>;
 	readonly cameraRef: MutableValueRef<Camera>;
@@ -2116,8 +2118,9 @@ function useEditorSurfaceRestoration({
 	compactInspectorExpanded,
 	contextualInspectorVisible,
 	editorToolDescriptionsExpanded,
-	fittedMapCameraRef,
+	cameraFitScopeRef,
 	fitMapRef,
+	fitStkSelectionRef,
 	canvasRef,
 	guidedPortKeyboardSessionRef,
 	cameraRef,
@@ -2154,10 +2157,11 @@ function useEditorSurfaceRestoration({
 							contextualInspector.dataset.compactObstruction ===
 								expectedInspectorObstruction))
 				) {
-					if (fittedMapCameraRef.current) {
+					if (cameraFitScopeRef.current === "map") {
 						fitMapRef.current();
 						return;
 					}
+					if (cameraFitScopeRef.current === "stk-selection" && fitStkSelectionRef.current()) return;
 					const canvas = canvasRef.current;
 					const session = guidedPortKeyboardSessionRef.current;
 					if (
@@ -2191,8 +2195,9 @@ function useEditorSurfaceRestoration({
 		compactInspectorExpanded,
 		contextualInspectorVisible,
 		editorToolDescriptionsExpanded,
-		fittedMapCameraRef,
+		cameraFitScopeRef,
 		fitMapRef,
+		fitStkSelectionRef,
 		canvasRef,
 		guidedPortKeyboardSessionRef,
 		cameraRef,
@@ -2340,8 +2345,9 @@ export default function TileFabApp(): React.ReactElement {
 	const closureSnapRef = useRef<Cell | null>(null);
 	const closureSnapRadiusPixelsRef = useRef(0);
 	const panRef = useRef<PanState | null>(null);
-	const fittedMapCameraRef = useRef(false);
+	const cameraFitScopeRef = useRef<"map" | "stk-selection" | null>(null);
 	const fitMapRef = useRef<() => void>(() => undefined);
+	const fitStkSelectionRef = useRef<() => boolean>(() => false);
 	const inspectAreaDragRef = useRef<InspectAreaDragState | null>(null);
 	const inspectAreaKeyboardSessionRef = useRef<InspectAreaKeyboardSession | null>(null);
 	const inspectAreaKeyboardReadoutRef = useRef<HTMLParagraphElement | null>(null);
@@ -4326,6 +4332,13 @@ export default function TileFabApp(): React.ReactElement {
 				) {
 					return;
 				}
+				// A resize can briefly remove/recreate the placement target. Keep a supporting
+				// placement control focused instead of treating that return as a new step.
+				if (
+					guidedBuildOrganizationPlacementOwnsNextStep &&
+					document.activeElement instanceof HTMLElement &&
+					document.activeElement.closest(".tilefab-buildbar") !== null
+				) return;
 				if (guidedBuildExclusiveReviewTargetId === guidedBuildDirectTargetId) {
 					const active = document.activeElement;
 					if (
@@ -6113,7 +6126,7 @@ export default function TileFabApp(): React.ReactElement {
 	): void => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
-		fittedMapCameraRef.current = false;
+		cameraFitScopeRef.current = null;
 		fitCameraToBounds(bounds, canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas));
 		canvas.dataset.fittedSelectionBounds = [
 			bounds.minX,
@@ -6321,6 +6334,7 @@ export default function TileFabApp(): React.ReactElement {
 		next: PortEquipmentMembershipEditSession | null,
 		publication: "sync" | "coalesced" = "sync",
 	): void => {
+		if (cameraFitScopeRef.current === "stk-selection" && next?.selection !== portEquipmentMembershipEditSessionRef.current?.selection) cameraFitScopeRef.current = null;
 		if (next === null) eqMembershipFrameDeferredRef.current = false;
 		portEquipmentMembershipEditSessionRef.current = next;
 		if (publication === "coalesced") {
@@ -6340,6 +6354,7 @@ export default function TileFabApp(): React.ReactElement {
 		setPortEquipmentMembershipEditSessionState(next);
 	};
 	const updateStkDraftSession = (next: StkDraftSession | null): void => {
+		if (cameraFitScopeRef.current === "stk-selection" && next?.selection !== stkDraftSessionRef.current?.selection) cameraFitScopeRef.current = null;
 		stkDraftSessionRef.current = next;
 		setStkDraftSelection(next?.selection ?? null);
 		rendererRef.current.invalidateStatic();
@@ -9160,7 +9175,7 @@ export default function TileFabApp(): React.ReactElement {
 		refreshPendingEqConfiguration();
 	};
 
-	const setStkTemplate = (next: StkAuthoringTemplate): void => {
+	const setStkTemplate = (next: StkAuthoringTemplate, restoreCanvasFocus = true): void => {
 		if (!STK_AUTHORING_TEMPLATES.includes(next)) return;
 		const keyboardSession = guidedPortKeyboardSessionRef.current;
 		updateStkDraftSession(null);
@@ -9172,7 +9187,7 @@ export default function TileFabApp(): React.ReactElement {
 			presentGuidedPortKeyboardSession(keyboardSession);
 		}
 		scheduleRender();
-		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+		if (restoreCanvasFocus) restoreCanvasFocusAfterAction();
 	};
 
 	const refreshBuildPreview = (): void => {
@@ -10479,6 +10494,7 @@ export default function TileFabApp(): React.ReactElement {
 				`키보드 ${portType} · 방향키 또는 WASD로 슬롯 이동 · Enter로 선택 · Esc로 종료`,
 		);
 		if (statusMessage) publishGuidedPortKeyboardAnnouncement(statusMessage);
+		const focusOwner = document.activeElement;
 		requestAnimationFrame(() => {
 			if (guidedPortKeyboardSessionRef.current !== session) return;
 			const currentCanvas = canvasRef.current;
@@ -10496,7 +10512,7 @@ export default function TileFabApp(): React.ReactElement {
 					rendererRef.current.invalidateStatic();
 					scheduleRender();
 				}
-				currentCanvas.focus({ preventScroll: true });
+				if (document.activeElement === focusOwner || document.activeElement === document.body) currentCanvas.focus({ preventScroll: true });
 			}
 		});
 		scheduleRender();
@@ -10602,6 +10618,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		const next = moveGuidedPortKeyboardCursor(session, search.row);
+		if (cameraFitScopeRef.current === "stk-selection") cameraFitScopeRef.current = null;
 		if (next.scope === "ordinary") {
 			const canvas = canvasRef.current;
 			if (
@@ -10808,7 +10825,7 @@ export default function TileFabApp(): React.ReactElement {
 					});
 				}
 			}
-			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+			restoreCanvasFocusAfterAction();
 			return;
 		}
 		if (placementIntent) {
@@ -12369,8 +12386,8 @@ export default function TileFabApp(): React.ReactElement {
 							? "ports"
 							: "rail",
 				portEquipmentPresentation: portEquipmentPresentationRef.current,
-				hoverPortId: activeArrangementPreview ? null : hoverPortIdRef.current,
-				selectedPortId: activeArrangementPreview
+				hoverPortId: activeArrangementPreview || portEquipmentMembershipEditSessionRef.current ? null : hoverPortIdRef.current,
+				selectedPortId: activeArrangementPreview || portEquipmentMembershipEditSessionRef.current
 					? null
 					: (selectedPortEquipmentRef.current?.portId ?? null),
 				selectedEquipmentGroupIds: activeArrangementPreview
@@ -12378,7 +12395,7 @@ export default function TileFabApp(): React.ReactElement {
 					: portEquipmentGroupEditSessionRef.current
 						? [portEquipmentGroupEditSessionRef.current.sourceEquipmentGroupId]
 						: portEquipmentMembershipEditSessionRef.current
-							? [portEquipmentMembershipEditSessionRef.current.sourceEquipmentGroupId]
+							? undefined
 							: staticFabSelectionRef.current
 								? staticFabSelectionEquipmentGroupIds(staticFabSelectionRef.current)
 								: undefined,
@@ -12507,7 +12524,7 @@ export default function TileFabApp(): React.ReactElement {
 				portTargetZoomButtonRef.current.hidden =
 					ordinaryPortKeyboardSession?.scope !== "ordinary" ||
 					!guidedPortKeyboardSessionCurrent(ordinaryPortKeyboardSession) ||
-					cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM;
+					(cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM && cameraFitScopeRef.current !== "stk-selection");
 			}
 			canvas.dataset.stkAcquisitionZoom = ordinaryStkAcquisitionNeedsZoom
 				? "overview"
@@ -12527,8 +12544,10 @@ export default function TileFabApp(): React.ReactElement {
 				ordinaryPortKeyboardMarker.dataset.portSlotRow = String(row);
 				ordinaryPortKeyboardMarker.dataset.portType = ordinaryPortKeyboardSession.portType;
 				ordinaryPortKeyboardMarker.dataset.phase = ordinaryPortKeyboardSession.phase;
+				ordinaryPortKeyboardMarker.dataset.selectionReview = String(ordinaryPortKeyboardSession.portType === "STK" && cameraFitScopeRef.current === "stk-selection");
+				ordinaryPortKeyboardMarker.style.setProperty("--tilefab-port-review-size", `${Math.max(8, Math.min(24, cameraRef.current.zoom * 0.8))}px`);
 				ordinaryPortKeyboardMarker.dataset.labelEdge =
-					screen.x < markerFrame.left + 72
+					cameraFitScopeRef.current === "stk-selection" ? "center" : screen.x < markerFrame.left + 72
 						? "left"
 						: screen.x > markerFrame.left + markerFrame.width - 72
 							? "right"
@@ -12539,6 +12558,7 @@ export default function TileFabApp(): React.ReactElement {
 				delete ordinaryPortKeyboardMarker.dataset.portSlotRow;
 				delete ordinaryPortKeyboardMarker.dataset.portType;
 				delete ordinaryPortKeyboardMarker.dataset.phase;
+				delete ordinaryPortKeyboardMarker.dataset.selectionReview;
 				delete ordinaryPortKeyboardMarker.dataset.labelEdge;
 			}
 			const ordinaryEqAnchorMarker = ordinaryEqAnchorMarkerRef.current;
@@ -13449,6 +13469,8 @@ export default function TileFabApp(): React.ReactElement {
 					}
 				}
 			}
+			// A native configuration menu owns Escape; closing it must retain the Port draft.
+			if (event.code === "Escape" && target?.matches("select")) return;
 			if (event.code === "Escape") {
 				event.preventDefault();
 				keyboardActionsRef.current.cancel();
@@ -14014,7 +14036,7 @@ export default function TileFabApp(): React.ReactElement {
 			if (commandMatches("camera.pan-right", "canvas")) deltaX = -PAN_STEP;
 			if (deltaX !== 0 || deltaY !== 0) {
 				event.preventDefault();
-				fittedMapCameraRef.current = false;
+				cameraFitScopeRef.current = null;
 				cameraRef.current.offsetX += deltaX;
 				cameraRef.current.offsetY += deltaY;
 				rendererRef.current.invalidateStatic();
@@ -15780,6 +15802,7 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
+		if (cameraFitScopeRef.current === "stk-selection") cameraFitScopeRef.current = null;
 		hoverPortSlotRef.current = nextRow;
 		if (session.portType === "EQ") {
 			updateEqMembershipTarget(session, nextRow);
@@ -17391,7 +17414,7 @@ export default function TileFabApp(): React.ReactElement {
 			pan.totalY += deltaY;
 			if (Math.hypot(pan.totalX, pan.totalY) >= 3) pan.moved = true;
 			if (pan.moved) {
-				fittedMapCameraRef.current = false;
+				cameraFitScopeRef.current = null;
 				cameraRef.current.offsetX += deltaX;
 				cameraRef.current.offsetY += deltaY;
 				rendererRef.current.invalidateStatic();
@@ -18390,7 +18413,7 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			return false;
 		}
-		fittedMapCameraRef.current = false;
+		cameraFitScopeRef.current = null;
 		rendererRef.current.invalidateStatic();
 		scheduleRender();
 		return true;
@@ -18421,12 +18444,66 @@ export default function TileFabApp(): React.ReactElement {
 			rendererRef.current,
 			fitMapInsets(canvas),
 		);
-		fittedMapCameraRef.current = false;
+		cameraFitScopeRef.current = null;
 		cameraReadyRef.current = true;
 		rendererRef.current.invalidateStatic();
 		setStatus(`현재 ${session.portType} Port를 ${Math.round(cameraRef.current.zoom)} px/m로 확대했습니다 · 현재 표식에서 선택하세요`);
 		scheduleRender();
-		requestAnimationFrame(() => canvas.focus({ preventScroll: true }));
+		restoreCanvasFocusAfterAction();
+	};
+
+	const fitStkSelection = (): boolean => {
+		const canvas = canvasRef.current;
+		const membership = portEquipmentMembershipEditSessionRef.current;
+		const draft = stkDraftSessionRef.current;
+		const session = guidedPortKeyboardSessionRef.current;
+		const source = membership
+			? membership.portType === "STK" && isCurrentPortEquipmentMembershipEdit(membership)
+				? { slots: membership.slots, rows: membership.selection.rows, currentRow: membership.keyboardRow }
+				: null
+			: draft && isCurrentStkDraft(draft)
+				? { slots: draft.slots, rows: draft.selection.rows, currentRow: session?.binding.slots === draft.slots ? session.currentRow : -1 }
+				: null;
+		if (!canvas || !source || source.rows.length === 0) {
+			if (cameraFitScopeRef.current === "stk-selection") cameraFitScopeRef.current = null;
+			return false;
+		}
+		const unitCamera: Camera = { offsetX: 0, offsetY: 0, zoom: 1, rotation: cameraRef.current.rotation };
+		const points = source.rows.map((row) => rendererRef.current.worldToScreen({
+			x: source.slots.worldPositions[row * 2] as number,
+			y: source.slots.worldPositions[row * 2 + 1] as number,
+		}, unitCamera));
+		const controls = canvas.closest(".tilefab-workspace")?.querySelector<HTMLElement>(".tilefab-camera-controls");
+		const canvasRect = canvas.getBoundingClientRect();
+		const controlRect = controls?.offsetParent !== null ? controls?.getBoundingClientRect() : null;
+		const fitted = stkDraftSelectionFit(points, source.rows.indexOf(source.currentRow), visibleCanvasFrame(canvas, fitMapInsets(canvas, false)), {
+			minimum: MIN_ZOOM, maximum: INITIAL_ZOOM,
+		}, controlRect ? {
+			left: controlRect.left - canvasRect.left - 12,
+			top: controlRect.top - canvasRect.top - 12,
+			width: controlRect.width + 24,
+			height: controlRect.height + 24,
+		} : undefined);
+		if (!fitted) {
+			if (cameraFitScopeRef.current === "stk-selection") cameraFitScopeRef.current = null;
+			return false;
+		}
+		Object.assign(cameraRef.current, fitted);
+		cameraReadyRef.current = true;
+		canvas.dataset.fittedStkSelectionRows = source.rows.join(",");
+		rendererRef.current.invalidateStatic();
+		scheduleRender();
+		return true;
+	};
+	fitStkSelectionRef.current = fitStkSelection;
+	const showStkSelection = (): void => {
+		if (!fitStkSelection()) {
+			setStatus("선택한 포트를 표시할 수 없습니다 · 선택을 확인하고 화면을 넓힌 뒤 다시 시도하세요");
+			return;
+		}
+		cameraFitScopeRef.current = "stk-selection";
+		setStatus("선택한 Stocker 포트 전체를 표시합니다 · 휠로 확대하거나 화면을 이동할 수 있습니다");
+		restoreCanvasFocusAfterAction();
 	};
 
 	const handleWheel = (event: WheelEvent): void => {
@@ -18503,13 +18580,13 @@ export default function TileFabApp(): React.ReactElement {
 							baseInsets,
 						)
 					: false;
-			fittedMapCameraRef.current = true;
+			cameraFitScopeRef.current = "map";
 			canvas.dataset.fittedMapBounds = [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].join(
 				",",
 			);
 			canvas.dataset.fitPortTargetReframed = String(portTargetReframed);
 		} else {
-			fittedMapCameraRef.current = false;
+			cameraFitScopeRef.current = null;
 			delete canvas.dataset.fittedMapBounds;
 			delete canvas.dataset.fitPortTargetReframed;
 		}
@@ -19662,7 +19739,7 @@ export default function TileFabApp(): React.ReactElement {
 	const focusCell = (cell: Cell): void => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
-		fittedMapCameraRef.current = false;
+		cameraFitScopeRef.current = null;
 		const camera = cameraRef.current;
 		camera.zoom = Math.min(MAX_ZOOM, Math.max(camera.zoom, INITIAL_ZOOM));
 		centerCameraOnWorldPoint(
@@ -19679,7 +19756,7 @@ export default function TileFabApp(): React.ReactElement {
 	const focusCorridor = (cells: readonly Cell[]): void => {
 		const canvas = canvasRef.current;
 		if (!canvas || cells.length === 0) return;
-		fittedMapCameraRef.current = false;
+		cameraFitScopeRef.current = null;
 		const camera = cameraRef.current;
 		let minX = cells[0]?.x ?? 0;
 		let maxX = minX;
@@ -28553,7 +28630,7 @@ export default function TileFabApp(): React.ReactElement {
 	const centerNavigatorWorld = useCallback((x: number, y: number): void => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
-		fittedMapCameraRef.current = false;
+		cameraFitScopeRef.current = null;
 		centerCameraOnWorldPoint(
 			x,
 			y,
@@ -29267,10 +29344,10 @@ export default function TileFabApp(): React.ReactElement {
 		setProjectMenuOpen(false);
 		setOpenFabStartDialogOpen(true);
 	};
-	const restoreCanvasFocusAfterGuidedDismissal = (): void => {
+	const restoreCanvasFocusAfterAction = (): void => {
 		const previousFocus = document.activeElement;
 		requestAnimationFrame(() => {
-			// Dismissal must not overwrite a control the user focused before this frame.
+			// A completed action must not overwrite a control the user focused before this frame.
 			const activeElement = document.activeElement;
 			if (activeElement !== previousFocus && activeElement !== document.body) return;
 			canvasRef.current?.focus({ preventScroll: true });
@@ -29286,7 +29363,7 @@ export default function TileFabApp(): React.ReactElement {
 			clearPortEquipmentSelection();
 			clearAreaSelection();
 		}
-		restoreCanvasFocusAfterGuidedDismissal();
+		restoreCanvasFocusAfterAction();
 	};
 	const exitGuidedBuild = (): void => {
 		recordGuidedBuildChoice("dismissed");
@@ -29295,7 +29372,7 @@ export default function TileFabApp(): React.ReactElement {
 		setGuidedBuildChapterCheckpoint(null);
 		setGuidedBuildOpen(false);
 		if (guidedBuildEvaluation.complete && staticFabNavigatorOpen) closeStaticFabNavigator();
-		restoreCanvasFocusAfterGuidedDismissal();
+		restoreCanvasFocusAfterAction();
 	};
 	const openBlueprintLibraryFromActivity = (
 		tab: BlueprintLibraryTab = "saved",
@@ -29455,10 +29532,11 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		eqMembershipFrameDeferredRef.current = false;
 		// A late dock resize must preserve explicit whole-map Fit instead of following one Port.
-		if (fittedMapCameraRef.current) {
+		if (cameraFitScopeRef.current === "map") {
 			fitMapRef.current();
 			return;
 		}
+		if (cameraFitScopeRef.current === "stk-selection" && fitStkSelectionRef.current()) return;
 		const camera = cameraRef.current;
 		const renderer = rendererRef.current;
 		const insets = fitMapInsets(canvas);
@@ -29504,7 +29582,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (moved) {
 			cameraReadyRef.current = true;
-			fittedMapCameraRef.current = false;
+			cameraFitScopeRef.current = null;
 			rendererRef.current.invalidateStatic();
 			scheduleRender();
 		}
@@ -29680,8 +29758,9 @@ export default function TileFabApp(): React.ReactElement {
 		compactInspectorExpanded,
 		contextualInspectorVisible,
 		editorToolDescriptionsExpanded,
-		fittedMapCameraRef,
+		cameraFitScopeRef,
 		fitMapRef,
+		fitStkSelectionRef,
 		canvasRef,
 		guidedPortKeyboardSessionRef,
 		cameraRef,
@@ -36683,6 +36762,11 @@ export default function TileFabApp(): React.ReactElement {
 								: "2번 끝 쪽"}
 							</button>
 						) : null}
+						{portEquipmentMembershipEditSession.portType === "STK" ? (
+							<button type="button" className="tilefab-placement-exit" data-testid="stk-membership-fit-selection" disabled={!portEquipmentMembershipEditSession.selection.rows.length} onClick={showStkSelection}>
+								<Search size={14} aria-hidden="true" /> 선택 범위 보기
+							</button>
+						) : null}
 						<button
 							type="button"
 							className="tilefab-inspector-primary"
@@ -36839,19 +36923,26 @@ export default function TileFabApp(): React.ReactElement {
 											</span>
 										) : null}
 									</span>
+									<span className="tilefab-equipment-view-actions">
+									{!guidedBuildExperienceActive && tool === "stk" && (stkDraftSelection?.rows.length ?? 0) > 0 ? (
+										<button type="button" className="tilefab-equipment-fit-selection" data-testid="stk-fit-selection" onClick={showStkSelection}>
+											<Search size={14} aria-hidden="true" /> 선택 범위 보기
+										</button>
+									) : null}
 									{!guidedBuildExperienceActive && guidedPortKeyboard?.scope === "ordinary" ? (
 										<button
 											ref={portTargetZoomButtonRef}
 											type="button"
 											className="tilefab-stk-zoom-current tilefab-equipment-zoom-current"
 											data-testid={tool === "stk" ? "ordinary-stk-zoom-in" : "ordinary-port-zoom-in"}
-											hidden={cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM}
+											hidden={cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM && cameraFitScopeRef.current !== "stk-selection"}
 											onClick={zoomOrdinaryPortTarget}
 										>
 											<Search size={14} aria-hidden="true" />
 											{tool === "stk" ? activeStkZoomActionLabel : "현재 Port 확대"}
 										</button>
 									) : null}
+									</span>
 								</span>
 								{ordinaryPortKeyboardEntryVisible ? (
 									<button
@@ -36893,31 +36984,20 @@ export default function TileFabApp(): React.ReactElement {
 										</fieldset>
 									) : null}{" "}
 									{tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
-										<fieldset
-											className="tilefab-segmented tilefab-stk-templates"
-											aria-label="Stocker 포트 구성"
-											aria-describedby="tilefab-port-authoring-instruction"
-										>
-											<legend>포트 구성</legend>
-											{STK_AUTHORING_TEMPLATES.map((template) => (
-												<button
-													type="button"
-													key={template}
-													data-testid={`stk-template-${template}`}
-													data-active={stkTemplate === template}
-													aria-pressed={stkTemplate === template}
-													aria-label={`${stkTemplatePresentation(template).label}: ${template === "FLEX" && guidedStkMinimumPorts === 2 ? "이번 가이드에서는 포트 2개 선택" : stkTemplatePresentation(template).requirement}`}
-													onClick={() => setStkTemplate(template)}
-													title={
-														template === "FLEX" && guidedStkMinimumPorts === 2
-															? "이번 가이드에서는 포트 2개 선택"
-															: stkTemplatePresentation(template).requirement
-													}
-												>
-													{stkTemplatePresentation(template).label}
-												</button>
-											))}
-										</fieldset>
+										<label className="tilefab-stk-template-choice">
+											<span>포트 구성</span>
+											<select
+												data-testid="stk-template-select"
+												aria-label="Stocker 포트 구성"
+												aria-describedby="tilefab-port-authoring-instruction"
+												value={stkTemplate}
+												onChange={(event) => setStkTemplate(event.target.value as StkAuthoringTemplate, false)}
+											>
+												{STK_AUTHORING_TEMPLATES.map((template) => (
+													<option key={template} value={template}>{stkTemplatePresentation(template).label}</option>
+												))}
+											</select>
+										</label>
 									) : null}
 								</>
 							) : null
@@ -39129,26 +39209,6 @@ export default function TileFabApp(): React.ReactElement {
 			</footer>
 		</div>
 	);
-}
-
-function stableDomStringMap(dataset: DOMStringMap): DOMStringMap {
-	const values = new Map(Object.entries(dataset));
-	return new Proxy(dataset, {
-		set(target, property, value): boolean {
-			if (typeof property !== "string") return Reflect.set(target, property, value, target);
-			const next = String(value);
-			if (values.get(property) !== next) {
-				values.set(property, next);
-				target[property] = next;
-			}
-			return true;
-		},
-		deleteProperty(target, property): boolean {
-			if (typeof property !== "string") return Reflect.deleteProperty(target, property);
-			if (values.delete(property)) delete target[property];
-			return true;
-		},
-	});
 }
 
 function editorActionHint(
@@ -41465,6 +41525,7 @@ function addCanvasFrameMargin(
 
 function fitMapInsets(
 	canvas: HTMLCanvasElement,
+	includeCameraControls = true,
 ): Readonly<{ left: number; right: number; top: number; bottom: number }> {
 	const workspace = canvas.closest(".tilefab-workspace");
 	if (!workspace) return Object.freeze({ left: 0, right: 0, top: 12, bottom: 0 });
@@ -41484,6 +41545,7 @@ function fitMapInsets(
 		const rect = element.getBoundingClientRect();
 		if (rect.right <= canvasRect.left || rect.left >= canvasRect.right) continue;
 		const isCameraControls = element.matches(".tilefab-camera-controls");
+		if (isCameraControls && !includeCameraControls) continue;
 		const isCompactHorizontalCameraControls =
 			isCameraControls &&
 			canvas.clientWidth <= 860 &&

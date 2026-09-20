@@ -37,17 +37,19 @@ export function EquipmentAuthoringWorkspace({
 			<header className="tilefab-equipment-heading">
 				<div className="tilefab-equipment-intro">
 					{heading}
-					<p>
-						{intent === "move"
-							? "입출고 지점(포트)을 골라 장비 전체를 옮깁니다."
-							: intent === "copy"
-								? "입출고 지점(포트)을 골라 장비 전체를 복제합니다."
-								: portType === "OHB"
-									? "입출고 지점(포트) 한 곳을 고르면 OHB가 생성됩니다."
-									: portType === "EQ"
-										? "같은 직선의 입출고 지점(포트)에서 시작과 끝을 고르면 EQ가 생성됩니다."
-										: "입출고 지점(포트)을 고른 뒤 ‘Stocker 생성’을 누르세요."}
-					</p>
+					{portType !== "STK" || intent !== "place" ? (
+						<p>
+							{intent === "move"
+								? "입출고 지점(포트)을 골라 장비 전체를 옮깁니다."
+								: intent === "copy"
+									? "입출고 지점(포트)을 골라 장비 전체를 복제합니다."
+									: portType === "OHB"
+										? "입출고 지점(포트) 한 곳을 고르면 OHB가 생성됩니다."
+										: portType === "EQ"
+											? "같은 직선의 입출고 지점(포트)에서 시작과 끝을 고르면 EQ가 생성됩니다."
+											: "입출고 지점(포트)을 고른 뒤 ‘Stocker 생성’을 누르세요."}
+						</p>
+					) : null}
 				</div>
 				{exit}
 			</header>
