@@ -946,7 +946,7 @@ import {
 	nextRailConstructionAnchor,
 	rejectedRailConstructionAnchor,
 } from "./RailConstructionContinuation";
-import { ProductionBayModulePanel } from "./ProductionBayModuleDialog";
+import { DeferredProductionBayModulePanel } from "./DeferredProductionBayModulePanel";
 import { nextProjectMenuIndex } from "./ProjectMenuNavigation";
 import {
 	describeOpenFabProjectSaveCancellation,
@@ -4703,6 +4703,12 @@ export default function TileFabApp(): React.ReactElement {
 	const [fabPresetDialogOpen, setFabPresetDialogOpen] = useState(false);
 	const [productionBayConfiguration, setProductionBayConfiguration] =
 		useState<ProductionBayModuleCatalogRequest | null>(null);
+	const [collapsedProductionBayRequest, setCollapsedProductionBayRequest] =
+		useState<ProductionBayModuleCatalogRequest | null>(null);
+	const productionBayConfigurationFocusRequestRef = useRef<HTMLElement | null>(null);
+	const productionBayPanelExpanded =
+		productionBayConfiguration !== null &&
+		productionBayConfiguration !== collapsedProductionBayRequest;
 	const productionBayPlacementFingerprintRef = useRef<string | null>(null);
 	const assembleLauncherRef = useRef<HTMLButtonElement>(null);
 	const assembleBottomLauncherRef = useRef<HTMLButtonElement>(null);
@@ -6704,14 +6710,6 @@ export default function TileFabApp(): React.ReactElement {
 				"프로젝트 세대가 변경되어 Station review를 다시 열어야 합니다",
 			);
 		}
-		const deferSharedRailUiPublication =
-			previousModel.map === nextModel.map &&
-			previousModel.physical === nextModel.physical &&
-			previousModel.ownership === nextModel.ownership;
-		const publishUiState = (publication: () => void): void => {
-			if (deferSharedRailUiPublication) startTransition(publication);
-			else publication();
-		};
 		cancelStaticFabArrangementRef.current();
 		cancelStaticFabAssemblyConnectorRef.current();
 		cancelStaticFabSemanticBayMutationRef.current(undefined, false);
@@ -6756,7 +6754,9 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		editorModelRef.current = nextModel;
 		refreshTemplateAttachmentGuide(nextModel, templateSessionRef.current);
-		publishUiState(() => setEditorModel(nextModel));
+		// Publish the checksum with the document-backed counts and history. Deferring this
+		// state can temporarily label a committed equipment edit as already saved.
+		setEditorModel(nextModel);
 		const focusedIssueId = readinessIssueRef.current?.id ?? null;
 		const nextFocusedIssue = focusedIssueId
 			? (nextModel.readiness.issues.find((issue) => issue.id === focusedIssueId) ?? null)
@@ -6775,9 +6775,7 @@ export default function TileFabApp(): React.ReactElement {
 			readinessIssueLocationRef.current = nextLocation;
 			setReadinessIssueLocation(nextLocation);
 		}
-		publishUiState(() => {
-			setStatus(message);
-		});
+		setStatus(message);
 		if (
 			(areaSelectionRef.current &&
 				areaSelectionRef.current.revision !== nextModel.map.getRevision()) ||
@@ -18681,6 +18679,28 @@ export default function TileFabApp(): React.ReactElement {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
 		const baseInsets = fitMapInsets(canvas);
+		const placement = organizationBundlePlacementSessionRef.current;
+		const placementAnchor =
+			organizationBundlePlacementPreviewPendingAnchorRef.current ??
+			organizationBundlePlacementPreviewRef.current?.anchor ??
+			(placement && hoverRef.current ? placement.anchorAtPointerCell(hoverRef.current) : null);
+		if (editorModelRef.current.map.size === 0 && placement && placementAnchor) {
+			fitCameraToBounds(
+				organizationBundlePlacementFramingBounds(placement, placementAnchor),
+				canvas,
+				cameraRef.current,
+				rendererRef.current,
+				baseInsets,
+				4,
+			);
+			cameraFitScopeRef.current = null;
+			cameraReadyRef.current = true;
+			delete canvas.dataset.fittedMapBounds;
+			delete canvas.dataset.fitPortTargetReframed;
+			rendererRef.current.invalidateStatic();
+			scheduleRender();
+			return;
+		}
 		const portKeyboardSession = guidedPortKeyboardSessionRef.current;
 		const protectCurrentPortTarget =
 			portKeyboardSession?.scope === "ordinary" &&
@@ -32265,8 +32285,8 @@ export default function TileFabApp(): React.ReactElement {
 					/>
 				) : null}
 
-				{productionBayConfiguration ? (
-					<ProductionBayModulePanel
+				{productionBayConfiguration && productionBayPanelExpanded ? (
+					<DeferredProductionBayModulePanel
 						request={productionBayConfiguration}
 						continuation={placedTwinBayDuplicateAction}
 						rotationDegrees={organizationBundlePlacementSession?.rotationDegrees ?? 0}
@@ -32274,7 +32294,11 @@ export default function TileFabApp(): React.ReactElement {
 						onRequestChange={updateProductionBayConfiguration}
 						onClose={closeProductionBayPanel}
 						onCancel={cancelProductionBayPlacement}
-						onFocusCanvas={() => canvasRef.current?.focus({ preventScroll: true })}
+						onFocusCanvas={() => {
+							setCollapsedProductionBayRequest(productionBayConfiguration);
+							restoreCanvasFocusAfterAction();
+						}}
+						focusRequestRef={productionBayConfigurationFocusRequestRef}
 					/>
 				) : null}
 
@@ -36450,7 +36474,7 @@ export default function TileFabApp(): React.ReactElement {
 										<small>안내를 확인한 뒤 다시 배치하거나 Esc로 취소하세요.</small>
 									</div>
 								) : null}
-								{!productionBayConfiguration ? placedTwinBayDuplicateAction : null}
+								{!productionBayPanelExpanded ? placedTwinBayDuplicateAction : null}
 								<span
 									className="tilefab-multi-place-status"
 									data-testid="organization-bundle-status"
@@ -36496,6 +36520,18 @@ export default function TileFabApp(): React.ReactElement {
 									>
 										<RotateCw size={14} />
 									</button>
+									{productionBayConfiguration && !productionBayPanelExpanded ? (
+										<button
+											type="button"
+											aria-expanded={false}
+											onClick={(event) => {
+												productionBayConfigurationFocusRequestRef.current = event.currentTarget;
+												setCollapsedProductionBayRequest(null);
+											}}
+										>
+											<LayoutTemplate size={14} /> 설정 다시 열기
+										</button>
+									) : null}
 								</fieldset>
 								{heldBlueprintSaveAction}
 								{!duplicatedTwinBayConnectorHandoff && !duplicatedBayBankConnectorHandoff

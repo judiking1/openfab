@@ -1,5 +1,5 @@
 import { ArrowLeftRight, Check, Crosshair, Factory, Minus, Plus, RotateCw, X } from "lucide-react";
-import { useId, useMemo } from "react";
+import { type RefObject, useId, useLayoutEffect, useMemo, useRef } from "react";
 import {
 	defaultProductionBayModuleCatalogRequest,
 	PRODUCTION_BAY_MODULE_CATALOG,
@@ -14,7 +14,7 @@ import singleBaySchematic from "./assets/production-bay-single.svg?no-inline";
 import twinBaySchematic from "./assets/production-bay-twin.svg?no-inline";
 import "./ProductionBayModuleDialog.css";
 
-interface ProductionBayModulePanelProps {
+export interface ProductionBayModulePanelProps {
 	readonly continuation?: React.ReactNode;
 	readonly request: ProductionBayModuleCatalogRequest;
 	readonly rotationDegrees: 0 | 90 | 180 | 270;
@@ -23,6 +23,7 @@ interface ProductionBayModulePanelProps {
 	readonly onClose: () => void;
 	readonly onCancel: () => void;
 	readonly onFocusCanvas: () => void;
+	readonly focusRequestRef?: RefObject<HTMLElement | null>;
 }
 
 type NumericRequestKey =
@@ -95,8 +96,19 @@ export function ProductionBayModulePanel({
 	onClose,
 	onCancel,
 	onFocusCanvas,
+	focusRequestRef,
 }: ProductionBayModulePanelProps): React.ReactElement {
 	const titleId = useId();
+	const familyRef = useRef<HTMLElement>(null);
+	useLayoutEffect(() => {
+		const owner = focusRequestRef?.current;
+		if (!owner || !focusRequestRef) return;
+		focusRequestRef.current = null;
+		if (document.activeElement !== owner && document.activeElement !== document.body) return;
+		familyRef.current
+			?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')
+			?.focus({ preventScroll: true });
+	}, [focusRequestRef]);
 	const item = productionBayModuleCatalogItem(request.id);
 	const error = productionBayModuleCatalogRequestError(request);
 	const plan = useMemo(() => {
@@ -144,7 +156,11 @@ export function ProductionBayModulePanel({
 				</button>
 			</header>
 
-			<nav className="tilefab-production-bay-family" aria-label="Production Bay family">
+			<nav
+				ref={familyRef}
+				className="tilefab-production-bay-family"
+				aria-label="Production Bay family"
+			>
 				{PRODUCTION_BAY_MODULE_CATALOG.map((catalogItem) => (
 					<button
 						type="button"
@@ -313,20 +329,20 @@ export function ProductionBayModulePanel({
 					{error ? <X size={15} /> : <Check size={15} />}
 					<strong>
 						{error
-							? "FIX DIMENSIONS"
+							? "치수를 확인하세요"
 							: placementPending
-								? "CHECKING PLACEMENT"
+								? "배치 위치 확인 중"
 								: continuation
 									? "배치 완료"
-									: "LIVE GHOST READY"}
+									: "설정 준비 완료"}
 					</strong>
 					<small>
 						{error ??
-							(continuation ? "전체 복제 또는 계속 배치" : "LMB place · R rotate · Esc cancel")}
+							(continuation ? "전체 복제 또는 계속 배치" : "클릭·Enter 배치 · R 회전 · Esc 취소")}
 					</small>
 				</span>
 				<button type="button" className="tilefab-production-bay-cancel" onClick={onCancel}>
-					CANCEL
+					배치 취소
 				</button>
 				<button
 					type="button"
@@ -334,7 +350,7 @@ export function ProductionBayModulePanel({
 					disabled={error !== null}
 					onClick={onFocusCanvas}
 				>
-					<Crosshair size={15} /> CANVAS
+					<Crosshair size={15} /> 배치 위치 선택
 				</button>
 			</footer>
 		</section>

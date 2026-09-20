@@ -4523,6 +4523,120 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 				`accessible loaded Bay schematic ${label}`,
 			);
 			const canvas = page.getByTestId("rail-canvas");
+			const beforeSettings = await readMetrics(page);
+			const lengthInput = panel.getByRole("spinbutton", { name: "Outer shell length" });
+			await lengthInput.fill("44");
+			await panel.getByRole("button", { name: "배치 위치 선택" }).click();
+			await panel.waitFor({ state: "hidden" });
+			await page.waitForFunction(
+				() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+			);
+			assertEqual(
+				await lengthInput.isVisible(),
+				false,
+				`Bay settings hide while positioning ${label}`,
+			);
+			const reopen = page.getByRole("button", { name: "설정 다시 열기" });
+			for (const control of [
+				reopen,
+				page.getByRole("button", { name: "조직 청사진 시계 방향 회전", exact: true }),
+				page.getByRole("button", { name: "조직 청사진 반시계 방향 회전", exact: true }),
+			]) {
+				await assertLocatorInsideViewport(page, control);
+				const hit = await control.evaluate((element) => {
+					const r = element.getBoundingClientRect();
+					return {
+						width: r.width,
+						height: r.height,
+						clear: [5, r.width / 2, r.width - 5].every((x) =>
+							element.contains(document.elementFromPoint(r.x + x, r.y + r.height / 2)),
+						),
+					};
+				});
+				assertAtLeast(hit.height, 44, `Bay positioning control height ${label}`);
+				assertAtLeast(hit.width, 44, `Bay positioning control width ${label}`);
+				assertEqual(hit.clear, true, `Bay positioning control pointer target ${label}`);
+			}
+			await canvas.press("r");
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="tilefab-app"]')
+						?.getAttribute("data-organization-bundle-rotation") === "90",
+			);
+			const compactFit = page.getByRole("button", { name: "전체 화면 맞춤", exact: true });
+			const fitPreview = (await compactFit.isVisible())
+				? compactFit
+				: page.getByRole("button", { name: "전체 보기", exact: true });
+			await fitPreview.hover();
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			await page.waitForFunction(() => {
+				const coordinates = document
+					.querySelector('[data-testid="area-stamp-keyboard-readout"]')
+					?.textContent?.match(/· X (-?\d+) m · Z (-?\d+) m/);
+				return (
+					coordinates &&
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-organization-bundle-preview-anchor") ===
+						`${coordinates[1]},${coordinates[2]}`
+				);
+			});
+			const previewAnchorBeforeFit = await canvas.getAttribute(
+				"data-organization-bundle-preview-anchor",
+			);
+			await fitPreview.click();
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			assertEqual(
+				await canvas.getAttribute("data-organization-bundle-preview-anchor"),
+				previewAnchorBeforeFit,
+				`Fit preserves placement position ${label}`,
+			);
+			await page.screenshot({
+				path: path.join(artifactRoot, `bay-settings-collapsed-${label}.png`),
+			});
+			if (viewport.width === 760) {
+				await reopen.focus();
+				await reopen.press("Enter");
+			} else await reopen.click();
+			await page.waitForFunction(
+				() => document.activeElement?.getAttribute("aria-pressed") === "true",
+			);
+			assertEqual(
+				await lengthInput.inputValue(),
+				"44",
+				`Bay settings retain custom length ${label}`,
+			);
+			assertEqual(
+				await panel.getByText("Rotation 90°", { exact: true }).count(),
+				1,
+				`Bay settings retain rotation ${label}`,
+			);
+			assertStaticFabWorldContentIdentity(
+				await readMetrics(page),
+				beforeSettings,
+				`Bay settings and rotation remain project-neutral ${label}`,
+			);
+			await page.screenshot({
+				path: path.join(artifactRoot, `bay-settings-reopened-${label}.png`),
+			});
+			await lengthInput.fill("40");
+			await panel.getByRole("button", { name: "배치 위치 선택" }).click();
+			await page.waitForFunction(
+				() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+			);
+			for (let turn = 0; turn < 3; turn++) await canvas.press("r");
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="tilefab-app"]')
+						?.getAttribute("data-organization-bundle-rotation") === "0",
+			);
+			await page.getByRole("button", { name: "설정 다시 열기" }).click();
 			await canvas.focus();
 			await canvas.press("Enter");
 			const next = page.getByTestId("ordinary-placed-twin-bay-duplicate-handoff");
@@ -13633,12 +13747,19 @@ async function exerciseGuidedPortHandoffRegression(
 						if (app.dataset.equipmentGroups !== String(expectedGroups)) return;
 						const expected = String(window.__tileFab.getDocument().canUndo);
 						const actual = app.dataset.historyCanUndo;
-						if (actual !== expected) mismatches++;
-						if (samples.length < 16) samples.push({ expected, actual });
+						const dirty = app.dataset.projectDirty;
+						const canvasDirty = document.querySelector('[data-testid="rail-canvas"]')?.dataset
+							.projectDirty;
+						if (actual !== expected || dirty !== "true" || canvasDirty !== "true") mismatches++;
+						if (samples.length < 16) samples.push({ expected, actual, dirty, canvasDirty });
 					});
 					observer.observe(app, {
 						attributes: true,
-						attributeFilter: ["data-equipment-groups", "data-history-can-undo"],
+						attributeFilter: [
+							"data-equipment-groups",
+							"data-history-can-undo",
+							"data-project-dirty",
+						],
 					});
 					return { observer, samples, mismatches: () => mismatches };
 				}, Number(frameLatchBaseline.equipmentGroups) + 1);
@@ -13691,6 +13812,11 @@ async function exerciseGuidedPortHandoffRegression(
 					frameLatchBaseline,
 					`ordinary OHB same-task Enter ${viewport.label}`,
 				);
+				assertEqual(
+					frameLatchCommitted.projectDirty,
+					"true",
+					`ordinary OHB commit needs save immediately ${viewport.label}`,
+				);
 				const historyPaints = await historyPublication.evaluate((trace) => {
 					trace.observer.disconnect();
 					return { samples: trace.samples, mismatches: trace.mismatches() };
@@ -13704,7 +13830,7 @@ async function exerciseGuidedPortHandoffRegression(
 				assertEqual(
 					historyPaints.mismatches,
 					0,
-					`ordinary OHB rendered equipment and history agree ${viewport.label}`,
+					`ordinary OHB rendered equipment, history and save state agree ${viewport.label}`,
 				);
 				assertEqual(
 					await authoredPortSlotRow(page, Number(frameLatchBaseline.modelNextPortId), "OHB"),
@@ -23037,7 +23163,7 @@ async function exerciseProductionBayPanelLayout(page) {
 		name: "Decrease Shell clearance",
 	});
 	assertEqual(await decrementShellGap.isDisabled(), true, "Production Bay minimum stepper state");
-	for (const locator of [decrementShellGap, page.getByRole("button", { name: "CANVAS" })]) {
+	for (const locator of [decrementShellGap, page.getByRole("button", { name: "배치 위치 선택" })]) {
 		const box = await locator.boundingBox();
 		if (!box || box.width < 44 || box.height < 44) {
 			throw new Error(`Production Bay control is smaller than 44px: ${JSON.stringify(box)}.`);
@@ -23085,7 +23211,10 @@ async function exerciseProductionBayPanelLayout(page) {
 				.querySelector('[data-testid="production-bay-module-panel"]')
 				?.getAttribute("data-live-preview") === "active",
 	);
-	await page.getByRole("button", { name: "CANVAS" }).click();
+	await page.getByRole("button", { name: "배치 위치 선택" }).click();
+	await page.waitForFunction(
+		() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+	);
 	assertEqual(
 		await page.getByTestId("rail-canvas").evaluate((element) => element === document.activeElement),
 		true,
@@ -23098,11 +23227,26 @@ async function exerciseProductionBayPanelLayout(page) {
 			"90",
 	);
 	assertEqual(
+		await panel.isVisible(),
+		false,
+		"Production Bay settings clear the placement workspace",
+	);
+	await page.getByRole("button", { name: "설정 다시 열기" }).click();
+	await panel.waitFor({ state: "visible" });
+	assertEqual(
 		await panel.getByText("Rotation 90°", { exact: true }).count(),
 		1,
 		"Production Bay rotation feedback",
 	);
-	assertEqual(await panel.isVisible(), true, "Production Bay panel survives Canvas rotation");
+	assertEqual(
+		await panel.isVisible(),
+		true,
+		"Production Bay settings reopen after Canvas rotation",
+	);
+	await panel.getByRole("button", { name: "배치 위치 선택" }).click();
+	await page.waitForFunction(
+		() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+	);
 	await page.keyboard.press("Escape");
 	await panel.waitFor({ state: "hidden" });
 	await page.waitForFunction(
@@ -31232,7 +31376,7 @@ async function exerciseOrdinaryConnectedCopyTwinBayHandoff(
 		);
 		await reopenedPage
 			.getByTestId("production-bay-module-panel")
-			.getByRole("button", { name: "CANCEL", exact: true })
+			.getByRole("button", { name: "배치 취소", exact: true })
 			.click();
 		await reopenedPage.getByTestId("production-bay-module-panel").waitFor({ state: "hidden" });
 		await reopenedPage.waitForFunction(

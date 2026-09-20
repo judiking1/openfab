@@ -410,14 +410,14 @@
 
 @media (max-width: 760px) {
 	.tilefab-production-bay-continuation {
-		margin-left: 44px;
+		margin-left: 0;
 	}
 
 	.tilefab-production-bay-panel {
 		top: auto;
 		right: 8px;
 		bottom: 8px;
-		left: 8px;
+		left: 68px;
 		width: auto;
 		max-height: min(66dvh, 570px);
 	}
@@ -469,4 +469,8 @@
 	.tilefab-production-bay-validation small {
 		display: none;
 	}
+}
+
+.tilefab-production-bay-loading > footer {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 }

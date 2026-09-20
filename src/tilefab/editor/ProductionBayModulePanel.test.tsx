@@ -28,11 +28,11 @@ describe("ProductionBayModulePanel", () => {
 		expect(markup).toContain('data-live-preview="active"');
 		expect(markup).not.toContain('role="dialog"');
 		expect(markup).not.toContain('aria-modal="true"');
-		expect(markup).toContain("LIVE GHOST READY");
-		expect(markup).toContain("LMB place · R rotate · Esc cancel");
+		expect(markup).toContain("설정 준비 완료");
+		expect(markup).toContain("클릭·Enter 배치 · R 회전 · Esc 취소");
 		expect(markup).toContain('aria-label="Close Production Bay panel"');
-		expect(markup).toMatch(/tilefab-production-bay-cancel[^>]*>CANCEL<\/button>/);
-		expect(markup).toContain("CANVAS");
+		expect(markup).toMatch(/tilefab-production-bay-cancel[^>]*>배치 취소<\/button>/);
+		expect(markup).toContain("배치 위치 선택");
 	});
 
 	it("shows the canonical rotation and pauses invalid request updates", () => {
@@ -46,7 +46,7 @@ describe("ProductionBayModulePanel", () => {
 
 		expect(markup).toContain("Rotation </span>90°");
 		expect(markup).toContain('data-live-preview="paused"');
-		expect(markup).toContain("FIX DIMENSIONS");
+		expect(markup).toContain("치수를 확인하세요");
 		expect(markup).toMatch(/class="tilefab-production-bay-canvas" disabled=""/);
 	});
 
@@ -56,7 +56,7 @@ describe("ProductionBayModulePanel", () => {
 		);
 
 		expect(markup).toContain('data-placement-pending="true"');
-		expect(markup).toContain("CHECKING PLACEMENT");
+		expect(markup).toContain("배치 위치 확인 중");
 		expect(markup).not.toMatch(/aria-label="Increase Outer shell length"[^>]*disabled/);
 	});
 });
