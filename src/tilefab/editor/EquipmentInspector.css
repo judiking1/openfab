@@ -36,6 +36,14 @@
 	grid-column: 1 / -1;
 }
 
+@media (min-width: 431px) and (max-width: 650px) {
+	.tilefab-device-actions > button {
+		gap: 4px;
+		padding-inline: 4px;
+		white-space: nowrap;
+	}
+}
+
 .tilefab-inspector.tilefab-equipment-inspector dl > div {
 	display: grid;
 	grid-template-columns: 90px minmax(0, 1fr);

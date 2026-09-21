@@ -7794,9 +7794,37 @@ async function exerciseGuidedPortHandoffRegression(
 		};
 
 		const visibleGuidedCanvasMarkerPoint = async (testId, label) => {
-			const marker = page.getByTestId(testId);
+			let snapshot;
 			try {
-				await marker.waitFor({ state: "visible", timeout: 10_000 });
+				// React can replace a marker between separate visibility and bounding-box reads.
+				// Capture its rectangle and hit owner in one frame; occlusion still fails below.
+				const handle = await page.waitForFunction(
+					(id) => {
+						const marker = document.querySelector(`[data-testid="${id}"]`);
+						if (!(marker instanceof HTMLElement)) return null;
+						const box = marker.getBoundingClientRect();
+						if (
+							box.width <= 0 ||
+							box.height <= 0 ||
+							getComputedStyle(marker).visibility === "hidden"
+						)
+							return null;
+						return {
+							box: { x: box.x, y: box.y, width: box.width, height: box.height },
+							markerIsButton: marker.tagName === "BUTTON",
+							hitTestId: document
+								.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+								?.getAttribute("data-testid"),
+						};
+					},
+					testId,
+					{ timeout: 10_000, polling: "raf" },
+				);
+				try {
+					snapshot = await handle.jsonValue();
+				} finally {
+					await handle.dispose();
+				}
 			} catch (error) {
 				const details = await page.evaluate(
 					(id) => ({
@@ -7863,8 +7891,7 @@ async function exerciseGuidedPortHandoffRegression(
 					cause: error,
 				});
 			}
-			const box = await marker.boundingBox();
-			if (!box) throw new Error(`${label} has no visible bounding box.`);
+			const { box, markerIsButton, hitTestId } = snapshot;
 			if (testId === "guided-rail-selection-target") {
 				assertAtLeast(box.width, 44, `${label} width`);
 				assertAtLeast(box.height, 44, `${label} height`);
@@ -7882,17 +7909,9 @@ async function exerciseGuidedPortHandoffRegression(
 				`${label} bottom viewport bound`,
 			);
 			const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-			const markerIsButton = await marker.evaluate((element) => element.tagName === "BUTTON");
 			assertEqual(
-				await page.evaluate(
-					({ x, y, expectedTestId }) =>
-						document.elementFromPoint(x, y)?.getAttribute("data-testid") === expectedTestId,
-					{
-						...point,
-						expectedTestId: markerIsButton ? testId : "rail-canvas",
-					},
-				),
-				true,
+				hitTestId,
+				markerIsButton ? testId : "rail-canvas",
 				`${label} remains the topmost visible action over the Canvas`,
 			);
 			return point;
@@ -17665,6 +17684,16 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 	const compactPartialSelectionHint = compactInspectHints.locator(
 		'[data-hint-id="select-partial-area"]',
 	);
+	await page.screenshot({
+		path: path.join(artifactRoot, "compact-partial-selection-entry-390x844.png"),
+		fullPage: true,
+	});
+	for (const id of ["select-module", "select-partial-area"]) {
+		const hint = compactInspectHints.locator(`[data-hint-id="${id}"]`);
+		await assertLocatorInsideViewport(page, hint);
+		await assertLocatorOwnsHitArea(hint, `390px Inspect ${id} complete hit area`);
+		assertAtLeast((await hint.boundingBox())?.height ?? 0, 44, `390px Inspect ${id} height`);
+	}
 	await assertLocatorInsideViewport(page, compactPartialSelectionHint);
 	assertEqual(
 		await compactPartialSelectionHint.getByText("부분 영역 선택", { exact: true }).count(),
@@ -17688,10 +17717,6 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 		390,
 		"390px Inspect entry horizontal overflow",
 	);
-	await page.screenshot({
-		path: path.join(artifactRoot, "compact-partial-selection-entry-390x844.png"),
-		fullPage: true,
-	});
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.waitForTimeout(100);
 
@@ -30319,6 +30344,38 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 	const closeInspector = inspector.getByRole("button", { name: "장비 선택 닫기" });
 	const moreActions = page.getByTestId("port-equipment-more-actions");
 	const moreActionsSummary = moreActions.locator(":scope > summary");
+	if ((page.viewportSize()?.width ?? 0) <= 430 && (page.viewportSize()?.height ?? 0) <= 650) {
+		assertEqual(
+			await inspector
+				.locator(".tilefab-contextual-inspector-content")
+				.evaluate((element) => element.scrollTop),
+			0,
+			`ordinary ${portType} short Inspector starts without scrolling`,
+		);
+		for (const action of [
+			continuation,
+			...(portType === "EQ" && !existingStocker ? [stkRecommendation] : []),
+		]) {
+			await assertLocatorInsideViewport(page, action);
+			await assertLocatorOwnsHitArea(action, `ordinary ${portType} initial short Inspector action`);
+			assertAtLeast((await action.boundingBox())?.height ?? 0, 44, "short Inspector action height");
+		}
+		for (const control of await page
+			.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
+			.all()) {
+			await assertLocatorInsideViewport(page, control);
+			await assertLocatorOwnsHitArea(
+				control,
+				`ordinary ${portType} short navigation/camera control`,
+			);
+		}
+		await page.screenshot({
+			path: path.join(
+				artifactRoot,
+				`ordinary-${portType.toLowerCase()}-initial-inspector-390x600.png`,
+			),
+		});
+	}
 	const expectedDevice = await inspector.evaluate((element) => {
 		const id = Number(element.getAttribute("data-equipment-group-id"));
 		const group = window.__tileFab
@@ -30357,6 +30414,28 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		);
 		await assertLocatorInsideViewport(page, action);
 		await assertLocatorOwnsHitArea(action, `ordinary ${portType} primary ${id} ${viewportLabel}`);
+		assertEqual(
+			await action.evaluate((element) => {
+				const textBoxes = [...element.childNodes].flatMap((node) => {
+					if (!(node instanceof Text) || !node.textContent.trim()) return [];
+					const range = document.createRange();
+					range.selectNodeContents(node);
+					return [...range.getClientRects()];
+				});
+				const bounds = element.getBoundingClientRect();
+				return (
+					textBoxes.length > 0 &&
+					textBoxes.every(
+						(box) =>
+							Math.abs(box.top - textBoxes[0].top) < 0.5 &&
+							box.left >= bounds.left &&
+							box.right <= bounds.right,
+					)
+				);
+			}),
+			true,
+			`ordinary ${portType} primary ${id} label fits one line ${viewportLabel}`,
+		);
 		assertAtLeast(
 			(await action.boundingBox())?.height ?? 0,
 			44,
@@ -30468,10 +30547,14 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			return Boolean(
 				repeat &&
 					recommendation &&
-					repeat.compareDocumentPosition(recommendation) & Node.DOCUMENT_POSITION_FOLLOWING,
+					recommendation.compareDocumentPosition(repeat) & Node.DOCUMENT_POSITION_FOLLOWING,
 			);
 		});
-		assertEqual(hierarchy, true, `ordinary EQ repeat precedes STK recommendation ${viewportLabel}`);
+		assertEqual(
+			hierarchy,
+			true,
+			`ordinary EQ next Stocker precedes repeated EQ placement ${viewportLabel}`,
+		);
 		await assertLocatorInsideViewport(page, stkRecommendation);
 		await assertLocatorOwnsHitArea(
 			stkRecommendation,
@@ -30516,19 +30599,25 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			true,
 			`ordinary EQ contextual STK recommendation is initially visible ${viewportLabel}`,
 		);
-		await continuation.focus();
-		await page.keyboard.press("Tab");
-		assertEqual(
-			await stkRecommendation.evaluate((element) => document.activeElement === element),
-			true,
-			`ordinary EQ repeat tabs locally to STK recommendation ${viewportLabel}`,
-		);
-		await page.keyboard.press("Shift+Tab");
-		assertEqual(
-			await continuation.evaluate((element) => document.activeElement === element),
-			true,
-			`ordinary EQ STK recommendation reverses locally to repeat ${viewportLabel}`,
-		);
+		const edit = inspector.getByTestId("edit-port-equipment-membership");
+		const move = inspector.getByTestId("move-port-equipment-group");
+		await stkRecommendation.focus();
+		for (const target of [edit, move, continuation]) {
+			await page.keyboard.press("Tab");
+			assertEqual(
+				await target.evaluate((element) => document.activeElement === element),
+				true,
+				`ordinary EQ next/edit/move/repeat Tab order ${viewportLabel}`,
+			);
+		}
+		for (const target of [move, edit, stkRecommendation]) {
+			await page.keyboard.press("Shift+Tab");
+			assertEqual(
+				await target.evaluate((element) => document.activeElement === element),
+				true,
+				`ordinary EQ reverse local Tab order ${viewportLabel}`,
+			);
+		}
 		const afterFocusCycle = await readMetrics(page);
 		assertProjectUnchanged(
 			afterFocusCycle,
@@ -43669,6 +43758,8 @@ async function exerciseMidWidthPriorityTopbarAcceptance(activeBrowser) {
 
 async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 	const viewports = Object.freeze([
+		Object.freeze({ label: "short", width: 390, height: 600 }),
+		Object.freeze({ label: "narrow", width: 520, height: 844 }),
 		Object.freeze({ label: "compact", width: 390, height: 844 }),
 		Object.freeze({ label: "mid", width: 760, height: 900 }),
 		Object.freeze({ label: "space", width: 1024, height: 900 }),
@@ -43719,6 +43810,12 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			await startDialog.getByRole("button", { name: /BLANK CANVAS/ }).click();
 			await startDialog.waitFor({ state: "hidden" });
 			await waitForReady(page, { physicalPaths: 0 });
+			if (viewport.height <= 650) {
+				// At short heights the expanded activity rail covers this fixture's drag start.
+				// Use the visible density control before choosing its Canvas points.
+				const density = page.getByTestId("editor-tool-description-toggle");
+				if ((await density.getAttribute("aria-pressed")) === "true") await density.click();
+			}
 			await centerWorld(page, { x: 1.5, y: 0.5 });
 			const before = await readMetrics(page);
 			const startPoint = await screenPointForWorld(page, { x: 0.5, y: 0.5 });
@@ -44078,9 +44175,11 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				);
 			}
 
-			await centerWorld(page, { x: 8.5, y: 6.5 });
-			const eqRailStart = await screenPointForWorld(page, { x: 4.5, y: 6.5 });
-			const eqRailEnd = await screenPointForWorld(page, { x: 12.5, y: 6.5 });
+			const [eqRailStart, eqRailEnd] = await frameRailPointerGesture(
+				page,
+				{ x: 4.5, y: 6.5 },
+				{ x: 12.5, y: 6.5 },
+			);
 			await page.mouse.move(eqRailStart.x, eqRailStart.y);
 			await page.mouse.down();
 			await page.mouse.move(eqRailEnd.x, eqRailEnd.y, { steps: 12 });
@@ -44508,6 +44607,12 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 					eqPorts: Number(eqPlaced.equipmentPorts) - Number(firstPort.equipmentPorts),
 				}),
 			);
+		} catch (error) {
+			await page.screenshot({
+				path: path.join(artifactRoot, `ordinary-rail-pointer-${viewport.label}-failure.png`),
+				fullPage: true,
+			});
+			throw error;
 		} finally {
 			await closeBrowserResource(context, `${viewport.label} ordinary Rail pointer context`);
 		}
@@ -44515,14 +44620,39 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 	return Object.freeze(proof);
 }
 
+async function frameRailPointerGesture(page, start, end) {
+	for (let zoomStep = 0; zoomStep < 8; zoomStep += 1) {
+		await centerWorld(page, { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 });
+		const points = [await screenPointForWorld(page, start), await screenPointForWorld(page, end)];
+		if (
+			await page.evaluate(
+				(targets) =>
+					targets.every(
+						({ x, y }) =>
+							document.elementFromPoint(x, y)?.getAttribute("data-testid") === "rail-canvas",
+					),
+				points,
+			)
+		) {
+			return points;
+		}
+		const zoomOut = page.getByRole("button", { name: "화면 축소", exact: true });
+		if (!(await zoomOut.isVisible())) break;
+		await zoomOut.click();
+	}
+	throw new Error("Rail gesture endpoints remain covered after visible camera framing.");
+}
+
 async function exerciseEqClickEndpoints(page, label) {
 	const longRecipe = "V1-EQ-DEMO-".repeat(8);
 	const canvas = page.getByTestId("rail-canvas");
 	await clickActivityCommand(page, "build", "레일 건설");
-	await centerWorld(page, { x: 8.5, y: 12.5 });
+	const [railStart, railEnd] = await frameRailPointerGesture(
+		page,
+		{ x: 4.5, y: 12.5 },
+		{ x: 12.5, y: 12.5 },
+	);
 	const railBefore = await readMetrics(page);
-	const railStart = await screenPointForWorld(page, { x: 4.5, y: 12.5 });
-	const railEnd = await screenPointForWorld(page, { x: 12.5, y: 12.5 });
 	await page.mouse.move(railStart.x, railStart.y);
 	await page.mouse.down();
 	await page.mouse.move(railEnd.x, railEnd.y, { steps: 12 });

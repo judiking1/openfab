@@ -38834,6 +38834,32 @@ export default function TileFabApp(): React.ReactElement {
 											</button>
 										</>
 									) : null}
+									{eqToStkHandoff ? (
+										<>
+											<span id="tilefab-eq-to-stk-handoff-description" className="tilefab-sr-only">
+												{eqToStkHandoff.description}
+											</span>
+											<button
+												type="button"
+												className="tilefab-equipment-next-kind"
+												data-testid="ordinary-next-stk-handoff"
+												aria-label={eqToStkHandoff.ariaLabel}
+												aria-describedby="tilefab-eq-to-stk-handoff-description"
+												onClick={() => {
+													if (chooseGuidedEquipmentTool("stk", selectedPortEquipment)) {
+														setStatus(ORDINARY_STK_HANDOFF_ENTRY_STATUS);
+													}
+												}}
+											>
+												<Warehouse size={15} aria-hidden="true" />
+												<span className="tilefab-next-port-handoff-copy">
+													<strong>{eqToStkHandoff.label}</strong>
+													<small>{eqToStkHandoff.instruction}</small>
+												</span>
+												<ChevronRight size={15} aria-hidden="true" />
+											</button>
+										</>
+									) : null}
 									<div className="tilefab-device-actions">
 										{selectedEquipmentGroup.kind === "OHB" ? (
 											<button
@@ -38898,32 +38924,6 @@ export default function TileFabApp(): React.ReactElement {
 											equipmentAuthoringContinuation(selectedEquipmentGroup),
 										)}
 									</p>
-									{eqToStkHandoff ? (
-										<>
-											<span id="tilefab-eq-to-stk-handoff-description" className="tilefab-sr-only">
-												{eqToStkHandoff.description}
-											</span>
-											<button
-												type="button"
-												className="tilefab-equipment-next-kind"
-												data-testid="ordinary-next-stk-handoff"
-												aria-label={eqToStkHandoff.ariaLabel}
-												aria-describedby="tilefab-eq-to-stk-handoff-description"
-												onClick={() => {
-													if (chooseGuidedEquipmentTool("stk", selectedPortEquipment)) {
-														setStatus(ORDINARY_STK_HANDOFF_ENTRY_STATUS);
-													}
-												}}
-											>
-												<Warehouse size={15} aria-hidden="true" />
-												<span className="tilefab-next-port-handoff-copy">
-													<strong>{eqToStkHandoff.label}</strong>
-													<small>{eqToStkHandoff.instruction}</small>
-												</span>
-												<ChevronRight size={15} aria-hidden="true" />
-											</button>
-										</>
-									) : null}
 								</>
 							) : null}
 
