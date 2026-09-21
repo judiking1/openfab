@@ -1131,6 +1131,7 @@ import {
 } from "./UserBlueprintLibraryCrossTabRefreshController";
 import "./TileFabApp.css";
 import { EquipmentAuthoringWorkspace } from "./EquipmentAuthoringWorkspace";
+import { useEditorNavigationScroll } from "./useEditorNavigationScroll";
 import { useEquipmentWorkspaceFraming } from "./useEquipmentWorkspaceFraming";
 import "./EquipmentAuthoringWorkspace.css";
 import "./EquipmentInspector.css";
@@ -2255,6 +2256,7 @@ export default function TileFabApp(): React.ReactElement {
 	const staticCanvasRef = useRef<HTMLCanvasElement>(null);
 	const appRootRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const editorNavigationRef = useRef<HTMLElement>(null);
 	const connectedCopyTwinBayHandoffRef = useRef<HTMLButtonElement>(null);
 	const placedTwinBayDuplicateHandoffRef = useRef<HTMLButtonElement>(null);
 	const duplicatedTwinBayConnectorHandoffRef = useRef<HTMLButtonElement>(null);
@@ -6063,7 +6065,7 @@ export default function TileFabApp(): React.ReactElement {
 		organizationBundlePlacementSession,
 	]);
 	useLayoutEffect(() => {
-		if (!constructionBarVisible || (!organizationBundlePlacementSession && !areaStampSession)) return;
+		if (!constructionBarVisible || ((guidedBuildExperienceActive || editorActivity !== "build") && !organizationBundlePlacementSession && !areaStampSession)) return;
 		const workspace = canvasRef.current?.closest<HTMLElement>(".tilefab-workspace");
 		const bar = workspace?.querySelector<HTMLElement>('[data-testid="rail-buildbar"]');
 		if (!workspace || !bar) return;
@@ -6086,7 +6088,7 @@ export default function TileFabApp(): React.ReactElement {
 			observer.disconnect();
 			workspace.style.removeProperty(property);
 		};
-	}, [constructionBarVisible, organizationBundlePlacementSession, areaStampSession]);
+	}, [constructionBarVisible, organizationBundlePlacementSession, areaStampSession, guidedBuildExperienceActive, editorActivity]);
 	const updateTemplatePoseLock = (next: RailTemplatePoseLock): void => {
 		templatePoseLockRef.current = next;
 		templatePointerResolutionRef.current = null;
@@ -30056,6 +30058,7 @@ export default function TileFabApp(): React.ReactElement {
 		: compactPortToolFocusActive
 			? compactPortToolDescriptionsExpanded
 			: guidedBuildExperienceActive || editorToolDescriptionPreference === "expanded";
+	useEditorNavigationScroll(editorNavigationRef, editorActivity, editorToolDescriptionsExpanded);
 	useLayoutEffect(() => {
 		if (!compactPortToolContextActive && compactPortToolDescriptionsExpanded) {
 			setCompactPortToolDescriptionsExpanded(false);
@@ -33431,6 +33434,7 @@ export default function TileFabApp(): React.ReactElement {
 
 				<nav
 					className="tilefab-tools"
+					ref={editorNavigationRef}
 					aria-label="편집 활동과 도구"
 					aria-hidden={
 						guidedBuildOrganizationCommandOwnsWorkspace ||
@@ -33751,6 +33755,7 @@ export default function TileFabApp(): React.ReactElement {
 							</>
 						) : null}
 					</fieldset>
+					<span className="tilefab-navigation-scroll-hint" aria-hidden="true">아래 도구 · 스크롤 ↓</span>
 				</nav>
 
 				{stationProposalReview ? (

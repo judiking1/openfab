@@ -2670,20 +2670,60 @@ function reportAcceptanceProgress(stage) {
 }
 
 async function assertGuidedPrimaryTarget(page, expectedId, label) {
-	const app = page.getByTestId("tilefab-app");
-	const targets = page.locator('[data-guided-target="true"]');
+	let observation;
 	try {
-		await page.waitForFunction(
+		// Read ownership and actionability together. A separate read can observe the next
+		// transition after the expected target was already published in the previous frame.
+		const handle = await page.waitForFunction(
 			({ expected }) => {
 				const root = document.querySelector('[data-testid="tilefab-app"]');
-				return (
-					root?.getAttribute("data-guided-primary-target") === expected &&
-					document.querySelectorAll('[data-guided-target="true"]').length === 1
-				);
+				const targets = [...document.querySelectorAll('[data-guided-target="true"]')];
+				const identity = root?.getAttribute("data-guided-primary-target");
+				if (identity !== expected || targets.length !== 1) return null;
+				const element = targets[0];
+				const bounds = element.getBoundingClientRect();
+				return {
+					identity,
+					count: targets.length,
+					owner: element.getAttribute("data-guided-action-id"),
+					visible:
+						bounds.width > 0 &&
+						bounds.height > 0 &&
+						getComputedStyle(element).visibility === "visible",
+					panelOwner: element.getAttribute("data-testid") === "guided-build-suggested-action",
+					panelCount: document.querySelectorAll('[data-testid="guided-build-suggested-action"]')
+						.length,
+					actionability: {
+						width: bounds.width,
+						height: bounds.height,
+						disabled: element instanceof HTMLButtonElement ? element.disabled : false,
+						ariaDisabled: element.getAttribute("aria-disabled"),
+						tagName: element.tagName,
+						tabIndex: element.tabIndex,
+						describedBy: element.getAttribute("aria-describedby"),
+						hitOwned: [
+							[0.5, 0.5],
+							[0.25, 0.7],
+							[0.75, 0.7],
+							[0.5, 0.82],
+						].some(([xRatio, yRatio]) => {
+							const hit = document.elementFromPoint(
+								bounds.left + bounds.width * xRatio,
+								bounds.top + bounds.height * yRatio,
+							);
+							return hit === element || (hit !== null && element.contains(hit));
+						}),
+					},
+				};
 			},
 			{ expected: expectedId },
 			{ timeout: 10_000 },
 		);
+		try {
+			observation = await handle.jsonValue();
+		} finally {
+			await handle.dispose();
+		}
 	} catch (error) {
 		const state = await page.evaluate(() => {
 			const root = document.querySelector('[data-testid="tilefab-app"]');
@@ -2731,41 +2771,11 @@ async function assertGuidedPrimaryTarget(page, expectedId, label) {
 			cause: error,
 		});
 	}
-	assertEqual(
-		await app.getAttribute("data-guided-primary-target"),
-		expectedId,
-		`${label} identity`,
-	);
-	assertEqual(await targets.count(), 1, `${label} exposes exactly one visible next target`);
-	const target = targets.first();
-	assertEqual(
-		await target.getAttribute("data-guided-action-id"),
-		expectedId,
-		`${label} owner identity`,
-	);
-	assertEqual(await target.isVisible(), true, `${label} owner visibility`);
-	const actionability = await target.evaluate((element) => ({
-		width: element.getBoundingClientRect().width,
-		height: element.getBoundingClientRect().height,
-		disabled: element instanceof HTMLButtonElement ? element.disabled : false,
-		ariaDisabled: element.getAttribute("aria-disabled"),
-		tagName: element.tagName,
-		tabIndex: element.tabIndex,
-		describedBy: element.getAttribute("aria-describedby"),
-		hitOwned: [
-			[0.5, 0.5],
-			[0.25, 0.7],
-			[0.75, 0.7],
-			[0.5, 0.82],
-		].some(([xRatio, yRatio]) => {
-			const bounds = element.getBoundingClientRect();
-			const hit = document.elementFromPoint(
-				bounds.left + bounds.width * xRatio,
-				bounds.top + bounds.height * yRatio,
-			);
-			return hit === element || (hit !== null && element.contains(hit));
-		}),
-	}));
+	assertEqual(observation.identity, expectedId, `${label} identity`);
+	assertEqual(observation.count, 1, `${label} exposes exactly one visible next target`);
+	assertEqual(observation.owner, expectedId, `${label} owner identity`);
+	assertEqual(observation.visible, true, `${label} owner visibility`);
+	const { actionability } = observation;
 	assertEqual(actionability.disabled, false, `${label} owner enabled state`);
 	assertEqual(actionability.ariaDisabled === "true", false, `${label} owner aria-enabled state`);
 	assertAtLeast(actionability.width, 44, `${label} owner width`);
@@ -2777,13 +2787,12 @@ async function assertGuidedPrimaryTarget(page, expectedId, label) {
 		`${label} accessible instruction ownership`,
 	);
 	assertEqual(actionability.hitOwned, true, `${label} owner hit-test ownership`);
-	const panelOwner = (await target.getAttribute("data-testid")) === "guided-build-suggested-action";
 	assertEqual(
-		await page.getByTestId("guided-build-suggested-action").count(),
-		panelOwner ? 1 : 0,
+		observation.panelCount,
+		observation.panelOwner ? 1 : 0,
 		`${label} keeps one panel proxy only when that button is the real target`,
 	);
-	return target;
+	return page.locator(`[data-guided-target="true"][data-guided-action-id="${expectedId}"]`);
 }
 
 async function assertGuidedPickerRovingTarget(page, expectedId, label) {
@@ -6738,9 +6747,11 @@ async function exerciseFactoryScaleOrdinaryPortOverview(browserInstance) {
 				}
 				const targetPoint = await page.getByTestId("rail-canvas").evaluate((canvas) => {
 					const bounds = canvas.getBoundingClientRect();
+					const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+					if (!(marker instanceof HTMLElement)) throw new Error("STK target marker missing");
 					return {
-						x: bounds.left + Number(canvas.dataset.guidedPortKeyboardScreenX),
-						y: bounds.top + Number(canvas.dataset.guidedPortKeyboardScreenY),
+						x: bounds.left + Number.parseFloat(marker.style.left),
+						y: bounds.top + Number.parseFloat(marker.style.top),
 					};
 				});
 				if (modality === "touch") await dispatchSingleTouchGesture(page, [targetPoint]);
@@ -7801,7 +7812,32 @@ async function exerciseGuidedPortHandoffRegression(
 				const handle = await page.waitForFunction(
 					(id) => {
 						const marker = document.querySelector(`[data-testid="${id}"]`);
-						if (!(marker instanceof HTMLElement)) return null;
+						if (!(marker instanceof HTMLElement) || marker.hidden) return null;
+						const canvas = document.querySelector('[data-testid="rail-canvas"]');
+						if (id.startsWith("guided-port-")) {
+							if (!(canvas instanceof HTMLCanvasElement)) return null;
+							const role =
+								id === "guided-port-row-start"
+									? "start"
+									: id === "guided-port-row-end"
+										? "end"
+										: "target";
+							const painted = canvas.dataset.guidedCanvasMarkers
+								?.split("|")
+								.find((value) => value.startsWith(`${role}:`));
+							if (!painted) return null;
+							const [, x, y, row] = painted.split(":");
+							// A later resize frame may follow the viewport-ready observation. Read the
+							// React marker and its actual Canvas paint together with the hit snapshot.
+							if (
+								!(Math.abs(Number.parseFloat(marker.style.left) - Number(x)) <= 0.011) ||
+								!(Math.abs(Number.parseFloat(marker.style.top) - Number(y)) <= 0.011) ||
+								marker.dataset.portSlotRow !== row ||
+								canvas.width !== Math.max(1, Math.round(canvas.clientWidth * devicePixelRatio)) ||
+								canvas.height !== Math.max(1, Math.round(canvas.clientHeight * devicePixelRatio))
+							)
+								return null;
+						}
 						const box = marker.getBoundingClientRect();
 						if (
 							box.width <= 0 ||
@@ -7809,12 +7845,18 @@ async function exerciseGuidedPortHandoffRegression(
 							getComputedStyle(marker).visibility === "hidden"
 						)
 							return null;
+						const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
 						return {
 							box: { x: box.x, y: box.y, width: box.width, height: box.height },
 							markerIsButton: marker.tagName === "BUTTON",
-							hitTestId: document
-								.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
-								?.getAttribute("data-testid"),
+							hitTestId: hit?.getAttribute("data-testid"),
+							diagnostic: {
+								hit: hit?.outerHTML.slice(0, 2000),
+								hitBox: hit?.getBoundingClientRect().toJSON(),
+								marker: marker.outerHTML,
+								canvasBox: canvas?.getBoundingClientRect().toJSON(),
+								canvasData: canvas instanceof HTMLElement ? { ...canvas.dataset } : null,
+							},
 						};
 					},
 					testId,
@@ -7890,6 +7932,12 @@ async function exerciseGuidedPortHandoffRegression(
 				throw new Error(`${label} did not become visible: ${JSON.stringify(details)}.`, {
 					cause: error,
 				});
+			}
+			if (snapshot.hitTestId !== (snapshot.markerIsButton ? testId : "rail-canvas")) {
+				await writeFile(
+					path.join(artifactRoot, `guided-marker-hit-failure-${practiceTransitionMode}.json`),
+					JSON.stringify({ label, ...snapshot }, null, 2),
+				);
 			}
 			const { box, markerIsButton, hitTestId } = snapshot;
 			if (testId === "guided-rail-selection-target") {
@@ -8153,10 +8201,13 @@ async function exerciseGuidedPortHandoffRegression(
 		await waitForLegalPortSlots(page);
 		await assertGuidedPrimaryTarget(page, "canvas:ohb", "Guided OHB wait-state recovery");
 		await page.waitForFunction(
-			() =>
-				document
-					.querySelector('[data-testid="rail-canvas"]')
-					?.getAttribute("data-guided-port-keyboard-type") === "OHB",
+			() => {
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				return (
+					canvas?.getAttribute("data-guided-port-keyboard-type") === "OHB" &&
+					document.activeElement === canvas
+				);
+			},
 			undefined,
 			{ timeout: 10_000 },
 		);
@@ -11906,6 +11957,12 @@ async function exerciseGuidedPortHandoffRegression(
 			page,
 			"action:duplicate-bank",
 			"Guided Bank duplicate exit recovery",
+		);
+		await page.waitForFunction(
+			() =>
+				document.activeElement?.getAttribute("data-guided-action-id") === "action:duplicate-bank",
+			undefined,
+			{ timeout: 10_000 },
 		);
 		assertEqual(
 			await duplicateBank.evaluate((element) => element === document.activeElement),
@@ -20807,9 +20864,11 @@ async function clickCurrentStkTargetByPointer(page, candidates, expectedRows, la
 	const readTarget = () =>
 		canvas.evaluate((element) => {
 			const bounds = element.getBoundingClientRect();
-			const row = Number(element.dataset.guidedPortKeyboardRow);
-			const x = bounds.left + Number(element.dataset.guidedPortKeyboardScreenX);
-			const y = bounds.top + Number(element.dataset.guidedPortKeyboardScreenY);
+			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+			if (!(marker instanceof HTMLElement)) throw new Error("STK target marker missing");
+			const row = Number(marker.dataset.portSlotRow);
+			const x = bounds.left + Number.parseFloat(marker.style.left);
+			const y = bounds.top + Number.parseFloat(marker.style.top);
 			return {
 				row,
 				x,
@@ -35846,14 +35905,16 @@ async function exerciseOrdinaryFourPortLowZoomAcquisition(page, baseline) {
 		canvas.evaluate((canvasElement) => {
 			const slots = window.__tileFab?.getEditorModel().portSlotArtifacts.STK.slots;
 			const canvasBounds = canvasElement.getBoundingClientRect();
-			const row = Number(canvasElement.dataset.guidedPortKeyboardRow);
+			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+			if (!(marker instanceof HTMLElement)) return null;
+			const row = Number(marker.dataset.portSlotRow);
 			if (!slots || !Number.isSafeInteger(row) || row < 0 || row >= slots.count) return null;
 			return {
 				row,
 				x: slots.worldPositions[row * 2],
 				y: slots.worldPositions[row * 2 + 1],
-				clientX: canvasBounds.left + Number(canvasElement.dataset.guidedPortKeyboardScreenX),
-				clientY: canvasBounds.top + Number(canvasElement.dataset.guidedPortKeyboardScreenY),
+				clientX: canvasBounds.left + Number.parseFloat(marker.style.left),
+				clientY: canvasBounds.top + Number.parseFloat(marker.style.top),
 				zoom: Number(canvasElement.dataset.cameraZoom),
 				acquisition: canvasElement.dataset.stkAcquisitionZoom ?? "",
 			};
@@ -36797,9 +36858,10 @@ async function assertOrdinaryStrictStkSafeFrame(page, candidates, templateLabel,
 		}
 		const width = Math.max(1, canvas.clientWidth - left - right);
 		const height = Math.max(1, canvas.clientHeight - top - bottom);
-		const localX = Number(canvas.dataset.guidedPortKeyboardScreenX);
-		const localY = Number(canvas.dataset.guidedPortKeyboardScreenY);
 		const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+		const localX =
+			marker instanceof HTMLElement ? Number.parseFloat(marker.style.left) : Number.NaN;
+		const localY = marker instanceof HTMLElement ? Number.parseFloat(marker.style.top) : Number.NaN;
 		const markerRect = marker instanceof HTMLElement ? marker.getBoundingClientRect() : null;
 		const labelRect =
 			marker instanceof HTMLElement ? marker.querySelector("span")?.getBoundingClientRect() : null;
@@ -40511,10 +40573,10 @@ async function assertOrdinaryPortKeyboardTargetVisible(page, label) {
 			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
 			if (!(canvas instanceof HTMLCanvasElement)) return false;
 			if (!(marker instanceof HTMLElement)) return false;
-			const screenX = canvas?.dataset.guidedPortKeyboardScreenX ?? "";
-			const screenY = canvas?.dataset.guidedPortKeyboardScreenY ?? "";
-			const localX = Number(screenX);
-			const localY = Number(screenY);
+			const screenX = marker.style.left;
+			const screenY = marker.style.top;
+			const localX = Number.parseFloat(screenX);
+			const localY = Number.parseFloat(screenY);
 			const rect = canvas.getBoundingClientRect();
 			return (
 				canvas?.getAttribute("data-port-keyboard-scope") === "ordinary" &&
@@ -40542,8 +40604,8 @@ async function assertOrdinaryPortKeyboardTargetVisible(page, label) {
 		if (!(marker instanceof HTMLElement)) return null;
 		const markerRect = marker.getBoundingClientRect();
 		const markerLabelRect = marker.querySelector("span")?.getBoundingClientRect() ?? null;
-		const localX = Number(canvas.dataset.guidedPortKeyboardScreenX);
-		const localY = Number(canvas.dataset.guidedPortKeyboardScreenY);
+		const localX = Number.parseFloat(marker.style.left);
+		const localY = Number.parseFloat(marker.style.top);
 		const clientX = rect.left + localX;
 		const clientY = rect.top + localY;
 		const hit = document.elementFromPoint(clientX, clientY);
@@ -43811,10 +43873,98 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			await startDialog.waitFor({ state: "hidden" });
 			await waitForReady(page, { physicalPaths: 0 });
 			if (viewport.height <= 650) {
+				const navigationBefore = await readMetrics(page);
+				await page.waitForFunction(() => {
+					const navigation = document.querySelector(".tilefab-tools");
+					const hints = document.querySelector(".tilefab-action-hints");
+					const bar = document.querySelector(".tilefab-buildbar");
+					return (
+						navigation?.getAttribute("data-more-tools") === "true" &&
+						hints &&
+						bar &&
+						hints.getBoundingClientRect().bottom <= bar.getBoundingClientRect().top
+					);
+				});
+				for (const control of await page
+					.locator(
+						".tilefab-editor-activity-button:visible, .tilefab-camera-controls button:visible",
+					)
+					.all()) {
+					await assertLocatorInsideViewport(page, control);
+					await assertLocatorOwnsHitArea(control, "short expanded activity/camera control");
+				}
+				for (const id of ["build-track", "rotate-build"]) {
+					const hint = page.locator(`.tilefab-action-hint[data-hint-id="${id}"]`);
+					await assertLocatorInsideViewport(page, hint);
+					await assertLocatorOwnsHitArea(hint, `short ordinary Rail ${id} hint`);
+					assertAtLeast((await hint.boundingBox())?.height ?? 0, 44, "Rail hint target height");
+				}
+				await page.screenshot({
+					path: path.join(artifactRoot, "ordinary-navigation-initial-390x600.png"),
+				});
+				const eraseTool = page.getByRole("button", { name: "모듈 철거", exact: true });
+				await eraseTool.focus();
+				await assertLocatorInsideViewport(page, eraseTool);
+				await assertLocatorOwnsHitArea(eraseTool, "short scrolled erase action");
+				await page.screenshot({
+					path: path.join(artifactRoot, "ordinary-navigation-scrolled-390x600.png"),
+				});
+				await page.keyboard.press("Enter");
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="tilefab-app"]')
+							?.getAttribute("data-editor-tool") === "erase",
+				);
+				const railTool = page.getByRole("button", { name: "레일 건설", exact: true });
+				await railTool.focus();
+				await page.keyboard.press("Enter");
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="tilefab-app"]')
+							?.getAttribute("data-editor-tool") === "build",
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					navigationBefore,
+					"short navigation and tool switch",
+				);
 				// At short heights the expanded activity rail covers this fixture's drag start.
 				// Use the visible density control before choosing its Canvas points.
 				const density = page.getByTestId("editor-tool-description-toggle");
 				if ((await density.getAttribute("aria-pressed")) === "true") await density.click();
+				const compactNavigation = await page.locator(".tilefab-tools").boundingBox();
+				const compactHints = await page.locator(".tilefab-action-hints").boundingBox();
+				assertAtLeast(
+					compactHints?.x ?? 0,
+					(compactNavigation?.x ?? 0) + (compactNavigation?.width ?? 0),
+					"short compact Rail hints clear the whole navigation width",
+				);
+				for (const activity of ["build", "inspect", "assemble"]) {
+					await page.getByTestId(`editor-activity-${activity}`).click();
+					for (const control of await page
+						.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
+						.all()) {
+						await assertLocatorInsideViewport(page, control);
+						await assertLocatorOwnsHitArea(control, `short compact ${activity} control`);
+					}
+					await page.screenshot({
+						path: path.join(artifactRoot, `ordinary-navigation-compact-${activity}-390x600.png`),
+					});
+				}
+				await page.getByRole("button", { name: "내 청사진", exact: true }).click();
+				for (const control of await page
+					.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
+					.all()) {
+					await assertLocatorOwnsHitArea(control, "short compact Blueprint control");
+				}
+				await page.getByTestId("editor-activity-build").click();
+				assertProjectUnchanged(
+					await readMetrics(page),
+					navigationBefore,
+					"short compact activity and library navigation",
+				);
 			}
 			await centerWorld(page, { x: 1.5, y: 0.5 });
 			const before = await readMetrics(page);
@@ -44081,8 +44231,12 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			);
 			const firstPortTarget = await page.getByTestId("rail-canvas").evaluate((canvas) => {
 				const bounds = canvas.getBoundingClientRect();
-				const x = bounds.left + Number(canvas.dataset.guidedPortKeyboardScreenX);
-				const y = bounds.top + Number(canvas.dataset.guidedPortKeyboardScreenY);
+				const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+				if (!(marker instanceof HTMLElement) || marker.hidden)
+					throw new Error("Visible OHB marker missing");
+				// This marker is painted every frame; diagnostic dataset coordinates are throttled.
+				const x = bounds.left + Number.parseFloat(marker.style.left);
+				const y = bounds.top + Number.parseFloat(marker.style.top);
 				return {
 					x,
 					y,
@@ -44094,7 +44248,56 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				true,
 				`${viewport.label} highlighted first OHB point belongs to Canvas`,
 			);
+			await page.getByTestId("rail-canvas").evaluate((canvas) => {
+				canvas.ordinaryFirstPortTrace = [];
+				for (const type of ["pointermove", "pointerdown"]) {
+					canvas.addEventListener(
+						type,
+						(event) => {
+							canvas.ordinaryFirstPortTrace.push({
+								type,
+								x: event.clientX,
+								y: event.clientY,
+								camera: { ...globalThis.__tileFab.camera },
+								markerStyle: document
+									.querySelector('[data-testid="ordinary-port-keyboard-target"]')
+									?.getAttribute("style"),
+								dataset: Object.fromEntries(
+									Object.entries(canvas.dataset).filter(([key]) =>
+										/camera|guidedPortKeyboard|hoverPort/i.test(key),
+									),
+								),
+							});
+						},
+						{ capture: true, once: true },
+					);
+				}
+				window.addEventListener(
+					"pointerdown",
+					() => {
+						canvas.ordinaryFirstPortTrace.push({
+							type: "pointerdown-complete",
+							camera: { ...globalThis.__tileFab.camera },
+							status: document.querySelector(".tilefab-statusbar")?.textContent,
+						});
+					},
+					{ once: true },
+				);
+			});
 			await page.mouse.click(firstPortTarget.x, firstPortTarget.y);
+			await writeFile(
+				path.join(artifactRoot, `ordinary-first-ohb-pointer-${viewport.label}.json`),
+				JSON.stringify(
+					{
+						target: firstPortTarget,
+						events: await page
+							.getByTestId("rail-canvas")
+							.evaluate((canvas) => canvas.ordinaryFirstPortTrace),
+					},
+					null,
+					2,
+				),
+			);
 			const firstPort = await waitForWorker(
 				page,
 				(metrics) =>
@@ -44422,8 +44625,10 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			);
 			const eqKeyboardMarkerPoint = await page.getByTestId("rail-canvas").evaluate((canvas) => {
 				const bounds = canvas.getBoundingClientRect();
-				const x = bounds.left + Number(canvas.dataset.guidedPortKeyboardScreenX);
-				const y = bounds.top + Number(canvas.dataset.guidedPortKeyboardScreenY);
+				const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+				if (!(marker instanceof HTMLElement)) throw new Error("EQ target marker missing");
+				const x = bounds.left + Number.parseFloat(marker.style.left);
+				const y = bounds.top + Number.parseFloat(marker.style.top);
 				return { x, y, hitCanvas: document.elementFromPoint(x, y) === canvas };
 			});
 			assertEqual(

@@ -114,6 +114,7 @@ import {
 	type StaticFabOrganizationBundlePlacementPreviewArtifact,
 } from "../core/StaticFabOrganizationBundlePlacementPreview";
 import { type Cell, cellKey, decodeRailCell, type RailCell, type TileMap } from "../core/TileMap";
+import { GUIDED_PORT_CALLOUT_FONTS, guidedPortCalloutLayout } from "./GuidedPortCalloutLayout";
 import {
 	nextPhysicalRailOverviewPoint,
 	overviewRailPointDistanceSquared,
@@ -1811,7 +1812,7 @@ export class TileRenderer {
 			input.guidedPortPlacement.gesture !== "row"
 		) {
 			const calloutRow = guidedRows[Math.floor((guidedRows.length - 1) / 2)] ?? guidedAnchorRow;
-			this.drawGuidedPortPlacementCallout(ctx, input, slots, calloutRow);
+			this.drawGuidedPortPlacementCallout(ctx, input, slots, calloutRow, markerRadius);
 		}
 	}
 
@@ -2030,6 +2031,7 @@ export class TileRenderer {
 		input: TileRenderInput,
 		slots: CompiledPortSlots,
 		row: number,
+		markerRadius: number,
 	): void {
 		const guidance = input.guidedPortPlacement;
 		if (!guidance) return;
@@ -2041,27 +2043,22 @@ export class TileRenderer {
 			input.camera,
 		);
 		ctx.save();
-		ctx.font = "700 10px ui-sans-serif, system-ui, sans-serif";
-		const labelWidth = ctx.measureText(guidance.label).width;
-		ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
-		const instructionWidth = ctx.measureText(guidance.instruction).width;
-		const reservedLeft = clamp(guidance.reservedLeftPixels ?? 0, 0, Math.max(0, input.width - 180));
-		const width = Math.min(
-			input.width - reservedLeft - 16,
-			Math.max(164, labelWidth, instructionWidth) + 20,
-		);
-		const height = 44;
-		const x = clamp(
-			anchor.x - width / 2,
-			reservedLeft + 8,
-			Math.max(reservedLeft + 8, input.width - width - 8),
-		);
-		const minimumY = (guidance.reservedTopPixels ?? 0) + 8;
-		const y = clamp(
-			anchor.y - 62,
-			minimumY,
-			Math.max(minimumY, input.height - (guidance.reservedBottomPixels ?? 0) - height - 8),
-		);
+		const layout = guidedPortCalloutLayout({
+			...guidance,
+			width: input.width,
+			height: input.height,
+			anchor,
+			markerRadius,
+			measure: (text, kind) => {
+				ctx.font = GUIDED_PORT_CALLOUT_FONTS[kind];
+				return ctx.measureText(text).width;
+			},
+		});
+		if (!layout) {
+			ctx.restore();
+			return;
+		}
+		const { x, y, width, height } = layout;
 		ctx.fillStyle = "rgba(10, 20, 21, 0.96)";
 		ctx.strokeStyle = slots.portType === "STK" ? "#d8b95f" : "#68cfd4";
 		ctx.lineWidth = 1.5;
@@ -2069,16 +2066,20 @@ export class TileRenderer {
 		ctx.fill();
 		ctx.stroke();
 		ctx.fillStyle = slots.portType === "STK" ? "#f6dc8b" : "#a8f3f5";
-		ctx.font = "700 10px ui-sans-serif, system-ui, sans-serif";
+		ctx.font = GUIDED_PORT_CALLOUT_FONTS.label;
 		ctx.textAlign = "left";
 		ctx.textBaseline = "top";
-		ctx.fillText(guidance.label, x + 10, y + 8);
+		layout.labelLines.forEach((line, index) => {
+			ctx.fillText(line, x + 10, y + 8 + index * 16);
+		});
 		ctx.fillStyle = "#b9c9ca";
-		ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
-		ctx.fillText(guidance.instruction, x + 10, y + 24);
+		ctx.font = GUIDED_PORT_CALLOUT_FONTS.instruction;
+		layout.instructionLines.forEach((line, index) => {
+			ctx.fillText(line, x + 10, y + layout.instructionOffset + index * 14);
+		});
 		ctx.beginPath();
-		ctx.moveTo(anchor.x, y + height);
-		ctx.lineTo(anchor.x, Math.min(anchor.y - 7, y + height + 12));
+		ctx.moveTo(layout.connector.x, layout.connector.fromY);
+		ctx.lineTo(layout.connector.x, layout.connector.toY);
 		ctx.stroke();
 		ctx.restore();
 	}
