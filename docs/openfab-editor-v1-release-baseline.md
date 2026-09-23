@@ -20,6 +20,10 @@ The release has one primary promise:
 Existing advanced authoring, derived 3D, readiness, and simulation work stays preserved. Later-stage
 capability does not justify exposing it in the default v1 journey before the editor promise passes.
 
+Reference study supports native modular construction rules, port-derived equipment orientation and
+later comparison playback. CAD import is outside the product plan; CAD export is only an optional
+future idea. Neither is a V1 or Twin View gate. Native project/blueprint round-trips remain required.
+
 ## 2. Release train and version policy
 
 The footer displays the package update version injected at build time, including compact layouts.

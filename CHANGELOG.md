@@ -6,14 +6,22 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.2
+
+- Make expanded authoring tool descriptions readable at 12px, wrap full names and instructions,
+  and size each button to its content. Compact equipment placement retains its canvas space.
+- Clarify that reference study informs modular rail rules, port-derived equipment and later
+  comparison playback. CAD import is outside the product plan; CAD export is an optional idea.
+
 ### Preview candidate 0.1.1
 
 - Show the package update version in the footer, including compact screens. This preview version
   does not indicate completion of the V1 authoring milestone.
 - Use readable Korean inspection tabs, summary categories and correction actions; keep diagnostic
   codes and current-project validation unchanged.
-- Document staged import review, port/slot identity, derived equipment 3D, reproducible comparison
-  and the distinction between demand replay and recorded-result playback as future requirements.
+- Document port/slot identity, derived equipment 3D, reproducible comparison and the distinction
+  between demand replay and recorded-result playback as future requirements. The proposed CAD
+  import milestone was withdrawn in 0.1.2 after clarification of the reference study purpose.
 
 ### Changed
 

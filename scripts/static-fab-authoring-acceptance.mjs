@@ -16090,6 +16090,7 @@ async function exerciseExpertBuildReleaseSurface(page) {
 			2,
 			`Expert ${viewport.width}px shows Build tool descriptions`,
 		);
+		await assertExpandedToolDescriptions(page, `Expert ${viewport.width}px Build`);
 		assertEqual(
 			await page.getByRole("group", { name: "레일 도구", exact: true }).count(),
 			1,
@@ -16177,6 +16178,7 @@ async function exerciseExpertBuildReleaseSurface(page) {
 				"true",
 				`Expert ${viewport.width}px ${activity} keyboard activation`,
 			);
+			await assertExpandedToolDescriptions(page, `Expert ${viewport.width}px ${activity}`);
 			const assembleMenu = page.getByTestId("static-fab-assemble-menu");
 			if (activity === "assemble") {
 				await assembleMenu.waitFor({ state: "visible", timeout: 2_000 });
@@ -38003,6 +38005,42 @@ async function assertActiveNavigatorTabPanel(page, tab) {
 	);
 }
 
+async function assertExpandedToolDescriptions(page, label) {
+	const tools = page.locator(
+		'.tilefab-app[data-guided-build-active="false"] .tilefab-tools[data-tool-density="expanded"] .tilefab-tool-button:has(.tilefab-tool-button-caption)',
+	);
+	for (const tool of await tools.all()) {
+		await tool.scrollIntoViewIfNeeded();
+		await assertLocatorOwnsHitArea(tool, `${label} readable tool`);
+		const presentation = await tool.evaluate((button) => {
+			const bounds = button.getBoundingClientRect();
+			return [
+				...button.querySelectorAll(
+					".tilefab-tool-button-caption strong, .tilefab-tool-button-caption small",
+				),
+			].map((text) => {
+				const range = document.createRange();
+				range.selectNodeContents(text);
+				return {
+					text: text.textContent,
+					fontSize: Number.parseFloat(getComputedStyle(text).fontSize),
+					fits: [...range.getClientRects()].every(
+						(rect) =>
+							rect.left >= bounds.left &&
+							rect.right <= bounds.right &&
+							rect.top >= bounds.top &&
+							rect.bottom <= bounds.bottom,
+					),
+				};
+			});
+		});
+		for (const text of presentation) {
+			assertAtLeast(text.fontSize, 12, `${label} ${text.text} font size`);
+			assertEqual(text.fits, true, `${label} ${text.text} fits its button`);
+		}
+	}
+}
+
 async function exerciseStaticFabNavigator(page) {
 	const before = await readMetrics(page);
 	const launcher = await activityCommandButton(page, "inspect", "FAB 내비게이터");
@@ -42380,7 +42418,7 @@ async function fitAndZoomOut(page, steps) {
 	await page.waitForTimeout(80);
 }
 
-async function centerWorld(page, world) {
+async function centerWorld(page, world, clearancePixels = 0) {
 	await page.evaluate(
 		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 	);
@@ -42388,26 +42426,25 @@ async function centerWorld(page, world) {
 		const box = await page.getByTestId("rail-canvas").boundingBox();
 		if (!box) throw new Error("Rail canvas has no visible bounds.");
 		const point = await screenPointForWorld(page, world);
-		const center = await page.getByTestId("rail-canvas").evaluate((canvas) => {
+		const center = await page.getByTestId("rail-canvas").evaluate((canvas, clearancePixels) => {
 			const box = canvas.getBoundingClientRect();
 			const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-			if (document.elementFromPoint(center.x, center.y) === canvas) return center;
+			const ownsArea = (point, radius) =>
+				[-radius, 0, radius].every((dx) =>
+					[-radius, 0, radius].every(
+						(dy) => document.elementFromPoint(point.x + dx, point.y + dy) === canvas,
+					),
+				);
+			if (ownsArea(center, clearancePixels)) return center;
 			// A taller equipment workspace may cover the geometric center. Pan from usable Canvas.
 			for (const y of [0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) {
 				for (const x of [0.5, 0.6, 0.4, 0.7, 0.3]) {
 					const point = { x: box.x + box.width * x, y: box.y + box.height * y };
-					if (
-						[-22, 0, 22].every((dx) =>
-							[-22, 0, 22].every(
-								(dy) => document.elementFromPoint(point.x + dx, point.y + dy) === canvas,
-							),
-						)
-					)
-						return point;
+					if (ownsArea(point, Math.max(22, clearancePixels))) return point;
 				}
 			}
 			throw new Error("No unobscured Canvas area for panning");
-		});
+		}, clearancePixels);
 		const delta = { x: center.x - point.x, y: center.y - point.y };
 		// A secondary drag shorter than 3 px is a cancel click in the editor. A target
 		// already inside that radius is centered enough; callers locate exact world input separately.
@@ -44048,10 +44085,28 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 					"short compact activity and library navigation",
 				);
 			}
-			await centerWorld(page, { x: 1.5, y: 0.5 });
+			// The full drag corridor must clear the expanded menu, not just its midpoint.
+			await centerWorld(page, { x: 1.5, y: 0.5 }, 64);
 			const before = await readMetrics(page);
 			const startPoint = await screenPointForWorld(page, { x: 0.5, y: 0.5 });
 			const endPoint = await screenPointForWorld(page, { x: 3.5, y: 0.5 });
+			assertEqual(
+				await page
+					.getByTestId("rail-canvas")
+					.evaluate(
+						(canvas, { startPoint, endPoint }) =>
+							Array.from({ length: 13 }, (_, index) => index / 12).every(
+								(ratio) =>
+									document.elementFromPoint(
+										startPoint.x + (endPoint.x - startPoint.x) * ratio,
+										startPoint.y + (endPoint.y - startPoint.y) * ratio,
+									) === canvas,
+							),
+						{ startPoint, endPoint },
+					),
+				true,
+				`${viewport.label} entire pointer drag corridor is visible Canvas`,
+			);
 			await page.mouse.move(startPoint.x, startPoint.y);
 			await page.mouse.down();
 			await page.mouse.move(endPoint.x, endPoint.y, { steps: 12 });
@@ -44171,7 +44226,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				committed,
 				`${viewport.label} impossible OHB recovery route switch`,
 			);
-			await centerWorld(page, { x: 2.5, y: 6.5 });
+			await centerWorld(page, { x: 2.5, y: 6.5 }, 64);
 			const clickStart = await screenPointForWorld(page, { x: 0.5, y: 6.5 });
 			const clickEnd = await screenPointForWorld(page, { x: 4.5, y: 6.5 });
 			await page.mouse.click(clickStart.x, clickStart.y);
@@ -44909,7 +44964,7 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 
 async function frameRailPointerGesture(page, start, end) {
 	for (let zoomStep = 0; zoomStep < 8; zoomStep += 1) {
-		await centerWorld(page, { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 });
+		await centerWorld(page, { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }, 64);
 		const points = [await screenPointForWorld(page, start), await screenPointForWorld(page, end)];
 		if (
 			await page.evaluate(

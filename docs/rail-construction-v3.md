@@ -2,8 +2,8 @@
 
 > Active specification, updated 2026-07-19. Scope is rail construction only. Native project
 > persistence and the port-first construction foundation are implemented; 3D, OHT vehicles,
-> production simulation, and legacy map import remain gated by the authoritative static-authoring
-> roadmap. Game-facing FAB pattern composition is the active rail acceptance extension.
+> production simulation remain gated by the authoritative static-authoring roadmap. CAD/field-map
+> import is outside the product plan. Game-facing FAB pattern composition is the active rail acceptance extension.
 
 Session continuation and the complete phase order are defined in [`HANDOFF.md`](./HANDOFF.md) and
 [`static-fab-authoring-roadmap.md`](./static-fab-authoring-roadmap.md).

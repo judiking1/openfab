@@ -1,23 +1,27 @@
 # Port-Derived Equipment and Scenario Boundaries
 
-> Architecture note for future import, derived 3D, and simulation work. It records public-safe
+> Architecture note for port-first modular authoring, derived 3D, and simulation work. It records public-safe
 > conclusions from a read-only private-reference study. No source body, raw row,
 > identifier, coordinate, layout, operational value, asset, credential, or company-specific naming
 > rule was copied into OpenFab.
 
 ## Status and roadmap gate
 
-Updated 2026-09-24 after renewed read-only analysis. The additional conclusions below are requirements,
-not a claim that generic CAD import, comparison or playback is implemented.
+Updated 2026-09-24 after clarification of the product intent. Reference study informs easier
+modular rail construction, the data needed to draw and connect rails, port-derived equipment
+orientation/3D, and synchronized playback of results from different simulation conditions.
+**CAD/field-map import is not a product requirement or a future milestone.** The earlier proposed
+CAD decode/preview/import pipeline is withdrawn. CAD export remains an optional low-priority idea,
+with no implementation or release gate. Native projects and OpenFab blueprint exchange are unchanged.
 
-### Additional import and experiment requirements
+### Modular authoring and experiment requirements
 
-CAD import must expose units, axes, origin, layers/heights, nested transforms, unsupported entities,
-connection repairs and direction decisions before commit. Arbitrary curves, slopes and off-grid
-geometry cannot be silently rounded into the current directed1m authoring grammar. An analysis
-preview must distinguish exact conversion, lossy conversion and unsupported geometry. Extending
-the canonical model requires a separate migration/Worker/physical-path contract; it must not create
-a second editable3D model. Source review evidence remains local and separate from runnable output.
+Modules declare directed entry/exit sockets, their occupied/clearance envelope, ownership and exact
+connection boundaries. Nearby rails are not implicitly connected. Users choose placement, rotation
+and useful dimensions; the compiler derives physical paths, length, tangents and legal stopping slots.
+Rail direction, service-face direction and equipment pose must be distinct and unambiguous. Shared
+IDs/transforms drive 2D, 3D, picking and diagnostics. Real-site-like test layouts are not reusable
+public fixtures; all module examples are independently synthetic.
 
 Equipment bodies, carrier storage slots and vehicle stopping ports are distinct concepts. Multiple
 access candidates require an explicit decision bound to the current geometry. Renumbering or
@@ -54,7 +58,14 @@ right one:
 - renderer objects, UI stores, source-file row order, and inferred display groups never become
   project truth.
 
-## Public-safe import conclusions
+## Existing station-proposal foundation (not a CAD roadmap)
+
+The following contracts describe the existing OpenFab-owned station proposal reader and review
+foundation, including its implementation history. They do not schedule CAD decoding, new external
+format adapters or a field-map import UI. Preserve these tested boundaries while prioritizing native
+modular authoring. References below to import mean this bounded proposal path unless stated otherwise.
+
+### Public-safe proposal conclusions
 
 External station sources may mix attachment, identity, physical grouping, control grouping,
 direction, capability, and operational metadata. Every field is therefore an untrusted proposal,
@@ -164,7 +175,7 @@ authority, atomicity, or `simulationReady === false`.
 
 ## Canonical import boundary
 
-An eventual station importer should be a proposal compiler, not a direct document loader:
+The existing station proposal path uses a proposal compiler rather than a direct document loader:
 
 ```text
 raw source
