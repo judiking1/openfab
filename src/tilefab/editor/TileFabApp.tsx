@@ -4371,7 +4371,7 @@ export default function TileFabApp(): React.ReactElement {
 			: guidedBuildPanelActionOwnsNextStep
 				? `안내 패널에서 강조된 ‘${guidedBuildCurrentPrompt?.suggestedActionLabel ?? "다음 작업"}’ 버튼을 선택하세요.`
 				: guidedBuildCompletionActionOwnsNextStep
-					? "안내 패널에서 강조된 ‘가이드 종료 · 편집 계속’ 버튼을 선택해 Guide와 CHECKS 결과를 닫고 일반 Inspect 편집으로 돌아가세요."
+					? "안내 패널에서 강조된 ‘가이드 종료 · 편집 계속’ 버튼을 선택해 가이드와 검사 결과를 닫고 일반 편집으로 돌아가세요."
 				: guidedBuildArrangementApplyOwnsNextStep
 					? "정렬 검토 패널에서 강조된 ‘APPLY’ 버튼을 선택하세요. 축이나 정렬 방식을 확인 중이면 Tab으로 APPLY에 이동한 뒤 Enter를 누르세요."
 					: guidedBuildArrangementCancelOwnsNextStep
@@ -20091,7 +20091,7 @@ export default function TileFabApp(): React.ReactElement {
 			setStaticFabProjectIssueId(issue.id);
 			setStaticFabProjectIssueLocation(boundedLocation);
 			setStatus(
-				"조직 ID가 중복되었거나 CHECKS 레코드가 현재 세대와 일치하지 않아 자동 선택하지 않았습니다",
+				"조직 ID가 중복되었거나 검사 레코드가 현재 세대와 일치하지 않아 자동 선택하지 않았습니다",
 			);
 			scheduleRender();
 			return false;
@@ -20205,7 +20205,7 @@ export default function TileFabApp(): React.ReactElement {
 				const rail = createRailAreaSelection(model.ownership, start, end, "intersect");
 				if (rail.ownerships.length === 0) {
 					projectSelectionBlocked = true;
-					setStatus("CHECKS 프로젝트 범위에 선택할 현재 레일 모듈이 없습니다");
+					setStatus("검사 대상 프로젝트 범위에 선택할 현재 레일 모듈이 없습니다");
 				} else {
 					updateStaticFabSelection(
 						createStaticFabSelection(
@@ -20278,7 +20278,7 @@ export default function TileFabApp(): React.ReactElement {
 			staticFabProjectIssueLocationRef.current,
 		);
 		if (!recheckContext) {
-			setStatus("현재 CHECKS 위치가 Inspector 대상과 정확히 일치하지 않아 이동하지 않았습니다");
+			setStatus("현재 검사 위치가 속성 패널 대상과 정확히 일치하지 않아 이동하지 않았습니다");
 			return;
 		}
 		ordinaryStaticFabIssueRecheckContextRef.current = recheckContext;
@@ -20611,7 +20611,7 @@ export default function TileFabApp(): React.ReactElement {
 				activePortEquipmentIntegrityIssues,
 			);
 			if (!resolved) {
-				setStatus("무결성 진단 대상은 읽기 전용입니다 · CHECKS에서 관계를 먼저 복구하세요");
+				setStatus("무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요");
 				scheduleRender();
 				return;
 			}
@@ -20678,7 +20678,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (!resolved || resolved.equipmentGroup.kind !== "OHB") {
 			setStatus(
 				selectedPort
-					? "무결성 진단 대상은 읽기 전용입니다 · CHECKS에서 관계를 먼저 복구하세요"
+					? "무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요"
 					: "한 개의 OHB 포트를 먼저 선택하세요",
 			);
 			return;
@@ -20727,7 +20727,7 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			setStatus(
 				selectedPort
-					? "무결성 진단 대상은 읽기 전용입니다 · CHECKS에서 관계를 먼저 복구하세요"
+					? "무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요"
 					: "EQ 또는 STK 그룹의 포트를 먼저 선택하세요",
 			);
 			return;
@@ -20789,7 +20789,7 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			setStatus(
 				selectedPort
-					? "무결성 진단 대상은 읽기 전용입니다 · CHECKS에서 관계를 먼저 복구하세요"
+					? "무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요"
 					: "EQ 또는 STK 그룹의 포트를 먼저 선택하세요",
 			);
 			return;
@@ -22019,7 +22019,7 @@ export default function TileFabApp(): React.ReactElement {
 			activePortEquipmentIntegrityIssues,
 		);
 		if (!selectedEquipment) {
-			setStatus("무결성 진단 대상 장비는 복제할 수 없습니다 · CHECKS에서 관계를 먼저 복구하세요");
+			setStatus("무결성 진단 대상 장비는 복제할 수 없습니다 · 검사 화면에서 관계를 먼저 복구하세요");
 			scheduleRender();
 			return;
 		}
@@ -22189,7 +22189,7 @@ export default function TileFabApp(): React.ReactElement {
 				)
 			: null;
 		if (selectedPort && !selectedEquipment) {
-			setStatus("무결성 진단 대상은 읽기 전용입니다 · CHECKS에서 관계를 먼저 복구하세요");
+			setStatus("무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요");
 			scheduleRender();
 			return;
 		}
@@ -27716,13 +27716,13 @@ export default function TileFabApp(): React.ReactElement {
 				: readiness.ready && currentStaticFabProjectChecks.ready
 					? "ready"
 					: "issues";
-	const staticFabPendingCheckLabel = staticFabCheckStatus === "unchecked" ? "REQUIRED" : "CHECKING";
+	const staticFabPendingCheckLabel = staticFabCheckStatus === "error" ? "검사 불가" : staticFabCheckStatus === "unchecked" ? "검사 필요" : "검사 중";
 	const staticFabCheckFingerprint =
 		currentStaticFabProjectChecks?.fingerprint ?? readiness.fingerprint;
 	const staticFabChecksUnavailableMessage = currentStaticFabInspectionError
-		? "CHECKS UNAVAILABLE"
+		? "검사 결과를 불러올 수 없습니다"
 		: currentStaticFabOverviewError
-			? "OVERVIEW UNAVAILABLE"
+			? "전체 지도를 불러올 수 없습니다"
 			: null;
 	const readinessDisplayIssues = [
 		...readiness.issues.filter(
@@ -27802,19 +27802,19 @@ export default function TileFabApp(): React.ReactElement {
 							: "unsafe";
 	const networkLabel = !startupReady
 		? startupState.status === "error"
-			? "PROJECT LOAD ERROR"
+			? "프로젝트 열기 실패"
 			: startupState.status === "worker"
-				? "PREPARING PROJECT"
-				: "ACTIVATING PROJECT"
+				? "프로젝트 준비 중"
+				: "프로젝트 여는 중"
 		: staticFabCheckStatus === "ready"
-			? "STATIC FAB READY"
+			? "FAB 검사 통과"
 			: staticFabCheckStatus === "checking"
-				? "CHECKING STATIC FAB"
+				? "FAB 검사 중"
 				: staticFabCheckStatus === "unchecked"
-					? "FAB CHECK REQUIRED"
+					? "FAB 검사 필요"
 					: staticFabCheckStatus === "error"
-						? "FAB CHECK ERROR"
-						: `FAB CHECK · ${staticFabCheckActionCount || staticFabCheckIssueCount}`;
+						? "FAB 검사 실패"
+						: `FAB 검사 · ${staticFabCheckActionCount || staticFabCheckIssueCount}건 확인`;
 	const presentedNetwork = staticFabCheckEntryPresentation({
 		baseState: networkState,
 		baseLabel: networkLabel,
@@ -32798,17 +32798,17 @@ export default function TileFabApp(): React.ReactElement {
 					>
 						<header>
 							<span>
-								<small>STATIC FAB CHECKS</small>
+								<small>FAB 검사</small>
 								<strong>
 									{staticFabCheckStatus === "ready"
-										? "STATIC FAB READY"
+										? "정적 FAB 검사 통과"
 										: staticFabCheckStatus === "checking"
-											? "CHECKING EXACT PROJECT"
+											? "현재 프로젝트 검사 중"
 											: staticFabCheckStatus === "error"
-												? "CHECKS UNAVAILABLE"
+												? "검사를 완료하지 못했습니다"
 												: staticFabCheckStatus === "unchecked"
-													? "FAB CHECK REQUIRED"
-													: `${staticFabCheckActionCount} ${staticFabCheckActionCount === 1 ? "ACTION" : "ACTIONS"}`}
+													? "검사가 필요합니다"
+													: `수정 필요 ${staticFabCheckActionCount}건`}
 								</strong>
 							</span>
 							<button
@@ -32877,36 +32877,36 @@ export default function TileFabApp(): React.ReactElement {
 										<AlertTriangle size={15} aria-hidden="true" />
 									)}
 									<span>
-										<strong>CURRENT-SOURCE RECHECK</strong>
+										<strong>수정 후 다시 검사한 결과</strong>
 										<small>{ordinaryStaticFabIssueRecheckOutcome.message}</small>
 									</span>
 								</div>
 							) : null}
 						<dl className="tilefab-readiness-checks">
 							<ReadinessCheck
-								label="RAIL FLOW"
+								label="레일 흐름"
 								passed={readiness.ready}
 								value={
 									readiness.ready
-										? "READY"
+										? "통과"
 										: readiness.status === "empty"
-											? "EMPTY"
+											? "레일 없음"
 											: readinessActionCount > 0
-												? `${readinessActionCount} ${readinessActionCount === 1 ? "ACTION" : "ACTIONS"}`
-												: `${readiness.issues.length} ${readiness.issues.length === 1 ? "ISSUE" : "ISSUES"}`
+												? `수정 ${readinessActionCount}건`
+												: `문제 ${readiness.issues.length}건`
 								}
 							/>
 							<ReadinessCheck
-								label="CLEARANCE"
+								label="레일 간격"
 								passed={readiness.summary.clearanceIssues === 0}
 								value={
 									readiness.summary.clearanceIssues === 0
-										? "CLEAR"
-										: `${readiness.summary.clearanceIssues} ISSUES`
+										? "통과"
+										: `${readiness.summary.clearanceIssues}건 확인`
 								}
 							/>
 							<ReadinessCheck
-								label="SWITCHES"
+								label="분기·합류"
 								state={
 									!currentStaticFabProjectChecks
 										? "pending"
@@ -32918,12 +32918,12 @@ export default function TileFabApp(): React.ReactElement {
 									!currentStaticFabProjectChecks
 										? staticFabPendingCheckLabel
 										: currentStaticFabProjectChecks.summary.switchIssueCount === 0
-											? `${currentStaticFabProjectChecks.summary.advancedSwitchCount} OK`
-											: `${currentStaticFabProjectChecks.summary.switchIssueCount} ISSUES`
+											? `${currentStaticFabProjectChecks.summary.advancedSwitchCount}개 통과`
+											: `${currentStaticFabProjectChecks.summary.switchIssueCount}건 확인`
 								}
 							/>
 							<ReadinessCheck
-								label="PORT REACH"
+								label="포트 연결"
 								state={
 									!currentStaticFabProjectChecks?.summary.portChecksComplete
 										? "pending"
@@ -32935,14 +32935,14 @@ export default function TileFabApp(): React.ReactElement {
 									!currentStaticFabProjectChecks
 										? staticFabPendingCheckLabel
 										: !currentStaticFabProjectChecks.summary.portChecksComplete
-											? "BLOCKED BY INTEGRITY"
+											? "데이터 오류 먼저 수정"
 											: currentStaticFabProjectChecks.summary.portIssueCount === 0
-												? `${currentStaticFabProjectChecks.summary.portCount} OK`
-												: `${currentStaticFabProjectChecks.summary.portIssueCount} ISSUES`
+												? `${currentStaticFabProjectChecks.summary.portCount}개 통과`
+												: `${currentStaticFabProjectChecks.summary.portIssueCount}건 확인`
 								}
 							/>
 							<ReadinessCheck
-								label="EQUIPMENT"
+								label="장비"
 								state={
 									!currentStaticFabProjectChecks?.summary.equipmentChecksComplete
 										? "pending"
@@ -32954,14 +32954,14 @@ export default function TileFabApp(): React.ReactElement {
 									!currentStaticFabProjectChecks
 										? staticFabPendingCheckLabel
 										: !currentStaticFabProjectChecks.summary.equipmentChecksComplete
-											? "BLOCKED BY INTEGRITY"
+											? "데이터 오류 먼저 수정"
 											: currentStaticFabProjectChecks.summary.equipmentIssueCount === 0
-												? `${currentStaticFabProjectChecks.summary.equipmentGroupCount} OK`
-												: `${currentStaticFabProjectChecks.summary.equipmentIssueCount} ISSUES`
+												? `${currentStaticFabProjectChecks.summary.equipmentGroupCount}개 통과`
+												: `${currentStaticFabProjectChecks.summary.equipmentIssueCount}건 확인`
 								}
 							/>
 							<ReadinessCheck
-								label="ORGANIZATION"
+								label="구조 소속"
 								state={
 									!currentStaticFabProjectChecks?.summary.organizationChecksComplete
 										? "pending"
@@ -32973,14 +32973,14 @@ export default function TileFabApp(): React.ReactElement {
 									!currentStaticFabProjectChecks
 										? staticFabPendingCheckLabel
 										: !currentStaticFabProjectChecks.summary.organizationChecksComplete
-											? "BLOCKED BY EQUIPMENT"
+											? "장비 오류 먼저 수정"
 											: currentStaticFabProjectChecks.summary.organizationIssueCount === 0
-												? `${currentStaticFabProjectChecks.summary.organizationCount} OK`
-												: `${currentStaticFabProjectChecks.summary.organizationIssueCount} ISSUES`
+												? `${currentStaticFabProjectChecks.summary.organizationCount}개 통과`
+												: `${currentStaticFabProjectChecks.summary.organizationIssueCount}건 확인`
 								}
 							/>
 							<ReadinessCheck
-								label="HIERARCHY"
+								label="계층"
 								state={
 									!currentStaticFabProjectChecks
 										? "pending"
@@ -32992,12 +32992,12 @@ export default function TileFabApp(): React.ReactElement {
 									!currentStaticFabProjectChecks
 										? staticFabPendingCheckLabel
 										: currentStaticFabProjectChecks.summary.hierarchyIssueCount === 0
-											? "RESOLVED"
-											: `${currentStaticFabProjectChecks.summary.hierarchyIssueCount} ISSUES`
+											? "확인 완료"
+											: `${currentStaticFabProjectChecks.summary.hierarchyIssueCount}건 확인`
 								}
 							/>
 							<ReadinessCheck
-								label="EXACT SOURCE"
+								label="검사 기준"
 								state={
 									currentStaticFabInspectionError
 										? "fail"
@@ -33007,12 +33007,12 @@ export default function TileFabApp(): React.ReactElement {
 								}
 								value={
 									currentStaticFabInspectionError
-										? "ERROR"
+										? "검사 실패"
 										: currentStaticFabProjectChecks
-											? "MATCHED"
+											? "현재 프로젝트"
 											: staticFabCheckStatus === "unchecked"
-												? "REQUIRED"
-												: "CHECKING"
+												? "검사 필요"
+												: "검사 중"
 								}
 							/>
 						</dl>
@@ -33118,11 +33118,11 @@ export default function TileFabApp(): React.ReactElement {
 								<h3 id="rail-readiness-guide-title">{activeReadinessGuide.title}</h3>
 								<p>{activeReadinessGuide.summary}</p>
 								<div className="tilefab-readiness-next-action">
-									<small>NEXT EDIT</small>
+									<small>다음 작업</small>
 									<p>{activeReadinessGuide.action}</p>
 									{activeOneWayRepairBlocked ? (
 										<span className="tilefab-readiness-auto-blocked">
-											<AlertTriangle size={12} /> AUTO BLOCKED · {activeOneWayRepairBlockedReason}
+											<AlertTriangle size={12} /> 자동 수정 불가 · {activeOneWayRepairBlockedReason}
 										</span>
 									) : null}
 								</div>
@@ -33138,13 +33138,13 @@ export default function TileFabApp(): React.ReactElement {
 											</button>
 											<span>
 												<Crosshair size={12} />
-												{activeReadinessLocationsComplete ? "" : "SAMPLE "}
+												{activeReadinessLocationsComplete ? "" : "대표 위치 "}
 												{readinessIssueLocation + 1}/{activeReadinessLocationCount}
 												{!activeReadinessLocationsComplete
-													? ` · ${activeReadinessIssue.affectedCount} AFFECTED`
+													? ` · ${activeReadinessIssue.affectedCount}곳 영향`
 													: ""}
 												{activeReadinessCorridor
-													? ` · ${Math.max(0, activeReadinessCorridor.cells.length - 1)} m CORRIDOR`
+													? ` · ${Math.max(0, activeReadinessCorridor.cells.length - 1)} m 구간`
 													: activeReadinessFocus
 														? ` · X ${activeReadinessFocus.x} · Z ${activeReadinessFocus.y}`
 														: ""}
@@ -33181,7 +33181,7 @@ export default function TileFabApp(): React.ReactElement {
 												<MousePointer2 size={13} />
 											)}
 											{activeOneWayRepairBlocked
-												? "INSPECT BRIDGE"
+												? "연결 레일 확인"
 												: activeReadinessGuide.repairLabel}
 										</button>
 									) : null}
@@ -33208,7 +33208,7 @@ export default function TileFabApp(): React.ReactElement {
 								</h3>
 								<p>{activeStaticFabProjectGuide.summary}</p>
 								<div className="tilefab-readiness-next-action">
-									<small>NEXT EDIT</small>
+									<small>다음 작업</small>
 									<p>{activeStaticFabProjectGuide.action}</p>
 								</div>
 								{activeStaticFabProjectIssue.locationCount > 0 ? (
@@ -33275,13 +33275,13 @@ export default function TileFabApp(): React.ReactElement {
 								role="alert"
 							>
 								<header>
-									<span>EXACT SOURCE CONTRACT</span>
-									<strong>CHECK FAILED</strong>
+									<span>현재 프로젝트 검사</span>
+									<strong>검사 실패</strong>
 								</header>
-								<h3>RELOAD STATIC FAB CHECKS</h3>
+								<h3>검사 패널을 다시 열어 주세요</h3>
 								<p>{currentStaticFabInspectionError}</p>
 								<div className="tilefab-readiness-next-action">
-									<small>NEXT EDIT</small>
+									<small>다음 작업</small>
 									<p>
 										현재 편집을 유지한 채 패널을 닫았다 다시 열어 같은 프로젝트 세대를 재검사하세요.
 									</p>
@@ -33290,10 +33290,10 @@ export default function TileFabApp(): React.ReactElement {
 						) : null}
 						<section className="tilefab-readiness-issues" aria-label="정적 FAB 문제 목록">
 							<header>
-								<span>ACTIONS</span>
+								<span>수정할 항목</span>
 								<strong>{staticFabCheckActionCount}</strong>
 								{staticFabCheckFollowUpCount > 0 ? (
-									<small>{staticFabCheckFollowUpCount} FOLLOW-UP</small>
+									<small>{staticFabCheckFollowUpCount}건 후속 확인</small>
 								) : null}
 								<div>
 									<button
@@ -33318,7 +33318,7 @@ export default function TileFabApp(): React.ReactElement {
 								{currentStaticFabInspectionPending && !currentStaticFabProjectChecks ? (
 									<div className="tilefab-readiness-clear" data-state="pending" role="status">
 										<RefreshCcw size={16} />
-										<span>CHECKING EXACT PROJECT SNAPSHOT</span>
+										<span>현재 프로젝트를 검사하고 있습니다</span>
 									</div>
 								) : staticFabCheckIssueCount === 0 && currentStaticFabProjectChecks ? (
 									<div
@@ -33330,19 +33330,19 @@ export default function TileFabApp(): React.ReactElement {
 										}
 									>
 										<Check size={16} />
-										<span>ALL STATIC FAB CHECKS PASSED</span>
+										<span>모든 정적 FAB 검사를 통과했습니다</span>
 									</div>
 								) : null}
 								{currentStaticFabInspectionError ? (
 									<>
 										<div className="tilefab-readiness-domain-label">
-											<span>SOURCE</span>
+											<span>프로젝트 데이터</span>
 											<small>1</small>
 										</div>
 										<div className="tilefab-readiness-source-error">
 											<AlertTriangle size={13} />
 											<span>
-												<strong>EXACT PROJECT CHECK FAILED</strong>
+												<strong>현재 프로젝트 검사에 실패했습니다</strong>
 												<small>{currentStaticFabInspectionError}</small>
 											</span>
 										</div>
@@ -33350,7 +33350,7 @@ export default function TileFabApp(): React.ReactElement {
 								) : null}
 								{displayedRailCheckIssues.length > 0 ? (
 									<div className="tilefab-readiness-domain-label">
-										<span>RAIL</span>
+										<span>레일</span>
 										<small>{readiness.issues.length}</small>
 									</div>
 								) : null}
@@ -39540,6 +39540,13 @@ export default function TileFabApp(): React.ReactElement {
 				</span>
 				<span ref={previewReadoutRef} className="tilefab-status-preview" />
 				<span className="tilefab-status-spacer" />
+				<small
+					className="tilefab-release-version"
+					data-testid="openfab-release-version"
+					title="OpenFab Builder 업데이트 버전 · 2D 제작 V1 개발 중"
+				>
+					v{import.meta.env.OPENFAB_APP_VERSION}
+				</small>
 				<span
 					className="tilefab-worker-state"
 					data-state={workerState.status}
@@ -40056,11 +40063,11 @@ function ReadinessCheck({
 }
 
 function staticFabProjectCheckDomainLabel(domain: StaticFabProjectCheckDomain): string {
-	if (domain === "switch") return "SWITCH";
-	if (domain === "port") return "PORT";
-	if (domain === "equipment") return "EQUIPMENT";
-	if (domain === "organization") return "ORGANIZATION";
-	return "HIERARCHY";
+	if (domain === "switch") return "분기·합류";
+	if (domain === "port") return "포트";
+	if (domain === "equipment") return "장비";
+	if (domain === "organization") return "구조";
+	return "계층";
 }
 
 function staticFabProjectCheckLocationLabel(
@@ -40102,7 +40109,7 @@ function staticFabProjectCheckInspectorLabel(
 		if (staticFabProjectChecksHaveAmbiguousPortEquipmentIdentity(checks)) return null;
 		const port = portEquipment.ports.find((candidate) => candidate.id === location.entityId);
 		return port && portEquipment.equipmentGroups.some((group) => group.id === port.equipmentGroupId)
-			? "OPEN PORT INSPECTOR"
+			? "포트 속성 열기"
 			: null;
 	}
 	if (location.kind === "equipment") {
@@ -40111,20 +40118,20 @@ function staticFabProjectCheckInspectorLabel(
 			(candidate) => candidate.id === location.entityId,
 		);
 		return group?.portIds.some((portId) => portEquipment.ports.some((port) => port.id === portId))
-			? "OPEN EQUIPMENT INSPECTOR"
+			? "장비 속성 열기"
 			: null;
 	}
-	if (location.kind === "switch") return "OPEN SWITCH INSPECTOR";
+	if (location.kind === "switch") return "스위치 속성 열기";
 	if (location.kind === "project") {
-		return map.size > 0 ? "OPEN AREA INSPECTOR" : null;
+		return map.size > 0 ? "영역 속성 열기" : null;
 	}
 	if (location.kind === "rail") {
 		const cell = staticFabProjectCheckRailCell(location);
-		return cell && map.getEncoded(cell.x, cell.y) !== 0 ? "OPEN RAIL INSPECTOR" : null;
+		return cell && map.getEncoded(cell.x, cell.y) !== 0 ? "레일 속성 열기" : null;
 	}
 	if (location.kind === "organization") {
 		return staticFabProjectCheckOrganizationTarget(checks, location, organizations)
-			? "OPEN ORGANIZATION"
+			? "구조 상세 열기"
 			: null;
 	}
 	return null;

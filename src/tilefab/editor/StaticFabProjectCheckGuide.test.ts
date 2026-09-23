@@ -25,8 +25,8 @@ describe("StaticFabProjectCheckGuide", () => {
 		);
 
 		expect(guide).toMatchObject({
-			title: "SEPARATE CONFLICTING PORTS",
-			metric: "2 LAYOUT FAULTS",
+			title: "겹친 포트를 분리하세요",
+			metric: "배치 오류 2건",
 			technicalLabel: "EQUIPMENT LAYOUT · PORT_SPACING",
 		});
 		expect(guide.action).toContain("OHB는 개별 포트");
@@ -59,8 +59,8 @@ describe("StaticFabProjectCheckGuide", () => {
 			}),
 		);
 
-		expect(guide.title).toBe("REBUILD EQ PORT ROW");
-		expect(guide.action).toContain("OPEN EQUIPMENT INSPECTOR");
+		expect(guide.title).toBe("EQ 포트 열을 다시 구성하세요");
+		expect(guide.action).toContain("장비 속성 열기");
 	});
 
 	it("directs EQ and STK body overlap to reservation separation", () => {
@@ -74,7 +74,7 @@ describe("StaticFabProjectCheckGuide", () => {
 			}),
 		);
 
-		expect(guide.title).toBe("SEPARATE EQUIPMENT RESERVATIONS");
+		expect(guide.title).toBe("장비 사이의 공간을 확보하세요");
 		expect(guide.action).toContain("EQ 본체와 STK 예약 범위");
 	});
 
@@ -104,7 +104,7 @@ describe("StaticFabProjectCheckGuide", () => {
 			}),
 		);
 
-		expect(guide.title).toBe("RESTORE RECIPROCAL PORT OWNERSHIP");
+		expect(guide.title).toBe("포트와 장비의 소속을 일치시키세요");
 		expect(guide.technicalLabel).toContain("PORT_GROUP_POINTER_MISMATCH");
 		expect(guide.action).toContain("자동 복구하지 않습니다");
 	});
@@ -122,7 +122,7 @@ describe("StaticFabProjectCheckGuide", () => {
 			"port 9,999 route is missing",
 		);
 
-		expect(guide.metric).toBe("10,000 LAYOUT FAULTS");
+		expect(guide.metric).toBe("배치 오류 10,000건");
 		expect(guide.summary).toBe("port 9,999 route is missing");
 	});
 
@@ -170,9 +170,9 @@ describe("StaticFabProjectCheckGuide", () => {
 			}),
 		);
 
-		expect(relation.title).toBe("REPAIR ORGANIZATION RELATIONS");
+		expect(relation.title).toBe("구조 사이의 관계를 확인하세요");
 		expect(relation.action).toContain("RELATIONS");
-		expect(ownership.title).toBe("SEPARATE DIRECT OWNERSHIP");
+		expect(ownership.title).toBe("겹친 직접 소속을 정리하세요");
 		expect(ownership.action).toContain("정확한 token");
 		expect(staticFabOrganizationIssueDetailTab("ORGANIZATION_PARENT_MISSING")).toBe("relations");
 		expect(staticFabOrganizationIssueDetailTab("ORGANIZATION_METADATA_INVALID")).toBe("properties");

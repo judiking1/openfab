@@ -450,7 +450,7 @@ export function GuidedBuildPanel({
 						<strong>저장한 파일에서 같은 FAB를 다시 열었습니다.</strong>
 						<small>
 							현재 FAB의 레일·포트·장비·조직과 프로젝트 설정이 모두 복원됐습니다. 아래 버튼을 누르면
-							이 안내와 CHECKS 결과를 닫고 일반 Inspect 편집으로 돌아갑니다.
+							이 안내와 검사 결과를 닫고 일반 편집으로 돌아갑니다.
 						</small>
 					</p>
 					{practiceGraduated ? (

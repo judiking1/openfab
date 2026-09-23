@@ -466,7 +466,7 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).toContain('data-guided-action-id="action:continue-editing"');
 		expect(markup).toContain('data-guided-target="true"');
 		expect(markup).toContain('aria-describedby="tilefab-guided-primary-target-description"');
-		expect(markup).toContain("이 안내와 CHECKS 결과를 닫고 일반 Inspect 편집으로 돌아갑니다");
+		expect(markup).toContain("이 안내와 검사 결과를 닫고 일반 편집으로 돌아갑니다");
 		expect(markup).not.toContain('aria-label="Guided Build 최소화"');
 		expect(markup).not.toContain("<span>접기</span>");
 	});

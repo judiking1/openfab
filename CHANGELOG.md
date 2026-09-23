@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.1
+
+- Show the package update version in the footer, including compact screens. This preview version
+  does not indicate completion of the V1 authoring milestone.
+- Use readable Korean inspection tabs, summary categories and correction actions; keep diagnostic
+  codes and current-project validation unchanged.
+- Document staged import review, port/slot identity, derived equipment 3D, reproducible comparison
+  and the distinction between demand replay and recorded-result playback as future requirements.
+
 ### Changed
 
 - Stocker configuration uses a labeled native menu. Selection-range review and current-port zoom

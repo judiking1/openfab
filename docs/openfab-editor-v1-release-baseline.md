@@ -22,6 +22,12 @@ capability does not justify exposing it in the default v1 journey before the edi
 
 ## 2. Release train and version policy
 
+The footer displays the package update version injected at build time, including compact layouts.
+Every user-facing release candidate must update that version and CHANGELOG together. A `0.x` preview
+does not declare the V1 product milestone complete, and native project schema versions are separate.
+Private and public commit IDs can differ for identical exported files; exact source and deployment
+commits belong in release evidence, not an unverified browser label derived from a previous HEAD.
+
 OpenFab uses Semantic Versioning: `major.minor.patch`.
 
 - `major`: a product series or an incompatible public contract change;

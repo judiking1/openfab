@@ -10,6 +10,7 @@ const artifactRoot = path.resolve(
 	process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR ?? path.join(root, "artifacts", "openfab-live-demo"),
 );
 const distRoot = path.join(root, "dist");
+const releaseVersion = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")).version;
 const host = "127.0.0.1";
 const requestedPort = Number(process.env.OPENFAB_LIVE_DEMO_PORT ?? 0);
 const previewBasePath = "/openfab-demo/";
@@ -83,6 +84,29 @@ try {
 	result.crossOriginIsolated = await page.evaluate(() => globalThis.crossOriginIsolated);
 	assertEqual(result.crossOriginIsolated, false, "ordinary static-host isolation");
 	await waitForReady(page);
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 760, height: 900 },
+		{ width: 390, height: 844 },
+		{ width: 390, height: 600 },
+	]) {
+		await page.setViewportSize(viewport);
+		const version = page.getByTestId("openfab-release-version");
+		await version.waitFor({ state: "visible" });
+		assertEqual(await version.textContent(), `v${releaseVersion}`, "visible release version");
+		const visible = await version.evaluate((element) => {
+			const box = element.getBoundingClientRect();
+			return (
+				box.left >= 0 &&
+				box.right <= innerWidth &&
+				box.top >= 0 &&
+				box.bottom <= innerHeight &&
+				element.scrollWidth <= element.clientWidth
+			);
+		});
+		assertEqual(visible, true, "release version fits the viewport");
+	}
+	await page.setViewportSize({ width: 1440, height: 900 });
 	result.header = { desktop: await readHeaderEvidence(page, "desktop") };
 	await page.setViewportSize({ width: 1280, height: 900 });
 	result.header.notebook = await readHeaderEvidence(page, "notebook");
@@ -308,7 +332,7 @@ async function readProductionNavigatorIdentity(activePage) {
 
 async function exerciseChecksSurface(activePage, guidedPanel, label) {
 	const checksToggle = activePage.getByTestId("rail-readiness-toggle");
-	assertEqual((await checksToggle.innerText()).trim(), "CHECKS", `${label} deferred check warning`);
+	assertEqual((await checksToggle.innerText()).trim(), "검사", `${label} deferred check warning`);
 	assertEqual(
 		await checksToggle.getAttribute("data-state"),
 		"guided",
@@ -317,7 +341,7 @@ async function exerciseChecksSurface(activePage, guidedPanel, label) {
 	await checksToggle.click();
 	const readinessPanel = activePage.getByTestId("rail-readiness-panel");
 	await readinessPanel.waitFor({ state: "visible" });
-	if ((await checksToggle.innerText()).trim() === "CHECKS") {
+	if ((await checksToggle.innerText()).trim() === "검사") {
 		throw new Error(`${label}: explicit Checks detour did not restore the real check status.`);
 	}
 	if ((await checksToggle.getAttribute("data-state")) === "guided") {
@@ -351,7 +375,7 @@ async function exerciseChecksSurface(activePage, guidedPanel, label) {
 	await guidedPanel.waitFor({ state: "visible" });
 	assertEqual(
 		(await checksToggle.innerText()).trim(),
-		"CHECKS",
+		"검사",
 		`${label} check warning re-deferral`,
 	);
 	assertEqual(
@@ -384,7 +408,7 @@ async function readGuidedProgressiveSurface(activePage, label) {
 		`${label} legacy mission eyebrow removal`,
 	);
 	const checksToggle = activePage.getByTestId("rail-readiness-toggle");
-	assertEqual((await checksToggle.innerText()).trim(), "CHECKS", `${label} deferred check warning`);
+	assertEqual((await checksToggle.innerText()).trim(), "검사", `${label} deferred check warning`);
 	assertEqual(
 		await checksToggle.getAttribute("data-state"),
 		"guided",
@@ -463,11 +487,7 @@ async function advanceToFirstRailSurface(activePage, guidedPanel) {
 		"First Rail legacy mission eyebrow removal",
 	);
 	const checksToggle = activePage.getByTestId("rail-readiness-toggle");
-	assertEqual(
-		(await checksToggle.innerText()).trim(),
-		"CHECKS",
-		"First Rail deferred check warning",
-	);
+	assertEqual((await checksToggle.innerText()).trim(), "검사", "First Rail deferred check warning");
 	assertEqual(
 		await checksToggle.getAttribute("data-state"),
 		"guided",

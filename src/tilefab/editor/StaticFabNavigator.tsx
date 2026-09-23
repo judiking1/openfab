@@ -335,14 +335,14 @@ export function StaticFabNavigator({
 				<NavigatorTabButton
 					active={tab === "map"}
 					tabId="map"
-					label="MAP"
+					label="전체 보기"
 					icon={<MapIcon size={14} />}
 					onClick={() => onTabChange("map")}
 				/>
 				<NavigatorTabButton
 					active={tab === "organizations"}
 					tabId="organizations"
-					label="ORGANIZATIONS"
+					label="구조"
 					count={model?.organizations.length ?? 0}
 					icon={<Network size={14} />}
 					onClick={() => onTabChange("organizations")}
@@ -350,7 +350,7 @@ export function StaticFabNavigator({
 				<NavigatorTabButton
 					active={tab === "checks"}
 					tabId="checks"
-					label="CHECKS"
+					label="검사"
 					count={totalIssueCount}
 					icon={<ListChecks size={14} />}
 					onClick={() => onTabChange("checks")}
@@ -428,7 +428,9 @@ export function StaticFabNavigator({
 						/>
 					) : (
 						<div className="tilefab-navigator-empty">
-							{preparing ? "PREPARING OVERVIEW" : (unavailableMessage ?? "EMPTY MAP")}
+							{preparing
+								? "전체 지도를 준비하고 있습니다"
+								: (unavailableMessage ?? "아직 레일이 없습니다")}
 						</div>
 					)}
 					<button
@@ -442,9 +444,11 @@ export function StaticFabNavigator({
 					</button>
 				</div>
 				<footer className="tilefab-navigator-footer">
-					<span>{model ? `${model.railCellCount.toLocaleString()} CELLS` : "NO RAIL"}</span>
-					<span>{model ? `${model.organizations.length.toLocaleString()} ORGS` : "0 ORGS"}</span>
-					<span>{totalIssueCount.toLocaleString()} ISSUES</span>
+					<span>{model ? `레일 ${model.railCellCount.toLocaleString()}칸` : "레일 없음"}</span>
+					<span>
+						{model ? `구조 ${model.organizations.length.toLocaleString()}개` : "구조 0개"}
+					</span>
+					<span>문제 {totalIssueCount.toLocaleString()}건</span>
 				</footer>
 			</div>
 			{(["map", "organizations", "checks"] as const)

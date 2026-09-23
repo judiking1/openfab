@@ -13,7 +13,7 @@ describe("staticFabCheckEntryPresentation", () => {
 			}),
 		).toEqual({
 			state: "guided",
-			label: "CHECKS",
+			label: "검사",
 			ariaLabel: "FAB 검사 열기 · 먼저 Rail을 만드세요",
 			taskFirst: true,
 			glyph: "checks",
@@ -58,7 +58,7 @@ describe("staticFabCheckEntryPresentation", () => {
 			}),
 		).toEqual({
 			state: "guided",
-			label: "CHECKS",
+			label: "검사",
 			ariaLabel: "FAB 검사 열기",
 			taskFirst: false,
 			glyph: "status",

@@ -2584,7 +2584,7 @@
 
 .tilefab-navigator-tabs {
 	display: grid;
-	grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.45fr) minmax(0, 0.9fr);
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 	border-bottom: 1px solid #293436;
 }
 
@@ -2786,7 +2786,7 @@
 
 .tilefab-readiness > header small {
 	color: #778587;
-	font-size: 9px;
+	font-size: 12px;
 	font-weight: 730;
 }
 
@@ -2861,24 +2861,22 @@
 	align-items: center;
 	gap: 5px;
 	min-width: 0;
-	overflow: hidden;
+	overflow: visible;
 	color: #879497;
-	font-size: 10px;
+	font-size: 12px;
 	font-weight: 680;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	white-space: normal;
 }
 
 .tilefab-readiness-checks dd {
 	min-width: 0;
 	max-width: 55%;
 	margin: 0;
-	overflow: hidden;
+	overflow: visible;
 	color: #d7dfdf;
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 720;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	white-space: normal;
 }
 
 .tilefab-operational-launch {
@@ -4208,7 +4206,9 @@
 @container tilefab-readiness (max-width: 500px) {
 	.tilefab-readiness-checks > div {
 		display: grid;
-		height: 48px;
+		height: auto;
+		min-height: 48px;
+		padding: 8px;
 		grid-template-columns: minmax(0, 1fr);
 		grid-template-rows: auto auto;
 		align-content: center;
@@ -4217,8 +4217,7 @@
 	}
 
 	.tilefab-readiness-checks dt {
-		overflow: hidden;
-		text-overflow: ellipsis;
+		overflow: visible;
 	}
 
 	.tilefab-readiness-checks dd {
@@ -4229,12 +4228,12 @@
 
 .tilefab-readiness-clear {
 	display: flex;
-	height: 76px;
+	min-height: 76px;
 	align-items: center;
 	justify-content: center;
 	gap: 7px;
 	color: #78d296;
-	font-size: 9px;
+	font-size: 12px;
 	font-weight: 690;
 }
 
@@ -10004,6 +10003,13 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	font-size: 16px;
 }
 
+.tilefab-release-version {
+	flex: none;
+	color: #aababc;
+	font-size: 12px;
+	white-space: nowrap;
+}
+
 .tilefab-brand small,
 .tilefab-project-trigger small {
 	font-size: var(--tilefab-font-caption);
@@ -11438,12 +11444,16 @@ button.tilefab-action-hint[data-guided-target="true"] {
 		overflow: visible;
 	}
 
-	.tilefab-readiness[data-focused="true"] > .tilefab-navigator-overview {
+	.tilefab-readiness > .tilefab-navigator-overview {
 		grid-template-rows: 44px;
 	}
 
-	.tilefab-readiness[data-focused="true"] > .tilefab-navigator-overview .tilefab-navigator-body {
+	.tilefab-readiness > .tilefab-navigator-overview .tilefab-navigator-body {
 		display: none;
+	}
+
+	.tilefab-readiness:not([data-focused="true"]) .tilefab-readiness-checks {
+		order: 0;
 	}
 
 	.tilefab-readiness-checks {

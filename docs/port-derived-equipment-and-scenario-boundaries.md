@@ -7,6 +7,37 @@
 
 ## Status and roadmap gate
 
+Updated 2026-09-24 after renewed read-only analysis. The additional conclusions below are requirements,
+not a claim that generic CAD import, comparison or playback is implemented.
+
+### Additional import and experiment requirements
+
+CAD import must expose units, axes, origin, layers/heights, nested transforms, unsupported entities,
+connection repairs and direction decisions before commit. Arbitrary curves, slopes and off-grid
+geometry cannot be silently rounded into the current directed1m authoring grammar. An analysis
+preview must distinguish exact conversion, lossy conversion and unsupported geometry. Extending
+the canonical model requires a separate migration/Worker/physical-path contract; it must not create
+a second editable3D model. Source review evidence remains local and separate from runnable output.
+
+Equipment bodies, carrier storage slots and vehicle stopping ports are distinct concepts. Multiple
+access candidates require an explicit decision bound to the current geometry. Renumbering or
+reconversion invalidates stale attachment choices. Field presence does not prove applied behavior;
+empty access fields, unused motion settings and excluded review rows must not become asserted
+capabilities or active counts. Structural file validity and simulation readiness are separate gates.
+
+Future comparisons freeze map/engine identities, actual applied settings, fleet, demand, initial
+inventory and independent random streams. Each execution owns its Worker and state. Equal seeds
+alone do not establish reproducibility: A/A checks must compare event identity, ordering, time and
+final state, even when aggregates match. Missing/truncated traces are inconclusive. Results use
+matching simulation-time windows with explicit gaps, sample counts, units and denominators;
+unmeasured values are not zero, and cumulative totals are not interval throughput.
+
+Demand-history replay feeds requests into current resource/physics rules; it does not force original
+completion times. Recorded-result playback instead reconstructs a time-indexed run and must verify
+seek/continuous-play equivalence. Carrier custody, crane/vehicle dependencies, exclusive resources,
+unmapped inputs and unknown initial inventory require explicit validation. These remain future
+requirements after the authoring and derived3D gates.
+
 This note does not authorize simulation work. Static authoring, native project persistence,
 port-first equipment authoring, complete 2D validation, and the derived 3D exit gate must precede
 OHT simulation. `simulationReady` stays `false` until the separate simulation-readiness contract is

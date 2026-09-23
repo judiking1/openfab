@@ -33,10 +33,10 @@ describe("RailReadinessIssueGuide", () => {
 		const guide = railReadinessIssueGuide(diagnosticReport, diagnostic);
 
 		expect(guide).toMatchObject({
-			title: "ONE-WAY BRIDGE NEEDS A RETURN LINK",
-			metric: "1 ONE-WAY BRIDGE",
+			title: "돌아오는 연결이 필요합니다",
+			metric: "단방향 연결 1개",
 			repairTool: "replace-one-way",
-			repairLabel: "AUTO REBUILD LINK",
+			repairLabel: "왕복 연결 자동 복구",
 			technicalLabel: "DIRECTED CONNECTIVITY",
 			role: "primary",
 			highlightKind: "corridor",
@@ -64,8 +64,8 @@ describe("RailReadinessIssueGuide", () => {
 		);
 
 		expect(guide).toMatchObject({
-			title: "PHYSICAL FLOW RECHECK",
-			metric: "WAITING FOR FLOW FIX",
+			title: "레일 수정 후 경로를 다시 검사합니다",
+			metric: "레일 흐름 수정 대기",
 			repairTool: null,
 			repairLabel: null,
 			role: "consequence",
@@ -141,7 +141,7 @@ describe("RailReadinessIssueGuide", () => {
 	it("uses the correct engineering count noun instead of an affected-cell label", () => {
 		expect(
 			railReadinessIssueGuide(report({ openTerminals: 2 }), issue("OPEN_TERMINAL", 2)).metric,
-		).toBe("2 OPEN ENDS");
+		).toBe("열린 끝점 2개");
 		expect(
 			railReadinessIssueGuide(
 				report({ clearanceIssues: 1 }),
@@ -168,7 +168,7 @@ describe("RailReadinessIssueGuide", () => {
 		expect(guide).toMatchObject({
 			role: "consequence",
 			causedByCode: "DISCONNECTED_NETWORK",
-			repairLabel: "BUILD A BRIDGE",
+			repairLabel: "연결 레일 만들기",
 		});
 	});
 

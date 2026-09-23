@@ -26,7 +26,7 @@ export function staticFabCheckEntryPresentation(input: {
 	if (input.guidedDeferred || ordinaryTaskFirst) {
 		return Object.freeze({
 			state: "guided",
-			label: "CHECKS",
+			label: "검사",
 			ariaLabel: ordinaryTaskFirst ? "FAB 검사 열기 · 먼저 Rail을 만드세요" : "FAB 검사 열기",
 			taskFirst: ordinaryTaskFirst,
 			glyph: ordinaryTaskFirst ? "checks" : "status",

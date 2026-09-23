@@ -56,9 +56,9 @@ describe("StaticFabNavigator task-first entry", () => {
 		expect(markup).toContain(
 			'id="tilefab-fab-navigator-panel-map" aria-labelledby="tilefab-fab-navigator-tab-map"',
 		);
-		expect(markup).toContain("MAP");
-		expect(markup).toContain("ORGANIZATIONS");
-		expect(markup).toContain("CHECKS");
+		expect(markup).toContain("전체 보기");
+		expect(markup).toContain("구조");
+		expect(markup).toContain("검사");
 		expect(markup).not.toContain('data-navigator-tab-id="equipment"');
 	});
 

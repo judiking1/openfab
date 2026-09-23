@@ -101,6 +101,16 @@ if (publicExportManifest.includeFiles?.includes("vercel.json")) {
 }
 requireEqual(builderViteConfig.base, "./", "Builder static-host base");
 requireEqual(runtimeViteConfig.base, "./", "runtime static-host base");
+requireEqual(
+	builderViteConfig.define["import.meta.env.OPENFAB_APP_VERSION"],
+	JSON.stringify(version),
+	"visible Builder version matches package",
+);
+requireEqual(
+	runtimeViteConfig.define["import.meta.env.OPENFAB_APP_VERSION"],
+	JSON.stringify(version),
+	"visible runtime version matches package",
+);
 requireNoIsolationHeaders(builderViteConfig.server.headers, "Builder development server");
 requireNoIsolationHeaders(builderViteConfig.preview.headers, "Builder preview server");
 requireIsolationHeaders(runtimeViteConfig.server.headers, "runtime development server");

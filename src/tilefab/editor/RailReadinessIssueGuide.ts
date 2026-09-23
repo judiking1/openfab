@@ -41,34 +41,34 @@ export function railReadinessIssueGuide(
 	const count = issue.affectedCount.toLocaleString("en-US");
 	if (issue.code === "EMPTY_PROJECT") {
 		return guide(
-			"START A RAIL NETWORK",
+			"레일부터 만들어 주세요",
 			"아직 검사할 레일이 없습니다.",
 			"첫 폐루프 패턴을 배치하거나 레일 건설 도구로 폐쇄형 경로를 만드세요.",
-			"NO RAIL",
+			"레일 없음",
 			"build",
-			"OPEN RAIL BUILD",
+			"레일 만들기",
 			"EMPTY PROJECT",
 		);
 	}
 	if (issue.code === "OPEN_TERMINAL") {
 		return guide(
-			"CLOSE OPEN RAIL ENDS",
+			"열린 레일 끝을 연결하세요",
 			`단방향 레일의 시작점 또는 진행 종료점이 ${count}개 열려 있습니다. 외형이 거의 루프여도 한 칸의 미연결 끝점이면 폐쇄망이 아닙니다.`,
 			"진행이 끝나는 열린 끝점에서 이어 그려 호환되는 시작점에 합류시키세요. 시작점이 강조된 경우 가장 가까운 진행 종료점으로 이동해 건설을 시작합니다.",
-			`${count} OPEN ${issue.affectedCount === 1 ? "END" : "ENDS"}`,
+			`열린 끝점 ${count}개`,
 			"build",
-			"CONTINUE RAIL",
+			"레일 이어 만들기",
 			"OPEN TERMINAL",
 		);
 	}
 	if (issue.code === "DISCONNECTED_NETWORK") {
 		return guide(
-			"JOIN SEPARATE RAIL NETWORKS",
+			"떨어진 레일망을 연결하세요",
 			`각자 닫혀 보일 수 있지만 프로젝트가 물리적으로 떨어진 ${count}개 레일 네트워크로 나뉘어 있습니다.`,
 			"두 네트워크 사이에 진행 방향을 보존하는 분기와 합류 브리지를 추가하세요.",
-			`${count} NETWORKS`,
+			`분리된 레일망 ${count}개`,
 			"build",
-			"BUILD A BRIDGE",
+			"연결 레일 만들기",
 			"WEAK CONNECTIVITY",
 			{ highlightKind: "region" },
 		);
@@ -81,10 +81,10 @@ export function railReadinessIssueGuide(
 			physicallyJoined && !causedByOpenEnds && issue.sourceCode === "ONE_WAY_CORRIDOR";
 		return guide(
 			oneWayCorridor
-				? "ONE-WAY BRIDGE NEEDS A RETURN LINK"
+				? "돌아오는 연결이 필요합니다"
 				: physicallyJoined
-					? "FINISH THE OPEN FLOW"
-					: "JOIN DIRECTED LOOPS",
+					? "열린 레일 흐름을 완성하세요"
+					: "각 순환 레일을 연결하세요",
 			oneWayCorridor
 				? `레일 선형 자체가 끊어진 것은 아닙니다. 강조된 단방향 연결 ${count}개는 한 순환망에서 다른 순환망으로 들어가는 길만 만들고, 반대로 돌아오는 길은 만들지 못했습니다. 화살표를 따라 전체 맵을 왕복 순환하려면 검증된 반대 방향 연결이 최소 ${report.summary.minimumReturnLinks.toLocaleString("en-US")}개 더 필요합니다.`
 				: physicallyJoined
@@ -95,11 +95,13 @@ export function railReadinessIssueGuide(
 				: physicallyJoined
 					? "먼저 강조된 열린 끝점을 서로 연결해 폐루프를 완성하세요."
 					: "각 루프를 한 방향으로 나가기만 하는 선이 아니라 분기와 합류가 모두 있는 브리지로 연결하세요.",
-			oneWayCorridor
-				? `${count} ONE-WAY ${issue.affectedCount === 1 ? "BRIDGE" : "BRIDGES"}`
-				: `${count} FLOW REGIONS`,
+			oneWayCorridor ? `단방향 연결 ${count}개` : `나뉜 흐름 ${count}개`,
 			oneWayCorridor ? "replace-one-way" : "build",
-			oneWayCorridor ? "AUTO REBUILD LINK" : physicallyJoined ? "CONTINUE RAIL" : "BUILD A BRIDGE",
+			oneWayCorridor
+				? "왕복 연결 자동 복구"
+				: physicallyJoined
+					? "레일 이어 만들기"
+					: "연결 레일 만들기",
 			"DIRECTED CONNECTIVITY",
 			{
 				role: causedByOpenEnds || causedBySeparateNetworks ? "consequence" : "primary",
@@ -114,47 +116,47 @@ export function railReadinessIssueGuide(
 	}
 	if (issue.code === "UNSUPPORTED_JUNCTION") {
 		return guide(
-			"REBUILD INVALID JUNCTION",
+			"잘못된 분기·합류를 다시 만드세요",
 			`AMHS 접선 분기·합류 규격을 벗어난 교차점이 ${count}개 있습니다.`,
 			"강조된 교차점을 선택해 철거한 뒤 진행 방향을 유지하는 분기 또는 합류 모듈로 다시 만드세요.",
-			`${count} JUNCTIONS`,
+			`분기·합류 ${count}곳`,
 			"inspect",
-			"INSPECT JUNCTION",
+			"분기·합류 확인",
 			"JUNCTION GRAMMAR",
 		);
 	}
 	if (issue.code === "CLEARANCE_CONFLICT") {
 		return guide(
-			"SEPARATE OVERLAPPING RAIL",
+			"겹친 레일의 간격을 확보하세요",
 			`레일 빔, OHT 이동 공간 또는 설치 여유가 겹치는 충돌 구역이 ${count}개 있습니다.`,
 			"강조된 두 경로 중 하나를 선택해 평행 이동하거나 충분한 셀 간격으로 다시 건설하세요.",
-			`${count} CLEARANCE ${issue.affectedCount === 1 ? "CONFLICT" : "CONFLICTS"}`,
+			`간격 충돌 ${count}곳`,
 			"inspect",
-			"INSPECT CONFLICT",
+			"겹친 위치 확인",
 			technicalLabel(issue, "PHYSICAL CLEARANCE"),
 			{ highlightKind: "path" },
 		);
 	}
 	if (issue.code === "INVALID_PHYSICAL_PATH") {
 		return guide(
-			"REBUILD UNCOMPILED RAIL",
+			"변환되지 않은 레일을 다시 만드세요",
 			`저작 레일 중 ${count}개 경로가 실제 곡선·직선 물리 경로로 변환되지 않았습니다.`,
 			"강조된 레일 모듈을 선택해 철거한 뒤 카탈로그 모듈로 다시 건설하세요.",
-			`${count} INVALID ${issue.affectedCount === 1 ? "PATH" : "PATHS"}`,
+			`잘못된 경로 ${count}개`,
 			"inspect",
-			"INSPECT RAIL",
+			"레일 확인",
 			"PHYSICAL COMPILATION",
 			{ highlightKind: "path" },
 		);
 	}
 	if (issue.code === "PHYSICAL_TERMINAL") {
 		return guide(
-			"CLOSE PHYSICAL RAIL ENDS",
+			"끊긴 물리 경로를 연결하세요",
 			`화면의 물리 레일 경로가 ${count}개 끝점에서 더 이어지지 않습니다.`,
 			"강조된 끝점의 레일 셀과 진행 방향을 검사하고 호환되는 모듈로 연결을 다시 만드세요.",
-			`${count} PHYSICAL ENDS`,
+			`끊긴 물리 끝점 ${count}개`,
 			"inspect",
-			"INSPECT END",
+			"끝점 확인",
 			"PHYSICAL TERMINAL",
 			{
 				role: report.summary.openTerminals > 0 ? "consequence" : "primary",
@@ -165,12 +167,12 @@ export function railReadinessIssueGuide(
 	}
 	if (issue.code === "PHYSICAL_OPEN_PATH") {
 		return guide(
-			"REPAIR PATH CONTINUITY",
+			"이어지지 않는 경로를 수정하세요",
 			`컴파일된 레일 ${count}개가 다음 물리 경로로 완전히 이어지지 않습니다.`,
 			"강조된 대표 경로 시작점에서 진행 방향을 따라가며 끊긴 끝을 찾고, 직선·커브·분기 모듈이 같은 방향과 접선으로 만나도록 다시 건설하세요.",
-			`${count} OPEN ${issue.affectedCount === 1 ? "PATH" : "PATHS"}`,
+			`이어지지 않는 경로 ${count}개`,
 			"inspect",
-			"TRACE OPEN PATH",
+			"끊긴 경로 따라가기",
 			"PHYSICAL ADJACENCY",
 			{
 				role: report.summary.openTerminals > 0 ? "consequence" : "primary",
@@ -182,16 +184,16 @@ export function railReadinessIssueGuide(
 	if (issue.code === "PHYSICAL_DISCONNECTED") {
 		const authoredAlreadySplit = report.summary.strongComponents !== 1;
 		return guide(
-			authoredAlreadySplit ? "PHYSICAL FLOW RECHECK" : "PHYSICAL FLOW IS SPLIT",
+			authoredAlreadySplit ? "레일 수정 후 경로를 다시 검사합니다" : "물리 경로가 나뉘어 있습니다",
 			authoredAlreadySplit
 				? "물리 경로 검사는 현재 저작 방향망 문제의 파생 결과입니다. 별도로 고칠 두 번째 오류가 아닙니다."
 				: `저작 방향망은 연결됐지만 실제 곡선·직선 경로가 ${count}개 흐름 구역으로 분리되어 있습니다.`,
 			authoredAlreadySplit
-				? "위의 ONE-WAY BRIDGE 또는 열린 끝점을 수정하면 물리 경로를 자동으로 다시 컴파일하고 이 항목을 재검사합니다."
+				? "위의 단방향 연결 또는 열린 끝점을 수정하면 물리 경로를 자동으로 다시 컴파일하고 이 항목을 재검사합니다."
 				: "강조된 대표 경로 시작점에서 흐름을 추적하고 방향과 접선이 맞는 카탈로그 모듈로 다시 건설하세요.",
-			authoredAlreadySplit ? "WAITING FOR FLOW FIX" : `${count} PHYSICAL REGIONS`,
+			authoredAlreadySplit ? "레일 흐름 수정 대기" : `나뉜 물리 경로 ${count}개`,
 			authoredAlreadySplit ? null : "inspect",
-			authoredAlreadySplit ? null : "TRACE FLOW REGION",
+			authoredAlreadySplit ? null : "경로 구역 따라가기",
 			"PHYSICAL CONNECTIVITY",
 			{
 				role: authoredAlreadySplit ? "consequence" : "primary",
@@ -201,12 +203,12 @@ export function railReadinessIssueGuide(
 		);
 	}
 	return guide(
-		"REBUILD INVALID TOPOLOGY",
+		"잘못된 레일 연결을 다시 만드세요",
 		"저작 레일과 물리 경로 사이에 변환할 수 없는 토폴로지 오류가 있습니다.",
 		"강조된 모듈을 검사해 철거한 뒤 지원되는 직선·커브·분기·합류 모듈로 다시 건설하세요.",
-		`${count} TOPOLOGY ${issue.affectedCount === 1 ? "ERROR" : "ERRORS"}`,
+		`레일 연결 오류 ${count}건`,
 		"inspect",
-		"INSPECT RAIL",
+		"레일 확인",
 		technicalLabel(issue, "TOPOLOGY"),
 	);
 }

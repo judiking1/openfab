@@ -3327,7 +3327,7 @@ async function exerciseGuidedBuildReleaseSurface(page, firstRunDialog) {
 	const guidedChecksToggle = page.getByTestId("rail-readiness-toggle");
 	assertEqual(
 		(await guidedChecksToggle.innerText()).trim(),
-		"CHECKS",
+		"검사",
 		"Guided defers the premature check warning",
 	);
 	assertEqual(
@@ -3462,7 +3462,7 @@ async function exerciseGuidedBuildReleaseSurface(page, firstRunDialog) {
 		);
 		assertEqual(
 			(await guidedChecksToggle.innerText()).trim(),
-			"CHECKS",
+			"검사",
 			"Guided First Rail keeps the check warning deferred",
 		);
 	}
@@ -3869,7 +3869,7 @@ async function auditBlankFabCheckPriority(page, viewport, canvas) {
 	);
 	assertEqual(
 		(await checkEntry.innerText()).trim(),
-		"CHECKS",
+		"검사",
 		`blank FAB Check uses neutral copy ${viewport.label}`,
 	);
 	assertEqual(
@@ -3974,7 +3974,7 @@ async function auditBlankFabCheckPriority(page, viewport, canvas) {
 	);
 	assertIncludes(
 		explicitPresentation.label,
-		"FAB CHECK",
+		"FAB 검사",
 		`explicit blank FAB Check reveals real label ${viewport.label}`,
 	);
 	assertEqual(
@@ -4014,7 +4014,7 @@ async function auditBlankFabCheckPriority(page, viewport, canvas) {
 	);
 	assertEqual(
 		(await checkEntry.innerText()).trim(),
-		"CHECKS",
+		"검사",
 		`blank FAB Check returns to neutral copy ${viewport.label}`,
 	);
 	await clickActivityCommand(page, "build", "레일 건설");
@@ -13517,7 +13517,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		assertIncludes(
 			await panel.innerText(),
-			"이 안내와 CHECKS 결과를 닫고 일반 Inspect 편집으로 돌아갑니다",
+			"이 안내와 검사 결과를 닫고 일반 편집으로 돌아갑니다",
 			"Guided completion explains the exact handoff",
 		);
 		await assertLocatorInsideViewport(page, continueEditing);
@@ -18138,11 +18138,11 @@ async function exerciseCurrentLargeFabContinuity(page, expectedAuthored) {
 	assertEqual(checked.staticFabCheckIssues, "0", "Large FAB CHECKS issues");
 	const exactSource = await checksPanel.evaluate((panel) => {
 		const label = Array.from(panel.querySelectorAll("dt")).find(
-			(element) => element.textContent?.trim() === "EXACT SOURCE",
+			(element) => element.textContent?.trim() === "검사 기준",
 		);
 		return label?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
 	});
-	assertEqual(exactSource, "MATCHED", "Large FAB CHECKS exact source");
+	assertEqual(exactSource, "현재 프로젝트", "Large FAB CHECKS exact source");
 	await checksPanel.getByRole("button", { name: "정적 FAB 검사 패널 닫기", exact: true }).click();
 	await checksPanel.waitFor({ state: "hidden" });
 	assertExactStaticFabModelIdentity(
@@ -38355,11 +38355,69 @@ async function exerciseStaticFabNavigator(page) {
 	);
 	const exactSourceValue = await readinessPanel.evaluate((panel) => {
 		const label = Array.from(panel.querySelectorAll("dt")).find(
-			(element) => element.textContent?.trim() === "EXACT SOURCE",
+			(element) => element.textContent?.trim() === "검사 기준",
 		);
 		return label?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
 	});
-	assertEqual(exactSourceValue, "MATCHED", "whole-project exact source contract");
+	assertEqual(exactSourceValue, "현재 프로젝트", "whole-project exact source contract");
+
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 760, height: 900 },
+		{ width: 390, height: 844 },
+		{ width: 390, height: 600 },
+	]) {
+		await page.setViewportSize(viewport);
+		const layout = await readinessPanel.evaluate((panel) => {
+			const tabs = Array.from(panel.querySelectorAll(".tilefab-navigator-tab"));
+			const labels = Array.from(panel.querySelectorAll(".tilefab-navigator-tab-label"));
+			const values = Array.from(
+				panel.querySelectorAll(".tilefab-readiness-checks dt, .tilefab-readiness-checks dd"),
+			);
+			return {
+				tabLabels: labels.map((label) => label.textContent.trim()),
+				summaryStartsVisible: (() => {
+					const first = values[0]?.parentElement.getBoundingClientRect();
+					const bounds = panel.getBoundingClientRect();
+					return Boolean(first && first.top >= bounds.top && first.bottom <= bounds.bottom);
+				})(),
+				tabClipped: labels.some((label) => label.scrollWidth > label.clientWidth),
+				smallTarget: tabs.some((tab) => tab.getBoundingClientRect().height < 44),
+				valueCount: values.length,
+				unreadable: values.some((value) => {
+					const style = getComputedStyle(value);
+					const range = document.createRange();
+					range.selectNodeContents(value);
+					const text = range.getBoundingClientRect();
+					const row = value.parentElement.getBoundingClientRect();
+					return (
+						Number.parseFloat(style.fontSize) < 12 ||
+						text.left < row.left - 1 ||
+						text.right > row.right + 1 ||
+						text.top < row.top - 1 ||
+						text.bottom > row.bottom + 1
+					);
+				}),
+			};
+		});
+		assertEqual(layout.tabLabels.join("/"), "전체 보기/구조/검사", "readable navigator labels");
+		assertEqual(
+			layout.tabClipped,
+			false,
+			`navigator labels at ${viewport.width}×${viewport.height}`,
+		);
+		assertEqual(layout.smallTarget, false, "navigator 44px tab targets");
+		assertEqual(layout.valueCount, 16, "eight complete inspection summary pairs");
+		assertEqual(
+			layout.summaryStartsVisible,
+			true,
+			"inspection summary begins in the visible panel",
+		);
+		assertEqual(layout.unreadable, false, "inspection summary text stays inside its row");
+		await page.screenshot({
+			path: path.join(artifactRoot, `inspection-readable-${viewport.width}x${viewport.height}.png`),
+		});
+	}
 
 	await page.setViewportSize({ width: 720, height: 900 });
 	await page.waitForTimeout(100);
@@ -38915,7 +38973,7 @@ async function exerciseStaticFabIssueInspectorRecheck(activeBrowser) {
 		const issueGuide = page.getByTestId("static-fab-project-check-guide");
 		await issueGuide.waitFor({ state: "visible" });
 		const openInspector = page.getByTestId("open-static-fab-issue-inspector");
-		assertEqual(await openInspector.textContent(), "OPEN AREA INSPECTOR", "issue Inspector target");
+		assertEqual(await openInspector.textContent(), "영역 속성 열기", "issue Inspector target");
 		await openInspector.click();
 		await checksPanel.waitFor({ state: "hidden" });
 

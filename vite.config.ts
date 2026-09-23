@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
@@ -11,7 +12,11 @@ const ISOLATION_HEADERS = {
 
 export default defineConfig(({ mode }) => {
 	const isolatedRuntime = mode === "runtime";
+	const { version } = JSON.parse(readFileSync(path.join(__dirname, "package.json"), "utf8"));
 	return {
+		define: {
+			"import.meta.env.OPENFAB_APP_VERSION": JSON.stringify(version),
+		},
 		// Keep Builder deployable at either a domain root or an unknown repository path.
 		base: "./",
 		plugins: [react(), tailwindcss()],
