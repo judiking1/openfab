@@ -59,11 +59,11 @@ describe("StkDraftPresentation", () => {
 	it("keeps the selected template grammar visible before and after a choice", () => {
 		expect(stkTemplatePresentation("FLEX")).toEqual({
 			label: "자유 선택",
-			requirement: "레일 중앙 포트 1개 이상",
+			requirement: "레일 중앙 포트 1~16개",
 		});
 		expect(stkTemplatePresentation("BACK_TO_BACK")).toEqual({
 			label: "양쪽 짝(B2B)",
-			requirement: "반대 방향 평행 레일의 정렬된 짝 · 짝수 4개 이상",
+			requirement: "6 m 이내 반대 방향 평행 레일 · 정렬된 포트 2쌍 이상",
 		});
 		expect(stkDraftAuthoringInstruction("FOUR_PORT", null, 20)).toBe(
 			"연속 4개 · 같은 직선 레일의 연속 4개 · 포인터: 금색 ◇ 포트 클릭으로 첫 Port 선택 · 키보드: 방향키/WASD 이동 → Enter · Esc Stocker 배치 종료",
@@ -71,7 +71,7 @@ describe("StkDraftPresentation", () => {
 		expect(
 			stkDraftAuthoringInstruction("FLEX", selection({ rows: [1], canComplete: true }), 20),
 		).toContain(
-			"1 PORT 선택 · 1 RAIL RUN · Shift+Enter / Stocker 생성 · 자유 선택 조건: 레일 중앙 포트 1개 이상",
+			"1 PORT 선택 · 1 RAIL RUN · Shift+Enter / Stocker 생성 · 자유 선택 조건: 레일 중앙 포트 1~16개",
 		);
 		expect(
 			stkDraftAuthoringInstruction("FLEX", selection({ rows: [1], canComplete: true }), 20),
@@ -143,14 +143,14 @@ describe("StkDraftPresentation", () => {
 		});
 		expect(stkOverviewCoachPresentation(1, "FLEX")).toEqual({
 			instruction:
-				"자유 선택 · 1개 이상 · 포인터: 금색 원 클릭으로 추가·제거 · 키보드: Enter · 준비되면 Stocker 생성",
+				"자유 선택 · 1~16개 · 포인터: 금색 원 클릭으로 추가·제거 · 키보드: Enter · 준비되면 Stocker 생성",
 			zoomActionLabel: "현재 Port 확대",
 		});
 		expect(stkOverviewCoachPresentation(0, "SIX_PORT").instruction).toContain(
 			"연속 6개 · 같은 직선",
 		);
 		expect(stkOverviewCoachPresentation(0, "BACK_TO_BACK").instruction).toContain(
-			"양쪽 짝(B2B) · 정렬된 짝수 4개 이상",
+			"양쪽 짝(B2B) · 6 m 이내 반대 방향 · 정렬된 2쌍 이상",
 		);
 		expect(() => stkOverviewCoachPresentation(-1, "FLEX")).toThrow(RangeError);
 	});

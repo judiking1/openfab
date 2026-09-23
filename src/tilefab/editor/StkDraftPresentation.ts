@@ -1,5 +1,9 @@
 import type { StkDraftSelection } from "../compile/StkDraftSelector";
-import type { StkAuthoringTemplate } from "../core/EquipmentGroup";
+import {
+	STK_MAXIMUM_BACK_TO_BACK_LANE_SEPARATION_CELLS,
+	STK_MAXIMUM_PORT_COUNT,
+	type StkAuthoringTemplate,
+} from "../core/EquipmentGroup";
 
 export interface StkDraftStatusPresentation {
 	readonly label: string;
@@ -53,7 +57,10 @@ export function stkDraftReviewPresentation(
 
 export function stkTemplatePresentation(template: StkAuthoringTemplate): StkTemplatePresentation {
 	if (template === "FLEX") {
-		return Object.freeze({ label: "자유 선택", requirement: "레일 중앙 포트 1개 이상" });
+		return Object.freeze({
+			label: "자유 선택",
+			requirement: `레일 중앙 포트 1~${STK_MAXIMUM_PORT_COUNT}개`,
+		});
 	}
 	if (template === "FOUR_PORT") {
 		return Object.freeze({ label: "연속 4개", requirement: "같은 직선 레일의 연속 4개" });
@@ -63,7 +70,7 @@ export function stkTemplatePresentation(template: StkAuthoringTemplate): StkTemp
 	}
 	return Object.freeze({
 		label: "양쪽 짝(B2B)",
-		requirement: "반대 방향 평행 레일의 정렬된 짝 · 짝수 4개 이상",
+		requirement: `${STK_MAXIMUM_BACK_TO_BACK_LANE_SEPARATION_CELLS} m 이내 반대 방향 평행 레일 · 정렬된 포트 2쌍 이상`,
 	});
 }
 
@@ -116,10 +123,10 @@ export function stkOverviewCoachPresentation(
 }
 
 function stkOverviewTemplateRequirement(template: StkAuthoringTemplate): string {
-	if (template === "FLEX") return "자유 선택 · 1개 이상";
+	if (template === "FLEX") return `자유 선택 · 1~${STK_MAXIMUM_PORT_COUNT}개`;
 	if (template === "FOUR_PORT") return "연속 4개 · 같은 직선";
 	if (template === "SIX_PORT") return "연속 6개 · 같은 직선";
-	return "양쪽 짝(B2B) · 정렬된 짝수 4개 이상";
+	return `양쪽 짝(B2B) · ${STK_MAXIMUM_BACK_TO_BACK_LANE_SEPARATION_CELLS} m 이내 반대 방향 · 정렬된 2쌍 이상`;
 }
 
 export function stkDraftStatusPresentation(

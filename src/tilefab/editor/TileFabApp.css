@@ -8424,6 +8424,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-assemble-menu {
 	display: grid;
+	grid-auto-rows: max-content;
 	align-content: start;
 	gap: 10px;
 	min-height: 0;

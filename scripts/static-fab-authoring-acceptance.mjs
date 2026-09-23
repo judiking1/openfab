@@ -15241,7 +15241,7 @@ async function exerciseGuidedPortHandoffRegression(
 						.innerText();
 					for (const copy of [
 						"Stocker · 0개 Port 선택",
-						"레일 중앙 포트 1개 이상",
+						"레일 중앙 포트 1~16개",
 						"금색 슬롯 클릭",
 						"방향키",
 						"Enter",
@@ -35593,7 +35593,7 @@ async function exerciseOrdinaryStrictStkSafeFrame(page) {
 		{
 			template: "BACK_TO_BACK",
 			label: "양쪽 짝(B2B)",
-			requirement: "반대 방향 평행 레일의 정렬된 짝",
+			requirement: "6 m 이내 반대 방향 평행 레일",
 			portCount: 4,
 			resetActivation: "space",
 			removeActivation: "space",
@@ -43943,6 +43943,30 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				);
 				for (const activity of ["build", "inspect", "assemble"]) {
 					await page.getByTestId(`editor-activity-${activity}`).click();
+					if (activity === "assemble") {
+						const newFabCard = page.getByTestId("fab-preset-browser");
+						await newFabCard.waitFor({ state: "visible" });
+						const content = await newFabCard.evaluate((card) => {
+							const bounds = card.getBoundingClientRect();
+							return [...card.querySelectorAll("small, strong, em")].map((label) => {
+								const text = label.getBoundingClientRect();
+								return {
+									label: label.textContent,
+									contained:
+										text.left >= bounds.left + 1 &&
+										text.right <= bounds.right - 1 &&
+										text.top >= bounds.top + 1 &&
+										text.bottom <= bounds.bottom - 1,
+								};
+							});
+						});
+						assertEqual(content.length, 3, "short New FAB card title and description count");
+						for (const item of content) {
+							assertEqual(item.contained, true, `short New FAB card contains ${item.label}`);
+						}
+						await assertLocatorInsideViewport(page, newFabCard);
+						await assertLocatorOwnsHitArea(newFabCard, "short New FAB complete card");
+					}
 					for (const control of await page
 						.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
 						.all()) {
