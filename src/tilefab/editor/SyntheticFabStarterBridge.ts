@@ -415,7 +415,7 @@ function preparedMatchesRequest(
 		const checksum = RailChecksumAccumulator.fromDigest(prepared.authoredChecksum);
 		return (
 			isPreparedSyntheticFabStarterPayload(prepared) &&
-			syntheticFabStarterRelationshipsMatchPlan(prepared, productionPlan) &&
+			syntheticFabStarterRelationshipsMatchPlan(prepared, productionPlan, parallelHallPlan) &&
 			prepared.requestFingerprint === requestFingerprint &&
 			prepared.planFingerprint === expectedPlanFingerprint &&
 			syntheticFabStarterRequestFingerprint(prepared.request) === requestFingerprint &&
@@ -776,8 +776,10 @@ function preparedStepsMatchParallelHallPlan(
 			step.targetAnchor.y !== gateway.targetAnchor.y ||
 			step.pose !== null ||
 			step.junctions === null ||
-			step.outboundTurns !== 0 ||
-			step.returnTurns !== 0 ||
+			(gateway.contract !== null &&
+				!sameJunctionContract(step.junctions, gateway.contract.exactJunctions)) ||
+			step.outboundTurns !== (gateway.contract?.expectedOutboundTurns ?? 0) ||
+			step.returnTurns !== (gateway.contract?.expectedReturnTurns ?? 0) ||
 			step.bayCount !== 0 ||
 			step.bayIds.length !== 0 ||
 			step.addedEdges < 1

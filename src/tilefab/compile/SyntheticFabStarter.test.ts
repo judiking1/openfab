@@ -262,6 +262,17 @@ describe("SyntheticFabStarter", () => {
 		expect(build.steps.filter((step) => step.hierarchyRole === "process-loop")).toHaveLength(24);
 		expect(build.steps.filter((step) => step.kind === "network-link")).toHaveLength(4);
 		expect(organizations.records).toHaveLength(39);
+		expect(
+			build.document.relationships.records.map((record) => record.participantOrganizationIds),
+		).toEqual([[2], [3]]);
+		expect(build.document.relationships.nextRelationshipId).toBe(3);
+		expect(plan?.gateways.filter((gateway) => gateway.contract !== null)).toHaveLength(2);
+		for (const gateway of plan?.gateways ?? []) {
+			if (!gateway.contract) continue;
+			const step = build.steps.find((step) => step.connectionId === gateway.id);
+			expect(step?.junctions).toEqual(gateway.contract.exactJunctions);
+			expect(step).toMatchObject({ addedEdges: 16, outboundTurns: 0, returnTurns: 0 });
+		}
 		expect(roles.filter((role) => role === "FAB")).toHaveLength(1);
 		expect(roles.filter((role) => role === "BAY_BANK")).toHaveLength(2);
 		expect(roles.filter((role) => role === "BAY")).toHaveLength(12);
@@ -280,7 +291,54 @@ describe("SyntheticFabStarter", () => {
 			stronglyConnected: true,
 		});
 		expect(build.physical).toMatchObject({ valid: true, diagnostics: [] });
+		const project = captureOpenFabProject(build.document, {
+			manifest: createOpenFabProjectManifest(
+				"parallel-hall-roundtrip",
+				"Parallel Hall",
+				"2026-09-24T00:00:00.000Z",
+			),
+			view: null,
+		});
+		const parsed = parseOpenFabProjectJson(serializeOpenFabProject(project)).project;
+		const snapshot = createRailSnapshotFromOpenFabProject(parsed);
+		const loaded = hydrateRailMirrorSnapshotDocument(snapshot);
+		expect(loaded.relationships).toEqual(build.document.relationships);
+		expect(snapshot.checksum).toBe(build.authoredChecksum);
 	}, 20_000);
+
+	it.each([
+		[8, 80, 36, 40],
+		[20, 120, 60, 76],
+		[8, 120, 60, 64],
+		[20, 80, 36, 76],
+	])(
+		"keeps parallel hall contacts valid at %i Bays, %i depth, %i frontage, %i pitch",
+		(bayCount, aisleLengthMeters, laneSpacingMeters, bayPitchMeters) => {
+			const base = defaultSyntheticFabStarterRequest("parallel-hall-fab-12");
+			const build = buildSyntheticFabStarter({
+				...base,
+				parameters: {
+					...base.parameters,
+					bayCount,
+					aisleLengthMeters,
+					laneSpacingMeters,
+					bayPitchMeters,
+				},
+			});
+			expect(build.analysis).toMatchObject({
+				status: "closed",
+				components: 1,
+				strongComponents: 1,
+				openEnds: 0,
+				unsafeJunctions: 0,
+			});
+			expect(build.physical).toMatchObject({ valid: true, diagnostics: [] });
+			expect(
+				build.document.relationships.records.map((record) => record.participantOrganizationIds),
+			).toEqual([[2], [3]]);
+		},
+		20_000,
+	);
 
 	it("builds one production Bay as an enclosing circulation with two long internal Process Loops", () => {
 		const build = buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("bay-assembly"));

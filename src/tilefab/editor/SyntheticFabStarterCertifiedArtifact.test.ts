@@ -3,6 +3,7 @@ import {
 	defaultSyntheticFabStarterRequest,
 	type SyntheticFabStarterRequest,
 	setSyntheticFabStarterParameter,
+	syntheticFabStarterParallelHallAssemblyPlan,
 } from "../compile/SyntheticFabStarter";
 import {
 	type PreparedSyntheticFabStarter,
@@ -11,11 +12,11 @@ import {
 import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import { captureStaticFabOrganizationBundle } from "../core/StaticFabOrganizationBundle";
 import { staticFabOrganizationBundleFingerprint } from "../core/StaticFabOrganizationBundlePlacement";
-import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v4.json?raw";
-import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v4.json?raw";
-import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v5.json?raw";
-import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v4.json?raw";
-import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v4.json?raw";
+import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v5.json?raw";
+import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v5.json?raw";
+import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v6.json?raw";
+import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v5.json?raw";
+import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v5.json?raw";
 import { checksumRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
 import {
@@ -51,6 +52,7 @@ import {
 	type SyntheticFabStarterCertifiedArtifact,
 	syntheticFabStarterCertifiedArtifactIdForRequest,
 } from "./SyntheticFabStarterCertifiedArtifact";
+import { syntheticFabStarterRelationshipsMatchPlan } from "./SyntheticFabStarterRelationshipContract";
 
 describe("SyntheticFabStarterCertifiedArtifact", () => {
 	let request: SyntheticFabStarterRequest;
@@ -63,6 +65,8 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 	let productionArtifact: SyntheticFabStarterCertifiedArtifact;
 	let parallelHallRequest: SyntheticFabStarterRequest;
 	let parallelHallArtifact: SyntheticFabStarterCertifiedArtifact;
+	let parallelHallPrimary: PreparedSyntheticFabStarter;
+	let parallelHallIndependent: PreparedSyntheticFabStarter;
 
 	beforeAll(() => {
 		request = defaultSyntheticFabStarterRequest("large-fab-60");
@@ -78,9 +82,11 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 			productionRequest,
 		);
 		parallelHallRequest = defaultSyntheticFabStarterRequest("parallel-hall-fab-12");
+		parallelHallPrimary = prepareSyntheticFabStarter(parallelHallRequest);
+		parallelHallIndependent = prepareSyntheticFabStarter(parallelHallRequest);
 		parallelHallArtifact = createSyntheticFabStarterCertifiedArtifact(
-			prepareSyntheticFabStarter(parallelHallRequest),
-			prepareSyntheticFabStarter(parallelHallRequest),
+			parallelHallPrimary,
+			parallelHallIndependent,
 			parallelHallRequest,
 		);
 	}, 60_000);
@@ -88,11 +94,11 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 	it("matches the checked-in deterministic public synthetic artifact", () => {
 		expect(JSON.parse(generatedArtifactSource)).toEqual(artifact);
 		expect(artifact).toMatchObject({
-			schemaVersion: 4,
-			artifactId: "large-fab-60.default.v4",
-			certificationContract: "independent-materialization-v3",
+			schemaVersion: 5,
+			artifactId: "large-fab-60.default.v5",
+			certificationContract: "independent-materialization-v4",
 		});
-		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION).toBe(5);
+		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION).toBe(6);
 		expect(artifact.typedArrayByteLength).toBeGreaterThan(0);
 		expect(artifact.payloadByteLength).toBeLessThan(
 			SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES,
@@ -201,9 +207,98 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 		}
 	});
 
+	it("preserves both Parallel Hall Bank contacts through independent builds and certified copies", () => {
+		const hydrated = hydrateSyntheticFabStarterCertifiedArtifact(
+			parallelHallArtifact,
+			parallelHallRequest,
+		);
+		if (!hydrated) throw new Error("Expected Parallel Hall artifact.");
+		const expected = hydrateStaticFabAssemblyRelationshipSnapshot(
+			parallelHallPrimary.snapshot.relationships,
+		);
+		expect(expected.records.map((record) => record.participantOrganizationIds)).toEqual([[2], [3]]);
+		for (const candidate of [parallelHallIndependent, hydrated.prepared]) {
+			expect(
+				hydrateStaticFabAssemblyRelationshipSnapshot(candidate.snapshot.relationships),
+			).toEqual(expected);
+			expect(candidate.placementBundle?.relationships).toEqual(expected);
+			expect(candidate.authoredChecksum).toBe(parallelHallPrimary.authoredChecksum);
+			expect(preparedSyntheticFabStarterMatchesRequest(candidate, parallelHallRequest)).toBe(true);
+		}
+	});
+
+	it("rejects removed Parallel Hall contacts despite recomputed snapshot and bundle checksums", () => {
+		const plan = syntheticFabStarterParallelHallAssemblyPlan(parallelHallRequest);
+		if (!plan) throw new Error("Expected Parallel Hall plan.");
+		expect(syntheticFabStarterRelationshipsMatchPlan(parallelHallPrimary, null, plan)).toBe(true);
+		const stripped = withNoDeclaredRelationships(parallelHallPrimary);
+		expect(syntheticFabStarterRelationshipsMatchPlan(stripped, null, plan)).toBe(false);
+		expect(stripped.snapshot.checksum).toBe(checksumRailMirrorSnapshot(stripped.snapshot));
+		expect(preparedSyntheticFabStarterMatchesRequest(stripped, parallelHallRequest)).toBe(false);
+		expect(() =>
+			createSyntheticFabStarterCertifiedArtifact(
+				stripped,
+				withNoDeclaredRelationships(parallelHallIndependent),
+				parallelHallRequest,
+			),
+		).toThrow();
+	});
+
+	it("rejects rehashed Parallel Hall Bank name swaps and refuses changed source ownership", () => {
+		const altered = structuredClone(parallelHallPrimary);
+		expect(preparedSyntheticFabStarterMatchesRequest(altered, parallelHallRequest)).toBe(true);
+		const names = altered.snapshot.organizations.records.names as string[];
+		[names[1], names[2]] = [names[2] as string, names[1] as string];
+		const bundle = altered.placementBundle;
+		if (!bundle) throw new Error("Expected Parallel Hall bundle.");
+		const placementBundle = {
+			...bundle,
+			organizations: bundle.organizations.map((row, index) => ({
+				...row,
+				name: names[index] as string,
+			})),
+		};
+		const checksum = checksumRailMirrorSnapshot(altered.snapshot);
+		expect(
+			preparedSyntheticFabStarterMatchesRequest(
+				{
+					...altered,
+					authoredChecksum: checksum,
+					snapshot: { ...altered.snapshot, checksum },
+					placementBundle,
+					placementBundleFingerprint: staticFabOrganizationBundleFingerprint(placementBundle),
+				},
+				parallelHallRequest,
+			),
+		).toBe(false);
+		const state = hydrateStaticFabOrganizationSnapshot(parallelHallPrimary.snapshot.organizations);
+		const first = state.records[1];
+		const second = state.records[2];
+		if (!first || !second) throw new Error("Expected two Parallel Hall Banks.");
+		const organizations = createStaticFabOrganizationSnapshot({
+			...state,
+			records: state.records.map((row) => ({
+				...row,
+				membership:
+					row.id === first.id
+						? second.membership
+						: row.id === second.id
+							? first.membership
+							: row.membership,
+			})),
+		});
+		const changed = { ...parallelHallPrimary.snapshot, organizations };
+		expect(() =>
+			hydrateRailMirrorSnapshotDocument({
+				...changed,
+				checksum: checksumRailMirrorSnapshot(changed),
+			}),
+		).toThrow(/조립 관계/);
+	});
+
 	it("rejects self-consistent checksums that silently remove declared Production relationships", () => {
-		const stripped = withNoProductionRelationships(productionPrimary);
-		const repeated = withNoProductionRelationships(productionIndependent);
+		const stripped = withNoDeclaredRelationships(productionPrimary);
+		const repeated = withNoDeclaredRelationships(productionIndependent);
 		expect(stripped.snapshot.checksum).toBe(checksumRailMirrorSnapshot(stripped.snapshot));
 		expect(preparedSyntheticFabStarterMatchesRequest(stripped, productionRequest)).toBe(false);
 		expect(() =>
@@ -211,18 +306,23 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 		).toThrow();
 	});
 
-	it("rejects an independently checksummed portable bundle that omits the declared relationships", () => {
-		const bundle = productionPrimary.placementBundle;
-		if (!bundle) throw new Error("Expected Production bundle.");
+	it.each([
+		"Production",
+		"Parallel Hall",
+	])("rejects an independently checksummed %s portable bundle that omits the declared relationships", (producer) => {
+		const primary = producer === "Production" ? productionPrimary : parallelHallPrimary;
+		const request = producer === "Production" ? productionRequest : parallelHallRequest;
+		const bundle = primary.placementBundle;
+		if (!bundle) throw new Error("Expected producer bundle.");
 		const stripped = { ...bundle, relationships: emptyStaticFabAssemblyRelationshipState() };
 		expect(
 			preparedSyntheticFabStarterMatchesRequest(
 				{
-					...productionPrimary,
+					...primary,
 					placementBundle: stripped,
 					placementBundleFingerprint: staticFabOrganizationBundleFingerprint(stripped),
 				},
-				productionRequest,
+				request,
 			),
 		).toBe(false);
 	});
@@ -315,8 +415,8 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 		if (!transferable) throw new Error("Expected transferable Parallel Hall hydration.");
 		expect(isSyntheticFabStarterCertificationEvidence(transferable.attestation)).toBe(false);
 		expect(transferable.attestation).toMatchObject({
-			schemaVersion: 5,
-			artifactSchemaVersion: 4,
+			schemaVersion: 6,
+			artifactSchemaVersion: 5,
 		});
 
 		const rebound = rebindSyntheticFabStarterCertificationEvidence(
@@ -705,7 +805,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
-function withNoProductionRelationships(
+function withNoDeclaredRelationships(
 	prepared: PreparedSyntheticFabStarter,
 ): PreparedSyntheticFabStarter {
 	const relationships = emptyStaticFabAssemblyRelationshipState();

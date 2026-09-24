@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DIR_E, DIR_W } from "../core/railShape";
 import {
 	createParallelHallFabAssemblyPlan,
 	parallelHallFabMinimumPitchMeters,
@@ -79,5 +80,44 @@ describe("ParallelHallFabAssemblyPlan", () => {
 		expect(() =>
 			createParallelHallFabAssemblyPlan({ ...DEFAULT_PROFILE, bayPitchMeters: 40 }),
 		).toThrow(/at least 4 m/);
+	});
+
+	it("declares supported Bank contacts across every profile boundary", () => {
+		for (const bayCount of [8, 20])
+			for (const bayDepthMeters of [80, 120])
+				for (const bayFrontageMeters of [36, 60])
+					for (const bayPitchMeters of [parallelHallFabMinimumPitchMeters(bayFrontageMeters), 76]) {
+						const plan = createParallelHallFabAssemblyPlan({
+							bayCount,
+							bayDepthMeters,
+							bayFrontageMeters,
+							bayPitchMeters,
+						});
+						expect(plan.gateways.slice(0, 2).map((gateway) => gateway.contract)).toEqual([
+							null,
+							null,
+						]);
+						expect(
+							plan.relationships.relationships.records.map(
+								(record) => record.participantOrganizationIds,
+							),
+						).toEqual([[2], [3]]);
+						for (const gateway of plan.gateways.slice(2)) {
+							const contract = gateway.contract;
+							if (!contract) throw new Error("Bank gateway must be declared.");
+							expect(contract.sourceRun.flowDirection).toBe(DIR_W);
+							expect(contract.targetRun.flowDirection).toBe(DIR_E);
+							expect(
+								contract.exactJunctions.sourceDeparture.x - contract.exactJunctions.sourceArrival.x,
+							).toBe(8);
+							expect(contract.targetRun.fixedCoordinate - contract.sourceRun.fixedCoordinate).toBe(
+								8,
+							);
+							expect(contract.sourceRun.minimum).toBeGreaterThan(plan.interbaySpine.origin.x + 2);
+							expect(contract.sourceRun.maximum).toBeLessThan(
+								plan.interbaySpine.origin.x + plan.interbaySpine.lengthMeters - 2,
+							);
+						}
+					}
 	});
 });

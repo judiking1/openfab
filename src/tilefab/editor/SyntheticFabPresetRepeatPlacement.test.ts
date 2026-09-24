@@ -27,6 +27,7 @@ describe("Synthetic FAB preset repeat placement", () => {
 			document.map,
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		);
 		expect(document.organizations.records).toHaveLength(39);
 		const firstSnapshot = captureRailMirrorSnapshot(
@@ -34,8 +35,11 @@ describe("Synthetic FAB preset repeat placement", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 		const firstOrganizations = document.organizations.records;
+		const firstRelationships = document.relationships.records;
+		expect(firstRelationships).toHaveLength(2);
 
 		const second = adoptedWorkerPlan(document, bundle, {
 			x: bundle.sourceWidthMeters + 40,
@@ -44,12 +48,15 @@ describe("Synthetic FAB preset repeat placement", () => {
 		expect(document.commitStaticFabOrganizationBundle(second)).toBe(true);
 		expect(document.getPatchSequence()).toBe(2);
 		expect(document.organizations.records).toHaveLength(78);
+		expect(document.relationships.records.map((record) => record.id)).toEqual([1, 2, 3, 4]);
+		expect(document.relationships.nextRelationshipId).toBe(5);
 		expect(new Set(document.organizations.records.map((record) => record.id)).size).toBe(78);
 		expect(new Set(document.organizations.records.map((record) => record.name)).size).toBe(78);
 		const repeatedChecksum = checksumRailMap(
 			document.map,
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		);
 		expect(repeatedChecksum).not.toBe(firstChecksum);
 
@@ -60,16 +67,26 @@ describe("Synthetic FAB preset repeat placement", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 		expect([...undoneSnapshot.xs]).toEqual([...firstSnapshot.xs]);
 		expect([...undoneSnapshot.ys]).toEqual([...firstSnapshot.ys]);
 		expect([...undoneSnapshot.encoded]).toEqual([...firstSnapshot.encoded]);
 		expect(document.organizations.records).toEqual(firstOrganizations);
+		expect(document.relationships.records).toEqual(firstRelationships);
+		expect(document.relationships.nextRelationshipId).toBe(5);
 		expect(document.redo()).toBe(true);
 		expect(document.organizations.records).toHaveLength(78);
-		expect(checksumRailMap(document.map, document.portEquipment, document.organizations)).toBe(
-			repeatedChecksum,
-		);
+		expect(document.relationships.records.map((record) => record.id)).toEqual([1, 2, 3, 4]);
+		expect(document.relationships.nextRelationshipId).toBe(5);
+		expect(
+			checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(repeatedChecksum);
 	}, 30_000);
 
 	it("places two independent Full FABs on one map and preserves atomic undo/redo", () => {
@@ -85,6 +102,7 @@ describe("Synthetic FAB preset repeat placement", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 		expect(firstSnapshot.xs).toHaveLength(44_068);
 		expect(document.organizations.records).toHaveLength(161);
@@ -99,6 +117,7 @@ describe("Synthetic FAB preset repeat placement", () => {
 			document.getPatchSequence(),
 			document.portEquipment,
 			document.organizations,
+			document.relationships,
 		).snapshot;
 		expect(repeatedSnapshot.xs).toHaveLength(88_136);
 		expect(document.getPatchSequence()).toBe(2);
@@ -115,6 +134,7 @@ describe("Synthetic FAB preset repeat placement", () => {
 				document.getPatchSequence(),
 				document.portEquipment,
 				document.organizations,
+				document.relationships,
 			).snapshot.xs,
 		).toHaveLength(88_136);
 	}, 60_000);
@@ -162,6 +182,7 @@ function adoptedWorkerPlan(
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	).snapshot;
 	const permit = issueStaticFabOrganizationBundlePlacementPermit(
 		document.map,

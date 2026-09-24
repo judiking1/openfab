@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultSyntheticFabStarterRequest } from "../compile/SyntheticFabStarter";
-import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v4.json?raw";
+import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v5.json?raw";
 import {
 	SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION,
 	type SyntheticFabStarterCertifiedArtifactWorkerRequest,
@@ -26,7 +26,7 @@ describe("SyntheticFabStarterCertifiedArtifactBridge", () => {
 		const request = worker.request;
 		if (!request) throw new Error("Expected a Worker hydration request.");
 		expect(request.source).toBe(generatedParallelHallArtifactSource);
-		expect(request.artifactId).toBe("parallel-hall-fab-12.default.v4");
+		expect(request.artifactId).toBe("parallel-hall-fab-12.default.v5");
 
 		worker.emit(hydrateSyntheticFabStarterCertifiedArtifactRequest(request));
 		const hydrated = await pending;

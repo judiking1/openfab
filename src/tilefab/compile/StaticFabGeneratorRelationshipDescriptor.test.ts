@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createParallelHallFabAssemblyPlan } from "./ParallelHallFabAssemblyPlan";
 import { createProductionFabAssemblyPlan } from "./ProductionFabAssemblyPlan";
 import {
 	createStaticFabGeneratorRelationshipDescriptor,
@@ -13,11 +14,23 @@ const declaration = () =>
 	}).relationships;
 
 describe("StaticFabGeneratorRelationshipDescriptor", () => {
-	it("resolves every nested witness by seed key even when runtime IDs have another order", () => {
-		const descriptor = declaration();
+	it.each([
+		["Production", declaration],
+		[
+			"Parallel Hall",
+			() =>
+				createParallelHallFabAssemblyPlan({
+					bayCount: 12,
+					bayDepthMeters: 104,
+					bayFrontageMeters: 40,
+					bayPitchMeters: 44,
+				}).relationships,
+		],
+	] as const)("resolves every nested %s witness when runtime IDs have another order", (_, create) => {
+		const descriptor = create();
 		const ids = new Map(descriptor.organizationKeys.map((key, index) => [key, 40 - index * 3]));
 		const resolved = resolveStaticFabGeneratorRelationships(descriptor, ids);
-		expect(resolved.nextRelationshipId).toBe(4);
+		expect(resolved.nextRelationshipId).toBe(descriptor.relationships.records.length + 1);
 		for (const [index, record] of resolved.records.entries()) {
 			const participant = 37 - index * 3;
 			expect(record.parentOrganizationId).toBe(40);

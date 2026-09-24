@@ -64,7 +64,7 @@ test("rejects a rehashed artifact using the retired certification contract", () 
 	verifyCase((fixture, write) => {
 		const row = fixture.artifacts[0];
 		const payload = JSON.parse(readFileSync(new URL(`../${row.path}`, import.meta.url), "utf8"));
-		payload.certificationContract = "independent-materialization-v2";
+		payload.certificationContract = "independent-materialization-v3";
 		const bytes = JSON.stringify(payload);
 		row.sha256 = createHash("sha256").update(bytes).digest("hex");
 		write(row.path, bytes);

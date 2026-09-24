@@ -1,9 +1,19 @@
 import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
+import { RAIL_NETWORK_LINK_JUNCTION_SPACING_METERS } from "../core/RailNetworkLinkPlanner";
 import type { RailTemplatePose } from "../core/RailTemplateCatalog";
 import { DIR_E, DIR_W } from "../core/railShape";
 import type { Cell } from "../core/TileMap";
+import {
+	describeParallelHallFabRelationships,
+	PARALLEL_HALL_FAB_ORGANIZATION_KEY,
+} from "./ParallelHallFabRelationships";
+import type { StaticFabGeneratorRelationshipDescriptor } from "./StaticFabGeneratorRelationshipDescriptor";
+import type {
+	SyntheticFabAssemblyJunctionContract,
+	SyntheticFabAssemblyLinkOperation,
+} from "./SyntheticFabAssemblyPlan";
 
-export const PARALLEL_HALL_FAB_ASSEMBLY_PLAN_VERSION = 1 as const;
+export const PARALLEL_HALL_FAB_ASSEMBLY_PLAN_VERSION = 2 as const;
 export const PARALLEL_HALL_FAB_MINIMUM_BAYS = 8;
 export const PARALLEL_HALL_FAB_MAXIMUM_BAYS = 20;
 export const PARALLEL_HALL_FAB_MINIMUM_DEPTH_METERS = 80;
@@ -71,6 +81,14 @@ export interface ParallelHallFabGatewayPlan {
 	readonly sourceAnchor: Cell;
 	readonly targetAnchor: Cell;
 	readonly ownerId: string;
+	readonly contract: ParallelHallFabGatewayContract | null;
+}
+
+export interface ParallelHallFabGatewayContract
+	extends Pick<SyntheticFabAssemblyLinkOperation, "sourceRun" | "targetRun" | "corridor"> {
+	readonly exactJunctions: SyntheticFabAssemblyJunctionContract;
+	readonly expectedOutboundTurns: 0;
+	readonly expectedReturnTurns: 0;
 }
 
 export interface ParallelHallFabAssemblyPlan {
@@ -81,6 +99,7 @@ export interface ParallelHallFabAssemblyPlan {
 	readonly interbaySpine: ParallelHallFabLoopPlan;
 	readonly banks: readonly [ParallelHallFabBankPlan, ParallelHallFabBankPlan];
 	readonly gateways: readonly ParallelHallFabGatewayPlan[];
+	readonly relationships: StaticFabGeneratorRelationshipDescriptor;
 	readonly planFingerprint: string;
 }
 
@@ -150,25 +169,27 @@ export function createParallelHallFabAssemblyPlan(
 			"WEST-OUTER-GATEWAY",
 			{ x: 0, y: middleY },
 			{ x: collectorX, y: middleY },
-			"PARALLEL-HALL-FAB",
+			PARALLEL_HALL_FAB_ORGANIZATION_KEY,
 		),
 		gateway(
 			"EAST-OUTER-GATEWAY",
 			{ x: collectorX + collectorLengthMeters, y: middleY },
 			{ x: fabWidthMeters, y: middleY },
-			"PARALLEL-HALL-FAB",
+			PARALLEL_HALL_FAB_ORGANIZATION_KEY,
 		),
-		gateway(
+		bankGateway(
 			"NORTH-COLLECTOR-GATEWAY",
 			{ x: middleX, y: northCollectorY + BANK_COLLECTOR_DEPTH_METERS },
 			{ x: middleX, y: spineY },
 			"NORTH-BAY-BANK",
+			"north",
 		),
-		gateway(
+		bankGateway(
 			"SOUTH-COLLECTOR-GATEWAY",
 			{ x: middleX, y: spineY + INTERBAY_SPINE_DEPTH_METERS },
 			{ x: middleX, y: southCollectorY },
 			"SOUTH-BAY-BANK",
+			"south",
 		),
 	]);
 	const withoutFingerprint = Object.freeze({
@@ -187,6 +208,7 @@ export function createParallelHallFabAssemblyPlan(
 			ParallelHallFabBankPlan,
 		],
 		gateways,
+		relationships: describeParallelHallFabRelationships([northBank, southBank], gateways),
 	});
 	return Object.freeze({
 		...withoutFingerprint,
@@ -344,7 +366,62 @@ function gateway(
 		sourceAnchor: Object.freeze({ ...sourceAnchor }),
 		targetAnchor: Object.freeze({ ...targetAnchor }),
 		ownerId,
+		contract: null,
 	});
+}
+
+function bankGateway(
+	id: string,
+	sourceAnchor: Cell,
+	targetAnchor: Cell,
+	ownerId: string,
+	bankSide: "north" | "south",
+): ParallelHallFabGatewayPlan {
+	const minimum = sourceAnchor.x - RAIL_NETWORK_LINK_JUNCTION_SPACING_METERS;
+	const maximum = sourceAnchor.x;
+	const sourceOwner = bankSide === "north" ? ownerId : PARALLEL_HALL_FAB_ORGANIZATION_KEY;
+	const targetOwner = bankSide === "north" ? PARALLEL_HALL_FAB_ORGANIZATION_KEY : ownerId;
+	const exactJunctions = Object.freeze({
+		sourceDeparture: Object.freeze({ ...sourceAnchor }),
+		sourceArrival: Object.freeze({ x: minimum, y: sourceAnchor.y }),
+		targetArrival: Object.freeze({ ...targetAnchor }),
+		targetDeparture: Object.freeze({ x: minimum, y: targetAnchor.y }),
+	});
+	const contract: ParallelHallFabGatewayContract = Object.freeze({
+		// These bounds constrain junction candidates; the planner retains the complete physical run.
+		sourceRun: Object.freeze({
+			id: `${id}-SOURCE`,
+			ownerId: sourceOwner,
+			side: "south",
+			axis: "x",
+			anchor: exactJunctions.sourceDeparture,
+			fixedCoordinate: sourceAnchor.y,
+			minimum,
+			maximum,
+			flowDirection: DIR_W,
+		}),
+		targetRun: Object.freeze({
+			id: `${id}-TARGET`,
+			ownerId: targetOwner,
+			side: "north",
+			axis: "x",
+			anchor: exactJunctions.targetArrival,
+			fixedCoordinate: targetAnchor.y,
+			minimum,
+			maximum,
+			flowDirection: DIR_E,
+		}),
+		corridor: Object.freeze({
+			minX: minimum,
+			maxX: maximum,
+			minY: sourceAnchor.y,
+			maxY: targetAnchor.y,
+		}),
+		exactJunctions,
+		expectedOutboundTurns: 0,
+		expectedReturnTurns: 0,
+	});
+	return Object.freeze({ ...gateway(id, sourceAnchor, targetAnchor, ownerId), contract });
 }
 
 function moveAlong(anchor: Cell, direction: number, distance: number): Cell {
@@ -360,6 +437,7 @@ function parallelHallFabPlanFingerprint(
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([
 		plan.id,
+		plan.relationships.fingerprint,
 		plan.outer.id,
 		plan.interbaySpine.id,
 		...plan.banks.flatMap((bank) => [
@@ -401,6 +479,33 @@ function parallelHallFabPlanFingerprint(
 			gatewayPlan.targetAnchor.y,
 		]),
 	]);
+	for (const { contract } of plan.gateways) {
+		if (!contract) {
+			checksum.addStrings(["NO_BANK_GATEWAY_CONTRACT"]);
+			continue;
+		}
+		for (const run of [contract.sourceRun, contract.targetRun]) {
+			checksum.addStrings([run.id, run.ownerId, run.side, run.axis]);
+			checksum.addNumbers([
+				run.anchor.x,
+				run.anchor.y,
+				run.fixedCoordinate,
+				run.minimum,
+				run.maximum,
+				run.flowDirection,
+			]);
+		}
+		for (const cell of Object.values(contract.exactJunctions))
+			checksum.addNumbers([cell.x, cell.y]);
+		checksum.addNumbers([
+			contract.corridor.minX,
+			contract.corridor.minY,
+			contract.corridor.maxX,
+			contract.corridor.maxY,
+			contract.expectedOutboundTurns,
+			contract.expectedReturnTurns,
+		]);
+	}
 	return checksum.digest();
 }
 

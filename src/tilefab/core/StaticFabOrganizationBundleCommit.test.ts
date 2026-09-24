@@ -49,11 +49,15 @@ describe("StaticFabOrganizationBundle document commit", () => {
 	it.each([
 		"single-contact-fixture",
 		"production-generator",
+		"parallel-hall-generator",
 	])("copies and rotates %s with atomic history and exact mirror packets", async (source) => {
 		const fixture =
 			source === "production-generator"
 				? buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("production-fab-60")).document
-				: productionBankContactFixture();
+				: source === "parallel-hall-generator"
+					? buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("parallel-hall-fab-12"))
+							.document
+					: productionBankContactFixture();
 		const root = fixture.organizations.records.find(
 			(record) => (record.parentOrganizationIds?.length ?? 0) === 0,
 		);
@@ -80,7 +84,9 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			mirror.applyPatch(decodeRailPatchSoA(packet.patch, mirror.organizationState));
 		});
 		const plan = adoptedWorkerPlan(document, captured.bundle, { x: 500, y: 500 }, 1);
-		expect(plan.relationshipMutations).toHaveLength(source === "production-generator" ? 3 : 1);
+		expect(plan.relationshipMutations).toHaveLength(
+			source === "production-generator" ? 3 : source === "parallel-hall-generator" ? 2 : 1,
+		);
 		let tick = 0;
 		const result = await document.commitStaticFabOrganizationBundleCooperatively(plan, {
 			now: () => ++tick,
@@ -97,7 +103,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 		expect(document.undo()).toBe(true);
 		expect(document.relationships.records).toHaveLength(0);
 		expect(document.relationships.nextRelationshipId).toBe(
-			source === "production-generator" ? 4 : 2,
+			source === "production-generator" ? 4 : source === "parallel-hall-generator" ? 3 : 2,
 		);
 		expect(document.redo()).toBe(true);
 		expect(snapshotFor(document).checksum).toBe(expected.checksum);

@@ -28038,12 +28038,52 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 			baseline,
 			"Retried preset cancellation preserves document",
 		);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.getByRole("button", { name: "FAB 프리셋", exact: true }).click();
+		await dialog.waitFor({ state: "visible" });
+		await page.getByTestId("synthetic-fab-starter-parallel-hall-fab-12").click();
+		await bayCount.fill("12");
+		await bayCount.press("Enter");
+		await startSyntheticFabPresetAction(page, "create-project-from-synthetic-fab-preset");
+		await continueWithoutSavingIfVisible(page);
+		const parallel = await waitForWorker(
+			page,
+			(metrics) => metrics.modelRelationships === "2" && metrics.staticFabOrganizations === "39",
+			{ timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS },
+		);
+		assertEqual(parallel.modelNextRelationshipId, "3", "Parallel Hall relationship allocator");
+		assertEqual(parallel.strongComponents, "1", "Parallel Hall network count");
+		assertEqual(parallel.openTerminals, "0", "Parallel Hall terminals");
+		assertEqual(parallel.workerSimulationReady, "false", "Parallel Hall simulation gate");
+		const relationships = await readAssemblyRelationships(page);
+		await page.screenshot({
+			path: path.join(artifactRoot, "parallel-hall-declared-relationships.png"),
+		});
+		const saved = await saveProject(page);
+		await reloadProjectFromFile(page, saved);
+		const reopened = await readMetrics(page);
+		for (const key of [
+			"workerChecksum",
+			"workerPhysicalFingerprint",
+			"modelRelationships",
+			"modelNextRelationshipId",
+			"staticFabOrganizations",
+		])
+			assertEqual(reopened[key], parallel[key], `Parallel Hall file reload ${key}`);
+		assertEqual(
+			JSON.stringify(await readAssemblyRelationships(page)),
+			JSON.stringify(relationships),
+			"Parallel Hall file preserves every declared contact",
+		);
+		assertEqual(reopened.historyCanUndo, "false", "Parallel Hall reload resets history");
 		return {
 			pendingGated: true,
 			failedMetricsUnavailable: true,
 			inputsPreserved: true,
 			retryPreparedPlacement: true,
 			cancellationPreservedSource: true,
+			parallelHallRelationships: 2,
+			parallelHallFileRoundtrip: true,
 		};
 	} finally {
 		await context.close();

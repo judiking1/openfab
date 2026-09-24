@@ -488,6 +488,28 @@ describe("SyntheticFabStarterBridge", () => {
 			),
 		};
 		expect(preparedSyntheticFabStarterMatchesRequest(wrongGateway, request)).toBe(false);
+		for (const connectionId of ["NORTH-COLLECTOR-GATEWAY", "SOUTH-COLLECTOR-GATEWAY"]) {
+			const gateway = prepared.steps.find((step) => step.connectionId === connectionId);
+			if (!gateway?.junctions) throw new Error(`Expected declared junctions for ${connectionId}`);
+			for (const field of [
+				"sourceDeparture",
+				"sourceArrival",
+				"targetDeparture",
+				"targetArrival",
+			] as const) {
+				const shiftedJunctions = {
+					...gateway.junctions,
+					[field]: { ...gateway.junctions[field], x: gateway.junctions[field].x + 1 },
+				};
+				const shifted = {
+					...prepared,
+					steps: prepared.steps.map((step) =>
+						step === gateway ? { ...step, junctions: shiftedJunctions } : step,
+					),
+				};
+				expect(preparedSyntheticFabStarterMatchesRequest(shifted, request)).toBe(false);
+			}
+		}
 	});
 
 	it("binds Dense Central-Spine steps to its independent assembly plan", () => {

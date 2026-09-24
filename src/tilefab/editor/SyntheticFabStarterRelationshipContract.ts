@@ -1,3 +1,5 @@
+import type { ParallelHallFabAssemblyPlan } from "../compile/ParallelHallFabAssemblyPlan";
+import { parallelHallFabOrganizationIdentities } from "../compile/ParallelHallFabRelationships";
 import type { ProductionFabAssemblyPlan } from "../compile/ProductionFabAssemblyPlan";
 import { productionFabOrganizationIdentities } from "../compile/ProductionFabRelationships";
 import { resolveStaticFabGeneratorRelationships } from "../compile/StaticFabGeneratorRelationshipDescriptor";
@@ -10,10 +12,17 @@ import { createStaticFabAssemblyRelationshipSnapshot } from "../worker/StaticFab
 export function syntheticFabStarterRelationshipsMatchPlan(
 	prepared: PreparedSyntheticFabStarter,
 	productionPlan: ProductionFabAssemblyPlan | null,
+	parallelHallPlan: ParallelHallFabAssemblyPlan | null,
 ): boolean {
 	let expected = emptyStaticFabAssemblyRelationshipState();
-	if (productionPlan) {
-		const identities = productionFabOrganizationIdentities(productionPlan.banks);
+	if (productionPlan && parallelHallPlan) return false;
+	const producer = productionPlan ?? parallelHallPlan;
+	if (producer) {
+		const identities = productionPlan
+			? productionFabOrganizationIdentities(productionPlan.banks)
+			: parallelHallFabOrganizationIdentities(
+					(parallelHallPlan as ParallelHallFabAssemblyPlan).banks,
+				);
 		const keys = identities.map((identity) => identity.key);
 		const ids = prepared.snapshot.organizations.organizationIds;
 		if (
@@ -46,9 +55,9 @@ export function syntheticFabStarterRelationshipsMatchPlan(
 			)
 				return false;
 		}
-		expected = resolveStaticFabGeneratorRelationships(productionPlan.relationships, idByKey);
+		expected = resolveStaticFabGeneratorRelationships(producer.relationships, idByKey);
 	}
-	// Production authoring starts at (0, 0), includes the whole hierarchy, and allocates dense IDs;
+	// Both producers start at (0, 0), include the whole hierarchy, and allocate dense IDs;
 	// therefore complete bundle capture preserves its coordinates and organization ID order.
 	return (
 		exactValue(

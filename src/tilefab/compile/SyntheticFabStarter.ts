@@ -112,6 +112,10 @@ import {
 	type ParallelHallFabBayPlacement,
 	parallelHallFabMinimumPitchMeters,
 } from "./ParallelHallFabAssemblyPlan";
+import {
+	PARALLEL_HALL_FAB_ORGANIZATION_KEY,
+	parallelHallFabOrganizationIdentities,
+} from "./ParallelHallFabRelationships";
 import { analyzePhysicalPathTopology } from "./PhysicalPathTopology";
 import { type CompiledPhysicalLayout, compilePhysicalRail } from "./PhysicalRailCompiler";
 import {
@@ -152,7 +156,7 @@ import {
 	syntheticFabTopologyBayCount,
 } from "./SyntheticFabTopologySpec";
 
-export const SYNTHETIC_FAB_STARTER_VERSION = 3 as const;
+export const SYNTHETIC_FAB_STARTER_VERSION = 4 as const;
 export const SYNTHETIC_FAB_STARTER_IDS = [
 	"blank",
 	"bay-assembly",
@@ -1037,6 +1041,15 @@ export function buildSyntheticFabStarter(
 		});
 		planFingerprint = assembly.planFingerprint;
 		commitParallelHallFab(document, evaluator, steps, assembly, organizationSeeds);
+		const expectedKeys = parallelHallFabOrganizationIdentities(assembly.banks).map(
+			(identity) => identity.key,
+		);
+		if (
+			organizationSeeds.length !== expectedKeys.length ||
+			organizationSeeds.some((seed, index) => seed.key !== expectedKeys[index])
+		)
+			throw new Error("Parallel Hall organization allocation differs from the declared plan.");
+		relationshipDescriptor = assembly.relationships;
 	} else if (normalized.id === "central-spine-fab-24") {
 		const assembly = createCentralSpineFabAssemblyPlan({
 			bayCount: normalized.parameters.bayCount,
@@ -2341,7 +2354,7 @@ function commitParallelHallFab(
 	organizationSeeds: MutableSyntheticFabOrganizationSeed[],
 ): void {
 	const fabOrganization = organizationSeedDescriptor({
-		key: "PARALLEL-HALL-FAB",
+		key: PARALLEL_HALL_FAB_ORGANIZATION_KEY,
 		kind: "AREA",
 		name: "Parallel Process Hall",
 		parentKeys: [],
@@ -2428,7 +2441,7 @@ function commitParallelHallFab(
 			gateway.id,
 			gateway.sourceAnchor,
 			gateway.targetAnchor,
-			null,
+			gateway.contract,
 			{
 				connectionId: gateway.id,
 				connectionRole: gateway.ownerId === fabOrganization.key ? "wall-outer" : "spine-wall",

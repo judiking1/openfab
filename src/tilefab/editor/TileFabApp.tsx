@@ -8308,8 +8308,9 @@ export default function TileFabApp(): React.ReactElement {
 			const prepareAdditionPatch = mirrorBridge.prepareStaticFabAdditionPatchCooperatively?.bind(mirrorBridge);
 			if (!prepareAdditionPatch) throw new Error("현재 Rail Worker가 조직 청사진 전송 준비를 지원하지 않습니다");
 			let preparedPatchIsCurrent: (() => boolean) | null = null;
+			const commitScheduler = createBrowserRailStartupScheduler();
 			const commitResult = await activeDocument.commitStaticFabOrganizationBundleCooperatively(plan, {
-				checkpoint: () => new Promise<void>(resolve => window.setTimeout(resolve, 0)),
+				checkpoint: () => commitScheduler.yield(),
 				now: performanceNow,
 				checkCancelled: () => {
 					if (!requestIsCurrent() || snapshotController.signal.aborted || workerBridgeRef.current !== mirrorBridge ||
