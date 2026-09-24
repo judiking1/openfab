@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.12
+
+- Reject edits and project activation outside V1's supported X/Z rail coordinate range
+  of -130,048 to 130,048 metres, including advanced-switch reserved areas and blueprint previews.
+  Keep the current project and history when an unsupported file cannot open; never recenter or
+  truncate its coordinates. Native coordinate encoding is unchanged. This range is an authoring
+  admission limit, not a simulation or clearance accuracy certification.
+
 ### Preview candidate 0.1.11
 
 - Refuse rail edits that exceed equipment placement capacity before changing the project.

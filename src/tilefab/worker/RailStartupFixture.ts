@@ -548,7 +548,8 @@ export function createBayFlowEditScaleProbeDocument(fillerCellCount: number): Ra
 	const halfPerimeter = fillerCellCount / 2;
 	const fillerWidth = Math.floor(halfPerimeter / 2);
 	const fillerDepth = halfPerimeter - fillerWidth;
-	const fillerRoute = rectangleRoute({ x: 200_000, y: 200_000 }, fillerWidth, fillerDepth);
+	// Retain the detached topology and full cell count inside the independent V1 coordinate domain.
+	const fillerRoute = rectangleRoute({ x: 100_000, y: 100_000 }, fillerWidth, fillerDepth);
 	applyScaleProbePlan(
 		map,
 		planClosedRailPathComponent(map, fillerRoute),

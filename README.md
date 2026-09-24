@@ -21,6 +21,11 @@ The current product is a grid-first 2D static-FAB editor. It can:
 The serialized project is the source of truth. Canvas, Workers, and future 3D views consume derived
 geometry; they do not create another editable map model.
 
+V1 supports authored rail cells and complete switch footprints within X/Z **-130,048 to
+130,048 metres** on each axis. Opening a file outside this range leaves the current project
+unchanged and explains the limitation; coordinates are never silently shifted or truncated.
+This authoring limit does not certify simulation or clearance accuracy.
+
 ## Product series
 
 | Version line | Product | Default scope |

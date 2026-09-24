@@ -7,6 +7,7 @@ import {
 	deriveAdvancedSwitchGeometry,
 } from "./AdvancedSwitch";
 import { stableSortSteps } from "./CooperativeSort";
+import { isSupportedRailCoordinate, isSupportedRailFootprint } from "./RailCoordinateDomain";
 import { bitCount } from "./railShape";
 
 /**
@@ -62,6 +63,7 @@ interface PreparedAdvancedSwitchState {
 	claims: Map<string, number>;
 	nextId: number;
 	mutationCount: number;
+	unsupportedCoordinateDelta: number;
 }
 
 export function cellKey(x: number, y: number): string {
@@ -85,6 +87,7 @@ export class TileMap {
 	private advancedSwitchClaims = new Map<string, number>();
 	private railCellCount = 0;
 	private readonly encodedCellCounts = new Float64Array(256);
+	private unsupportedCoordinateSourceCount = 0;
 	private directedEdgeCount = 0;
 	private revision = 0;
 	private nextAdvancedSwitchId = 1;
@@ -112,6 +115,11 @@ export class TileMap {
 
 	get advancedSwitchCount(): number {
 		return this.advancedSwitches.size;
+	}
+
+	/** Nonzero cells and switch footprints outside the editable V1 domain; never serialized. */
+	getUnsupportedCoordinateSourceCount(): number {
+		return this.unsupportedCoordinateSourceCount;
 	}
 
 	getRevision(): number {
@@ -183,7 +191,7 @@ export class TileMap {
 			},
 			addEncodedCell(x: number, y: number, encoded: number): void {
 				assertOpen();
-				if (!Number.isInteger(x) || !Number.isInteger(y)) {
+				if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) {
 					throw new Error("Hydrated rail coordinates must be integers.");
 				}
 				if (!Number.isInteger(encoded) || encoded <= 0 || encoded > 0xff) {
@@ -213,6 +221,9 @@ export class TileMap {
 				const cursorWillChange = nextId !== map.nextAdvancedSwitchId;
 				map.assertCanAdvanceMutationGeneration(cursorWillChange ? 2 : 1);
 				map.advancedSwitches.set(next.id, next);
+				map.unsupportedCoordinateSourceCount += Number(
+					!isSupportedRailFootprint(next.origin, claimedCells),
+				);
 				for (const cell of claimedCells)
 					map.advancedSwitchClaims.set(cellKey(cell.x, cell.y), next.id);
 				map.nextAdvancedSwitchId = nextId;
@@ -245,6 +256,9 @@ export class TileMap {
 
 	/** Internal command surface. All editor mutations should still go through RailDocument. */
 	setEncoded(x: number, y: number, encoded: number): boolean {
+		if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) {
+			throw new Error("Rail coordinates must be safe integers.");
+		}
 		const next = encoded & 0xff;
 		const before = this.getEncoded(x, y);
 		if (before === next) return false;
@@ -255,6 +269,9 @@ export class TileMap {
 		chunk[localIndex(x, y)] = next;
 		if (before !== 0) this.encodedCellCounts[before]--;
 		if (next !== 0) this.encodedCellCounts[next]++;
+		if (!isSupportedRailCoordinate(x, y)) {
+			this.unsupportedCoordinateSourceCount += Number(next !== 0) - Number(before !== 0);
+		}
 
 		if (before === 0 && next !== 0) this.railCellCount++;
 		if (before !== 0 && next === 0) this.railCellCount--;
@@ -296,6 +313,8 @@ export class TileMap {
 			if (cellKeys.has(key)) throw new Error(`Duplicate rail cell mutation at ${key}.`);
 			cellKeys.add(key);
 			if (
+				!Number.isSafeInteger(mutation.x) ||
+				!Number.isSafeInteger(mutation.y) ||
 				!Number.isInteger(mutation.before) ||
 				mutation.before < 0 ||
 				mutation.before > 0xff ||
@@ -320,6 +339,7 @@ export class TileMap {
 		if (prepared) {
 			this.advancedSwitches = prepared.switches;
 			this.advancedSwitchClaims = prepared.claims;
+			this.unsupportedCoordinateSourceCount += prepared.unsupportedCoordinateDelta;
 			this.nextAdvancedSwitchId = prepared.nextId;
 			this.revision += prepared.mutationCount;
 			this.advanceMutationGeneration(prepared.mutationCount);
@@ -399,6 +419,7 @@ export class TileMap {
 		if (inverseSwitchState) {
 			this.advancedSwitches = inverseSwitchState.switches;
 			this.advancedSwitchClaims = inverseSwitchState.claims;
+			this.unsupportedCoordinateSourceCount += inverseSwitchState.unsupportedCoordinateDelta;
 			this.nextAdvancedSwitchId = inverseSwitchState.nextId;
 			this.revision += inverseSwitchState.mutationCount;
 			this.advanceMutationGeneration(inverseSwitchState.mutationCount);
@@ -438,17 +459,26 @@ export class TileMap {
 
 		const nextSwitches = new Map(this.advancedSwitches);
 		const nextClaims = new Map(this.advancedSwitchClaims);
+		let unsupportedCoordinateDelta = 0;
 		for (const mutation of normalized) {
 			if (!mutation.before) continue;
 			nextSwitches.delete(mutation.id);
-			for (const cell of deriveAdvancedSwitchGeometry(mutation.before).claimedCells) {
+			const claimedCells = deriveAdvancedSwitchGeometry(mutation.before).claimedCells;
+			unsupportedCoordinateDelta -= Number(
+				!isSupportedRailFootprint(mutation.before.origin, claimedCells),
+			);
+			for (const cell of claimedCells) {
 				const key = cellKey(cell.x, cell.y);
 				if (nextClaims.get(key) === mutation.id) nextClaims.delete(key);
 			}
 		}
 		for (const mutation of normalized) {
 			if (!mutation.after) continue;
-			for (const cell of deriveAdvancedSwitchGeometry(mutation.after).claimedCells) {
+			const claimedCells = deriveAdvancedSwitchGeometry(mutation.after).claimedCells;
+			unsupportedCoordinateDelta += Number(
+				!isSupportedRailFootprint(mutation.after.origin, claimedCells),
+			);
+			for (const cell of claimedCells) {
 				const key = cellKey(cell.x, cell.y);
 				const ownerId = nextClaims.get(key);
 				if (ownerId !== undefined && ownerId !== mutation.id) {
@@ -472,6 +502,7 @@ export class TileMap {
 			claims: nextClaims,
 			nextId,
 			mutationCount: normalized.length,
+			unsupportedCoordinateDelta,
 		};
 	}
 
@@ -483,6 +514,7 @@ export class TileMap {
 		this.advancedSwitchClaims.clear();
 		this.railCellCount = 0;
 		this.encodedCellCounts.fill(0);
+		this.unsupportedCoordinateSourceCount = 0;
 		this.directedEdgeCount = 0;
 		this.revision++;
 		this.advanceMutationGeneration();
@@ -545,7 +577,11 @@ export class TileMap {
 			for (const mutation of normalized) {
 				if (mutation.before) {
 					copy.advancedSwitches.delete(mutation.id);
-					for (const cell of deriveAdvancedSwitchGeometry(mutation.before).claimedCells) {
+					const claimedCells = deriveAdvancedSwitchGeometry(mutation.before).claimedCells;
+					copy.unsupportedCoordinateSourceCount -= Number(
+						!isSupportedRailFootprint(mutation.before.origin, claimedCells),
+					);
+					for (const cell of claimedCells) {
 						const key = cellKey(cell.x, cell.y);
 						if (copy.advancedSwitchClaims.get(key) === mutation.id)
 							copy.advancedSwitchClaims.delete(key);
@@ -555,7 +591,11 @@ export class TileMap {
 			}
 			for (const mutation of normalized) {
 				if (mutation.after) {
-					for (const cell of deriveAdvancedSwitchGeometry(mutation.after).claimedCells) {
+					const claimedCells = deriveAdvancedSwitchGeometry(mutation.after).claimedCells;
+					copy.unsupportedCoordinateSourceCount += Number(
+						!isSupportedRailFootprint(mutation.after.origin, claimedCells),
+					);
+					for (const cell of claimedCells) {
 						const key = cellKey(cell.x, cell.y);
 						const ownerId = copy.advancedSwitchClaims.get(key);
 						if (ownerId !== undefined && ownerId !== mutation.id)
@@ -612,7 +652,8 @@ export class TileMap {
 				}
 				const record = copyAdvancedSwitch(change.after);
 				if (record.id !== change.id) throw new Error("Advanced switch addition id mismatch.");
-				for (const cell of deriveAdvancedSwitchGeometry(record).claimedCells) {
+				const claimedCells = deriveAdvancedSwitchGeometry(record).claimedCells;
+				for (const cell of claimedCells) {
 					const key = cellKey(cell.x, cell.y);
 					if (copy.advancedSwitchClaims.has(key) || source.getEncoded(cell.x, cell.y) !== 0) {
 						throw new Error(`Advanced switch addition ${record.id} overlaps existing source.`);
@@ -622,6 +663,9 @@ export class TileMap {
 				copy.assertCanAdvanceMutationGeneration(1);
 				copy.advanceMutationGeneration();
 				copy.advancedSwitches.set(record.id, record);
+				copy.unsupportedCoordinateSourceCount += Number(
+					!isSupportedRailFootprint(record.origin, claimedCells),
+				);
 				copy.revision++;
 				nextId = Math.max(nextId, record.id + 1);
 				yield;
@@ -653,6 +697,7 @@ export class TileMap {
 		}
 		copy.railCellCount = this.railCellCount;
 		copy.encodedCellCounts.set(this.encodedCellCounts);
+		copy.unsupportedCoordinateSourceCount = this.unsupportedCoordinateSourceCount;
 		copy.directedEdgeCount = this.directedEdgeCount;
 		copy.revision = this.revision;
 		copy.nextAdvancedSwitchId = this.nextAdvancedSwitchId;
@@ -673,6 +718,7 @@ export class TileMap {
 		copy.advancedSwitchClaims = new Map(this.advancedSwitchClaims);
 		copy.railCellCount = this.railCellCount;
 		copy.encodedCellCounts.set(this.encodedCellCounts);
+		copy.unsupportedCoordinateSourceCount = this.unsupportedCoordinateSourceCount;
 		copy.directedEdgeCount = this.directedEdgeCount;
 		copy.revision = this.revision;
 		copy.nextAdvancedSwitchId = this.nextAdvancedSwitchId;

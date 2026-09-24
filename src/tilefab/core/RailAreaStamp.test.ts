@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
 import { analyzeRailNetwork } from "./network";
@@ -21,6 +21,7 @@ import {
 	rotateRailAreaStampPose,
 	transformRailAreaStampTemplate,
 } from "./RailAreaStamp";
+import { RAIL_COORDINATE_MAX_METERS as BOUND } from "./RailCoordinateDomain";
 import { RailDocument } from "./RailDocument";
 import { buildRailModuleOwnershipIndex } from "./RailModuleOwnership";
 import {
@@ -33,6 +34,41 @@ import { DIR_N, DIR_S } from "./railShape";
 import { TileMap } from "./TileMap";
 
 describe("RailAreaStamp", () => {
+	it("rejects exact and sampled previews using complete transformed bounds before reading the target", () => {
+		const template = rectangularLoopTemplate(40, 10);
+		for (const quarterTurns of [0, 1, 2, 3] as const) {
+			for (const reverseFlow of [false, true]) {
+				const pose = { quarterTurns, reverseFlow };
+				const bounds = railAreaStampPoseBounds(template, pose);
+				const anchors = [
+					{ x: BOUND - bounds.maxX, y: 0 },
+					{ x: -BOUND - bounds.minX, y: 0 },
+					{ x: 0, y: BOUND - bounds.maxY },
+					{ x: 0, y: -BOUND - bounds.minY },
+				];
+				for (const [index, anchor] of anchors.entries()) {
+					for (const planner of [planRailAreaStamp, planRailAreaStampPreview]) {
+						const target = new TileMap();
+						expect(planner(target, template, anchor, pose).valid).toBe(true);
+						const read = vi.spyOn(target, "getEncoded").mockImplementation(() => {
+							throw new Error("unexpected target scan");
+						});
+						const outside = {
+							x: anchor.x + (index === 0 ? 1 : index === 1 ? -1 : 0),
+							y: anchor.y + (index === 2 ? 1 : index === 3 ? -1 : 0),
+						};
+						const rejected = planner(target, template, outside, pose);
+						expect(rejected.valid).toBe(false);
+						expect(rejected.reason).toContain("지원 범위");
+						expect(rejected.mutations).toHaveLength(0);
+						expect(rejected.cells).toHaveLength(1);
+						expect(read).not.toHaveBeenCalled();
+					}
+				}
+			}
+		}
+	});
+
 	it("captures a complete closed Bay and duplicates it through one atomic document command", () => {
 		const document = longBayDocument();
 		const selection = selectWholeMap(document);

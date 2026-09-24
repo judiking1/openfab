@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
 import { exerciseRailCapacityProject } from "./rail-capacity-project-acceptance.mjs";
+import { exerciseRailCoordinateProject } from "./rail-coordinate-project-acceptance.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactRoot = path.resolve(
@@ -29,6 +30,7 @@ const result = {
 	recoveryCleanupRemoved: 0,
 	relationshipStartup: null,
 	railCapacity: null,
+	railCoordinates: null,
 };
 
 try {
@@ -227,6 +229,13 @@ try {
 	await waitForReady(page, 0);
 	await chooseBlankCanvasForFirstRun(page);
 	result.railCapacity = await exerciseRailCapacityProject(page, artifactRoot);
+	await capacityContext.close();
+	const coordinateContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+	page = await coordinateContext.newPage();
+	await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+	await waitForReady(page, 0);
+	await chooseBlankCanvasForFirstRun(page);
+	result.railCoordinates = await exerciseRailCoordinateProject(page, artifactRoot);
 
 	result.status = "PASS";
 	result.authoredChecksum = authored.workerChecksum;

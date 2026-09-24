@@ -5,6 +5,7 @@ import {
 	validateAdvancedSwitchPatch,
 } from "./AdvancedSwitch";
 import { classifyRailCell } from "./RailCellClassification";
+import { isSupportedRailCoordinate, RAIL_COORDINATE_DOMAIN_REASON } from "./RailCoordinateDomain";
 import {
 	ALL_DIRECTIONS,
 	bitCount,
@@ -115,6 +116,13 @@ export function planRailConstruction(
 	end: Cell,
 	preference: BendPreference = "auto",
 ): RailConstructionPlan {
+	if (!isSupportedRailCoordinate(start.x, start.y) || !isSupportedRailCoordinate(end.x, end.y)) {
+		return unsupportedCoordinatePlan(
+			map,
+			preference === "vertical-first" ? preference : "horizontal-first",
+			[start, end],
+		);
+	}
 	if (start.x === end.x || start.y === end.y) {
 		const bend = start.x === end.x ? "vertical-first" : "horizontal-first";
 		return evaluateRoute(map, lShapedPath(start, end, start.y === end.y), bend);
@@ -316,6 +324,9 @@ function evaluateRoute(
 	cells: readonly Cell[],
 	bend: Exclude<BendPreference, "auto">,
 ): RailConstructionPlan {
+	if (cells.some((cell) => !isSupportedRailCoordinate(cell.x, cell.y))) {
+		return unsupportedCoordinatePlan(map, bend, cells);
+	}
 	const overlay = new Map<string, RailMutation>();
 	const conflicts = new Map<string, Cell>();
 	let reason = "배치 가능";
@@ -419,6 +430,32 @@ function evaluateRoute(
 		newEdges,
 		lengthMeters: Math.max(0, cells.length - 1),
 		turns: countTurns(cells),
+		bend,
+	};
+}
+
+function unsupportedCoordinatePlan(
+	map: RailMapReader,
+	bend: Exclude<BendPreference, "auto">,
+	cells: readonly Cell[],
+): RailConstructionPlan {
+	// Retain at most one real endpoint for a visible refusal callout; never rasterize an
+	// unsupported span or put non-finite input into a renderer-facing preview.
+	const anchor = cells.findLast(
+		(cell) => Number.isSafeInteger(cell.x) && Number.isSafeInteger(cell.y),
+	);
+	return {
+		kind: "build",
+		baseRevision: map.getRevision(),
+		cells: anchor ? [{ ...anchor }] : [],
+		mutations: [],
+		valid: false,
+		reason: RAIL_COORDINATE_DOMAIN_REASON,
+		issueCode: "topology",
+		conflicts: [],
+		newEdges: 0,
+		lengthMeters: 0,
+		turns: 0,
 		bend,
 	};
 }

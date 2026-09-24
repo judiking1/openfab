@@ -3270,6 +3270,7 @@ describe("physical rail presentation rendering", () => {
 
 	it.each([
 		{ width: 390, kind: "rail" },
+		{ width: 390, kind: "coordinate" },
 		{ width: 1280, kind: "rail" },
 		{ width: 390, kind: "invalid-switch" },
 		{ width: 390, kind: "switch" },
@@ -3283,11 +3284,17 @@ describe("physical rail presentation rendering", () => {
 		const physical = compilePhysicalRail(document.map);
 		const plan = fixture
 			? planAdvancedSwitchReshape(document.map, fixture.plan.switchRecord?.id ?? -1, "C")
-			: kind === "rail"
-				? planRailConstruction(document.map, { x: 0, y: 0 }, { x: 1, y: 0 })
+			: kind === "rail" || kind === "coordinate"
+				? planRailConstruction(
+						document.map,
+						{ x: 0, y: 0 },
+						{ x: kind === "coordinate" ? 1e12 : 1, y: 0 },
+					)
 				: planAdvancedSwitch(document.map, { x: 2, y: 0 }, { x: 2, y: -2 }, "A");
 		const reason =
-			"장비 배치 위치가 204,098개로 현재 지원 한도 204,096개를 넘습니다. 레일 수를 줄이거나 별도 프로젝트에 배치하세요.";
+			kind === "coordinate"
+				? plan.reason
+				: "장비 배치 위치가 204,098개로 현재 지원 한도 204,096개를 넘습니다. 레일 수를 줄이거나 별도 프로젝트에 배치하세요.";
 		const evaluation = {
 			...new RailDraftEvaluator().evaluate(document.map, physical, plan),
 			valid: false,
@@ -3309,7 +3316,8 @@ describe("physical rail presentation rendering", () => {
 			if (overlay.context.fillStyle === "rgba(10, 14, 15, 0.94)")
 				boxes.push({ x, y, width: boxWidth, height });
 		};
-		new TileRenderer().render(createRecordingContext().context, overlay.context, {
+		const renderer = new TileRenderer();
+		renderer.render(createRecordingContext().context, overlay.context, {
 			map: document.map,
 			physicalPaths: physical.paths,
 			ghost: { mode: "build", plan, evaluation },
@@ -3323,6 +3331,11 @@ describe("physical rail presentation rendering", () => {
 			selectedTile: null,
 			measurementInsets: { left: 190, top: 74, right: 0, bottom: 200 },
 		});
+		if (kind === "coordinate") {
+			expect(plan.valid).toBe(false);
+			expect(plan.mutations).toHaveLength(0);
+			expect(renderer.getStats().ghostPathCompiles).toBe(0);
+		}
 		expect(boxes).toHaveLength(1);
 		const bounds = boxes[0];
 		if (!bounds) throw new Error("Expected the refusal callout");

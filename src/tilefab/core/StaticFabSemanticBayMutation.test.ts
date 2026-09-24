@@ -679,7 +679,8 @@ describe("StaticFabSemanticBayMutation", () => {
 
 	it("rejects source Bank ownership of an exact Bay advanced-switch module", () => {
 		const switchFixture = new RailDocument();
-		const origin = Object.freeze({ x: 1_000_000, y: 1_000_000 });
+		// Isolate the shared module from the Bay while keeping its editable coordinates supported.
+		const origin = Object.freeze({ x: 100_000, y: 100_000 });
 		const terminalPlan = planRailConstruction(
 			switchFixture.map,
 			{ x: origin.x - 3, y: origin.y },

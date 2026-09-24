@@ -103,7 +103,9 @@ describe("authored rail source capacity", () => {
 	});
 	it("includes advanced switch additions, replacements and removals at the source boundary", () => {
 		const map = new TileMap();
-		for (let x = 0; x < PORT_SLOT_MAX_ROWS - 5; x++) map.setEncoded(x, 100, 0x20);
+		// Center this source-count fixture inside the independent supported coordinate domain.
+		for (let row = 0; row < PORT_SLOT_MAX_ROWS - 5; row++)
+			map.setEncoded(row - PORT_SLOT_MAX_ROWS / 2, 100, 0x20);
 		const record: AdvancedSwitchRecord = {
 			id: 1,
 			profileClass: "A",
@@ -119,7 +121,7 @@ describe("authored rail source capacity", () => {
 		expect(
 			railSourceCapacityError(map, [], [{ id: 1, before: record, after: replacement }]),
 		).toBeNull();
-		const addition = { x: -1, y: 100, before: 0, after: 0x20 };
+		const addition = { x: -PORT_SLOT_MAX_ROWS / 2 - 1, y: 100, before: 0, after: 0x20 };
 		expect(railSourceCapacityError(map, [addition])).toContain("레일 계산 규모");
 		expect(
 			railSourceCapacityError(map, [addition], [{ id: 1, before: record, after: null }]),

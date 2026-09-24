@@ -173,14 +173,14 @@ async function createFixture(directory) {
 	}
 }
 
-async function projectAction(page, name) {
+export async function projectAction(page, name) {
 	const action = page.getByRole("button", { name, exact: true });
 	if (!(await action.isVisible()))
 		await page.getByRole("button", { name: /^프로젝트 메뉴 ·/ }).click();
 	await action.click();
 }
 
-async function openFile(page, file) {
+export async function openFile(page, file) {
 	const chooser = page.waitForEvent("filechooser");
 	await projectAction(page, "프로젝트 열기");
 	const discard = page.getByRole("button", { name: "저장하지 않고 계속", exact: true });
@@ -188,11 +188,12 @@ async function openFile(page, file) {
 	await (await chooser).setFiles(file);
 }
 
-async function identity(page) {
+export async function identity(page) {
 	return page.evaluate(() => {
 		const canvas = document.querySelector('[data-testid="rail-canvas"]')?.dataset;
 		const app = document.querySelector(".tilefab-app")?.dataset;
 		return {
+			projectId: canvas?.projectId,
 			checksum: canvas?.workerChecksum,
 			fingerprint: canvas?.workerPhysicalFingerprint,
 			sequence: canvas?.workerTargetSequence,
@@ -232,7 +233,7 @@ async function waitForIdentity(page, checksum, paths) {
 	);
 }
 
-async function point(page, world) {
+export async function point(page, world) {
 	const box = await page.getByTestId("rail-canvas").boundingBox();
 	assert.ok(box);
 	const camera = await page.evaluate(() => {

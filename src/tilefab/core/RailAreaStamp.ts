@@ -7,6 +7,7 @@ import {
 } from "./paint";
 import type { RailAreaSelection } from "./RailAreaSelection";
 import { classifyRailCell } from "./RailCellClassification";
+import { isSupportedRailCoordinate, RAIL_COORDINATE_DOMAIN_REASON } from "./RailCoordinateDomain";
 import type { DirectedRailEdge } from "./RailModuleOwnership";
 import {
 	ALL_DIRECTIONS,
@@ -609,6 +610,15 @@ export function planRailAreaStamp(
 	assertIntegerCell(anchor);
 	assertQuarterTurns(pose.quarterTurns);
 	const compiledPose = compiledRailAreaStampPose(template, pose);
+	const coordinateRejection = rejectUnsupportedStampCoordinates(
+		map,
+		template,
+		anchor,
+		pose,
+		compiledPose,
+		"exact",
+	);
+	if (coordinateRejection) return coordinateRejection;
 	const cells = compiledPose.cells.map((offset) => freezeCell(worldCell(anchor, offset)));
 	const mutations = Object.freeze(
 		compiledPose.states
@@ -731,6 +741,15 @@ export function planRailAreaStampPreview(
 	assertIntegerCell(anchor);
 	assertQuarterTurns(pose.quarterTurns);
 	const compiledPose = compiledRailAreaStampPose(template, pose);
+	const coordinateRejection = rejectUnsupportedStampCoordinates(
+		map,
+		template,
+		anchor,
+		pose,
+		compiledPose,
+		"coarse-preview",
+	);
+	if (coordinateRejection) return coordinateRejection;
 	const sampleStride = Math.max(
 		1,
 		Math.ceil(compiledPose.states.length / RAIL_AREA_STAMP_PREVIEW_MAX_CELLS),
@@ -1302,6 +1321,50 @@ function freezeMetadata(metadata: RailAreaStampMetadata): RailAreaStampMetadata 
 		anchor: freezeCell(metadata.anchor),
 		bounds: Object.freeze({ ...metadata.bounds }),
 	});
+}
+
+function rejectUnsupportedStampCoordinates(
+	map: RailMapReader,
+	template: RailAreaStampTemplate,
+	anchor: Cell,
+	pose: RailAreaStampPose,
+	compiled: CompiledRailAreaStampPose,
+	planningLevel: RailAreaStampMetadata["planningLevel"],
+): RailAreaStampPlan | null {
+	const bounds = {
+		minX: anchor.x + compiled.bounds.minX,
+		minY: anchor.y + compiled.bounds.minY,
+		maxX: anchor.x + compiled.bounds.maxX,
+		maxY: anchor.y + compiled.bounds.maxY,
+	};
+	assertIntegerCell({ x: bounds.minX, y: bounds.minY });
+	assertIntegerCell({ x: bounds.maxX, y: bounds.maxY });
+	// Bounds cover every transformed cell, including cells skipped by a coarse preview.
+	if (
+		isSupportedRailCoordinate(bounds.minX, bounds.minY) &&
+		isSupportedRailCoordinate(bounds.maxX, bounds.maxY)
+	)
+		return null;
+	const metadata = freezeMetadata({
+		sourceModuleCount: template.sourceModuleCount,
+		sourceEdgeCount: template.sourceEdgeCount,
+		planningLevel,
+		quarterTurns: pose.quarterTurns,
+		reverseFlow: pose.reverseFlow,
+		anchor,
+		bounds,
+		widthMeters: compiled.widthMeters,
+		heightMeters: compiled.heightMeters,
+	});
+	return invalidAreaStamp(
+		map,
+		[anchor],
+		[],
+		[],
+		metadata,
+		RAIL_COORDINATE_DOMAIN_REASON,
+		"topology",
+	);
 }
 
 function assertIntegerCell(cell: Cell): void {

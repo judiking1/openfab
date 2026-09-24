@@ -50,6 +50,11 @@ IsoCity is MIT licensed. The full upstream notice is retained in `THIRD_PARTY_NO
 - Linear physical piece: compiler groups consecutive cells into **at most 5 m**.
 - Standard 90-degree curve: **R500** quarter arc inside one 1 m cell.
 - Authoring axes: world `(x, z)`, with positive `z` downward in the default top view.
+- V1 editable source domain: each axis **-130,048…130,048 m**, including every nonzero rail cell,
+  advanced-switch origin and claimed footprint. This admission limit retains headroom for derived
+  Float32 positions; it is not a clearance or simulation accuracy certificate. Wider signed-Int32
+  source may be retained for diagnostics, but editable activation rejects it without shifting or
+  truncating the file and preserves the currently open project.
 - View rotation: 0/90/180/270 degrees; rotation never changes stored map coordinates.
 - No diagonal/free-angle construction in v3.
 

@@ -2,6 +2,7 @@ import {
 	type AdvancedSwitchMutation,
 	advancedSwitchEquals,
 	advancedSwitchRecordError,
+	deriveAdvancedSwitchGeometry,
 } from "./AdvancedSwitch";
 import {
 	assertPortSlotRowBudget,
@@ -9,6 +10,11 @@ import {
 	OPENFAB_PORT_SLOT_POLICIES,
 } from "./PortSlotPolicy";
 import { classifyRailCell } from "./RailCellClassification";
+import {
+	assertRailCoordinateDomain,
+	isSupportedRailCoordinate,
+	isSupportedRailFootprint,
+} from "./RailCoordinateDomain";
 import { cellKey, decodeRailCell, type TileMap, type TileMapCellMutation } from "./TileMap";
 
 export interface RailSourceCounts {
@@ -40,6 +46,7 @@ export function railSourceCounts(map: TileMap): RailSourceCounts {
 }
 
 export function assertRailSourceCapacity(map: TileMap): void {
+	assertRailCoordinateDomain(map.getUnsupportedCoordinateSourceCount());
 	assertSourceCounts(railSourceCounts(map));
 }
 
@@ -51,6 +58,7 @@ export function railSourceCapacityError(
 ): string | null {
 	try {
 		let { sourcePaths, cardinalLinearSources } = railSourceCounts(map);
+		let unsupportedCoordinates = map.getUnsupportedCoordinateSourceCount();
 		const cells = new Set<string>();
 		for (const { x, y, before, after } of changes) {
 			const key = cellKey(x, y);
@@ -68,6 +76,9 @@ export function railSourceCapacityError(
 			)
 				throw new Error("레일 변경 원본이 현재 맵과 다릅니다. 다시 그려 주세요.");
 			cells.add(key);
+			if (!isSupportedRailCoordinate(x, y)) {
+				unsupportedCoordinates += Number(after !== 0) - Number(before !== 0);
+			}
 			const previous = CELL_SOURCE_COUNTS[before] as RailSourceCounts;
 			const next = CELL_SOURCE_COUNTS[after] as RailSourceCounts;
 			sourcePaths += next.sourcePaths - previous.sourcePaths;
@@ -84,9 +95,23 @@ export function railSourceCapacityError(
 			)
 				throw new Error("고급 분기 변경 원본이 현재 맵과 다릅니다. 다시 그려 주세요.");
 			switches.add(id);
+			if (before) {
+				unsupportedCoordinates -= Number(
+					!isSupportedRailFootprint(
+						before.origin,
+						deriveAdvancedSwitchGeometry(before).claimedCells,
+					),
+				);
+			}
+			if (after) {
+				unsupportedCoordinates += Number(
+					!isSupportedRailFootprint(after.origin, deriveAdvancedSwitchGeometry(after).claimedCells),
+				);
+			}
 			sourcePaths +=
 				(Number(after !== null) - Number(before !== null)) * SOURCES_PER_ADVANCED_SWITCH;
 		}
+		assertRailCoordinateDomain(unsupportedCoordinates);
 		assertSourceCounts({ sourcePaths, cardinalLinearSources });
 		return null;
 	} catch (error) {
