@@ -11,6 +11,7 @@ import type { PortEquipmentState } from "../core/EquipmentGroup";
 import type { RailReplacementPlan } from "../core/edit";
 import type { RailConstructionPlan } from "../core/paint";
 import { railPatchInvalidatedPorts } from "../core/RailDocument";
+import { railSourceCapacityError } from "../core/RailSourceCapacity";
 import { moveCell } from "../core/railShape";
 import { type Cell, cellKey, decodeRailCell, TileMap } from "../core/TileMap";
 import { collectAffectedTurnoutFootprints } from "../core/turnout";
@@ -336,6 +337,17 @@ export class RailDraftEvaluator {
 			);
 		}
 
+		const capacityError = railSourceCapacityError(map, plan.mutations, switchMutations(plan));
+		if (capacityError) {
+			return this.cacheEvaluation(
+				map,
+				plan,
+				committedLayout,
+				committedRevision,
+				portEquipment,
+				emptyEvaluation(plan, committedRevision, capacityError, "compile"),
+			);
+		}
 		this.bindCommittedLayout(committedLayout);
 		let draftLayout: CompiledPhysicalLayout | null = null;
 		let compileError: string | null = null;

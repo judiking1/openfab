@@ -445,6 +445,12 @@ export interface TileRenderInput {
 		targetRows: readonly number[];
 	}> | null;
 	ghost: GhostState | null;
+	measurementInsets?: Readonly<{
+		left: number;
+		right: number;
+		top: number;
+		bottom: number;
+	}> | null;
 	organizationBundlePreview?: StaticFabOrganizationBundlePlacementPreview | null;
 	organizationBundlePreviewFrame?: Readonly<{
 		left: number;
@@ -4887,6 +4893,7 @@ export class TileRenderer {
 				COLORS.invalid,
 				input.width,
 				input.height,
+				input.measurementInsets,
 			);
 			return;
 		}
@@ -5061,7 +5068,16 @@ export class TileRenderer {
 			this.drawHandle(ctx, start, camera, stroke, false);
 			this.drawHandle(ctx, end, camera, stroke, true);
 		}
-		this.drawMeasurement(ctx, ghost, camera, end, stroke, input.width, input.height);
+		this.drawMeasurement(
+			ctx,
+			ghost,
+			camera,
+			end,
+			stroke,
+			input.width,
+			input.height,
+			input.measurementInsets,
+		);
 		if (ghost.mode === "build" && conflictKeys.size > 0) {
 			this.drawGhostConflictCells(ctx, highlightedCells, conflictKeys, camera);
 		}
@@ -5976,7 +5992,16 @@ export class TileRenderer {
 			ctx.fillStyle = COLORS.invalidFill;
 			ctx.fillRect(origin.x + 1, origin.y + 1, camera.zoom - 2, camera.zoom - 2);
 			this.drawHandle(ctx, anchor, camera, stroke, true);
-			this.drawMeasurement(ctx, ghost, camera, anchor, stroke, input.width, input.height);
+			this.drawMeasurement(
+				ctx,
+				ghost,
+				camera,
+				anchor,
+				stroke,
+				input.width,
+				input.height,
+				input.measurementInsets,
+			);
 			this.drawAdvancedSwitchConflictCells(
 				ctx,
 				[anchor, ...ghost.evaluation.conflictCells],
@@ -6018,7 +6043,16 @@ export class TileRenderer {
 		const exit = visual.geometry.outputs[0].cell;
 		this.drawHandle(ctx, entry, camera, stroke, false);
 		this.drawHandle(ctx, exit, camera, stroke, true);
-		this.drawMeasurement(ctx, ghost, camera, exit, stroke, input.width, input.height);
+		this.drawMeasurement(
+			ctx,
+			ghost,
+			camera,
+			exit,
+			stroke,
+			input.width,
+			input.height,
+			input.measurementInsets,
+		);
 		this.drawAdvancedSwitchConflictCells(ctx, ghost.evaluation.conflictCells, camera);
 	}
 
@@ -6201,6 +6235,7 @@ export class TileRenderer {
 		accent: string,
 		viewportWidth: number,
 		viewportHeight: number,
+		insets: TileRenderInput["measurementInsets"],
 	): void {
 		const point = this.tileCenterAtScreen(end, camera);
 		const networkLink =
@@ -6223,10 +6258,34 @@ export class TileRenderer {
 		const geometryWidth = ctx.measureText(geometry).width;
 		ctx.font = "500 10px Inter, system-ui, sans-serif";
 		const reasonWidth = ctx.measureText(secondary).width;
-		const width = Math.max(primaryWidth, geometryWidth, reasonWidth) + 20;
-		const height = geometry ? 58 : 42;
-		const x = clamp(point.x + 14, 8, Math.max(8, viewportWidth - width - 8));
-		const y = clamp(point.y - height - 6, 8, Math.max(8, viewportHeight - height - 8));
+		const left = Math.max(0, insets?.left ?? 0) + 8;
+		const right = viewportWidth - Math.max(0, insets?.right ?? 0) - 8;
+		const top = Math.max(0, insets?.top ?? 0) + 8;
+		const bottom = viewportHeight - Math.max(0, insets?.bottom ?? 0) - 8;
+		const width = Math.min(Math.max(primaryWidth, geometryWidth, reasonWidth) + 20, right - left);
+		if (width <= 20) return;
+		const lines = (text: string, font: string): string[] => {
+			ctx.font = font;
+			return wrapMeasurementText(text, width - 20, (value) => ctx.measureText(value).width);
+		};
+		const primaryLines = lines(primary, "650 12px Inter, system-ui, sans-serif");
+		const geometryLines = lines(
+			geometry,
+			"550 10px ui-monospace, SFMono-Regular, Menlo, monospace",
+		);
+		const reasonLines = lines(secondary, "500 10px Inter, system-ui, sans-serif");
+		const primaryExtra = Math.max(0, primaryLines.length - 1) * 16;
+		const geometryExtra = Math.max(0, geometryLines.length - 1) * 16;
+		const reasonOffset = (geometry ? 49 : 30) + primaryExtra + geometryExtra;
+		const height =
+			(geometry ? 58 : 42) +
+			primaryExtra +
+			geometryExtra +
+			Math.max(0, reasonLines.length - 1) * 14;
+		// An entirely covered canvas has no readable callout space; the status retains the reason.
+		if (height > bottom - top) return;
+		const x = clamp(point.x + 14, left, right - width);
+		const y = clamp(point.y - height - 6, top, bottom - height);
 		ctx.fillStyle = "rgba(10, 14, 15, 0.94)";
 		ctx.strokeStyle = accent;
 		ctx.lineWidth = 1;
@@ -6235,15 +6294,21 @@ export class TileRenderer {
 		ctx.stroke();
 		ctx.fillStyle = "#e6eeee";
 		ctx.font = "650 12px Inter, system-ui, sans-serif";
-		ctx.fillText(primary, x + 10, y + 16);
+		primaryLines.forEach((line, index) => {
+			ctx.fillText(line, x + 10, y + 16 + index * 16);
+		});
 		if (geometry) {
 			ctx.fillStyle = "#91a4a6";
 			ctx.font = "550 10px ui-monospace, SFMono-Regular, Menlo, monospace";
-			ctx.fillText(geometry, x + 10, y + 32);
+			geometryLines.forEach((line, index) => {
+				ctx.fillText(line, x + 10, y + 32 + primaryExtra + index * 16);
+			});
 		}
 		ctx.fillStyle = accent;
 		ctx.font = "500 10px Inter, system-ui, sans-serif";
-		ctx.fillText(secondary, x + 10, y + (geometry ? 49 : 30));
+		reasonLines.forEach((line, index) => {
+			ctx.fillText(line, x + 10, y + reasonOffset + index * 14);
+		});
 	}
 
 	private drawPhysicalHover(
@@ -8642,6 +8707,32 @@ function rotateDirection(direction: Direction, rotation: Camera["rotation"]): Di
 	const directions = [DIR_N, DIR_E, DIR_S, DIR_W] as const;
 	const index = directions.indexOf(direction);
 	return directions[(index + rotation) % directions.length] as Direction;
+}
+
+function wrapMeasurementText(
+	text: string,
+	width: number,
+	measure: (text: string) => number,
+): string[] {
+	if (!text) return [];
+	if (measure(text) <= width) return [text];
+	const lines: string[] = [];
+	let line = "";
+	for (const character of text) {
+		if (line && measure(line + character) > width) {
+			const space = line.lastIndexOf(" ");
+			if (space > 0) {
+				lines.push(line.slice(0, space));
+				line = line.slice(space + 1);
+			} else {
+				lines.push(line);
+				line = "";
+			}
+		}
+		if (line || character.trim()) line += character;
+	}
+	if (line) lines.push(line.trimEnd());
+	return lines;
 }
 
 function roundRect(

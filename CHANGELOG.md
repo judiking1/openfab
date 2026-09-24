@@ -6,6 +6,13 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.11
+
+- Refuse rail edits that exceed equipment placement capacity before changing the project.
+  Keep Undo/Redo, Worker state and native save/reopen intact, with a visible limit explanation.
+- Wrap rail preview explanations within the unobstructed canvas so compact screens retain
+  the full reason beside the authoring menu.
+
 ### Preview candidate 0.1.10
 
 - Preserve every Central Spine Bay's envelope and two Process Loop contacts through native

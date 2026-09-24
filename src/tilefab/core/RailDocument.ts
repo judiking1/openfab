@@ -73,6 +73,7 @@ import {
 	type RailMirrorHistoryLedgerEntry,
 	trimRailMirrorHistoryRelationshipBudget,
 } from "./RailPatchHistory";
+import { assertRailSourceCapacity } from "./RailSourceCapacity";
 import {
 	consumeReviewedPortEquipmentApply,
 	consumeReviewedPortEquipmentApplyCooperatively,
@@ -355,6 +356,7 @@ export class RailDocument {
 		if (!Number.isSafeInteger(patchSequence) || patchSequence < 0) {
 			throw new Error("Loaded rail patch sequence must be a non-negative safe integer.");
 		}
+		assertRailSourceCapacity(map);
 		const document = new RailDocument();
 		document.currentMap = map;
 		document.currentPortEquipment = copyPortEquipmentState(portEquipment);
@@ -421,6 +423,7 @@ export class RailDocument {
 		);
 		const currentOperationalConfiguration =
 			copyOperationalConfigurationState(operationalConfiguration);
+		assertRailSourceCapacity(map);
 		const organizationImpactIndex = consumeStaticFabOrganizationImpactIndex(
 			organizationActivation,
 			map,
@@ -1300,6 +1303,7 @@ export class RailDocument {
 				source.map.createAdditionCandidateSteps(entry.changes, entry.switchChanges),
 				check,
 			);
+			assertRailSourceCapacity(nextMap);
 			const nextPortEquipment = await applyPortEquipmentAdditionsCooperatively(
 				source.portEquipment,
 				entry.portChanges,
@@ -2528,6 +2532,7 @@ export class RailDocument {
 			source.map.createMutationCandidateSteps(entry.changes, entry.switchChanges),
 			check,
 		);
+		assertRailSourceCapacity(nextMap);
 		const nextPortEquipment = await finishDocumentPreparationSteps(
 			applyPortEquipmentMutationsSteps(
 				source.portEquipment,
@@ -3139,6 +3144,7 @@ export class RailDocument {
 				: nextMap;
 		if (resolvedNextMap !== this.currentMap) {
 			resolvedNextMap.applyAtomicMutations(effectiveChanges, effectiveSwitchChanges);
+			assertRailSourceCapacity(resolvedNextMap);
 		}
 		const nextPortEquipment = applyPortEquipmentMutations(
 			this.currentPortEquipment,

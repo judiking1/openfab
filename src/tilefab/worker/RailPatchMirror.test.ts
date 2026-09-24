@@ -27,6 +27,7 @@ import {
 } from "../core/OperationalConfiguration";
 import { createPortEquipmentMutationPlan } from "../core/PortEquipmentPlan";
 import type { PortRecord } from "../core/PortRecord";
+import { PORT_SLOT_MAX_ROWS } from "../core/PortSlotPolicy";
 import { planRailConstruction, planRailErase } from "../core/paint";
 import { createRailAreaSelection } from "../core/RailAreaSelection";
 import { initialRailAreaStampPose } from "../core/RailAreaStamp";
@@ -46,6 +47,31 @@ import { RailPatchMirror } from "./RailPatchMirror";
 import { checksumRailPhysicalLayout } from "./RailPhysicalLayout";
 
 describe("RailPatchMirror", () => {
+	it("rejects a derived point allocation overflow before publication and permits a corrected retry", () => {
+		let overflow = false;
+		const mirror = new RailPatchMirror((map, revision) => {
+			const layout = compilePhysicalRail(map, revision);
+			return overflow
+				? { ...layout, paths: { ...layout.paths, pointCount: PORT_SLOT_MAX_ROWS * 64 + 1 } }
+				: layout;
+		});
+		const document = new RailDocument();
+		mirror.sync(captureRailMirrorSnapshot(document.map, 0).snapshot);
+		const patches: RailPatchEvent[] = [];
+		document.subscribe((event) => patches.push(event));
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
+		).toBe(true);
+		const state = mirror.state;
+		const publication = mirror.getPhysicalPublication();
+		overflow = true;
+		expect(() => mirror.applyPatch(patches[0])).toThrow(/레일 계산 규모/);
+		expect(mirror.state).toEqual(state);
+		expect(mirror.getPhysicalPublication()).toBe(publication);
+		overflow = false;
+		mirror.applyPatch(patches[0]);
+		expect(mirror.state.checksum).toBe(checksumRailMap(document.map));
+	});
 	it("mirrors AREA metadata without recompiling physical rail geometry", () => {
 		const document = new RailDocument();
 		expect(

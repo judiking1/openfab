@@ -7,6 +7,7 @@ const latencyTestFiles = [
 	"src/tilefab/core/PortEquipment.test.ts",
 	"src/tilefab/core/PortEquipmentLayoutValidator.test.ts",
 	"src/tilefab/core/RailNetworkLinkPlanner.test.ts",
+	"src/tilefab/core/RailDocumentCapacity.test.ts",
 	"src/tilefab/core/StaticFabAssemblyRelationshipActivation.test.ts",
 	"src/tilefab/core/StaticFabAssemblyRelationshipRelocation.test.ts",
 	"src/tilefab/core/StaticFabAssemblyRelationshipRemap.test.ts",

@@ -4,6 +4,7 @@ import {
 } from "../compile/PhysicalPathMigration";
 import { type CompiledPhysicalLayout, compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { resolvePortAttachment } from "../compile/PortAttachmentResolver";
+import { assertPortSlotCapacity } from "../compile/PortSlotCompiler";
 import {
 	deriveStaticFabOrganizationOutlineIndexSnapshotFromValidatedSource,
 	type StaticFabOrganizationOutlineIndexSnapshot,
@@ -52,6 +53,7 @@ import {
 	railPatchTransitionFingerprint,
 	trimRailMirrorHistoryRelationshipBudget,
 } from "../core/RailPatchHistory";
+import { assertRailSourceCapacity } from "../core/RailSourceCapacity";
 import { ALL_DIRECTIONS, moveCell } from "../core/railShape";
 import { STATIC_FAB_ARRANGEMENT_PLAN_KIND } from "../core/StaticFabArrangementPlan";
 import { STATIC_FAB_ASSEMBLY_CONNECTOR_PATCH_KIND } from "../core/StaticFabAssemblyConnector";
@@ -346,6 +348,7 @@ export class RailPatchMirror {
 		}
 		nextChecksum.setAssemblyRelationshipNextId(nextRelationships.nextRelationshipId);
 		const nextMap = hydrator.finish(snapshot.revision, snapshot.nextAdvancedSwitchId);
+		assertRailSourceCapacity(nextMap);
 		assertAdvancedSwitchTopology(nextMap);
 		assertPortEquipmentLayout(nextMap, nextPortEquipment);
 		assertStaticFabOrganizationState(nextMap, nextPortEquipment, nextOrganizations);
@@ -532,6 +535,7 @@ export class RailPatchMirror {
 			if (railMutationCount > 0) {
 				this.mirroredMap.applyAtomicMutations(patch.changes, patch.switchChanges);
 				mapApplied = true;
+				assertRailSourceCapacity(this.mirroredMap);
 			}
 			assertPortEquipmentLayout(this.mirroredMap, nextPortEquipment);
 			const affectedOrganizations = staticFabOrganizationImpactsForPatch(
@@ -745,6 +749,7 @@ export class RailPatchMirror {
 				`Physical compiler revision mismatch: expected ${revision}, received ${layout.revision}/${layout.paths.revision}.`,
 			);
 		}
+		assertPortSlotCapacity(layout);
 		return layout;
 	}
 

@@ -12660,6 +12660,7 @@ export default function TileFabApp(): React.ReactElement {
 						}
 					: null,
 				ghost: activeGhost,
+				measurementInsets: activeGhost ? fitMapInsets(canvas) : null,
 				organizationBundlePreview: activeOrganizationBundlePreview,
 				organizationBundlePreviewFrame: activeOrganizationBundlePreview
 					? visibleCanvasFrame(canvas, fitMapInsets(canvas))

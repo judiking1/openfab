@@ -84,6 +84,7 @@ export class TileMap {
 	private advancedSwitches = new Map<number, AdvancedSwitchRecord>();
 	private advancedSwitchClaims = new Map<string, number>();
 	private railCellCount = 0;
+	private readonly encodedCellCounts = new Float64Array(256);
 	private directedEdgeCount = 0;
 	private revision = 0;
 	private nextAdvancedSwitchId = 1;
@@ -102,6 +103,11 @@ export class TileMap {
 
 	get edgeCount(): number {
 		return this.directedEdgeCount;
+	}
+
+	/** Derived occupied-cell counts; no mutable buffer is exposed or serialized. */
+	getEncodedCellCount(encoded: number): number {
+		return this.encodedCellCounts[encoded & 0xff] as number;
 	}
 
 	get advancedSwitchCount(): number {
@@ -247,6 +253,8 @@ export class TileMap {
 		const chunk = this.getWritableChunk(x, y, next !== 0);
 		if (!chunk) return false;
 		chunk[localIndex(x, y)] = next;
+		if (before !== 0) this.encodedCellCounts[before]--;
+		if (next !== 0) this.encodedCellCounts[next]++;
 
 		if (before === 0 && next !== 0) this.railCellCount++;
 		if (before !== 0 && next === 0) this.railCellCount--;
@@ -474,6 +482,7 @@ export class TileMap {
 		this.advancedSwitches.clear();
 		this.advancedSwitchClaims.clear();
 		this.railCellCount = 0;
+		this.encodedCellCounts.fill(0);
 		this.directedEdgeCount = 0;
 		this.revision++;
 		this.advanceMutationGeneration();
@@ -643,6 +652,7 @@ export class TileMap {
 			yield;
 		}
 		copy.railCellCount = this.railCellCount;
+		copy.encodedCellCounts.set(this.encodedCellCounts);
 		copy.directedEdgeCount = this.directedEdgeCount;
 		copy.revision = this.revision;
 		copy.nextAdvancedSwitchId = this.nextAdvancedSwitchId;
@@ -662,6 +672,7 @@ export class TileMap {
 		);
 		copy.advancedSwitchClaims = new Map(this.advancedSwitchClaims);
 		copy.railCellCount = this.railCellCount;
+		copy.encodedCellCounts.set(this.encodedCellCounts);
 		copy.directedEdgeCount = this.directedEdgeCount;
 		copy.revision = this.revision;
 		copy.nextAdvancedSwitchId = this.nextAdvancedSwitchId;

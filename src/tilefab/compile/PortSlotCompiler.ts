@@ -1,7 +1,6 @@
 import { isCanonicalPortEquipmentState, type PortEquipmentState } from "../core/EquipmentGroup";
 import {
 	type CardinalPortRoute,
-	OPENFAB_MINIMUM_PORT_SPACING_MILLIMETERS,
 	PORT_DIRECTIONS,
 	PORT_SIDES,
 	PORT_TYPES,
@@ -9,6 +8,13 @@ import {
 	type PortSide,
 	type PortType,
 } from "../core/PortRecord";
+import {
+	assertPortSlotRowBudget,
+	assertRailGeometryBudget,
+	OPENFAB_PORT_SLOT_POLICIES,
+	PORT_SLOT_MAX_ROWS,
+	type PortSlotPolicy,
+} from "../core/PortSlotPolicy";
 import { type Direction, moveCell, oppositeDirection } from "../core/railShape";
 import { cellKey } from "../core/TileMap";
 import { type CompiledPathIntervalRemap, PATH_SOURCE_IDENTITY_KIND } from "./CompoundPhysicalPath";
@@ -45,39 +51,7 @@ export const PORT_SLOT_STATUS = {
 
 export type PortSlotStatus = (typeof PORT_SLOT_STATUS)[keyof typeof PORT_SLOT_STATUS];
 
-export interface PortSlotPolicy {
-	readonly portType: PortType;
-	readonly sides: readonly PortSide[];
-	readonly lateralOffsetMillimeters: number;
-	readonly footprintRadiusMillimeters: number;
-	readonly minimumPortSpacingMillimeters: number;
-}
-
-export const OPENFAB_PORT_SLOT_POLICIES: Readonly<Record<PortType, PortSlotPolicy>> = Object.freeze(
-	{
-		OHB: Object.freeze({
-			portType: "OHB",
-			sides: Object.freeze(["LEFT", "RIGHT"] as const),
-			lateralOffsetMillimeters: 700,
-			footprintRadiusMillimeters: 150,
-			minimumPortSpacingMillimeters: OPENFAB_MINIMUM_PORT_SPACING_MILLIMETERS,
-		}),
-		EQ: Object.freeze({
-			portType: "EQ",
-			sides: Object.freeze(["CENTER"] as const),
-			lateralOffsetMillimeters: 0,
-			footprintRadiusMillimeters: 150,
-			minimumPortSpacingMillimeters: OPENFAB_MINIMUM_PORT_SPACING_MILLIMETERS,
-		}),
-		STK: Object.freeze({
-			portType: "STK",
-			sides: Object.freeze(["CENTER"] as const),
-			lateralOffsetMillimeters: 0,
-			footprintRadiusMillimeters: 180,
-			minimumPortSpacingMillimeters: OPENFAB_MINIMUM_PORT_SPACING_MILLIMETERS,
-		}),
-	},
-);
+export { OPENFAB_PORT_SLOT_POLICIES, PORT_SLOT_MAX_ROWS, type PortSlotPolicy };
 
 export interface CompiledPortSlots {
 	readonly revision: number;
@@ -341,9 +315,6 @@ export class PortSlotRailClearanceIndex {
 	}
 }
 
-// Preserve the certified 100k-linear-path boundary plus bounded headroom for one maximum-gap
-// Bay-to-Bay Connector. This remains a hard allocation ceiling rather than scaling with input size.
-export const PORT_SLOT_MAX_ROWS = 204_096;
 export const PORT_SLOT_SPATIAL_CHUNK_METERS = 32;
 const LOCAL_OWNING_RAIL_WINDOW_METERS = 0.75;
 const DISTANCE_EPSILON_METERS = 1e-6;
@@ -1066,11 +1037,7 @@ export function assertPortSlotCapacity(layout: CompiledPhysicalLayout): void {
 		[layout.paths.pathCount, PORT_SLOT_MAX_ROWS],
 		[layout.paths.pointCount, PORT_SLOT_MAX_ROWS * 64],
 	] as const) {
-		if (!Number.isSafeInteger(count) || count < 0 || count > maximum) {
-			throw new Error(
-				"레일 계산 규모가 현재 지원 한도를 넘습니다. 복사 범위를 줄이거나 별도 프로젝트에 배치하세요.",
-			);
-		}
+		assertRailGeometryBudget(count, maximum);
 	}
 	const linearSourceCount = countLinearPortSlotSources(layout.pathIntervalRemap);
 	for (const policy of Object.values(OPENFAB_PORT_SLOT_POLICIES)) {
@@ -1084,14 +1051,6 @@ function countLinearPortSlotSources(remap: CompiledPathIntervalRemap): number {
 		if (isCardinalLinearSource(remap, index)) count++;
 	}
 	return count;
-}
-
-function assertPortSlotRowBudget(count: number): void {
-	if (count > PORT_SLOT_MAX_ROWS) {
-		throw new Error(
-			`장비 배치 위치가 ${count.toLocaleString("en-US")}개로 현재 지원 한도 ${PORT_SLOT_MAX_ROWS.toLocaleString("en-US")}개를 넘습니다. 복사 범위를 줄이거나 별도 프로젝트에 배치하세요.`,
-		);
-	}
 }
 
 function isCardinalLinearSource(remap: CompiledPathIntervalRemap, index: number): boolean {

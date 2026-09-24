@@ -140,7 +140,7 @@ describe("BlueprintPlacementRuntime", () => {
 		});
 		expect(rejected.valid).toBe(false);
 		expect(rejected.reason).toContain("현재 지원 한도 204,096개");
-		expect(rejected.reason).toContain("복사 범위를 줄이거나 별도 프로젝트");
+		expect(rejected.reason).toContain("레일 수를 줄이거나 별도 프로젝트");
 		expect(
 			captureRailMirrorSnapshot(document.map, document.getPatchSequence(), document.portEquipment)
 				.snapshot,

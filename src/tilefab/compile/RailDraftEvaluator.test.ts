@@ -413,6 +413,11 @@ describe("RailDraftEvaluator", () => {
 		const localDraft: RailConstructionPlan = {
 			...isolatedPlan,
 			baseRevision: document.map.getRevision(),
+			// Probe the physical replacement against the real source, including the occupied cell.
+			mutations: isolatedPlan.mutations.map((mutation) => ({
+				...mutation,
+				before: document.map.getEncoded(mutation.x, mutation.y),
+			})),
 		};
 
 		const evaluation = new RailDraftEvaluator().evaluate(document.map, committedLayout, localDraft);

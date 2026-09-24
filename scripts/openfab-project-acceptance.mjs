@@ -6,6 +6,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
+import { exerciseRailCapacityProject } from "./rail-capacity-project-acceptance.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactRoot = path.resolve(
@@ -27,6 +28,7 @@ const result = {
 	secondBytes: 0,
 	recoveryCleanupRemoved: 0,
 	relationshipStartup: null,
+	railCapacity: null,
 };
 
 try {
@@ -218,6 +220,13 @@ try {
 	assertEqual(cleanupStores.summaries, 50, "recovery cleanup summary count");
 	assertEqual(cleanupStores.oldestProjectId, "cleanup-seed-5", "recovery cleanup retention floor");
 	result.recoveryCleanupRemoved = 5;
+	await context.close();
+	const capacityContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+	page = await capacityContext.newPage();
+	await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+	await waitForReady(page, 0);
+	await chooseBlankCanvasForFirstRun(page);
+	result.railCapacity = await exerciseRailCapacityProject(page, artifactRoot);
 
 	result.status = "PASS";
 	result.authoredChecksum = authored.workerChecksum;

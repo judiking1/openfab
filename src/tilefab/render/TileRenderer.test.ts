@@ -3268,6 +3268,89 @@ describe("physical rail presentation rendering", () => {
 		expect(renderer.getStats().ghostPathCompiles).toBe(0);
 	});
 
+	it.each([
+		{ width: 390, kind: "rail" },
+		{ width: 1280, kind: "rail" },
+		{ width: 390, kind: "invalid-switch" },
+		{ width: 390, kind: "switch" },
+		{ width: 390, kind: "reshape" },
+	])("keeps the entire $kind refusal inside the visible $width px workspace", ({ width, kind }) => {
+		installRecordingPath2D();
+		const fixture = kind === "reshape" ? createAdvancedSwitchFixture("A") : null;
+		const document =
+			fixture?.document ?? (kind === "switch" ? createOpenEastTerminal() : new RailDocument());
+		if (fixture) expect(document.commit(fixture.plan)).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const plan = fixture
+			? planAdvancedSwitchReshape(document.map, fixture.plan.switchRecord?.id ?? -1, "C")
+			: kind === "rail"
+				? planRailConstruction(document.map, { x: 0, y: 0 }, { x: 1, y: 0 })
+				: planAdvancedSwitch(document.map, { x: 2, y: 0 }, { x: 2, y: -2 }, "A");
+		const reason =
+			"장비 배치 위치가 204,098개로 현재 지원 한도 204,096개를 넘습니다. 레일 수를 줄이거나 별도 프로젝트에 배치하세요.";
+		const evaluation = {
+			...new RailDraftEvaluator().evaluate(document.map, physical, plan),
+			valid: false,
+			reason,
+		};
+		const overlay = createRecordingContext();
+		const labels: Array<{ text: string; x: number; y: number; width: number; font: string }> = [];
+		const boxes: Array<{ x: number; y: number; width: number; height: number }> = [];
+		overlay.context.fillText = (text, x, y) => {
+			labels.push({
+				text,
+				x,
+				y,
+				width: overlay.context.measureText(text).width,
+				font: overlay.context.font,
+			});
+		};
+		overlay.context.roundRect = (x, y, boxWidth, height) => {
+			if (overlay.context.fillStyle === "rgba(10, 14, 15, 0.94)")
+				boxes.push({ x, y, width: boxWidth, height });
+		};
+		new TileRenderer().render(createRecordingContext().context, overlay.context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			ghost: { mode: "build", plan, evaluation },
+			camera: { offsetX: 195, offsetY: 188, zoom: 38, rotation: 0 },
+			width,
+			height: 600,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+			measurementInsets: { left: 190, top: 74, right: 0, bottom: 200 },
+		});
+		expect(boxes).toHaveLength(1);
+		const bounds = boxes[0];
+		if (!bounds) throw new Error("Expected the refusal callout");
+		expect(bounds.x).toBeGreaterThanOrEqual(198);
+		expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 8);
+		expect(bounds.y).toBeGreaterThanOrEqual(82);
+		expect(bounds.y + bounds.height).toBeLessThanOrEqual(392);
+		const reasonLines = labels.filter(
+			(label) => label.font === "500 10px Inter, system-ui, sans-serif",
+		);
+		expect(
+			reasonLines
+				.map((label) => label.text)
+				.join("")
+				.replaceAll(" ", ""),
+		).toBe(reason.replaceAll(" ", ""));
+		for (const label of reasonLines) {
+			expect(label.x).toBeGreaterThanOrEqual(bounds.x + 10);
+			expect(label.x + label.width).toBeLessThanOrEqual(bounds.x + bounds.width - 10);
+			expect(label.y).toBeLessThan(bounds.y + bounds.height);
+		}
+		if (width === 390) expect(reasonLines.length).toBeGreaterThan(1);
+		else {
+			expect(reasonLines).toHaveLength(1);
+			expect(bounds.height).toBe(58);
+		}
+	});
+
 	it("keeps one-way flow visible at overview zoom while hiding construction hardware", () => {
 		const document = new RailDocument();
 		expect(
@@ -3805,6 +3888,11 @@ describe("draft clearance rendering", () => {
 		const plan: RailConstructionPlan = {
 			...isolatedPlan,
 			baseRevision: document.map.getRevision(),
+			// Keep the collision probe bound to the source cell it proposes to replace.
+			mutations: isolatedPlan.mutations.map((mutation) => ({
+				...mutation,
+				before: document.map.getEncoded(mutation.x, mutation.y),
+			})),
 		};
 		const evaluation = new RailDraftEvaluator().evaluate(document.map, physical, plan);
 		expect(evaluation.issues.some((issue) => issue.source === "committed")).toBe(true);
