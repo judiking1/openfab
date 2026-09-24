@@ -11,6 +11,7 @@ const latencyTestFiles = [
 	"src/tilefab/core/StaticFabAssemblyRelationshipRelocation.test.ts",
 	"src/tilefab/core/StaticFabAssemblyRelationshipRemap.test.ts",
 	"src/tilefab/core/StaticFabOrganization.test.ts",
+	"src/tilefab/core/StaticFabOrganizationBundleCommit.test.ts",
 	"src/tilefab/core/StaticFabOuterCirculation.test.ts",
 	"src/tilefab/core/TileMapMutationCandidate.test.ts",
 	"src/tilefab/editor/OpenFabStationProposalBridge.test.ts",

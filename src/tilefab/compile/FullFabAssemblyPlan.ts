@@ -1,9 +1,16 @@
 import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
+import { RAIL_NETWORK_LINK_JUNCTION_SPACING_METERS } from "../core/RailNetworkLinkPlanner";
 import type { RailTemplatePose } from "../core/RailTemplateCatalog";
-import { DIR_E, DIR_W } from "../core/railShape";
+import { DIR_E, DIR_N, DIR_S, DIR_W } from "../core/railShape";
 import type { Cell } from "../core/TileMap";
+import { describeFullFabRelationships, FULL_FAB_ORGANIZATION_KEY } from "./FullFabRelationships";
+import type { StaticFabGeneratorRelationshipDescriptor } from "./StaticFabGeneratorRelationshipDescriptor";
+import type {
+	SyntheticFabAssemblyJunctionContract,
+	SyntheticFabAssemblyLinkOperation,
+} from "./SyntheticFabAssemblyPlan";
 
-export const FULL_FAB_ASSEMBLY_PLAN_VERSION = 1 as const;
+export const FULL_FAB_ASSEMBLY_PLAN_VERSION = 2 as const;
 export const FULL_FAB_MINIMUM_BAYS = 48;
 export const FULL_FAB_MAXIMUM_BAYS = 64;
 export const FULL_FAB_BANK_COUNT = 4;
@@ -82,6 +89,14 @@ export interface FullFabGatewayPlan {
 	readonly targetAnchor: Cell;
 	readonly ownerId: string;
 	readonly allowSameComponent: boolean;
+	readonly contract: FullFabGatewayContract;
+}
+
+export interface FullFabGatewayContract
+	extends Pick<SyntheticFabAssemblyLinkOperation, "sourceRun" | "targetRun" | "corridor"> {
+	readonly exactJunctions: SyntheticFabAssemblyJunctionContract;
+	readonly expectedOutboundTurns: 0;
+	readonly expectedReturnTurns: 0;
 }
 
 export interface FullFabAssemblyPlan {
@@ -92,6 +107,7 @@ export interface FullFabAssemblyPlan {
 	readonly halls: readonly [FullFabHallPlan, FullFabHallPlan];
 	readonly banks: readonly [FullFabBankPlan, FullFabBankPlan, FullFabBankPlan, FullFabBankPlan];
 	readonly gateways: readonly FullFabGatewayPlan[];
+	readonly relationships: StaticFabGeneratorRelationshipDescriptor;
 	readonly planFingerprint: string;
 }
 
@@ -189,21 +205,21 @@ export function createFullFabAssemblyPlan(profile: FullFabProfile): FullFabAssem
 				hall.interbaySpine.origin.y + Math.floor(hall.interbaySpine.depthMeters / 2);
 			const [northBank, southBank] = hall.banks;
 			return [
-				gateway(
+				perimeterGateway(
 					`${hall.id}-WEST-OUTER-GATEWAY`,
 					{ x: 0, y: spineMiddleY },
 					{ x: collectorX, y: spineMiddleY },
-					"FULL-FAB",
-					false,
+					hall.interbaySpine,
+					"west",
 				),
-				gateway(
+				perimeterGateway(
 					`${hall.id}-EAST-OUTER-GATEWAY`,
 					{ x: collectorX + collectorLengthMeters, y: spineMiddleY },
 					{ x: fabWidthMeters, y: spineMiddleY },
-					"FULL-FAB",
-					true,
+					hall.interbaySpine,
+					"east",
 				),
-				gateway(
+				bankGateway(
 					`${northBank.id}-INTERBAY-GATEWAY`,
 					{
 						x: middleX,
@@ -211,9 +227,9 @@ export function createFullFabAssemblyPlan(profile: FullFabProfile): FullFabAssem
 					},
 					{ x: middleX, y: hall.interbaySpine.origin.y },
 					northBank.id,
-					false,
+					"north",
 				),
-				gateway(
+				bankGateway(
 					`${southBank.id}-INTERBAY-GATEWAY`,
 					{
 						x: middleX,
@@ -221,7 +237,7 @@ export function createFullFabAssemblyPlan(profile: FullFabProfile): FullFabAssem
 					},
 					{ x: middleX, y: southBank.collector.origin.y },
 					southBank.id,
-					false,
+					"south",
 				),
 			];
 		}),
@@ -234,6 +250,7 @@ export function createFullFabAssemblyPlan(profile: FullFabProfile): FullFabAssem
 		halls,
 		banks,
 		gateways,
+		relationships: describeFullFabRelationships(banks, gateways),
 	});
 	return Object.freeze({
 		...withoutFingerprint,
@@ -393,6 +410,7 @@ function gateway(
 	targetAnchor: Cell,
 	ownerId: string,
 	allowSameComponent: boolean,
+	contract: FullFabGatewayContract,
 ): FullFabGatewayPlan {
 	return Object.freeze({
 		id,
@@ -400,7 +418,119 @@ function gateway(
 		targetAnchor: Object.freeze({ ...targetAnchor }),
 		ownerId,
 		allowSameComponent,
+		contract,
 	});
+}
+
+function bankGateway(
+	id: string,
+	sourceAnchor: Cell,
+	targetAnchor: Cell,
+	ownerId: string,
+	side: "north" | "south",
+): FullFabGatewayPlan {
+	const minimum = sourceAnchor.x - RAIL_NETWORK_LINK_JUNCTION_SPACING_METERS;
+	const maximum = sourceAnchor.x;
+	const exactJunctions = Object.freeze({
+		sourceDeparture: Object.freeze({ ...sourceAnchor }),
+		sourceArrival: Object.freeze({ x: minimum, y: sourceAnchor.y }),
+		targetArrival: Object.freeze({ ...targetAnchor }),
+		targetDeparture: Object.freeze({ x: minimum, y: targetAnchor.y }),
+	});
+	const contract: FullFabGatewayContract = Object.freeze({
+		sourceRun: Object.freeze({
+			id: `${id}-SOURCE`,
+			ownerId: side === "north" ? ownerId : FULL_FAB_ORGANIZATION_KEY,
+			side: "south",
+			axis: "x",
+			anchor: exactJunctions.sourceDeparture,
+			fixedCoordinate: sourceAnchor.y,
+			minimum,
+			maximum,
+			flowDirection: DIR_W,
+		}),
+		targetRun: Object.freeze({
+			id: `${id}-TARGET`,
+			ownerId: side === "north" ? FULL_FAB_ORGANIZATION_KEY : ownerId,
+			side: "north",
+			axis: "x",
+			anchor: exactJunctions.targetArrival,
+			fixedCoordinate: targetAnchor.y,
+			minimum,
+			maximum,
+			flowDirection: DIR_E,
+		}),
+		corridor: Object.freeze({
+			minX: minimum,
+			maxX: maximum,
+			minY: sourceAnchor.y,
+			maxY: targetAnchor.y,
+		}),
+		exactJunctions,
+		expectedOutboundTurns: 0,
+		expectedReturnTurns: 0,
+	});
+	return gateway(id, sourceAnchor, targetAnchor, ownerId, false, contract);
+}
+
+function perimeterGateway(
+	id: string,
+	sourceAnchor: Cell,
+	targetAnchor: Cell,
+	spine: FullFabLoopPlan,
+	side: "west" | "east",
+): FullFabGatewayPlan {
+	// One corner cell and two straight support cells bound each end of the 20 m spine.
+	// Author the source-direction return pair explicitly instead of accepting a nearby candidate.
+	const inset = 3;
+	const spacing = RAIL_NETWORK_LINK_JUNCTION_SPACING_METERS;
+	const west = side === "west";
+	const departureY = west
+		? spine.origin.y + inset + spacing
+		: spine.origin.y + spine.depthMeters - inset - spacing;
+	const arrivalY = departureY + (west ? -spacing : spacing);
+	const minimum = Math.min(departureY, arrivalY);
+	const maximum = Math.max(departureY, arrivalY);
+	const exactJunctions = Object.freeze({
+		sourceDeparture: Object.freeze({ x: sourceAnchor.x, y: departureY }),
+		sourceArrival: Object.freeze({ x: sourceAnchor.x, y: arrivalY }),
+		targetArrival: Object.freeze({ x: targetAnchor.x, y: departureY }),
+		targetDeparture: Object.freeze({ x: targetAnchor.x, y: arrivalY }),
+	});
+	const contract: FullFabGatewayContract = Object.freeze({
+		sourceRun: Object.freeze({
+			id: `${id}-SOURCE`,
+			ownerId: FULL_FAB_ORGANIZATION_KEY,
+			side,
+			axis: "y",
+			anchor: exactJunctions.sourceDeparture,
+			fixedCoordinate: sourceAnchor.x,
+			minimum,
+			maximum,
+			flowDirection: west ? DIR_N : DIR_S,
+		}),
+		targetRun: Object.freeze({
+			id: `${id}-TARGET`,
+			ownerId: FULL_FAB_ORGANIZATION_KEY,
+			side,
+			axis: "y",
+			anchor: exactJunctions.targetArrival,
+			fixedCoordinate: targetAnchor.x,
+			minimum,
+			maximum,
+			flowDirection: west ? DIR_N : DIR_S,
+		}),
+		corridor: Object.freeze({
+			minX: sourceAnchor.x,
+			maxX: targetAnchor.x,
+			minY: minimum,
+			maxY: maximum,
+		}),
+		exactJunctions,
+		expectedOutboundTurns: 0,
+		expectedReturnTurns: 0,
+	});
+	return gateway(id, sourceAnchor, targetAnchor, FULL_FAB_ORGANIZATION_KEY, !west, contract);
 }
 
 function moveAlong(anchor: Cell, direction: number, distance: number): Cell {
@@ -414,6 +544,7 @@ function fullFabPlanFingerprint(plan: Omit<FullFabAssemblyPlan, "planFingerprint
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([
 		plan.id,
+		plan.relationships.fingerprint,
 		plan.outer.id,
 		...plan.halls.flatMap((hall) => [hall.id, hall.interbaySpine.id]),
 		...plan.banks.flatMap((bank) => [
@@ -457,6 +588,29 @@ function fullFabPlanFingerprint(plan: Omit<FullFabAssemblyPlan, "planFingerprint
 			gatewayPlan.allowSameComponent ? 1 : 0,
 		]),
 	]);
+	for (const { contract } of plan.gateways) {
+		for (const run of [contract.sourceRun, contract.targetRun]) {
+			checksum.addStrings([run.id, run.ownerId, run.side, run.axis]);
+			checksum.addNumbers([
+				run.anchor.x,
+				run.anchor.y,
+				run.fixedCoordinate,
+				run.minimum,
+				run.maximum,
+				run.flowDirection,
+			]);
+		}
+		for (const cell of Object.values(contract.exactJunctions))
+			checksum.addNumbers([cell.x, cell.y]);
+		checksum.addNumbers([
+			contract.corridor.minX,
+			contract.corridor.minY,
+			contract.corridor.maxX,
+			contract.corridor.maxY,
+			contract.expectedOutboundTurns,
+			contract.expectedReturnTurns,
+		]);
+	}
 	return checksum.digest();
 }
 

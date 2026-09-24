@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.9
+
+- Preserve four declared Bank-to-FAB contacts in Full FAB presets through native projects,
+  certified preparation and rotated assembly copies. Validate the planned junctions and owners
+  across both halls while preserving the existing rail geometry.
+- Verify equipment repeat/return against the selected Inspector device after its display is ready,
+  independently of the earlier Worker synchronization snapshot.
+
 ### Preview candidate 0.1.8
 
 - Reduce redundant work in rail ownership and checksum calculation while preserving exact
@@ -83,7 +91,7 @@ All notable public OpenFab changes will be documented here. The format follows
   keyboard feedback and compact layouts while preserving the same atomic edit and Undo/Redo paths.
 - Native project schema v13 preserves explicit assembly relationship state and allocator cursors
   through save/load, history, and Worker synchronization. Projects older than schema v11 migrate to empty
-  relationship state; explicit Connector, Production FAB and Parallel Hall producers are supported, while other
+  relationship state; explicit Connector, Production FAB, Parallel Hall, Paired FAB and Full FAB contacts are supported, while other
   generator producers and Detach remain pending.
 - Relationship snapshot hydration and checksums run in cancellable bounded steps. Final document
   adoption reuses completed relationship validation, and whole-map copying retains less memory.

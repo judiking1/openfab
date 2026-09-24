@@ -51,6 +51,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 		"production-generator",
 		"parallel-hall-generator",
 		"paired-circulation-generator",
+		"full-generator",
 	])("copies and rotates %s with atomic history and exact mirror packets", async (source) => {
 		const fixture =
 			source === "production-generator"
@@ -62,7 +63,9 @@ describe("StaticFabOrganizationBundle document commit", () => {
 						? buildSyntheticFabStarter(
 								defaultSyntheticFabStarterRequest("paired-circulation-fab-52"),
 							).document
-						: productionBankContactFixture();
+						: source === "full-generator"
+							? buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("full-fab-52")).document
+							: productionBankContactFixture();
 		const root = fixture.organizations.records.find(
 			(record) => (record.parentOrganizationIds?.length ?? 0) === 0,
 		);
@@ -94,7 +97,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				? 3
 				: source === "parallel-hall-generator"
 					? 2
-					: source === "paired-circulation-generator"
+					: source === "paired-circulation-generator" || source === "full-generator"
 						? 4
 						: 1,
 		);
@@ -118,7 +121,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 				? 4
 				: source === "parallel-hall-generator"
 					? 3
-					: source === "paired-circulation-generator"
+					: source === "paired-circulation-generator" || source === "full-generator"
 						? 5
 						: 2,
 		);

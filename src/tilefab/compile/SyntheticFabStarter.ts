@@ -81,6 +81,7 @@ import {
 	type FullFabBayPlacement,
 	fullFabMinimumPitchMeters,
 } from "./FullFabAssemblyPlan";
+import { FULL_FAB_ORGANIZATION_KEY, fullFabOrganizationIdentities } from "./FullFabRelationships";
 import {
 	createPairedCirculationFabAssemblyPlan,
 	PAIRED_CIRCULATION_FAB_ASSEMBLY_PLAN_VERSION,
@@ -160,7 +161,7 @@ import {
 	syntheticFabTopologyBayCount,
 } from "./SyntheticFabTopologySpec";
 
-export const SYNTHETIC_FAB_STARTER_VERSION = 5 as const;
+export const SYNTHETIC_FAB_STARTER_VERSION = 6 as const;
 export const SYNTHETIC_FAB_STARTER_IDS = [
 	"blank",
 	"bay-assembly",
@@ -1053,6 +1054,23 @@ export function buildSyntheticFabStarter(
 		});
 		planFingerprint = assembly.planFingerprint;
 		commitFullFab(document, evaluator, steps, assembly, organizationSeeds);
+		const identities = fullFabOrganizationIdentities(assembly.banks);
+		if (
+			organizationSeeds.length !== identities.length ||
+			organizationSeeds.some((seed, index) => {
+				const identity = identities[index];
+				return (
+					!identity ||
+					seed.key !== identity.key ||
+					seed.kind !== identity.kind ||
+					seed.name !== identity.name ||
+					seed.parentKeys.length !== (identity.parentKey === null ? 0 : 1) ||
+					(identity.parentKey !== null && seed.parentKeys[0] !== identity.parentKey)
+				);
+			})
+		)
+			throw new Error("Full FAB organization allocation differs from the declared plan.");
+		relationshipDescriptor = assembly.relationships;
 	} else if (normalized.id === "parallel-hall-fab-12") {
 		const assembly = createParallelHallFabAssemblyPlan({
 			bayCount: normalized.parameters.bayCount,
@@ -2256,7 +2274,7 @@ function commitFullFab(
 	organizationSeeds: MutableSyntheticFabOrganizationSeed[],
 ): void {
 	const fabOrganization = organizationSeedDescriptor({
-		key: "FULL-FAB",
+		key: FULL_FAB_ORGANIZATION_KEY,
 		kind: "AREA",
 		name: "Full Production FAB",
 		parentKeys: [],
@@ -2345,7 +2363,7 @@ function commitFullFab(
 			gateway.id,
 			gateway.sourceAnchor,
 			gateway.targetAnchor,
-			null,
+			gateway.contract,
 			{
 				connectionId: gateway.id,
 				connectionRole: gateway.ownerId === fabOrganization.key ? "wall-outer" : "spine-wall",

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createFullFabAssemblyPlan } from "./FullFabAssemblyPlan";
 import { createParallelHallFabAssemblyPlan } from "./ParallelHallFabAssemblyPlan";
 import { createProductionFabAssemblyPlan } from "./ProductionFabAssemblyPlan";
 import {
@@ -16,6 +17,16 @@ const declaration = () =>
 describe("StaticFabGeneratorRelationshipDescriptor", () => {
 	it.each([
 		["Production", declaration],
+		[
+			"Full",
+			() =>
+				createFullFabAssemblyPlan({
+					bayCount: 52,
+					bayDepthMeters: 104,
+					bayFrontageMeters: 40,
+					bayPitchMeters: 44,
+				}).relationships,
+		],
 		[
 			"Parallel Hall",
 			() =>

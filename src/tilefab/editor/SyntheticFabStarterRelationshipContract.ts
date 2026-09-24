@@ -1,3 +1,5 @@
+import type { FullFabAssemblyPlan } from "../compile/FullFabAssemblyPlan";
+import { fullFabOrganizationIdentities } from "../compile/FullFabRelationships";
 import type { PairedCirculationFabAssemblyPlan } from "../compile/PairedCirculationFabAssemblyPlan";
 import { pairedCirculationFabOrganizationIdentities } from "../compile/PairedCirculationFabRelationships";
 import type { ParallelHallFabAssemblyPlan } from "../compile/ParallelHallFabAssemblyPlan";
@@ -16,19 +18,23 @@ export function syntheticFabStarterRelationshipsMatchPlan(
 	productionPlan: ProductionFabAssemblyPlan | null,
 	parallelHallPlan: ParallelHallFabAssemblyPlan | null,
 	pairedCirculationPlan: PairedCirculationFabAssemblyPlan | null,
+	fullFabPlan: FullFabAssemblyPlan | null,
 ): boolean {
 	let expected = emptyStaticFabAssemblyRelationshipState();
-	if ([productionPlan, parallelHallPlan, pairedCirculationPlan].filter(Boolean).length > 1)
+	if (
+		[productionPlan, parallelHallPlan, pairedCirculationPlan, fullFabPlan].filter(Boolean).length >
+		1
+	)
 		return false;
-	const producer = productionPlan ?? parallelHallPlan ?? pairedCirculationPlan;
+	const producer = productionPlan ?? parallelHallPlan ?? pairedCirculationPlan ?? fullFabPlan;
 	if (producer) {
 		const identities = productionPlan
 			? productionFabOrganizationIdentities(productionPlan.banks)
 			: parallelHallPlan
 				? parallelHallFabOrganizationIdentities(parallelHallPlan.banks)
-				: pairedCirculationFabOrganizationIdentities(
-						(pairedCirculationPlan as PairedCirculationFabAssemblyPlan).banks,
-					);
+				: pairedCirculationPlan
+					? pairedCirculationFabOrganizationIdentities(pairedCirculationPlan.banks)
+					: fullFabOrganizationIdentities((fullFabPlan as FullFabAssemblyPlan).banks);
 		const keys = identities.map((identity) => identity.key);
 		const ids = prepared.snapshot.organizations.organizationIds;
 		if (

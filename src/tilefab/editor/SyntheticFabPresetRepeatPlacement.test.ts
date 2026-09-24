@@ -106,6 +106,8 @@ describe("Synthetic FAB preset repeat placement", () => {
 		).snapshot;
 		expect(firstSnapshot.xs).toHaveLength(44_068);
 		expect(document.organizations.records).toHaveLength(161);
+		const firstRelationships = structuredClone(document.relationships.records);
+		expect(firstRelationships.map((record) => record.id)).toEqual([1, 2, 3, 4]);
 
 		const second = adoptedWorkerPlan(document, bundle, {
 			x: bundle.sourceWidthMeters + 80,
@@ -123,11 +125,25 @@ describe("Synthetic FAB preset repeat placement", () => {
 		expect(document.getPatchSequence()).toBe(2);
 		expect(document.organizations.records).toHaveLength(322);
 		expect(new Set(document.organizations.records.map((record) => record.id)).size).toBe(322);
+		expect(document.relationships.records.map((record) => record.id)).toEqual([
+			1, 2, 3, 4, 5, 6, 7, 8,
+		]);
+		expect(document.relationships.nextRelationshipId).toBe(9);
 
 		expect(document.undo()).toBe(true);
 		expect(document.organizations.records).toHaveLength(161);
+		expect(document.relationships.records).toEqual(firstRelationships);
+		expect(document.relationships.nextRelationshipId).toBe(9);
 		expect(document.redo()).toBe(true);
 		expect(document.organizations.records).toHaveLength(322);
+		expect(
+			checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(repeatedSnapshot.checksum);
 		expect(
 			captureRailMirrorSnapshot(
 				document.map,

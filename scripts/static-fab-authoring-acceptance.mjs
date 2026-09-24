@@ -28395,46 +28395,65 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 			"Parallel Hall file preserves every declared contact",
 		);
 		assertEqual(reopened.historyCanUndo, "false", "Parallel Hall reload resets history");
-		await page.getByRole("button", { name: "FAB 프리셋", exact: true }).click();
-		await dialog.waitFor({ state: "visible" });
-		await page.getByTestId("synthetic-fab-starter-paired-circulation-fab-52").click();
-		await startSyntheticFabPresetAction(page, "create-project-from-synthetic-fab-preset");
-		await continueWithoutSavingIfVisible(page);
-		const paired = await waitForWorker(
-			page,
-			(metrics) => metrics.modelRelationships === "4" && metrics.staticFabOrganizations === "144",
-			{ timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS },
-		);
-		assertEqual(paired.modelNextRelationshipId, "5", "Paired FAB relationship allocator");
-		assertEqual(paired.strongComponents, "1", "Paired FAB network count");
-		assertEqual(paired.openTerminals, "0", "Paired FAB terminals");
-		assertEqual(paired.workerSimulationReady, "false", "Paired FAB simulation gate");
-		const pairedRelationships = await readAssemblyRelationships(page);
-		assertEqual(
-			JSON.stringify(pairedRelationships.records.map((record) => record.connectionGroups.length)),
-			JSON.stringify([13, 13, 13, 13]),
-			"Paired FAB preserves every Bay contact in all four Banks",
-		);
-		await page.screenshot({
-			path: path.join(artifactRoot, "paired-fab-declared-relationships.png"),
-		});
-		const pairedSaved = await saveProject(page);
-		await reloadProjectFromFile(page, pairedSaved);
-		const pairedReopened = await readMetrics(page);
-		for (const key of [
-			"workerChecksum",
-			"workerPhysicalFingerprint",
-			"modelRelationships",
-			"modelNextRelationshipId",
-			"staticFabOrganizations",
-		])
-			assertEqual(pairedReopened[key], paired[key], `Paired FAB file reload ${key}`);
-		assertEqual(
-			JSON.stringify(await readAssemblyRelationships(page)),
-			JSON.stringify(pairedRelationships),
-			"Paired FAB file preserves every declared contact",
-		);
-		assertEqual(pairedReopened.historyCanUndo, "false", "Paired FAB reload resets history");
+		for (const preset of [
+			{
+				id: "paired-circulation-fab-52",
+				label: "Paired FAB",
+				organizations: "144",
+				groups: [13, 13, 13, 13],
+				capture: "paired-fab",
+			},
+			{
+				id: "full-fab-52",
+				label: "Full FAB",
+				organizations: "161",
+				groups: [1, 1, 1, 1],
+				capture: "full-fab",
+			},
+		]) {
+			await page.getByRole("button", { name: "FAB 프리셋", exact: true }).click();
+			await dialog.waitFor({ state: "visible" });
+			await page.getByTestId(`synthetic-fab-starter-${preset.id}`).click();
+			await startSyntheticFabPresetAction(page, "create-project-from-synthetic-fab-preset");
+			await continueWithoutSavingIfVisible(page);
+			const created = await waitForWorker(
+				page,
+				(metrics) =>
+					metrics.modelRelationships === "4" &&
+					metrics.staticFabOrganizations === preset.organizations,
+				{ timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS },
+			);
+			assertEqual(created.modelNextRelationshipId, "5", `${preset.label} relationship allocator`);
+			assertEqual(created.strongComponents, "1", `${preset.label} network count`);
+			assertEqual(created.openTerminals, "0", `${preset.label} terminals`);
+			assertEqual(created.workerSimulationReady, "false", `${preset.label} simulation gate`);
+			const contacts = await readAssemblyRelationships(page);
+			assertEqual(
+				JSON.stringify(contacts.records.map((record) => record.connectionGroups.length)),
+				JSON.stringify(preset.groups),
+				`${preset.label} preserves every declared contact in all four Banks`,
+			);
+			await page.screenshot({
+				path: path.join(artifactRoot, `${preset.capture}-declared-relationships.png`),
+			});
+			const savedPreset = await saveProject(page);
+			await reloadProjectFromFile(page, savedPreset);
+			const reopenedPreset = await readMetrics(page);
+			for (const key of [
+				"workerChecksum",
+				"workerPhysicalFingerprint",
+				"modelRelationships",
+				"modelNextRelationshipId",
+				"staticFabOrganizations",
+			])
+				assertEqual(reopenedPreset[key], created[key], `${preset.label} file reload ${key}`);
+			assertEqual(
+				JSON.stringify(await readAssemblyRelationships(page)),
+				JSON.stringify(contacts),
+				`${preset.label} file preserves every declared contact`,
+			);
+			assertEqual(reopenedPreset.historyCanUndo, "false", `${preset.label} reload resets history`);
+		}
 		return {
 			pendingGated: true,
 			failedMetricsUnavailable: true,
@@ -28445,6 +28464,8 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 			parallelHallFileRoundtrip: true,
 			pairedFabRelationships: 4,
 			pairedFabFileRoundtrip: true,
+			fullFabRelationships: 4,
+			fullFabFileRoundtrip: true,
 		};
 	} finally {
 		await context.close();
@@ -37906,6 +37927,37 @@ async function exerciseSelectedEquipmentRepeatEntry(page, portType, viewportLabe
 		expectedLabel,
 		`ordinary ${portType} repeat label ${viewportLabel}`,
 	);
+	// Worker synchronization can precede the completion Inspector's selection publication.
+	// Bind repeat/return to the visible, authored source device immediately before activating it.
+	const repeatSource = await page.evaluate((expectedType) => {
+		const app = document.querySelector('[data-testid="tilefab-app"]');
+		const inspector = document.querySelector('[data-testid="port-equipment-inspector"]');
+		const portId = app?.getAttribute("data-selected-port-id");
+		const groupId = inspector?.getAttribute("data-equipment-group-id");
+		const equipment = window.__tileFab?.getEditorModel()?.document.portEquipment;
+		const port = equipment?.ports.find((item) => String(item.id) === portId);
+		const group = equipment?.equipmentGroups.find((item) => String(item.id) === groupId);
+		if (
+			app?.getAttribute("data-editor-activity") !== "inspect" ||
+			app.getAttribute("data-editor-tool") !== "inspect" ||
+			!portId ||
+			!groupId ||
+			inspector?.getAttribute("data-port-id") !== portId ||
+			!port ||
+			!group ||
+			group.kind !== expectedType ||
+			port.equipmentGroupId !== group.id ||
+			!group.portIds.includes(port.id)
+		) {
+			throw new Error("Repeat source must match the visible authored equipment selection.");
+		}
+		return { portId, groupId };
+	}, portType);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		baseline,
+		`ordinary ${portType} repeat source ${viewportLabel}`,
+	);
 	await repeat.click();
 	await page.waitForFunction(
 		(expectedTool) => {
@@ -37934,7 +37986,7 @@ async function exerciseSelectedEquipmentRepeatEntry(page, portType, viewportLabe
 	);
 	assertEqual(
 		await page.getByTestId("tilefab-app").getAttribute("data-equipment-repeat-return-port"),
-		baseline.selectedPortId,
+		repeatSource.portId,
 		`ordinary ${portType} repeat return context ${viewportLabel}`,
 	);
 	assertProjectUnchanged(
@@ -37964,13 +38016,18 @@ async function exerciseSelectedEquipmentRepeatEntry(page, portType, viewportLabe
 	);
 	assertEqual(
 		(await readMetrics(page)).selectedPortId,
-		baseline.selectedPortId,
+		repeatSource.portId,
 		`ordinary ${portType} repeat exit restores source selection ${viewportLabel}`,
 	);
 	assertEqual(
 		await page.getByTestId("port-equipment-inspector").count(),
 		1,
 		`ordinary ${portType} repeat exit restores source inspector ${viewportLabel}`,
+	);
+	assertEqual(
+		await page.getByTestId("port-equipment-inspector").getAttribute("data-equipment-group-id"),
+		repeatSource.groupId,
+		`ordinary ${portType} repeat exit restores source equipment ${viewportLabel}`,
 	);
 }
 

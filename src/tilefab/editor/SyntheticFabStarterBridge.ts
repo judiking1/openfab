@@ -1,5 +1,6 @@
 import type { CentralSpineFabAssemblyPlan } from "../compile/CentralSpineFabAssemblyPlan";
 import type { FullFabAssemblyPlan, FullFabLoopPlan } from "../compile/FullFabAssemblyPlan";
+import { FULL_FAB_ORGANIZATION_KEY } from "../compile/FullFabRelationships";
 import type {
 	PairedCirculationCorridorPlan,
 	PairedCirculationFabAssemblyPlan,
@@ -420,6 +421,7 @@ function preparedMatchesRequest(
 				productionPlan,
 				parallelHallPlan,
 				pairedCirculationPlan,
+				fullFabPlan,
 			) &&
 			prepared.requestFingerprint === requestFingerprint &&
 			prepared.planFingerprint === expectedPlanFingerprint &&
@@ -880,15 +882,17 @@ function preparedStepsMatchFullFabPlan(
 			step.hierarchyRole !== "network-link" ||
 			step.entityId !== gateway.id ||
 			step.connectionId !== gateway.id ||
-			step.connectionRole !== (gateway.ownerId === "FULL-FAB" ? "wall-outer" : "spine-wall") ||
+			step.connectionRole !==
+				(gateway.ownerId === FULL_FAB_ORGANIZATION_KEY ? "wall-outer" : "spine-wall") ||
 			step.anchor.x !== gateway.sourceAnchor.x ||
 			step.anchor.y !== gateway.sourceAnchor.y ||
 			step.targetAnchor?.x !== gateway.targetAnchor.x ||
 			step.targetAnchor.y !== gateway.targetAnchor.y ||
 			step.pose !== null ||
 			step.junctions === null ||
-			step.outboundTurns !== 0 ||
-			step.returnTurns !== 0 ||
+			!sameJunctionContract(step.junctions, gateway.contract.exactJunctions) ||
+			step.outboundTurns !== gateway.contract.expectedOutboundTurns ||
+			step.returnTurns !== gateway.contract.expectedReturnTurns ||
 			step.bayCount !== 0 ||
 			step.bayIds.length !== 0 ||
 			step.addedEdges < 1

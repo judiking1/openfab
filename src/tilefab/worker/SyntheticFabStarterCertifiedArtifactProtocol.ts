@@ -5,7 +5,7 @@ import type {
 	SyntheticFabStarterCertifiedArtifactId,
 } from "../editor/SyntheticFabStarterCertifiedArtifact";
 
-export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION = 7 as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION = 8 as const;
 
 export interface HydrateSyntheticFabStarterCertifiedArtifactRequest {
 	readonly type: "HYDRATE_SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT";

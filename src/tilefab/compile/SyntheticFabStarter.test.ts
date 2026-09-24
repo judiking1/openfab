@@ -12,6 +12,7 @@ import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/Ope
 import { captureRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
 import { checksumRailPhysicalLayout } from "../worker/RailPhysicalLayout";
+import { fullFabOrganizationIdentities } from "./FullFabRelationships";
 import { pairedCirculationFabOrganizationIdentities } from "./PairedCirculationFabRelationships";
 import { analyzePhysicalPathTopology } from "./PhysicalPathTopology";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
@@ -244,9 +245,42 @@ describe("SyntheticFabStarter", () => {
 		const request = defaultSyntheticFabStarterRequest("full-fab-52");
 		const plan = syntheticFabStarterFullFabAssemblyPlan(request);
 		expect(plan).not.toBeNull();
+		if (!plan) throw new Error("Expected Full plan.");
 		const build = buildSyntheticFabStarter(request);
 		const organizations = build.document.organizations;
 		const roles = [...deriveStaticFabOrganizationSemanticRoles(organizations).values()];
+		const identities = fullFabOrganizationIdentities(plan.banks);
+		const expectedRelationships = resolveStaticFabGeneratorRelationships(
+			plan.relationships,
+			new Map(identities.map((identity, index) => [identity.key, index + 1])),
+		);
+		expect(build.document.relationships).toEqual(expectedRelationships);
+		expect(
+			expectedRelationships.records.map((record) => record.participantOrganizationIds),
+		).toEqual([[2], [3], [4], [5]]);
+		expect(identities.map((identity) => identity.name)).toEqual(
+			organizations.records.map((record) => record.name),
+		);
+		for (const gateway of plan.gateways) {
+			const step = build.steps.find((candidate) => candidate.connectionId === gateway.id);
+			expect(step?.junctions, gateway.id).toEqual(gateway.contract.exactJunctions);
+			expect(step?.addedEdges).toBe(gateway.ownerId === "FULL-FAB" ? 48 : 16);
+		}
+		expect(build.physicalFingerprint).toBe("dddd5295:8dd692b3");
+		const project = captureOpenFabProject(build.document, {
+			manifest: createOpenFabProjectManifest(
+				"full-relationships",
+				"Full FAB",
+				"2026-09-24T00:00:00.000Z",
+			),
+		});
+		const reopened = createRailSnapshotFromOpenFabProject(
+			parseOpenFabProjectJson(serializeOpenFabProject(project)).project,
+		);
+		expect(reopened.checksum).toBe(build.authoredChecksum);
+		expect(hydrateRailMirrorSnapshotDocument(reopened).relationships).toEqual(
+			expectedRelationships,
+		);
 
 		expect(build.planFingerprint).toBe(plan?.planFingerprint);
 		expect(build.steps).toHaveLength(171);
