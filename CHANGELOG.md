@@ -6,6 +6,11 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.6
+
+- Keep Bay flow review cards tall enough for their text on short screens and preserve
+  scrolling content with fixed action buttons at 390×600.
+
 ### Preview candidate 0.1.5
 
 - Explain Bay disconnect/delete consequences in Korean, show retained and removed content first,

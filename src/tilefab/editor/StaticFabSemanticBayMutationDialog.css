@@ -266,7 +266,9 @@
 
 .tilefab-semantic-bay-workspace {
 	display: grid;
+	grid-auto-rows: max-content;
 	min-height: 0;
+	align-content: start;
 	gap: 10px;
 	overflow: auto;
 	padding: 12px;
@@ -674,8 +676,6 @@
 }
 
 .tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-workspace {
-	grid-auto-rows: max-content;
-	align-content: start;
 	gap: 12px;
 	padding: 16px;
 	word-break: keep-all;

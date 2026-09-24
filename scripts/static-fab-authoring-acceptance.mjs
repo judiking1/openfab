@@ -24746,53 +24746,63 @@ async function exerciseBayFlowEdit(page, source) {
 		testEscape: false,
 	});
 
-	await page.setViewportSize({ width: 390, height: 844 });
-	await page.waitForTimeout(100);
-	await openStaticFabAssembleMenu(page, menu);
-	const browseOrganizations = menu.getByTestId("assemble-browse-organizations");
-	await browseOrganizations.scrollIntoViewIfNeeded();
-	await assertLocatorInsideViewport(page, browseOrganizations);
-	await browseOrganizations.click();
-	const narrowSelection = await chooseDefaultTwinBayInOpenOrganizationBrowser(page, source);
-	assertEqual(narrowSelection.selectedBayId, selectedBayId, "390px Twin Bay selection identity");
-	const narrowSource = await readMetrics(page);
-	assertEqual(
-		narrowSource.workerChecksum,
-		desktopSource.workerChecksum,
-		"390px Bay flow source checksum",
-	);
-	await assertAuthoredOrganizationSelectionContext(page, narrowSource, "390px Twin Bay");
-	const narrow = await exerciseCertifiedBayFlowEditJourney(page, {
-		label: "390px",
-		selectedBayId,
-		source: narrowSource,
-		coRotatingScreenshot: "bay-flow-edit-co-rotating-review-390x844.png",
-		alternatingScreenshot: "bay-flow-edit-alternating-review-390x844.png",
-		responsive: true,
-		testEscape: true,
-	});
-	assertEqual(
-		narrow.targetChecksum,
-		desktop.targetChecksum,
-		"desktop and 390px deterministic Bay flow target checksum",
-	);
+	const narrowJourneys = [];
+	for (const height of [844, 600]) {
+		const label = `390x${height}`;
+		await page.setViewportSize({ width: 390, height });
+		await page.waitForTimeout(100);
+		await openStaticFabAssembleMenu(page, menu);
+		const browseOrganizations = menu.getByTestId("assemble-browse-organizations");
+		await browseOrganizations.scrollIntoViewIfNeeded();
+		await assertLocatorInsideViewport(page, browseOrganizations);
+		await browseOrganizations.click();
+		const narrowSelection = await chooseDefaultTwinBayInOpenOrganizationBrowser(page, source);
+		assertEqual(
+			narrowSelection.selectedBayId,
+			selectedBayId,
+			`${label} Twin Bay selection identity`,
+		);
+		const narrowSource = await readMetrics(page);
+		assertEqual(
+			narrowSource.workerChecksum,
+			desktopSource.workerChecksum,
+			`${label} Bay flow source checksum`,
+		);
+		await assertAuthoredOrganizationSelectionContext(page, narrowSource, `${label} Twin Bay`);
+		const journey = await exerciseCertifiedBayFlowEditJourney(page, {
+			label,
+			selectedBayId,
+			source: narrowSource,
+			coRotatingScreenshot: `bay-flow-edit-co-rotating-review-${label}.png`,
+			alternatingScreenshot: `bay-flow-edit-alternating-review-${label}.png`,
+			responsive: true,
+			testEscape: true,
+		});
+		assertEqual(
+			journey.targetChecksum,
+			desktop.targetChecksum,
+			`desktop and ${label} deterministic Bay flow target checksum`,
+		);
+		narrowJourneys.push({ height, ...journey });
+	}
+	const [narrow, shortScreen] = narrowJourneys;
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.waitForTimeout(100);
 	const finalWorkerLifecycle = await readBayFlowEditWorkerLifecycle(page);
 	assertEqual(
 		finalWorkerLifecycle.started - initialWorkerLifecycle.started,
-		5,
+		8,
 		"attached Bay flow Worker start count",
 	);
 	assertEqual(
 		finalWorkerLifecycle.terminated - initialWorkerLifecycle.terminated,
-		5,
+		8,
 		"attached Bay flow Worker termination count",
 	);
 	assertEqual(finalWorkerLifecycle.live, 0, "attached Bay flow Worker live count");
 	reportAcceptanceProgress("bay-flow-edit:pass");
 	return {
-		...narrow.restored,
+		...shortScreen.restored,
 		selectedBayId,
 		sourceChecksum: desktopSource.workerChecksum,
 		targetChecksum: desktop.targetChecksum,
@@ -24800,11 +24810,15 @@ async function exerciseBayFlowEdit(page, source) {
 		desktopReverseFirstPaintMilliseconds: desktop.reverseFirstPaintMilliseconds,
 		narrowFirstPaintMilliseconds: narrow.firstPaintMilliseconds,
 		narrowReverseFirstPaintMilliseconds: narrow.reverseFirstPaintMilliseconds,
+		shortScreenFirstPaintMilliseconds: shortScreen.firstPaintMilliseconds,
+		shortScreenReverseFirstPaintMilliseconds: shortScreen.reverseFirstPaintMilliseconds,
 		screenshots: [
 			"bay-flow-edit-co-rotating-review-desktop.png",
 			"bay-flow-edit-alternating-review-desktop.png",
 			"bay-flow-edit-co-rotating-review-390x844.png",
 			"bay-flow-edit-alternating-review-390x844.png",
+			"bay-flow-edit-co-rotating-review-390x600.png",
+			"bay-flow-edit-alternating-review-390x600.png",
 		],
 	};
 }
@@ -25248,6 +25262,46 @@ async function openCertifiedBayFlowEditReview(page, target, options) {
 	}
 }
 
+async function assertBayFlowStatusTextLayout(dialog, label) {
+	const layout = await dialog.evaluate((element) => {
+		const status = element.querySelector(".tilefab-semantic-bay-status");
+		const copy = status?.querySelector(".tilefab-semantic-bay-status-copy");
+		const workspace = element.querySelector(".tilefab-semantic-bay-workspace");
+		if (
+			!(status instanceof HTMLElement) ||
+			!(copy instanceof HTMLElement) ||
+			!(workspace instanceof HTMLElement)
+		) {
+			throw new Error("Bay flow status layout is incomplete.");
+		}
+		const bounds = status.getBoundingClientRect();
+		const range = document.createRange();
+		range.selectNodeContents(copy);
+		const panels = [...workspace.children].map((panel) => panel.getBoundingClientRect());
+		return {
+			textOverflow: Math.max(
+				0,
+				...[...range.getClientRects()].flatMap((rect) => [
+					bounds.top - rect.top,
+					rect.bottom - bounds.bottom,
+					bounds.left - rect.left,
+					rect.right - bounds.right,
+				]),
+			),
+			statusOverflow: Math.max(0, status.scrollHeight - status.clientHeight),
+			workspaceOverflow: Math.max(0, workspace.scrollWidth - workspace.clientWidth),
+			panelOverlap: Math.max(
+				0,
+				...panels.slice(1).map((panel, index) => panels[index].bottom - panel.top),
+			),
+		};
+	});
+	assertAtMost(layout.textOverflow, 1, `${label} status text containment`);
+	assertAtMost(layout.statusOverflow, 1, `${label} status content containment`);
+	assertEqual(layout.workspaceOverflow, 0, `${label} workspace horizontal overflow`);
+	assertAtMost(layout.panelOverlap, 1, `${label} review panel separation`);
+}
+
 async function assertBayFlowReviewTextLayout(dialog, label) {
 	const rows = await dialog
 		.locator(".tilefab-semantic-bay-bounded-details p, .tilefab-semantic-bay-evidence-grid article")
@@ -25451,12 +25505,17 @@ async function verifyCertifiedBayFlowEditReview(
 		false,
 		`${label} technical details initially collapsed`,
 	);
+	await assertBayFlowStatusTextLayout(dialog, `${label} collapsed`);
+	await page.screenshot({
+		path: path.join(artifactRoot, `bay-flow-collapsed-${label.replace(/[^a-zA-Z0-9-]/g, "-")}.png`),
+	});
 	await details.locator("summary").click();
 	assertEqual(
 		await details.evaluate((element) => element.open),
 		true,
 		`${label} technical details disclosed`,
 	);
+	await assertBayFlowStatusTextLayout(dialog, `${label} expanded`);
 	const connectorEvidence = dialog
 		.locator(".tilefab-semantic-bay-bounded-details p")
 		.filter({ hasText: "유지되는 연결 레일" });
