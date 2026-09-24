@@ -14,80 +14,93 @@ import { STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_PROTOCOL_VERSION } from "../wo
 import { prepareStaticFabOrganizationBundlePlacement } from "../worker/StaticFabOrganizationBundlePlacementRuntime";
 
 describe("Synthetic FAB preset repeat placement", () => {
-	it("places the same Parallel Hall FAB twice with fresh IDs and one undo command per FAB", () => {
-		const prepared = prepareSyntheticFabStarter(
-			defaultSyntheticFabStarterRequest("parallel-hall-fab-12"),
-		);
-		const bundle = prepared.placementBundle;
-		if (!bundle) throw new Error("Parallel Hall preset must expose a placement bundle.");
-		const document = new RailDocument();
-		const first = adoptedWorkerPlan(document, bundle, { x: 0, y: 0 });
-		expect(document.commitStaticFabOrganizationBundle(first)).toBe(true);
-		const firstChecksum = checksumRailMap(
-			document.map,
-			document.portEquipment,
-			document.organizations,
-			document.relationships,
-		);
-		expect(document.organizations.records).toHaveLength(39);
-		const firstSnapshot = captureRailMirrorSnapshot(
-			document.map,
-			document.getPatchSequence(),
-			document.portEquipment,
-			document.organizations,
-			document.relationships,
-		).snapshot;
-		const firstOrganizations = document.organizations.records;
-		const firstRelationships = document.relationships.records;
-		expect(firstRelationships).toHaveLength(2);
-
-		const second = adoptedWorkerPlan(document, bundle, {
-			x: bundle.sourceWidthMeters + 40,
-			y: 0,
-		});
-		expect(document.commitStaticFabOrganizationBundle(second)).toBe(true);
-		expect(document.getPatchSequence()).toBe(2);
-		expect(document.organizations.records).toHaveLength(78);
-		expect(document.relationships.records.map((record) => record.id)).toEqual([1, 2, 3, 4]);
-		expect(document.relationships.nextRelationshipId).toBe(5);
-		expect(new Set(document.organizations.records.map((record) => record.id)).size).toBe(78);
-		expect(new Set(document.organizations.records.map((record) => record.name)).size).toBe(78);
-		const repeatedChecksum = checksumRailMap(
-			document.map,
-			document.portEquipment,
-			document.organizations,
-			document.relationships,
-		);
-		expect(repeatedChecksum).not.toBe(firstChecksum);
-
-		expect(document.undo()).toBe(true);
-		expect(document.organizations.records).toHaveLength(39);
-		const undoneSnapshot = captureRailMirrorSnapshot(
-			document.map,
-			document.getPatchSequence(),
-			document.portEquipment,
-			document.organizations,
-			document.relationships,
-		).snapshot;
-		expect([...undoneSnapshot.xs]).toEqual([...firstSnapshot.xs]);
-		expect([...undoneSnapshot.ys]).toEqual([...firstSnapshot.ys]);
-		expect([...undoneSnapshot.encoded]).toEqual([...firstSnapshot.encoded]);
-		expect(document.organizations.records).toEqual(firstOrganizations);
-		expect(document.relationships.records).toEqual(firstRelationships);
-		expect(document.relationships.nextRelationshipId).toBe(5);
-		expect(document.redo()).toBe(true);
-		expect(document.organizations.records).toHaveLength(78);
-		expect(document.relationships.records.map((record) => record.id)).toEqual([1, 2, 3, 4]);
-		expect(document.relationships.nextRelationshipId).toBe(5);
-		expect(
-			checksumRailMap(
+	it.each([
+		["parallel-hall-fab-12", 39, 2],
+		["central-spine-fab-24", 73, 24],
+	] as const)(
+		"places %s twice with fresh IDs and one undo command per FAB",
+		(preset, organizationCount, relationshipCount) => {
+			const prepared = prepareSyntheticFabStarter(defaultSyntheticFabStarterRequest(preset));
+			const bundle = prepared.placementBundle;
+			if (!bundle) throw new Error("Preset must expose a placement bundle.");
+			const document = new RailDocument();
+			const first = adoptedWorkerPlan(document, bundle, { x: 0, y: 0 });
+			expect(document.commitStaticFabOrganizationBundle(first)).toBe(true);
+			const firstChecksum = checksumRailMap(
 				document.map,
 				document.portEquipment,
 				document.organizations,
 				document.relationships,
-			),
-		).toBe(repeatedChecksum);
-	}, 30_000);
+			);
+			expect(document.organizations.records).toHaveLength(organizationCount);
+			const firstSnapshot = captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot;
+			const firstOrganizations = document.organizations.records;
+			const firstRelationships = document.relationships.records;
+			expect(firstRelationships).toHaveLength(relationshipCount);
+
+			const second = adoptedWorkerPlan(document, bundle, {
+				x: bundle.sourceWidthMeters + 40,
+				y: 0,
+			});
+			expect(document.commitStaticFabOrganizationBundle(second)).toBe(true);
+			expect(document.getPatchSequence()).toBe(2);
+			expect(document.organizations.records).toHaveLength(organizationCount * 2);
+			expect(document.relationships.records.map((record) => record.id)).toEqual(
+				Array.from({ length: relationshipCount * 2 }, (_, index) => index + 1),
+			);
+			expect(document.relationships.nextRelationshipId).toBe(relationshipCount * 2 + 1);
+			expect(new Set(document.organizations.records.map((record) => record.id)).size).toBe(
+				organizationCount * 2,
+			);
+			expect(new Set(document.organizations.records.map((record) => record.name)).size).toBe(
+				organizationCount * 2,
+			);
+			const repeatedChecksum = checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			);
+			expect(repeatedChecksum).not.toBe(firstChecksum);
+
+			expect(document.undo()).toBe(true);
+			expect(document.organizations.records).toHaveLength(organizationCount);
+			const undoneSnapshot = captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot;
+			expect([...undoneSnapshot.xs]).toEqual([...firstSnapshot.xs]);
+			expect([...undoneSnapshot.ys]).toEqual([...firstSnapshot.ys]);
+			expect([...undoneSnapshot.encoded]).toEqual([...firstSnapshot.encoded]);
+			expect(document.organizations.records).toEqual(firstOrganizations);
+			expect(document.relationships.records).toEqual(firstRelationships);
+			expect(document.relationships.nextRelationshipId).toBe(relationshipCount * 2 + 1);
+			expect(document.redo()).toBe(true);
+			expect(document.organizations.records).toHaveLength(organizationCount * 2);
+			expect(document.relationships.records.map((record) => record.id)).toEqual(
+				Array.from({ length: relationshipCount * 2 }, (_, index) => index + 1),
+			);
+			expect(document.relationships.nextRelationshipId).toBe(relationshipCount * 2 + 1);
+			expect(
+				checksumRailMap(
+					document.map,
+					document.portEquipment,
+					document.organizations,
+					document.relationships,
+				),
+			).toBe(repeatedChecksum);
+		},
+		30_000,
+	);
 
 	it("places two independent Full FABs on one map and preserves atomic undo/redo", () => {
 		const prepared = prepareSyntheticFabStarter(defaultSyntheticFabStarterRequest("full-fab-52"));

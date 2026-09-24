@@ -6,6 +6,12 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.10
+
+- Preserve every Central Spine Bay's envelope and two Process Loop contacts through native
+  projects, certified preparation and portable copies, retaining existing geometry and ownership.
+  These contact records do not enable Bay detachment or simulation.
+
 ### Preview candidate 0.1.9
 
 - Preserve four declared Bank-to-FAB contacts in Full FAB presets through native projects,

@@ -2,8 +2,10 @@ import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import type { RailTemplatePose } from "../core/RailTemplateCatalog";
 import { DIR_E, DIR_N, DIR_S, DIR_W, type Direction } from "../core/railShape";
 import type { Cell } from "../core/TileMap";
+import { describeCentralSpineFabRelationships } from "./CentralSpineFabRelationships";
+import type { StaticFabGeneratorRelationshipDescriptor } from "./StaticFabGeneratorRelationshipDescriptor";
 
-export const CENTRAL_SPINE_FAB_ASSEMBLY_PLAN_VERSION = 1 as const;
+export const CENTRAL_SPINE_FAB_ASSEMBLY_PLAN_VERSION = 2 as const;
 export const CENTRAL_SPINE_FAB_MINIMUM_BAYS = 16;
 export const CENTRAL_SPINE_FAB_MAXIMUM_BAYS = 32;
 export const CENTRAL_SPINE_FAB_MINIMUM_DEPTH_METERS = 56;
@@ -71,6 +73,7 @@ export interface CentralSpineFabAssemblyPlan {
 	readonly outer: CentralSpineFabLoopPlan;
 	readonly interbaySpine: CentralSpineFabLoopPlan;
 	readonly banks: readonly [CentralSpineFabBankPlan, CentralSpineFabBankPlan];
+	readonly relationships: StaticFabGeneratorRelationshipDescriptor;
 	readonly planFingerprint: string;
 }
 
@@ -119,6 +122,13 @@ export function createCentralSpineFabAssemblyPlan(
 		spineY + INTERBAY_SPINE_DEPTH_METERS,
 		() => nextBayOrdinal++,
 	);
+	const interbaySpine = loopPlan(
+		"FAB-CENTRAL-INTERBAY",
+		{ x: 0, y: spineY },
+		fabWidthMeters,
+		INTERBAY_SPINE_DEPTH_METERS,
+		{ forward: DIR_E, side: "right", flow: "forward" },
+	);
 	const withoutFingerprint = Object.freeze({
 		version: CENTRAL_SPINE_FAB_ASSEMBLY_PLAN_VERSION,
 		id: "central-spine-fab-24" as const,
@@ -128,17 +138,12 @@ export function createCentralSpineFabAssemblyPlan(
 			side: "right",
 			flow: "forward",
 		}),
-		interbaySpine: loopPlan(
-			"FAB-CENTRAL-INTERBAY",
-			{ x: 0, y: spineY },
-			fabWidthMeters,
-			INTERBAY_SPINE_DEPTH_METERS,
-			{ forward: DIR_E, side: "right", flow: "forward" },
-		),
+		interbaySpine,
 		banks: Object.freeze([northBank, southBank]) as readonly [
 			CentralSpineFabBankPlan,
 			CentralSpineFabBankPlan,
 		],
+		relationships: describeCentralSpineFabRelationships([northBank, southBank], interbaySpine),
 	});
 	return Object.freeze({
 		...withoutFingerprint,
@@ -318,6 +323,7 @@ function centralSpineFabPlanFingerprint(
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([
 		plan.id,
+		plan.relationships.fingerprint,
 		plan.outer.id,
 		plan.outer.pose.side,
 		plan.outer.pose.flow,

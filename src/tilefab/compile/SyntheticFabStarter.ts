@@ -67,6 +67,10 @@ import {
 	createCentralSpineFabAssemblyPlan,
 } from "./CentralSpineFabAssemblyPlan";
 import {
+	CENTRAL_SPINE_FAB_ORGANIZATION_KEY,
+	centralSpineFabOrganizationIdentities,
+} from "./CentralSpineFabRelationships";
+import {
 	createFullFabAssemblyPlan,
 	FULL_FAB_ASSEMBLY_PLAN_VERSION,
 	FULL_FAB_MAXIMUM_BAYS,
@@ -161,7 +165,7 @@ import {
 	syntheticFabTopologyBayCount,
 } from "./SyntheticFabTopologySpec";
 
-export const SYNTHETIC_FAB_STARTER_VERSION = 6 as const;
+export const SYNTHETIC_FAB_STARTER_VERSION = 7 as const;
 export const SYNTHETIC_FAB_STARTER_IDS = [
 	"blank",
 	"bay-assembly",
@@ -1098,6 +1102,23 @@ export function buildSyntheticFabStarter(
 		});
 		planFingerprint = assembly.planFingerprint;
 		commitCentralSpineFab(document, evaluator, steps, assembly, organizationSeeds);
+		const identities = centralSpineFabOrganizationIdentities(assembly.banks);
+		if (
+			organizationSeeds.length !== identities.length ||
+			organizationSeeds.some((seed, index) => {
+				const identity = identities[index];
+				return (
+					!identity ||
+					seed.key !== identity.key ||
+					seed.kind !== identity.kind ||
+					seed.name !== identity.name ||
+					seed.parentKeys.length !== (identity.parentKey === null ? 0 : 1) ||
+					(identity.parentKey !== null && seed.parentKeys[0] !== identity.parentKey)
+				);
+			})
+		)
+			throw new Error("Central Spine organization allocation differs from the declared plan.");
+		relationshipDescriptor = assembly.relationships;
 	} else if (normalized.id === "production-fab-60") {
 		const assembly = createProductionFabAssemblyPlan({
 			bayCount: normalized.parameters.bayCount,
@@ -2584,7 +2605,7 @@ function commitCentralSpineFab(
 	assembly: CentralSpineFabAssemblyPlan,
 	organizationSeeds: MutableSyntheticFabOrganizationSeed[],
 ): void {
-	const fabOrganizationKey = "CENTRAL-SPINE-FAB";
+	const fabOrganizationKey = CENTRAL_SPINE_FAB_ORGANIZATION_KEY;
 	const fabOrganization = organizationSeedDescriptor({
 		key: fabOrganizationKey,
 		kind: "AREA",

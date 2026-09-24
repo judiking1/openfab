@@ -1,3 +1,5 @@
+import type { CentralSpineFabAssemblyPlan } from "../compile/CentralSpineFabAssemblyPlan";
+import { centralSpineFabOrganizationIdentities } from "../compile/CentralSpineFabRelationships";
 import type { FullFabAssemblyPlan } from "../compile/FullFabAssemblyPlan";
 import { fullFabOrganizationIdentities } from "../compile/FullFabRelationships";
 import type { PairedCirculationFabAssemblyPlan } from "../compile/PairedCirculationFabAssemblyPlan";
@@ -19,14 +21,17 @@ export function syntheticFabStarterRelationshipsMatchPlan(
 	parallelHallPlan: ParallelHallFabAssemblyPlan | null,
 	pairedCirculationPlan: PairedCirculationFabAssemblyPlan | null,
 	fullFabPlan: FullFabAssemblyPlan | null,
+	centralSpinePlan: CentralSpineFabAssemblyPlan | null,
 ): boolean {
 	let expected = emptyStaticFabAssemblyRelationshipState();
 	if (
-		[productionPlan, parallelHallPlan, pairedCirculationPlan, fullFabPlan].filter(Boolean).length >
-		1
+		[productionPlan, parallelHallPlan, pairedCirculationPlan, fullFabPlan, centralSpinePlan].filter(
+			Boolean,
+		).length > 1
 	)
 		return false;
-	const producer = productionPlan ?? parallelHallPlan ?? pairedCirculationPlan ?? fullFabPlan;
+	const producer =
+		productionPlan ?? parallelHallPlan ?? pairedCirculationPlan ?? fullFabPlan ?? centralSpinePlan;
 	if (producer) {
 		const identities = productionPlan
 			? productionFabOrganizationIdentities(productionPlan.banks)
@@ -34,7 +39,11 @@ export function syntheticFabStarterRelationshipsMatchPlan(
 				? parallelHallFabOrganizationIdentities(parallelHallPlan.banks)
 				: pairedCirculationPlan
 					? pairedCirculationFabOrganizationIdentities(pairedCirculationPlan.banks)
-					: fullFabOrganizationIdentities((fullFabPlan as FullFabAssemblyPlan).banks);
+					: fullFabPlan
+						? fullFabOrganizationIdentities(fullFabPlan.banks)
+						: centralSpineFabOrganizationIdentities(
+								(centralSpinePlan as CentralSpineFabAssemblyPlan).banks,
+							);
 		const keys = identities.map((identity) => identity.key);
 		const ids = prepared.snapshot.organizations.organizationIds;
 		if (

@@ -3,6 +3,7 @@ import {
 	centralSpineFabMinimumPitchMeters,
 	createCentralSpineFabAssemblyPlan,
 } from "./CentralSpineFabAssemblyPlan";
+import { describeCentralSpineFabRelationships } from "./CentralSpineFabRelationships";
 
 const DEFAULT_PROFILE = Object.freeze({
 	bayCount: 24,
@@ -16,7 +17,7 @@ describe("CentralSpineFabAssemblyPlan", () => {
 		const plan = createCentralSpineFabAssemblyPlan(DEFAULT_PROFILE);
 
 		expect(plan).toMatchObject({
-			version: 1,
+			version: 2,
 			id: "central-spine-fab-24",
 			outer: { origin: { x: 0, y: 0 }, lengthMeters: 668, depthMeters: 200 },
 			interbaySpine: { origin: { x: 0, y: 92 }, lengthMeters: 668, depthMeters: 16 },
@@ -62,5 +63,22 @@ describe("CentralSpineFabAssemblyPlan", () => {
 		expect(() =>
 			createCentralSpineFabAssemblyPlan({ ...DEFAULT_PROFILE, bayDepthMeters: 73 }),
 		).toThrow(/depth/i);
+	});
+	it("binds frozen contacts to the declared forward spine and both planning sides", () => {
+		const plan = createCentralSpineFabAssemblyPlan(DEFAULT_PROFILE);
+		expect(
+			Object.isFrozen(
+				plan.relationships.relationships.records[23]?.connectionGroups[2]?.legs[0]?.seamContacts,
+			),
+		).toBe(true);
+		expect(() =>
+			describeCentralSpineFabRelationships(plan.banks, {
+				...plan.interbaySpine,
+				pose: { ...plan.interbaySpine.pose, flow: "reverse" },
+			}),
+		).toThrow(/forward interbay trunk/);
+		expect(() =>
+			describeCentralSpineFabRelationships([...plan.banks].reverse(), plan.interbaySpine),
+		).toThrow(/planning Bank order/);
 	});
 });

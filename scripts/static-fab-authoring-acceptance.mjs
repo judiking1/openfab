@@ -28410,6 +28410,13 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 				groups: [1, 1, 1, 1],
 				capture: "full-fab",
 			},
+			{
+				id: "central-spine-fab-24",
+				label: "Central Spine FAB",
+				organizations: "73",
+				groups: Array(24).fill(3),
+				capture: "central-spine-fab",
+			},
 		]) {
 			await page.getByRole("button", { name: "FAB 프리셋", exact: true }).click();
 			await dialog.waitFor({ state: "visible" });
@@ -28419,11 +28426,15 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 			const created = await waitForWorker(
 				page,
 				(metrics) =>
-					metrics.modelRelationships === "4" &&
+					metrics.modelRelationships === String(preset.groups.length) &&
 					metrics.staticFabOrganizations === preset.organizations,
 				{ timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS },
 			);
-			assertEqual(created.modelNextRelationshipId, "5", `${preset.label} relationship allocator`);
+			assertEqual(
+				created.modelNextRelationshipId,
+				String(preset.groups.length + 1),
+				`${preset.label} relationship allocator`,
+			);
 			assertEqual(created.strongComponents, "1", `${preset.label} network count`);
 			assertEqual(created.openTerminals, "0", `${preset.label} terminals`);
 			assertEqual(created.workerSimulationReady, "false", `${preset.label} simulation gate`);
@@ -28431,7 +28442,7 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 			assertEqual(
 				JSON.stringify(contacts.records.map((record) => record.connectionGroups.length)),
 				JSON.stringify(preset.groups),
-				`${preset.label} preserves every declared contact in all four Banks`,
+				`${preset.label} preserves every declared operation contact`,
 			);
 			await page.screenshot({
 				path: path.join(artifactRoot, `${preset.capture}-declared-relationships.png`),
@@ -28466,6 +28477,8 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 			pairedFabFileRoundtrip: true,
 			fullFabRelationships: 4,
 			fullFabFileRoundtrip: true,
+			centralSpineFabRelationships: 24,
+			centralSpineFabFileRoundtrip: true,
 		};
 	} finally {
 		await context.close();

@@ -6,7 +6,7 @@ import {
 } from "../compile/SyntheticFabStarterPreview";
 import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import { staticFabOrganizationBundleFingerprint } from "../core/StaticFabOrganizationBundlePlacement";
-import generatedSource from "../generated/synthetic-fab-presets/full-fab-52.default.v7.json?raw";
+import generatedSource from "../generated/synthetic-fab-presets/full-fab-52.default.v8.json?raw";
 import { checksumRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
 import {

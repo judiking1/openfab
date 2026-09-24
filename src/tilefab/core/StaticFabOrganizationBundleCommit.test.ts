@@ -52,6 +52,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 		"parallel-hall-generator",
 		"paired-circulation-generator",
 		"full-generator",
+		"central-spine-generator",
 	])("copies and rotates %s with atomic history and exact mirror packets", async (source) => {
 		const fixture =
 			source === "production-generator"
@@ -65,7 +66,11 @@ describe("StaticFabOrganizationBundle document commit", () => {
 							).document
 						: source === "full-generator"
 							? buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("full-fab-52")).document
-							: productionBankContactFixture();
+							: source === "central-spine-generator"
+								? buildSyntheticFabStarter(
+										defaultSyntheticFabStarterRequest("central-spine-fab-24"),
+									).document
+								: productionBankContactFixture();
 		const root = fixture.organizations.records.find(
 			(record) => (record.parentOrganizationIds?.length ?? 0) === 0,
 		);
@@ -93,13 +98,15 @@ describe("StaticFabOrganizationBundle document commit", () => {
 		});
 		const plan = adoptedWorkerPlan(document, captured.bundle, { x: 500, y: 500 }, 1);
 		expect(plan.relationshipMutations).toHaveLength(
-			source === "production-generator"
-				? 3
-				: source === "parallel-hall-generator"
-					? 2
-					: source === "paired-circulation-generator" || source === "full-generator"
-						? 4
-						: 1,
+			source === "central-spine-generator"
+				? 24
+				: source === "production-generator"
+					? 3
+					: source === "parallel-hall-generator"
+						? 2
+						: source === "paired-circulation-generator" || source === "full-generator"
+							? 4
+							: 1,
 		);
 		let tick = 0;
 		const result = await document.commitStaticFabOrganizationBundleCooperatively(plan, {
@@ -117,13 +124,15 @@ describe("StaticFabOrganizationBundle document commit", () => {
 		expect(document.undo()).toBe(true);
 		expect(document.relationships.records).toHaveLength(0);
 		expect(document.relationships.nextRelationshipId).toBe(
-			source === "production-generator"
-				? 4
-				: source === "parallel-hall-generator"
-					? 3
-					: source === "paired-circulation-generator" || source === "full-generator"
-						? 5
-						: 2,
+			source === "central-spine-generator"
+				? 25
+				: source === "production-generator"
+					? 4
+					: source === "parallel-hall-generator"
+						? 3
+						: source === "paired-circulation-generator" || source === "full-generator"
+							? 5
+							: 2,
 		);
 		expect(document.redo()).toBe(true);
 		expect(snapshotFor(document).checksum).toBe(expected.checksum);

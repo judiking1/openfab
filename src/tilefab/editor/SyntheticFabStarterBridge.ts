@@ -422,6 +422,7 @@ function preparedMatchesRequest(
 				parallelHallPlan,
 				pairedCirculationPlan,
 				fullFabPlan,
+				centralSpinePlan,
 			) &&
 			prepared.requestFingerprint === requestFingerprint &&
 			prepared.planFingerprint === expectedPlanFingerprint &&
@@ -974,29 +975,15 @@ function preparedStepsMatchCentralSpinePlan(
 	plan: CentralSpineFabAssemblyPlan,
 ): boolean {
 	if (steps.length !== 2 + plan.profile.bayCount * 3) return false;
-	const outer = steps[0];
-	const spine = steps[1];
 	if (
-		!outer ||
-		outer.kind !== "template" ||
-		outer.templateId !== "outer-loop" ||
-		outer.hierarchyRole !== "outer-circulation" ||
-		outer.entityId !== plan.outer.id ||
-		outer.anchor.x !== plan.outer.origin.x ||
-		outer.anchor.y !== plan.outer.origin.y ||
-		outer.pose?.forward !== plan.outer.pose.forward ||
-		outer.pose.side !== plan.outer.pose.side ||
-		outer.pose.flow !== plan.outer.pose.flow ||
-		!spine ||
-		spine.kind !== "template" ||
-		spine.templateId !== "outer-loop" ||
-		spine.hierarchyRole !== "interbay-spine" ||
-		spine.entityId !== plan.interbaySpine.id ||
-		spine.anchor.x !== plan.interbaySpine.origin.x ||
-		spine.anchor.y !== plan.interbaySpine.origin.y ||
-		spine.pose?.forward !== plan.interbaySpine.pose.forward ||
-		spine.pose.side !== plan.interbaySpine.pose.side ||
-		spine.pose.flow !== plan.interbaySpine.pose.flow
+		!preparedLoopStepMatches(steps[0], plan.outer, "outer-circulation", plan.outer.id, []) ||
+		!preparedLoopStepMatches(
+			steps[1],
+			plan.interbaySpine,
+			"interbay-spine",
+			plan.interbaySpine.id,
+			[],
+		)
 	) {
 		return false;
 	}
@@ -1036,6 +1023,8 @@ function preparedStepsMatchCentralSpinePlan(
 						step.connectionRole !== null ||
 						step.targetAnchor !== null ||
 						step.junctions !== null ||
+						step.outboundTurns !== null ||
+						step.returnTurns !== null ||
 						step.addedEdges < 1
 					);
 				})

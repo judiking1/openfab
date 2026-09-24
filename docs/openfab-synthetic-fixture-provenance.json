@@ -19,43 +19,44 @@
 		"src/tilefab/compile/ParallelHallFabRelationships.ts",
 		"src/tilefab/compile/PairedCirculationFabRelationships.ts",
 		"src/tilefab/compile/CollectorBankFabRelationships.ts",
-		"src/tilefab/compile/FullFabRelationships.ts"
+		"src/tilefab/compile/FullFabRelationships.ts",
+		"src/tilefab/compile/CentralSpineFabRelationships.ts"
 	],
 	"artifacts": [
 		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/central-spine-fab-24.default.v7.json",
-			"artifactId": "central-spine-fab-24.default.v7",
-			"sha256": "42533e315adba101c052e68984c55e62f2f1ec1d03976aaa47be91a70111beb3",
+			"path": "src/tilefab/generated/synthetic-fab-presets/central-spine-fab-24.default.v8.json",
+			"artifactId": "central-spine-fab-24.default.v8",
+			"sha256": "f5e3e4764a0812cb94f35fc34217ed09d917812d59c682f15996b0575295a714",
 			"profileSource": "src/tilefab/compile/CentralSpineFabAssemblyPlan.ts"
 		},
 		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/full-fab-52.default.v7.json",
-			"artifactId": "full-fab-52.default.v7",
-			"sha256": "db90812c6a5dad6b8980a620664ade11e315645600a90d28dab30da0fcd54afd",
+			"path": "src/tilefab/generated/synthetic-fab-presets/full-fab-52.default.v8.json",
+			"artifactId": "full-fab-52.default.v8",
+			"sha256": "319213be658bc43a4171509062a36e0401162183a2de521b6b01ad5691f58af1",
 			"profileSource": "src/tilefab/compile/FullFabAssemblyPlan.ts"
 		},
 		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/large-fab-60.default.v7.json",
-			"artifactId": "large-fab-60.default.v7",
-			"sha256": "d7fe36bd2b300f266ff38254a08eed4904243154b2451163d2cf67721c1e86ea",
+			"path": "src/tilefab/generated/synthetic-fab-presets/large-fab-60.default.v8.json",
+			"artifactId": "large-fab-60.default.v8",
+			"sha256": "b07dd59c9a431e4999ee33e271bd5bccc0ada79d801aa2f0367bd81aa194494c",
 			"profileSource": "src/tilefab/compile/SyntheticFabTopologySpec.ts"
 		},
 		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/paired-circulation-fab-52.default.v8.json",
-			"artifactId": "paired-circulation-fab-52.default.v8",
-			"sha256": "4a1f806582fca1bc983ed0cd2b9c8d143903bc62df2b7500f366bc2c582e46f3",
+			"path": "src/tilefab/generated/synthetic-fab-presets/paired-circulation-fab-52.default.v9.json",
+			"artifactId": "paired-circulation-fab-52.default.v9",
+			"sha256": "a4b7931899759e51b7890a1dab3edcaed1e4026493539e82a39978826f9d2f8a",
 			"profileSource": "src/tilefab/compile/PairedCirculationFabAssemblyPlan.ts"
 		},
 		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/parallel-hall-fab-12.default.v7.json",
-			"artifactId": "parallel-hall-fab-12.default.v7",
-			"sha256": "a98ba18c3b5ecc8ce8806ebaffb4d4c2695a5a8530293a91c604d697b4209888",
+			"path": "src/tilefab/generated/synthetic-fab-presets/parallel-hall-fab-12.default.v8.json",
+			"artifactId": "parallel-hall-fab-12.default.v8",
+			"sha256": "72be7ecec0844123ef89a95361cd142b6a27a712cb5dd45149bb690cc84e0dd5",
 			"profileSource": "src/tilefab/compile/ParallelHallFabAssemblyPlan.ts"
 		},
 		{
-			"path": "src/tilefab/generated/synthetic-fab-presets/production-fab-60.default.v7.json",
-			"artifactId": "production-fab-60.default.v7",
-			"sha256": "7ffab361313865c7532aec3e6bb106d3c521b1e780bbe56558dd4a7f14b3f807",
+			"path": "src/tilefab/generated/synthetic-fab-presets/production-fab-60.default.v8.json",
+			"artifactId": "production-fab-60.default.v8",
+			"sha256": "c0530641c64022ede37a662cacca40fb53e8633e835af685453599ec20092d1b",
 			"profileSource": "src/tilefab/compile/ProductionFabAssemblyPlan.ts"
 		}
 	],
