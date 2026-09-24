@@ -10,8 +10,14 @@ export function useEditorNavigationScroll(
 		const navigation = navigationRef.current;
 		if (!navigation) return;
 		navigation.dataset.scrollContext = `${activity}:${expanded ? "expanded" : "compact"}`;
-		navigation.scrollTop = 0;
+		let resetScroll = true;
 		const update = (): void => {
+			// Reset and measure after the observer's initial layout notification. Even writing
+			// scrollTop during mount would synchronously lay out the whole editor.
+			if (resetScroll) {
+				resetScroll = false;
+				navigation.scrollTop = 0;
+			}
 			navigation.dataset.moreTools = String(
 				navigation.scrollHeight - navigation.clientHeight - navigation.scrollTop > 1,
 			);
@@ -23,7 +29,6 @@ export function useEditorNavigationScroll(
 		)) {
 			observer.observe(child);
 		}
-		update();
 		navigation.addEventListener("scroll", update, { passive: true });
 		return () => {
 			observer.disconnect();

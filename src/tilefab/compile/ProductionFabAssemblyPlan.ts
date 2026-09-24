@@ -2,8 +2,10 @@ import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import type { RailTemplatePose } from "../core/RailTemplateCatalog";
 import { DIR_E, DIR_N, DIR_S, DIR_W, type Direction } from "../core/railShape";
 import type { Cell } from "../core/TileMap";
+import { describeProductionFabRelationships } from "./ProductionFabRelationships";
+import type { StaticFabGeneratorRelationshipDescriptor } from "./StaticFabGeneratorRelationshipDescriptor";
 
-export const PRODUCTION_FAB_ASSEMBLY_PLAN_VERSION = 1 as const;
+export const PRODUCTION_FAB_ASSEMBLY_PLAN_VERSION = 2 as const;
 export const PRODUCTION_FAB_MINIMUM_BAYS = 50;
 export const PRODUCTION_FAB_MAXIMUM_BAYS = 100;
 export const PRODUCTION_FAB_MINIMUM_BANKS = 3;
@@ -66,6 +68,7 @@ export interface ProductionFabAssemblyPlan {
 	readonly outer: ProductionFabLoopPlan;
 	readonly interbaySpine: ProductionFabLoopPlan;
 	readonly banks: readonly ProductionFabBankPlan[];
+	readonly relationships: StaticFabGeneratorRelationshipDescriptor;
 	readonly planFingerprint: string;
 }
 
@@ -215,6 +218,7 @@ export function createProductionFabAssemblyPlan(
 			{ forward: DIR_E, side: "right", flow: "forward" },
 		),
 		banks: Object.freeze(banks),
+		relationships: describeProductionFabRelationships(banks),
 	});
 	return Object.freeze({
 		...withoutFingerprint,
@@ -347,6 +351,7 @@ function productionFabPlanFingerprint(
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([
 		plan.id,
+		plan.relationships.fingerprint,
 		plan.outer.id,
 		plan.outer.pose.side,
 		plan.outer.pose.flow,

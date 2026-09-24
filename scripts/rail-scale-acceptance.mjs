@@ -9628,10 +9628,15 @@ async function exerciseArrangementScalePage(
 			throw new Error("Arrangement scale page uses a stale acceptance contract.");
 		}
 		const workflow = await exerciseArrangementSessionWorkflow(page, readyTimeoutMilliseconds);
-		const pageLongTasks = await page.evaluate(
-			() => globalThis.__openFabScale?.longTasks.length ?? 0,
+		const pageLongTaskEntries = await page.evaluate(
+			() => globalThis.__openFabScale?.longTasks ?? [],
 		);
-		return { ...workflow, pageReadyMilliseconds, pageLongTasks };
+		return {
+			...workflow,
+			pageReadyMilliseconds,
+			pageLongTasks: pageLongTaskEntries.length,
+			pageLongTaskEntries,
+		};
 	} finally {
 		await closeBrowserResource(page, `${cellCount.toLocaleString()}-cell arrangement page`);
 	}

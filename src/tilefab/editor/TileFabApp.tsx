@@ -6080,7 +6080,8 @@ export default function TileFabApp(): React.ReactElement {
 			else workspace.style.removeProperty(property);
 			scheduleRenderRef.current();
 		};
-		measure();
+		// The observer also delivers the initial measurement after layout, so mounting the
+		// editor does not force a whole-page layout inside React's commit.
 		const observer = new ResizeObserver(measure);
 		observer.observe(bar);
 		observer.observe(workspace);
@@ -7285,7 +7286,8 @@ export default function TileFabApp(): React.ReactElement {
 					payload,
 					createBrowserRailStartupScheduler(),
 					controller.signal,
-					3,
+					// Leave headroom for allocation-driven GC between cooperative checkpoints.
+					2,
 					document,
 				);
 				if (

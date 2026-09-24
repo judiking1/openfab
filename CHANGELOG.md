@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.3
+
+- Preserve explicitly declared Bank-to-FAB contact relationships in generated Production FABs,
+  including project save/load, certified presets and complete portable assembly copies.
+- Validate the exact producer records during preparation and certification. Shared circulation
+  remains infrastructure; automatic Detach and simulation remain unavailable.
+- Measure placement hint clearance and reset menu scrolling through the existing resize observers,
+  avoiding forced whole-page layout during the editor's initial React commit.
+
 ### Preview candidate 0.1.2
 
 - Make expanded authoring tool descriptions readable at 12px, wrap full names and instructions,
@@ -42,7 +51,8 @@ All notable public OpenFab changes will be documented here. The format follows
   keyboard feedback and compact layouts while preserving the same atomic edit and Undo/Redo paths.
 - Native project schema v13 preserves explicit assembly relationship state and allocator cursors
   through save/load, history, and Worker synchronization. Projects older than schema v11 migrate to empty
-  relationship state; automatic relationship producers and Detach remain disabled.
+  relationship state; explicit Connector and Production FAB producers are supported, while other
+  generator producers and Detach remain pending.
 - Relationship snapshot hydration and checksums run in cancellable bounded steps. Final document
   adoption reuses completed relationship validation, and whole-map copying retains less memory.
 

@@ -127,7 +127,15 @@ import {
 	type ProductionFabProcessLoopPlacement,
 	productionFabMaximumBayPitchMeters,
 } from "./ProductionFabAssemblyPlan";
+import {
+	PRODUCTION_FAB_ORGANIZATION_KEY,
+	productionFabOrganizationKeys,
+} from "./ProductionFabRelationships";
 import { createTopologyOnlyRailDraftPreview, RailDraftEvaluator } from "./RailDraftEvaluator";
+import {
+	resolveStaticFabGeneratorRelationships,
+	type StaticFabGeneratorRelationshipDescriptor,
+} from "./StaticFabGeneratorRelationshipDescriptor";
 import {
 	createSyntheticFabAssemblyPlan,
 	SYNTHETIC_FAB_ASSEMBLY_PLAN_VERSION,
@@ -144,7 +152,7 @@ import {
 	syntheticFabTopologyBayCount,
 } from "./SyntheticFabTopologySpec";
 
-export const SYNTHETIC_FAB_STARTER_VERSION = 2 as const;
+export const SYNTHETIC_FAB_STARTER_VERSION = 3 as const;
 export const SYNTHETIC_FAB_STARTER_IDS = [
 	"blank",
 	"bay-assembly",
@@ -985,6 +993,7 @@ export function buildSyntheticFabStarter(
 	const evaluator = new RailDraftEvaluator();
 	const steps: SyntheticFabStarterBuildStep[] = [];
 	const organizationSeeds: MutableSyntheticFabOrganizationSeed[] = [];
+	let relationshipDescriptor: StaticFabGeneratorRelationshipDescriptor | null = null;
 	let planFingerprint: string | null = null;
 
 	if (normalized.id === "bay-assembly") {
@@ -1045,6 +1054,13 @@ export function buildSyntheticFabStarter(
 		});
 		planFingerprint = assembly.planFingerprint;
 		commitProductionFab(document, evaluator, steps, assembly, organizationSeeds);
+		const expectedKeys = productionFabOrganizationKeys(assembly.banks);
+		if (
+			organizationSeeds.length !== expectedKeys.length ||
+			organizationSeeds.some((seed, index) => seed.key !== expectedKeys[index])
+		)
+			throw new Error("Production FAB organization allocation differs from the declared plan.");
+		relationshipDescriptor = assembly.relationships;
 	} else if (normalized.id === "single-loop") {
 		commitTemplate(
 			document,
@@ -1265,11 +1281,16 @@ export function buildSyntheticFabStarter(
 	}
 
 	if (organizationSeeds.length > 0) {
+		const { organizations, organizationIdByKey } = organizationStateFromSeeds(organizationSeeds);
 		document = RailDocument.fromLoadedMap(
 			document.map,
 			document.getPatchSequence(),
 			document.portEquipment,
-			organizationStateFromSeeds(organizationSeeds),
+			organizations,
+			document.operationalConfiguration,
+			relationshipDescriptor
+				? resolveStaticFabGeneratorRelationships(relationshipDescriptor, organizationIdByKey)
+				: document.relationships,
 		);
 	}
 
@@ -1281,6 +1302,7 @@ export function buildSyntheticFabStarter(
 		document.map,
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	const physicalFingerprint = checksumRailPhysicalLayout(physical);
 	const bounds = document.map.bounds();
@@ -2637,7 +2659,7 @@ function commitProductionFab(
 	assembly: ProductionFabAssemblyPlan,
 	organizationSeeds: MutableSyntheticFabOrganizationSeed[],
 ): void {
-	const fabOrganizationKey = "PRODUCTION-FAB";
+	const fabOrganizationKey = PRODUCTION_FAB_ORGANIZATION_KEY;
 	commitTemplate(
 		document,
 		evaluator,
@@ -2853,18 +2875,19 @@ function appendOrganizationSeed(
 	for (const edge of edges) seed.railEdges.set(staticFabOrganizationEdgeKey(edge), edge);
 }
 
-function organizationStateFromSeeds(
-	seeds: readonly MutableSyntheticFabOrganizationSeed[],
-): StaticFabOrganizationState {
+function organizationStateFromSeeds(seeds: readonly MutableSyntheticFabOrganizationSeed[]): {
+	readonly organizations: StaticFabOrganizationState;
+	readonly organizationIdByKey: ReadonlyMap<string, number>;
+} {
 	const idByKey = new Map(seeds.map((seed, index) => [seed.key, index + 1]));
-	const records = seeds.map((seed, index) => {
+	const records = seeds.map((seed) => {
 		const parentOrganizationIds = seed.parentKeys.map((key) => {
 			const id = idByKey.get(key);
 			if (id === undefined) throw new Error(`Organization parent '${key}' is not defined.`);
 			return id;
 		});
 		return Object.freeze({
-			id: index + 1,
+			id: idByKey.get(seed.key) as number,
 			kind: seed.kind,
 			name: seed.name,
 			parentOrganizationIds: Object.freeze(
@@ -2881,10 +2904,13 @@ function organizationStateFromSeeds(
 			}),
 		});
 	});
-	return copyStaticFabOrganizationState({
-		nextOrganizationId: records.length + 1,
-		records: Object.freeze(records),
-	});
+	return {
+		organizations: copyStaticFabOrganizationState({
+			nextOrganizationId: records.length + 1,
+			records: Object.freeze(records),
+		}),
+		organizationIdByKey: idByKey,
+	};
 }
 
 function starterScale(

@@ -42,6 +42,7 @@ import type {
 	SyntheticFabStarterWorkerResponse,
 } from "../worker/SyntheticFabStarterProtocol";
 import { freezeSyntheticFabStarterContainersCooperatively } from "./SyntheticFabStarterContainers";
+import { syntheticFabStarterRelationshipsMatchPlan } from "./SyntheticFabStarterRelationshipContract";
 
 export interface SyntheticFabStarterAdmissionScheduler {
 	now(): number;
@@ -414,6 +415,7 @@ function preparedMatchesRequest(
 		const checksum = RailChecksumAccumulator.fromDigest(prepared.authoredChecksum);
 		return (
 			isPreparedSyntheticFabStarterPayload(prepared) &&
+			syntheticFabStarterRelationshipsMatchPlan(prepared, productionPlan) &&
 			prepared.requestFingerprint === requestFingerprint &&
 			prepared.planFingerprint === expectedPlanFingerprint &&
 			syntheticFabStarterRequestFingerprint(prepared.request) === requestFingerprint &&

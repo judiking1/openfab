@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -57,6 +58,17 @@ function verifyCase(mutate, expectedError = null) {
 
 test("accepts the checked-in synthetic data and authored illustration declarations", () => {
 	verifyCase(() => {});
+});
+
+test("rejects a rehashed artifact using the retired certification contract", () => {
+	verifyCase((fixture, write) => {
+		const row = fixture.artifacts[0];
+		const payload = JSON.parse(readFileSync(new URL(`../${row.path}`, import.meta.url), "utf8"));
+		payload.certificationContract = "independent-materialization-v2";
+		const bytes = JSON.stringify(payload);
+		row.sha256 = createHash("sha256").update(bytes).digest("hex");
+		write(row.path, bytes);
+	}, /certification contract mismatch/);
 });
 
 test("rejects an undeclared SVG even inside the illustration asset directory", () => {

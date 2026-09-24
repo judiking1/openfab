@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { productionBankContactFixture } from "../compile/StaticFabAssemblyRelationshipTestFixture";
 import {
+	buildSyntheticFabStarter,
+	defaultSyntheticFabStarterRequest,
+} from "../compile/SyntheticFabStarter";
+import {
 	captureRailMirrorSnapshot,
 	checksumRailMap,
 	checksumRailPatchResult,
@@ -42,8 +46,14 @@ import {
 } from "./StaticFabOrganizationBundlePlacement";
 
 describe("StaticFabOrganizationBundle document commit", () => {
-	it("prepares a complete nested relationship closure and replays the exact six-domain packet", async () => {
-		const fixture = productionBankContactFixture();
+	it.each([
+		"single-contact-fixture",
+		"production-generator",
+	])("copies and rotates %s with atomic history and exact mirror packets", async (source) => {
+		const fixture =
+			source === "production-generator"
+				? buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("production-fab-60")).document
+				: productionBankContactFixture();
 		const root = fixture.organizations.records.find(
 			(record) => (record.parentOrganizationIds?.length ?? 0) === 0,
 		);
@@ -70,7 +80,7 @@ describe("StaticFabOrganizationBundle document commit", () => {
 			mirror.applyPatch(decodeRailPatchSoA(packet.patch, mirror.organizationState));
 		});
 		const plan = adoptedWorkerPlan(document, captured.bundle, { x: 500, y: 500 }, 1);
-		expect(plan.relationshipMutations.length).toBeGreaterThan(0);
+		expect(plan.relationshipMutations).toHaveLength(source === "production-generator" ? 3 : 1);
 		let tick = 0;
 		const result = await document.commitStaticFabOrganizationBundleCooperatively(plan, {
 			now: () => ++tick,
@@ -86,6 +96,9 @@ describe("StaticFabOrganizationBundle document commit", () => {
 		expect(mirror.captureSnapshot()).toEqual(expected);
 		expect(document.undo()).toBe(true);
 		expect(document.relationships.records).toHaveLength(0);
+		expect(document.relationships.nextRelationshipId).toBe(
+			source === "production-generator" ? 4 : 2,
+		);
 		expect(document.redo()).toBe(true);
 		expect(snapshotFor(document).checksum).toBe(expected.checksum);
 		expect(mirror.captureSnapshot()).toEqual(snapshotFor(document));

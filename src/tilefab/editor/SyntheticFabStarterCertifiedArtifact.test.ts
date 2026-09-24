@@ -8,14 +8,26 @@ import {
 	type PreparedSyntheticFabStarter,
 	prepareSyntheticFabStarter,
 } from "../compile/SyntheticFabStarterPreview";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import { captureStaticFabOrganizationBundle } from "../core/StaticFabOrganizationBundle";
-import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v3.json?raw";
-import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v3.json?raw";
-import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v4.json?raw";
-import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v3.json?raw";
-import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v3.json?raw";
+import { staticFabOrganizationBundleFingerprint } from "../core/StaticFabOrganizationBundlePlacement";
+import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v4.json?raw";
+import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v4.json?raw";
+import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v5.json?raw";
+import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v4.json?raw";
+import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v4.json?raw";
+import { checksumRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
+import {
+	createStaticFabAssemblyRelationshipSnapshot,
+	hydrateStaticFabAssemblyRelationshipSnapshot,
+} from "../worker/StaticFabAssemblyRelationshipSoA";
+import {
+	createStaticFabOrganizationSnapshot,
+	hydrateStaticFabOrganizationSnapshot,
+} from "../worker/StaticFabOrganizationSoA";
 import { SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION } from "../worker/SyntheticFabStarterCertifiedArtifactProtocol";
+import { preparedSyntheticFabStarterMatchesRequest } from "./SyntheticFabStarterBridge";
 import {
 	certificationEvidenceBindsPreparedIdentity,
 	certificationEvidenceMatchesPrepared,
@@ -76,11 +88,11 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 	it("matches the checked-in deterministic public synthetic artifact", () => {
 		expect(JSON.parse(generatedArtifactSource)).toEqual(artifact);
 		expect(artifact).toMatchObject({
-			schemaVersion: 3,
-			artifactId: "large-fab-60.default.v3",
-			certificationContract: "independent-materialization-v2",
+			schemaVersion: 4,
+			artifactId: "large-fab-60.default.v4",
+			certificationContract: "independent-materialization-v3",
 		});
-		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION).toBe(4);
+		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION).toBe(5);
 		expect(artifact.typedArrayByteLength).toBeGreaterThan(0);
 		expect(artifact.payloadByteLength).toBeLessThan(
 			SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES,
@@ -113,7 +125,7 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 		).toBe(false);
 	});
 
-	it("refuses to certify relationship-producing starters before producer activation", () => {
+	it("refuses undeclared relationship state in producer-free Legacy Large", () => {
 		const relationshipPrimary = structuredClone(primary);
 		const relationshipIndependent = structuredClone(independent);
 		(
@@ -164,6 +176,137 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 		expect(captured.bundle.sourceModuleCount).toBe(104);
 	});
 
+	it("preserves exact Production relationships across two builds, artifact hydration and portable capture", () => {
+		const hydrated = hydrateSyntheticFabStarterCertifiedArtifact(
+			productionArtifact,
+			productionRequest,
+		);
+		if (!hydrated) throw new Error("Expected Production artifact.");
+		const expected = hydrateStaticFabAssemblyRelationshipSnapshot(
+			productionPrimary.snapshot.relationships,
+		);
+		expect(expected.records).toHaveLength(3);
+		expect(expected.records.map((record) => record.participantOrganizationIds)).toEqual([
+			[2],
+			[63],
+			[124],
+		]);
+		for (const candidate of [productionIndependent, hydrated.prepared]) {
+			expect(
+				hydrateStaticFabAssemblyRelationshipSnapshot(candidate.snapshot.relationships),
+			).toEqual(expected);
+			expect(candidate.placementBundle?.relationships).toEqual(expected);
+			expect(candidate.authoredChecksum).toBe(productionPrimary.authoredChecksum);
+			expect(preparedSyntheticFabStarterMatchesRequest(candidate, productionRequest)).toBe(true);
+		}
+	});
+
+	it("rejects self-consistent checksums that silently remove declared Production relationships", () => {
+		const stripped = withNoProductionRelationships(productionPrimary);
+		const repeated = withNoProductionRelationships(productionIndependent);
+		expect(stripped.snapshot.checksum).toBe(checksumRailMirrorSnapshot(stripped.snapshot));
+		expect(preparedSyntheticFabStarterMatchesRequest(stripped, productionRequest)).toBe(false);
+		expect(() =>
+			createSyntheticFabStarterCertifiedArtifact(stripped, repeated, productionRequest),
+		).toThrow();
+	});
+
+	it("rejects an independently checksummed portable bundle that omits the declared relationships", () => {
+		const bundle = productionPrimary.placementBundle;
+		if (!bundle) throw new Error("Expected Production bundle.");
+		const stripped = { ...bundle, relationships: emptyStaticFabAssemblyRelationshipState() };
+		expect(
+			preparedSyntheticFabStarterMatchesRequest(
+				{
+					...productionPrimary,
+					placementBundle: stripped,
+					placementBundleFingerprint: staticFabOrganizationBundleFingerprint(stripped),
+				},
+				productionRequest,
+			),
+		).toBe(false);
+	});
+
+	it("rejects swapped Bank identities even when snapshot and portable checksums are recomputed", () => {
+		const altered = structuredClone(productionPrimary);
+		const names = altered.snapshot.organizations.records.names as string[];
+		[names[1], names[62]] = [names[62] as string, names[1] as string];
+		if (!altered.placementBundle) throw new Error("Expected Production bundle.");
+		const organizations = altered.placementBundle.organizations.map((row, index) => ({
+			...row,
+			name: names[index] as string,
+		}));
+		const placementBundle = { ...altered.placementBundle, organizations };
+		const checksum = checksumRailMirrorSnapshot(altered.snapshot);
+		const forged = {
+			...altered,
+			snapshot: { ...altered.snapshot, checksum },
+			authoredChecksum: checksum,
+			placementBundle,
+			placementBundleFingerprint: staticFabOrganizationBundleFingerprint(placementBundle),
+		};
+		expect(preparedSyntheticFabStarterMatchesRequest(forged, productionRequest)).toBe(false);
+		expect(() =>
+			createSyntheticFabStarterCertifiedArtifact(
+				forged,
+				structuredClone(forged),
+				productionRequest,
+			),
+		).toThrow("Independent starter preparations do not match.");
+	});
+
+	it("refuses changed Bank ownership before activating a Production project", () => {
+		const state = hydrateStaticFabOrganizationSnapshot(productionPrimary.snapshot.organizations);
+		const first = state.records[1];
+		const second = state.records[62];
+		if (!first || !second) throw new Error("Expected two Production Banks.");
+		const organizations = createStaticFabOrganizationSnapshot({
+			...state,
+			records: state.records.map((record) => ({
+				...record,
+				membership:
+					record.id === first.id
+						? second.membership
+						: record.id === second.id
+							? first.membership
+							: record.membership,
+			})),
+		});
+		const changed = { ...productionPrimary.snapshot, organizations };
+		const snapshot = { ...changed, checksum: checksumRailMirrorSnapshot(changed) };
+		expect(snapshot.checksum).not.toBe(productionPrimary.snapshot.checksum);
+		expect(() => hydrateRailMirrorSnapshotDocument(snapshot)).toThrow(/조립 관계/);
+	});
+
+	it.each([
+		"name",
+		"parent",
+	])("rejects portable-only organization %s drift with a valid bundle fingerprint", (field) => {
+		const bundle = productionPrimary.placementBundle;
+		if (!bundle) throw new Error("Expected Production bundle.");
+		const organizations = bundle.organizations.map((row, index) =>
+			index !== (field === "name" ? 1 : 2)
+				? row
+				: {
+						...row,
+						...(field === "name"
+							? { name: "Undeclared Bank" }
+							: { parentOrganizationIndices: [62] }),
+					},
+		);
+		const placementBundle = { ...bundle, organizations };
+		expect(
+			preparedSyntheticFabStarterMatchesRequest(
+				{
+					...productionPrimary,
+					placementBundle,
+					placementBundleFingerprint: staticFabOrganizationBundleFingerprint(placementBundle),
+				},
+				productionRequest,
+			),
+		).toBe(false);
+	});
+
 	it("rebinds only a request-bound Worker attestation into main-realm evidence", async () => {
 		const transferable = hydrateSyntheticFabStarterCertifiedArtifactForTransfer(
 			generatedParallelHallArtifactSource,
@@ -172,8 +315,8 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 		if (!transferable) throw new Error("Expected transferable Parallel Hall hydration.");
 		expect(isSyntheticFabStarterCertificationEvidence(transferable.attestation)).toBe(false);
 		expect(transferable.attestation).toMatchObject({
-			schemaVersion: 4,
-			artifactSchemaVersion: 3,
+			schemaVersion: 5,
+			artifactSchemaVersion: 4,
 		});
 
 		const rebound = rebindSyntheticFabStarterCertificationEvidence(
@@ -408,7 +551,7 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 				independentWithoutPlacement,
 				productionRequest,
 			),
-		).toThrow(/Production FAB certification invariants/);
+		).toThrow("Independent starter preparations do not match.");
 	});
 
 	it("certifies the default Parallel Hall FAB as a repeat-placeable authored hierarchy", () => {
@@ -560,4 +703,24 @@ function visitTypedViews(value: unknown, path: string, views: Map<string, ArrayB
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
+}
+
+function withNoProductionRelationships(
+	prepared: PreparedSyntheticFabStarter,
+): PreparedSyntheticFabStarter {
+	const relationships = emptyStaticFabAssemblyRelationshipState();
+	const snapshot = {
+		...prepared.snapshot,
+		relationships: createStaticFabAssemblyRelationshipSnapshot(relationships),
+	};
+	const checksum = checksumRailMirrorSnapshot(snapshot);
+	if (!prepared.placementBundle) throw new Error("Expected Production bundle.");
+	const placementBundle = { ...prepared.placementBundle, relationships };
+	return {
+		...prepared,
+		snapshot: { ...snapshot, checksum },
+		authoredChecksum: checksum,
+		placementBundle,
+		placementBundleFingerprint: staticFabOrganizationBundleFingerprint(placementBundle),
+	};
 }

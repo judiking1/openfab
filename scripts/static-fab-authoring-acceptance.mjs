@@ -591,6 +591,8 @@ try {
 	assertEqual(productionFab.equipmentGroups, "0", "production FAB equipment groups");
 	assertEqual(productionFab.equipmentPorts, "0", "production FAB equipment ports");
 	assertEqual(productionFab.historyCanUndo, "false", "production FAB undo history");
+	assertEqual(productionFab.modelRelationships, "3", "production FAB declared Bank relationships");
+	assertEqual(productionFab.modelNextRelationshipId, "4", "production FAB relationship allocator");
 	await assertFittedMapVisible(desktopPage);
 	await desktopPage.screenshot({
 		path: path.join(artifactRoot, "production-fab-60-rail-desktop.png"),
@@ -602,6 +604,34 @@ try {
 		"production-fab-canvas-organization-selection",
 		productionFabCanvasOrganizationSelection,
 	);
+	const productionFabRelationships = await readAssemblyRelationships(desktopPage);
+	const productionFabSavedPath = await saveProject(desktopPage);
+	await reloadProjectFromFile(desktopPage, productionFabSavedPath);
+	const productionFabReloaded = await readMetrics(desktopPage);
+	for (const key of [
+		"workerChecksum",
+		"workerPhysicalFingerprint",
+		"modelRelationships",
+		"modelNextRelationshipId",
+		"staticFabOrganizations",
+	]) {
+		assertEqual(
+			productionFabReloaded[key],
+			productionFab[key],
+			`production FAB file reload ${key}`,
+		);
+	}
+	assertEqual(
+		JSON.stringify(await readAssemblyRelationships(desktopPage)),
+		JSON.stringify(productionFabRelationships),
+		"production FAB file reload preserves every declared relationship field",
+	);
+	assertEqual(
+		productionFabReloaded.historyCanUndo,
+		"false",
+		"production FAB reload resets history",
+	);
+	recordStep("production-fab-relationship-file-roundtrip", productionFabReloaded);
 
 	// Preserve the mature Phase 4 organization regression surface while proving that legacy
 	// shape inference is no longer a production entry point.
@@ -27645,11 +27675,32 @@ async function exerciseSyntheticFabPresetPlacementModes(page, before) {
 		firstAdded.cells.length,
 		"repeat placement rail-cell increment",
 	);
-	for (const key of ["authoredCells", "authoredEdges", "physicalPaths", "staticFabOrganizations"]) {
+	for (const key of [
+		"authoredCells",
+		"authoredEdges",
+		"physicalPaths",
+		"staticFabOrganizations",
+		"modelRelationships",
+	]) {
 		assertEqual(
 			Number(secondPlaced[key]) - Number(firstPlaced[key]),
 			Number(firstPlaced[key]) - Number(before[key]),
 			`repeat placement ${key} increment`,
+		);
+	}
+	assertEqual(
+		Number(firstPlaced.modelRelationships) - Number(before.modelRelationships),
+		3,
+		"production FAB copy carries all three Bank relationships",
+	);
+	for (const [previous, next] of [
+		[before, firstPlaced],
+		[firstPlaced, secondPlaced],
+	]) {
+		assertEqual(
+			Number(next.modelNextRelationshipId) - Number(previous.modelNextRelationshipId),
+			3,
+			"each production FAB copy allocates three fresh relationship IDs",
 		);
 	}
 	const firstOrganizationIdIncrement =
@@ -27677,6 +27728,11 @@ async function exerciseSyntheticFabPresetPlacementModes(page, before) {
 		{ timeout: PRESET_FACTORY_PLACEMENT_BUDGET_MILLISECONDS },
 	);
 	assertEqual(firstUndone.organizationBundleActive, "true", "repeat ghost after first undo");
+	assertEqual(
+		firstUndone.modelRelationships,
+		firstPlaced.modelRelationships,
+		"first undo removes the second FAB's relationships atomically",
+	);
 	await page.getByTestId("rail-canvas").press("Control+z");
 	const restored = await waitForWorker(
 		page,
@@ -27726,6 +27782,16 @@ async function exerciseSyntheticFabPresetPlacementModes(page, before) {
 		"repeat-placement undo preserves the allocator high-water mark",
 	);
 	assertEqual(restored.projectDirty, "true", "repeat-placement allocator state remains dirty");
+	assertEqual(
+		restored.modelRelationships,
+		before.modelRelationships,
+		"undo restores relationships",
+	);
+	assertEqual(
+		restored.modelNextRelationshipId,
+		secondPlaced.modelNextRelationshipId,
+		"repeat-placement undo keeps relationship IDs monotonic",
+	);
 	await page.getByTestId("rail-canvas").press("Escape");
 	await page.waitForFunction(
 		() =>
@@ -27768,6 +27834,11 @@ async function exerciseSyntheticFabPresetPlacementModes(page, before) {
 		"false",
 		"ordinary FAB preset click exits after one placement",
 	);
+	assertEqual(
+		Number(oneShotPlaced.modelRelationships) - Number(oneShotBaseline.modelRelationships),
+		3,
+		"one-shot production FAB copy carries all relationships",
+	);
 	await page.getByTestId("rail-canvas").press("Control+z");
 	const oneShotUndone = await waitForWorker(
 		page,
@@ -27782,6 +27853,11 @@ async function exerciseSyntheticFabPresetPlacementModes(page, before) {
 		oneShotUndone.organizationBundleActive,
 		"false",
 		"one-shot FAB preset does not recreate a ghost after undo",
+	);
+	assertEqual(
+		oneShotUndone.modelRelationships,
+		oneShotBaseline.modelRelationships,
+		"one-shot undo removes the FAB relationships atomically",
 	);
 	assertRailGeometryIdentity(
 		await readRailGeometry(page),

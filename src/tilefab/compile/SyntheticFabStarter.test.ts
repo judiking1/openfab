@@ -14,7 +14,9 @@ import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotD
 import { checksumRailPhysicalLayout } from "../worker/RailPhysicalLayout";
 import { analyzePhysicalPathTopology } from "./PhysicalPathTopology";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
+import { productionFabOrganizationKeys } from "./ProductionFabRelationships";
 import { createRailProjectReadiness } from "./RailProjectReadiness";
+import { resolveStaticFabGeneratorRelationships } from "./StaticFabGeneratorRelationshipDescriptor";
 import {
 	createSyntheticFabAssemblyPlan,
 	type SyntheticFabAssemblyProcessTrunkOperation,
@@ -378,6 +380,13 @@ describe("SyntheticFabStarter", () => {
 		expect(semanticRoles.filter((role) => role === "BAY_BANK")).toHaveLength(3);
 		expect(semanticRoles.filter((role) => role === "BAY")).toHaveLength(60);
 		expect(semanticRoles.filter((role) => role === "PROCESS_LOOP")).toHaveLength(120);
+		if (!plan) throw new Error("Expected Production plan.");
+		const expectedRelationships = resolveStaticFabGeneratorRelationships(
+			plan.relationships,
+			new Map(productionFabOrganizationKeys(plan.banks).map((key, index) => [key, index + 1])),
+		);
+		expect(build.document.relationships).toEqual(expectedRelationships);
+		expect(build.document.relationships.records).toHaveLength(3);
 		const directlyOwnedEdges = new Set(
 			organizations.records.flatMap((record) =>
 				record.membership.railEdges.map(
@@ -423,11 +432,13 @@ describe("SyntheticFabStarter", () => {
 			loaded.getPatchSequence(),
 			loaded.portEquipment,
 			loaded.organizations,
+			loaded.relationships,
 		);
 
 		expect(parsed.areas.nextOrganizationId).toBe(185);
 		expect(parsed.areas.records).toHaveLength(184);
 		expect(loaded.organizations).toEqual(build.document.organizations);
+		expect(loaded.relationships).toEqual(expectedRelationships);
 		expect(loadedCapture.snapshot.checksum).toBe(snapshot.checksum);
 		expect(snapshot.checksum).toBe(build.authoredChecksum);
 		expect(serializeOpenFabProject(parsed)).toBe(serialized);
@@ -437,6 +448,7 @@ describe("SyntheticFabStarter", () => {
 	it.each([
 		[50, 3, 104],
 		[73, 4, 120],
+		[85, 5, 112],
 		[100, 3, 112],
 		[100, 6, 140],
 	] as const)(
@@ -452,6 +464,15 @@ describe("SyntheticFabStarter", () => {
 			const build = buildSyntheticFabStarter(request);
 
 			expect(build.steps).toHaveLength(2 + bankCount + bayCount * 3);
+			const plan = syntheticFabStarterProductionAssemblyPlan(request);
+			if (!plan) throw new Error("Expected Production plan.");
+			expect(build.document.relationships).toEqual(
+				resolveStaticFabGeneratorRelationships(
+					plan.relationships,
+					new Map(productionFabOrganizationKeys(plan.banks).map((key, index) => [key, index + 1])),
+				),
+			);
+			expect(build.document.relationships.records).toHaveLength(bankCount);
 			expect(build.summary).toMatchObject({
 				zoneCount: bankCount,
 				bayCount,
