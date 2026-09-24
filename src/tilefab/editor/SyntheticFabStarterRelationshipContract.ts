@@ -1,3 +1,5 @@
+import type { PairedCirculationFabAssemblyPlan } from "../compile/PairedCirculationFabAssemblyPlan";
+import { pairedCirculationFabOrganizationIdentities } from "../compile/PairedCirculationFabRelationships";
 import type { ParallelHallFabAssemblyPlan } from "../compile/ParallelHallFabAssemblyPlan";
 import { parallelHallFabOrganizationIdentities } from "../compile/ParallelHallFabRelationships";
 import type { ProductionFabAssemblyPlan } from "../compile/ProductionFabAssemblyPlan";
@@ -13,16 +15,20 @@ export function syntheticFabStarterRelationshipsMatchPlan(
 	prepared: PreparedSyntheticFabStarter,
 	productionPlan: ProductionFabAssemblyPlan | null,
 	parallelHallPlan: ParallelHallFabAssemblyPlan | null,
+	pairedCirculationPlan: PairedCirculationFabAssemblyPlan | null,
 ): boolean {
 	let expected = emptyStaticFabAssemblyRelationshipState();
-	if (productionPlan && parallelHallPlan) return false;
-	const producer = productionPlan ?? parallelHallPlan;
+	if ([productionPlan, parallelHallPlan, pairedCirculationPlan].filter(Boolean).length > 1)
+		return false;
+	const producer = productionPlan ?? parallelHallPlan ?? pairedCirculationPlan;
 	if (producer) {
 		const identities = productionPlan
 			? productionFabOrganizationIdentities(productionPlan.banks)
-			: parallelHallFabOrganizationIdentities(
-					(parallelHallPlan as ParallelHallFabAssemblyPlan).banks,
-				);
+			: parallelHallPlan
+				? parallelHallFabOrganizationIdentities(parallelHallPlan.banks)
+				: pairedCirculationFabOrganizationIdentities(
+						(pairedCirculationPlan as PairedCirculationFabAssemblyPlan).banks,
+					);
 		const keys = identities.map((identity) => identity.key);
 		const ids = prepared.snapshot.organizations.organizationIds;
 		if (
@@ -57,7 +63,7 @@ export function syntheticFabStarterRelationshipsMatchPlan(
 		}
 		expected = resolveStaticFabGeneratorRelationships(producer.relationships, idByKey);
 	}
-	// Both producers start at (0, 0), include the whole hierarchy, and allocate dense IDs;
+	// These producers start at (0, 0), include the whole hierarchy, and allocate dense IDs;
 	// therefore complete bundle capture preserves its coordinates and organization ID order.
 	return (
 		exactValue(

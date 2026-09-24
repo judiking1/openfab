@@ -151,6 +151,8 @@ describe("Synthetic FAB preset repeat placement", () => {
 		expect(document.commitStaticFabOrganizationBundle(first)).toBe(true);
 		expect(document.map.size).toBe(33_663);
 		expect(document.organizations.records).toHaveLength(144);
+		const firstRelationships = structuredClone(document.relationships.records);
+		expect(firstRelationships.map((record) => record.id)).toEqual([1, 2, 3, 4]);
 
 		const second = adoptedWorkerPlan(document, bundle, {
 			x: bundle.sourceWidthMeters + 80,
@@ -162,13 +164,34 @@ describe("Synthetic FAB preset repeat placement", () => {
 		expect(document.organizations.records).toHaveLength(288);
 		expect(new Set(document.organizations.records.map((record) => record.id)).size).toBe(288);
 		expect(new Set(document.organizations.records.map((record) => record.name)).size).toBe(288);
+		expect(document.relationships.records.map((record) => record.id)).toEqual([
+			1, 2, 3, 4, 5, 6, 7, 8,
+		]);
+		expect(document.relationships.nextRelationshipId).toBe(9);
+		const repeatedChecksum = checksumRailMap(
+			document.map,
+			document.portEquipment,
+			document.organizations,
+			document.relationships,
+		);
 
 		expect(document.undo()).toBe(true);
 		expect(document.map.size).toBe(33_663);
 		expect(document.organizations.records).toHaveLength(144);
+		expect(document.relationships.records).toHaveLength(4);
+		expect(document.relationships.records).toEqual(firstRelationships);
+		expect(document.relationships.nextRelationshipId).toBe(9);
 		expect(document.redo()).toBe(true);
 		expect(document.map.size).toBe(67_326);
 		expect(document.organizations.records).toHaveLength(288);
+		expect(
+			checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(repeatedChecksum);
 	}, 60_000);
 });
 

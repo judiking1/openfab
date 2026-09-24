@@ -28395,6 +28395,46 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 			"Parallel Hall file preserves every declared contact",
 		);
 		assertEqual(reopened.historyCanUndo, "false", "Parallel Hall reload resets history");
+		await page.getByRole("button", { name: "FAB 프리셋", exact: true }).click();
+		await dialog.waitFor({ state: "visible" });
+		await page.getByTestId("synthetic-fab-starter-paired-circulation-fab-52").click();
+		await startSyntheticFabPresetAction(page, "create-project-from-synthetic-fab-preset");
+		await continueWithoutSavingIfVisible(page);
+		const paired = await waitForWorker(
+			page,
+			(metrics) => metrics.modelRelationships === "4" && metrics.staticFabOrganizations === "144",
+			{ timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS },
+		);
+		assertEqual(paired.modelNextRelationshipId, "5", "Paired FAB relationship allocator");
+		assertEqual(paired.strongComponents, "1", "Paired FAB network count");
+		assertEqual(paired.openTerminals, "0", "Paired FAB terminals");
+		assertEqual(paired.workerSimulationReady, "false", "Paired FAB simulation gate");
+		const pairedRelationships = await readAssemblyRelationships(page);
+		assertEqual(
+			JSON.stringify(pairedRelationships.records.map((record) => record.connectionGroups.length)),
+			JSON.stringify([13, 13, 13, 13]),
+			"Paired FAB preserves every Bay contact in all four Banks",
+		);
+		await page.screenshot({
+			path: path.join(artifactRoot, "paired-fab-declared-relationships.png"),
+		});
+		const pairedSaved = await saveProject(page);
+		await reloadProjectFromFile(page, pairedSaved);
+		const pairedReopened = await readMetrics(page);
+		for (const key of [
+			"workerChecksum",
+			"workerPhysicalFingerprint",
+			"modelRelationships",
+			"modelNextRelationshipId",
+			"staticFabOrganizations",
+		])
+			assertEqual(pairedReopened[key], paired[key], `Paired FAB file reload ${key}`);
+		assertEqual(
+			JSON.stringify(await readAssemblyRelationships(page)),
+			JSON.stringify(pairedRelationships),
+			"Paired FAB file preserves every declared contact",
+		);
+		assertEqual(pairedReopened.historyCanUndo, "false", "Paired FAB reload resets history");
 		return {
 			pendingGated: true,
 			failedMetricsUnavailable: true,
@@ -28403,6 +28443,8 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 			cancellationPreservedSource: true,
 			parallelHallRelationships: 2,
 			parallelHallFileRoundtrip: true,
+			pairedFabRelationships: 4,
+			pairedFabFileRoundtrip: true,
 		};
 	} finally {
 		await context.close();

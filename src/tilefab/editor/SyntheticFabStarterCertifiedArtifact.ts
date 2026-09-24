@@ -21,21 +21,21 @@ import {
 } from "./SyntheticFabStarterBridge";
 import { freezeSyntheticFabStarterContainers } from "./SyntheticFabStarterContainers";
 
-export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_SCHEMA_VERSION = 5 as const;
-export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "large-fab-60.default.v5" as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_SCHEMA_VERSION = 6 as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "large-fab-60.default.v6" as const;
 export const PAIRED_CIRCULATION_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"paired-circulation-fab-52.default.v6" as const;
-export const FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "full-fab-52.default.v5" as const;
+	"paired-circulation-fab-52.default.v7" as const;
+export const FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "full-fab-52.default.v6" as const;
 export const CENTRAL_SPINE_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"central-spine-fab-24.default.v5" as const;
+	"central-spine-fab-24.default.v6" as const;
 export const PARALLEL_HALL_FAB_STARTER_CERTIFIED_ARTIFACT_ID =
-	"parallel-hall-fab-12.default.v5" as const;
-export const PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "production-fab-60.default.v5" as const;
+	"parallel-hall-fab-12.default.v6" as const;
+export const PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "production-fab-60.default.v6" as const;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_TYPED_ARRAY_BYTES = 2 * 1024 * 1024;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_SOURCE_BYTES =
 	SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES + 64 * 1024;
-export const SYNTHETIC_FAB_STARTER_CERTIFICATION_ATTESTATION_SCHEMA_VERSION = 6 as const;
+export const SYNTHETIC_FAB_STARTER_CERTIFICATION_ATTESTATION_SCHEMA_VERSION = 7 as const;
 
 export type SyntheticFabStarterCertifiedArtifactId =
 	| typeof SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID
@@ -46,7 +46,7 @@ export type SyntheticFabStarterCertifiedArtifactId =
 	| typeof PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID;
 
 const CERTIFIED_PAYLOAD_KIND = "openfab-prepared-synthetic-fab-starter" as const;
-const CERTIFICATION_CONTRACT = "independent-materialization-v4" as const;
+const CERTIFICATION_CONTRACT = "independent-materialization-v5" as const;
 const MAXIMUM_SERIALIZED_DEPTH = 32;
 const MAXIMUM_SERIALIZED_NODES = 650_000;
 const MAXIMUM_SERIALIZED_STRING_BYTES = 2 * 1024 * 1024;

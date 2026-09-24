@@ -98,6 +98,10 @@ import {
 	pairedCirculationFabMinimumPitchMeters,
 } from "./PairedCirculationFabAssemblyPlan";
 import {
+	PAIRED_CIRCULATION_FAB_ORGANIZATION_KEY,
+	pairedCirculationFabOrganizationIdentities,
+} from "./PairedCirculationFabRelationships";
+import {
 	createParallelHallFabAssemblyPlan,
 	PARALLEL_HALL_FAB_ASSEMBLY_PLAN_VERSION,
 	PARALLEL_HALL_FAB_MAXIMUM_BAYS,
@@ -156,7 +160,7 @@ import {
 	syntheticFabTopologyBayCount,
 } from "./SyntheticFabTopologySpec";
 
-export const SYNTHETIC_FAB_STARTER_VERSION = 4 as const;
+export const SYNTHETIC_FAB_STARTER_VERSION = 5 as const;
 export const SYNTHETIC_FAB_STARTER_IDS = [
 	"blank",
 	"bay-assembly",
@@ -1023,6 +1027,23 @@ export function buildSyntheticFabStarter(
 		});
 		planFingerprint = assembly.planFingerprint;
 		commitPairedCirculationFab(document, evaluator, steps, assembly, organizationSeeds);
+		const identities = pairedCirculationFabOrganizationIdentities(assembly.banks);
+		if (
+			organizationSeeds.length !== identities.length ||
+			organizationSeeds.some((seed, index) => {
+				const identity = identities[index];
+				return (
+					!identity ||
+					seed.key !== identity.key ||
+					seed.kind !== identity.kind ||
+					seed.name !== identity.name ||
+					seed.parentKeys.length !== (identity.parentKey === null ? 0 : 1) ||
+					(identity.parentKey !== null && seed.parentKeys[0] !== identity.parentKey)
+				);
+			})
+		)
+			throw new Error("Paired FAB organization allocation differs from the declared plan.");
+		relationshipDescriptor = assembly.relationships;
 	} else if (normalized.id === "full-fab-52") {
 		const assembly = createFullFabAssemblyPlan({
 			bayCount: normalized.parameters.bayCount,
@@ -2038,7 +2059,7 @@ function commitPairedCirculationFab(
 	organizationSeeds: MutableSyntheticFabOrganizationSeed[],
 ): void {
 	const fabOrganization = organizationSeedDescriptor({
-		key: "PAIRED-CIRCULATION-FAB",
+		key: PAIRED_CIRCULATION_FAB_ORGANIZATION_KEY,
 		kind: "AREA",
 		name: "Paired-Circulation Production FAB",
 		parentKeys: [],
@@ -2166,7 +2187,7 @@ function commitPairedCirculationBay(
 			key: bay.bankId,
 			kind: "AREA",
 			name: bay.bankId,
-			parentKeys: ["PAIRED-CIRCULATION-FAB"],
+			parentKeys: [PAIRED_CIRCULATION_FAB_ORGANIZATION_KEY],
 			description: `${bay.side} Bay Bank attached to paired interbay circulation.`,
 			color: "CYAN",
 		}),

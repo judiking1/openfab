@@ -1238,15 +1238,16 @@ function* straightModuleSteps(
 		byStart.set(directedEdgeStartKey(edge), edge);
 		if (cooperative) yield;
 	}
-	const visited = new Set<string>();
+	// eligible deduplicates coordinates; ordered and byStart retain those exact edge objects.
+	const visited = new Set<DirectedRailEdge>();
 	const chains: DirectedRailEdge[][] = [];
 	const walk = function* (start: DirectedRailEdge): Generator<void, void> {
 		const chain: DirectedRailEdge[] = [];
 		let current: DirectedRailEdge | undefined = start;
-		while (current && !visited.has(directedEdgeKey(current))) {
+		while (current && !visited.has(current)) {
 			const direction = directionBetween(current.from, current.to);
 			if (!direction) break;
-			visited.add(directedEdgeKey(current));
+			visited.add(current);
 			chain.push(current);
 			current = byStart.get(`${cellKey(current.to.x, current.to.y)}:${direction}`);
 			if (cooperative) yield;
@@ -1258,7 +1259,7 @@ function* straightModuleSteps(
 		if (cooperative) yield;
 	}
 	for (const edge of ordered) {
-		yield* walk(edge);
+		if (!visited.has(edge)) yield* walk(edge);
 		if (cooperative) yield;
 	}
 

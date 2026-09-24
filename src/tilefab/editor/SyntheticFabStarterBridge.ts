@@ -415,7 +415,12 @@ function preparedMatchesRequest(
 		const checksum = RailChecksumAccumulator.fromDigest(prepared.authoredChecksum);
 		return (
 			isPreparedSyntheticFabStarterPayload(prepared) &&
-			syntheticFabStarterRelationshipsMatchPlan(prepared, productionPlan, parallelHallPlan) &&
+			syntheticFabStarterRelationshipsMatchPlan(
+				prepared,
+				productionPlan,
+				parallelHallPlan,
+				pairedCirculationPlan,
+			) &&
 			prepared.requestFingerprint === requestFingerprint &&
 			prepared.planFingerprint === expectedPlanFingerprint &&
 			syntheticFabStarterRequestFingerprint(prepared.request) === requestFingerprint &&

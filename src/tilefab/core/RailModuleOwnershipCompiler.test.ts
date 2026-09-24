@@ -1,13 +1,114 @@
 import { describe, expect, it, vi } from "vitest";
 import { type AdvancedSwitchRecord, deriveAdvancedSwitchGeometry } from "./AdvancedSwitch";
 import { createCooperativeTask } from "./CooperativeTask";
+import { planRailConstruction } from "./paint";
+import { RailDocument } from "./RailDocument";
 import {
+	buildRailModuleOwnershipIndex,
 	createRailModuleOwnershipIndexCompiler,
 	railModuleOwnershipIndexMatchesMap,
 } from "./RailModuleOwnership";
+import { ALL_DIRECTIONS, moveCell, oppositeDirection } from "./railShape";
 import { encodeRailCell, TileMap } from "./TileMap";
 
 describe("cooperative authored module compilation", () => {
+	it.each([
+		1, 5, 6, 11,
+	])("partitions %i directed edges exactly once in every direction", (length) => {
+		for (const direction of ALL_DIRECTIONS) {
+			const hydrate = TileMap.createHydrator();
+			const expectedEdges: string[] = [];
+			let cell = { x: 10, y: -20 };
+			for (let offset = 0; offset <= length; offset++) {
+				hydrate.addEncodedCell(
+					cell.x,
+					cell.y,
+					encodeRailCell({
+						incoming: offset === 0 ? 0 : oppositeDirection(direction),
+						outgoing: offset === length ? 0 : direction,
+					}),
+				);
+				const next = moveCell(cell, direction);
+				if (offset < length) expectedEdges.push(`${cell.x},${cell.y}>${next.x},${next.y}`);
+				cell = next;
+			}
+			const map = hydrate.finish(1);
+			const synchronous = buildRailModuleOwnershipIndex(map);
+			const task = createRailModuleOwnershipIndexCompiler(map);
+			while (!task.done) expect(task.step(3)).toBeLessThanOrEqual(3);
+			const actual = task.finish();
+			expect(actual.captureSnapshot()).toEqual(synchronous.captureSnapshot());
+			const edges = actual.modules.flatMap((module) =>
+				module.eraseEdges.map((edge) => `${edge.from.x},${edge.from.y}>${edge.to.x},${edge.to.y}`),
+			);
+			expect(edges).toHaveLength(length);
+			expect([...new Set(edges)].sort()).toEqual([...expectedEdges].sort());
+			const expectedGroups = Array.from({ length: Math.ceil(length / 5) }, (_, group) => ({
+				key: `LINEAR_EDGE:${expectedEdges[group * 5]}`,
+				edges: expectedEdges.slice(group * 5, group * 5 + 5),
+			}));
+			expect(
+				actual.modules
+					.map((module) => ({
+						key: module.key,
+						edges: module.eraseEdges.map(
+							(edge) => `${edge.from.x},${edge.from.y}>${edge.to.x},${edge.to.y}`,
+						),
+					}))
+					.sort((left, right) => left.key.localeCompare(right.key)),
+			).toEqual(expectedGroups.sort((left, right) => left.key.localeCompare(right.key)));
+			expect(actual.modules).toHaveLength(Math.ceil(length / 5));
+			expect(
+				actual.modules.every(
+					(module) =>
+						typeof module.construction.lengthMeters === "number" &&
+						module.construction.lengthMeters <= 5,
+				),
+			).toBe(true);
+		}
+	});
+
+	it("keeps claimed branch edges separate from the straight partition", () => {
+		const document = new RailDocument();
+		for (const [from, to] of [
+			[
+				{ x: 0, y: 0 },
+				{ x: 16, y: 0 },
+			],
+			[
+				{ x: 6, y: 0 },
+				{ x: 6, y: 6 },
+			],
+		] as const) {
+			expect(document.commit(planRailConstruction(document.map, from, to))).toBe(true);
+		}
+		const task = createRailModuleOwnershipIndexCompiler(document.map);
+		while (!task.done) task.step(1);
+		const actual = task.finish();
+		expect(actual.captureSnapshot()).toEqual(
+			buildRailModuleOwnershipIndex(document.map).captureSnapshot(),
+		);
+		expect(actual.modules.filter((module) => module.kind === "turnout")).toHaveLength(1);
+		expect(
+			actual.modules.map((module) => [
+				module.key,
+				module.eraseEdges.map((edge) => `${edge.from.x},${edge.from.y}>${edge.to.x},${edge.to.y}`),
+			]),
+		).toEqual([
+			["LINEAR_EDGE:0,0>1,0", ["0,0>1,0", "1,0>2,0", "2,0>3,0", "3,0>4,0", "4,0>5,0"]],
+			["LINEAR_EDGE:5,0>6,0", ["5,0>6,0", "6,0>7,0", "7,0>8,0", "8,0>9,0", "9,0>10,0"]],
+			["BRANCH:6,0", ["6,0>6,1"]],
+			["LINEAR_EDGE:10,0>11,0", ["10,0>11,0", "11,0>12,0", "12,0>13,0", "13,0>14,0", "14,0>15,0"]],
+			["LINEAR_EDGE:15,0>16,0", ["15,0>16,0"]],
+			["LINEAR_EDGE:6,1>6,2", ["6,1>6,2", "6,2>6,3", "6,3>6,4", "6,4>6,5", "6,5>6,6"]],
+		]);
+		const edges = actual.modules.flatMap((module) =>
+			module.eraseEdges.map((edge) => `${edge.from.x},${edge.from.y}>${edge.to.x},${edge.to.y}`),
+		);
+		expect(new Set(edges).size).toBe(edges.length);
+		expect(edges).toHaveLength(document.map.edgeCount);
+	});
+
 	it("does not traverse on creation and cannot publish an unfinished partition", () => {
 		const map = straightMap(13);
 		const traverse = vi.spyOn(map, "railTraversalSteps");

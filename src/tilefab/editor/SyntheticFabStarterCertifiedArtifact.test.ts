@@ -12,11 +12,11 @@ import {
 import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import { captureStaticFabOrganizationBundle } from "../core/StaticFabOrganizationBundle";
 import { staticFabOrganizationBundleFingerprint } from "../core/StaticFabOrganizationBundlePlacement";
-import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v5.json?raw";
-import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v5.json?raw";
-import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v6.json?raw";
-import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v5.json?raw";
-import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v5.json?raw";
+import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v6.json?raw";
+import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v6.json?raw";
+import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v7.json?raw";
+import generatedParallelHallArtifactSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v6.json?raw";
+import generatedProductionArtifactSource from "../generated/synthetic-fab-presets/production-fab-60.default.v6.json?raw";
 import { checksumRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
 import {
@@ -94,11 +94,11 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 	it("matches the checked-in deterministic public synthetic artifact", () => {
 		expect(JSON.parse(generatedArtifactSource)).toEqual(artifact);
 		expect(artifact).toMatchObject({
-			schemaVersion: 5,
-			artifactId: "large-fab-60.default.v5",
-			certificationContract: "independent-materialization-v4",
+			schemaVersion: 6,
+			artifactId: "large-fab-60.default.v6",
+			certificationContract: "independent-materialization-v5",
 		});
-		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION).toBe(6);
+		expect(SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_WORKER_PROTOCOL_VERSION).toBe(7);
 		expect(artifact.typedArrayByteLength).toBeGreaterThan(0);
 		expect(artifact.payloadByteLength).toBeLessThan(
 			SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_MAX_PAYLOAD_BYTES,
@@ -230,9 +230,11 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 	it("rejects removed Parallel Hall contacts despite recomputed snapshot and bundle checksums", () => {
 		const plan = syntheticFabStarterParallelHallAssemblyPlan(parallelHallRequest);
 		if (!plan) throw new Error("Expected Parallel Hall plan.");
-		expect(syntheticFabStarterRelationshipsMatchPlan(parallelHallPrimary, null, plan)).toBe(true);
+		expect(syntheticFabStarterRelationshipsMatchPlan(parallelHallPrimary, null, plan, null)).toBe(
+			true,
+		);
 		const stripped = withNoDeclaredRelationships(parallelHallPrimary);
-		expect(syntheticFabStarterRelationshipsMatchPlan(stripped, null, plan)).toBe(false);
+		expect(syntheticFabStarterRelationshipsMatchPlan(stripped, null, plan, null)).toBe(false);
 		expect(stripped.snapshot.checksum).toBe(checksumRailMirrorSnapshot(stripped.snapshot));
 		expect(preparedSyntheticFabStarterMatchesRequest(stripped, parallelHallRequest)).toBe(false);
 		expect(() =>
@@ -415,8 +417,8 @@ describe("SyntheticFabStarterCertifiedArtifact", () => {
 		if (!transferable) throw new Error("Expected transferable Parallel Hall hydration.");
 		expect(isSyntheticFabStarterCertificationEvidence(transferable.attestation)).toBe(false);
 		expect(transferable.attestation).toMatchObject({
-			schemaVersion: 6,
-			artifactSchemaVersion: 5,
+			schemaVersion: 7,
+			artifactSchemaVersion: 6,
 		});
 
 		const rebound = rebindSyntheticFabStarterCertificationEvidence(

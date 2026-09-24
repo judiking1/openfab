@@ -7,13 +7,15 @@ import type { RailModuleSide } from "../core/RailModulePlanner";
 import type { RailTemplatePose } from "../core/RailTemplateCatalog";
 import { DIR_E, DIR_N, DIR_S, DIR_W, type Direction } from "../core/railShape";
 import type { Cell } from "../core/TileMap";
+import { describePairedCirculationFabRelationships } from "./PairedCirculationFabRelationships";
+import type { StaticFabGeneratorRelationshipDescriptor } from "./StaticFabGeneratorRelationshipDescriptor";
 import type {
 	SyntheticFabAssemblyJunctionContract,
 	SyntheticFabAssemblyLinkCorridor,
 	SyntheticFabAssemblyRunContract,
 } from "./SyntheticFabAssemblyPlan";
 
-export const PAIRED_CIRCULATION_FAB_ASSEMBLY_PLAN_VERSION = 2 as const;
+export const PAIRED_CIRCULATION_FAB_ASSEMBLY_PLAN_VERSION = 3 as const;
 export const PAIRED_CIRCULATION_FAB_MINIMUM_BAYS = 48;
 export const PAIRED_CIRCULATION_FAB_MAXIMUM_BAYS = 64;
 export const PAIRED_CIRCULATION_FAB_BANK_COUNT = 4;
@@ -137,6 +139,7 @@ export interface PairedCirculationFabAssemblyPlan {
 		PairedCirculationBankPlan,
 	];
 	readonly gateways: readonly PairedCirculationGatewayPlan[];
+	readonly relationships: StaticFabGeneratorRelationshipDescriptor;
 	readonly planFingerprint: string;
 }
 
@@ -364,6 +367,7 @@ export function createPairedCirculationFabAssemblyPlan(
 		halls,
 		banks,
 		gateways,
+		relationships: describePairedCirculationFabRelationships(banks, halls),
 	});
 	return Object.freeze({
 		...withoutFingerprint,
@@ -694,6 +698,7 @@ function pairedCirculationPlanFingerprint(
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([
 		plan.id,
+		plan.relationships.fingerprint,
 		plan.outer.id,
 		plan.outer.plannerFingerprint,
 		plan.outer.laneA.id,

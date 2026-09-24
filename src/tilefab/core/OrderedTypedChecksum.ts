@@ -155,12 +155,16 @@ export class OrderedTypedChecksum {
 	}
 
 	private addBytes(bytes: Uint8Array): void {
+		let hashA = this.hashA;
+		let hashB = this.hashB;
 		for (let index = 0; index < bytes.length; index++) {
 			const byte = bytes[index] as number;
-			this.hashA = Math.imul(this.hashA ^ byte, 0x01000193) >>> 0;
-			this.hashB = Math.imul(this.hashB ^ byte, 0x85ebca6b) >>> 0;
-			this.hashB ^= this.hashB >>> 13;
+			hashA = Math.imul(hashA ^ byte, 0x01000193) >>> 0;
+			hashB = Math.imul(hashB ^ byte, 0x85ebca6b) >>> 0;
+			hashB ^= hashB >>> 13;
 		}
+		this.hashA = hashA;
+		this.hashB = hashB;
 	}
 }
 

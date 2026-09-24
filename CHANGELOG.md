@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.8
+
+- Reduce redundant work in rail ownership and checksum calculation while preserving exact
+  fingerprints, module partitions, source validation and cooperative scheduling boundaries.
+
+### Preview candidate 0.1.7
+
+- Preserve every declared Paired FAB Bank contact through native projects and portable copies,
+  including the Bay that directly owns each gateway connection.
+
 ### Preview candidate 0.1.6
 
 - Keep Bay flow review cards tall enough for their text on short screens and preserve

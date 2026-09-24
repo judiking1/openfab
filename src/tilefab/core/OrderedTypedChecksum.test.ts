@@ -2,6 +2,46 @@ import { expect, it } from "vitest";
 import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
 
+it("retains exact subview bytes and publishes each completed checksum chunk before yielding", async () => {
+	const bytes = Uint8Array.from({ length: 40 }, (_, index) => (index * 37 + 19) % 256);
+	const views = [bytes.subarray(3, 20), new Uint8Array(), bytes.subarray(23, 39)];
+	for (const checkpointBytes of [1, 3, 7, 65_536]) {
+		const checksum = new OrderedTypedChecksum();
+		checksum.addNumbers([
+			0,
+			-0,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+			1 / 3,
+		]);
+		checksum.addStrings(["", "Bay", "공장 🏭"]);
+		const checkpoints: string[] = [];
+		await checksum.addViewsCooperatively(
+			views,
+			async () => {
+				checkpoints.push(checksum.digest());
+			},
+			checkpointBytes,
+		);
+		expect(checkpoints).toHaveLength(
+			Math.ceil(17 / checkpointBytes) + Math.ceil(16 / checkpointBytes),
+		);
+		if (checkpointBytes === 7) {
+			expect(checkpoints).toEqual([
+				"8440aa5c:555fe208",
+				"519e9944:c41fa85d",
+				"3142af7b:84d38547",
+				"ec856dc0:827685fc",
+				"ecba14a4:7147ba48",
+				"10c8f4eb:082a73dd",
+			]);
+		}
+		checksum.addString("after");
+		expect(checksum.digest()).toBe("fd20b4d7:0dd5bb85");
+	}
+});
+
 it("preserves a wide numeric sequence's single length prefix across cooperative batches", () => {
 	const values = Object.freeze(Array.from({ length: 4097 }, (_, index) => index * 0.25 - 500));
 	const synchronous = new OrderedTypedChecksum();

@@ -12,6 +12,7 @@ import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/Ope
 import { captureRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
 import { checksumRailPhysicalLayout } from "../worker/RailPhysicalLayout";
+import { pairedCirculationFabOrganizationIdentities } from "./PairedCirculationFabRelationships";
 import { analyzePhysicalPathTopology } from "./PhysicalPathTopology";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { productionFabOrganizationKeys } from "./ProductionFabRelationships";
@@ -152,9 +153,36 @@ describe("SyntheticFabStarter", () => {
 		const request = defaultSyntheticFabStarterRequest("paired-circulation-fab-52");
 		const plan = syntheticFabStarterPairedCirculationAssemblyPlan(request);
 		expect(plan).not.toBeNull();
+		if (!plan) throw new Error("Expected Paired FAB plan.");
 		const build = buildSyntheticFabStarter(request);
 		const organizations = build.document.organizations;
 		const roles = [...deriveStaticFabOrganizationSemanticRoles(organizations).values()];
+		const identities = pairedCirculationFabOrganizationIdentities(plan.banks);
+		const expectedRelationships = resolveStaticFabGeneratorRelationships(
+			plan.relationships,
+			new Map(identities.map((identity, index) => [identity.key, index + 1])),
+		);
+		expect(build.document.relationships).toEqual(expectedRelationships);
+		expect(
+			build.document.relationships.records.map((record) => record.participantOrganizationIds),
+		).toEqual([[2], [3], [4], [5]]);
+		expect(
+			build.document.relationships.records.map((record) => record.connectionGroups.length),
+		).toEqual([13, 13, 13, 13]);
+		const project = captureOpenFabProject(build.document, {
+			manifest: createOpenFabProjectManifest(
+				"paired-relationships",
+				"Paired FAB",
+				"2026-09-24T00:00:00.000Z",
+			),
+		});
+		const reopened = createRailSnapshotFromOpenFabProject(
+			parseOpenFabProjectJson(serializeOpenFabProject(project)).project,
+		);
+		expect(reopened.checksum).toBe(build.authoredChecksum);
+		expect(hydrateRailMirrorSnapshotDocument(reopened).relationships).toEqual(
+			expectedRelationships,
+		);
 
 		expect(build.planFingerprint).toBe(plan?.planFingerprint);
 		expect(build.steps).toHaveLength(201);

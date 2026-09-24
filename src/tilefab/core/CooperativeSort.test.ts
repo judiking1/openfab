@@ -13,6 +13,7 @@ describe("cooperative stable sorting", () => {
 			while (!task.done) expect(task.step(7)).toBeLessThanOrEqual(7);
 			task.finish();
 			expect(input).toEqual(expected);
+			expect(input.every((entry, index) => entry === expected[index])).toBe(true);
 		}
 	});
 
