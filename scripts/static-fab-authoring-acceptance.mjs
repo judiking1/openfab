@@ -25937,6 +25937,228 @@ async function openStaticFabAssembleMenu(page, menu, label = "Assemble") {
 	await menu.waitFor({ state: "visible" });
 }
 
+async function assertSemanticBayReviewLayout(page, dialog, label) {
+	await assertLocatorInsideViewport(page, dialog);
+	for (const [name, element] of [
+		["dialog", dialog],
+		["workspace", dialog.locator(".tilefab-semantic-bay-workspace")],
+	]) {
+		assertEqual(
+			await element.evaluate((node) => node.scrollWidth - node.clientWidth),
+			0,
+			`${label} ${name} has no horizontal overflow`,
+		);
+	}
+	const layout = await dialog.evaluate((element) => {
+		const workspace = element.querySelector(".tilefab-semantic-bay-workspace");
+		const panels = [...workspace.children].map((child) => child.getBoundingClientRect());
+		const status = element.querySelector(".tilefab-semantic-bay-status");
+		const statusBounds = status.getBoundingClientRect();
+		const textBounds = status
+			.querySelector(".tilefab-semantic-bay-status-copy")
+			.getBoundingClientRect();
+		return {
+			statusTextOverflow: Math.max(0, textBounds.bottom - statusBounds.bottom),
+			overlaps: panels.slice(1).filter((panel, index) => panel.top < panels[index].bottom - 1)
+				.length,
+		};
+	});
+	assertEqual(layout.statusTextOverflow, 0, `${label} status contains its complete text`);
+	assertEqual(layout.overlaps, 0, `${label} review panels do not overlap`);
+}
+
+async function exerciseSemanticBayRetryReview(page, action, viewport, fault) {
+	const menu = page.getByTestId("static-fab-assemble-menu");
+	await page.setViewportSize(viewport);
+	await openStaticFabAssembleMenu(page, menu, "semantic Bay retry");
+	const launcher = menu.getByTestId(
+		action === "DISCONNECT" ? "assemble-disconnect-selected-bay" : "assemble-delete-selected-bay",
+	);
+	await launcher.scrollIntoViewIfNeeded();
+	const before = await readMetrics(page);
+	await page.evaluate(() => {
+		const original = Worker.prototype.postMessage;
+		const messages = [];
+		Worker.prototype.postMessage = function (message, ...rest) {
+			if (
+				message.type === "CAPTURE_RAIL_SNAPSHOT" ||
+				message.type === "PREPARE_STATIC_FAB_SEMANTIC_BAY_MUTATION"
+			) {
+				messages.push({
+					type: message.type,
+					requestId: message.requestId,
+					ticketId: message.ticketId ?? null,
+				});
+			}
+			return original.call(this, message, ...rest);
+		};
+		globalThis.__openfabSemanticRetryMessages = messages;
+		globalThis.__openfabRestoreSemanticRetryObserver = () => {
+			Worker.prototype.postMessage = original;
+		};
+	});
+	const routePattern = "**/staticFabSemanticBayMutationWorker-*.js";
+	let releaseRoute;
+	const intercepted = new Promise((resolve) => {
+		releaseRoute = resolve;
+	});
+	const holdWorker = (route) => releaseRoute(route);
+	await page.route(routePattern, holdWorker);
+	try {
+		await launcher.click();
+		const dialog = page.getByTestId("semantic-bay-command-dialog");
+		await dialog.waitFor({ state: "visible" });
+		const route = await intercepted;
+		const label = `${action.toLowerCase()}-${viewport.width}x${viewport.height}`;
+		assertEqual(await dialog.getAttribute("data-phase"), "analyzing", `${label} deferred analysis`);
+		await assertLocatorInsideViewport(page, page.getByTestId("semantic-bay-command-cancel"));
+		await page.screenshot({ path: path.join(artifactRoot, `semantic-bay-analyzing-${label}.png`) });
+		const response = await route.fetch();
+		const body = await response.text();
+		const injection = `
+const originalAcceptancePost = self.postMessage.bind(self);
+self.postMessage = (message, ...rest) => {
+  if (message.type === "STATIC_FAB_SEMANTIC_BAY_MUTATION_PREPARED") {
+    if (${JSON.stringify(fault)} === "stale") {
+      message = {...message, requestId: message.requestId + 1};
+    } else {
+      const prepared = message.prepared;
+      message = {...message, prepared: {...prepared, valid: false, plan: null, review: null, ticket: null,
+        failureCode: "prospective", reason: "예상 경로가 닫히지 않아 변경을 적용할 수 없습니다.",
+        prospectiveEvidence: {...prepared.prospectiveEvidence, authoredComponentsClosed: false,
+          authoredStatus: "open", authoredOpenTerminalCount: 1, physicalComponentsClosed: false,
+          physicalOpenPathCount: 1}
+      }};
+    }
+  }
+  return originalAcceptancePost(message, ...rest);
+};
+`;
+		await route.fulfill({ response, body: injection + body });
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="semantic-bay-command-dialog"]')
+					?.getAttribute("data-phase") === "rejected",
+			undefined,
+			{ timeout: 30_000 },
+		);
+		assertProjectUnchanged(await readMetrics(page), before, `${label} rejected result`);
+		assertEqual(
+			await page.getByTestId("semantic-bay-command-apply").count(),
+			0,
+			`${label} rejected cannot apply`,
+		);
+		const retry = page.getByTestId("semantic-bay-command-retry");
+		for (const control of [retry, page.getByTestId("semantic-bay-command-cancel")]) {
+			await assertLocatorInsideViewport(page, control);
+			const bounds = await control.boundingBox();
+			assertAtLeast(bounds.width, 44, `${label} control width`);
+			assertAtLeast(bounds.height, 44, `${label} control height`);
+		}
+		if (fault === "closure") {
+			assertEqual(
+				await dialog.locator('[data-closed="false"]').count(),
+				1,
+				`${label} failed prospective closure`,
+			);
+			assertIncludes(
+				await dialog.locator('[role="alert"]').innerText(),
+				"예상 경로가 닫히지 않아",
+				`${label} visible rejection reason`,
+			);
+			assertEqual(
+				await dialog.locator('[data-certified="true"]').count(),
+				0,
+				`${label} failed evidence has no certified badge`,
+			);
+		}
+		await assertSemanticBayReviewLayout(page, dialog, `${label} rejected`);
+		const details = page.getByTestId("semantic-bay-command-details");
+		assertEqual(await details.getAttribute("open"), null, `${label} details initially collapsed`);
+		await details.locator("summary").focus();
+		await page.keyboard.press("Enter");
+		assertEqual(
+			await details.evaluate((element) => element.open),
+			true,
+			`${label} keyboard disclosure`,
+		);
+		await assertSemanticBayReviewLayout(page, dialog, `${label} rejected details`);
+		await page.screenshot({
+			path: path.join(artifactRoot, `semantic-bay-rejected-details-${label}.png`),
+		});
+		await page.keyboard.press("Enter");
+		await page.screenshot({ path: path.join(artifactRoot, `semantic-bay-rejected-${label}.png`) });
+		const firstMessages = await page.evaluate(() => [...globalThis.__openfabSemanticRetryMessages]);
+		await page.unroute(routePattern, holdWorker);
+		await retry.click();
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="semantic-bay-command-dialog"]')
+					?.getAttribute("data-phase") === "ready",
+			undefined,
+			{ timeout: 30_000 },
+		);
+		const messages = await page.evaluate(() => globalThis.__openfabSemanticRetryMessages);
+		const captures = messages.filter((message) => message.type === "CAPTURE_RAIL_SNAPSHOT");
+		const attempts = messages.filter(
+			(message) => message.type === "PREPARE_STATIC_FAB_SEMANTIC_BAY_MUTATION",
+		);
+		assertEqual(
+			captures.length,
+			firstMessages.filter((message) => message.type === "CAPTURE_RAIL_SNAPSHOT").length + 1,
+			`${label} fresh mirror capture`,
+		);
+		assertEqual(attempts.length, 2, `${label} exactly two prepare attempts`);
+		assertNotEqual(attempts[0].ticketId, attempts[1].ticketId, `${label} fresh permit`);
+		assertEqual(
+			await dialog.locator('[data-closed="true"]').count(),
+			2,
+			`${label} successful closure recheck`,
+		);
+		assertEqual(
+			await page.getByTestId("semantic-bay-command-apply").isEnabled(),
+			true,
+			`${label} fresh result can apply`,
+		);
+		await assertSemanticBayReviewLayout(page, dialog, `${label} ready`);
+		assertProjectUnchanged(await readMetrics(page), before, `${label} retry is review only`);
+		await page.screenshot({ path: path.join(artifactRoot, `semantic-bay-ready-${label}.png`) });
+		await details.locator("summary").focus();
+		await page.keyboard.press("Enter");
+		await assertSemanticBayReviewLayout(page, dialog, `${label} ready details`);
+		await page.screenshot({
+			path: path.join(artifactRoot, `semantic-bay-ready-details-${label}.png`),
+		});
+		await page.keyboard.press("Escape");
+		await dialog.waitFor({ state: "hidden" });
+		await page.waitForFunction(
+			(testId) => document.activeElement?.getAttribute("data-testid") === testId,
+			await launcher.getAttribute("data-testid"),
+			{ timeout: 10_000 },
+		);
+		return {
+			action,
+			viewport,
+			fault,
+			prepareAttempts: attempts.length,
+			freshMirrorCapture: true,
+			freshPermit: true,
+			screenshots: [
+				`semantic-bay-analyzing-${label}.png`,
+				`semantic-bay-rejected-${label}.png`,
+				`semantic-bay-ready-${label}.png`,
+				`semantic-bay-rejected-details-${label}.png`,
+				`semantic-bay-ready-details-${label}.png`,
+			],
+		};
+	} finally {
+		await page.unroute(routePattern, holdWorker);
+		await page.evaluate(() => globalThis.__openfabRestoreSemanticRetryObserver());
+	}
+}
+
 async function exerciseSemanticBayMutation(page, source) {
 	reportAcceptanceProgress("semantic-bay-mutation:start");
 	await page.setViewportSize({ width: 1440, height: 900 });
@@ -26065,17 +26287,17 @@ async function exerciseSemanticBayMutation(page, source) {
 	);
 	assertIncludes(
 		(await dialog.textContent()) ?? "",
-		"All source and result components are independently closed",
+		"현재·예상 지도의 경로 조건 충족",
 		"semantic Bay exact closed-component evidence",
 	);
 	assertIncludes(
 		(await dialog.textContent()) ?? "",
-		"PRESERVED",
+		"유지되는 항목",
 		"semantic Bay Disconnect preserved review",
 	);
 	assertIncludes(
 		(await dialog.textContent()) ?? "",
-		"REMOVED",
+		"없어지는 항목",
 		"semantic Bay Disconnect removed review",
 	);
 	await page.screenshot({
@@ -26162,7 +26384,7 @@ async function exerciseSemanticBayMutation(page, source) {
 	assertEqual(await dialog.getAttribute("data-action"), "DELETE", "Delete dialog action");
 	assertIncludes(
 		(await dialog.textContent()) ?? "",
-		"physical Δ-1",
+		"물리 구역 Δ-1",
 		"detached Delete physical component delta review",
 	);
 	await page.screenshot({
@@ -26307,6 +26529,13 @@ async function exerciseSemanticBayMutation(page, source) {
 	);
 	await responsiveCancel.focus();
 	await page.keyboard.press("Shift+Tab");
+	const responsiveSummary = page.getByTestId("semantic-bay-command-details").locator("summary");
+	assertEqual(
+		await responsiveSummary.evaluate((element) => element === document.activeElement),
+		true,
+		"390px semantic Bay backward navigation includes the collapsed disclosure",
+	);
+	await page.keyboard.press("Shift+Tab");
 	assertEqual(
 		await responsiveApply.evaluate((element) => element === document.activeElement),
 		true,
@@ -26314,9 +26543,15 @@ async function exerciseSemanticBayMutation(page, source) {
 	);
 	await page.keyboard.press("Tab");
 	assertEqual(
+		await responsiveSummary.evaluate((element) => element === document.activeElement),
+		true,
+		"390px semantic Bay focus trap wraps forward to the disclosure",
+	);
+	await page.keyboard.press("Tab");
+	assertEqual(
 		await responsiveCancel.evaluate((element) => element === document.activeElement),
 		true,
-		"390px semantic Bay focus trap wraps forward to Cancel",
+		"390px semantic Bay disclosure returns to Cancel",
 	);
 	await page.screenshot({
 		path: path.join(artifactRoot, "semantic-bay-disconnect-review-390x844.png"),
@@ -26346,6 +26581,29 @@ async function exerciseSemanticBayMutation(page, source) {
 	}
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.waitForTimeout(100);
+	const retryReviews = [];
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 760, height: 900 },
+		{ width: 390, height: 844 },
+		{ width: 390, height: 600 },
+	]) {
+		for (const action of ["DISCONNECT", "DELETE"]) {
+			retryReviews.push(
+				await exerciseSemanticBayRetryReview(
+					page,
+					action,
+					viewport,
+					action === "DISCONNECT" ? "stale" : "closure",
+				),
+			);
+		}
+	}
+	if (await menu.isVisible().catch(() => false)) {
+		await page.getByTestId("editor-activity-assemble").click();
+		await menu.waitFor({ state: "hidden" });
+	}
+	await page.setViewportSize({ width: 1440, height: 900 });
 	reportAcceptanceProgress("semantic-bay-mutation:pass");
 	return {
 		...sourceRestored,
@@ -26353,10 +26611,12 @@ async function exerciseSemanticBayMutation(page, source) {
 		firstPaintMilliseconds: Number(await root.getAttribute("data-semantic-bay-first-paint-ms")),
 		disconnectChecksum: disconnected.workerChecksum,
 		deleteChecksum: deleted.workerChecksum,
+		retryReviews,
 		screenshots: [
 			"semantic-bay-disconnect-review.png",
 			"semantic-bay-delete-review.png",
 			"semantic-bay-disconnect-review-390x844.png",
+			...retryReviews.flatMap((review) => review.screenshots),
 		],
 	};
 }

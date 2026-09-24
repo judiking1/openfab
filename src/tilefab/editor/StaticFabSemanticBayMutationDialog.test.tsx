@@ -22,7 +22,7 @@ describe("StaticFabSemanticBayMutationDialog", () => {
 		expect(markup).toContain('data-command="disconnect-bay"');
 		expect(markup).toContain('data-action="DISCONNECT"');
 		expect(markup).toContain('data-phase="analyzing"');
-		expect(markup).toContain("ANALYZING EXACT SOURCE");
+		expect(markup).toContain("변경 영향을 검토하고 있습니다");
 		expect(markup).toMatch(
 			/data-testid="semantic-bay-command-cancel"[^>]*data-initial-focus="true"/,
 		);
@@ -34,14 +34,14 @@ describe("StaticFabSemanticBayMutationDialog", () => {
 		const markup = renderDialog(readySession("DISCONNECT", 3, 4));
 
 		expect(markup).toContain('data-phase="ready"');
-		expect(markup).toContain("The Bay, 2 Process Loops, 18 rail modules");
-		expect(markup).toContain("stay authored");
-		expect(markup).toContain("the Bank parent relation are removed");
-		expect(markup).toContain("All source and result components are independently closed");
-		expect(markup).toContain("authored Δ+1 · physical Δ+1 · DISCONNECT");
-		expect(markup).toContain("WORKER-CERTIFIED TOPOLOGY");
-		expect(markup).toContain("PLANNER REVIEW · WORKER EVIDENCE BELOW");
-		expect(markup).toContain("not certification");
+		expect(markup).toContain("내부 순환로 2개 · 레일 모듈 18개");
+		expect(markup).toContain("Bay 내부 구성");
+		expect(markup).toContain("Bank와 이어지는 연결 레일·상위 소속");
+		expect(markup).toContain("현재·예상 지도의 경로 조건 충족");
+		expect(markup).toContain("연결 구역 Δ+1 · 물리 구역 Δ+1 · DISCONNECT");
+		expect(markup).toContain("연결 검증 완료");
+		expect(markup).toContain("변경 대상");
+		expect(markup).toContain("경로 후보의 유무만으로 적용을 허용하지 않습니다");
 		expect(markup).not.toMatch(/data-testid="semantic-bay-command-apply"[^>]*disabled/);
 	});
 
@@ -52,12 +52,12 @@ describe("StaticFabSemanticBayMutationDialog", () => {
 		expect(markup).toContain('data-review-action="DELETE"');
 		expect(markup).toContain('data-review-equipment-group-count="2"');
 		expect(markup).toContain('data-review-port-count="4"');
-		expect(markup).toContain("3 organizations, 2 Process Loops, 18 rail modules");
-		expect(markup).toContain("2 equipment groups, and 4 ports are removed");
-		expect(markup).toContain("removed in the same atomic command");
-		expect(markup).toContain("340 remaining Bank directed edges stay authored");
-		expect(markup).toContain("Retained circulation candidate · PRESENT");
-		expect(markup).toContain("authored Δ+0 · physical Δ+0 · DELETE");
+		expect(markup).toContain("내부 순환로 2개 · 레일 모듈 18개");
+		expect(markup).toContain("장비 2개 · 포트 4개");
+		expect(markup).toContain("Bank 연결 1개도 함께 제거합니다");
+		expect(markup).toContain("Bank의 방향 레일 340개를 유지합니다");
+		expect(markup).toContain("Bank 순환 경로 후보: 있음");
+		expect(markup).toContain("연결 구역 Δ+0 · 물리 구역 Δ+0 · DELETE");
 	});
 
 	it("bounds identity samples even when the exact review contains more rows", () => {
@@ -76,7 +76,7 @@ describe("StaticFabSemanticBayMutationDialog", () => {
 		});
 		const markup = renderDialog(session);
 
-		expect(markup).toContain("module:1, module:2, module:3, module:4 +14 MORE");
+		expect(markup).toContain("module:1, module:2, module:3, module:4 외 14개");
 		expect(markup).not.toContain("module:5");
 		expect(markup).not.toContain("module:6");
 	});
@@ -101,10 +101,90 @@ describe("StaticFabSemanticBayMutationDialog", () => {
 		const markup = renderDialog(rejected);
 
 		expect(markup).toContain(
-			"sampled-module:1, sampled-module:2, sampled-module:3, sampled-module:4 +9,996 MORE",
+			"sampled-module:1, sampled-module:2, sampled-module:3, sampled-module:4 외 9,996개",
 		);
-		expect(markup).not.toContain("+252 MORE");
+		expect(markup).not.toContain("외 252개");
 		expect(markup).not.toContain("sampled-module:256");
+	});
+
+	it.each([
+		["sourceEvidence", "authoredComponentsClosed"],
+		["sourceEvidence", "physicalComponentsClosed"],
+		["prospectiveEvidence", "authoredComponentsClosed"],
+		["prospectiveEvidence", "physicalComponentsClosed"],
+	] as const)("never labels failed %s.%s as closed", (side, flag) => {
+		const sourceEvidence = topologyEvidenceFixture(2);
+		const prospectiveEvidence = topologyEvidenceFixture(3);
+		const session = reduceStaticFabSemanticBayMutationSession(analyzingSession("DISCONNECT"), {
+			type: "ANALYSIS_REJECTED",
+			requestSequence: 1,
+			reason: "Closure failed.",
+			review: reviewFixture("DISCONNECT"),
+			sourceEvidence,
+			prospectiveEvidence,
+			[side]: {
+				...(side === "sourceEvidence" ? sourceEvidence : prospectiveEvidence),
+				[flag]: false,
+			},
+			timings: null,
+		});
+		const markup = renderDialog(session);
+		expect(markup).toContain('data-closed="false"');
+		expect(markup).toContain("연결 또는 물리 경로 검토 실패");
+		expect(markup).toContain("검토 자료의 연결 또는 물리 경로 조건 미충족");
+		expect(markup).not.toContain("현재·예상 지도의 경로 조건 충족");
+		expect(markup).not.toContain("연결 검증 완료");
+		expect(markup).toContain("검토한 변경 대상 · 적용되지 않음");
+		expect(markup).not.toContain('data-testid="semantic-bay-command-apply"');
+		expect(markup).toContain('data-testid="semantic-bay-command-retry"');
+	});
+
+	it("keeps stale successful evidence diagnostic after application is rejected", () => {
+		const applying = reduceStaticFabSemanticBayMutationSession(readySession("DELETE", 2, 2), {
+			type: "APPLY",
+		});
+		const rejected = reduceStaticFabSemanticBayMutationSession(applying, {
+			type: "APPLICATION_REJECTED",
+			reason: "Source changed.",
+		});
+		const markup = renderDialog(rejected);
+		expect(markup).toContain("현재 작업의 적용을 허용하는 결과가 아닙니다");
+		expect(markup).toContain("참고용 경로 검토 수치");
+		expect(markup).not.toContain("연결 검증 완료");
+		expect(markup).not.toContain('data-testid="semantic-bay-command-apply"');
+	});
+
+	it("keeps detailed evidence collapsed after the impact summary", () => {
+		const markup = renderDialog(readySession("DELETE", 2, 2));
+		expect(markup).not.toMatch(/<details[^>]*\sopen/);
+		expect(markup.indexOf("없어지는 항목")).toBeLessThan(markup.indexOf("검토 상세"));
+		expect(markup).toContain("실행 취소 한 번");
+		expect(markup).not.toContain('data-testid="semantic-bay-command-retry"');
+	});
+
+	it("does not turn diagnostic zero counts into an approved removal summary", () => {
+		const rejected = reduceStaticFabSemanticBayMutationSession(analyzingSession("DISCONNECT"), {
+			type: "ANALYSIS_REJECTED",
+			requestSequence: 1,
+			reason: "Already detached.",
+			review: {
+				...reviewFixture("DISCONNECT"),
+				issueCode: "ALREADY_DISCONNECTED",
+				bankOrganizationId: null,
+				incidentConnectorCount: 0,
+			},
+			sourceEvidence: topologyEvidenceFixture(2),
+			prospectiveEvidence: null,
+			timings: null,
+		});
+		const markup = renderDialog(rejected);
+		expect(markup).toContain("이미 Bank에서 분리된 Bay입니다");
+		expect(markup).not.toContain("연결 0개를 제거");
+		expect(markup).not.toContain('data-impact="removed"');
+		expect(markup).not.toContain("Bank 순환 경로 후보: 없음");
+		expect(markup).not.toContain("식별자 표본 없음 외 1개");
+		expect(markup).not.toContain("실행 취소 한 번");
+		expect(markup.indexOf("Already detached.")).toBeLessThan(markup.indexOf("<details"));
 	});
 
 	it("renders rejected and applying as the same bounded four-phase command surface", () => {
@@ -122,14 +202,15 @@ describe("StaticFabSemanticBayMutationDialog", () => {
 		});
 
 		expect(renderDialog(rejected)).toContain('data-phase="rejected"');
-		expect(renderDialog(rejected)).toContain("COMMAND BLOCKED");
+		expect(renderDialog(rejected)).toContain("변경을 적용할 수 없습니다");
 		expect(renderDialog(rejected)).toContain("A connector-attached port blocks this command.");
 		expect(renderDialog(applying)).toContain('data-phase="applying"');
 		expect(renderDialog(applying)).toContain('aria-busy="true"');
-		expect(renderDialog(applying)).toContain("APPLYING ONE ATOMIC COMMAND");
+		expect(renderDialog(applying)).toContain("변경을 적용하고 있습니다");
 		expect(renderDialog(applying)).toMatch(
 			/data-testid="semantic-bay-command-cancel"[^>]*disabled/,
 		);
+		expect(renderDialog(applying)).not.toContain('data-testid="semantic-bay-command-retry"');
 	});
 });
 
@@ -139,6 +220,7 @@ function renderDialog(session: StaticFabSemanticBayMutationSession): string {
 			session={session}
 			onAnalyze={vi.fn()}
 			onCancel={vi.fn()}
+			onRetry={vi.fn()}
 			onApply={vi.fn()}
 		/>,
 	);

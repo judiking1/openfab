@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.5
+
+- Explain Bay disconnect/delete consequences in Korean, show retained and removed content first,
+  and place detailed topology measurements in an accessible disclosure.
+- Show failed or stale topology evidence truthfully and keep rejection reasons visible.
+- Retry a blocked review from a fresh document snapshot and permit while preserving modal focus
+  and the atomic apply boundary.
+
 ### Preview candidate 0.1.4
 
 - Preserve two explicitly declared Bank-to-FAB contact relationships in Parallel Hall presets,

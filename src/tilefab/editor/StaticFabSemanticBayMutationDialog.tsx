@@ -17,6 +17,8 @@ export interface StaticFabSemanticBayMutationDialogProps {
 	/** Invoked after the analyzing dialog has painted; the caller retains all Worker authority. */
 	readonly onAnalyze: (requestSequence: number) => void;
 	readonly onCancel: () => void;
+	/** Rechecks the current document; the caller discards every previous snapshot and permit. */
+	readonly onRetry: () => void;
 	/** Requests adoption/commit. The dialog never owns a plan, ticket, Worker, or document command. */
 	readonly onApply: () => void;
 }
@@ -26,6 +28,7 @@ export function StaticFabSemanticBayMutationDialog({
 	returnFocus,
 	onAnalyze,
 	onCancel,
+	onRetry,
 	onApply,
 }: StaticFabSemanticBayMutationDialogProps): React.ReactElement {
 	const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +108,11 @@ export function StaticFabSemanticBayMutationDialog({
 		const frame = requestAnimationFrame(() => onAnalyzeRef.current(requestSequence));
 		return () => cancelAnimationFrame(frame);
 	}, [session.phase, session.requestSequence]);
+	useEffect(() => {
+		if (session.phase === "rejected" && document.activeElement === dialogRef.current) {
+			cancelRef.current?.focus({ preventScroll: true });
+		}
+	}, [session.phase]);
 
 	const requestCancel = (): void => {
 		if (applying) return;
@@ -114,9 +122,10 @@ export function StaticFabSemanticBayMutationDialog({
 	const requestApply = (): void => {
 		if (!canApply) return;
 		restoreLauncherOnUnmountRef.current = false;
+		dialogRef.current?.focus({ preventScroll: true });
 		onApply();
 	};
-	const commandLabel = session.action === "DISCONNECT" ? "DISCONNECT BAY" : "DELETE BAY";
+	const commandLabel = session.action === "DISCONNECT" ? "Bay 분리" : "Bay 삭제";
 	const content = (
 		<div
 			ref={backdropRef}
@@ -128,7 +137,7 @@ export function StaticFabSemanticBayMutationDialog({
 		>
 			<section
 				ref={dialogRef}
-				className="tilefab-semantic-bay-dialog"
+				className="tilefab-semantic-bay-dialog tilefab-semantic-bay-mutation-dialog"
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby={titleId}
@@ -145,32 +154,32 @@ export function StaticFabSemanticBayMutationDialog({
 						{session.action === "DISCONNECT" ? <Unlink size={19} /> : <Trash2 size={19} />}
 					</span>
 					<span>
-						<small>SEMANTIC BAY COMMAND</small>
+						<small>변경 내용 확인</small>
 						<strong id={titleId} className="tilefab-semantic-bay-dialog-title">
 							{commandLabel}
 						</strong>
 					</span>
-					<code className="tilefab-semantic-bay-dialog-id">ORG {session.bayOrganizationId}</code>
 				</header>
 
 				<div className="tilefab-semantic-bay-workspace">
 					<p id={descriptionId} className="tilefab-semantic-bay-intro">
-						<strong className="tilefab-semantic-bay-intro-name">{session.bayName}</strong>
+						<strong className="tilefab-semantic-bay-intro-name">{session.bayName}</strong> ·{" "}
 						{session.action === "DISCONNECT"
-							? " will remain authored as an independent closed Bay."
-							: " and its owned static content will be removed together."}
+							? "Bank에서 분리합니다. Bay 내부 레일과 장비는 유지됩니다."
+							: "이 Bay와 소유한 내부 레일·장비를 함께 삭제합니다."}
 					</p>
 
-					<CommandStatus session={session} />
-					{session.review ? <ImpactReview review={session.review} /> : null}
-					{session.sourceEvidence && session.prospectiveEvidence ? (
-						<WorkerEvidence
-							action={session.action}
-							source={session.sourceEvidence}
-							prospective={session.prospectiveEvidence}
-							certified={session.phase === "ready" || session.phase === "applying"}
-						/>
+					{session.review ? (
+						<ImpactReview review={session.review} rejected={session.phase === "rejected"} />
 					) : null}
+					<CommandStatus session={session} />
+					<ClosureSummary session={session} />
+					{(canApply || applying) && (
+						<p className="tilefab-semantic-bay-undo-note">
+							적용하면 실행 취소 한 번으로 되돌릴 수 있습니다.
+						</p>
+					)}
+					<TechnicalDetails session={session} />
 				</div>
 
 				<footer>
@@ -182,25 +191,38 @@ export function StaticFabSemanticBayMutationDialog({
 						disabled={applying}
 						onClick={requestCancel}
 					>
-						X&nbsp; CANCEL
+						{session.phase === "rejected" ? "닫고 수정하기" : "취소"}
 					</button>
-					<button
-						type="button"
-						className="tilefab-semantic-bay-apply"
-						data-testid="semantic-bay-command-apply"
-						data-action={session.action}
-						disabled={!canApply}
-						onClick={requestApply}
-					>
-						{applying ? (
-							<LoaderCircle className="tilefab-semantic-bay-spinner" size={15} />
-						) : session.action === "DISCONNECT" ? (
-							<Unlink size={15} />
-						) : (
-							<Trash2 size={15} />
-						)}
-						{applying ? "APPLYING" : commandLabel}
-					</button>
+					{session.phase === "rejected" ? (
+						<button
+							type="button"
+							data-testid="semantic-bay-command-retry"
+							onClick={() => {
+								cancelRef.current?.focus({ preventScroll: true });
+								onRetry();
+							}}
+						>
+							다시 검토
+						</button>
+					) : (
+						<button
+							type="button"
+							className="tilefab-semantic-bay-apply"
+							data-testid="semantic-bay-command-apply"
+							data-action={session.action}
+							disabled={!canApply}
+							onClick={requestApply}
+						>
+							{applying ? (
+								<LoaderCircle className="tilefab-semantic-bay-spinner" size={15} />
+							) : session.action === "DISCONNECT" ? (
+								<Unlink size={15} />
+							) : (
+								<Trash2 size={15} />
+							)}
+							{applying ? "적용 중…" : commandLabel}
+						</button>
+					)}
 				</footer>
 			</section>
 		</div>
@@ -215,12 +237,20 @@ function CommandStatus({
 	const state = session.phase;
 	const title =
 		state === "analyzing"
-			? "ANALYZING EXACT SOURCE"
+			? "변경 영향을 검토하고 있습니다"
 			: state === "ready"
-				? "READY TO APPLY"
+				? "검토 완료 · 적용할 수 있습니다"
 				: state === "rejected"
-					? "COMMAND BLOCKED"
-					: "APPLYING ONE ATOMIC COMMAND";
+					? "변경을 적용할 수 없습니다"
+					: "변경을 적용하고 있습니다";
+	const detail =
+		state === "rejected"
+			? "아직 적용되지 않았습니다. 검토 상세에서 사유를 확인하고 지도를 수정하거나 다시 검토하세요."
+			: state === "ready"
+				? "아직 적용되지 않았습니다. 위의 변경 대상을 확인한 뒤 적용하세요."
+				: state === "analyzing"
+					? "현재 지도의 연결과 변경 후 남는 경로를 확인합니다. 취소하면 지도를 바꾸지 않습니다."
+					: "레일·조직·장비를 하나의 변경으로 반영합니다. 잠시 기다려 주세요.";
 	return (
 		<section
 			className="tilefab-semantic-bay-status"
@@ -240,132 +270,209 @@ function CommandStatus({
 			</span>
 			<span className="tilefab-semantic-bay-status-copy">
 				<strong className="tilefab-semantic-bay-status-title">{title}</strong>
-				<small className="tilefab-semantic-bay-status-detail">{session.reason}</small>
+				<small className="tilefab-semantic-bay-status-detail">{detail}</small>
+				{state === "rejected" && (
+					<small className="tilefab-semantic-bay-status-detail tilefab-semantic-bay-rejection-reason">
+						{session.reason}
+					</small>
+				)}
 			</span>
-			{session.timings ? (
-				<code className="tilefab-semantic-bay-status-timing">
-					{session.timings.planningMilliseconds.toFixed(1)} +{" "}
-					{session.timings.validationMilliseconds.toFixed(1)} ms
-				</code>
-			) : null}
 		</section>
 	);
 }
 
 function ImpactReview({
 	review,
-}: Readonly<{ review: StaticFabSemanticBayMutationReview }>): React.ReactElement {
-	const processLoops = plural(review.processLoopCount, "Process Loop");
-	const modules = plural(review.railModuleCount, "rail module");
-	const switches = plural(review.advancedSwitchCount, "advanced switch");
-	const equipment = plural(review.equipmentGroupCount, "equipment group");
-	const ports = plural(review.portCount, "port");
-	const removedOrganizationCount = review.action === "DELETE" ? review.processLoopCount + 1 : 0;
-	const connectorIdentitySamples = boundedConnectorIdentitySamples(review);
+	rejected,
+}: Readonly<{
+	review: StaticFabSemanticBayMutationReview;
+	rejected: boolean;
+}>): React.ReactElement {
+	if (review.issueCode !== null)
+		return (
+			<section className="tilefab-semantic-bay-review" aria-label="변경 대상 확인 필요">
+				<header>
+					<strong>변경 대상 확인 필요</strong>
+				</header>
+				<p className="tilefab-semantic-bay-impact-copy">
+					{review.issueCode === "ALREADY_DISCONNECTED"
+						? "이미 Bank에서 분리된 Bay입니다. 제거할 Bank 연결이 없습니다."
+						: "변경 대상을 확정하지 못했습니다. 아래 거절 사유를 확인하세요."}
+				</p>
+			</section>
+		);
+	const contents = `내부 순환로 ${review.processLoopCount.toLocaleString()}개 · 레일 모듈 ${review.railModuleCount.toLocaleString()}개 · 분기기 ${review.advancedSwitchCount.toLocaleString()}개 · 장비 ${review.equipmentGroupCount.toLocaleString()}개 · 포트 ${review.portCount.toLocaleString()}개`;
 	return (
 		<section
 			className="tilefab-semantic-bay-review"
-			aria-labelledby="semantic-bay-impact-title"
+			aria-label="변경 대상"
 			data-review-action={review.action}
 			data-review-equipment-group-count={review.equipmentGroupCount}
 			data-review-port-count={review.portCount}
 		>
 			<header>
-				<strong id="semantic-bay-impact-title">EXACT IMPACT REVIEW</strong>
-				<small>PLANNER REVIEW · WORKER EVIDENCE BELOW</small>
+				<strong>{rejected ? "검토한 변경 대상 · 적용되지 않음" : "변경 대상"}</strong>
 			</header>
 			<div className="tilefab-semantic-bay-impact-grid">
-				{review.action === "DISCONNECT" ? (
+				<article data-impact="removed">
+					<strong>없어지는 항목</strong>
+					<p className="tilefab-semantic-bay-impact-copy">
+						{review.action === "DELETE"
+							? "선택한 Bay와 소유한 내부 구성"
+							: "Bank와 이어지는 연결 레일·상위 소속"}
+					</p>
+					<p className="tilefab-semantic-bay-impact-detail">
+						{review.action === "DELETE"
+							? contents
+							: `연결 ${review.incidentConnectorCount.toLocaleString()}개를 제거하고 독립된 Bay로 남깁니다.`}
+					</p>
+					{review.action === "DELETE" && (
+						<p className="tilefab-semantic-bay-impact-detail">
+							{review.incidentConnectorCount > 0
+								? `Bank 연결 ${review.incidentConnectorCount.toLocaleString()}개도 함께 제거합니다.`
+								: "이미 분리된 Bay이므로 Bank 연결은 바뀌지 않습니다."}
+						</p>
+					)}
+				</article>
+				<article data-impact="preserved">
+					<strong>유지되는 항목</strong>
+					<p className="tilefab-semantic-bay-impact-copy">
+						{review.action === "DISCONNECT"
+							? "Bay 내부 구성"
+							: review.bankOrganizationId === null
+								? "선택한 Bay 밖의 구성"
+								: "나머지 Bank 레일"}
+					</p>
+					<p className="tilefab-semantic-bay-impact-detail">
+						{review.action === "DISCONNECT"
+							? contents
+							: review.bankOrganizationId === null
+								? "다른 Bay와 장비는 이 삭제 대상에 포함되지 않습니다."
+								: `Bank의 방향 레일 ${review.remainingBankDirectedEdgeCount.toLocaleString()}개를 유지합니다.`}
+					</p>
+				</article>
+			</div>
+		</section>
+	);
+}
+
+function ClosureSummary({
+	session,
+}: Readonly<{ session: StaticFabSemanticBayMutationSession }>): React.ReactElement | null {
+	if (!session.sourceEvidence && !session.prospectiveEvidence) return null;
+	const rows = [
+		{
+			label: session.phase === "rejected" ? "검토 당시 지도" : "현재 지도",
+			evidence: session.sourceEvidence,
+		},
+		{
+			label: session.phase === "rejected" ? "당시 변경 예상" : "변경 후 예상",
+			evidence: session.prospectiveEvidence,
+		},
+	];
+	return (
+		<section
+			className="tilefab-semantic-bay-closure"
+			aria-label="경로 검토 결과"
+			data-testid="semantic-bay-closure-summary"
+		>
+			<strong>경로 검토 결과</strong>
+			{rows.map(({ label, evidence }) => {
+				const closed =
+					evidence?.authoredComponentsClosed === true && evidence.physicalComponentsClosed;
+				const message =
+					evidence === null
+						? "확인하지 못함"
+						: !closed
+							? "연결 또는 물리 경로 검토 실패"
+							: evidence.authoredCellCount === 0
+								? "남는 레일 없음"
+								: "각 레일 구역의 순환 경로 확인";
+				return (
+					<div key={label} data-closed={evidence === null ? "unknown" : String(closed)}>
+						<span>{label}</span>
+						<strong>{message}</strong>
+					</div>
+				);
+			})}
+			{session.phase === "rejected" && (
+				<small>이전 검토 결과입니다. 현재 작업의 적용을 허용하는 결과가 아닙니다.</small>
+			)}
+		</section>
+	);
+}
+
+function TechnicalDetails({
+	session,
+}: Readonly<{ session: StaticFabSemanticBayMutationSession }>): React.ReactElement {
+	const review = session.review;
+	return (
+		<details className="tilefab-semantic-bay-disclosure" data-testid="semantic-bay-command-details">
+			<summary>검토 상세 · 연결 수치와 사유</summary>
+			<div className="tilefab-semantic-bay-disclosure-body">
+				<p className="tilefab-semantic-bay-reason">{session.reason}</p>
+				<p>
+					조직 ID {session.bayOrganizationId}
+					{session.timings
+						? ` · 계획 ${session.timings.planningMilliseconds.toFixed(1)}ms · 검증 ${session.timings.validationMilliseconds.toFixed(1)}ms`
+						: ""}
+				</p>
+				{review && review.issueCode === null && (
 					<>
-						<article data-impact="preserved">
-							<strong>PRESERVED</strong>
-							<p className="tilefab-semantic-bay-impact-copy">
-								The Bay, {processLoops}, {modules}, {switches}, {equipment}, and {ports} stay
-								authored.
-							</p>
-						</article>
-						<article data-impact="removed">
-							<strong>REMOVED</strong>
-							<p className="tilefab-semantic-bay-impact-copy">
-								{connectorSummary(review)} and the Bank parent relation are removed.
-							</p>
-							<small className="tilefab-semantic-bay-impact-detail">
-								{plural(review.remainingBankDirectedEdgeCount, "remaining Bank directed edge")} ·
-								circulation candidate{" "}
-								{review.retainedCirculationCandidatePresent ? "PRESENT" : "NOT PRESENT"}
-							</small>
-						</article>
-					</>
-				) : (
-					<>
-						<article data-impact="removed">
-							<strong>REMOVED</strong>
-							<p className="tilefab-semantic-bay-impact-copy">
-								{plural(removedOrganizationCount, "organization")}, {processLoops}, {modules},{" "}
-								{plural(review.bayDirectedEdgeCount, "Bay-owned directed edge")}, {switches},{" "}
-								{equipment}, and {ports} are removed.
-							</p>
-							<small className="tilefab-semantic-bay-impact-detail">
-								{review.incidentConnectorCount > 0
-									? `${connectorSummary(review)} is removed in the same atomic command.`
-									: "The Bay is already detached; no Bank connector changes."}
-							</small>
-						</article>
-						<article data-impact="preserved">
-							<strong>PRESERVED</strong>
-							<p className="tilefab-semantic-bay-impact-copy">
-								{review.bankOrganizationId === null
-									? "The detached Bay does not change a Bank circulation."
-									: `${plural(review.remainingBankDirectedEdgeCount, "remaining Bank directed edge")} stay authored.`}
-							</p>
-							<small className="tilefab-semantic-bay-impact-detail">
-								Retained circulation candidate ·{" "}
-								{review.retainedCirculationCandidatePresent ? "PRESENT" : "NOT PRESENT"}
-							</small>
-						</article>
+						<p>
+							Bank 순환 경로 후보: {review.retainedCirculationCandidatePresent ? "있음" : "없음"}.
+							경로 후보의 유무만으로 적용을 허용하지 않습니다.
+						</p>
+						<section className="tilefab-semantic-bay-bounded-details" aria-label="대상 식별자 일부">
+							<BoundedIdentity
+								label="내부 순환로"
+								values={review.processLoopOrganizationIds}
+								totalCount={review.processLoopCount}
+							/>
+							<BoundedIdentity
+								label="레일 모듈"
+								values={review.railModuleKeys}
+								totalCount={review.railModuleCount}
+							/>
+							<BoundedIdentity
+								label="연결 레일"
+								values={boundedConnectorIdentitySamples(review)}
+								totalCount={review.connectorDirectedEdgeCount}
+							/>
+							{review.action === "DELETE" && (
+								<>
+									<BoundedIdentity
+										label="삭제 조직"
+										values={review.removedOrganizationIds}
+										totalCount={review.processLoopCount + 1}
+									/>
+									<BoundedIdentity
+										label="장비"
+										values={review.equipmentGroupIds}
+										totalCount={review.equipmentGroupCount}
+									/>
+									<BoundedIdentity
+										label="포트"
+										values={review.portIds}
+										totalCount={review.portCount}
+									/>
+								</>
+							)}
+						</section>
 					</>
 				)}
+				{session.sourceEvidence && session.prospectiveEvidence && (
+					<WorkerEvidence
+						action={session.action}
+						source={session.sourceEvidence}
+						prospective={session.prospectiveEvidence}
+						certified={
+							staticFabSemanticBayMutationSessionCanApply(session) || session.phase === "applying"
+						}
+					/>
+				)}
 			</div>
-			<section
-				className="tilefab-semantic-bay-bounded-details"
-				aria-label="Bounded exact identities"
-			>
-				<BoundedIdentity
-					label="PROCESS LOOPS"
-					values={review.processLoopOrganizationIds}
-					totalCount={review.processLoopCount}
-				/>
-				<BoundedIdentity
-					label="RAIL MODULES"
-					values={review.railModuleKeys}
-					totalCount={review.railModuleCount}
-				/>
-				<BoundedIdentity
-					label="CONNECTOR EDGES"
-					values={connectorIdentitySamples}
-					totalCount={review.connectorDirectedEdgeCount}
-				/>
-				{review.action === "DELETE" ? (
-					<>
-						<BoundedIdentity
-							label="REMOVED ORGANIZATIONS"
-							values={review.removedOrganizationIds}
-							totalCount={removedOrganizationCount}
-						/>
-						<BoundedIdentity
-							label="EQUIPMENT"
-							values={review.equipmentGroupIds}
-							totalCount={review.equipmentGroupCount}
-						/>
-						<BoundedIdentity label="PORTS" values={review.portIds} totalCount={review.portCount} />
-					</>
-				) : null}
-			</section>
-			<p className="tilefab-semantic-bay-candidate-note">
-				Circulation candidate status is core planning evidence, not certification. Exact topology
-				certification is reported separately below.
-			</p>
-		</section>
+		</details>
 	);
 }
 
@@ -382,32 +489,48 @@ function WorkerEvidence({
 }>): React.ReactElement {
 	const authoredDelta = prospective.authoredComponentCount - source.authoredComponentCount;
 	const physicalDelta = prospective.physicalComponentCount - source.physicalComponentCount;
+	const allClosed =
+		source.authoredComponentsClosed &&
+		source.physicalComponentsClosed &&
+		prospective.authoredComponentsClosed &&
+		prospective.physicalComponentsClosed;
 	return (
-		<section className="tilefab-semantic-bay-evidence" data-certified={certified}>
+		<section className="tilefab-semantic-bay-evidence" data-certified={certified && allClosed}>
 			<header>
 				<span aria-hidden="true">
-					<ShieldCheck size={16} />
+					{certified && allClosed ? <ShieldCheck size={16} /> : <X size={16} />}
 				</span>
 				<span>
-					<strong>{certified ? "WORKER-CERTIFIED TOPOLOGY" : "WORKER TOPOLOGY EVIDENCE"}</strong>
+					<strong>{certified && allClosed ? "연결 검증 완료" : "참고용 경로 검토 수치"}</strong>
 					<small>
-						All source and result components are independently closed · authored{" "}
-						{signedDelta(authoredDelta)} · physical {signedDelta(physicalDelta)} · {action}
+						{allClosed
+							? certified
+								? "현재·예상 지도의 경로 조건 충족"
+								: "검토 당시 지도의 경로 조건 충족 · 현재 적용 허용 아님"
+							: "검토 자료의 연결 또는 물리 경로 조건 미충족"}{" "}
+						· 연결 구역 {signedDelta(authoredDelta)} · 물리 구역 {signedDelta(physicalDelta)} ·{" "}
+						{action}
 					</small>
 				</span>
 			</header>
 			<div className="tilefab-semantic-bay-evidence-grid">
-				<TopologyEvidenceColumn label="SOURCE" evidence={source} />
-				<TopologyEvidenceColumn label="RESULT" evidence={prospective} />
+				<TopologyEvidenceColumn
+					label={certified ? "현재 지도" : "검토 당시 지도"}
+					evidence={source}
+				/>
+				<TopologyEvidenceColumn
+					label={certified ? "변경 후 예상" : "당시 변경 예상"}
+					evidence={prospective}
+				/>
 			</div>
 			<section
 				className="tilefab-semantic-bay-scope-row"
-				data-certified={certified}
-				aria-label={certified ? "Verified scopes" : "Evaluated scopes"}
+				data-certified={certified && allClosed}
+				aria-label={certified && allClosed ? "검증한 범위" : "검토한 범위"}
 			>
-				<span className="tilefab-semantic-bay-scope">GEOMETRY</span>
-				<span className="tilefab-semantic-bay-scope">DIRECTED TOPOLOGY</span>
-				<span className="tilefab-semantic-bay-scope">ORGANIZATION</span>
+				<span className="tilefab-semantic-bay-scope">레일 형상</span>
+				<span className="tilefab-semantic-bay-scope">방향 연결</span>
+				<span className="tilefab-semantic-bay-scope">조직 소유</span>
 			</section>
 		</section>
 	);
@@ -424,30 +547,30 @@ function TopologyEvidenceColumn({
 		<dl>
 			<div>
 				<dt>{label}</dt>
-				<dd>{evidence.authoredDirectedEdgeCount.toLocaleString()} EDGES</dd>
+				<dd>{evidence.authoredDirectedEdgeCount.toLocaleString()} 방향 레일</dd>
 			</div>
 			<div>
-				<dt>AUTHORED COMPONENTS</dt>
+				<dt>연결 구역</dt>
 				<dd>{evidence.authoredComponentCount.toLocaleString()}</dd>
 			</div>
 			<div>
-				<dt>DIRECTED SCC</dt>
+				<dt>방향 순환 구역</dt>
 				<dd>{evidence.authoredStrongComponentCount.toLocaleString()}</dd>
 			</div>
 			<div>
-				<dt>PHYSICAL COMPONENTS</dt>
+				<dt>물리 구역</dt>
 				<dd>{evidence.physicalComponentCount.toLocaleString()}</dd>
 			</div>
 			<div>
-				<dt>OPEN TERMINALS</dt>
+				<dt>열린 끝점</dt>
 				<dd>{evidence.authoredOpenTerminalCount.toLocaleString()}</dd>
 			</div>
 			<div>
-				<dt>CLEARANCE ISSUES</dt>
+				<dt>간격 문제</dt>
 				<dd>{evidence.physicalClearanceIssueCount.toLocaleString()}</dd>
 			</div>
 			<div>
-				<dt>PHYSICAL DIAGNOSTICS</dt>
+				<dt>물리 진단</dt>
 				<dd>{evidence.physicalDiagnosticCount.toLocaleString()}</dd>
 			</div>
 		</dl>
@@ -472,8 +595,12 @@ function BoundedIdentity({
 		<span className="tilefab-semantic-bay-identity">
 			<strong className="tilefab-semantic-bay-identity-label">{label}</strong>
 			<code className="tilefab-semantic-bay-identity-values">
-				{visible.length === 0 ? (totalCount === 0 ? "NONE" : "NO SAMPLE") : visible.join(", ")}
-				{remainder > 0 ? ` +${remainder.toLocaleString()} MORE` : ""}
+				{visible.length === 0
+					? totalCount === 0
+						? "없음"
+						: "식별자 표본 없음"
+					: visible.join(", ")}
+				{remainder > 0 ? ` 외 ${remainder.toLocaleString()}개` : ""}
 			</code>
 		</span>
 	);
@@ -496,30 +623,18 @@ function boundedConnectorIdentitySamples(
 	return values;
 }
 
-function connectorSummary(review: StaticFabSemanticBayMutationReview): string {
-	return review.incidentConnectorCount === 0
-		? "No incident Bank connector"
-		: `${plural(review.incidentConnectorCount, "incident Bank connector")} (${plural(
-				review.connectorDirectedEdgeCount,
-				"directed edge",
-			)})`;
-}
-
-function plural(count: number, noun: string): string {
-	return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
-}
-
 function signedDelta(delta: number): string {
 	return `Δ${delta >= 0 ? "+" : ""}${delta.toLocaleString()}`;
 }
 
 const FOCUSABLE_SELECTOR =
-	"button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
+	"summary, button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
 function trapTabNavigation(event: globalThis.KeyboardEvent, root: HTMLElement): void {
 	const controls = [...root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
 		(element) =>
-			!element.hidden && !element.inert && element.getAttribute("aria-hidden") !== "true",
+			!element.closest('[hidden], [inert], [aria-hidden="true"]') &&
+			element.getClientRects().length > 0,
 	);
 	if (controls.length === 0) {
 		event.preventDefault();

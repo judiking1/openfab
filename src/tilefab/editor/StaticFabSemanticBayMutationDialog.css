@@ -668,3 +668,113 @@
 .tilefab-semantic-bay-dialog[data-command="edit-bay-flow"] > footer button {
 	font-size: 13px;
 }
+
+.tilefab-semantic-bay-dialog.tilefab-semantic-bay-mutation-dialog > header {
+	grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-workspace {
+	grid-auto-rows: max-content;
+	align-content: start;
+	gap: 12px;
+	padding: 16px;
+	word-break: keep-all;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-intro,
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-impact-copy,
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-status-title,
+.tilefab-semantic-bay-dialog.tilefab-semantic-bay-mutation-dialog > footer button {
+	font-size: 13px;
+	line-height: 1.6;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-impact-detail,
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-status-detail {
+	color: #aabcb9;
+	font-size: 12px;
+	line-height: 1.6;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-review > header strong,
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-impact-grid article > strong {
+	font-size: 12px;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-status {
+	grid-template-columns: 24px minmax(0, 1fr);
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-undo-note {
+	margin: 0;
+	color: #a7bcb7;
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-closure {
+	display: grid;
+	gap: 8px;
+	padding: 12px;
+	border: 1px solid #364d47;
+	border-radius: 5px;
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-closure > div {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 4px 12px;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-closure [data-closed="true"] strong {
+	color: #9ddfc9;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-closure [data-closed="false"] strong {
+	color: #efb9b3;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-closure > small {
+	color: #b4b6a0;
+	font-size: 12px;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-disclosure {
+	min-width: 0;
+	border: 1px solid #3d5050;
+	border-radius: 5px;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-disclosure > summary {
+	min-height: 44px;
+	padding: 12px;
+	color: #c4d8d4;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 700;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-disclosure > summary:focus-visible,
+.tilefab-semantic-bay-mutation-dialog > footer button:focus-visible {
+	outline: 2px solid #a5decd;
+	outline-offset: -3px;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-disclosure-body {
+	display: grid;
+	min-width: 0;
+	gap: 12px;
+	padding: 0 12px 12px;
+	font-size: 12px;
+	line-height: 1.6;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-semantic-bay-mutation-dialog .tilefab-semantic-bay-disclosure-body > p {
+	margin: 0;
+}

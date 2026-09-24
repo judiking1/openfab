@@ -23885,6 +23885,35 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(`Bay 구조 명령을 검증하지 못했습니다 · ${reason}`);
 	};
 
+	const retryStaticFabSemanticBayMutation = (): void => {
+		const current = staticFabSemanticBayMutationUiRef.current;
+		if (!current || current.phase !== "rejected") return;
+		const requestSequence =
+			Math.max(staticFabSemanticBayMutationRequestRef.current, current.requestSequence) + 1;
+		staticFabSemanticBayMutationRequestRef.current = requestSequence;
+		const controller = staticFabSemanticBayMutationSnapshotControllerRef.current;
+		staticFabSemanticBayMutationSnapshotControllerRef.current = null;
+		controller?.abort();
+		const bridge = staticFabSemanticBayMutationBridgeRef.current;
+		staticFabSemanticBayMutationBridgeRef.current = null;
+		bridge?.dispose();
+		staticFabSemanticBayMutationPlanRef.current = null;
+		if (appRootRef.current) {
+			appRootRef.current.dataset.semanticBayCommandStartedAt = String(performance.now());
+			appRootRef.current.dataset.semanticBaySnapshotStatus = "deferred-until-painted";
+			appRootRef.current.dataset.semanticBayFirstPaintMs = "";
+			appRootRef.current.dataset.semanticBaySnapshotHandoffMs = "";
+			appRootRef.current.dataset.semanticBayHydrationMs = "";
+			appRootRef.current.dataset.semanticBayWorkerRoundTripMs = "";
+			appRootRef.current.dataset.semanticBayResponseValidationMs = "";
+			appRootRef.current.dataset.semanticBayAdoptionMs = "";
+		}
+		publishStaticFabSemanticBayMutation(
+			reduceStaticFabSemanticBayMutationSession(current, { type: "RETRY", requestSequence }),
+		);
+		setStatus(`${current.bayName}의 현재 지도에서 변경 영향을 다시 검토합니다`);
+	};
+
 	const analyzeStaticFabSemanticBayMutation = (requestSequence: number): void => {
 		// The dialog invokes this after its first paint frame. This second frame keeps snapshot
 		// traversal and Worker transfer entirely outside the modal's first-paint budget.
@@ -24171,8 +24200,8 @@ export default function TileFabApp(): React.ReactElement {
 		assemblePaletteReturnFocusRef.current = null;
 		const resultMessage =
 			action === "DISCONNECT"
-				? `${bayName}을 Bank에서 분리했습니다 · Bay 콘텐츠와 ${review.processLoopCount}개 Process Loop를 보존했습니다`
-				: `${bayName}과 ${review.removedOrganizationIds.length}개 조직, ${review.railModuleCount}개 레일 모듈, ${review.equipmentGroupCount}개 장비를 삭제했습니다`;
+				? `${bayName} · Bank에서 분리했습니다. Bay 내부 구성과 ${review.processLoopCount}개 순환로를 유지했습니다`
+				: `${bayName} 삭제 완료 · 조직 ${review.removedOrganizationIds.length}개, 레일 모듈 ${review.railModuleCount}개, 장비 ${review.equipmentGroupCount}개를 삭제했습니다`;
 		syncModelUi(`${resultMessage} · 한 번의 실행 취소 가능한 명령으로 적용했습니다`);
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
@@ -31335,6 +31364,7 @@ export default function TileFabApp(): React.ReactElement {
 						returnFocus={staticFabSemanticBayMutationReturnFocusRef.current}
 						onAnalyze={analyzeStaticFabSemanticBayMutation}
 						onCancel={() => cancelStaticFabSemanticBayMutation(undefined, false)}
+						onRetry={retryStaticFabSemanticBayMutation}
 						onApply={applyStaticFabSemanticBayMutation}
 					/>
 				) : null}

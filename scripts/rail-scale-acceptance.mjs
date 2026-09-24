@@ -7935,23 +7935,21 @@ async function readSemanticBayDeleteEvidence(page) {
 			};
 			return {
 				authoredEdges: number(heading),
-				authoredComponents: number("AUTHORED COMPONENTS"),
-				directedScc: number("DIRECTED SCC"),
-				physicalComponents: number("PHYSICAL COMPONENTS"),
-				openTerminals: number("OPEN TERMINALS"),
-				clearanceIssues: number("CLEARANCE ISSUES"),
-				physicalDiagnostics: number("PHYSICAL DIAGNOSTICS"),
+				authoredComponents: number("연결 구역"),
+				directedScc: number("방향 순환 구역"),
+				physicalComponents: number("물리 구역"),
+				openTerminals: number("열린 끝점"),
+				clearanceIssues: number("간격 문제"),
+				physicalDiagnostics: number("물리 진단"),
 			};
 		};
 		return {
 			certified: evidence.dataset.certified === "true",
 			deletedEquipmentGroupCount: Number(review.dataset.reviewEquipmentGroupCount),
 			deletedPortCount: Number(review.dataset.reviewPortCount),
-			allClosed: (evidence.textContent ?? "").includes(
-				"All source and result components are independently closed",
-			),
-			source: readColumn(columns[0], "SOURCE"),
-			result: readColumn(columns[1], "RESULT"),
+			allClosed: (evidence.textContent ?? "").includes("현재·예상 지도의 경로 조건 충족"),
+			source: readColumn(columns[0], "현재 지도"),
+			result: readColumn(columns[1], "변경 후 예상"),
 		};
 	});
 }

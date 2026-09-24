@@ -20,6 +20,7 @@ const latencyTestFiles = [
 	"src/tilefab/editor/RailEditorRelationshipActivation.test.ts",
 	"src/tilefab/editor/StaticFabBayFlowEditBridge.test.ts",
 	"src/tilefab/editor/StaticFabSemanticBayMutationBridge.test.ts",
+	"src/tilefab/render/SyntheticFabStarterSchematic.test.ts",
 	"src/tilefab/render/TileRenderer.test.ts",
 	"src/tilefab/worker/OpenFabProjectSerializationRuntime.test.ts",
 	"src/tilefab/worker/OpenFabStationProposalReviewDraftSoA.test.ts",
