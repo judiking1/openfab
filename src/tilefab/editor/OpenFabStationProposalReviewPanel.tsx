@@ -775,6 +775,11 @@ function GroupDetail({
 				</span>
 				<DecisionBadge group={group} />
 			</header>
+			<p className="tilefab-station-review-active-row">
+				{activeRow
+					? `현재 선택 행 ${activeRow.row + 1} · ${activeRow.proposal.portKey || "Port 키 없음"} · 원본 그룹 ${activeRow.proposal.physicalGroupKey || "미지정"}`
+					: "ROWS에서 그룹에 넣을 행을 선택하세요"}
+			</p>
 			<div className="tilefab-station-review-group-actions">
 				<button
 					type="button"

@@ -60,6 +60,10 @@ const COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE = new Error(
 	"Compact Bay configuration continuation completed.",
 );
 const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconnection completed.");
+const STATION_REVIEW_APPLY_ONLY_COMPLETE = new Error("Station review Apply acceptance completed.");
+const COMPACT_STARTER_NAV_ONLY_COMPLETE = new Error("Compact starter navigation completed.");
+const PRESET_RECOVERY_ONLY_COMPLETE = new Error("Synthetic preset recovery completed.");
+const PROJECT_STARTER_RETRY_ONLY_COMPLETE = new Error("Project starter retry completed.");
 const STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE = new Error(
 	"Static FAB issue Inspector recheck acceptance completed.",
 );
@@ -113,6 +117,35 @@ try {
 		assertEqual(result.pageErrors.length, 0, "Declared Bay page errors");
 		result.status = "PASS";
 		throw DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_STATION_REVIEW_APPLY_ACCEPTANCE_ONLY === "1") {
+		recordStep("station-review-apply", await exerciseStationProposalReviewApply(browser));
+		assertEqual(result.consoleErrors.length, 0, "Station review Apply console errors");
+		assertEqual(result.pageErrors.length, 0, "Station review Apply page errors");
+		result.status = "PASS";
+		console.log("PASS Station review Apply acceptance");
+		throw STATION_REVIEW_APPLY_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_COMPACT_STARTER_NAV_ONLY === "1") {
+		recordStep("compact-starter-navigation", await exerciseCompactStarterNavigation(browser));
+		assertEqual(result.consoleErrors.length, 0, "Compact starter console errors");
+		assertEqual(result.pageErrors.length, 0, "Compact starter page errors");
+		result.status = "PASS";
+		throw COMPACT_STARTER_NAV_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_PRESET_RECOVERY_ONLY === "1") {
+		recordStep("synthetic-fab-preset-recovery", await exerciseSyntheticFabPresetRecovery(browser));
+		assertEqual(result.consoleErrors.length, 0, "Preset recovery console errors");
+		assertEqual(result.pageErrors.length, 0, "Preset recovery page errors");
+		result.status = "PASS";
+		throw PRESET_RECOVERY_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_PROJECT_STARTER_RETRY_ONLY === "1") {
+		recordStep("compact-project-starter-retry", await exerciseCompactProjectStarterRetry(browser));
+		assertEqual(result.consoleErrors.length, 0, "Project starter retry console errors");
+		assertEqual(result.pageErrors.length, 0, "Project starter retry page errors");
+		result.status = "PASS";
+		throw PROJECT_STARTER_RETRY_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_COMPACT_BAY_CONFIGURATION_ACCEPTANCE_ONLY === "1") {
 		recordStep(
@@ -346,6 +379,7 @@ try {
 	const initialBlank = await readMetrics(desktopPage);
 	const stationProposalReview = await exerciseStationProposalReviewEntry(desktopPage, initialBlank);
 	recordStep("station-proposal-review-entry", stationProposalReview);
+	recordStep("station-proposal-review-apply", await exerciseStationProposalReviewApply(browser));
 	const commandRegistry = await exerciseEditorCommandHelp(desktopPage, initialBlank);
 	recordStep("editor-command-registry", commandRegistry);
 	const bayAssemblyPreview = await openSyntheticFabStarter(desktopPage, "bay-assembly");
@@ -2587,6 +2621,7 @@ try {
 	);
 	await exerciseActivityDensityFitStability(desktopPage);
 	const presetRecovery = await exerciseSyntheticFabPresetRecovery(browser);
+	recordStep("compact-project-starter-retry", await exerciseCompactProjectStarterRetry(browser));
 	const maximumLargeFab = await createMaximumLargeFabPreset(desktopPage);
 	recordStep("large-fab-100-activation", { ...maximumLargeFab, presetRecovery });
 	await reloadProjectFromFile(desktopPage, secondSavedPath);
@@ -2661,6 +2696,10 @@ try {
 		error === ORDINARY_HIERARCHY_CONTINUATION_ONLY_COMPLETE ||
 		error === COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE ||
 		error === DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE ||
+		error === STATION_REVIEW_APPLY_ONLY_COMPLETE ||
+		error === COMPACT_STARTER_NAV_ONLY_COMPLETE ||
+		error === PRESET_RECOVERY_ONLY_COMPLETE ||
+		error === PROJECT_STARTER_RETRY_ONLY_COMPLETE ||
 		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE
 	) {
 		// The opt-in focused run intentionally skips the whole-editor acceptance sequence.
@@ -22600,6 +22639,299 @@ async function exerciseStationProposalReviewEntry(page, baseline) {
 	};
 }
 
+async function exerciseStationProposalReviewApply(browserInstance) {
+	const context = await browserInstance.newContext({
+		viewport: { width: 1440, height: 900 },
+		acceptDownloads: true,
+	});
+	let page;
+	try {
+		page = await context.newPage();
+		page.on("console", (message) => {
+			if (message.type() === "error") result.consoleErrors.push(message.text());
+		});
+		page.on("pageerror", (error) => result.pageErrors.push(error.message));
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		const startDialog = page.getByTestId("openfab-start-dialog");
+		await startDialog.waitFor({ state: "visible" });
+		await startDialog.getByRole("button", { name: /BLANK CANVAS/ }).click();
+		await startDialog.waitFor({ state: "hidden" });
+		await startPattern(page, "long-bay");
+		const blank = await readMetrics(page);
+		await placeActiveConstruction(page, { x: 0, y: 0 });
+		await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(blank.workerTargetSequence) + 1 &&
+				Number(metrics.physicalPaths) > 0,
+			{ timeout: 20_000 },
+		);
+		await page.getByTestId("rail-canvas").press("Escape");
+		const slots = await page.evaluate(() => {
+			const artifacts = window.__tileFab?.getEditorModel().portSlotArtifacts;
+			if (!artifacts) throw new Error("Station review fixture has no compiled Port slots.");
+			const collect = (type, side, offset) => {
+				const source = artifacts[type].slots;
+				const candidates = [];
+				for (let row = 0; row < source.count; row++) {
+					if (
+						source.statuses[row] !== 0 ||
+						source.stationMillimeters[row] !== 500 ||
+						source.sides[row] !== side ||
+						source.lateralOffsetMillimeters[row] !== offset ||
+						source.directions[row] !== 0
+					) {
+						continue;
+					}
+					candidates.push({
+						row,
+						routeX: source.routeXs[row],
+						routeZ: source.routeZs[row],
+						from: source.routeFromDirections[row],
+						to: source.routeToDirections[row],
+						world: {
+							x: source.worldPositions[row * 2],
+							y: source.worldPositions[row * 2 + 1],
+						},
+					});
+				}
+				return candidates;
+			};
+			const ohb = collect("OHB", 1, 700);
+			const eq = collect("EQ", 0, 0);
+			const stk = collect("STK", 0, 0);
+			const distance = (left, right) =>
+				Math.hypot(left.routeX - right.routeX, left.routeZ - right.routeZ);
+			for (const first of eq) {
+				for (const second of eq) {
+					if (
+						first.row >= second.row ||
+						first.routeZ !== second.routeZ ||
+						Math.abs(first.routeX - second.routeX) !== 2 ||
+						first.from !== second.from ||
+						first.to !== second.to
+					) {
+						continue;
+					}
+					for (const overhead of ohb) {
+						if (distance(overhead, first) < 6 || distance(overhead, second) < 6) continue;
+						const stocker = stk.find(
+							(candidate) =>
+								distance(candidate, first) >= 8 &&
+								distance(candidate, second) >= 8 &&
+								distance(candidate, overhead) >= 8,
+						);
+						if (stocker) return { ohb: overhead, eq: [first, second], stk: stocker };
+					}
+				}
+			}
+			throw new Error(
+				`No separate OHB/EQ/EQ/STK legal slots on the UI-authored loop: ${ohb.length}/${eq.length}/${stk.length}.`,
+			);
+		});
+		const before = await readMetrics(page);
+		const source = [
+			"identity_scope,port_key,attachment_scope,attachment_alias,station_mm,side,lateral_offset_mm,direction,direction_evidence,port_type,physical_group_key,physical_group_kind,organization_alias,source_x_mm,source_z_mm",
+			"PUBLIC_TEST,PUBLIC_OHB_1,PUBLIC_RAIL,PUBLIC_ROUTE_1,500,LEFT,700,WITH_TRAVEL,DECLARED,OHB,PUBLIC_OHB_GROUP,OHB,,,",
+			"PUBLIC_TEST,PUBLIC_EQ_1,PUBLIC_RAIL,PUBLIC_ROUTE_2,500,CENTER,0,WITH_TRAVEL,DECLARED,EQ,PUBLIC_EQ_GROUP,EQ,,,",
+			"PUBLIC_TEST,PUBLIC_EQ_2,PUBLIC_RAIL,PUBLIC_ROUTE_3,500,CENTER,0,WITH_TRAVEL,DECLARED,EQ,PUBLIC_EQ_GROUP,EQ,,,",
+			"PUBLIC_TEST,PUBLIC_STK_1,PUBLIC_RAIL,PUBLIC_ROUTE_4,500,CENTER,0,WITH_TRAVEL,DECLARED,STK,PUBLIC_STK_GROUP,STK,,,",
+		].join("\n");
+		const chooserPromise = page.waitForEvent("filechooser");
+		await clickActivityCommand(page, "equip", "Station proposal 가져오기");
+		await (await chooserPromise).setFiles({
+			name: "public-station-four-row-review.csv",
+			mimeType: "text/csv",
+			buffer: Buffer.from(source, "utf8"),
+		});
+		const panel = page.getByTestId("openfab-station-proposal-review");
+		await panel.waitFor({ state: "visible" });
+		assertEqual(await panel.getAttribute("data-row-count"), "4", "Station four-row import");
+		const selectRow = async (index, portKey, candidate) => {
+			await panel.getByRole("tab", { name: /^ROWS/ }).click();
+			await panel
+				.locator('.tilefab-station-review-list[data-kind="row"] [role="option"]')
+				.nth(index)
+				.click();
+			assertIncludes(
+				await panel.locator(".tilefab-station-review-detail").innerText(),
+				portKey,
+				`Station canonical row ${index + 1} identity`,
+			);
+			await panel.getByRole("button", { name: "SELECT EXACT SLOT" }).click();
+			await centerWorld(page, candidate.world);
+			const point = await screenPointForWorld(page, candidate.world);
+			assertEqual(
+				await page.evaluate(
+					({ x, y }) =>
+						document.elementFromPoint(x, y)?.getAttribute("data-testid") === "rail-canvas",
+					point,
+				),
+				true,
+				`Station row ${index + 1} exact slot is unobscured`,
+			);
+			await clickWorld(page, candidate.world, false);
+			const selection = panel.locator(
+				'.tilefab-station-review-selection[data-source-position="NOT_PROVIDED"]',
+			);
+			try {
+				await selection.waitFor({ state: "visible", timeout: 5_000 });
+			} catch (error) {
+				await page.screenshot({
+					path: path.join(artifactRoot, `station-review-row-${index + 1}-selection-failure.png`),
+					fullPage: true,
+				});
+				const state = await page.evaluate(() => ({
+					phase: document
+						.querySelector('[data-testid="openfab-station-proposal-review"]')
+						?.getAttribute("data-phase"),
+					panel: document
+						.querySelector('[data-testid="openfab-station-proposal-review"]')
+						?.innerText.slice(0, 3000),
+					app: document.querySelector('[data-testid="tilefab-app"]')?.outerHTML.slice(0, 900),
+				}));
+				throw new Error(
+					`Station row ${index + 1} exact slot selection failed: ${JSON.stringify(state)}`,
+					{ cause: error },
+				);
+			}
+			await selection.getByRole("button", { name: "INCLUDE ROW" }).click();
+		};
+		await selectRow(0, "PUBLIC_EQ_1", slots.eq[0]);
+		await panel.getByRole("button", { name: "CREATE GROUP" }).click();
+		await selectRow(1, "PUBLIC_EQ_2", slots.eq[1]);
+		await panel.getByRole("tab", { name: /^GROUPS/ }).click();
+		await panel
+			.locator('.tilefab-station-review-list[data-kind="group"] [role="option"]')
+			.first()
+			.click();
+		assertIncludes(
+			await panel.locator(".tilefab-station-review-active-row").innerText(),
+			"현재 선택 행 2 · PUBLIC_EQ_2",
+			"Station group shows the active source row before joining",
+		);
+		await panel.getByRole("button", { name: "+ ADD ACTIVE ROW" }).click();
+		await panel.getByRole("button", { name: "2 m" }).click();
+		await panel.getByRole("button", { name: "CONFIRM SOURCE GROUP" }).click();
+		await selectRow(2, "PUBLIC_OHB_1", slots.ohb);
+		await panel.getByRole("button", { name: "CREATE GROUP" }).click();
+		await panel.getByRole("button", { name: "CONFIRM SOURCE GROUP" }).click();
+		await selectRow(3, "PUBLIC_STK_1", slots.stk);
+		await panel.getByRole("button", { name: "CREATE GROUP" }).click();
+		await panel.getByRole("button", { name: "FLEX" }).click();
+		await panel.getByRole("button", { name: "CONFIRM SOURCE GROUP" }).click();
+		await panel.getByRole("tab", { name: /^FINAL/ }).click();
+		for (const policy of ["REJECTED SOURCE ROWS", "UNKNOWN COLUMNS", "ORGANIZATION"]) {
+			await panel.getByRole("button", { name: new RegExp(policy) }).click();
+		}
+		assertEqual(await panel.getAttribute("data-capture-ready"), "true", "Station review complete");
+		assertProjectUnchanged(await readMetrics(page), before, "Station review before Evaluate");
+		await panel.getByRole("button", { name: "EVALUATE" }).click();
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="openfab-station-proposal-review"]')
+					?.getAttribute("data-phase") === "ready",
+			undefined,
+			{ timeout: 30_000 },
+		);
+		assertEqual(
+			await panel.locator(".tilefab-station-review-evaluation").getAttribute("data-state"),
+			"READY",
+			"Station Worker prospective evaluation",
+		);
+		assertProjectUnchanged(await readMetrics(page), before, "Station review Evaluate isolation");
+		await page.screenshot({
+			path: path.join(artifactRoot, "station-review-four-row-ready.png"),
+			fullPage: true,
+		});
+		await page.setViewportSize({ width: 390, height: 600 });
+		await assertLocatorInsideViewport(page, panel.getByRole("button", { name: "APPLY ONCE" }));
+		await assertLocatorInsideViewport(page, panel.getByRole("button", { name: "EVALUATE" }));
+		await page.screenshot({
+			path: path.join(artifactRoot, "station-review-four-row-ready-390x600.png"),
+			fullPage: true,
+		});
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.evaluate(() => {
+			const document = window.__tileFab?.getDocument();
+			if (!document) throw new Error("Station review recovery fixture has no document.");
+			const commit = document.commitReviewedPortEquipmentCooperatively;
+			document.commitReviewedPortEquipmentCooperatively = async () => {
+				document.commitReviewedPortEquipmentCooperatively = commit;
+				throw new Error("Synthetic Station commit rejection before mutation");
+			};
+		});
+		await panel.getByRole("button", { name: "APPLY ONCE" }).click();
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="openfab-station-proposal-review"]')
+					?.getAttribute("data-phase") === "reviewing",
+			undefined,
+			{ timeout: 30_000 },
+		);
+		assertIncludes(
+			await panel.getByRole("alert").innerText(),
+			"Synthetic Station commit rejection before mutation",
+			"Station failed Apply explains recoverable error",
+		);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			before,
+			"Station failed Apply preserves project",
+		);
+		await panel.getByRole("button", { name: "EVALUATE" }).click();
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="openfab-station-proposal-review"]')
+					?.getAttribute("data-phase") === "ready",
+			undefined,
+			{ timeout: 30_000 },
+		);
+		assertProjectUnchanged(await readMetrics(page), before, "Station fresh evaluation isolation");
+		await panel.getByRole("button", { name: "APPLY ONCE" }).click();
+		await panel.waitFor({ state: "hidden", timeout: 30_000 });
+		const after = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1 &&
+				Number(metrics.equipmentPorts) === 4 &&
+				Number(metrics.equipmentGroups) === 3 &&
+				metrics.workerChecksum === metrics.modelChecksum,
+			{ timeout: 30_000 },
+		);
+		assertEqual(
+			Number(after.modelSequence),
+			Number(before.modelSequence) + 1,
+			"Station one atomic command",
+		);
+		const redone = await undoAndRedo(page, before, after);
+		const savedPath = await saveProject(page);
+		await reloadProjectFromFile(page, savedPath);
+		const reopened = await readMetrics(page);
+		assertEqual(reopened.modelChecksum, redone.modelChecksum, "Station native reopen checksum");
+		assertEqual(
+			reopened.workerChecksum,
+			redone.workerChecksum,
+			"Station native reopen Worker parity",
+		);
+		assertEqual(reopened.equipmentPorts, "4", "Station native reopen Port count");
+		assertEqual(reopened.equipmentGroups, "3", "Station native reopen equipment groups");
+		return {
+			rows: 4,
+			ports: Number(reopened.equipmentPorts),
+			groups: Number(reopened.equipmentGroups),
+			checksum: reopened.modelChecksum,
+		};
+	} finally {
+		await page?.close().catch(() => undefined);
+		await context.close().catch(() => undefined);
+	}
+}
+
 async function exerciseEditorCommandHelp(page, baseline) {
 	const canvas = page.getByTestId("rail-canvas");
 	const helpButton = page.getByRole("button", { name: "도움말·가이드", exact: true });
@@ -27766,6 +28098,9 @@ async function exerciseCompactLayout(page) {
 	await page.waitForTimeout(250);
 	await assertEditorActivityRailLayout(page, "390px");
 	await exerciseSyntheticStarterLayout(page);
+	await page.setViewportSize({ width: 390, height: 600 });
+	await exerciseSyntheticStarterLayout(page);
+	await page.setViewportSize({ width: 390, height: 844 });
 	const canvasBox = await page.getByTestId("rail-canvas").boundingBox();
 	if (!canvasBox || canvasBox.width < 380 || canvasBox.height < 700) {
 		throw new Error(`Compact canvas is clipped: ${JSON.stringify(canvasBox)}.`);
@@ -29785,6 +30120,87 @@ async function continueWithoutSavingIfVisible(page, expected = null) {
 	if (visible) await discard.click();
 }
 
+async function exerciseCompactProjectStarterRetry(browserInstance) {
+	const context = await browserInstance.newContext({ viewport: { width: 390, height: 600 } });
+	try {
+		const page = await context.newPage();
+		page.on("console", (message) => {
+			if (message.type() === "error")
+				result.consoleErrors.push(`[project-starter] ${message.text()}`);
+		});
+		page.on("pageerror", (error) => result.pageErrors.push(`[project-starter] ${error.message}`));
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		const startDialog = page.getByTestId("openfab-start-dialog");
+		await startDialog.getByRole("button", { name: /BLANK CANVAS/ }).click();
+		await startDialog.waitFor({ state: "hidden" });
+		const before = await readMetrics(page);
+		let workerFailures = 0;
+		await page.route("**/syntheticFabStarterWorker-*.js", (route) => {
+			workerFailures += 1;
+			return route.fulfill({
+				status: 200,
+				contentType: "text/javascript",
+				body: 'throw new Error("OpenFab acceptance injected project starter Worker failure");',
+			});
+		});
+		await page.locator(".tilefab-project-trigger").click();
+		await page.getByRole("button", { name: "새 프로젝트", exact: true }).click();
+		const dialog = page.getByTestId("synthetic-fab-starter-dialog");
+		await dialog.waitFor({ state: "visible" });
+		await page.getByTestId("synthetic-fab-starter-bay-bank").click();
+		await dialog.locator('.tilefab-starter-preview-error[data-kind="worker-error"]').waitFor({
+			state: "visible",
+			timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS,
+		});
+		assertAtLeast(workerFailures, 1, "Project starter Worker failure injected");
+		const retry = dialog.getByRole("button", { name: "FAB 미리보기 다시 시도" });
+		await dialog.getByRole("button", { name: "구성 설정으로 이동" }).click();
+		await retry.scrollIntoViewIfNeeded();
+		await assertLocatorOwnsHitArea(retry, "Project starter retry");
+		await page.screenshot({
+			path: path.join(artifactRoot, "project-starter-worker-retry-390x600.png"),
+		});
+		await page.unroute("**/syntheticFabStarterWorker-*.js");
+		await retry.click();
+		await page.waitForFunction(() => {
+			const create = document.querySelector('[data-testid="create-synthetic-fab-project"]');
+			return create instanceof HTMLButtonElement && !create.disabled;
+		});
+		await page.getByTestId("close-synthetic-fab-starter").click();
+		await dialog.waitFor({ state: "hidden" });
+		assertProjectUnchanged(await readMetrics(page), before, "Project starter retry then cancel");
+		return { viewport: "390x600", workerFailures, retryHitTarget: true, preservedProject: true };
+	} finally {
+		await context.close();
+	}
+}
+
+async function exerciseCompactStarterNavigation(browserInstance) {
+	const context = await browserInstance.newContext({ viewport: { width: 390, height: 844 } });
+	let page;
+	try {
+		page = await context.newPage();
+		page.on("console", (message) => {
+			if (message.type() === "error") result.consoleErrors.push(message.text());
+		});
+		page.on("pageerror", (error) => result.pageErrors.push(error.message));
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		const startDialog = page.getByTestId("openfab-start-dialog");
+		await startDialog.waitFor({ state: "visible" });
+		await startDialog.getByRole("button", { name: /BLANK CANVAS/ }).click();
+		await startDialog.waitFor({ state: "hidden" });
+		await exerciseSyntheticStarterLayout(page);
+		await page.setViewportSize({ width: 390, height: 600 });
+		await exerciseSyntheticStarterLayout(page);
+		return { viewports: ["390x844", "390x600"], preservedProject: true };
+	} finally {
+		await page?.close().catch(() => undefined);
+		await context.close().catch(() => undefined);
+	}
+}
+
 async function assertStarterModalIsolation(page, before) {
 	const directNewProject = page.locator('.tilefab-commands button[aria-label="새 프로젝트"]');
 	const returnFocusTarget = (await directNewProject.isVisible().catch(() => false))
@@ -29852,9 +30268,84 @@ async function exerciseSyntheticStarterLayout(page) {
 		await assertLocatorInsideViewport(page, control);
 	}
 	await page.screenshot({
-		path: path.join(artifactRoot, `synthetic-starter-${viewport.width}px.png`),
+		path: path.join(artifactRoot, `synthetic-starter-${viewport.width}x${viewport.height}.png`),
 		fullPage: true,
 	});
+	if (viewport.width <= 560) {
+		const navigation = page.getByTestId("synthetic-fab-starter-choice-navigation");
+		const previous = navigation.getByRole("button", { name: "이전 시작점" });
+		const next = navigation.getByRole("button", { name: "다음 시작점" });
+		await assertLocatorInsideViewport(page, navigation);
+		assertIncludes(await navigation.innerText(), "시작점 3 / 3", "compact starter position");
+		assertEqual(await next.isDisabled(), true, "compact starter final choice boundary");
+		await activeStarter.focus();
+		await page.keyboard.press("Tab");
+		const tabFocus = await page.evaluate(() => ({
+			inConfiguration: document.activeElement?.closest(".tilefab-starter-config") !== null,
+			active: document.activeElement?.outerHTML.slice(0, 500) ?? null,
+		}));
+		assertEqual(
+			tabFocus.inConfiguration,
+			true,
+			`compact starter Tab reaches the configuration after the non-interactive preview: ${JSON.stringify(tabFocus)}`,
+		);
+		await navigation.getByRole("button", { name: "구성 설정으로 이동" }).click();
+		await assertLocatorInsideViewport(page, parameter);
+		assertEqual(
+			await dialog
+				.getByRole("group", { name: "스타터 치수" })
+				.evaluate((element) => element.contains(document.activeElement)),
+			true,
+			"compact starter Settings transfers focus into configuration",
+		);
+		await previous.click();
+		assertEqual(
+			await dialog.getByTestId("synthetic-fab-starter-preview").getAttribute("data-starter-id"),
+			"bay-assembly",
+			"compact starter previous updates preview",
+		);
+		assertIncludes(await navigation.innerText(), "시작점 2 / 3", "compact starter middle position");
+		assertIncludes(
+			await navigation.locator('[aria-live="polite"]').textContent(),
+			"BAY ASSEMBLY",
+			"compact starter announces the selected Bay Assembly",
+		);
+		await previous.click();
+		assertEqual(
+			await dialog.getByTestId("synthetic-fab-starter-preview").getAttribute("data-starter-id"),
+			"blank",
+			"compact starter returns to Blank",
+		);
+		assertIncludes(await navigation.innerText(), "시작점 1 / 3", "compact starter Blank position");
+		assertIncludes(
+			await navigation.locator('[aria-live="polite"]').textContent(),
+			"EMPTY GRID",
+			"compact starter announces the selected Blank choice",
+		);
+		assertEqual(await previous.isDisabled(), true, "compact starter first choice boundary");
+		await assertLocatorInsideViewport(page, page.getByTestId("synthetic-fab-starter-blank"));
+		await page.waitForFunction(() => {
+			const createButton = document.querySelector('[data-testid="create-synthetic-fab-project"]');
+			return createButton instanceof HTMLButtonElement && !createButton.disabled;
+		});
+		await page.screenshot({
+			path: path.join(
+				artifactRoot,
+				`synthetic-starter-blank-${viewport.width}x${viewport.height}.png`,
+			),
+			fullPage: true,
+		});
+		await page.getByTestId("close-synthetic-fab-starter").click();
+		await dialog.waitFor({ state: "hidden" });
+		assertProjectUnchanged(await readMetrics(page), before, "compact Blank return then cancel");
+		await openSyntheticFabStarter(page, "bay-bank");
+		await dialog.waitFor({ state: "visible" });
+		assertEqual(
+			await dialog.getByTestId("synthetic-fab-starter-preview").getAttribute("data-starter-id"),
+			"bay-bank",
+			"compact starter reopens Bay Bank after Blank cancellation",
+		);
+	}
 	await parameter.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, parameter);
 	const overflow = await dialog.evaluate((element) => ({
@@ -29874,6 +30365,7 @@ async function exerciseSyntheticStarterLayout(page) {
 	const presetDialog = page.getByTestId("synthetic-fab-starter-dialog");
 	await presetDialog.waitFor({ state: "visible" });
 	const presetConfiguration = page.getByRole("group", { name: "스타터 치수" });
+	await presetConfiguration.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, presetConfiguration);
 	const presetBayCount = page.getByTestId("synthetic-fab-parameter-bayCount");
 	const initialPresetBayCount = await presetBayCount.inputValue();
@@ -31226,12 +31718,14 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		(expectedType) => {
 			const app = document.querySelector(".tilefab-app");
 			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const inspector = document.querySelector('[data-testid="port-equipment-inspector"]');
 			const status = document.querySelector(".tilefab-statusbar [role='status']")?.textContent;
 			return (
 				app?.getAttribute("data-editor-activity") === "inspect" &&
 				app.getAttribute("data-editor-tool") === "inspect" &&
 				app.getAttribute("data-port-keyboard-scope") === "" &&
 				canvas?.getAttribute("data-guided-port-keyboard-type") === "" &&
+				inspector instanceof HTMLElement &&
 				document.activeElement === canvas &&
 				status?.includes(`${expectedType}-`) === true &&
 				status.includes(

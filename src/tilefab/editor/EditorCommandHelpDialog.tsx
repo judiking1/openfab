@@ -98,7 +98,7 @@ export function EditorCommandHelpDialog({
 		else dialogRef.current?.focus();
 	}, [open, showCommandCatalog]);
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (!open) return;
 		const closeOnEscape = (event: KeyboardEvent): void => {
 			if (event.key !== "Escape") return;

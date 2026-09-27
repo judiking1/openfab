@@ -1,6 +1,8 @@
 import {
 	AlertTriangle,
 	Check,
+	ChevronLeft,
+	ChevronRight,
 	Factory,
 	Grid3X3,
 	LayoutTemplate,
@@ -115,6 +117,8 @@ export function SyntheticFabStarterDialog({
 	const defaultProjectName = defaultSyntheticFabStarterProjectName(request);
 	const projectName = projectNameOverride ?? defaultProjectName;
 	const dialogRef = useRef<HTMLElement>(null);
+	const starterListRef = useRef<HTMLElement>(null);
+	const starterConfigRef = useRef<HTMLFieldSetElement>(null);
 	const operationErrorRef = useRef<HTMLDivElement>(null);
 	const cancelBusyButtonRef = useRef<HTMLButtonElement>(null);
 	const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -128,6 +132,10 @@ export function SyntheticFabStarterDialog({
 			: mode === "preset"
 				? SYNTHETIC_FAB_PRESET_CATALOG
 				: SYNTHETIC_FAB_PROJECT_CATALOG;
+	const activeStarterIndex = Math.max(
+		0,
+		catalog.findIndex((candidate) => candidate.id === request.id),
+	);
 	const item = syntheticFabStarterCatalogItem(request.id);
 	const presentation = syntheticFabStarterPresentation(request);
 	const previewLabel = presentation.label;
@@ -354,6 +362,26 @@ export function SyntheticFabStarterDialog({
 		setPreviewRequested(mode !== "preset" || cached !== undefined);
 		setRequest(nextRequest);
 	};
+	const stepStarter = (direction: -1 | 1): void => {
+		const nextIndex = activeStarterIndex + direction;
+		const next = catalog[nextIndex];
+		if (!next || busy) return;
+		selectStarter(next.id);
+		starterListRef.current
+			?.querySelectorAll(":scope > button")
+			.item(nextIndex)
+			?.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" });
+	};
+	const focusStarterConfiguration = (): void => {
+		const configuration = starterConfigRef.current;
+		if (!configuration) return;
+		configuration.scrollIntoView({ block: "start", behavior: "auto" });
+		(
+			configuration.querySelector<HTMLElement>(
+				"button:not(:disabled), input:not(:disabled), select:not(:disabled)",
+			) ?? configuration
+		).focus({ preventScroll: true });
+	};
 	const updateParameter = (
 		descriptor: SyntheticFabStarterParameterDescriptor,
 		value: number,
@@ -533,7 +561,47 @@ export function SyntheticFabStarterDialog({
 				) : null}
 
 				<div className="tilefab-starter-workspace">
+					{mode === "project" ? (
+						<nav
+							className="tilefab-starter-choice-navigation"
+							data-testid="synthetic-fab-starter-choice-navigation"
+							aria-label="시작점 선택 이동"
+						>
+							<button
+								type="button"
+								aria-label="이전 시작점"
+								disabled={busy || activeStarterIndex === 0}
+								onClick={() => stepStarter(-1)}
+							>
+								<ChevronLeft size={20} aria-hidden="true" />
+							</button>
+							<span aria-live="polite" aria-atomic="true">
+								시작점 {activeStarterIndex + 1} / {catalog.length}
+								<span className="tilefab-sr-only">
+									, {item.label}: {item.title}
+								</span>
+							</span>
+							<button
+								type="button"
+								className="tilefab-starter-choice-config"
+								aria-label="구성 설정으로 이동"
+								disabled={busy}
+								onClick={focusStarterConfiguration}
+							>
+								설정
+							</button>
+							<button
+								type="button"
+								aria-label="다음 시작점"
+								disabled={busy || activeStarterIndex >= catalog.length - 1}
+								onClick={() => stepStarter(1)}
+							>
+								<ChevronRight size={20} aria-hidden="true" />
+							</button>
+						</nav>
+					) : null}
 					<nav
+						ref={starterListRef}
 						className="tilefab-starter-list"
 						aria-label={
 							mode === "project"
@@ -752,7 +820,13 @@ export function SyntheticFabStarterDialog({
 						</ul>
 					</section>
 
-					<fieldset className="tilefab-starter-config" aria-label="스타터 치수" disabled={busy}>
+					<fieldset
+						ref={starterConfigRef}
+						className="tilefab-starter-config"
+						aria-label="스타터 치수"
+						tabIndex={-1}
+						disabled={busy}
+					>
 						<legend>크기·구성 설정</legend>
 						{item.parameters.length === 0 ? (
 							<div className="tilefab-starter-empty-config">

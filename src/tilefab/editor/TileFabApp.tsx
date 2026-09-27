@@ -7872,10 +7872,25 @@ export default function TileFabApp(): React.ReactElement {
 				) {
 					return;
 				}
-				if (!stationProposalReviewBindingIsCurrent(current)) return;
 				const message =
 					applyError instanceof Error ? applyError.message : "Station review Apply failed.";
-				updateStationProposalReview(current, { phase: "error", error: message });
+				const activeReview = stationProposalReviewUiRef.current;
+				if (
+					activeReview?.generation !== current.generation ||
+					activeReview.session !== current.session
+				) {
+					return;
+				}
+				if (!stationProposalReviewBindingIsCurrent(current)) {
+					cancelStationProposalReview(`Station Apply 원본이 변경되어 검토를 닫았습니다 · ${message}`);
+					syncModelUi("Station Apply 중 변경된 프로젝트를 다시 동기화했습니다");
+					return;
+				}
+				updateStationProposalReview(current, {
+					phase: "reviewing",
+					evaluation: null,
+					error: message,
+				});
 				setStatus(message);
 			})
 			.finally(() => {
@@ -18051,11 +18066,9 @@ export default function TileFabApp(): React.ReactElement {
 				"eq",
 			);
 		if (retainsSelection && firstPort) {
-			startTransition(() => {
-				setPortEquipmentSelection({
-					portId: firstPort.id,
-					equipmentGroupId: firstPort.equipmentGroupId,
-				});
+			setPortEquipmentSelection({
+				portId: firstPort.id,
+				equipmentGroupId: firstPort.equipmentGroupId,
 			});
 		}
 		if (retainsSelection) {

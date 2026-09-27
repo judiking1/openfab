@@ -349,6 +349,17 @@
 	padding: 0 10px;
 }
 
+.tilefab-station-review-active-row {
+	margin: 0;
+	padding: 7px 9px;
+	border: 1px solid #335359;
+	border-radius: 4px;
+	color: #c8e3e6;
+	background: #15272b;
+	font-size: 10px;
+	line-height: 1.4;
+}
+
 .tilefab-station-review-row-actions,
 .tilefab-station-review-group-actions,
 .tilefab-station-review-group-detail fieldset {
