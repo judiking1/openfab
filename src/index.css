@@ -737,9 +737,13 @@ button {
 }
 
 @media (max-width: 960px) {
-	/* Project owns duplicate start/file paths while the tablet header prioritizes editing. */
-	.tilefab-commands button[aria-label="프로젝트 열기"],
-	.tilefab-commands button[aria-label="프로젝트 저장"] {
+	/* Keep Open in the project menu while Save stays directly reachable after the first edit. */
+	.tilefab-commands button[aria-label="프로젝트 열기"] {
+		display: none;
+	}
+
+	/* Public V1 has no alternate view; use its single-view slot for the file action. */
+	.tilefab-commands .tilefab-view-switch[data-derived-3d="false"] {
 		display: none;
 	}
 
@@ -790,7 +794,6 @@ button {
 	.tilefab-commands button[aria-label="새 프로젝트"],
 	.tilefab-commands button[aria-label="FAB 조립"],
 	.tilefab-commands button[aria-label="프로젝트 열기"],
-	.tilefab-commands button[aria-label="프로젝트 저장"],
 	.tilefab-commands button[aria-label="다시 실행"],
 	.tilefab-commands button[aria-label="전체 삭제"] {
 		display: none;
@@ -884,5 +887,13 @@ button {
 		display: block;
 		max-width: none;
 		color: #9ce8ec;
+	}
+}
+
+@media (max-width: 700px) {
+	/* Keep the experimental two-view switch and the sole in-project preset launcher reachable. */
+	.tilefab-commands:has(.tilefab-view-switch[data-derived-3d="true"])
+	button[aria-label="프로젝트 저장"] {
+		display: none;
 	}
 }

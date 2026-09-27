@@ -42876,6 +42876,64 @@ async function auditGuidedDuplicatePlacementWidths(
 	guidedPanel,
 	exit,
 ) {
+	const assertPlacementFocus = async (label) => {
+		try {
+			const focusHandle = await page.waitForFunction(
+				() => {
+					const target = document.querySelector(
+						'[data-testid="guided-organization-placement-target"]',
+					);
+					return (
+						target instanceof HTMLElement &&
+						!target.hidden &&
+						target.getAttribute("data-guided-action-id") === "canvas:organization-placement" &&
+						document.activeElement === target
+					);
+				},
+				undefined,
+				{ timeout: 10_000 },
+			);
+			await focusHandle.dispose();
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			assertEqual(
+				await page.evaluate(
+					() =>
+						document.activeElement ===
+						document.querySelector('[data-testid="guided-organization-placement-target"]'),
+				),
+				true,
+				`${label} remains focused`,
+			);
+		} catch (error) {
+			const state = await page.evaluate(() => {
+				const active = document.activeElement;
+				const target = document.querySelector(
+					'[data-testid="guided-organization-placement-target"]',
+				);
+				return {
+					viewport: `${window.innerWidth}x${window.innerHeight}`,
+					primaryTarget: document
+						.querySelector('[data-testid="tilefab-app"]')
+						?.getAttribute("data-guided-primary-target"),
+					active: {
+						tag: active?.tagName,
+						testId: active?.getAttribute("data-testid"),
+						guidedActionId: active?.getAttribute("data-guided-action-id"),
+					},
+					target: {
+						connected: target?.isConnected,
+						hidden: target instanceof HTMLElement ? target.hidden : null,
+						guidedActionId: target?.getAttribute("data-guided-action-id"),
+					},
+				};
+			});
+			throw new Error(`${label} did not retain focus: ${JSON.stringify(state)}`, {
+				cause: error,
+			});
+		}
+	};
 	const buildbar = page.getByTestId("rail-buildbar");
 	for (const viewport of [
 		{ width: 390, height: 720, label: "390x720" },
@@ -42894,11 +42952,7 @@ async function auditGuidedDuplicatePlacementWidths(
 			"canvas:organization-placement",
 			`${screenshotStem} exact placement owner ${viewport.label}`,
 		);
-		assertEqual(
-			await exactOwner.evaluate((element) => element === document.activeElement),
-			true,
-			`${screenshotStem} placement focus ${viewport.label}`,
-		);
+		await assertPlacementFocus(`${screenshotStem} placement focus ${viewport.label}`);
 		assertEqual(
 			await page.locator(".tilefab-tools").isHidden(),
 			true,
@@ -43064,11 +43118,7 @@ async function auditGuidedDuplicatePlacementWidths(
 		"canvas:organization-placement",
 		`${screenshotStem} exact placement owner 390x844`,
 	);
-	assertEqual(
-		await restoredOwner.evaluate((element) => element === document.activeElement),
-		true,
-		`${screenshotStem} placement focus 390x844`,
-	);
+	await assertPlacementFocus(`${screenshotStem} placement focus 390x844`);
 	await exit.focus();
 	for (const viewport of [
 		{ width: 390, height: 720, label: "390x720" },
@@ -45081,9 +45131,11 @@ async function exerciseMidWidthPriorityTopbarAcceptance(activeBrowser) {
 			["project", page.locator(".tilefab-project-trigger")],
 			["checks", page.getByTestId("rail-readiness-toggle")],
 			...(resume ? [["resume", page.getByTestId("guided-build-resume")]] : []),
+			["save", page.getByRole("button", { name: "프로젝트 저장", exact: true })],
 			["undo", page.getByRole("button", { name: "실행 취소", exact: true })],
 			["redo", page.getByRole("button", { name: "다시 실행", exact: true })],
 			["2d", page.getByRole("button", { name: "2D 편집 뷰", exact: true })],
+			["3d", page.getByRole("button", { name: "3D 검사 뷰", exact: true })],
 			["fit", page.getByRole("button", { name: "전체 보기", exact: true })],
 			["help", page.getByRole("button", { name: "도움말·가이드", exact: true })],
 		];
@@ -45181,6 +45233,9 @@ async function exerciseMidWidthPriorityTopbarAcceptance(activeBrowser) {
 				metrics.historyCanRedo === "true",
 			{ timeout: 20_000 },
 		);
+		const derived3D =
+			(await page.locator(".tilefab-view-switch").getAttribute("data-derived-3d")) === "true";
+		const directSaveAvailable = (width) => !derived3D || width > 700;
 		const ordinaryProof = [];
 		for (const viewport of [
 			{ width: 390, expectedMinimum: 44, redo: false },
@@ -45201,9 +45256,11 @@ async function exerciseMidWidthPriorityTopbarAcceptance(activeBrowser) {
 					expectedOrder: [
 						"project",
 						"checks",
+						...(directSaveAvailable(viewport.width) ? ["save"] : []),
 						"undo",
 						...(viewport.redo ? ["redo"] : []),
-						"2d",
+						...(derived3D || viewport.width > 960 ? ["2d"] : []),
+						...(derived3D ? ["3d"] : []),
 						...(viewport.fit ? ["fit"] : []),
 						"help",
 					],
@@ -45221,6 +45278,30 @@ async function exerciseMidWidthPriorityTopbarAcceptance(activeBrowser) {
 					fullPage: true,
 				});
 			}
+		}
+		if (derived3D) {
+			await page.setViewportSize({ width: 390, height: 600 });
+			const presetLauncher = page.getByRole("button", { name: "FAB 프리셋", exact: true });
+			await assertLocatorInsideViewport(page, presetLauncher);
+			await assertLocatorOwnsHitArea(presetLauncher, "derived 3D compact FAB preset launcher");
+			await presetLauncher.click();
+			const presetDialog = page.getByTestId("synthetic-fab-starter-dialog");
+			await presetDialog.waitFor({ state: "visible" });
+			assertEqual(
+				await presetDialog.getAttribute("data-mode"),
+				"preset",
+				"derived 3D compact preset route",
+			);
+			await page.screenshot({
+				path: path.join(artifactRoot, "mid-width-topbar-derived-3d-preset-390x600.png"),
+			});
+			await presetDialog.getByTestId("close-synthetic-fab-starter").click();
+			await presetDialog.waitFor({ state: "hidden" });
+			assertProjectUnchanged(
+				await readMetrics(page),
+				ordinaryBaseline,
+				"derived 3D compact preset cancel",
+			);
 		}
 
 		await page.setViewportSize({ width: 1440, height: 900 });
@@ -45273,7 +45354,15 @@ async function exerciseMidWidthPriorityTopbarAcceptance(activeBrowser) {
 						"project",
 						"checks",
 						"resume",
-						...(viewport.editing ? ["undo", "redo", "2d"] : []),
+						...(directSaveAvailable(viewport.width) ? ["save"] : []),
+						...(viewport.editing
+							? [
+									"undo",
+									"redo",
+									...(derived3D || viewport.width > 960 ? ["2d"] : []),
+									...(derived3D ? ["3d"] : []),
+								]
+							: []),
 						...(viewport.fit ? ["fit"] : []),
 						"help",
 					],
@@ -45292,7 +45381,7 @@ async function exerciseMidWidthPriorityTopbarAcceptance(activeBrowser) {
 				});
 			}
 		}
-		return Object.freeze({ ordinaryProof, pausedProof });
+		return Object.freeze({ ordinaryProof, pausedProof, derived3DCompactPresetRoute: derived3D });
 	} finally {
 		await context.close();
 	}

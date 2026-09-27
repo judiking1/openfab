@@ -567,17 +567,9 @@ async function readHeaderEvidence(activePage, label) {
 		}
 	}
 	if (label !== "compact") {
-		const requiredCommands = [
-			"FAB 프리셋",
-			"실행 취소",
-			"다시 실행",
-			"2D 편집 뷰",
-			"전체 보기",
-			"도움말·가이드",
-		];
-		if (label !== "medium") {
-			requiredCommands.splice(1, 0, "프로젝트 열기", "프로젝트 저장");
-		}
+		const requiredCommands = ["FAB 프리셋", "실행 취소", "다시 실행", "전체 보기", "도움말·가이드"];
+		if (label === "medium") requiredCommands.splice(1, 0, "프로젝트 저장");
+		else requiredCommands.splice(1, 0, "프로젝트 열기", "프로젝트 저장", "2D 편집 뷰");
 		for (const command of requiredCommands) {
 			if (!evidence.commands.includes(command)) {
 				throw new Error(`${label}: required topbar command is hidden: ${command}`);
@@ -597,7 +589,7 @@ async function readHeaderEvidence(activePage, label) {
 			"물리 레일 외형",
 			"전체 삭제",
 		];
-		if (label === "medium") duplicateCommands.push("프로젝트 열기", "프로젝트 저장");
+		if (label === "medium") duplicateCommands.push("프로젝트 열기", "2D 편집 뷰");
 		for (const command of duplicateCommands) {
 			if (evidence.commands.includes(command)) {
 				throw new Error(`${label}: duplicate topbar command is still visible: ${command}`);

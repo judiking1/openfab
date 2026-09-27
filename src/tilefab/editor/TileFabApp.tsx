@@ -4686,6 +4686,18 @@ export default function TileFabApp(): React.ReactElement {
 			appRootRef.current?.querySelector<HTMLElement>(
 				'[data-testid="guided-organization-placement-target"]',
 			) ?? null;
+		let placementFocusWasOwned = document.activeElement === placementTarget();
+		const restorePlacementFocus = (): void => {
+			if (!restorePlacementFocusAfterViewportResize) return;
+			const target = placementTarget();
+			if (!target || target.hidden) return;
+			const active = document.activeElement;
+			if (active === document.body || active === canvas || active === target) {
+				target.focus({ preventScroll: true });
+			} else {
+				restorePlacementFocusAfterViewportResize = false;
+			}
+		};
 		const measure = (): void => {
 			measureFrame = 0;
 			const next = fitMapInsets(canvas);
@@ -4698,17 +4710,10 @@ export default function TileFabApp(): React.ReactElement {
 					: next,
 			);
 			if (!restorePlacementFocusAfterViewportResize) return;
-			restorePlacementFocusAfterViewportResize = false;
+			if (focusFrame !== 0) cancelAnimationFrame(focusFrame);
 			focusFrame = requestAnimationFrame(() => {
-				const target = placementTarget();
-				const active = document.activeElement;
-				if (
-					target &&
-					!target.hidden &&
-					(active === document.body || active === canvas || active === target)
-				) {
-					target.focus({ preventScroll: true });
-				}
+				focusFrame = 0;
+				restorePlacementFocus();
 			});
 		};
 		const scheduleMeasure = (): void => {
@@ -4716,11 +4721,37 @@ export default function TileFabApp(): React.ReactElement {
 			measureFrame = requestAnimationFrame(measure);
 		};
 		const handleViewportResize = (): void => {
-			restorePlacementFocusAfterViewportResize = document.activeElement === placementTarget();
+			restorePlacementFocusAfterViewportResize =
+				restorePlacementFocusAfterViewportResize ||
+				placementFocusWasOwned ||
+				document.activeElement === placementTarget();
 			scheduleMeasure();
+		};
+		const handleFocusIn = (event: FocusEvent): void => {
+			if (event.target === placementTarget()) {
+				placementFocusWasOwned = true;
+			} else if (event.target === canvas && restorePlacementFocusAfterViewportResize) {
+				// The Canvas can briefly receive focus while its placement marker is hidden.
+			} else if (event.target !== document.body) {
+				placementFocusWasOwned = false;
+				restorePlacementFocusAfterViewportResize = false;
+			}
+		};
+		const handleKeyDown = (event: KeyboardEvent): void => {
+			if (event.key !== "Tab") return;
+			placementFocusWasOwned = false;
+			restorePlacementFocusAfterViewportResize = false;
+		};
+		const handlePointerDown = (event: PointerEvent): void => {
+			if (event.target instanceof Node && placementTarget()?.contains(event.target)) return;
+			placementFocusWasOwned = false;
+			restorePlacementFocusAfterViewportResize = false;
 		};
 		measure();
 		const observer = new ResizeObserver(scheduleMeasure);
+		const markerObserver = new MutationObserver(restorePlacementFocus);
+		const marker = placementTarget();
+		if (marker) markerObserver.observe(marker, { attributes: true, attributeFilter: ["hidden"] });
 		const workspace = canvas.closest(".tilefab-workspace");
 		const measuredElements: Element[] = [canvas];
 		if (workspace) {
@@ -4744,9 +4775,16 @@ export default function TileFabApp(): React.ReactElement {
 			}
 		}
 		for (const element of measuredElements) observer.observe(element);
+		document.addEventListener("focusin", handleFocusIn);
+		document.addEventListener("keydown", handleKeyDown, true);
+		document.addEventListener("pointerdown", handlePointerDown, true);
 		window.addEventListener("resize", handleViewportResize);
 		return () => {
 			observer.disconnect();
+			markerObserver.disconnect();
+			document.removeEventListener("focusin", handleFocusIn);
+			document.removeEventListener("keydown", handleKeyDown, true);
+			document.removeEventListener("pointerdown", handlePointerDown, true);
 			window.removeEventListener("resize", handleViewportResize);
 			if (measureFrame !== 0) cancelAnimationFrame(measureFrame);
 			if (focusFrame !== 0) cancelAnimationFrame(focusFrame);

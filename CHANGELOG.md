@@ -6,6 +6,21 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.15
+
+- Keep a direct Save action visible on compact public 2D screens after the first edit. Preserve
+  the 2D/3D switch and FAB preset entry in development builds that enable derived 3D.
+- Restore keyboard focus to the Guided Bay placement marker after responsive resizing, even
+  when the marker is briefly hidden, while respecting a move to Help or Exit.
+
+### Preview candidate 0.1.14
+
+- Add previous/next, position, and Settings controls to the compact New Project starter;
+  keep its preview and keyboard order aligned.
+- Support a four-row OHB/EQ/Stocker Station Proposal review with exact slot selection,
+  Worker evaluation, one undoable Apply, save/reopen, and failed-Apply recovery.
+- Stabilize Help Escape and Guided EQ-to-Inspector handoff on short screens.
+
 ### Preview candidate 0.1.13
 
 - Allow the last individually managed Bay in a declared Bank connection to be disconnected

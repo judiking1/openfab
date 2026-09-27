@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,7 @@ const result = {
 	pickerCalls: 0,
 	guardRetryable: false,
 	selectionShortcuts: [],
+	compactSave: [],
 };
 
 try {
@@ -153,9 +154,15 @@ try {
 	);
 	result.pickerCalls = await readSavePickerCalls(page);
 	result.guardRetryable = true;
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 760, height: 900 },
+	]) {
+		result.compactSave.push(await exerciseCompactDirectSave(browser, viewport));
+	}
 	result.status = "PASS";
 	console.log(
-		`PASS project save cancellation | ${result.pickerCalls} cancelled pickers | guard focus restored`,
+		`PASS project save cancellation | ${result.pickerCalls} cancelled pickers | compact direct Save at 390/760px`,
 	);
 } finally {
 	if (page) {
@@ -184,12 +191,168 @@ async function buildFiveMeterRail(activePage) {
 	const canvas = activePage.getByTestId("rail-canvas");
 	const bounds = await canvas.boundingBox();
 	if (!bounds) throw new Error("Rail canvas has no visible bounds.");
-	const start = { x: bounds.x + bounds.width * 0.38, y: bounds.y + bounds.height * 0.45 };
+	const start = {
+		x: bounds.x + (bounds.width <= 450 ? Math.max(190, bounds.width * 0.53) : bounds.width * 0.38),
+		y: bounds.y + bounds.height * 0.45,
+	};
 	await activePage.mouse.move(start.x, start.y);
 	await activePage.mouse.down();
 	await activePage.mouse.move(start.x + 4 * 38, start.y, { steps: 8 });
 	await activePage.mouse.up();
 	await waitForReady(activePage, 5);
+}
+
+async function exerciseCompactDirectSave(activeBrowser, viewport) {
+	const label = `${viewport.width}x${viewport.height}`;
+	const context = await activeBrowser.newContext({ viewport, acceptDownloads: true });
+	await context.addInitScript(() => {
+		Object.defineProperty(window, "__openFabSavePickerCalls", {
+			configurable: true,
+			writable: true,
+			value: 0,
+		});
+		Object.defineProperty(window, "showSaveFilePicker", {
+			configurable: true,
+			value: async () => {
+				window.__openFabSavePickerCalls += 1;
+				throw new DOMException("User cancelled the save picker.", "AbortError");
+			},
+		});
+	});
+	const compactPage = await context.newPage();
+	const browserErrors = [];
+	compactPage.on("console", (message) => {
+		if (message.type() === "error") browserErrors.push(message.text());
+	});
+	compactPage.on("pageerror", (error) => browserErrors.push(error.message));
+	try {
+		await compactPage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(compactPage, 0);
+		await chooseBlankCanvasForFirstRun(compactPage);
+		await buildFiveMeterRail(compactPage);
+		const before = await readCancellationInvariants(compactPage);
+		assertEqual(before.projectDirty, "true", `${label} first Rail leaves Blank dirty`);
+		assertEqual(before.projectFile, "", `${label} Blank has no file reference`);
+		const topbar = compactPage.locator(".tilefab-topbar");
+		const topbarSize = await topbar.evaluate((element) => ({
+			clientWidth: element.clientWidth,
+			scrollWidth: element.scrollWidth,
+			commandsClientWidth: element.querySelector(".tilefab-commands")?.clientWidth ?? 0,
+			commandsScrollWidth: element.querySelector(".tilefab-commands")?.scrollWidth ?? 0,
+		}));
+		assertEqual(topbarSize.scrollWidth <= topbarSize.clientWidth, true, `${label} topbar fits`);
+		assertEqual(
+			topbarSize.commandsScrollWidth <= topbarSize.commandsClientWidth,
+			true,
+			`${label} command strip fits`,
+		);
+		const viewSwitch = compactPage.locator('.tilefab-view-switch[data-derived-3d="false"]');
+		assertEqual(await viewSwitch.count(), 1, `${label} public V1 single view`);
+		assertEqual(await viewSwitch.isVisible(), false, `${label} redundant 2D switch hidden`);
+		const save = compactPage.getByRole("button", { name: "프로젝트 저장", exact: true });
+		await save.waitFor({ state: "visible" });
+		const saveBounds = await save.boundingBox();
+		if (!saveBounds) throw new Error(`${label} direct Save has no bounds.`);
+		assertEqual(saveBounds.width >= 44 && saveBounds.height >= 44, true, `${label} 44px Save`);
+		assertEqual(
+			saveBounds.x >= 0 && saveBounds.x + saveBounds.width <= viewport.width,
+			true,
+			`${label} Save fits viewport`,
+		);
+		const saveHits = await save.evaluate((button) => {
+			const bounds = button.getBoundingClientRect();
+			const inset = 4;
+			return [
+				[bounds.left + bounds.width / 2, bounds.top + bounds.height / 2],
+				[bounds.left + inset, bounds.top + inset],
+				[bounds.right - inset, bounds.top + inset],
+				[bounds.left + inset, bounds.bottom - inset],
+				[bounds.right - inset, bounds.bottom - inset],
+			].map(([x, y]) => button.contains(document.elementFromPoint(x, y)));
+		});
+		assertEqual(saveHits.every(Boolean), true, `${label} Save owns all five hit points`);
+		await save.click();
+		await compactPage
+			.getByText("프로젝트 저장을 취소했습니다 · 현재 프로젝트를 유지합니다", { exact: true })
+			.waitFor({ state: "visible" });
+		await compactPage.waitForFunction(
+			() =>
+				window.__openFabSavePickerCalls === 1 &&
+				document.querySelector(".tilefab-app")?.dataset.projectOperation === "idle" &&
+				document.activeElement?.classList.contains("tilefab-project-trigger") === true,
+			undefined,
+			{ timeout: 10_000 },
+		);
+		assertInvariantEquality(
+			await readCancellationInvariants(compactPage),
+			before,
+			`${label} native picker cancellation`,
+		);
+		await compactPage.evaluate(() => {
+			Object.defineProperty(window, "showSaveFilePicker", { configurable: true, value: undefined });
+		});
+		const downloadPromise = compactPage.waitForEvent("download");
+		await save.click();
+		const download = await downloadPromise;
+		const downloadPath = await download.path();
+		if (!downloadPath) throw new Error(`${label} fallback Save has no downloaded file.`);
+		assertEqual(
+			download.suggestedFilename().endsWith(".openfab"),
+			true,
+			`${label} fallback extension`,
+		);
+		const saved = JSON.parse(await readFile(downloadPath, "utf8"));
+		assertEqual(saved.manifest.id, before.projectId, `${label} downloaded project identity`);
+		assertEqual(
+			saved.rail.patchSequence,
+			Number(before.modelSequence),
+			`${label} downloaded Rail sequence`,
+		);
+		assertEqual(saved.rail.cells.length, 5, `${label} downloaded Rail cells`);
+		await compactPage.waitForFunction(
+			() =>
+				document.querySelector(".tilefab-app")?.dataset.projectOperation === "idle" &&
+				document.querySelector('[data-testid="rail-canvas"]')?.dataset.projectDirty === "false" &&
+				document.activeElement?.classList.contains("tilefab-project-trigger") === true,
+			undefined,
+			{ timeout: 10_000 },
+		);
+		const after = await readCancellationInvariants(compactPage);
+		assertEqual(after.projectDirty, "false", `${label} fallback save clears dirty state`);
+		assertEqual(after.projectId, before.projectId, `${label} fallback keeps project identity`);
+		assertEqual(
+			after.modelChecksum,
+			before.modelChecksum,
+			`${label} fallback keeps authored model`,
+		);
+		assertEqual(
+			after.workerChecksum,
+			before.workerChecksum,
+			`${label} fallback keeps Worker mirror`,
+		);
+		assertEqual(after.historyCanUndo, before.historyCanUndo, `${label} fallback keeps Undo`);
+		assertEqual(after.historyCanRedo, before.historyCanRedo, `${label} fallback keeps Redo`);
+		assertEqual(browserErrors.length, 0, `${label} browser errors: ${browserErrors.join(" | ")}`);
+		await compactPage.screenshot({
+			path: path.join(artifactRoot, `compact-direct-save-${label}.png`),
+		});
+		return {
+			viewport: label,
+			pickerCalls: 1,
+			downloadBytes: (await readFile(downloadPath)).length,
+		};
+	} catch (error) {
+		await compactPage
+			.screenshot({ path: path.join(artifactRoot, `compact-direct-save-failed-${label}.png`) })
+			.catch(() => undefined);
+		await writeFile(
+			path.join(artifactRoot, `compact-direct-save-failed-${label}.json`),
+			`${JSON.stringify(await readCancellationInvariants(compactPage), null, 2)}\n`,
+		).catch(() => undefined);
+		throw error;
+	} finally {
+		await context.close();
+	}
 }
 
 async function waitForReady(activePage, physicalPaths) {
@@ -214,6 +377,10 @@ async function readCancellationInvariants(activePage) {
 		const canvas = document.querySelector('[data-testid="rail-canvas"]');
 		return {
 			projectId: canvas?.dataset.projectId ?? "",
+			modelSequence: String(
+				window.__tileFab?.getEditorModel()?.document?.getPatchSequence?.() ?? "",
+			),
+			modelChecksum: window.__tileFab?.getEditorModel()?.authoredChecksum ?? "",
 			projectBlueprints: app?.dataset.projectBlueprints ?? "",
 			projectDirty: canvas?.dataset.projectDirty ?? "",
 			projectFile: canvas?.dataset.projectFile ?? "",
@@ -232,6 +399,8 @@ async function readCancellationInvariants(activePage) {
 function assertInvariantEquality(actual, expected, phase) {
 	for (const key of [
 		"projectId",
+		"modelSequence",
+		"modelChecksum",
 		"projectBlueprints",
 		"projectDirty",
 		"projectFile",
