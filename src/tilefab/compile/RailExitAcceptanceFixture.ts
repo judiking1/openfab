@@ -1,11 +1,11 @@
-import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import { planOffsetStraight } from "../core/edit";
+import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
 import {
-	initialRailTemplatePose,
-	planRailTemplate,
 	type BranchBypassTemplateParameters,
+	initialRailTemplatePose,
 	type LongBayTemplateParameters,
+	planRailTemplate,
 } from "../core/RailTemplateCatalog";
 import { DIR_E } from "../core/railShape";
 import type { Cell } from "../core/TileMap";

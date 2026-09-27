@@ -205,6 +205,7 @@ function certifiedDocumentFixture(
 		document.getPatchSequence(),
 		document.organizations,
 		intent,
+		document.relationships,
 	);
 	if (!result.plan.valid || !result.prospectiveState) throw new Error(result.plan.reason);
 	const prospectiveChecksum = checksumRailMap(

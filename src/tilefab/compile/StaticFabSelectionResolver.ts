@@ -1,6 +1,6 @@
 import type { PortEquipmentState } from "../core/EquipmentGroup";
 import type { RailAreaSelection, RailAreaSelectionBounds } from "../core/RailAreaSelection";
-import { moveCell, type Direction } from "../core/railShape";
+import { type Direction, moveCell } from "../core/railShape";
 import type { CompiledPortEquipmentPresentation } from "./PortEquipmentPresentation";
 
 export interface StaticFabEquipmentGroupSelectionResolution {

@@ -3,13 +3,13 @@ import type {
 	OhbEquipmentGroup,
 	PortEquipmentState,
 } from "../core/EquipmentGroup";
+import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
 import {
 	createInvalidPortEquipmentMutationPlan,
 	createPortEquipmentMutationPlan,
 	type PortEquipmentMutationPlan,
 } from "../core/PortEquipmentPlan";
-import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
-import { portRecordEquals, type PortRecord } from "../core/PortRecord";
+import { type PortRecord, portRecordEquals } from "../core/PortRecord";
 import {
 	type CompiledPortSlots,
 	PORT_SLOT_STATUS,

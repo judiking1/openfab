@@ -16,6 +16,7 @@ import {
 import { type RailMutation, railMutationTopologyError } from "./paint";
 import { buildRailModuleOwnershipIndex, type DirectedRailEdge } from "./RailModuleOwnership";
 import { ALL_DIRECTIONS, directionBetween, moveCell, oppositeDirection } from "./railShape";
+import type { StaticFabAssemblyRelationshipStateV1 } from "./StaticFabAssemblyRelationship";
 import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
@@ -438,6 +439,7 @@ export function planStaticFabBayFlowEdit(
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
 	intent: StaticFabBayFlowEditIntent,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): StaticFabBayFlowEditPlan {
 	return planStaticFabBayFlowEditWithProspectiveState(
 		map,
@@ -445,6 +447,7 @@ export function planStaticFabBayFlowEdit(
 		basePatchSequence,
 		organizations,
 		intent,
+		relationships,
 	).plan;
 }
 
@@ -459,6 +462,7 @@ export function planStaticFabBayFlowEditWithProspectiveState(
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
 	intent: StaticFabBayFlowEditIntent,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): StaticFabBayFlowEditPlanningResult {
 	const intentError = staticFabBayFlowEditIntentError(intent);
 	if (intentError) {
@@ -512,6 +516,7 @@ export function planStaticFabBayFlowEditWithProspectiveState(
 			basePatchSequence,
 			organizations,
 			intent.bayOrganizationId,
+			relationships,
 		);
 		const recognizedResult = recognizeProductionBayModule(
 			normalized.map,
@@ -592,6 +597,7 @@ export function planStaticFabBayFlowEditWithProspectiveState(
 			basePatchSequence,
 			prospectiveOrganizations,
 			intent.bayOrganizationId,
+			relationships,
 		);
 		assertFixedExternalGateway(map, prospectiveMap, normalized, normalizedTarget);
 		const targetRecognitionResult = recognizeProductionBayModule(
@@ -717,6 +723,7 @@ function normalizeBayForRecognition(
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
 	bayOrganizationId: number,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): NormalizedBaySource {
 	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
 	const bay = organizations.records.find((record) => record.id === bayOrganizationId);
@@ -761,6 +768,7 @@ function normalizeBayForRecognition(
 			action: "DISCONNECT",
 			bayOrganizationId,
 		}),
+		relationships,
 	);
 	if (!disconnect.plan.valid || !disconnect.prospectiveState) {
 		throw new FlowEditFailure(

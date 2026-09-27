@@ -359,6 +359,7 @@ function certifiedFixture(
 		document.organizations,
 		intent,
 		capture.snapshot.checksum,
+		document.relationships,
 	);
 	const prepared = prepareStaticFabSemanticBayMutation({
 		type: "PREPARE_STATIC_FAB_SEMANTIC_BAY_MUTATION",
@@ -382,6 +383,7 @@ function certifiedFixture(
 		document.getPatchSequence(),
 		document.organizations,
 		intent,
+		document.relationships,
 	);
 	const mirror = new RailPatchMirror();
 	mirror.sync(capture.snapshot);
@@ -552,6 +554,7 @@ function certifiedOwnedDependencyDeleteFixture(): CertifiedOwnedDependencyDelete
 		document.organizations,
 		intent,
 		capture.snapshot.checksum,
+		document.relationships,
 	);
 	const prepared = prepareStaticFabSemanticBayMutation({
 		type: "PREPARE_STATIC_FAB_SEMANTIC_BAY_MUTATION",
@@ -575,6 +578,7 @@ function certifiedOwnedDependencyDeleteFixture(): CertifiedOwnedDependencyDelete
 		document.getPatchSequence(),
 		document.organizations,
 		intent,
+		document.relationships,
 	);
 	const mirror = new RailPatchMirror();
 	mirror.sync(capture.snapshot);

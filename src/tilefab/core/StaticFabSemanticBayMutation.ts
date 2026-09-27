@@ -26,6 +26,15 @@ import {
 	oppositeDirection,
 } from "./railShape";
 import {
+	applyStaticFabAssemblyRelationshipMutations,
+	copyStaticFabAssemblyRelationshipRecord,
+	type StaticFabAssemblyRelationshipMutationV1,
+	type StaticFabAssemblyRelationshipRecordV1,
+	type StaticFabAssemblyRelationshipStateV1,
+	staticFabAssemblyRelationshipStateSourceError,
+} from "./StaticFabAssemblyRelationship";
+import { reviewStaticFabBayRelationshipDisconnection } from "./StaticFabBayRelationshipDisconnection";
+import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
@@ -70,6 +79,7 @@ export type StaticFabSemanticBayMutationIssueCode =
 	| "ANCESTOR_COLLAPSE_UNRESOLVED"
 	| "CONNECTOR_NOT_RECOGNIZED"
 	| "AMBIGUOUS_CONNECTOR"
+	| "RELATIONSHIP_NOT_DETACHABLE"
 	| "SHARED_CONNECTOR_OWNERSHIP"
 	| "CONNECTOR_EQUIPMENT_DEPENDENCY"
 	| "PARTIAL_EQUIPMENT_GROUP"
@@ -123,6 +133,9 @@ export interface StaticFabSemanticBayMutationPlan {
 	readonly equipmentGroupMutations: readonly EquipmentGroupMutation[];
 	readonly organizationMutations: readonly StaticFabOrganizationMutation[];
 	readonly organizationImpactAuthorizations: readonly number[];
+	readonly relationshipMutations: readonly StaticFabAssemblyRelationshipMutationV1[];
+	readonly nextRelationshipIdBefore: number;
+	readonly nextRelationshipIdAfter: number;
 	readonly nextOrganizationIdBefore: number;
 	readonly nextOrganizationIdAfter: number;
 	readonly valid: boolean;
@@ -135,11 +148,26 @@ export interface StaticFabSemanticBayMutationProspectiveState {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 }
 
 export interface StaticFabSemanticBayMutationPlanningResult {
 	readonly plan: StaticFabSemanticBayMutationPlan;
 	readonly prospectiveState: StaticFabSemanticBayMutationProspectiveState | null;
+}
+
+type GeometryPlan = Omit<
+	StaticFabSemanticBayMutationPlan,
+	"relationshipMutations" | "nextRelationshipIdBefore" | "nextRelationshipIdAfter"
+>;
+
+interface GeometryPlanningResult {
+	readonly plan: GeometryPlan;
+	readonly prospectiveState: Omit<
+		StaticFabSemanticBayMutationProspectiveState,
+		"relationships"
+	> | null;
+	readonly removedRelationship: StaticFabAssemblyRelationshipRecordV1 | null;
 }
 
 interface SemanticBaySource {
@@ -197,6 +225,7 @@ export function planStaticFabSemanticBayMutation(
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
 	intent: StaticFabSemanticBayMutationIntent,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): StaticFabSemanticBayMutationPlan {
 	return planStaticFabSemanticBayMutationWithProspectiveState(
 		map,
@@ -204,6 +233,7 @@ export function planStaticFabSemanticBayMutation(
 		basePatchSequence,
 		organizations,
 		intent,
+		relationships,
 	).plan;
 }
 
@@ -218,7 +248,76 @@ export function planStaticFabSemanticBayMutationWithProspectiveState(
 	basePatchSequence: number,
 	organizations: StaticFabOrganizationState,
 	intent: StaticFabSemanticBayMutationIntent,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): StaticFabSemanticBayMutationPlanningResult {
+	let geometry = planSemanticBayGeometry(
+		map,
+		portEquipment,
+		basePatchSequence,
+		organizations,
+		intent,
+		relationships,
+	);
+	let relationshipMutations: readonly StaticFabAssemblyRelationshipMutationV1[] = Object.freeze([]);
+	let prospectiveRelationships = relationships;
+	if (geometry.plan.valid && geometry.prospectiveState) {
+		try {
+			if (geometry.removedRelationship) {
+				relationshipMutations = Object.freeze([
+					Object.freeze({
+						id: geometry.removedRelationship.id,
+						before: copyStaticFabAssemblyRelationshipRecord(geometry.removedRelationship),
+						after: null,
+					}),
+				]);
+				prospectiveRelationships = applyStaticFabAssemblyRelationshipMutations(
+					relationships,
+					relationshipMutations,
+					relationships.nextRelationshipId,
+				);
+			}
+			const relationError = staticFabAssemblyRelationshipStateSourceError(
+				geometry.prospectiveState.map,
+				geometry.prospectiveState.organizations,
+				prospectiveRelationships,
+			);
+			if (relationError) throw new Error(relationError);
+		} catch (error) {
+			geometry = rejected(
+				map,
+				basePatchSequence,
+				organizations,
+				intent,
+				"SHARED_CONNECTOR_OWNERSHIP",
+				`변경 후 유지할 조립 관계를 보존할 수 없습니다 · ${error instanceof Error ? error.message : "관계 검증 실패"}`,
+			);
+			relationshipMutations = Object.freeze([]);
+		}
+	}
+	return Object.freeze({
+		plan: Object.freeze({
+			...geometry.plan,
+			relationshipMutations,
+			nextRelationshipIdBefore: relationships.nextRelationshipId,
+			nextRelationshipIdAfter: relationships.nextRelationshipId,
+		}),
+		prospectiveState: geometry.prospectiveState
+			? Object.freeze({
+					...geometry.prospectiveState,
+					relationships: prospectiveRelationships,
+				})
+			: null,
+	});
+}
+
+function planSemanticBayGeometry(
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+	basePatchSequence: number,
+	organizations: StaticFabOrganizationState,
+	intent: StaticFabSemanticBayMutationIntent,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+): GeometryPlanningResult {
 	const intentError = staticFabSemanticBayMutationIntentError(intent);
 	if (intentError) {
 		return rejected(
@@ -264,7 +363,38 @@ export function planStaticFabSemanticBayMutationWithProspectiveState(
 		);
 	}
 
-	const source = resolveSemanticBaySource(organizations, intent.bayOrganizationId);
+	const declared = reviewStaticFabBayRelationshipDisconnection(
+		map,
+		organizations,
+		relationships,
+		intent.bayOrganizationId,
+		STATIC_FAB_SEMANTIC_BAY_CONNECTOR_EDGE_LIMIT,
+	);
+	if (declared.kind === "rejected") {
+		return rejected(
+			map,
+			basePatchSequence,
+			organizations,
+			intent,
+			declared.issueCode,
+			declared.reason,
+		);
+	}
+	if (declared.kind === "candidate" && intent.action !== "DISCONNECT") {
+		return rejected(
+			map,
+			basePatchSequence,
+			organizations,
+			intent,
+			"RELATIONSHIP_NOT_DETACHABLE",
+			"명시적으로 연결한 Bay는 먼저 연결 해제를 적용한 뒤 삭제해 주세요",
+		);
+	}
+	const source = resolveSemanticBaySource(
+		organizations,
+		intent.bayOrganizationId,
+		declared.kind === "candidate",
+	);
 	if (source instanceof PlanningFailure) {
 		return rejected(map, basePatchSequence, organizations, intent, source.code, source.message);
 	}
@@ -285,7 +415,9 @@ export function planStaticFabSemanticBayMutationWithProspectiveState(
 		if (!sourceCoverage) throw new Error("선택한 Bay의 effective membership을 찾을 수 없습니다");
 		assertNoSharedSourceBankBayContentOwnership(source, sourceCoverage.effective);
 		const connector = source.bank
-			? recognizeIncidentConnector(map, source, sourceCoverage.effective)
+			? declared.kind === "candidate"
+				? declared
+				: recognizeIncidentConnector(map, source, sourceCoverage.effective)
 			: null;
 		assertNoSharedConnectorOwnership(organizations, source, connector);
 
@@ -412,6 +544,7 @@ export function planStaticFabSemanticBayMutationWithProspectiveState(
 			);
 			return Object.freeze({
 				plan,
+				removedRelationship: declared.kind === "candidate" ? declared.relationship : null,
 				prospectiveState: Object.freeze({
 					map: disconnectedMap,
 					portEquipment,
@@ -537,6 +670,7 @@ export function planStaticFabSemanticBayMutationWithProspectiveState(
 		);
 		return Object.freeze({
 			plan,
+			removedRelationship: null,
 			prospectiveState: Object.freeze({
 				map: finalMap,
 				portEquipment: finalEquipment,
@@ -560,6 +694,7 @@ export function planStaticFabSemanticBayMutationWithProspectiveState(
 function resolveSemanticBaySource(
 	organizations: StaticFabOrganizationState,
 	bayOrganizationId: number,
+	allowDeclaredRootBank: boolean,
 ): SemanticBaySource | PlanningFailure {
 	const bay = organizations.records.find((record) => record.id === bayOrganizationId);
 	if (!bay)
@@ -629,9 +764,10 @@ function resolveSemanticBaySource(
 					record !== undefined && roles.get(record.id) === "FAB",
 			);
 		if (
-			bankParentIds.length !== 1 ||
-			fabParents.length !== 1 ||
-			staticFabOrganizationParentIds(fabParents[0] as StaticFabOrganizationRecord).length !== 0
+			!(allowDeclaredRootBank && bankParentIds.length === 0) &&
+			(bankParentIds.length !== 1 ||
+				fabParents.length !== 1 ||
+				staticFabOrganizationParentIds(fabParents[0] as StaticFabOrganizationRecord).length !== 0)
 		) {
 			return new PlanningFailure(
 				"AMBIGUOUS_HIERARCHY",
@@ -1819,6 +1955,36 @@ function planDirectedEdgeRemoval(
 	return Object.freeze({ mutations, switchMutations });
 }
 
+/** Reconstruct only the authored connector cut when adopting a declared Bay removal. */
+export function expectedStaticFabDeclaredBayDisconnectRailMutations(
+	map: TileMap,
+	relationship: StaticFabAssemblyRelationshipRecordV1,
+): readonly RailMutation[] {
+	const groups = relationship.connectionGroups;
+	const legs = groups[0]?.legs;
+	if (
+		groups.length !== 1 ||
+		legs?.length !== 2 ||
+		!legs.some((leg) => leg.directionRole === "OUTBOUND") ||
+		!legs.some((leg) => leg.directionRole === "RETURN") ||
+		legs.some((leg) => leg.exclusiveCutEdges.length === 0)
+	) {
+		throw new Error("Declared Bay connector must have one exact outbound/return cut.");
+	}
+	const cuts = legs.flatMap((leg) => leg.exclusiveCutEdges);
+	if (
+		cuts.length > STATIC_FAB_SEMANTIC_BAY_CONNECTOR_EDGE_LIMIT ||
+		cuts.some((cut) => cut.scope.kind !== "PARENT_DIRECT")
+	) {
+		throw new Error("Declared Bay connector cut exceeds its parent-owned boundary.");
+	}
+	return planDirectedEdgeRemoval(
+		map,
+		cuts.map((cut) => cut.edge),
+		[],
+	).mutations;
+}
+
 /**
  * Derive the narrow relocation authority required when an exact membership mutation already
  * accounts for every protected authored item but the cell-level impact index remains conservative.
@@ -2050,7 +2216,7 @@ function validPlan(
 	organizationImpactAuthorizations: readonly number[],
 	review: StaticFabSemanticBayMutationReview,
 	reason: string,
-): StaticFabSemanticBayMutationPlan {
+): GeometryPlan {
 	if (mutations.length === 0 && switchMutations.length === 0) {
 		throw new PlanningFailure("MUTATION_INVALID", "Semantic Bay 명령의 레일 변경이 비어 있습니다");
 	}
@@ -2087,7 +2253,7 @@ function rejected(
 	issueCode: StaticFabSemanticBayMutationIssueCode,
 	reason: string,
 	source: SemanticBaySource | null = null,
-): StaticFabSemanticBayMutationPlanningResult {
+): GeometryPlanningResult {
 	const bay =
 		source?.bay ?? organizations.records.find((record) => record.id === intent.bayOrganizationId);
 	const review = Object.freeze({
@@ -2117,6 +2283,7 @@ function rejected(
 		issueCode,
 	}) satisfies StaticFabSemanticBayMutationReview;
 	return Object.freeze({
+		removedRelationship: null,
 		plan: Object.freeze({
 			kind:
 				intent.action === "DELETE"

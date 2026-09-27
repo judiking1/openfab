@@ -5,12 +5,12 @@ import {
 	STK_AUTHORING_TEMPLATES,
 	type StkAuthoringTemplate,
 } from "../core/EquipmentGroup";
+import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
 import {
 	createInvalidPortEquipmentMutationPlan,
 	createPortEquipmentMutationPlan,
 	type PortEquipmentMutationPlan,
 } from "../core/PortEquipmentPlan";
-import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
 import { PORT_SIDES } from "../core/PortRecord";
 import { type Direction, moveCell } from "../core/railShape";
 import { analyzeStkPortLayout } from "../core/StkPortLayout";

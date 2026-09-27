@@ -1870,10 +1870,12 @@ export class RailDocument {
 		}
 		if (
 			plan.nextOrganizationIdBefore !== this.organizations.nextOrganizationId ||
-			plan.nextOrganizationIdAfter !== this.organizations.nextOrganizationId
+			plan.nextOrganizationIdAfter !== this.organizations.nextOrganizationId ||
+			plan.nextRelationshipIdBefore !== this.relationships.nextRelationshipId ||
+			plan.nextRelationshipIdAfter !== this.relationships.nextRelationshipId
 		) {
 			return this.rejectCommand(
-				"Semantic Bay 변경은 조직 ID 세대를 변경할 수 없습니다",
+				"Semantic Bay 변경은 조직·관계 ID 세대를 변경할 수 없습니다",
 				"Semantic Bay 변경을 거부했습니다",
 			);
 		}
@@ -1883,6 +1885,7 @@ export class RailDocument {
 				this.map,
 				this.portEquipment,
 				this.organizations,
+				this.relationships,
 			)
 		) {
 			return this.rejectCommand(
@@ -1912,6 +1915,12 @@ export class RailDocument {
 			plan.nextOrganizationIdBefore,
 			plan.nextOrganizationIdAfter,
 			plan.organizationImpactAuthorizations,
+			null,
+			null,
+			null,
+			plan.relationshipMutations,
+			plan.nextRelationshipIdBefore,
+			plan.nextRelationshipIdAfter,
 		);
 		if (validateAdvancedSwitchPatch(this.map, entry.changes, entry.switchChanges).length > 0) {
 			return this.rejectCommand(
@@ -1948,6 +1957,7 @@ export class RailDocument {
 				this.map,
 				this.portEquipment,
 				this.organizations,
+				this.relationships,
 			)
 		) {
 			return this.rejectCommand(
@@ -1966,6 +1976,12 @@ export class RailDocument {
 				entry.organizationNextIdAfter,
 				false,
 				entry.organizationImpactAuthorizations,
+				null,
+				null,
+				null,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
 			);
 		} catch (error) {
 			return this.rejectCommand(error, "Semantic Bay 변경을 원자적으로 적용할 수 없습니다");
@@ -1982,6 +1998,11 @@ export class RailDocument {
 			entry.organizationNextIdBefore,
 			entry.organizationNextIdAfter,
 			entry.organizationImpactAuthorizations,
+			undefined,
+			null,
+			entry.relationshipChanges,
+			entry.relationshipNextIdBefore,
+			entry.relationshipNextIdAfter,
 		);
 		return true;
 	}
@@ -3983,6 +4004,14 @@ function staticFabSemanticBayMutationCommitError(
 	if (plan.mutations.length === 0 || plan.organizationMutations.length === 0) {
 		return "Semantic Bay 변경의 레일 또는 조직 변경이 비어 있습니다";
 	}
+	if (
+		plan.relationshipMutations.length > 1 ||
+		(plan.review.action !== "DISCONNECT" && plan.relationshipMutations.length !== 0) ||
+		plan.relationshipMutations.some(
+			(change) => !change.before || change.after !== null || change.before.id !== change.id,
+		)
+	)
+		return "Semantic Bay 변경은 연결 해제 시 검토한 관계 하나만 제거할 수 있습니다";
 	if (
 		plan.mutations.some(
 			(change) => change.before === change.after || (change.after & change.before) !== change.after,

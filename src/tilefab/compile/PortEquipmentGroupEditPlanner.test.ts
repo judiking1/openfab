@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
 import { TileMap } from "../core/TileMap";
-import { planEqRowPlacement, planStkPlacement } from "./PortPlacementPlanner";
+import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import {
-	planPortEquipmentGroupEdit,
 	PortEquipmentGroupSlotIndex,
+	planPortEquipmentGroupEdit,
 	portEquipmentGroupSlotIndexFor,
 } from "./PortEquipmentGroupEditPlanner";
-import { compilePhysicalRail } from "./PhysicalRailCompiler";
+import { planEqRowPlacement, planStkPlacement } from "./PortPlacementPlanner";
 import { PortSlotAvailabilityIndex } from "./PortSlotCompiler";
 import { compilePortSlotPreparedArtifactCatalog } from "./PortSlotPreparedArtifacts";
 

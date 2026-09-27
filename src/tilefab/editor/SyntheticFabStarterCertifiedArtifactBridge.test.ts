@@ -9,7 +9,9 @@ import {
 import { hydrateSyntheticFabStarterCertifiedArtifactRequest } from "../worker/SyntheticFabStarterCertifiedArtifactRuntime";
 import {
 	certificationEvidenceMatchesPrepared,
+	hydrateSyntheticFabStarterCertifiedArtifactForTransfer,
 	isSyntheticFabStarterCertificationEvidence,
+	rebindSyntheticFabStarterCertificationEvidenceCooperatively,
 } from "./SyntheticFabStarterCertifiedArtifact";
 import {
 	SyntheticFabStarterCertifiedArtifactBridge,
@@ -18,6 +20,52 @@ import {
 
 describe("SyntheticFabStarterCertifiedArtifactBridge", () => {
 	const starter = defaultSyntheticFabStarterRequest("parallel-hall-fab-12");
+
+	it("yields during container freezing and still rejects bytes changed during that suspension", async () => {
+		const transferred = hydrateSyntheticFabStarterCertifiedArtifactForTransfer(
+			generatedParallelHallArtifactSource,
+			starter,
+		);
+		if (!transferred) throw new Error("Expected a transferred artifact.");
+		for (const mutate of [false, true]) {
+			const { prepared, attestation } = structuredClone(transferred);
+			let resume: () => void = () => undefined;
+			const pause = new Promise<void>((resolve) => {
+				resume = resolve;
+			});
+			let checkpoints = 0;
+			let settled = false;
+			const pending = rebindSyntheticFabStarterCertificationEvidenceCooperatively(
+				prepared,
+				attestation,
+				starter,
+				async () => {
+					if (++checkpoints === 1) await pause;
+				},
+			).then((value) => {
+				settled = true;
+				return value;
+			});
+			await Promise.resolve();
+			expect(checkpoints).toBe(1);
+			expect(settled).toBe(false);
+			expect(Object.isFrozen(prepared)).toBe(true);
+			expect(Object.isFrozen(prepared.snapshot)).toBe(false);
+			if (mutate) prepared.snapshot.xs[0] = (prepared.snapshot.xs[0] as number) + 1;
+			resume();
+			const rebound = await pending;
+			expect(checkpoints).toBeGreaterThan(1);
+			if (mutate) {
+				expect(rebound).toBeNull();
+			} else {
+				if (!rebound) throw new Error("Expected fully validated evidence.");
+				expect(Object.isFrozen(prepared.snapshot)).toBe(true);
+				expect(certificationEvidenceMatchesPrepared(rebound.evidence, prepared, starter)).toBe(
+					true,
+				);
+			}
+		}
+	});
 
 	it("posts raw source and rebinds transferred Worker evidence in the main realm", async () => {
 		const worker = new FakeCertifiedArtifactWorker();

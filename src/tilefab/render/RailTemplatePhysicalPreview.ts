@@ -1,22 +1,22 @@
-import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { PATH_KIND, samplePhysicalPath } from "../compile/PhysicalPathCompiler";
+import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import {
 	instantiateRailTemplate,
 	planRailTemplate,
-	railTemplateCatalogItem,
-	railTemplateParameterValue,
-	transformRailTemplateBlueprint,
 	type RailTemplateId,
 	type RailTemplateParameters,
 	type RailTemplatePose,
+	railTemplateCatalogItem,
+	railTemplateParameterValue,
+	transformRailTemplateBlueprint,
 } from "../core/RailTemplateCatalog";
-import { moveCell, oppositeDirection, type Direction } from "../core/railShape";
+import { type Direction, moveCell, oppositeDirection } from "../core/railShape";
 import type { Cell } from "../core/TileMap";
 import {
-	compilePhysicalRailPresentation,
 	type CompiledRailPresentation,
+	compilePhysicalRailPresentation,
 } from "./PhysicalRailPresentation";
 
 const PREVIEW_CACHE_ENTRY_LIMIT = 64;
@@ -139,17 +139,16 @@ export function compileRailTemplatePhysicalPreview(
 		bounds: physicalBounds(presentation),
 		connectors: Object.freeze(
 			transformed.compositionConnectors.flatMap((connector) =>
-				item.anchorRequirement === "directed-straight-trunk" &&
-				connector.kind === "shared-trunk"
+				item.anchorRequirement === "directed-straight-trunk" && connector.kind === "shared-trunk"
 					? [
 							Object.freeze({
 								start: Object.freeze({ ...connector.startCell }),
 								end: Object.freeze({ ...connector.endCell }),
-									travelDirection: connector.travelDirection,
-									spanMeters: connector.spanMeters,
-									supportBeforeMeters: connector.supportBeforeMeters,
-									supportAfterMeters: connector.supportAfterMeters,
-								}),
+								travelDirection: connector.travelDirection,
+								spanMeters: connector.spanMeters,
+								supportBeforeMeters: connector.supportBeforeMeters,
+								supportAfterMeters: connector.supportAfterMeters,
+							}),
 						]
 					: [],
 			),
@@ -213,8 +212,7 @@ export function railTemplatePhysicalPreviewCacheEvictionCount(
 	let evictionCount = 0;
 	while (
 		evictionCount < retainedByteSizes.length &&
-		(retainedByteSizes.length - evictionCount > entryLimit ||
-			retainedBytes > typedArrayByteLimit)
+		(retainedByteSizes.length - evictionCount > entryLimit || retainedBytes > typedArrayByteLimit)
 	) {
 		retainedBytes -= retainedByteSizes[evictionCount] ?? 0;
 		evictionCount++;
@@ -358,10 +356,7 @@ function physicalBounds(presentation: CompiledRailPresentation): RailTemplatePre
 	});
 }
 
-function countKinds(
-	presentation: CompiledRailPresentation,
-	kinds: readonly number[],
-): number {
+function countKinds(presentation: CompiledRailPresentation, kinds: readonly number[]): number {
 	const accepted = new Set(kinds);
 	let count = 0;
 	for (const kind of presentation.source.kinds) if (accepted.has(kind)) count++;

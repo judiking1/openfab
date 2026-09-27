@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { PATH_KIND } from "../compile/PhysicalPathCompiler";
 import {
 	defaultRailTemplateParameters,
 	initialRailTemplatePose,
 	RAIL_TEMPLATE_CATALOG,
-	reverseRailTemplateFlow,
-	rotateRailTemplatePose,
-	setRailTemplateParameter,
 	type RailTemplateId,
 	type RailTemplateParameters,
 	type RailTemplatePose,
+	reverseRailTemplateFlow,
+	rotateRailTemplatePose,
+	setRailTemplateParameter,
 } from "../core/RailTemplateCatalog";
-import { PATH_KIND } from "../compile/PhysicalPathCompiler";
 import {
 	compileRailTemplatePhysicalPreview,
 	railTemplatePhysicalPreviewCacheEvictionCount,
@@ -19,7 +19,9 @@ import {
 } from "./RailTemplatePhysicalPreview";
 
 describe("RailTemplatePhysicalPreview", () => {
-	it.each(RAIL_TEMPLATE_CATALOG)("compiles $id through the authored and physical pipelines", (item) => {
+	it.each(
+		RAIL_TEMPLATE_CATALOG,
+	)("compiles $id through the authored and physical pipelines", (item) => {
 		const preview = compileRailTemplatePhysicalPreview(
 			item.id,
 			defaultRailTemplateParameters(item.id),
@@ -40,35 +42,36 @@ describe("RailTemplatePhysicalPreview", () => {
 		).toBe(preview);
 	});
 
-	it.each(["attached-return", "branch-bypass", "outerbay-link"] as const)(
-		"builds the public support trunk and physical turnouts for %s",
-		(id) => {
-			const preview = compileRailTemplatePhysicalPreview(
-				id,
-				defaultRailTemplateParameters(id),
-				initialRailTemplatePose(),
+	it.each([
+		"attached-return",
+		"branch-bypass",
+		"outerbay-link",
+	] as const)("builds the public support trunk and physical turnouts for %s", (id) => {
+		const preview = compileRailTemplatePhysicalPreview(
+			id,
+			defaultRailTemplateParameters(id),
+			initialRailTemplatePose(),
+		);
+		expect(preview.connectors).toHaveLength(1);
+		const connector = preview.connectors[0];
+		expect(connector?.spanMeters).toBeGreaterThan(0);
+		expect(preview.turnoutPathCount).toBeGreaterThanOrEqual(2);
+		const positions = preview.presentation.source.positions;
+		const xCoordinates = Array.from(
+			{ length: positions.length / 2 },
+			(_, index) => positions[index * 2] as number,
+		);
+		if (connector) {
+			expect(connector.start.x + 0.5 - Math.min(...xCoordinates)).toBeCloseTo(
+				connector.supportBeforeMeters + 1,
+				4,
 			);
-			expect(preview.connectors).toHaveLength(1);
-			const connector = preview.connectors[0];
-			expect(connector?.spanMeters).toBeGreaterThan(0);
-			expect(preview.turnoutPathCount).toBeGreaterThanOrEqual(2);
-			const positions = preview.presentation.source.positions;
-			const xCoordinates = Array.from(
-				{ length: positions.length / 2 },
-				(_, index) => positions[index * 2] as number,
-				);
-				if (connector) {
-					expect(connector.start.x + 0.5 - Math.min(...xCoordinates)).toBeCloseTo(
-						connector.supportBeforeMeters + 1,
-						4,
-					);
-					expect(Math.max(...xCoordinates) - (connector.end.x + 0.5)).toBeCloseTo(
-						connector.supportAfterMeters + 1,
-						4,
-					);
-				}
-		},
-	);
+			expect(Math.max(...xCoordinates) - (connector.end.x + 0.5)).toBeCloseTo(
+				connector.supportAfterMeters + 1,
+				4,
+			);
+		}
+	});
 
 	it("preserves physical extent while reversing a closed pattern's directed flow", () => {
 		const parameters = defaultRailTemplateParameters("long-bay");
@@ -144,10 +147,14 @@ describe("RailTemplatePhysicalPreview", () => {
 				}
 				for (const pose of allPoses()) {
 					const preview = compileRailTemplatePhysicalPreview(id, parameters, pose);
-					expect(preview.presentation.source.pathCount, `${id}:${boundary}:${preview.key}`).toBeGreaterThan(
-						0,
-					);
-					expect(preview.turnoutPathCount, `${id}:${boundary}:${preview.key}`).toBeGreaterThanOrEqual(2);
+					expect(
+						preview.presentation.source.pathCount,
+						`${id}:${boundary}:${preview.key}`,
+					).toBeGreaterThan(0);
+					expect(
+						preview.turnoutPathCount,
+						`${id}:${boundary}:${preview.key}`,
+					).toBeGreaterThanOrEqual(2);
 				}
 			}
 		}
@@ -156,7 +163,11 @@ describe("RailTemplatePhysicalPreview", () => {
 	it("contains invalid preview input instead of throwing through a UI render", () => {
 		const mismatched = defaultRailTemplateParameters("long-bay") as RailTemplateParameters;
 		expect(
-			tryCompileRailTemplatePhysicalPreview("attached-return", mismatched, initialRailTemplatePose()),
+			tryCompileRailTemplatePhysicalPreview(
+				"attached-return",
+				mismatched,
+				initialRailTemplatePose(),
+			),
 		).toBeNull();
 	});
 
@@ -179,11 +190,7 @@ describe("RailTemplatePhysicalPreview", () => {
 		expect(stats.entryCount).toBeLessThanOrEqual(stats.entryLimit);
 		expect(stats.retainedTypedArrayBytes).toBeLessThanOrEqual(stats.typedArrayByteLimit);
 		expect(
-			railTemplatePhysicalPreviewCacheEvictionCount([
-				4 * 1024 * 1024,
-				4 * 1024 * 1024,
-				1,
-			]),
+			railTemplatePhysicalPreviewCacheEvictionCount([4 * 1024 * 1024, 4 * 1024 * 1024, 1]),
 		).toBe(1);
 		expect(railTemplatePhysicalPreviewCacheEvictionCount([8 * 1024 * 1024 + 1])).toBe(1);
 		expect(railTemplatePhysicalPreviewCacheEvictionCount(new Array(65).fill(1))).toBe(1);

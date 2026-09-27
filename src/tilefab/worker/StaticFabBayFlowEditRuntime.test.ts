@@ -191,6 +191,7 @@ describe("StaticFabBayFlowEdit disposable Worker certification", () => {
 			fixture.document.getPatchSequence(),
 			fixture.document.organizations,
 			fixture.intent,
+			fixture.document.relationships,
 		);
 		if (!forward.plan.valid || !forward.prospectiveState) {
 			throw new Error(forward.plan.reason);
@@ -228,6 +229,7 @@ describe("StaticFabBayFlowEdit disposable Worker certification", () => {
 				action: "DISCONNECT" as const,
 				bayOrganizationId: fixture.bayId,
 			}),
+			fixture.document.relationships,
 		);
 		if (!disconnect.plan.valid || !disconnect.prospectiveState) {
 			throw new Error(disconnect.plan.reason);

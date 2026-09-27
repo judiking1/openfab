@@ -1,11 +1,11 @@
 import { compileStaticFabHierarchyIndex } from "../compile/StaticFabHierarchy";
 import { captureStaticFabHierarchyIndexSnapshot } from "../compile/StaticFabHierarchySnapshot";
 import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
+import { hydrateRailMirrorSnapshotDocument } from "./RailMirrorSnapshotDocument";
 import type {
 	PreparedStaticFabHierarchy,
 	PrepareStaticFabHierarchyRequest,
 } from "./StaticFabHierarchyProtocol";
-import { hydrateRailMirrorSnapshotDocument } from "./RailMirrorSnapshotDocument";
 
 export type StaticFabHierarchyClock = () => number;
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PORT_RECORD_MAX_ID } from "./PortRecord";
 import { allocatePortEquipmentRecordIds } from "./PortEquipmentIdAllocator";
+import { PORT_RECORD_MAX_ID } from "./PortRecord";
 
 describe("PortEquipmentIdAllocator", () => {
 	it("allocates deterministic contiguous IDs without mutating cursor input", () => {

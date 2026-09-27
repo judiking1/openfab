@@ -769,7 +769,7 @@ function expectExactKeys(
 		if (!keys.has(key)) fail("INVALID_FIELD", `${path}.${key}`, "unknown field");
 	}
 	for (const key of expected) {
-		if (!(key in record)) fail("INVALID_FIELD", `${path}.${key}`, "missing field");
+		if (!Object.hasOwn(record, key)) fail("INVALID_FIELD", `${path}.${key}`, "missing field");
 	}
 }
 
@@ -795,7 +795,7 @@ function sortJsonObjectKeys(value: unknown): unknown {
 	if (Array.isArray(value)) return value.map(sortJsonObjectKeys);
 	if (typeof value !== "object" || value === null) return value;
 	const record = value as Readonly<Record<string, unknown>>;
-	const sorted: Record<string, unknown> = {};
+	const sorted: Record<string, unknown> = Object.create(null);
 	for (const key of Object.keys(record).sort()) sorted[key] = sortJsonObjectKeys(record[key]);
 	return sorted;
 }

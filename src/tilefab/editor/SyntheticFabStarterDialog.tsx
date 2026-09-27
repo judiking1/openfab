@@ -145,7 +145,7 @@ export function SyntheticFabStarterDialog({
 		readCachedStarterPreview(request),
 	);
 	const [previewRequested, setPreviewRequested] = useState(
-		() => mode !== "preset" || readCachedStarterPreview(request) !== undefined,
+		() => mode !== "preset" || preview !== undefined,
 	);
 	const pendingPreviewActionRef = useRef<"create" | "place" | null>(null);
 	const [previewFailure, setPreviewFailure] = useState<StarterPreviewFailure | null>(null);
@@ -154,7 +154,10 @@ export function SyntheticFabStarterDialog({
 		prepared: PreparedSyntheticFabStarter | null;
 	}> | null>(null);
 	const requestFingerprint = syntheticFabStarterRequestFingerprint(request);
-	const expectedPlanFingerprint = syntheticFabStarterAssemblyFingerprint(request);
+	const expectedPlanFingerprint = useMemo(
+		() => syntheticFabStarterAssemblyFingerprint(request),
+		[request],
+	);
 	const previewIdle = mode === "preset" && !previewRequested && preview === undefined;
 	const previewPending = preview === undefined && !previewIdle;
 	const certifiedPreviewPending = previewPending && isDefaultSyntheticFabCertifiedRequest(request);
@@ -346,8 +349,9 @@ export function SyntheticFabStarterDialog({
 		onClearOperationError?.();
 		setIndependentVerificationResult(null);
 		pendingPreviewActionRef.current = null;
-		setPreview(readCachedStarterPreview(nextRequest));
-		setPreviewRequested(mode !== "preset" || readCachedStarterPreview(nextRequest) !== undefined);
+		const cached = readCachedStarterPreview(nextRequest);
+		setPreview(cached);
+		setPreviewRequested(mode !== "preset" || cached !== undefined);
 		setRequest(nextRequest);
 	};
 	const updateParameter = (
@@ -957,7 +961,7 @@ interface StarterPreviewLoad {
 }
 
 function beginStarterPreviewLoad(request: SyntheticFabStarterRequest): StarterPreviewLoad {
-	const cacheKey = starterPreviewCacheKey(request);
+	const cacheKey = syntheticFabStarterRequestFingerprint(request);
 	return starterPreviewCache.acquire(cacheKey, () => beginUncachedStarterPreviewLoad(request));
 }
 
@@ -1096,7 +1100,7 @@ function previewErrorMessage(error: unknown, fallback: string): string {
 function readCachedStarterPreview(
 	request: SyntheticFabStarterRequest,
 ): PreparedSyntheticFabStarter | null | undefined {
-	const cacheKey = starterPreviewCacheKey(request);
+	const cacheKey = syntheticFabStarterRequestFingerprint(request);
 	const cached = starterPreviewCache.get(cacheKey);
 	if (
 		!cached ||
@@ -1107,10 +1111,6 @@ function readCachedStarterPreview(
 	}
 	starterPreviewCache.delete(cacheKey);
 	return undefined;
-}
-
-function starterPreviewCacheKey(request: SyntheticFabStarterRequest): string {
-	return `${syntheticFabStarterRequestFingerprint(request)}|${syntheticFabStarterAssemblyFingerprint(request) ?? "no-plan"}`;
 }
 
 function isLargeFabPresetRequest(request: SyntheticFabStarterRequest): boolean {
@@ -1208,13 +1208,21 @@ function fullFabPresetBuildStages(bayCount: number): readonly string[] {
 
 function StarterMiniature({ id }: Readonly<{ id: SyntheticFabStarterId }>): React.ReactElement {
 	const request = useMemo(() => defaultSyntheticFabStarterRequest(id), [id]);
+	const [ready, setReady] = useState(false);
+	useEffect(() => {
+		// Let the dialog and its controls paint before computing decorative catalog sketches.
+		const timeout = window.setTimeout(() => setReady(true), 0);
+		return () => window.clearTimeout(timeout);
+	}, []);
 	return (
 		<div className="tilefab-starter-list-miniature" aria-hidden="true">
-			<StarterSchematicPreview
-				request={request}
-				label={syntheticFabStarterCatalogItem(id).label}
-				pending={false}
-			/>
+			{ready ? (
+				<StarterSchematicPreview
+					request={request}
+					label={syntheticFabStarterCatalogItem(id).label}
+					pending={false}
+				/>
+			) : null}
 		</div>
 	);
 }

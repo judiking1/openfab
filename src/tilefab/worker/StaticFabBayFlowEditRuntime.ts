@@ -210,6 +210,7 @@ export function prepareStaticFabBayFlowEditInSession(
 		source.getPatchSequence(),
 		source.organizations,
 		request.intent,
+		source.relationships,
 	);
 	const plan = planning.plan;
 	let plannerProspective = planning.prospectiveState;

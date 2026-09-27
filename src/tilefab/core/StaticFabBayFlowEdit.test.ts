@@ -190,6 +190,7 @@ describe("StaticFabBayFlowEdit", () => {
 				bayOrganizationId: twin.id,
 				targetInternalFlowPattern: "co-rotating",
 			},
+			document.relationships,
 		);
 		expect(result.plan.valid, result.plan.reason).toBe(true);
 		const prospective = result.prospectiveState;
@@ -227,6 +228,7 @@ describe("StaticFabBayFlowEdit", () => {
 				bayOrganizationId: selected.bayId,
 				targetInternalFlowPattern: "co-rotating",
 			},
+			document.relationships,
 		);
 
 		expect(result.plan).toMatchObject({
@@ -316,6 +318,7 @@ describe("StaticFabBayFlowEdit", () => {
 			document.getPatchSequence(),
 			organizations,
 			flowIntent(selected.bayId),
+			document.relationships,
 		);
 
 		assertUnsupportedDependency(result, /advanced switches or equipment groups/);
@@ -341,6 +344,7 @@ describe("StaticFabBayFlowEdit", () => {
 			document.getPatchSequence(),
 			document.organizations,
 			flowIntent(selected.bayId),
+			document.relationships,
 		);
 
 		assertUnsupportedDependency(result, /Port 1 attaches inside the selected Bay envelope/);
@@ -362,6 +366,7 @@ describe("StaticFabBayFlowEdit", () => {
 				bayOrganizationId: selected.bayId,
 				targetInternalFlowPattern: "co-rotating",
 			},
+			document.relationships,
 		);
 		const target = requireProspective(forward);
 
@@ -375,6 +380,7 @@ describe("StaticFabBayFlowEdit", () => {
 				bayOrganizationId: selected.bayId,
 				targetInternalFlowPattern: "alternating",
 			},
+			document.relationships,
 		);
 
 		expect(reverse.plan).toMatchObject({
@@ -412,6 +418,7 @@ describe("StaticFabBayFlowEdit", () => {
 				bayOrganizationId: selected.bayId,
 				targetInternalFlowPattern: "co-rotating",
 			},
+			document.relationships,
 		);
 		const prospective = requireProspective(result);
 		expect(() =>
@@ -518,6 +525,7 @@ describe("StaticFabBayFlowEdit", () => {
 				bayOrganizationId: selected.bayId,
 				targetInternalFlowPattern: "alternating",
 			},
+			document.relationships,
 		);
 
 		expect(result.prospectiveState).toBeNull();

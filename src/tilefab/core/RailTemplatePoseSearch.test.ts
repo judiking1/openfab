@@ -45,9 +45,24 @@ describe("RailTemplatePoseSearch", () => {
 
 	it("prunes only the explicitly locked axes", () => {
 		const preferred = initialRailTemplatePose();
-		expect(rankedRailTemplatePoses(preferred, lockRailTemplatePoseAxis(AUTO_RAIL_TEMPLATE_POSE_LOCK, "forward"))).toHaveLength(4);
-		expect(rankedRailTemplatePoses(preferred, lockRailTemplatePoseAxis(AUTO_RAIL_TEMPLATE_POSE_LOCK, "side"))).toHaveLength(8);
-		expect(rankedRailTemplatePoses(preferred, lockRailTemplatePoseAxis(AUTO_RAIL_TEMPLATE_POSE_LOCK, "flow"))).toHaveLength(8);
+		expect(
+			rankedRailTemplatePoses(
+				preferred,
+				lockRailTemplatePoseAxis(AUTO_RAIL_TEMPLATE_POSE_LOCK, "forward"),
+			),
+		).toHaveLength(4);
+		expect(
+			rankedRailTemplatePoses(
+				preferred,
+				lockRailTemplatePoseAxis(AUTO_RAIL_TEMPLATE_POSE_LOCK, "side"),
+			),
+		).toHaveLength(8);
+		expect(
+			rankedRailTemplatePoses(
+				preferred,
+				lockRailTemplatePoseAxis(AUTO_RAIL_TEMPLATE_POSE_LOCK, "flow"),
+			),
+		).toHaveLength(8);
 		expect(rankedRailTemplatePoses(preferred, LOCKED_RAIL_TEMPLATE_POSE)).toEqual([
 			{
 				pose: preferred,

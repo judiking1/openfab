@@ -3189,7 +3189,7 @@ function sortJsonObjectKeys(value: unknown): unknown {
 	if (Array.isArray(value)) return value.map(sortJsonObjectKeys);
 	if (typeof value !== "object" || value === null) return value;
 	const source = value as Readonly<Record<string, unknown>>;
-	const sorted: Record<string, unknown> = {};
+	const sorted: Record<string, unknown> = Object.create(null);
 	for (const key of Object.keys(source).sort()) sorted[key] = sortJsonObjectKeys(source[key]);
 	return sorted;
 }

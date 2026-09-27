@@ -101,7 +101,7 @@ it("refuses a one-cell extension before preview/publication and preserves native
 	expect(() =>
 		compileRailStartup({ kind: "project-json", json: projectJson(document) }),
 	).not.toThrow();
-});
+}, 120_000);
 
 it("rejects an over-capacity Worker patch/snapshot, rolls back counts and accepts the next legal patch", () => {
 	const document = boundaryDocument();

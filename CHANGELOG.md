@@ -6,6 +6,21 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.13
+
+- Allow the last individually managed Bay in a declared Bank connection to be disconnected
+  after an impact review. Preserve the other relationships, Bay content, Undo/Redo, Worker
+  mirror, and native project round trip; shared or contact-only connections still refuse.
+- Bind a Worker-prepared Bay disconnection to the live relationship and its exact rail cut
+  before it can gain commit authority, including when a response has a self-consistent
+  fingerprint and checksum.
+- Load the derived Three.js view only when a user opens 3D inspection, reducing first-load
+  JavaScript gzip by about 156 KiB in the measured fixed-baseline build. Audit the initial
+  JavaScript graph to prevent accidental static inclusion of Three.js.
+- Improve compact Bay review controls, text contrast, and short-screen Guided Build completion
+  scrolling. Restore zero-error Biome/ESLint checks, and require own blueprint fields with safe
+  canonical JSON key sorting.
+
 ### Preview candidate 0.1.12
 
 - Reject edits and project activation outside V1's supported X/Z rail coordinate range

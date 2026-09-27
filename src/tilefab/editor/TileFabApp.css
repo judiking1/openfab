@@ -2197,6 +2197,8 @@
 		right: 8px;
 		left: auto;
 		max-height: calc(48% - 18px);
+		overflow-y: auto;
+		overscroll-behavior: contain;
 	}
 
 	.tilefab-workspace:has(.tilefab-guided-build-panel) .tilefab-readiness,
@@ -4561,7 +4563,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-action-hint-input i {
-	color: #657476;
+	color: #7c8b8d;
 	font-style: normal;
 }
 
@@ -6806,7 +6808,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	overflow-x: auto;
 	border-bottom: 1px solid #2b3537;
 	background: #0e1314;
-	color: #657476;
+	color: #7c8b8d;
 	white-space: nowrap;
 }
 

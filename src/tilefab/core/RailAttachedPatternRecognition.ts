@@ -1,16 +1,16 @@
+import type { RailMapReader } from "./paint";
 import type { RailAreaSelection } from "./RailAreaSelection";
 import type { DirectedRailEdge, RailModuleOwnership } from "./RailModuleOwnership";
-import type { RailMapReader } from "./paint";
 import type { TransformedRailTemplateBlueprint } from "./RailTemplateCatalog";
 import {
 	ALL_DIRECTIONS,
 	bitCount,
+	type Direction,
 	directionBetween,
 	moveCell,
 	oppositeDirection,
-	type Direction,
 } from "./railShape";
-import { cellKey, type Cell } from "./TileMap";
+import { type Cell, cellKey } from "./TileMap";
 
 export interface AttachedPatternSelection {
 	readonly deltaEdges: readonly DirectedRailEdge[];
@@ -66,9 +66,7 @@ export function extractAttachedPatternSelection(
 			bitCount(rail.outgoing) !== 1
 		)
 			return null;
-		const outgoingDirection = ALL_DIRECTIONS.find(
-			(direction) => (rail.outgoing & direction) !== 0,
-		);
+		const outgoingDirection = ALL_DIRECTIONS.find((direction) => (rail.outgoing & direction) !== 0);
 		if (!outgoingDirection) return null;
 		current = Object.freeze({ from: cell, to: moveCell(cell, outgoingDirection) });
 	}
@@ -198,9 +196,7 @@ function singleOwnershipEdge(ownership: RailModuleOwnership | undefined): Direct
 function exactLinearRail(map: RailMapReader, cell: Cell, travelDirection: Direction): boolean {
 	if (map.getAdvancedSwitchOwningCell(cell.x, cell.y)) return false;
 	const rail = map.getRail(cell.x, cell.y);
-	return (
-		rail.incoming === oppositeDirection(travelDirection) && rail.outgoing === travelDirection
-	);
+	return rail.incoming === oppositeDirection(travelDirection) && rail.outgoing === travelDirection;
 }
 
 function moveRepeated(origin: Cell, direction: Direction, count: number): Cell {

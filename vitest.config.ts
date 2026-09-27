@@ -3,7 +3,13 @@ import { defineConfig } from "vitest/config";
 // Wall-clock budgets must not compete with unrelated compilation/fixture tests for CPU.
 // These files retain every original assertion and run once, after the parallel functional group.
 const latencyTestFiles = [
+	"src/tilefab/compile/CompoundPhysicalPath.test.ts",
+	"src/tilefab/compile/PhysicalPathCompiler.test.ts",
+	"src/tilefab/compile/PhysicalPathMigration.test.ts",
+	"src/tilefab/compile/PhysicalPathSpatialIndex.test.ts",
 	"src/tilefab/compile/PortEquipmentPresentation.test.ts",
+	"src/tilefab/compile/RailClearanceCompiler.test.ts",
+	"src/tilefab/core/edit.test.ts",
 	"src/tilefab/core/PortEquipment.test.ts",
 	"src/tilefab/core/PortEquipmentLayoutValidator.test.ts",
 	"src/tilefab/core/RailNetworkLinkPlanner.test.ts",
@@ -22,6 +28,7 @@ const latencyTestFiles = [
 	"src/tilefab/editor/RailEditorRelationshipActivation.test.ts",
 	"src/tilefab/editor/StaticFabBayFlowEditBridge.test.ts",
 	"src/tilefab/editor/StaticFabSemanticBayMutationBridge.test.ts",
+	"src/tilefab/render/PhysicalRailPresentation.test.ts",
 	"src/tilefab/render/SyntheticFabStarterSchematic.test.ts",
 	"src/tilefab/render/TileRenderer.test.ts",
 	"src/tilefab/worker/OpenFabProjectSerializationRuntime.test.ts",

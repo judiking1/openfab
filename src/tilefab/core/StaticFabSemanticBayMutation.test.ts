@@ -141,6 +141,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			document.getPatchSequence(),
 			document.organizations,
 			intent,
+			document.relationships,
 		);
 		const deleteResult = planStaticFabSemanticBayMutationWithProspectiveState(
 			document.map,
@@ -148,6 +149,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			document.getPatchSequence(),
 			document.organizations,
 			semanticIntent("DELETE", bay.id),
+			document.relationships,
 		);
 		fixture = Object.freeze({
 			certificate,
@@ -401,6 +403,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			disconnected.organizations,
 			semanticIntent("DELETE", fixture.bay.id),
+			disconnected.relationships,
 		);
 		const prospective = requireProspective(detachedDelete);
 		const directDelete = requireProspective(fixture.delete);
@@ -454,6 +457,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			disconnected.organizations,
 			semanticIntent("DISCONNECT", fixture.bay.id),
+			disconnected.relationships,
 		);
 		assertRejected(repeatedDisconnect, "ALREADY_DISCONNECTED");
 		assertSourceUnchanged();
@@ -480,6 +484,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			firstDisconnect.organizations,
 			semanticIntent("DISCONNECT", fixture.siblingBay.id),
+			firstDisconnect.relationships,
 		);
 		const twiceDisconnected = requireProspective(secondDisconnect);
 		expect(secondDisconnect.plan.review.incidentConnectorCount).toBe(1);
@@ -498,6 +503,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			firstDisconnect.organizations,
 			semanticIntent("DELETE", fixture.siblingBay.id),
+			firstDisconnect.relationships,
 		);
 		const afterAttachedDelete = requireProspective(attachedDelete);
 		expect(attachedDelete.plan.review.incidentConnectorCount).toBe(1);
@@ -551,6 +557,7 @@ describe("StaticFabSemanticBayMutation", () => {
 				action: "DELETE",
 				bayOrganizationId: fixture.bay.id,
 			} as unknown as StaticFabSemanticBayMutationIntent,
+			fixture.document.relationships,
 		);
 		assertRejected(malformed, "INVALID_SOURCE");
 
@@ -560,6 +567,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			-1,
 			fixture.document.organizations,
 			semanticIntent("DELETE", fixture.bay.id),
+			fixture.document.relationships,
 		);
 		assertRejected(stale, "STALE_SOURCE");
 
@@ -569,6 +577,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			fixture.document.organizations,
 			semanticIntent("DELETE", 0x7fff_ffff),
+			fixture.document.relationships,
 		);
 		assertRejected(missing, "MISSING_BAY");
 
@@ -578,6 +587,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			fixture.document.organizations,
 			semanticIntent("DELETE", fixture.processLoop.id),
+			fixture.document.relationships,
 		);
 		assertRejected(processLoop, "UNSUPPORTED_ORGANIZATION");
 		assertSourceUnchanged();
@@ -757,6 +767,7 @@ describe("StaticFabSemanticBayMutation", () => {
 				fixture.document.getPatchSequence(),
 				organizations,
 				semanticIntent(action, fixture.bay.id),
+				fixture.document.relationships,
 			);
 			assertRejected(result, "SHARED_ORGANIZATION_DEPENDENCY");
 			expect(result.plan.reason).toMatch(/명시적 rail 또는 advanced switch/);
@@ -940,6 +951,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			fixture.document.organizations,
 			semanticIntent("DELETE", fixture.bay.id),
+			fixture.document.relationships,
 		);
 		const prospective = requireProspective(result);
 		expect(result.plan.review).toMatchObject({
@@ -1000,6 +1012,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			organizations,
 			semanticIntent("DISCONNECT", fixture.bay.id),
+			fixture.document.relationships,
 		);
 		const disconnected = requireProspective(disconnect);
 		expect(disconnect.plan.review).toMatchObject({
@@ -1022,6 +1035,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			organizations,
 			semanticIntent("DELETE", fixture.bay.id),
+			fixture.document.relationships,
 		);
 		const afterDelete = requireProspective(deleteResult);
 		expect(deleteResult.plan.review).toMatchObject({
@@ -1056,6 +1070,7 @@ describe("StaticFabSemanticBayMutation", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.organizations,
 				semanticIntent(action, fixture.bay.id),
+				fixture.document.relationships,
 			);
 			assertRejected(result, "CONNECTOR_EQUIPMENT_DEPENDENCY");
 			expect(result.plan.reason).toMatch(/PORT-1/);
@@ -1117,6 +1132,7 @@ describe("StaticFabSemanticBayMutation", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.organizations,
 				semanticIntent(action, fixture.bay.id),
+				fixture.document.relationships,
 			);
 			assertRejected(result, "CONNECTOR_EQUIPMENT_DEPENDENCY");
 			return result.plan.reason;
@@ -1177,6 +1193,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			fixture.document.organizations,
 			semanticIntent("DELETE", fixture.bay.id),
+			fixture.document.relationships,
 		);
 		assertRejected(partialGroupDelete, "PARTIAL_EQUIPMENT_GROUP");
 		expect(partialGroupDelete.plan.reason).toMatch(/1/);
@@ -1221,6 +1238,7 @@ describe("StaticFabSemanticBayMutation", () => {
 			fixture.document.getPatchSequence(),
 			organizations,
 			semanticIntent(action, fixture.bay.id),
+			fixture.document.relationships,
 		);
 	}
 

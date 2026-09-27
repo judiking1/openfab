@@ -1058,7 +1058,7 @@ import type { StaticFabInspection3DCommand } from "./StaticFabInspection3DViewpo
 import {
 	DEFAULT_STATIC_FAB_INSPECTION_3D_VISIBILITY,
 	type StaticFabInspection3DVisibility,
-} from "./StaticFabInspection3DScene";
+} from "./StaticFabInspection3DVisibility";
 import {
 	StaticFabNavigator,
 	type StaticFabNavigatorIssueMarker,
@@ -2511,26 +2511,38 @@ export default function TileFabApp(): React.ReactElement {
 		null,
 	);
 	const portDerivedArtifactsRef = useRef<PortDerivedArtifactBundle | null>(null);
-	const portSlotsRef = {
-		get current(): CompiledPortSlots | null {
-			return portDerivedArtifactsRef.current?.slots ?? null;
-		},
-	};
-	const portSlotArtifactsRef = {
-		get current(): PortSlotPreparedArtifacts | null {
-			return portDerivedArtifactsRef.current?.artifacts ?? null;
-		},
-	};
-	const portSlotAvailabilityRef = {
-		get current(): PreparedPortSlotAvailabilityIndex | null {
-			return portDerivedArtifactsRef.current?.availability ?? null;
-		},
-	};
-	const portEquipmentPresentationRef = {
-		get current(): CompiledPortEquipmentPresentation | null {
-			return portDerivedArtifactsRef.current?.presentation ?? null;
-		},
-	};
+	const portSlotsRef = useMemo(
+		() => ({
+			get current(): CompiledPortSlots | null {
+				return portDerivedArtifactsRef.current?.slots ?? null;
+			},
+		}),
+		[],
+	);
+	const portSlotArtifactsRef = useMemo(
+		() => ({
+			get current(): PortSlotPreparedArtifacts | null {
+				return portDerivedArtifactsRef.current?.artifacts ?? null;
+			},
+		}),
+		[],
+	);
+	const portSlotAvailabilityRef = useMemo(
+		() => ({
+			get current(): PreparedPortSlotAvailabilityIndex | null {
+				return portDerivedArtifactsRef.current?.availability ?? null;
+			},
+		}),
+		[],
+	);
+	const portEquipmentPresentationRef = useMemo(
+		() => ({
+			get current(): CompiledPortEquipmentPresentation | null {
+				return portDerivedArtifactsRef.current?.presentation ?? null;
+			},
+		}),
+		[],
+	);
 	const cursorCellRef = useRef<Cell>({ x: 0, y: 0 });
 	const pointerCellRef = useRef<Cell>({ x: 0, y: 0 });
 	const cursorReadoutRef = useRef<HTMLSpanElement>(null);
@@ -4041,7 +4053,6 @@ export default function TileFabApp(): React.ReactElement {
 		status,
 	});
 	const guidedBuildCurrentSuggestedAction = guidedBuildCurrentPrompt?.suggestedAction ?? null;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: lifecycle transitions intentionally compare the session against the latest imperatively published Port bundle.
 	useEffect(() => {
 		const session = guidedPortKeyboardSessionRef.current;
 		if (!session) return;
@@ -4079,6 +4090,8 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildCurrentSuggestedAction,
 		guidedBuildEvaluation.currentMissionId,
 		guidedBuildOpen,
+		portSlotAvailabilityRef,
+		portSlotsRef,
 		tool,
 	]);
 	const guidedBuildCurrentSequence = guidedBuildEvaluation.complete
@@ -14360,6 +14373,10 @@ export default function TileFabApp(): React.ReactElement {
 			Reflect.deleteProperty(window, "__tileFab");
 			scheduleRenderRef.current = () => undefined;
 		};
+		// guidedPortKeyboardSessionCurrent, isCurrentPortRowDrag and isCurrentStkDraft read live refs only;
+		// re-running this effect would re-register every window/canvas listener, so their render-local
+		// identities must not restart it.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
 		equipmentScaleProbePortCount,
 		guidedBuildOpen,
@@ -14369,6 +14386,10 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildReuseEligibleRailTarget,
 		simulationRuntimePresentationRouter,
 		openCommandHelp,
+		portEquipmentPresentationRef,
+		portSlotArtifactsRef,
+		portSlotAvailabilityRef,
+		portSlotsRef,
 		recomputeDrag,
 		renderPerformance,
 		scaleProbeCellCount,

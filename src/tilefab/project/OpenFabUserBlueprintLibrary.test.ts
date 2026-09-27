@@ -77,6 +77,16 @@ describe("OpenFabUserBlueprintLibrary", () => {
 		);
 	});
 
+	it("requires blueprint envelope fields to be owned by the record", () => {
+		const source = createRecord("library-bay-a", "Bay A");
+		const { id, ...owned } = source;
+		const inherited = Object.assign(Object.create({ id }) as Record<string, unknown>, owned);
+
+		expect(() => parseOpenFabUserBlueprintRecord(inherited)).toThrow(
+			expect.objectContaining({ code: "INVALID_FIELD", path: "$.id" }),
+		);
+	});
+
 	it("measures the portable file budget in UTF-8 bytes", () => {
 		expect(openFabUtf8ByteLength("A가😀\ud800")).toBe(11);
 		expectUserBlueprintParseError(

@@ -136,6 +136,7 @@ export class StaticFabSemanticBayMutationBridge {
 				source.organizations,
 				input.intent,
 				sourceIdentity.checksum,
+				source.relationships,
 			);
 		} catch (error) {
 			return Promise.reject(
@@ -344,6 +345,9 @@ export class StaticFabSemanticBayMutationBridge {
 					organizationChanges: plan.organizationMutations,
 					organizationNextIdBefore: plan.nextOrganizationIdBefore,
 					organizationNextIdAfter: plan.nextOrganizationIdAfter,
+					relationshipChanges: plan.relationshipMutations,
+					relationshipNextIdBefore: plan.nextRelationshipIdBefore,
+					relationshipNextIdAfter: plan.nextRelationshipIdAfter,
 				});
 			} catch {
 				this.fail(new Error("Semantic Bay mutation Worker returned a malformed exact plan."));
@@ -377,6 +381,7 @@ export class StaticFabSemanticBayMutationBridge {
 					live.patchSequence,
 					live.organizations,
 					pending.intent,
+					live.relationships,
 				);
 			} else {
 				revokeStaticFabSemanticBayMutationPermit(pending.permit);
@@ -448,15 +453,19 @@ function exactTicketError(
 		ticket.sourceNextPortId === pending.sourceIdentity.nextPortId &&
 		ticket.sourceNextEquipmentGroupId === pending.sourceIdentity.nextEquipmentGroupId &&
 		ticket.sourceNextOrganizationId === pending.sourceIdentity.nextOrganizationId &&
+		ticket.sourceNextRelationshipId === pending.sourceIdentity.nextRelationshipId &&
 		ticket.intentFingerprint === pending.intentFingerprint &&
 		ticket.prospectiveNextAdvancedSwitchId === pending.sourceIdentity.nextAdvancedSwitchId &&
 		ticket.prospectiveNextPortId === pending.sourceIdentity.nextPortId &&
 		ticket.prospectiveNextEquipmentGroupId === pending.sourceIdentity.nextEquipmentGroupId &&
 		ticket.prospectiveNextOrganizationId === pending.sourceIdentity.nextOrganizationId &&
+		ticket.prospectiveNextRelationshipId === pending.sourceIdentity.nextRelationshipId &&
 		plan.baseRevision === pending.sourceIdentity.revision &&
 		plan.basePatchSequence === pending.sourceIdentity.patchSequence &&
 		plan.nextOrganizationIdBefore === pending.sourceIdentity.nextOrganizationId &&
-		plan.nextOrganizationIdAfter === pending.sourceIdentity.nextOrganizationId
+		plan.nextOrganizationIdAfter === pending.sourceIdentity.nextOrganizationId &&
+		plan.nextRelationshipIdBefore === pending.sourceIdentity.nextRelationshipId &&
+		plan.nextRelationshipIdAfter === pending.sourceIdentity.nextRelationshipId
 		? null
 		: "Semantic Bay mutation Worker returned a corrupted one-shot ticket.";
 }
@@ -472,6 +481,7 @@ function sourceIdentityFromSnapshot(
 		nextPortId: snapshot.portEquipment.nextPortId,
 		nextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 		nextOrganizationId: snapshot.organizations.nextOrganizationId,
+		nextRelationshipId: snapshot.relationships.nextRelationshipId,
 	});
 }
 
@@ -496,7 +506,8 @@ function sourceIdentityMatchesLiveState(
 		live.map.getAdvancedSwitchIdCursor() === identity.nextAdvancedSwitchId &&
 		live.portEquipment.nextPortId === identity.nextPortId &&
 		live.portEquipment.nextEquipmentGroupId === identity.nextEquipmentGroupId &&
-		live.organizations.nextOrganizationId === identity.nextOrganizationId
+		live.organizations.nextOrganizationId === identity.nextOrganizationId &&
+		live.relationships.nextRelationshipId === identity.nextRelationshipId
 	);
 }
 
@@ -514,6 +525,7 @@ function sameSourceIdentity(
 			"nextPortId",
 			"nextEquipmentGroupId",
 			"nextOrganizationId",
+			"nextRelationshipId",
 		]) &&
 		value.revision === expected.revision &&
 		value.patchSequence === expected.patchSequence &&
@@ -521,7 +533,8 @@ function sameSourceIdentity(
 		value.nextAdvancedSwitchId === expected.nextAdvancedSwitchId &&
 		value.nextPortId === expected.nextPortId &&
 		value.nextEquipmentGroupId === expected.nextEquipmentGroupId &&
-		value.nextOrganizationId === expected.nextOrganizationId
+		value.nextOrganizationId === expected.nextOrganizationId &&
+		value.nextRelationshipId === expected.nextRelationshipId
 	);
 }
 

@@ -4,15 +4,17 @@ import { type RailMutation, railMutationTopologyError } from "./paint";
 import type { RailAreaSelection } from "./RailAreaSelection";
 import type { DirectedRailEdge } from "./RailModuleOwnership";
 import {
+	type RailPatternCandidate,
 	railPatternCandidateIdentity,
 	recognizeRailPattern,
-	type RailPatternCandidate,
 } from "./RailPatternRecognition";
 import {
 	instantiateRailTemplate,
-	railTemplateCatalogItem,
-	transformRailTemplateBlueprint,
+	type RailTemplateBlueprint,
 	type RailTemplateParameters,
+	railTemplateCatalogItem,
+	type TransformedRailTemplateBlueprint,
+	transformRailTemplateBlueprint,
 } from "./RailTemplateCatalog";
 import {
 	ALL_DIRECTIONS,
@@ -103,7 +105,7 @@ export function planRailPatternResize(
 		);
 	}
 
-	let blueprint;
+	let blueprint: RailTemplateBlueprint;
 	try {
 		blueprint = instantiateRailTemplate(candidate.templateId, afterParameters);
 	} catch (error) {
@@ -113,7 +115,7 @@ export function planRailPatternResize(
 			error instanceof Error ? error.message : "변경할 패턴 치수가 유효하지 않습니다",
 		);
 	}
-	let transformed;
+	let transformed: TransformedRailTemplateBlueprint;
 	try {
 		transformed = transformRailTemplateBlueprint(blueprint, candidate.anchor, candidate.pose);
 	} catch (error) {

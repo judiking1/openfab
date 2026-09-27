@@ -153,6 +153,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 			fixture.document.getPatchSequence(),
 			fixture.document.organizations,
 			semanticIntent("DISCONNECT", fixture.bay.id),
+			fixture.document.relationships,
 		);
 		if (!firstDisconnect.plan.valid || !firstDisconnect.prospectiveState) {
 			throw new Error(firstDisconnect.plan.reason);
@@ -244,6 +245,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 			fixture.document.organizations,
 			intent,
 			fixture.snapshot.checksum,
+			fixture.document.relationships,
 		);
 		const prepared = requirePrepared(prepare(fixture.session, intent, permit.ticketId));
 		const workerPlan = structuredClone(prepared.plan);
@@ -259,6 +261,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 			fixture.document.getPatchSequence(),
 			fixture.document.organizations,
 			intent,
+			fixture.document.relationships,
 		);
 		const adoptedFingerprint = staticFabSemanticBayMutationPlanFingerprint(adopted);
 		const adoptedModuleKey = adopted.review.railModuleKeys[0];
@@ -279,6 +282,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 				fixture.document.map,
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(true);
 		expect(
@@ -287,6 +291,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 				fixture.document.map,
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(true);
 		expect(
@@ -295,6 +300,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 				fixture.document.map,
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(false);
 		expect(() =>
@@ -308,6 +314,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.organizations,
 				intent,
+				fixture.document.relationships,
 			),
 		).toThrow(/missing|consumed/i);
 	}, 120_000);
@@ -321,6 +328,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 			fixture.document.organizations,
 			intent,
 			fixture.snapshot.checksum,
+			fixture.document.relationships,
 		);
 		const prepared = requirePrepared(prepare(fixture.session, intent, permit.ticketId));
 		const tampered = structuredClone(prepared.plan);
@@ -336,6 +344,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.organizations,
 				intent,
+				fixture.document.relationships,
 			),
 		).toThrow(/fingerprint diverged/i);
 		expect(() =>
@@ -349,6 +358,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.organizations,
 				intent,
+				fixture.document.relationships,
 			),
 		).toThrow(/missing|consumed/i);
 
@@ -359,6 +369,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 			fixture.document.organizations,
 			intent,
 			fixture.snapshot.checksum,
+			fixture.document.relationships,
 		);
 		revokeStaticFabSemanticBayMutationPermit(revoked);
 		expect(() =>
@@ -372,6 +383,7 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 				fixture.document.getPatchSequence(),
 				fixture.document.organizations,
 				intent,
+				fixture.document.relationships,
 			),
 		).toThrow(/missing|consumed/i);
 	});

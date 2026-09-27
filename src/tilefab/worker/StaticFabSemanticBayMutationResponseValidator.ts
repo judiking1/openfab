@@ -11,6 +11,10 @@ import {
 import { type PortMutation, type PortRecord, portRecordError } from "../core/PortRecord";
 import type { RailMutation } from "../core/paint";
 import {
+	type StaticFabAssemblyRelationshipStateV1,
+	staticFabAssemblyRelationshipStateShapeError,
+} from "../core/StaticFabAssemblyRelationship";
+import {
 	STATIC_FAB_ORGANIZATION_KINDS,
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
@@ -68,6 +72,9 @@ const PLAN_KEYS = Object.freeze([
 	"portMutations",
 	"equipmentGroupMutations",
 	"organizationMutations",
+	"relationshipMutations",
+	"nextRelationshipIdBefore",
+	"nextRelationshipIdAfter",
 	"organizationImpactAuthorizations",
 	"nextOrganizationIdBefore",
 	"nextOrganizationIdAfter",
@@ -135,6 +142,7 @@ const TICKET_KEYS = Object.freeze([
 	"sourceNextPortId",
 	"sourceNextEquipmentGroupId",
 	"sourceNextOrganizationId",
+	"sourceNextRelationshipId",
 	"intentFingerprint",
 	"planFingerprint",
 	"prospectiveChecksum",
@@ -142,6 +150,7 @@ const TICKET_KEYS = Object.freeze([
 	"prospectiveNextPortId",
 	"prospectiveNextEquipmentGroupId",
 	"prospectiveNextOrganizationId",
+	"prospectiveNextRelationshipId",
 ] as const);
 
 /** Bounded structural and cross-field gate used by both Worker entry and main-thread bridge. */
@@ -215,12 +224,15 @@ export function semanticBayPlanShapeError(value: unknown, mode: "compact" | "ful
 		!nonNegativeSafeInteger(value.basePatchSequence) ||
 		!positiveCursor(value.nextOrganizationIdBefore) ||
 		!positiveCursor(value.nextOrganizationIdAfter) ||
+		!positiveCursor(value.nextRelationshipIdBefore) ||
+		value.nextRelationshipIdAfter !== value.nextRelationshipIdBefore ||
 		(value.issueCode !== null && !semanticBayIssueCode(value.issueCode)) ||
 		!Array.isArray(value.mutations) ||
 		!Array.isArray(value.switchMutations) ||
 		!Array.isArray(value.portMutations) ||
 		!Array.isArray(value.equipmentGroupMutations) ||
 		!Array.isArray(value.organizationMutations) ||
+		!Array.isArray(value.relationshipMutations) ||
 		!Array.isArray(value.organizationImpactAuthorizations)
 	) {
 		return "semantic Bay plan scalar fields are malformed";
@@ -254,6 +266,32 @@ export function semanticBayPlanShapeError(value: unknown, mode: "compact" | "ful
 	}
 	const organizationMutationError = organizationMutationsShapeError(value.organizationMutations);
 	if (organizationMutationError) return organizationMutationError;
+	if (value.relationshipMutations.length > 1)
+		return "semantic Bay plan may remove at most one relationship";
+	for (const mutation of value.relationshipMutations) {
+		if (
+			!isRecord(mutation) ||
+			!hasExactKeys(mutation, ["id", "before", "after"]) ||
+			!positiveInt32(mutation.id) ||
+			!isRecord(mutation.before) ||
+			mutation.before.id !== mutation.id ||
+			mutation.after !== null ||
+			review.action !== "DISCONNECT" ||
+			staticFabAssemblyRelationshipStateShapeError({
+				nextRelationshipId: value.nextRelationshipIdBefore,
+				records: [mutation.before],
+			} as unknown as StaticFabAssemblyRelationshipStateV1) !== null ||
+			mutation.before.reviewPolicy !== "REVIEW_REQUIRED" ||
+			mutation.before.hierarchyRole !== "BAY_TO_BANK" ||
+			mutation.before.purpose !== "HIERARCHY_LINK" ||
+			!Array.isArray(mutation.before.participantOrganizationIds) ||
+			!mutation.before.participantOrganizationIds.includes(review.bayOrganizationId) ||
+			mutation.before.parentOrganizationId !== review.bankOrganizationId ||
+			!Array.isArray(mutation.before.managedChildOrganizationIds) ||
+			!sameArray(mutation.before.managedChildOrganizationIds, [review.bayOrganizationId])
+		)
+			return "semantic Bay relationship removal identity is malformed";
+	}
 	if (hasDeletedOrganizationAuthorization(value)) {
 		return "semantic Bay plan authorizes an organization deleted by the same patch";
 	}
@@ -265,6 +303,7 @@ export function semanticBayPlanShapeError(value: unknown, mode: "compact" | "ful
 			value.portMutations.length !== 0 ||
 			value.equipmentGroupMutations.length !== 0 ||
 			value.organizationMutations.length !== 0 ||
+			value.relationshipMutations.length !== 0 ||
 			value.organizationImpactAuthorizations.length !== 0 ||
 			value.nextOrganizationIdAfter !== value.nextOrganizationIdBefore
 		) {
@@ -464,13 +503,15 @@ function semanticBayTicketShapeError(
 		!positiveCursor(ticket.sourceNextPortId) ||
 		!positiveCursor(ticket.sourceNextEquipmentGroupId) ||
 		!positiveCursor(ticket.sourceNextOrganizationId) ||
+		!positiveCursor(ticket.sourceNextRelationshipId) ||
 		!boundedFingerprint(ticket.intentFingerprint) ||
 		!boundedFingerprint(ticket.planFingerprint) ||
 		!boundedFingerprint(ticket.prospectiveChecksum) ||
 		!positiveCursor(ticket.prospectiveNextAdvancedSwitchId) ||
 		!positiveCursor(ticket.prospectiveNextPortId) ||
 		!positiveCursor(ticket.prospectiveNextEquipmentGroupId) ||
-		!positiveCursor(ticket.prospectiveNextOrganizationId)
+		!positiveCursor(ticket.prospectiveNextOrganizationId) ||
+		!positiveCursor(ticket.prospectiveNextRelationshipId)
 	) {
 		return "semantic Bay Worker ticket values are malformed";
 	}
@@ -478,6 +519,9 @@ function semanticBayTicketShapeError(
 		ticket.sourcePatchSequence === plan.basePatchSequence &&
 		ticket.sourceNextOrganizationId === plan.nextOrganizationIdBefore &&
 		ticket.prospectiveNextOrganizationId === plan.nextOrganizationIdAfter &&
+		ticket.sourceNextRelationshipId === plan.nextRelationshipIdBefore &&
+		ticket.prospectiveNextRelationshipId === plan.nextRelationshipIdAfter &&
+		ticket.sourceNextRelationshipId === ticket.prospectiveNextRelationshipId &&
 		ticket.sourceNextAdvancedSwitchId === ticket.prospectiveNextAdvancedSwitchId &&
 		ticket.sourceNextPortId === ticket.prospectiveNextPortId &&
 		ticket.sourceNextEquipmentGroupId === ticket.prospectiveNextEquipmentGroupId &&
@@ -745,6 +789,7 @@ function semanticBayIssueCode(value: unknown): value is StaticFabSemanticBayMuta
 		value === "CONNECTOR_NOT_RECOGNIZED" ||
 		value === "AMBIGUOUS_CONNECTOR" ||
 		value === "SHARED_CONNECTOR_OWNERSHIP" ||
+		value === "RELATIONSHIP_NOT_DETACHABLE" ||
 		value === "CONNECTOR_EQUIPMENT_DEPENDENCY" ||
 		value === "PARTIAL_EQUIPMENT_GROUP" ||
 		value === "LEGACY_CUSTOM_EQUIPMENT" ||

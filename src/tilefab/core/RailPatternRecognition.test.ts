@@ -4,19 +4,19 @@ import { createRailAreaSelection, type RailAreaSelection } from "./RailAreaSelec
 import { RailDocument } from "./RailDocument";
 import { buildRailModuleOwnershipIndex } from "./RailModuleOwnership";
 import { recognizeRailPattern } from "./RailPatternRecognition";
-import { DIR_E, DIR_N, DIR_S, DIR_W } from "./railShape";
 import {
 	defaultRailTemplateParameters,
 	initialRailTemplatePose,
 	planRailTemplate,
-	reverseRailTemplateFlow,
-	rotateRailTemplatePose,
-	setRailTemplateParameter,
 	type RailTemplateId,
 	type RailTemplateParameters,
 	type RailTemplatePlan,
 	type RailTemplatePose,
+	reverseRailTemplateFlow,
+	rotateRailTemplatePose,
+	setRailTemplateParameter,
 } from "./RailTemplateCatalog";
+import { DIR_E, DIR_N, DIR_S, DIR_W } from "./railShape";
 import type { Cell } from "./TileMap";
 
 describe("RailPatternRecognition", () => {
@@ -118,23 +118,23 @@ describe("RailPatternRecognition", () => {
 		["attached-return", attachedParameters("attached-return", 4, 10)],
 		["branch-bypass", attachedParameters("branch-bypass", 20, 6)],
 		["outerbay-link", attachedParameters("outerbay-link", 20, 24)],
-	] satisfies readonly [RailTemplateId, RailTemplateParameters][])(
-		"recognizes the selected %s delta while proving its unselected parent trunk",
-		(templateId, parameters) => {
-			const { document, plan } = documentWithAttachedTemplate(templateId, parameters);
-			const selection = selectionForAttachedPlan(document, plan);
-			const recognition = recognizeRailPattern(
-				selection,
-				document.map,
-				buildRailModuleOwnershipIndex(document.map),
-			);
+	] satisfies readonly [
+		RailTemplateId,
+		RailTemplateParameters,
+	][])("recognizes the selected %s delta while proving its unselected parent trunk", (templateId, parameters) => {
+		const { document, plan } = documentWithAttachedTemplate(templateId, parameters);
+		const selection = selectionForAttachedPlan(document, plan);
+		const recognition = recognizeRailPattern(
+			selection,
+			document.map,
+			buildRailModuleOwnershipIndex(document.map),
+		);
 
-			expect(recognition.state, recognition.reason).toBe("recognized");
-			expect(recognition.candidates).toHaveLength(1);
-			expect(recognition.candidates[0]).toMatchObject({ templateId, parameters });
-			expect(recognition.reason).toMatch(/본선 X\+.*LEFT 결합/);
-		},
-	);
+		expect(recognition.state, recognition.reason).toBe("recognized");
+		expect(recognition.candidates).toHaveLength(1);
+		expect(recognition.candidates[0]).toMatchObject({ templateId, parameters });
+		expect(recognition.reason).toMatch(/본선 X\+.*LEFT 결합/);
+	});
 
 	it("keeps overlapping attached geometries explicit as catalog ambiguity", () => {
 		const parameters = attachedParameters("branch-bypass", 10, 4);
@@ -235,14 +235,13 @@ describe("RailPatternRecognition", () => {
 					ownership.kind === "straight" &&
 					ownership.eraseEdges.every((edge) => edge.from.y === 0 && edge.to.y === 0),
 			),
-		).toBe(
-			true,
-		);
+		).toBe(true);
 
 		const recognition = recognizeRailPattern(selection, document.map, index);
-		expect(recognition.state, `${recognition.reason}\n${selection.ownerships.map((o) => o.key)}`).toBe(
-			"recognized",
-		);
+		expect(
+			recognition.state,
+			`${recognition.reason}\n${selection.ownerships.map((o) => o.key)}`,
+		).toBe("recognized");
 		expect(recognition.candidates[0]).toMatchObject({
 			templateId: "attached-return",
 			scope: "attached-delta",
@@ -255,31 +254,32 @@ describe("RailPatternRecognition", () => {
 		[{ x: 72, y: 20 }, { forward: DIR_W, side: "left", flow: "forward" }, "X-"],
 		[{ x: 0, y: 16 }, { forward: DIR_N, side: "left", flow: "forward" }, "Z-"],
 		[{ x: 60, y: 20 }, { forward: DIR_E, side: "right", flow: "reverse" }, "X-"],
-	] satisfies readonly [Cell, RailTemplatePose, string][])(
-		"recognizes attached geometry at $2.forward with $2.flow flow",
-		(anchor, pose, directionLabel) => {
-			const parameters = attachedParameters("attached-return", 4, 10);
-			const { document, plan } = documentWithAttachedTemplate(
-				"attached-return",
-				parameters,
-				anchor,
-				pose,
-			);
-			const index = buildRailModuleOwnershipIndex(document.map);
-			const recognition = recognizeRailPattern(
-				selectionForAttachedPlan(document, plan),
-				document.map,
-				index,
-			);
+	] satisfies readonly [
+		Cell,
+		RailTemplatePose,
+		string,
+	][])("recognizes attached geometry at $2.forward with $2.flow flow", (anchor, pose, directionLabel) => {
+		const parameters = attachedParameters("attached-return", 4, 10);
+		const { document, plan } = documentWithAttachedTemplate(
+			"attached-return",
+			parameters,
+			anchor,
+			pose,
+		);
+		const index = buildRailModuleOwnershipIndex(document.map);
+		const recognition = recognizeRailPattern(
+			selectionForAttachedPlan(document, plan),
+			document.map,
+			index,
+		);
 
-			expect(recognition.state, recognition.reason).toBe("recognized");
-			expect(recognition.reason).toContain(`본선 ${directionLabel}`);
-			expect(recognition.candidates[0]).toMatchObject({
-				templateId: "attached-return",
-				scope: "attached-delta",
-			});
-		},
-	);
+		expect(recognition.state, recognition.reason).toBe("recognized");
+		expect(recognition.reason).toContain(`본선 ${directionLabel}`);
+		expect(recognition.candidates[0]).toMatchObject({
+			templateId: "attached-return",
+			scope: "attached-delta",
+		});
+	});
 
 	it("rejects a parallel or unrelated selected rail as attached-pattern context", () => {
 		const parameters = attachedParameters("attached-return", 4, 10);
@@ -353,13 +353,7 @@ function documentWithAttachedTemplate(
 	expect(starter.valid, starter.reason).toBe(true);
 	expect(document.commit(starter)).toBe(true);
 
-	const plan = planRailTemplate(
-		document.map,
-		templateId,
-		anchor,
-		pose,
-		parameters,
-	);
+	const plan = planRailTemplate(document.map, templateId, anchor, pose, parameters);
 	expect(plan.valid, plan.reason).toBe(true);
 	expect(document.commit(plan)).toBe(true);
 	return { document, plan };
@@ -412,19 +406,9 @@ function attachedParameters(
 			"laneSpacingMeters",
 			forwardExtent,
 		);
-		return setRailTemplateParameter(
-			templateId,
-			parameters,
-			"runLengthMeters",
-			lateralExtent,
-		);
+		return setRailTemplateParameter(templateId, parameters, "runLengthMeters", lateralExtent);
 	}
-	parameters = setRailTemplateParameter(
-		templateId,
-		parameters,
-		"trunkSpanMeters",
-		forwardExtent,
-	);
+	parameters = setRailTemplateParameter(templateId, parameters, "trunkSpanMeters", forwardExtent);
 	return setRailTemplateParameter(templateId, parameters, "offsetMeters", lateralExtent);
 }
 

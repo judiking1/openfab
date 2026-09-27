@@ -17,6 +17,7 @@ import {
 	OPENFAB_USER_BLUEPRINT_RESTORE_GENERATED_ID_LENGTH,
 	openFabUserBlueprintRecordsEqual,
 	parseOpenFabUserBlueprintLibraryBundleJson,
+	parseOpenFabUserBlueprintLibraryBundleValue,
 	planOpenFabUserBlueprintLibraryRestore,
 	previewOpenFabUserBlueprintLibraryRestorePlan,
 	serializeOpenFabUserBlueprintLibraryBundle,
@@ -80,6 +81,26 @@ describe("OpenFabUserBlueprintLibraryBundle", () => {
 		const blueprint = records[0]?.blueprint as Record<string, unknown>;
 		blueprint.name = "Tampered";
 		expectBundleError({ ...source, records }, "$.fingerprint");
+	});
+
+	it("requires library manifest fields to be owned by the bundle", () => {
+		const source = JSON.parse(
+			serializeOpenFabUserBlueprintLibraryBundle(
+				createOpenFabUserBlueprintLibraryBundle(
+					[createRecord("record-a", "Bay A")],
+					"2026-08-03T00:00:00.000Z",
+				),
+			),
+		) as Record<string, unknown>;
+		const inherited = Object.assign(
+			Object.create({ recordCount: source.recordCount }) as Record<string, unknown>,
+			source,
+		);
+		delete inherited.recordCount;
+
+		expect(() => parseOpenFabUserBlueprintLibraryBundleValue(inherited)).toThrow(
+			expect.objectContaining({ code: "INVALID_FIELD", path: "$.recordCount" }),
+		);
 	});
 
 	it("validates whole-library id, folder/name, quick-slot, and aggregate constraints", () => {

@@ -26,6 +26,10 @@ import {
 	simulationRuntimePresentationMatchesPublication,
 } from "../render/SimulationRuntimePresentation";
 import {
+	DEFAULT_STATIC_FAB_INSPECTION_3D_VISIBILITY,
+	type StaticFabInspection3DVisibility,
+} from "./StaticFabInspection3DVisibility";
+import {
 	bounds3DFromArray,
 	fitStaticFabInspectionCamera,
 	type StaticFabInspectionBounds3D,
@@ -39,6 +43,11 @@ import {
 	staticFabInspectionEquipmentOpeningCenterY,
 	staticFabInspectionEquipmentPickHeight,
 } from "./StaticFabInspectionSceneBounds";
+
+export {
+	DEFAULT_STATIC_FAB_INSPECTION_3D_VISIBILITY,
+	type StaticFabInspection3DVisibility,
+} from "./StaticFabInspection3DVisibility";
 
 export interface StaticFabInspectionSurfaceBuffer {
 	readonly positions: Float32Array;
@@ -92,12 +101,6 @@ export interface StaticFabInspectionAdvancedSwitchInstanceBuffer
 	readonly pathRows: Uint32Array;
 	readonly switchIds: Uint32Array;
 	readonly profileClasses: Uint8Array;
-}
-
-export interface StaticFabInspection3DVisibility {
-	readonly rail: boolean;
-	readonly switches: boolean;
-	readonly equipment: boolean;
 }
 
 export interface StaticFabInspection3DSceneCallbacks {
@@ -194,9 +197,6 @@ const EMPTY_SELECTION: StaticFabInspection3DSceneSelection = Object.freeze({
 	portId: null,
 	equipmentGroupId: null,
 });
-export const DEFAULT_STATIC_FAB_INSPECTION_3D_VISIBILITY: StaticFabInspection3DVisibility =
-	Object.freeze({ rail: true, switches: true, equipment: true });
-
 interface StaticFabInspectionResidentRailChunk {
 	readonly row: number;
 	readonly group: THREE.Group;

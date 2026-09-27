@@ -19,7 +19,10 @@ import {
 	preparedSyntheticFabStarterMatchesRequest,
 	preparedSyntheticFabStarterMaterializationFingerprint,
 } from "./SyntheticFabStarterBridge";
-import { freezeSyntheticFabStarterContainers } from "./SyntheticFabStarterContainers";
+import {
+	freezeSyntheticFabStarterContainers,
+	freezeSyntheticFabStarterContainersCooperatively,
+} from "./SyntheticFabStarterContainers";
 
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_SCHEMA_VERSION = 8 as const;
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID = "large-fab-60.default.v8" as const;
@@ -493,6 +496,8 @@ export function rebindSyntheticFabStarterCertificationEvidence(
 ): HydratedCertifiedSyntheticFabStarter | null {
 	try {
 		const attestation = validateTransferredCertificationPrelude(prepared, value, request);
+		freezeSyntheticFabStarterContainers(prepared);
+		assertTransferredMaterialization(prepared, attestation);
 		if (preparedTypedArrayFingerprint(prepared) !== attestation.transferredTypedArrayFingerprint) {
 			throw new Error("Transferred certified starter typed buffers do not match.");
 		}
@@ -510,7 +515,13 @@ export async function rebindSyntheticFabStarterCertificationEvidenceCooperativel
 	checkpoint: () => Promise<void>,
 ): Promise<HydratedCertifiedSyntheticFabStarter | null> {
 	try {
-		const attestation = validateTransferredCertificationPrelude(prepared, value, request);
+		const attestation = Object.freeze({
+			...validateTransferredCertificationPrelude(prepared, value, request),
+		});
+		await freezeSyntheticFabStarterContainersCooperatively(prepared, checkpoint);
+		// Nested view references were mutable until the cooperative freeze reached them.
+		assertTransferredPreparedBuffers(prepared, attestation.typedArrayByteLength);
+		assertTransferredMaterialization(prepared, attestation);
 		if (
 			(await preparedTypedArrayFingerprintCooperatively(prepared, checkpoint)) !==
 			attestation.transferredTypedArrayFingerprint
@@ -551,7 +562,13 @@ function validateTransferredCertificationPrelude(
 		throw new Error("Transferred certified starter attestation checksum does not match.");
 	}
 	assertTransferredPreparedBuffers(prepared, attestation.typedArrayByteLength);
-	freezeSyntheticFabStarterContainers(prepared);
+	return attestation;
+}
+
+function assertTransferredMaterialization(
+	prepared: PreparedSyntheticFabStarter,
+	attestation: SyntheticFabStarterCertificationAttestation,
+): void {
 	// The disposable same-origin Worker already performed strict shape, request, topology,
 	// organization, and certification-contract validation before transferring this graph. The main
 	// realm validates buffer ownership and identity without repeating those full domain walks.
@@ -561,7 +578,6 @@ function validateTransferredCertificationPrelude(
 	) {
 		throw new Error("Transferred certified starter materialization does not match.");
 	}
-	return attestation;
 }
 
 function bindTransferredCertificationEvidence(

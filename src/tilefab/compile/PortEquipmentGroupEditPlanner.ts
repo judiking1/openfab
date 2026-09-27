@@ -1,7 +1,7 @@
 import {
 	applyPortEquipmentMutations,
-	equipmentGroupEquals,
 	type EquipmentGroupRecord,
+	equipmentGroupEquals,
 	type PortEquipmentState,
 } from "../core/EquipmentGroup";
 import {
@@ -9,6 +9,7 @@ import {
 	copyEquipmentGroupWithPortIds,
 	equipmentGroupPortBarcode,
 } from "../core/EquipmentGroupPortOrder";
+import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
 import { assertPortEquipmentLayout } from "../core/PortEquipmentLayoutValidator";
 import {
 	createInvalidPortEquipmentMutationPlan,
@@ -16,8 +17,7 @@ import {
 	type PortEquipmentMutationPlan,
 	type PortEquipmentPlanKind,
 } from "../core/PortEquipmentPlan";
-import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
-import { PORT_SIDES, portRecordEquals, type PortRecord, type PortSide } from "../core/PortRecord";
+import { PORT_SIDES, type PortRecord, type PortSide, portRecordEquals } from "../core/PortRecord";
 import {
 	DIR_E,
 	DIR_N,

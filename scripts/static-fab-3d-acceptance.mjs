@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const artifactRoot = path.join(root, "artifacts", "static-fab-3d");
+const artifactRoot = path.resolve(
+	process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR ?? path.join(root, "artifacts", "static-fab-3d"),
+);
 const port = Number(process.env.OPENFAB_3D_PORT ?? 5300 + (process.pid % 503));
 const host = "127.0.0.1";
 const baseUrl = `http://${host}:${port}`;

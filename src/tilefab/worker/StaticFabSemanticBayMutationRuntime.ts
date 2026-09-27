@@ -13,6 +13,11 @@ import {
 import { analyzeRailNetwork } from "../core/network";
 import { portEquipmentLayoutError } from "../core/PortEquipmentLayoutValidator";
 import {
+	applyStaticFabAssemblyRelationshipMutations,
+	type StaticFabAssemblyRelationshipStateV1,
+	staticFabAssemblyRelationshipStateSourceError,
+} from "../core/StaticFabAssemblyRelationship";
+import {
 	applyStaticFabOrganizationMutations,
 	reverseStaticFabOrganizationMutations,
 	type StaticFabOrganizationState,
@@ -188,6 +193,7 @@ export function prepareStaticFabSemanticBayMutationInSession(
 		source.getPatchSequence(),
 		source.organizations,
 		request.intent,
+		source.relationships,
 	);
 	const plan = planning.plan;
 	const planningMilliseconds = elapsed(now, planningStartedAt);
@@ -207,7 +213,9 @@ export function prepareStaticFabSemanticBayMutationInSession(
 		plan.baseRevision !== sourceIdentity.revision ||
 		plan.basePatchSequence !== sourceIdentity.patchSequence ||
 		plan.nextOrganizationIdBefore !== sourceIdentity.nextOrganizationId ||
-		plan.nextOrganizationIdAfter !== sourceIdentity.nextOrganizationId
+		plan.nextOrganizationIdAfter !== sourceIdentity.nextOrganizationId ||
+		plan.nextRelationshipIdBefore !== sourceIdentity.nextRelationshipId ||
+		plan.nextRelationshipIdAfter !== sourceIdentity.nextRelationshipId
 	) {
 		const compact = compactPlan(plan);
 		return rejected(
@@ -250,6 +258,7 @@ export function prepareStaticFabSemanticBayMutationInSession(
 	let prospectiveMap: TileMap;
 	let prospectiveEquipment: PortEquipmentState;
 	let prospectiveOrganizations: typeof source.organizations;
+	let prospectiveRelationships: StaticFabAssemblyRelationshipStateV1;
 	try {
 		prospectiveMap = source.map.clone();
 		if (!prospectiveMap.applyAtomicMutations(plan.mutations, plan.switchMutations)) {
@@ -275,6 +284,17 @@ export function prepareStaticFabSemanticBayMutationInSession(
 			prospectiveOrganizations,
 		);
 		if (organizationIssue) throw new Error(organizationIssue);
+		prospectiveRelationships = applyStaticFabAssemblyRelationshipMutations(
+			source.relationships,
+			plan.relationshipMutations,
+			plan.nextRelationshipIdAfter,
+		);
+		const relationshipIssue = staticFabAssemblyRelationshipStateSourceError(
+			prospectiveMap,
+			prospectiveOrganizations,
+			prospectiveRelationships,
+		);
+		if (relationshipIssue) throw new Error(relationshipIssue);
 		assertOrganizationImpactSymmetry(
 			source.portEquipment,
 			source.organizations,
@@ -339,13 +359,13 @@ export function prepareStaticFabSemanticBayMutationInSession(
 			prospectiveMap,
 			prospectiveEquipment,
 			prospectiveOrganizations,
-			source.relationships,
+			prospectiveRelationships,
 		);
 		const plannerProspectiveChecksum = checksumRailMap(
 			planning.prospectiveState.map,
 			planning.prospectiveState.portEquipment,
 			planning.prospectiveState.organizations,
-			source.relationships,
+			planning.prospectiveState.relationships,
 		);
 		const incrementalChecksum = checksumRailPatchResult(sourceIdentity.checksum, {
 			changes: plan.mutations,
@@ -355,6 +375,9 @@ export function prepareStaticFabSemanticBayMutationInSession(
 			organizationChanges: plan.organizationMutations,
 			organizationNextIdBefore: plan.nextOrganizationIdBefore,
 			organizationNextIdAfter: plan.nextOrganizationIdAfter,
+			relationshipChanges: plan.relationshipMutations,
+			relationshipNextIdBefore: plan.nextRelationshipIdBefore,
+			relationshipNextIdAfter: plan.nextRelationshipIdAfter,
 		});
 		if (
 			prospectiveChecksum !== plannerProspectiveChecksum ||
@@ -366,7 +389,8 @@ export function prepareStaticFabSemanticBayMutationInSession(
 			prospectiveMap.getAdvancedSwitchIdCursor() !== sourceIdentity.nextAdvancedSwitchId ||
 			prospectiveEquipment.nextPortId !== sourceIdentity.nextPortId ||
 			prospectiveEquipment.nextEquipmentGroupId !== sourceIdentity.nextEquipmentGroupId ||
-			prospectiveOrganizations.nextOrganizationId !== sourceIdentity.nextOrganizationId
+			prospectiveOrganizations.nextOrganizationId !== sourceIdentity.nextOrganizationId ||
+			prospectiveRelationships.nextRelationshipId !== sourceIdentity.nextRelationshipId
 		) {
 			throw new Error("Semantic Bay mutation changed a monotonic identity cursor.");
 		}
@@ -383,6 +407,7 @@ export function prepareStaticFabSemanticBayMutationInSession(
 				sourceNextPortId: sourceIdentity.nextPortId,
 				sourceNextEquipmentGroupId: sourceIdentity.nextEquipmentGroupId,
 				sourceNextOrganizationId: sourceIdentity.nextOrganizationId,
+				sourceNextRelationshipId: sourceIdentity.nextRelationshipId,
 				intentFingerprint,
 				planFingerprint: staticFabSemanticBayMutationPlanFingerprint(plan),
 				prospectiveChecksum,
@@ -390,6 +415,7 @@ export function prepareStaticFabSemanticBayMutationInSession(
 				prospectiveNextPortId: prospectiveEquipment.nextPortId,
 				prospectiveNextEquipmentGroupId: prospectiveEquipment.nextEquipmentGroupId,
 				prospectiveNextOrganizationId: prospectiveOrganizations.nextOrganizationId,
+				prospectiveNextRelationshipId: prospectiveRelationships.nextRelationshipId,
 			}),
 			sourceEvidence,
 			prospectiveEvidence,
@@ -731,8 +757,10 @@ function compactPlan(plan: StaticFabSemanticBayMutationPlan): StaticFabSemanticB
 		portMutations: Object.freeze([]),
 		equipmentGroupMutations: Object.freeze([]),
 		organizationMutations: Object.freeze([]),
+		relationshipMutations: Object.freeze([]),
 		organizationImpactAuthorizations: Object.freeze([]),
 		nextOrganizationIdAfter: plan.nextOrganizationIdBefore,
+		nextRelationshipIdAfter: plan.nextRelationshipIdBefore,
 		valid: false,
 		review,
 	});
@@ -804,6 +832,7 @@ function sourceIdentityFromSnapshot(
 		nextPortId: snapshot.portEquipment.nextPortId,
 		nextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 		nextOrganizationId: snapshot.organizations.nextOrganizationId,
+		nextRelationshipId: snapshot.relationships.nextRelationshipId,
 	});
 }
 
@@ -819,7 +848,8 @@ function sourceIdentitiesEqual(
 		left.nextAdvancedSwitchId === right.nextAdvancedSwitchId &&
 		left.nextPortId === right.nextPortId &&
 		left.nextEquipmentGroupId === right.nextEquipmentGroupId &&
-		left.nextOrganizationId === right.nextOrganizationId
+		left.nextOrganizationId === right.nextOrganizationId &&
+		left.nextRelationshipId === right.nextRelationshipId
 	);
 }
 

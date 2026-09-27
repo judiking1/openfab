@@ -1,8 +1,8 @@
-import { PATH_KIND, type CompiledPhysicalPaths } from "./PhysicalPathCompiler";
+import { type CompiledPhysicalPaths, PATH_KIND } from "./PhysicalPathCompiler";
 import { buildPhysicalPathAdjacency } from "./PhysicalPathFlow";
 import {
-	PHYSICAL_PATH_IDENTITY_WIDTH,
 	comparePhysicalPathIdentity,
+	PHYSICAL_PATH_IDENTITY_WIDTH,
 	physicalPathIdentity,
 } from "./PhysicalPathIdentity";
 

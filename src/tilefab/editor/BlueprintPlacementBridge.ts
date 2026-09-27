@@ -1,5 +1,5 @@
-import type { StaticFabBlueprintTemplate } from "../core/StaticFabBlueprint";
 import type { RailAreaStampPose, RailAreaStampTemplate } from "../core/RailAreaStamp";
+import type { StaticFabBlueprintTemplate } from "../core/StaticFabBlueprint";
 import type { Cell } from "../core/TileMap";
 import type {
 	BlueprintPlacementWorkerRequest,
@@ -83,9 +83,7 @@ export class BlueprintPlacementBridge {
 				this.reject = null;
 				this.releaseWorker();
 				rejectTimeout?.(
-					new Error(
-						`Blueprint placement Worker timed out after ${this.timeoutMilliseconds} ms.`,
-					),
+					new Error(`Blueprint placement Worker timed out after ${this.timeoutMilliseconds} ms.`),
 				);
 			}, this.timeoutMilliseconds);
 			try {

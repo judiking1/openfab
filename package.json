@@ -1,7 +1,7 @@
 {
 	"name": "openfab-builder",
 	"private": true,
-	"version": "0.1.12",
+	"version": "0.1.13",
 	"license": "Apache-2.0",
 	"packageManager": "pnpm@10.33.0",
 	"engines": {
@@ -16,7 +16,7 @@
 		"build": "tsc -b && vite build",
 		"prebuild:public-bundle": "npm run check:certified-presets",
 		"build:public-bundle": "tsc -b && vite build --manifest",
-		"check:public-bundle": "npm run build:public-bundle && node scripts/openfab-public-bundle-audit.mjs",
+		"check:public-bundle": "npm run build:public-bundle && node --test scripts/openfab-public-bundle-audit.cases.mjs && node scripts/openfab-public-bundle-audit.mjs",
 		"prebuild:authoring": "npm run check:certified-presets",
 		"build:authoring": "tsc -b && VITE_OPENFAB_FILE_FALLBACK=1 vite build --mode authoring",
 		"prebuild:project": "npm run check:certified-presets",

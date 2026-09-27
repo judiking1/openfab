@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PortEquipmentState } from "../core/EquipmentGroup";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
+import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import {
 	planCopyOhbToSlot,
 	planEraseEquipmentGroup,
@@ -9,7 +10,6 @@ import {
 	resolvePortEquipmentSelection,
 } from "./PortEquipmentEditPlanner";
 import { planOhbPlacement } from "./PortPlacementPlanner";
-import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { compilePortSlots, PORT_SLOT_STATUS, PortSlotAvailabilityIndex } from "./PortSlotCompiler";
 
 describe("PortEquipmentEditPlanner", () => {
@@ -46,7 +46,9 @@ describe("PortEquipmentEditPlanner", () => {
 		expect(fixture.document.undo()).toBe(true);
 		expect(fixture.document.portEquipment.ports[0]).toEqual(before);
 		expect(fixture.document.redo()).toBe(true);
-		expect(fixture.document.portEquipment.ports[0]?.route).toEqual(plan.portMutations[0]?.after?.route);
+		expect(fixture.document.portEquipment.ports[0]?.route).toEqual(
+			plan.portMutations[0]?.after?.route,
+		);
 	});
 
 	it("copies an OHB with new monotonic IDs and one Worker-visible command", () => {
@@ -163,9 +165,7 @@ describe("PortEquipmentEditPlanner", () => {
 		const nonOhbState: PortEquipmentState = {
 			...fixture.document.portEquipment,
 			ports: [{ ...sourcePort, portType: "EQ" }],
-			equipmentGroups: [
-				{ id: 1, kind: "EQ", portIds: [1], pitchMillimeters: 1_000, recipe: null },
-			],
+			equipmentGroups: [{ id: 1, kind: "EQ", portIds: [1], pitchMillimeters: 1_000, recipe: null }],
 		};
 		expect(
 			planMoveOhbToSlot(

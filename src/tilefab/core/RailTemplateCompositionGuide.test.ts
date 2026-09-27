@@ -34,10 +34,12 @@ describe("RailTemplateCompositionGuide", () => {
 		).toEqual([24, 6, 24, 6]);
 
 		const shift = instantiateRailTemplate("shift-bay", defaultRailTemplateParameters("shift-bay"));
-		expect(shift.compositionConnectors.filter((connector) => connector.kind === "route-reuse"))
-			.toHaveLength(1);
-		expect(shift.compositionConnectors.filter((connector) => connector.kind === "shared-trunk"))
-			.toHaveLength(6);
+		expect(
+			shift.compositionConnectors.filter((connector) => connector.kind === "route-reuse"),
+		).toHaveLength(1);
+		expect(
+			shift.compositionConnectors.filter((connector) => connector.kind === "shared-trunk"),
+		).toHaveLength(6);
 		for (const connector of [...long.compositionConnectors, ...shift.compositionConnectors]) {
 			expect(Object.isFrozen(connector)).toBe(true);
 		}
@@ -87,12 +89,7 @@ describe("RailTemplateCompositionGuide", () => {
 		expect(document.commit(outer)).toBe(true);
 
 		const parameters = defaultRailTemplateParameters("long-bay");
-		const guide = deriveRailTemplateCompositionGuide(
-			document.map,
-			"long-bay",
-			pose,
-			parameters,
-		);
+		const guide = deriveRailTemplateCompositionGuide(document.map, "long-bay", pose, parameters);
 		expect(guide.linearRunCount).toBe(4);
 		expect(guide.intervals.length).toBeGreaterThanOrEqual(1);
 		expect(guide.candidateAnchorCount).toBeGreaterThan(0);

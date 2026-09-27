@@ -104,8 +104,10 @@ prohibited.
 ## License and release status
 
 Copyright 2026 이원배. OpenFab is available under the
-[Apache License, Version 2.0](./LICENSE). The clean public preview is `v0.1.0`; do not represent it
-as OpenFab `v1.0.0` until the exact public commit and deployed demo pass the final release audit.
+[Apache License, Version 2.0](./LICENSE). OpenFab Builder remains in the `0.1.x` preview line;
+the current source version is defined in `package.json` and displayed in the editor footer.
+Do not represent it as OpenFab `v1.0.0` until the complete V1 authoring gate and exact public
+release audit pass.
 
 See [Contributing](./CONTRIBUTING.md), [Security](./SECURITY.md),
 [Changelog](./CHANGELOG.md), [Notice](./NOTICE), and

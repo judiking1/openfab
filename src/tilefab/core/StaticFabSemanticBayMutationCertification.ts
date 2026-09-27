@@ -12,14 +12,22 @@ import {
 import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
 import { copyPortRecord, type PortMutation, type PortRecord } from "./PortRecord";
 import {
+	checksumStaticFabAssemblyRelationshipRecord,
+	copyStaticFabAssemblyRelationshipRecord,
+	type StaticFabAssemblyRelationshipStateV1,
+	staticFabAssemblyRelationshipRecordEquals,
+} from "./StaticFabAssemblyRelationship";
+import {
 	copyStaticFabOrganizationRecord,
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
+	staticFabOrganizationEdgeKey,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
 } from "./StaticFabOrganization";
 import {
+	expectedStaticFabDeclaredBayDisconnectRailMutations,
 	STATIC_FAB_SEMANTIC_BAY_DELETE_KIND,
 	STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND,
 	type StaticFabSemanticBayMutationIntent,
@@ -39,6 +47,7 @@ export interface StaticFabSemanticBayMutationWorkerTicket {
 	readonly sourceNextPortId: number;
 	readonly sourceNextEquipmentGroupId: number;
 	readonly sourceNextOrganizationId: number;
+	readonly sourceNextRelationshipId: number;
 	readonly intentFingerprint: string;
 	readonly planFingerprint: string;
 	readonly prospectiveChecksum: string;
@@ -46,6 +55,7 @@ export interface StaticFabSemanticBayMutationWorkerTicket {
 	readonly prospectiveNextPortId: number;
 	readonly prospectiveNextEquipmentGroupId: number;
 	readonly prospectiveNextOrganizationId: number;
+	readonly prospectiveNextRelationshipId: number;
 }
 
 /** Opaque main-realm authority for one source-bound disposable Worker request. */
@@ -57,7 +67,9 @@ interface SemanticBayMutationSource {
 	readonly map: TileMap;
 	readonly portEquipment: PortEquipmentState;
 	readonly organizations: StaticFabOrganizationState;
+	readonly relationships: StaticFabAssemblyRelationshipStateV1;
 	readonly sourceChecksum: string;
+	readonly sourceMapMutationGeneration: number;
 }
 
 interface SemanticBayMutationPermitSource extends SemanticBayMutationSource {
@@ -67,6 +79,7 @@ interface SemanticBayMutationPermitSource extends SemanticBayMutationSource {
 	readonly sourceNextPortId: number;
 	readonly sourceNextEquipmentGroupId: number;
 	readonly sourceNextOrganizationId: number;
+	readonly sourceNextRelationshipId: number;
 	readonly intentFingerprint: string;
 }
 
@@ -96,6 +109,7 @@ export function issueStaticFabSemanticBayMutationPermit(
 	organizations: StaticFabOrganizationState,
 	intent: StaticFabSemanticBayMutationIntent,
 	sourceChecksum: string,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): StaticFabSemanticBayMutationPermit {
 	if (!Number.isSafeInteger(patchSequence) || patchSequence < 0) {
 		throw new RangeError("Semantic Bay mutation patch sequence is invalid.");
@@ -113,13 +127,16 @@ export function issueStaticFabSemanticBayMutationPermit(
 			map,
 			portEquipment,
 			organizations,
+			relationships,
 			sourceChecksum,
+			sourceMapMutationGeneration: map.getMutationGeneration(),
 			baseRevision: map.getRevision(),
 			basePatchSequence: patchSequence,
 			sourceNextAdvancedSwitchId: map.getAdvancedSwitchIdCursor(),
 			sourceNextPortId: portEquipment.nextPortId,
 			sourceNextEquipmentGroupId: portEquipment.nextEquipmentGroupId,
 			sourceNextOrganizationId: organizations.nextOrganizationId,
+			sourceNextRelationshipId: relationships.nextRelationshipId,
 			intentFingerprint: staticFabSemanticBayMutationIntentFingerprint(intent),
 		}),
 	);
@@ -143,6 +160,7 @@ export function adoptStaticFabSemanticBayMutationWorkerPlan(
 	patchSequence: number,
 	organizations: StaticFabOrganizationState,
 	intent: StaticFabSemanticBayMutationIntent,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): StaticFabSemanticBayMutationPlan {
 	const source = pendingPermits.get(permit);
 	pendingPermits.delete(permit);
@@ -152,12 +170,15 @@ export function adoptStaticFabSemanticBayMutationWorkerPlan(
 		source.map !== map ||
 		source.portEquipment !== portEquipment ||
 		source.organizations !== organizations ||
+		source.relationships !== relationships ||
 		source.baseRevision !== map.getRevision() ||
+		source.sourceMapMutationGeneration !== map.getMutationGeneration() ||
 		source.basePatchSequence !== patchSequence ||
 		source.sourceNextAdvancedSwitchId !== map.getAdvancedSwitchIdCursor() ||
 		source.sourceNextPortId !== portEquipment.nextPortId ||
 		source.sourceNextEquipmentGroupId !== portEquipment.nextEquipmentGroupId ||
 		source.sourceNextOrganizationId !== organizations.nextOrganizationId ||
+		source.sourceNextRelationshipId !== relationships.nextRelationshipId ||
 		source.intentFingerprint !== intentFingerprint
 	) {
 		throw new Error("Semantic Bay mutation permit no longer matches the live document.");
@@ -172,11 +193,13 @@ export function adoptStaticFabSemanticBayMutationWorkerPlan(
 		ticket.sourceNextPortId !== source.sourceNextPortId ||
 		ticket.sourceNextEquipmentGroupId !== source.sourceNextEquipmentGroupId ||
 		ticket.sourceNextOrganizationId !== source.sourceNextOrganizationId ||
+		ticket.sourceNextRelationshipId !== source.sourceNextRelationshipId ||
 		ticket.intentFingerprint !== intentFingerprint ||
 		ticket.prospectiveNextAdvancedSwitchId !== source.sourceNextAdvancedSwitchId ||
 		ticket.prospectiveNextPortId !== source.sourceNextPortId ||
 		ticket.prospectiveNextEquipmentGroupId !== source.sourceNextEquipmentGroupId ||
 		ticket.prospectiveNextOrganizationId !== source.sourceNextOrganizationId ||
+		ticket.prospectiveNextRelationshipId !== source.sourceNextRelationshipId ||
 		typeof expectedProspectiveChecksum !== "string" ||
 		expectedProspectiveChecksum.length === 0 ||
 		ticket.prospectiveChecksum !== expectedProspectiveChecksum
@@ -194,6 +217,8 @@ export function adoptStaticFabSemanticBayMutationWorkerPlan(
 		workerPlan.basePatchSequence !== source.basePatchSequence ||
 		workerPlan.nextOrganizationIdBefore !== source.sourceNextOrganizationId ||
 		workerPlan.nextOrganizationIdAfter !== source.sourceNextOrganizationId ||
+		workerPlan.nextRelationshipIdBefore !== source.sourceNextRelationshipId ||
+		workerPlan.nextRelationshipIdAfter !== source.sourceNextRelationshipId ||
 		workerPlan.issueCode !== null ||
 		workerPlan.review.action !== intent.action ||
 		workerPlan.review.bayOrganizationId !== intent.bayOrganizationId ||
@@ -202,6 +227,86 @@ export function adoptStaticFabSemanticBayMutationWorkerPlan(
 		hasDeletedOrganizationAuthorization(workerPlan)
 	) {
 		throw new Error("Semantic Bay mutation Worker plan is stale or invalid.");
+	}
+	let connectedRelationship: StaticFabAssemblyRelationshipStateV1["records"][number] | null = null;
+	for (const record of relationships.records) {
+		if (
+			!record.participantOrganizationIds.includes(intent.bayOrganizationId) &&
+			!record.managedChildOrganizationIds.includes(intent.bayOrganizationId)
+		)
+			continue;
+		if (connectedRelationship) {
+			throw new Error("Semantic Bay mutation targets multiple declared relationships.");
+		}
+		connectedRelationship = record;
+	}
+	if (workerPlan.relationshipMutations.length !== (connectedRelationship ? 1 : 0)) {
+		throw new Error("Semantic Bay mutation omitted or invented a declared relationship removal.");
+	}
+	for (const mutation of workerPlan.relationshipMutations) {
+		const before = mutation.before;
+		const current = connectedRelationship;
+		if (
+			intent.action !== "DISCONNECT" ||
+			!before ||
+			!current ||
+			mutation.after !== null ||
+			before.id !== mutation.id ||
+			before.hierarchyRole !== "BAY_TO_BANK" ||
+			before.purpose !== "HIERARCHY_LINK" ||
+			before.reviewPolicy !== "REVIEW_REQUIRED" ||
+			before.parentOrganizationId !== workerPlan.review.bankOrganizationId ||
+			!before.participantOrganizationIds.includes(intent.bayOrganizationId) ||
+			before.managedChildOrganizationIds.length !== 1 ||
+			before.managedChildOrganizationIds[0] !== intent.bayOrganizationId ||
+			!staticFabAssemblyRelationshipRecordEquals(before, current)
+		)
+			throw new Error(
+				"Semantic Bay mutation relationship does not match its exact source identity.",
+			);
+		const expected = expectedStaticFabDeclaredBayDisconnectRailMutations(map, current);
+		if (
+			workerPlan.mutations.length !== expected.length ||
+			workerPlan.mutations.some((change, index) => {
+				const cut = expected[index];
+				return (
+					!cut ||
+					change.x !== cut.x ||
+					change.y !== cut.y ||
+					change.before !== cut.before ||
+					change.after !== cut.after
+				);
+			}) ||
+			workerPlan.switchMutations.length !== 0 ||
+			workerPlan.portMutations.length !== 0 ||
+			workerPlan.equipmentGroupMutations.length !== 0
+		) {
+			throw new Error("Semantic Bay mutation rail cut differs from its declared relationship.");
+		}
+		const outboundRole =
+			current.participantOrganizationIds[0] === intent.bayOrganizationId ? "OUTBOUND" : "RETURN";
+		const outbound = current.connectionGroups[0]?.legs.find(
+			(leg) => leg.directionRole === outboundRole,
+		);
+		const inbound = current.connectionGroups[0]?.legs.find(
+			(leg) => leg.directionRole !== outboundRole,
+		);
+		if (
+			!outbound ||
+			!inbound ||
+			workerPlan.review.connectorDirectedEdgeCount !==
+				outbound.exclusiveCutEdges.length + inbound.exclusiveCutEdges.length ||
+			!sameStringList(
+				workerPlan.review.connectorOutboundDirectedEdgeKeys,
+				outbound.exclusiveCutEdges.map((cut) => staticFabOrganizationEdgeKey(cut.edge)),
+			) ||
+			!sameStringList(
+				workerPlan.review.connectorReturnDirectedEdgeKeys,
+				inbound.exclusiveCutEdges.map((cut) => staticFabOrganizationEdgeKey(cut.edge)),
+			)
+		) {
+			throw new Error("Semantic Bay mutation review differs from its declared connector.");
+		}
 	}
 	const planFingerprint = staticFabSemanticBayMutationPlanFingerprint(workerPlan);
 	if (ticket.planFingerprint !== planFingerprint) {
@@ -226,6 +331,10 @@ function hasDeletedOrganizationAuthorization(plan: StaticFabSemanticBayMutationP
 	return plan.organizationImpactAuthorizations.some((id) => deletedIds.has(id));
 }
 
+function sameStringList(left: readonly string[], right: readonly string[]): boolean {
+	return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 export function isIssuedStaticFabSemanticBayMutationPlan(
 	plan: StaticFabSemanticBayMutationPlan,
 ): boolean {
@@ -237,12 +346,14 @@ export function isStaticFabSemanticBayMutationPlanIssuedFor(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): boolean {
 	const source = issuedPlans.get(plan);
 	return (
 		source?.map === map &&
 		source.portEquipment === portEquipment &&
-		source.organizations === organizations
+		source.organizations === organizations &&
+		source.relationships === relationships
 	);
 }
 
@@ -251,12 +362,17 @@ export function consumeCertifiedStaticFabSemanticBayMutationPlanIssuedFor(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
 ): boolean {
 	const certification = certifiedPlans.get(plan);
 	if (
 		certification?.map !== map ||
 		certification.portEquipment !== portEquipment ||
 		certification.organizations !== organizations ||
+		certification.relationships !== relationships ||
+		certification.sourceMapMutationGeneration !== map.getMutationGeneration() ||
+		plan.nextRelationshipIdBefore !== relationships.nextRelationshipId ||
+		plan.nextRelationshipIdAfter !== relationships.nextRelationshipId ||
 		plan.baseRevision !== map.getRevision() ||
 		certification.planFingerprint !== staticFabSemanticBayMutationPlanFingerprint(plan)
 	) {
@@ -282,6 +398,8 @@ export function staticFabSemanticBayMutationPlanFingerprint(
 		plan.basePatchSequence,
 		plan.nextOrganizationIdBefore,
 		plan.nextOrganizationIdAfter,
+		plan.nextRelationshipIdBefore,
+		plan.nextRelationshipIdAfter,
 		plan.valid ? 1 : 0,
 	]);
 	addRailMutations(checksum, plan.mutations);
@@ -289,6 +407,14 @@ export function staticFabSemanticBayMutationPlanFingerprint(
 	addPortMutations(checksum, plan.portMutations);
 	addEquipmentGroupMutations(checksum, plan.equipmentGroupMutations);
 	addOrganizationMutations(checksum, plan.organizationMutations);
+	checksum.addNumbers([plan.relationshipMutations.length]);
+	for (const mutation of plan.relationshipMutations) {
+		checksum.addNumbers([mutation.id]);
+		for (const record of [mutation.before, mutation.after]) {
+			checksum.addNumbers([record === null ? 0 : 1]);
+			if (record) checksum.addStrings([checksumStaticFabAssemblyRelationshipRecord(record)]);
+		}
+	}
 	checksum.addNumbers([
 		plan.organizationImpactAuthorizations.length,
 		...plan.organizationImpactAuthorizations,
@@ -338,6 +464,15 @@ function copyWorkerPlan(plan: StaticFabSemanticBayMutationPlan): StaticFabSemant
 			),
 		),
 		organizationImpactAuthorizations: Object.freeze([...plan.organizationImpactAuthorizations]),
+		relationshipMutations: Object.freeze(
+			plan.relationshipMutations.map((mutation) =>
+				Object.freeze({
+					id: mutation.id,
+					before: mutation.before ? copyStaticFabAssemblyRelationshipRecord(mutation.before) : null,
+					after: mutation.after ? copyStaticFabAssemblyRelationshipRecord(mutation.after) : null,
+				}),
+			),
+		),
 		review: copyReview(plan.review),
 	});
 }

@@ -3,7 +3,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import { chromium } from "playwright-core";
 import { verifyWrappedTextLineCount, wrappedTextLineCount } from "./browser-text-layout.mjs";
 
@@ -59,6 +59,7 @@ const ORDINARY_HIERARCHY_CONTINUATION_ONLY_COMPLETE = new Error(
 const COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE = new Error(
 	"Compact Bay configuration continuation completed.",
 );
+const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconnection completed.");
 const STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE = new Error(
 	"Static FAB issue Inspector recheck acceptance completed.",
 );
@@ -106,6 +107,13 @@ try {
 	await waitForServer(`${baseUrl}/`);
 	browser = await launchBrowserWithRetry();
 	recordStep("browser-text-line-measurement", await verifyWrappedTextLineCount(browser));
+	if (process.env.OPENFAB_DECLARED_BAY_DISCONNECTION_ACCEPTANCE_ONLY === "1") {
+		recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
+		assertEqual(result.consoleErrors.length, 0, "Declared Bay console errors");
+		assertEqual(result.pageErrors.length, 0, "Declared Bay page errors");
+		result.status = "PASS";
+		throw DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE;
+	}
 	if (process.env.OPENFAB_COMPACT_BAY_CONFIGURATION_ACCEPTANCE_ONLY === "1") {
 		recordStep(
 			"compact-bay-configuration-continuation",
@@ -236,6 +244,7 @@ try {
 	);
 	const ordinaryHierarchyContinuation = await exerciseOrdinaryModuleHierarchyContinuation(browser);
 	recordStep("ordinary-module-hierarchy-continuation", ordinaryHierarchyContinuation);
+	recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
 	recordStep("factory-scale-ordinary-port-overview", factoryPortOverview);
 	const context = await browser.newContext({
@@ -2651,6 +2660,7 @@ try {
 		error === FACTORY_PORT_OVERVIEW_ONLY_COMPLETE ||
 		error === ORDINARY_HIERARCHY_CONTINUATION_ONLY_COMPLETE ||
 		error === COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE ||
+		error === DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE ||
 		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE
 	) {
 		// The opt-in focused run intentionally skips the whole-editor acceptance sequence.
@@ -13573,7 +13583,29 @@ async function exerciseGuidedPortHandoffRegression(
 			null,
 			"action:continue-editing",
 		);
-		await continueEditing.press("Enter");
+		await page.setViewportSize({ width: 390, height: 600 });
+		assertEqual(
+			await panel.evaluate((element) => getComputedStyle(element).overflowY),
+			"auto",
+			"Short compact Guided completion can scroll internally",
+		);
+		const shortPanelScroll = await panel.evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+			return element.scrollTop;
+		});
+		assertAtLeast(shortPanelScroll, 1, "Short compact Guided completion scroll reach");
+		await assertLocatorInsideViewport(page, continueEditing);
+		assertAtLeast(
+			await continueEditing.evaluate((element) => element.getBoundingClientRect().height),
+			44,
+			"Short compact Guided completion continue touch target",
+		);
+		await page.screenshot({
+			path: path.join(artifactRoot, "guided-complete-390x600.png"),
+			fullPage: true,
+		});
+		await continueEditing.click();
+		await page.setViewportSize({ width: 390, height: 844 });
 		await panel.waitFor({ state: "hidden" });
 		await checksPanel.waitFor({ state: "hidden" });
 		await page.waitForFunction(
@@ -26216,6 +26248,318 @@ self.postMessage = (message, ...rest) => {
 		await page.unroute(routePattern, holdWorker);
 		await page.evaluate(() => globalThis.__openfabRestoreSemanticRetryObserver());
 	}
+}
+
+async function exerciseDeclaredBayDisconnection(browserInstance) {
+	const proofs = [];
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 390, height: 600 },
+	]) {
+		const label = `${viewport.width}x${viewport.height}`;
+		const context = await browserInstance.newContext({ viewport, acceptDownloads: true });
+		const page = await context.newPage();
+		page.on("console", (message) => {
+			if (message.type() === "error") result.consoleErrors.push(message.text());
+		});
+		page.on("pageerror", (error) => result.pageErrors.push(error.message));
+		try {
+			await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(page, { physicalPaths: 0 });
+			await page
+				.getByTestId("openfab-start-dialog")
+				.getByRole("button", { name: /BLANK CANVAS/ })
+				.click();
+			await page.getByTestId("editor-activity-assemble").click();
+			await page.getByTestId("production-bay-module-browser").click();
+			const settings = page.getByTestId("production-bay-module-panel");
+			await settings.waitFor({ state: "visible" });
+			await settings.getByRole("button", { name: "배치 위치 선택" }).click();
+			await settings.waitFor({ state: "hidden" });
+			const canvas = page.getByTestId("rail-canvas");
+			await canvas.focus();
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-organization-bundle-preview-state") === "candidate",
+			);
+			const origin = parseIntegerTuple(
+				(await readMetrics(page)).organizationBundlePreviewAnchor,
+				2,
+				"declared Bay initial anchor",
+			);
+			const bayIds = [];
+			for (let ordinal = 0; ordinal < 3; ordinal++) {
+				const target = [origin[0] + ordinal * 100, origin[1]];
+				for (let step = 0; step < 400; step++) {
+					const anchor = parseIntegerTuple(
+						(await readMetrics(page)).organizationBundlePreviewAnchor,
+						2,
+						"declared Bay keyboard anchor",
+					);
+					if (anchor[0] === target[0] && anchor[1] === target[1]) break;
+					await canvas.press(
+						anchor[0] < target[0]
+							? "ArrowRight"
+							: anchor[0] > target[0]
+								? "ArrowLeft"
+								: anchor[1] < target[1]
+									? "ArrowDown"
+									: "ArrowUp",
+					);
+					await page.waitForFunction(
+						(previous) =>
+							document
+								.querySelector('[data-testid="rail-canvas"]')
+								?.getAttribute("data-organization-bundle-preview-anchor") !== previous,
+						anchor.join(","),
+					);
+				}
+				const before = await readMetrics(page);
+				assertEqual(
+					before.organizationBundlePreviewAnchor,
+					target.join(","),
+					`declared Bay ordinary keyboard target ${label}`,
+				);
+				await canvas.press("Enter");
+				const placed = await waitForWorker(
+					page,
+					(metrics) =>
+						Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1 &&
+						Number(metrics.staticFabOrganizations) > Number(before.staticFabOrganizations),
+					{ timeout: 30_000 },
+				);
+				bayIds.push(Number(placed.lastPlacedOrganizationRootId));
+			}
+			await canvas.press("Escape");
+			for (let index = 0; index < 2; index++) {
+				await selectOrganizationsThroughAssemble(page, [bayIds[index], bayIds[index + 1]]);
+				const menu = page.getByTestId("static-fab-assemble-menu");
+				await openStaticFabAssembleMenu(page, menu, "declared Bay connector");
+				const before = await readMetrics(page);
+				await menu.getByTestId("assemble-connect-selected-bays").click();
+				const connector = page.getByTestId("static-fab-assembly-connector-panel");
+				await connector.waitFor({ state: "visible" });
+				await page.waitForFunction(
+					() => {
+						const button = document.querySelector(".tilefab-assembly-connector-apply");
+						return button instanceof HTMLButtonElement && !button.disabled;
+					},
+					undefined,
+					{ timeout: 30_000 },
+				);
+				await connector.locator(".tilefab-assembly-connector-apply").click();
+				await waitForWorker(
+					page,
+					(metrics) =>
+						Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1 &&
+						Number(metrics.modelRelationships) === index + 1,
+					{ timeout: 30_000 },
+				);
+			}
+			const before = await readMetrics(page);
+			const sourceRelationships = await page.evaluate(() =>
+				structuredClone(window.__tileFab.getDocument().relationships),
+			);
+			assertEqual(
+				sourceRelationships.records.length,
+				2,
+				`declared Bay source relationships ${label}`,
+			);
+			assertEqual(
+				JSON.stringify(sourceRelationships.records[1].managedChildOrganizationIds),
+				JSON.stringify([bayIds[2]]),
+				`declared Bay sole managed child ${label}`,
+			);
+			await selectOrganizationsThroughAssemble(page, [bayIds[2]]);
+			const menu = page.getByTestId("static-fab-assemble-menu");
+			await openStaticFabAssembleMenu(page, menu);
+			await menu.getByTestId("assemble-delete-selected-bay").click();
+			const dialog = page.getByTestId("semantic-bay-command-dialog");
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="semantic-bay-command-dialog"]')
+						?.getAttribute("data-phase") === "rejected",
+				undefined,
+				{ timeout: 30_000 },
+			);
+			assertIncludes(
+				await dialog.innerText(),
+				"먼저 연결 해제",
+				`declared Bay Delete recovery ${label}`,
+			);
+			await assertSemanticBayReviewLayout(page, dialog, `declared Bay refusal ${label}`);
+			await page.screenshot({
+				path: path.join(artifactRoot, `declared-bay-delete-refusal-${label}.png`),
+			});
+			await page.getByTestId("semantic-bay-command-retry").click();
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="semantic-bay-command-dialog"]')
+						?.getAttribute("data-phase") === "rejected",
+				undefined,
+				{ timeout: 30_000 },
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				before,
+				`declared Bay rejected retry ${label}`,
+			);
+			await page.getByTestId("semantic-bay-command-cancel").click();
+			await openStaticFabAssembleMenu(page, menu);
+			await menu.getByTestId("assemble-disconnect-selected-bay").click();
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="semantic-bay-command-dialog"]')
+						?.getAttribute("data-phase") === "ready",
+				undefined,
+				{ timeout: 30_000 },
+			);
+			await assertSemanticBayReviewLayout(page, dialog, `declared Bay ready ${label}`);
+			await assertLocatorInsideViewport(page, page.getByTestId("semantic-bay-command-apply"));
+			await page.screenshot({
+				path: path.join(artifactRoot, `declared-bay-disconnect-review-${label}.png`),
+			});
+			await page.getByTestId("semantic-bay-command-apply").click();
+			const disconnected = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1 &&
+					metrics.modelRelationships === "1",
+				{ timeout: 30_000 },
+			);
+			assertEqual(
+				disconnected.modelNextRelationshipId,
+				before.modelNextRelationshipId,
+				`declared Bay monotonic relationship cursor ${label}`,
+			);
+			assertEqual(
+				disconnected.workerChecksum,
+				disconnected.modelChecksum,
+				`declared Bay mirror identity ${label}`,
+			);
+			assertEqual(
+				disconnected.strongComponents,
+				"2",
+				`declared Bay two closed components ${label}`,
+			);
+			assertEqual(disconnected.openTerminals, "0", `declared Bay no open terminal ${label}`);
+			assertEqual(
+				disconnected.workerSimulationReady,
+				"false",
+				`declared Bay simulation gate ${label}`,
+			);
+			const remaining = await page.evaluate(() =>
+				structuredClone(window.__tileFab.getDocument().relationships),
+			);
+			assertEqual(
+				JSON.stringify(remaining.records),
+				JSON.stringify([sourceRelationships.records[0]]),
+				`declared Bay exact retained relationship ${label}`,
+			);
+			await page.getByRole("button", { name: "실행 취소" }).click();
+			const undone = await waitForWorker(
+				page,
+				(metrics) =>
+					metrics.workerChecksum === before.workerChecksum && metrics.modelRelationships === "2",
+			);
+			await dispatchBayFlowRedo(page, viewport.width < 760, undone, `declared Bay redo ${label}`);
+			const redone = await waitForWorker(
+				page,
+				(metrics) =>
+					metrics.workerChecksum === disconnected.workerChecksum &&
+					metrics.modelRelationships === "1",
+			);
+			const savedPath =
+				viewport.width < 760 ? await saveProjectWithKeyboard(page) : await saveProject(page);
+			const saved = await readMetrics(page);
+			const savedJson = JSON.parse(await readFile(savedPath, "utf8"));
+			assertEqual(
+				isDeepStrictEqual(savedJson.relationships, { schemaVersion: 1, ...remaining }),
+				true,
+				`declared Bay native relationship section ${label}`,
+			);
+			await page.screenshot({
+				path: path.join(artifactRoot, `declared-bay-disconnected-${label}.png`),
+			});
+			await closeBrowserResource(page, `declared Bay ${label} authored page`);
+			const reopenContext = await browserInstance.newContext({ viewport, acceptDownloads: true });
+			const reopenedPage = await reopenContext.newPage();
+			reopenedPage.on("console", (message) => {
+				if (message.type() === "error") result.consoleErrors.push(message.text());
+			});
+			reopenedPage.on("pageerror", (error) => result.pageErrors.push(error.message));
+			try {
+				await reopenedPage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+				await waitForReady(reopenedPage, { physicalPaths: 0 });
+				const start = reopenedPage.getByTestId("openfab-start-dialog");
+				await start.getByRole("button", { name: /BLANK CANVAS/ }).click();
+				await reopenedPage.locator(".tilefab-project-trigger").click();
+				const chooserPromise = reopenedPage.waitForEvent("filechooser");
+				await reopenedPage
+					.locator("#tilefab-project-menu")
+					.getByRole("button", { name: "열기", exact: true })
+					.click();
+				await (await chooserPromise).setFiles(savedPath);
+				await waitForWorker(reopenedPage, (metrics) => Number(metrics.physicalPaths) > 0);
+				const reopened = await readMetrics(reopenedPage);
+				assertFullStaticFabReloadIdentity(reopened, saved, `declared Bay reopen ${label}`);
+				assertEqual(
+					reopened.workerSimulationReady,
+					"false",
+					`declared Bay reopened simulation gate ${label}`,
+				);
+				await selectOrganizationsThroughAssemble(reopenedPage, [bayIds[2]]);
+				const reopenedMenu = reopenedPage.getByTestId("static-fab-assemble-menu");
+				await openStaticFabAssembleMenu(reopenedPage, reopenedMenu);
+				await reopenedMenu.getByTestId("assemble-delete-selected-bay").click();
+				await reopenedPage.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="semantic-bay-command-dialog"]')
+							?.getAttribute("data-phase") === "ready",
+					undefined,
+					{ timeout: 30_000 },
+				);
+				await reopenedPage.getByTestId("semantic-bay-command-apply").click();
+				const deleted = await waitForWorker(
+					reopenedPage,
+					(metrics) =>
+						metrics.strongComponents === "1" &&
+						metrics.modelRelationships === "1" &&
+						Number(metrics.staticFabOrganizations) < Number(reopened.staticFabOrganizations),
+					{ timeout: 30_000 },
+				);
+				assertEqual(
+					deleted.workerChecksum,
+					deleted.modelChecksum,
+					`declared Bay detached Delete mirror ${label}`,
+				);
+				proofs.push({
+					viewport: label,
+					source: before.workerChecksum,
+					disconnected: redone.workerChecksum,
+					reopened: reopened.workerChecksum,
+					deleted: deleted.workerChecksum,
+					nextRelationshipId: deleted.modelNextRelationshipId,
+				});
+			} finally {
+				await closeBrowserResource(reopenContext, `declared Bay ${label} reopened context`);
+			}
+		} catch (error) {
+			await page
+				.screenshot({ path: path.join(artifactRoot, `declared-bay-failure-${label}.png`) })
+				.catch(() => undefined);
+			throw error;
+		} finally {
+			await closeBrowserResource(context, `declared Bay ${label} context`);
+		}
+	}
+	return proofs;
 }
 
 async function exerciseSemanticBayMutation(page, source) {

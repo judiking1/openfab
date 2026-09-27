@@ -13,6 +13,7 @@ import {
 } from "../core/RailModuleOwnership";
 import { planRailRouteBatch } from "../core/RailTemplateCatalog";
 import { DIR_E, directionBetween, oppositeDirection } from "../core/railShape";
+import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
 import {
 	planStaticFabBayFlowEditWithProspectiveState,
 	STATIC_FAB_BAY_FLOW_EDIT_KIND,
@@ -425,6 +426,7 @@ function bayFlowEditFixture(): BayFlowEditFixture {
 			bayOrganizationId,
 			targetInternalFlowPattern: "co-rotating",
 		},
+		emptyStaticFabAssemblyRelationshipState(),
 	);
 	if (!planned.plan.valid || !planned.prospectiveState) throw new Error(planned.plan.reason);
 	const plan = planned.plan;

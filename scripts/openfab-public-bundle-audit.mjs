@@ -47,6 +47,9 @@ let compressedBytes = 0;
 let compressedCssBytes = 0;
 for (const file of initialFiles) {
 	const bytes = await readFile(path.join(distRoot, file));
+	if (file.endsWith(".js") && bytes.includes("WebGLRenderer")) {
+		throw new Error(`Three.js WebGLRenderer entered the initial JS graph: ${file}.`);
+	}
 	const compressed = gzipSync(bytes, { level: 9 }).byteLength;
 	rawBytes += bytes.byteLength;
 	compressedBytes += compressed;

@@ -151,12 +151,7 @@ describe("RailTemplateCatalog", () => {
 	it("keeps an interbay corridor wall-aligned while centering a smaller Bay run", () => {
 		let parameters = defaultRailTemplateParameters("interbay-spine");
 		parameters = setRailTemplateParameter("interbay-spine", parameters, "bayCount", 2);
-		parameters = setRailTemplateParameter(
-			"interbay-spine",
-			parameters,
-			"aisleLengthMeters",
-			60,
-		);
+		parameters = setRailTemplateParameter("interbay-spine", parameters, "aisleLengthMeters", 60);
 		const blueprint = instantiateRailTemplate("interbay-spine", parameters);
 
 		expect(parameters).toMatchObject({
@@ -171,12 +166,7 @@ describe("RailTemplateCatalog", () => {
 
 		parameters = setRailTemplateParameter("interbay-spine", parameters, "bayCount", 10);
 		parameters = setRailTemplateParameter("interbay-spine", parameters, "bayPitchMeters", 30);
-		parameters = setRailTemplateParameter(
-			"interbay-spine",
-			parameters,
-			"aisleLengthMeters",
-			28,
-		);
+		parameters = setRailTemplateParameter("interbay-spine", parameters, "aisleLengthMeters", 28);
 		expect(parameters).toMatchObject({ bayCount: 10, bayPitchMeters: 30, aisleLengthMeters: 304 });
 		expect(() => instantiateRailTemplate("interbay-spine", parameters)).not.toThrow();
 	});

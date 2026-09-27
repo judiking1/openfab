@@ -201,6 +201,7 @@ describe("RailScaleProbeFixture", () => {
 				action: "DELETE",
 				bayOrganizationId: RAIL_SEMANTIC_BAY_DELETE_SCALE_PROBE_METADATA.targetBayOrganizationId,
 			}),
+			document.relationships,
 		);
 		expect(deletion.plan.valid, deletion.plan.reason).toBe(true);
 		expect(deletion.plan.review).toMatchObject({

@@ -1,27 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
+import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
+import { checksumRailMap } from "../worker/RailMirrorChecksum";
+import { RailPatchMirror } from "../worker/RailPatchMirror";
 import type { PortEquipmentState } from "./EquipmentGroup";
 import { analyzeRailNetwork } from "./network";
 import { createRailAreaSelection, type RailAreaSelection } from "./RailAreaSelection";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
 import { buildRailModuleOwnershipIndex } from "./RailModuleOwnership";
-import { recognizeRailPattern, type RailPatternCandidate } from "./RailPatternRecognition";
+import { type RailPatternCandidate, recognizeRailPattern } from "./RailPatternRecognition";
 import { planRailPatternResize } from "./RailPatternResizePlanner";
 import {
 	defaultRailTemplateParameters,
 	initialRailTemplatePose,
 	planRailTemplate,
-	railTemplateParameterValue,
-	setRailTemplateParameter,
 	type RailTemplateId,
 	type RailTemplateParameterKey,
 	type RailTemplateParameters,
+	railTemplateParameterValue,
+	setRailTemplateParameter,
 } from "./RailTemplateCatalog";
 import { directionBetween, oppositeDirection } from "./railShape";
 import type { Cell } from "./TileMap";
-import { checksumRailMap } from "../worker/RailMirrorChecksum";
-import { RailPatchMirror } from "../worker/RailPatchMirror";
 
 describe("RailPatternResizePlanner", () => {
 	it("resizes a recognized Long Bay as one atomic edit with undo, redo, and Worker parity", () => {

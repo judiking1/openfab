@@ -1,23 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { compileStaticFabHierarchyIndex } from "./StaticFabHierarchy";
-import {
-	buildSyntheticFabStarter,
-	defaultSyntheticFabStarterRequest,
-} from "./SyntheticFabStarter";
 import type { PortEquipmentState } from "../core/EquipmentGroup";
 import { planRailConstruction } from "../core/paint";
 import { createRailAreaSelection } from "../core/RailAreaSelection";
 import { RailDocument } from "../core/RailDocument";
-import {
-	buildRailModuleOwnershipIndex,
-	type DirectedRailEdge,
-} from "../core/RailModuleOwnership";
-import { directionBetween, DIR_E, DIR_W } from "../core/railShape";
+import { buildRailModuleOwnershipIndex, type DirectedRailEdge } from "../core/RailModuleOwnership";
+import { DIR_E, DIR_W, directionBetween } from "../core/railShape";
 import type { CompiledPortEquipmentPresentation } from "./PortEquipmentPresentation";
+import { compileStaticFabHierarchyIndex } from "./StaticFabHierarchy";
 import {
 	resolveStaticFabEquipmentGroupsForRailSelection,
 	resolveStaticFabEquipmentGroupsInBounds,
 } from "./StaticFabSelectionResolver";
+import { buildSyntheticFabStarter, defaultSyntheticFabStarterRequest } from "./SyntheticFabStarter";
 
 describe("resolveStaticFabEquipmentGroupsInBounds", () => {
 	it("uses half-open marquee bounds and returns complete group identities", () => {
@@ -71,88 +65,79 @@ describe("resolveStaticFabEquipmentGroupsForRailSelection", () => {
 		});
 	});
 
-	it(
-		"keeps Process Bank equipment membership exact at shared-rail boundaries",
-		() => {
-			const build = buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("large-fab-60"));
-			const ownership = buildRailModuleOwnershipIndex(build.document.map);
-			const branch = compileStaticFabHierarchyIndex(build.document.map, ownership).branches[0];
-			const bank = branch?.processBanks[0];
-			if (!branch || !bank) throw new Error("expected generated Process Bank");
-			const bankEdgeKeys = new Set(
-				bank.selection.ownerships.flatMap((module) =>
-					module.eraseEdges.map((edge) => directedEdgeKey(edge)),
-				),
-			);
-			const insideEdges = uniqueDirectedEdges(
-				bank.selection.ownerships.flatMap((module) => module.eraseEdges),
-			);
-			const outsideEdges = uniqueDirectedEdges(
-				branch.factory.selection.ownerships
-					.flatMap((module) => module.eraseEdges)
-					.filter((edge) => !bankEdgeKeys.has(directedEdgeKey(edge))),
-			);
-			const insideA = insideEdges[0];
-			const insideB = insideEdges[1];
-			const insideC = insideEdges[2];
-			const outsideA = outsideEdges[0];
-			const outsideB = outsideEdges[1];
-			if (!insideA || !insideB || !insideC || !outsideA || !outsideB) {
-				throw new Error("expected Bank boundary rail fixtures");
-			}
-			const state: PortEquipmentState = Object.freeze({
-				nextPortId: 6,
-				nextEquipmentGroupId: 31,
-				ports: Object.freeze([
-					edgePort(1, 10, insideA),
-					edgePort(2, 10, insideB),
-					edgePort(3, 20, insideC),
-					edgePort(4, 20, outsideA),
-					edgePort(5, 30, outsideB),
-				]),
-				equipmentGroups: Object.freeze([
-					Object.freeze({
-						id: 10,
-						kind: "EQ" as const,
-						pitchMillimeters: 1_000,
-						recipe: null,
-						portIds: [1, 2],
-					}),
-					Object.freeze({
-						id: 20,
-						kind: "EQ" as const,
-						pitchMillimeters: 1_000,
-						recipe: null,
-						portIds: [3, 4],
-					}),
-					Object.freeze({
-						id: 30,
-						kind: "OHB" as const,
-						template: "SINGLE" as const,
-						portIds: [5],
-					}),
-				]),
-			});
+	it("keeps Process Bank equipment membership exact at shared-rail boundaries", () => {
+		const build = buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("large-fab-60"));
+		const ownership = buildRailModuleOwnershipIndex(build.document.map);
+		const branch = compileStaticFabHierarchyIndex(build.document.map, ownership).branches[0];
+		const bank = branch?.processBanks[0];
+		if (!branch || !bank) throw new Error("expected generated Process Bank");
+		const bankEdgeKeys = new Set(
+			bank.selection.ownerships.flatMap((module) =>
+				module.eraseEdges.map((edge) => directedEdgeKey(edge)),
+			),
+		);
+		const insideEdges = uniqueDirectedEdges(
+			bank.selection.ownerships.flatMap((module) => module.eraseEdges),
+		);
+		const outsideEdges = uniqueDirectedEdges(
+			branch.factory.selection.ownerships
+				.flatMap((module) => module.eraseEdges)
+				.filter((edge) => !bankEdgeKeys.has(directedEdgeKey(edge))),
+		);
+		const insideA = insideEdges[0];
+		const insideB = insideEdges[1];
+		const insideC = insideEdges[2];
+		const outsideA = outsideEdges[0];
+		const outsideB = outsideEdges[1];
+		if (!insideA || !insideB || !insideC || !outsideA || !outsideB) {
+			throw new Error("expected Bank boundary rail fixtures");
+		}
+		const state: PortEquipmentState = Object.freeze({
+			nextPortId: 6,
+			nextEquipmentGroupId: 31,
+			ports: Object.freeze([
+				edgePort(1, 10, insideA),
+				edgePort(2, 10, insideB),
+				edgePort(3, 20, insideC),
+				edgePort(4, 20, outsideA),
+				edgePort(5, 30, outsideB),
+			]),
+			equipmentGroups: Object.freeze([
+				Object.freeze({
+					id: 10,
+					kind: "EQ" as const,
+					pitchMillimeters: 1_000,
+					recipe: null,
+					portIds: [1, 2],
+				}),
+				Object.freeze({
+					id: 20,
+					kind: "EQ" as const,
+					pitchMillimeters: 1_000,
+					recipe: null,
+					portIds: [3, 4],
+				}),
+				Object.freeze({
+					id: 30,
+					kind: "OHB" as const,
+					template: "SINGLE" as const,
+					portIds: [5],
+				}),
+			]),
+		});
 
-			expect(resolveStaticFabEquipmentGroupsForRailSelection(state, bank.selection)).toEqual({
-				completeGroupIds: [10],
-				partialGroupIds: [20],
-			});
-		},
-		30_000,
-	);
+		expect(resolveStaticFabEquipmentGroupsForRailSelection(state, bank.selection)).toEqual({
+			completeGroupIds: [10],
+			partialGroupIds: [20],
+		});
+	}, 30_000);
 });
 
 function equipmentState(): PortEquipmentState {
 	return Object.freeze({
 		nextPortId: 5,
 		nextEquipmentGroupId: 31,
-		ports: Object.freeze([
-			port(1, 10, 2),
-			port(2, 20, 4),
-			port(3, 20, 7),
-			port(4, 30, 8),
-		]),
+		ports: Object.freeze([port(1, 10, 2), port(2, 20, 4), port(3, 20, 7), port(4, 30, 8)]),
 		equipmentGroups: Object.freeze([
 			Object.freeze({ id: 10, kind: "OHB" as const, template: "SINGLE" as const, portIds: [1] }),
 			Object.freeze({

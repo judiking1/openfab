@@ -76,8 +76,7 @@ export function rankedRailTemplatePoses(
 							pose,
 							tier,
 							mutationCount:
-								(preferredPose.side === side ? 0 : 1) +
-								(preferredFlow === flow ? 0 : 1),
+								(preferredPose.side === side ? 0 : 1) + (preferredFlow === flow ? 0 : 1),
 							order: order++,
 						}),
 					);
@@ -88,9 +87,7 @@ export function rankedRailTemplatePoses(
 	return Object.freeze(candidates);
 }
 
-export function normalizedRailTemplateFlow(
-	pose: RailTemplatePose,
-): "forward" | "reverse" {
+export function normalizedRailTemplateFlow(pose: RailTemplatePose): "forward" | "reverse" {
 	return pose.flow === "reverse" ? "reverse" : "forward";
 }
 
