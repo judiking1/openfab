@@ -6198,7 +6198,7 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 						app.getAttribute("data-editor-tool") === "inspect" &&
 						app.getAttribute("data-port-keyboard-scope") === "" &&
 						tools?.getAttribute("data-tool-density") === "expanded" &&
-						tools.getAttribute("data-tool-density-preference") === "expanded" &&
+						tools.getAttribute("data-tool-density-preference") === "auto" &&
 						tools.getAttribute("data-tool-density-context") === "default" &&
 						document.activeElement === canvas
 					);
@@ -15731,6 +15731,8 @@ async function exerciseGuidedPortHandoffRegression(
 						"STK",
 						viewport.label,
 						stkResponsiveCommitted,
+						false,
+						viewport.label === "390x844" ? "expanded" : "auto",
 					);
 					await assertExactOrdinaryStkCompletion(page, stkDraftViewportBaseline, viewport.label);
 					await page.screenshot({
@@ -15743,7 +15745,7 @@ async function exerciseGuidedPortHandoffRegression(
 						viewport.label,
 						stkResponsiveCommitted,
 					);
-					await exerciseCompactInspectorDensityPreference(page, "STK", viewport.label);
+					await exerciseCompactInspectorDensityPreference(page, "STK", viewport.label, "expanded");
 					await undoEquipmentCompletion(
 						page,
 						stkDraftViewportBaseline,
@@ -32025,6 +32027,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 	viewportLabel,
 	completionBaseline,
 	existingStocker = false,
+	expectedDensityPreference = "auto",
 ) {
 	await page.waitForFunction(
 		(expectedType) => {
@@ -32174,8 +32177,8 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		);
 		assertEqual(
 			await activityNavigation.getAttribute("data-tool-density-preference"),
-			"expanded",
-			`ordinary ${portType} Inspector preserves expanded preference ${viewportLabel}`,
+			expectedDensityPreference,
+			`ordinary ${portType} Inspector preserves chosen preference ${viewportLabel}`,
 		);
 		assertEqual(
 			await activityNavigation.getAttribute("data-tool-density-constrained"),
@@ -35897,6 +35900,18 @@ async function exerciseOrdinaryConnectedFabLoopHandoff(
 	);
 	const checksOpened = await readMetrics(page);
 	assertProjectUnchanged(checksOpened, loopRedone, `ordinary FAB CHECKS open ${viewportLabel}`);
+	const checksOutcome = {
+		status: await checksPanel.getAttribute("data-status"),
+		issues: await checksPanel.getAttribute("data-check-issues"),
+		actions: await checksPanel.getAttribute("data-check-actions"),
+		fingerprint: await checksPanel.getAttribute("data-fingerprint"),
+		sourceChecksum: await checksPanel.getAttribute("data-source-checksum"),
+	};
+	assertEqual(
+		["ready", "issues"].includes(checksOutcome.status),
+		true,
+		`ordinary FAB CHECKS settles to a reportable result ${viewportLabel}`,
+	);
 	assertEqual(
 		await page.getByTestId("rail-status-message").getAttribute("aria-live"),
 		"off",
@@ -35925,14 +35940,14 @@ async function exerciseOrdinaryConnectedFabLoopHandoff(
 	);
 	const checksClosed = await readMetrics(page);
 	assertProjectUnchanged(checksClosed, loopRedone, `ordinary FAB CHECKS close ${viewportLabel}`);
-	if (activationWidth === 1_440) {
-		await exerciseOrdinaryResilientFabNativeRecovery(
-			page,
-			checksClosed,
-			expectedFabId,
-			expectedBankIds,
-		);
-	}
+	await exerciseOrdinaryResilientFabNativeRecovery(
+		page,
+		checksClosed,
+		expectedFabId,
+		expectedBankIds,
+		{ width: activationWidth, height: sourceViewportHeight },
+		checksOutcome,
+	);
 	return checksClosed;
 }
 
@@ -36840,15 +36855,56 @@ async function exerciseOrdinaryResilientFabNativeRecovery(
 	completed,
 	fabOrganizationId,
 	bankOrganizationIds,
+	viewport,
+	expectedChecks,
 ) {
-	reportAcceptanceProgress("ordinary resilient Fab native recovery");
-	const savedPath = await saveProject(page);
+	reportAcceptanceProgress(
+		`ordinary resilient Fab native recovery ${viewport.width}x${viewport.height}`,
+	);
+	const authoredEquipment = await page.evaluate(() => {
+		const state = window.__tileFab?.getEditorModel().document.portEquipment;
+		if (!state) throw new Error("Ordinary Fab equipment is unavailable before save");
+		return {
+			ports: structuredClone(state.ports),
+			groups: structuredClone(state.equipmentGroups),
+		};
+	});
+	for (const kind of ["OHB", "EQ", "STK"]) {
+		assertEqual(
+			authoredEquipment.groups.some((group) => group.kind === kind),
+			true,
+			`ordinary resilient Fab retains hand-authored ${kind} ${viewport.width}px`,
+		);
+	}
+	assertAtLeast(
+		authoredEquipment.ports.length,
+		5,
+		`ordinary resilient Fab Ports ${viewport.width}px`,
+	);
+	const authoredRelationships = await readAssemblyRelationships(page);
+	const savedPath = await saveProjectFromCompactRoute(page);
 	const saved = await readMetrics(page);
 	assertStaticFabAuthoredContentIdentity(saved, completed, "ordinary resilient Fab saved source");
+	const savedFile = JSON.parse(await readFile(savedPath, "utf8"));
+	assertEqual(
+		savedFile.equipment.records.length,
+		authoredEquipment.groups.length,
+		`ordinary resilient Fab native equipment count ${viewport.width}px`,
+	);
+	assertEqual(
+		savedFile.ports.records.length,
+		authoredEquipment.ports.length,
+		`ordinary resilient Fab native Port count ${viewport.width}px`,
+	);
+	assertEqual(
+		isDeepStrictEqual(savedFile.relationships.records, authoredRelationships.records),
+		true,
+		`ordinary resilient Fab native relationship records ${viewport.width}px`,
+	);
 	const browser = page.context().browser();
 	if (!browser) throw new Error("Ordinary resilient Fab reopen browser is unavailable.");
 	const context = await browser.newContext({
-		viewport: { width: 1440, height: 900 },
+		viewport,
 		acceptDownloads: true,
 	});
 	const reopenedPage = await context.newPage();
@@ -36861,7 +36917,15 @@ async function exerciseOrdinaryResilientFabNativeRecovery(
 			await startDialog.waitFor({ state: "hidden" });
 		}
 		const chooserPromise = reopenedPage.waitForEvent("filechooser");
-		await reopenedPage.getByRole("button", { name: "프로젝트 열기" }).click();
+		if (viewport.width <= 760) {
+			await reopenedPage.locator(".tilefab-project-trigger").click();
+			await reopenedPage
+				.locator(".tilefab-project-menu-commands")
+				.getByRole("button", { name: "열기", exact: true })
+				.click();
+		} else {
+			await reopenedPage.getByRole("button", { name: "프로젝트 열기" }).click();
+		}
 		const discard = reopenedPage.getByRole("button", { name: "저장하지 않고 계속" });
 		if (await discard.isVisible().catch(() => false)) await discard.click();
 		const chooser = await chooserPromise;
@@ -36875,6 +36939,24 @@ async function exerciseOrdinaryResilientFabNativeRecovery(
 			{ timeout: 30_000 },
 		);
 		assertFullStaticFabReloadIdentity(reopened, saved, "ordinary resilient Fab reopen");
+		const reopenedEquipment = await reopenedPage.evaluate(() => {
+			const state = window.__tileFab?.getEditorModel().document.portEquipment;
+			if (!state) throw new Error("Ordinary Fab equipment is unavailable after reopen");
+			return {
+				ports: structuredClone(state.ports),
+				groups: structuredClone(state.equipmentGroups),
+			};
+		});
+		assertEqual(
+			isDeepStrictEqual(reopenedEquipment, authoredEquipment),
+			true,
+			`ordinary resilient Fab exact OHB/EQ/STK and Port reopen ${viewport.width}px`,
+		);
+		assertEqual(
+			isDeepStrictEqual(await readAssemblyRelationships(reopenedPage), authoredRelationships),
+			true,
+			`ordinary resilient Fab exact relationship reopen ${viewport.width}px`,
+		);
 		assertEqual(
 			reopened.resilientFabLoopReceiptPhase,
 			"",
@@ -36942,13 +37024,29 @@ async function exerciseOrdinaryResilientFabNativeRecovery(
 		const checksPanel = reopenedPage.getByTestId("rail-readiness-panel");
 		await checksPanel.waitFor({ state: "visible", timeout: 10_000 });
 		await reopenedPage.waitForFunction(
-			(expectedSequence) =>
-				document
-					.querySelector('[data-testid="rail-readiness-panel"]')
-					?.getAttribute("data-source-sequence") === expectedSequence,
+			(expectedSequence) => {
+				const panel = document.querySelector('[data-testid="rail-readiness-panel"]');
+				return (
+					panel?.getAttribute("data-status") !== "checking" &&
+					panel?.getAttribute("data-source-sequence") === expectedSequence
+				);
+			},
 			String(recovered.modelSequence),
 			{ timeout: 30_000 },
 		);
+		for (const [attribute, expected] of [
+			["data-status", expectedChecks.status],
+			["data-check-issues", expectedChecks.issues],
+			["data-check-actions", expectedChecks.actions],
+			["data-fingerprint", expectedChecks.fingerprint],
+			["data-source-checksum", expectedChecks.sourceChecksum],
+		]) {
+			assertEqual(
+				await checksPanel.getAttribute(attribute),
+				expected,
+				`ordinary resilient Fab same-width CHECKS ${attribute} ${viewport.width}px`,
+			);
+		}
 		assertProjectUnchanged(
 			await readMetrics(reopenedPage),
 			recovered,
@@ -36963,7 +37061,9 @@ async function exerciseOrdinaryResilientFabNativeRecovery(
 			undefined,
 			{ timeout: 10_000 },
 		);
-		await exerciseResilientFabCopyRejectionFeedback(reopenedPage, savedPath, fabOrganizationId);
+		if (viewport.width === 1_440) {
+			await exerciseResilientFabCopyRejectionFeedback(reopenedPage, savedPath, fabOrganizationId);
+		}
 	} finally {
 		await closeBrowserResource(context, "ordinary resilient Fab native reopen context");
 	}
@@ -38180,9 +38280,7 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 		const densityToggle = page.getByTestId("editor-tool-description-toggle");
 		assertEqual(
 			await activity.getAttribute("data-tool-density"),
-			viewport.width <= 760
-				? "compact"
-				: await activity.getAttribute("data-tool-density-preference"),
+			viewport.width <= 760 ? "compact" : "expanded",
 			`${specification.label} workspace menu clearance ${viewport.label}`,
 		);
 		if (viewport.width === 520) {
@@ -39005,7 +39103,12 @@ async function selectedPortWorld(page) {
 	});
 }
 
-async function exerciseCompactInspectorDensityPreference(page, portType, viewportLabel) {
+async function exerciseCompactInspectorDensityPreference(
+	page,
+	portType,
+	viewportLabel,
+	expectedDensityPreference = "auto",
+) {
 	if (viewportLabel !== "390x844") return;
 	const activityNavigation = page.locator(".tilefab-tools");
 	const densityToggle = page.getByTestId("editor-tool-description-toggle");
@@ -39025,8 +39128,8 @@ async function exerciseCompactInspectorDensityPreference(page, portType, viewpor
 	);
 	assertEqual(
 		await activityNavigation.getAttribute("data-tool-density-preference"),
-		"expanded",
-		`ordinary ${portType} Inspector close preserves expanded preference ${viewportLabel}`,
+		expectedDensityPreference,
+		`ordinary ${portType} Inspector close preserves chosen preference ${viewportLabel}`,
 	);
 	assertEqual(
 		await densityToggle.getAttribute("aria-disabled"),
@@ -39894,7 +39997,7 @@ async function exerciseStaticFabNavigator(page) {
 			assertEqual(
 				await activityNavigation.getAttribute("data-tool-density-preference"),
 				"expanded",
-				`${viewport.width}px Navigator preserves expanded preference`,
+				`${viewport.width}px Navigator preserves the earlier explicit expanded preference`,
 			);
 			assertEqual(
 				await densityToggle.getAttribute("aria-disabled"),
@@ -42187,8 +42290,8 @@ async function assertOrdinaryPortToolDensity(
 	const densityToggle = page.getByTestId("editor-tool-description-toggle");
 	assertEqual(
 		await activityNavigation.getAttribute("data-tool-density-preference"),
-		"expanded",
-		`${label} preserves the global expanded preference`,
+		"auto",
+		`${label} preserves the global automatic preference`,
 	);
 	assertEqual(
 		await activityNavigation.getAttribute("data-tool-density-constrained"),
@@ -42330,8 +42433,8 @@ async function assertOrdinaryPortToolDensity(
 		);
 		assertEqual(
 			await activityNavigation.getAttribute("data-tool-density-preference"),
-			"expanded",
-			`${label} constrained toggle preserves saved preference`,
+			"auto",
+			`${label} constrained toggle preserves automatic preference`,
 		);
 		assertEqual(
 			await densityToggle.evaluate((element) => element === document.activeElement),
@@ -45754,124 +45857,21 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 			await startDialog.waitFor({ state: "hidden" });
 			await waitForReady(page, { physicalPaths: 0 });
 			if (viewport.height <= 650) {
-				const navigationBefore = await readMetrics(page);
-				await page.waitForFunction(() => {
-					const navigation = document.querySelector(".tilefab-tools");
-					const hints = document.querySelector(".tilefab-action-hints");
-					const bar = document.querySelector(".tilefab-buildbar");
-					return (
-						navigation?.getAttribute("data-more-tools") === "true" &&
-						hints &&
-						bar &&
-						hints.getBoundingClientRect().bottom <= bar.getBoundingClientRect().top
-					);
-				});
-				for (const control of await page
-					.locator(
-						".tilefab-editor-activity-button:visible, .tilefab-camera-controls button:visible",
-					)
-					.all()) {
-					await assertLocatorInsideViewport(page, control);
-					await assertLocatorOwnsHitArea(control, "short expanded activity/camera control");
-				}
-				for (const id of ["build-track", "rotate-build"]) {
-					const hint = page.locator(`.tilefab-action-hint[data-hint-id="${id}"]`);
-					await assertLocatorInsideViewport(page, hint);
-					await assertLocatorOwnsHitArea(hint, `short ordinary Rail ${id} hint`);
-					assertAtLeast((await hint.boundingBox())?.height ?? 0, 44, "Rail hint target height");
-				}
+				await page.waitForFunction(
+					() =>
+						document.querySelector(".tilefab-tools")?.getAttribute("data-tool-density") ===
+						"compact",
+				);
+				assertEqual(
+					await page.getByTestId("editor-tool-description-toggle").getAttribute("aria-pressed"),
+					"false",
+					"short blank project starts with a compact activity menu",
+				);
 				await page.screenshot({
 					path: path.join(artifactRoot, "ordinary-navigation-initial-390x600.png"),
 				});
-				const eraseTool = page.getByRole("button", { name: "모듈 철거", exact: true });
-				await eraseTool.focus();
-				await assertLocatorInsideViewport(page, eraseTool);
-				await assertLocatorOwnsHitArea(eraseTool, "short scrolled erase action");
-				await page.screenshot({
-					path: path.join(artifactRoot, "ordinary-navigation-scrolled-390x600.png"),
-				});
-				await page.keyboard.press("Enter");
-				await page.waitForFunction(
-					() =>
-						document
-							.querySelector('[data-testid="tilefab-app"]')
-							?.getAttribute("data-editor-tool") === "erase",
-				);
-				const railTool = page.getByRole("button", { name: "레일 건설", exact: true });
-				await railTool.focus();
-				await page.keyboard.press("Enter");
-				await page.waitForFunction(
-					() =>
-						document
-							.querySelector('[data-testid="tilefab-app"]')
-							?.getAttribute("data-editor-tool") === "build",
-				);
-				assertProjectUnchanged(
-					await readMetrics(page),
-					navigationBefore,
-					"short navigation and tool switch",
-				);
-				// At short heights the expanded activity rail covers this fixture's drag start.
-				// Use the visible density control before choosing its Canvas points.
-				const density = page.getByTestId("editor-tool-description-toggle");
-				if ((await density.getAttribute("aria-pressed")) === "true") await density.click();
-				const compactNavigation = await page.locator(".tilefab-tools").boundingBox();
-				const compactHints = await page.locator(".tilefab-action-hints").boundingBox();
-				assertAtLeast(
-					compactHints?.x ?? 0,
-					(compactNavigation?.x ?? 0) + (compactNavigation?.width ?? 0),
-					"short compact Rail hints clear the whole navigation width",
-				);
-				for (const activity of ["build", "inspect", "assemble"]) {
-					await page.getByTestId(`editor-activity-${activity}`).click();
-					if (activity === "assemble") {
-						const newFabCard = page.getByTestId("fab-preset-browser");
-						await newFabCard.waitFor({ state: "visible" });
-						const content = await newFabCard.evaluate((card) => {
-							const bounds = card.getBoundingClientRect();
-							return [...card.querySelectorAll("small, strong, em")].map((label) => {
-								const text = label.getBoundingClientRect();
-								return {
-									label: label.textContent,
-									contained:
-										text.left >= bounds.left + 1 &&
-										text.right <= bounds.right - 1 &&
-										text.top >= bounds.top + 1 &&
-										text.bottom <= bounds.bottom - 1,
-								};
-							});
-						});
-						assertEqual(content.length, 3, "short New FAB card title and description count");
-						for (const item of content) {
-							assertEqual(item.contained, true, `short New FAB card contains ${item.label}`);
-						}
-						await assertLocatorInsideViewport(page, newFabCard);
-						await assertLocatorOwnsHitArea(newFabCard, "short New FAB complete card");
-					}
-					for (const control of await page
-						.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
-						.all()) {
-						await assertLocatorInsideViewport(page, control);
-						await assertLocatorOwnsHitArea(control, `short compact ${activity} control`);
-					}
-					await page.screenshot({
-						path: path.join(artifactRoot, `ordinary-navigation-compact-${activity}-390x600.png`),
-					});
-				}
-				await page.getByRole("button", { name: "내 청사진", exact: true }).click();
-				for (const control of await page
-					.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
-					.all()) {
-					await assertLocatorOwnsHitArea(control, "short compact Blueprint control");
-				}
-				await page.getByTestId("editor-activity-build").click();
-				assertProjectUnchanged(
-					await readMetrics(page),
-					navigationBefore,
-					"short compact activity and library navigation",
-				);
 			}
-			// The full drag corridor must clear the expanded menu, not just its midpoint.
+			// The first drag corridor must clear the untouched menu, not just its midpoint.
 			await centerWorld(page, { x: 1.5, y: 0.5 }, 64);
 			const before = await readMetrics(page);
 			const startPoint = await screenPointForWorld(page, { x: 0.5, y: 0.5 });
@@ -45973,6 +45973,128 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 				undefined,
 				{ timeout: 10_000 },
 			);
+			if (viewport.height <= 650) {
+				const navigationBefore = await readMetrics(page);
+				await page.getByTestId("editor-tool-description-toggle").click();
+				await page.waitForFunction(() => {
+					const navigation = document.querySelector(".tilefab-tools");
+					const hints = document.querySelector(".tilefab-action-hints");
+					const bar = document.querySelector(".tilefab-buildbar");
+					return (
+						navigation?.getAttribute("data-tool-density") === "expanded" &&
+						navigation?.getAttribute("data-more-tools") === "true" &&
+						hints &&
+						bar &&
+						hints.getBoundingClientRect().bottom <= bar.getBoundingClientRect().top
+					);
+				});
+				for (const control of await page
+					.locator(
+						".tilefab-editor-activity-button:visible, .tilefab-camera-controls button:visible",
+					)
+					.all()) {
+					await assertLocatorInsideViewport(page, control);
+					await assertLocatorOwnsHitArea(control, "short expanded activity/camera control");
+				}
+				for (const id of ["build-track", "rotate-build"]) {
+					const hint = page.locator(`.tilefab-action-hint[data-hint-id="${id}"]`);
+					await assertLocatorInsideViewport(page, hint);
+					await assertLocatorOwnsHitArea(hint, `short ordinary Rail ${id} hint`);
+					assertAtLeast((await hint.boundingBox())?.height ?? 0, 44, "Rail hint target height");
+				}
+				await page.screenshot({
+					path: path.join(
+						artifactRoot,
+						"ordinary-navigation-expanded-after-first-rail-390x600.png",
+					),
+				});
+				const eraseTool = page.getByRole("button", { name: "모듈 철거", exact: true });
+				await eraseTool.focus();
+				await assertLocatorInsideViewport(page, eraseTool);
+				await assertLocatorOwnsHitArea(eraseTool, "short scrolled erase action");
+				await page.screenshot({
+					path: path.join(artifactRoot, "ordinary-navigation-scrolled-390x600.png"),
+				});
+				await page.keyboard.press("Enter");
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="tilefab-app"]')
+							?.getAttribute("data-editor-tool") === "erase",
+				);
+				const railTool = page.getByRole("button", { name: "레일 건설", exact: true });
+				await railTool.focus();
+				await page.keyboard.press("Enter");
+				await page.waitForFunction(
+					() =>
+						document
+							.querySelector('[data-testid="tilefab-app"]')
+							?.getAttribute("data-editor-tool") === "build",
+				);
+				assertProjectUnchanged(
+					await readMetrics(page),
+					navigationBefore,
+					"short navigation and tool switch",
+				);
+				// Return to compact density before resuming short-screen construction.
+				const density = page.getByTestId("editor-tool-description-toggle");
+				if ((await density.getAttribute("aria-pressed")) === "true") await density.click();
+				const compactNavigation = await page.locator(".tilefab-tools").boundingBox();
+				const compactHints = await page.locator(".tilefab-action-hints").boundingBox();
+				assertAtLeast(
+					compactHints?.x ?? 0,
+					(compactNavigation?.x ?? 0) + (compactNavigation?.width ?? 0),
+					"short compact Rail hints clear the whole navigation width",
+				);
+				for (const activity of ["build", "inspect", "assemble"]) {
+					await page.getByTestId(`editor-activity-${activity}`).click();
+					if (activity === "assemble") {
+						const newFabCard = page.getByTestId("fab-preset-browser");
+						await newFabCard.waitFor({ state: "visible" });
+						const content = await newFabCard.evaluate((card) => {
+							const bounds = card.getBoundingClientRect();
+							return [...card.querySelectorAll("small, strong, em")].map((label) => {
+								const text = label.getBoundingClientRect();
+								return {
+									label: label.textContent,
+									contained:
+										text.left >= bounds.left + 1 &&
+										text.right <= bounds.right - 1 &&
+										text.top >= bounds.top + 1 &&
+										text.bottom <= bounds.bottom - 1,
+								};
+							});
+						});
+						assertEqual(content.length, 3, "short New FAB card title and description count");
+						for (const item of content) {
+							assertEqual(item.contained, true, `short New FAB card contains ${item.label}`);
+						}
+						await assertLocatorInsideViewport(page, newFabCard);
+						await assertLocatorOwnsHitArea(newFabCard, "short New FAB complete card");
+					}
+					for (const control of await page
+						.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
+						.all()) {
+						await assertLocatorInsideViewport(page, control);
+						await assertLocatorOwnsHitArea(control, `short compact ${activity} control`);
+					}
+					await page.screenshot({
+						path: path.join(artifactRoot, `ordinary-navigation-compact-${activity}-390x600.png`),
+					});
+				}
+				await page.getByRole("button", { name: "내 청사진", exact: true }).click();
+				for (const control of await page
+					.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
+					.all()) {
+					await assertLocatorOwnsHitArea(control, "short compact Blueprint control");
+				}
+				await page.getByTestId("editor-activity-build").click();
+				assertProjectUnchanged(
+					await readMetrics(page),
+					navigationBefore,
+					"short compact activity and library navigation",
+				);
+			}
 			await clickActivityCommand(page, "equip", "OHB 포트 배치");
 			const noSlotInstruction = await page
 				.locator('.tilefab-port-buildbar[data-port-type="OHB"] .tilefab-port-authoring-instruction')

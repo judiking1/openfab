@@ -2906,10 +2906,11 @@ export default function TileFabApp(): React.ReactElement {
 	const [inspection3DVisibilityMenuOpen, setInspection3DVisibilityMenuOpen] = useState(false);
 	const [editorActivity, setEditorActivity] = useState<EditorActivity>("build");
 	const [editorToolDescriptionPreference, setEditorToolDescriptionPreference] = useState<
-		"compact" | "expanded"
-	>("expanded");
+		"auto" | "compact" | "expanded"
+	>("auto");
 	const [compactPortToolDescriptionsExpanded, setCompactPortToolDescriptionsExpanded] =
 		useState(false);
+	const shortBuildViewport = useViewportMedia("(max-width: 520px) and (max-height: 780px)");
 	const compactEditorViewport = useViewportMedia("(max-width: 430px)");
 	const compactInspectorCollisionViewport = useViewportMedia("(max-width: 520px)");
 	const compactNavigatorViewport = useViewportMedia("(max-width: 760px)");
@@ -30229,7 +30230,10 @@ export default function TileFabApp(): React.ReactElement {
 		? false
 		: compactPortToolFocusActive
 			? compactPortToolDescriptionsExpanded
-			: guidedBuildExperienceActive || editorToolDescriptionPreference === "expanded";
+			: guidedBuildExperienceActive ||
+				editorToolDescriptionPreference === "expanded" ||
+				(editorToolDescriptionPreference === "auto" &&
+					!(editorActivity === "build" && shortBuildViewport));
 	useEditorNavigationScroll(editorNavigationRef, editorActivity, editorToolDescriptionsExpanded);
 	useLayoutEffect(() => {
 		if (!compactPortToolContextActive && compactPortToolDescriptionsExpanded) {
@@ -30276,9 +30280,7 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
-		setEditorToolDescriptionPreference((current) =>
-			current === "expanded" ? "compact" : "expanded",
-		);
+		setEditorToolDescriptionPreference(editorToolDescriptionsExpanded ? "compact" : "expanded");
 		setStatus(
 			editorToolDescriptionsExpanded
 				? "왼쪽 메뉴 설명을 접었습니다 · 버튼의 기능과 단축키는 그대로입니다"

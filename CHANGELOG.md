@@ -6,7 +6,19 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
-### Preview candidate 0.1.16
+### Preview candidate 0.1.17
+
+- Start short blank-project Rail authoring with a compact activity menu so the first pointer
+  drag remains on the canvas at 390×600. Keep explicit menu-density choices across resizing
+  and activity changes.
+- Verify that an ordinary project retaining hand-authored OHB/EQ/Stocker also reaches final
+  FAB assembly, then preserves its equipment, declared relationships, Worker parity, and
+  settled Checks result through same-width native save/reopen at 390, 760, and 1440px.
+
+## [0.1.16] - 2026-09-28
+
+Published Pages preview. The 0.1.14 and 0.1.15 candidate changes below are included in this
+verified release; those candidates were not separately deployed.
 
 - Add a reachable Settings action for compact FAB presets and patterns, including the
   first-screen Verified Template path. Return keyboard focus to the canvas or preset
@@ -31,7 +43,10 @@ All notable public OpenFab changes will be documented here. The format follows
   Worker evaluation, one undoable Apply, save/reopen, and failed-Apply recovery.
 - Stabilize Help Escape and Guided EQ-to-Inspector handoff on short screens.
 
-### Preview candidate 0.1.13
+## [0.1.13] - 2026-09-28
+
+Earlier published Pages preview. Older candidate notes below record the milestones included
+before this release.
 
 - Allow the last individually managed Bay in a declared Bank connection to be disconnected
   after an impact review. Preserve the other relationships, Bay content, Undo/Redo, Worker
