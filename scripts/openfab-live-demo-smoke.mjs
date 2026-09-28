@@ -551,8 +551,19 @@ async function readHeaderEvidence(activePage, label) {
 			: [];
 		return { viewport, items, commands };
 	});
-	if (evidence.items.length < 4) {
-		throw new Error(`${label}: expected at least four visible topbar regions`);
+	const requiredRegions =
+		label === "compact"
+			? ["tilefab-project", "tilefab-network", "tilefab-commands"]
+			: ["tilefab-brand", "tilefab-project", "tilefab-network", "tilefab-commands"];
+	for (const region of requiredRegions) {
+		if (!evidence.items.some((item) => item.name === region)) {
+			throw new Error(`${label}: required topbar region is hidden: ${region}`);
+		}
+	}
+	if (evidence.items.length !== requiredRegions.length) {
+		throw new Error(
+			`${label}: unexpected visible topbar regions: ${evidence.items.map((item) => item.name).join(", ")}`,
+		);
 	}
 	for (const item of evidence.items) {
 		assertRectWithinViewport(item, evidence.viewport, `${label} ${item.name}`, 1);
@@ -566,7 +577,70 @@ async function readHeaderEvidence(activePage, label) {
 			}
 		}
 	}
-	if (label !== "compact") {
+	if (label === "compact") {
+		for (const command of ["프로젝트 저장", "도움말·가이드"]) {
+			if (!evidence.commands.includes(command)) {
+				throw new Error(`${label}: required topbar command is hidden: ${command}`);
+			}
+		}
+		if (!evidence.commands.some((command) => command.startsWith("프로젝트 메뉴 ·"))) {
+			throw new Error("compact: Project menu does not show the file and save-state route");
+		}
+		const compactCommands = await activePage.evaluate(() => {
+			const strip = document.querySelector(".tilefab-commands");
+			if (!(strip instanceof HTMLElement)) return null;
+			const stripRect = strip.getBoundingClientRect();
+			return ["프로젝트 저장", "도움말·가이드"].map((name) => {
+				const button = [...strip.querySelectorAll("button[aria-label]")].find(
+					(item) => item.getAttribute("aria-label") === name,
+				);
+				if (!(button instanceof HTMLButtonElement)) return { name, visible: false };
+				const rect = button.getBoundingClientRect();
+				const x = rect.left + rect.width / 2;
+				const y = rect.top + rect.height / 2;
+				return {
+					name,
+					visible:
+						rect.width >= 44 &&
+						rect.height >= 44 &&
+						rect.left >= stripRect.left - 1 &&
+						rect.right <= stripRect.right + 1 &&
+						rect.left >= 0 &&
+						rect.right <= window.innerWidth &&
+						button.contains(document.elementFromPoint(x, y)),
+				};
+			});
+		});
+		if (!compactCommands || compactCommands.some((command) => !command.visible)) {
+			throw new Error(
+				`compact: Save or Help cannot be clicked without scrolling ${JSON.stringify(compactCommands)}`,
+			);
+		}
+		const projectTrigger = activePage.locator(".tilefab-project-trigger");
+		await projectTrigger.click();
+		const projectMenu = activePage.locator("#tilefab-project-menu");
+		await projectMenu.waitFor({ state: "visible" });
+		for (const command of ["열기", "프로젝트 파일 저장 (.openfab)"]) {
+			const button = projectMenu.getByRole("button", { name: command, exact: true });
+			const hitVisible = await button.evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return (
+					rect.width >= 44 &&
+					rect.height >= 44 &&
+					rect.left >= 0 &&
+					rect.right <= window.innerWidth &&
+					element.contains(
+						document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2),
+					)
+				);
+			});
+			if (!(await button.isEnabled()) || !hitVisible) {
+				throw new Error(`compact: Project menu command cannot be used: ${command}`);
+			}
+		}
+		await projectTrigger.click();
+		await projectMenu.waitFor({ state: "hidden" });
+	} else {
 		const requiredCommands = ["FAB 프리셋", "실행 취소", "다시 실행", "전체 보기", "도움말·가이드"];
 		if (label === "medium") requiredCommands.splice(1, 0, "프로젝트 저장");
 		else requiredCommands.splice(1, 0, "프로젝트 열기", "프로젝트 저장", "2D 편집 뷰");

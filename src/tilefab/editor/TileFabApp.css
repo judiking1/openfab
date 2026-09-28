@@ -745,9 +745,32 @@
 }
 
 .tilefab-project-trigger small {
+	display: flex;
+	min-width: 0;
+	align-items: center;
 	margin-top: 2px;
-	color: #718083;
+	color: #9cabad;
 	font-size: 8px;
+}
+
+.tilefab-project-file-name {
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-project-save-state {
+	flex: 0 0 auto;
+}
+
+.tilefab-project-file-name + .tilefab-project-save-state::before {
+	content: " · ";
+}
+
+.tilefab-project-save-state-short {
+	display: none;
 }
 
 .tilefab-project-trigger[data-dirty="true"] strong::after {
@@ -2378,37 +2401,35 @@
 @media (max-width: 650px) {
 	.tilefab-project-trigger {
 		height: 44px;
-		justify-content: center;
-		padding: 0;
+		justify-content: flex-start;
+		padding: 0 7px;
 	}
 
-	.tilefab-project-trigger > span:not(.tilefab-project-compact-icon),
+	.tilefab-project-trigger > .tilefab-project-compact-icon,
 	.tilefab-project-trigger > svg {
 		display: none;
 	}
 
-	.tilefab-project-trigger > .tilefab-project-compact-icon {
-		position: relative;
+	.tilefab-project-trigger > .tilefab-project-caption {
 		display: grid;
-		width: 20px;
-		height: 20px;
-		place-items: center;
+		width: 100%;
 	}
 
-	.tilefab-project-trigger[data-dirty="true"] .tilefab-project-compact-icon::after {
-		position: absolute;
-		top: -4px;
-		right: -5px;
-		width: 6px;
-		height: 6px;
-		border: 1px solid #0d1213;
-		border-radius: 50%;
-		background: #e3b85e;
-		content: "";
+	.tilefab-project-trigger strong {
+		font-size: 11px;
+	}
+
+	.tilefab-project-trigger small {
+		font-size: 9px;
+	}
+
+	.tilefab-project-trigger .tilefab-project-file-name,
+	.tilefab-project-trigger .tilefab-project-file-name + .tilefab-project-save-state::before {
+		display: none;
 	}
 
 	.tilefab-project-menu {
-		left: -38px;
+		left: 0;
 	}
 
 	.tilefab-recovery {

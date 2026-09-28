@@ -65,6 +65,9 @@ const PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ONLY_COMPLETE = new Error(
 const ORDINARY_ALL_EQUIPMENT_LOOP_MEMBERSHIP_ONLY_COMPLETE = new Error(
 	"Ordinary all-equipment Process Loop membership acceptance completed.",
 );
+const ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE = new Error(
+	"Zero-eligible Process Loop acceptance completed.",
+);
 const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconnection completed.");
 const STATION_REVIEW_APPLY_ONLY_COMPLETE = new Error("Station review Apply acceptance completed.");
 const COMPACT_STARTER_NAV_ONLY_COMPLETE = new Error("Compact starter navigation completed.");
@@ -82,6 +85,7 @@ const server = startPreviewServer();
 let browser;
 let desktopPage;
 let legacyLargeFabAcceptanceFixturePath = null;
+let zeroEligibleProcessLoopFixture = null;
 const result = {
 	status: "FAIL",
 	failure: null,
@@ -192,6 +196,14 @@ try {
 		result.status = "PASS";
 		console.log("PASS ordinary all-equipment Process Loop membership acceptance");
 		throw ORDINARY_ALL_EQUIPMENT_LOOP_MEMBERSHIP_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_ZERO_ELIGIBLE_PROCESS_LOOP_ACCEPTANCE_ONLY === "1") {
+		recordStep("zero-eligible-process-loop", await exerciseZeroEligibleProcessLoop(browser));
+		assertEqual(result.consoleErrors.length, 0, "Zero-eligible Loop console errors");
+		assertEqual(result.pageErrors.length, 0, "Zero-eligible Loop page errors");
+		result.status = "PASS";
+		console.log("PASS zero-eligible Process Loop acceptance");
+		throw ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_STATIC_FAB_ISSUE_RECHECK_ACCEPTANCE_ONLY === "1") {
 		const staticFabIssueRecheck = await exerciseStaticFabIssueInspectorRecheck(browser);
@@ -321,6 +333,7 @@ try {
 		"ordinary-all-equipment-loop-membership",
 		await exerciseOrdinaryAllEquipmentLoopMembership(browser),
 	);
+	recordStep("zero-eligible-process-loop", await exerciseZeroEligibleProcessLoop(browser));
 	recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
 	recordStep("factory-scale-ordinary-port-overview", factoryPortOverview);
@@ -2742,6 +2755,7 @@ try {
 		error === COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE ||
 		error === PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ONLY_COMPLETE ||
 		error === ORDINARY_ALL_EQUIPMENT_LOOP_MEMBERSHIP_ONLY_COMPLETE ||
+		error === ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE ||
 		error === DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE ||
 		error === STATION_REVIEW_APPLY_ONLY_COMPLETE ||
 		error === COMPACT_STARTER_NAV_ONLY_COMPLETE ||
@@ -4176,7 +4190,7 @@ async function auditOrdinaryNoSlotPortPrerequisite(page, viewport, canvas) {
 			toolLabel: "OHB 포트 배치",
 			portType: "OHB",
 			prerequisiteCopy: "먼저 직선 레일",
-			statusPrerequisiteCopy: "직선 레일을 먼저",
+			statusPrerequisiteCopy: "먼저 직선 레일",
 		},
 		{
 			tool: "eq",
@@ -5387,6 +5401,294 @@ async function exerciseProcessLoopEquipmentMembership(browserInstance) {
 	} finally {
 		await closeBrowserResource(page, "Process Loop equipment page");
 		await closeBrowserResource(context, "Process Loop equipment context");
+	}
+}
+
+async function createZeroEligibleProcessLoopFixture() {
+	if (zeroEligibleProcessLoopFixture) return zeroEligibleProcessLoopFixture;
+	const { createServer } = await import("vite");
+	const vite = await createServer({
+		root,
+		appType: "custom",
+		logLevel: "silent",
+		server: { middlewareMode: true },
+	});
+	try {
+		const [rail, templates, ownership, physical, ports, scope, organizations, project, codec] =
+			await Promise.all([
+				vite.ssrLoadModule("/src/tilefab/core/RailDocument.ts"),
+				vite.ssrLoadModule("/src/tilefab/core/RailTemplateCatalog.ts"),
+				vite.ssrLoadModule("/src/tilefab/core/RailModuleOwnership.ts"),
+				vite.ssrLoadModule("/src/tilefab/compile/PhysicalRailCompiler.ts"),
+				vite.ssrLoadModule("/src/tilefab/compile/PortSlotCompiler.ts"),
+				vite.ssrLoadModule("/src/tilefab/editor/OrdinaryPortProcessLoopScope.ts"),
+				vite.ssrLoadModule("/src/tilefab/core/StaticFabOrganization.ts"),
+				vite.ssrLoadModule("/src/tilefab/project/OpenFabProject.ts"),
+				vite.ssrLoadModule("/src/tilefab/project/OpenFabProjectCodec.ts"),
+			]);
+		const source = new rail.RailDocument();
+		const plan = templates.planRailTemplate(
+			source.map,
+			"long-bay",
+			{ x: 0, y: 0 },
+			templates.initialRailTemplatePose(),
+			templates.defaultRailTemplateParameters("long-bay"),
+		);
+		if (!plan.valid || !source.commit(plan)) {
+			throw new Error(
+				`Zero-eligible Loop rail fixture failed: ${plan.reason ?? source.getLastCommandError()}`,
+			);
+		}
+		const modules = ownership.buildRailModuleOwnershipIndex(source.map).modules;
+		const turn = modules.find((module) => module.kind === "turn");
+		const bayStraight = modules.find(
+			(module) => module.kind === "straight" && module.eraseEdges.length === 5,
+		);
+		if (!turn || !bayStraight)
+			throw new Error("Zero-eligible Loop fixture lacks turn or Bay rail.");
+		const membership = (module) => ({
+			railEdges: [...module.eraseEdges].sort(organizations.compareDirectedRailEdges),
+			advancedSwitchIds: [],
+			equipmentGroupIds: [],
+		});
+		const organizationState = {
+			nextOrganizationId: 3,
+			records: [
+				{
+					id: 1,
+					kind: "BAY",
+					name: "Synthetic Bay",
+					parentOrganizationIds: [],
+					properties: { description: "", color: "TEAL" },
+					membership: membership(bayStraight),
+				},
+				{
+					id: 2,
+					kind: "AISLE",
+					name: "Zero-slot Process Loop",
+					parentOrganizationIds: [1],
+					properties: { description: "", color: "TEAL" },
+					membership: membership(turn),
+				},
+			],
+		};
+		const document = rail.RailDocument.fromLoadedMap(
+			source.map,
+			source.getPatchSequence(),
+			source.portEquipment,
+			organizationState,
+		);
+		const slots = ports.compilePortSlots(
+			physical.compilePhysicalRail(document.map),
+			document.portEquipment,
+			"OHB",
+		);
+		const loop = document.organizations.records.find((record) => record.id === 2);
+		if (!loop) throw new Error("Zero-eligible Loop record was lost during native activation.");
+		assertEqual(
+			scope.compileOrdinaryPortProcessLoopScope(slots, loop).eligibleCount,
+			0,
+			"turn-only Process Loop has zero eligible OHB slots",
+		);
+		assertAtLeast(slots.legalCount, 1, "same map retains global legal OHB slots");
+		const outsideRow = Array.from(slots.statuses).findIndex(
+			(status, row) =>
+				status === ports.PORT_SLOT_STATUS.LEGAL &&
+				slots.routeXs[row] >= 8 &&
+				slots.routeXs[row] <= 16,
+		);
+		if (outsideRow < 0)
+			throw new Error("Zero-eligible Loop fixture lacks an outside legal OHB Port.");
+		const manifest = project.createOpenFabProjectManifest(
+			"openfab-zero-eligible-loop-acceptance",
+			"Zero-slot Loop",
+			"2024-01-01T00:00:00.000Z",
+		);
+		const fixturePath = path.join(artifactRoot, "zero-eligible-process-loop.openfab");
+		await writeFile(
+			fixturePath,
+			codec.serializeOpenFabProject(project.captureOpenFabProject(document, { manifest })),
+			"utf8",
+		);
+		zeroEligibleProcessLoopFixture = Object.freeze({
+			path: fixturePath,
+			loopId: loop.id,
+			globalLegalCount: slots.legalCount,
+			outside: Object.freeze({
+				row: outsideRow,
+				x: slots.worldPositions[outsideRow * 2],
+				y: slots.worldPositions[outsideRow * 2 + 1],
+			}),
+		});
+		return zeroEligibleProcessLoopFixture;
+	} finally {
+		await vite.close();
+	}
+}
+
+async function exerciseZeroEligibleProcessLoop(browserInstance) {
+	const fixture = await createZeroEligibleProcessLoopFixture();
+	const context = await browserInstance.newContext({
+		viewport: { width: 390, height: 600 },
+		acceptDownloads: true,
+	});
+	const page = await context.newPage();
+	page.on("console", (message) => {
+		if (message.type() === "error") result.consoleErrors.push(message.text());
+	});
+	page.on("pageerror", (error) => result.pageErrors.push(error.message));
+	try {
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		await page
+			.getByTestId("openfab-start-dialog")
+			.getByRole("button", { name: /BLANK CANVAS/ })
+			.click();
+		const chooserPromise = page.waitForEvent("filechooser");
+		await page.locator(".tilefab-project-trigger").click();
+		await page
+			.locator(".tilefab-project-menu-commands")
+			.getByRole("button", { name: "열기", exact: true })
+			.click();
+		await (await chooserPromise).setFiles(fixture.path);
+		const loaded = await waitForWorker(
+			page,
+			(metrics) =>
+				metrics.projectName === "Zero-slot Loop" && metrics.staticFabOrganizations === "2",
+		);
+		assertEqual(
+			Number(loaded.legalOhbSlots),
+			fixture.globalLegalCount,
+			"native fixture global OHB slots",
+		);
+		await clickActivityCommand(page, "equip", "OHB 포트 배치");
+		await waitForLegalPortSlots(page);
+		const outside = (await readLegalPortCandidates(page, "OHB", 256)).find(
+			(candidate) => candidate.row === fixture.outside.row,
+		);
+		if (!outside) throw new Error("Native fixture lost its outside legal OHB row.");
+		await zoomOrdinaryPortTargetIfOffered(page, "OHB", "390x600 zero Loop");
+		await revealOrdinaryEquipmentSlot(page, outside, "390x600 outside legal OHB row");
+		await page.waitForFunction(
+			() =>
+				Number(
+					document.querySelector('[data-testid="rail-canvas"]')?.dataset.visiblePortSlotMarks,
+				) > 0,
+			undefined,
+			{ timeout: 10_000 },
+		);
+		const beforeScope = await readMetrics(page);
+		await selectOrdinaryPortProcessLoopWithoutSlots(page, fixture.loopId, "390x600 zero Loop");
+		const scopedInstruction = await page.locator("#tilefab-port-authoring-instruction").innerText();
+		assertIncludes(scopedInstruction, "다른 Process Loop", "zero Loop main instruction next scope");
+		assertIncludes(
+			scopedInstruction,
+			"전체 Port 슬롯",
+			"zero Loop main instruction global recovery",
+		);
+		assertEqual(
+			(await readDirectProcessLoopPortCandidates(page, "OHB", fixture.loopId)).length,
+			0,
+			"native Loop direct legal OHB rows",
+		);
+		assertProjectUnchanged(await readMetrics(page), beforeScope, "zero Loop scope selection");
+		await page.screenshot({ path: path.join(artifactRoot, "zero-eligible-loop-390x600.png") });
+
+		const outsidePoint = await revealOrdinaryEquipmentSlot(
+			page,
+			outside,
+			"390x600 zero Loop outside refusal",
+		);
+		await page.mouse.click(outsidePoint.x, outsidePoint.y);
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="rail-status-message"]')
+					?.textContent?.includes("선택한 Process Loop 밖의 Port입니다"),
+			undefined,
+			{ timeout: 10_000 },
+		);
+		assertProjectUnchanged(await readMetrics(page), beforeScope, "zero Loop outside Port refusal");
+
+		const selector = page.getByTestId("ordinary-port-process-loop-target");
+		await selector.selectOption("");
+		await page.waitForFunction(
+			() =>
+				document.querySelector('[data-testid="ordinary-port-process-loop-target"]')?.value === "" &&
+				Number(
+					document.querySelector('[data-testid="rail-canvas"]')?.dataset.visiblePortSlotMarks,
+				) > 0,
+			undefined,
+			{ timeout: 10_000 },
+		);
+		assertEqual(
+			await page.getByTestId("ordinary-port-process-loop-start").isEnabled(),
+			true,
+			"global Port placement start recovers",
+		);
+		const beforePlacement = await readMetrics(page);
+		assertProjectUnchanged(beforePlacement, beforeScope, "zero Loop global scope recovery");
+		const globalPoint = await revealOrdinaryEquipmentSlot(
+			page,
+			outside,
+			"390x600 recovered global OHB",
+		);
+		await page.mouse.click(globalPoint.x, globalPoint.y);
+		const created = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforePlacement.workerTargetSequence) + 1 &&
+				Number(metrics.equipmentGroups) === Number(beforePlacement.equipmentGroups) + 1 &&
+				Number(metrics.equipmentPorts) === Number(beforePlacement.equipmentPorts) + 1,
+		);
+		assertSingleGuidedPortCommit(created, beforePlacement, "zero Loop global OHB creation");
+		await undoAndRedo(page, beforePlacement, created, null, true);
+		return Object.freeze({
+			viewport: "390x600",
+			loopId: fixture.loopId,
+			globalLegalCount: fixture.globalLegalCount,
+			outsideRow: outside.row,
+			createdGroupId: Number(beforePlacement.modelNextEquipmentGroupId),
+			checksum: created.modelChecksum,
+		});
+	} finally {
+		await closeBrowserResource(page, "zero-eligible Process Loop page");
+		await closeBrowserResource(context, "zero-eligible Process Loop context");
+	}
+}
+
+async function selectOrdinaryPortProcessLoopWithoutSlots(page, loopId, label) {
+	const selector = page.getByTestId("ordinary-port-process-loop-target");
+	await selector.waitFor({ state: "visible" });
+	await selector.scrollIntoViewIfNeeded();
+	await assertLocatorInsideViewport(page, selector);
+	await assertLocatorOwnsHitArea(selector, `${label} selector`);
+	await selector.selectOption(String(loopId));
+	await page.waitForFunction(
+		(expected) => {
+			const selected = document.querySelector('[data-testid="ordinary-port-process-loop-target"]');
+			const count = document.querySelector(
+				'[data-testid="ordinary-port-process-loop-target-count"]',
+			);
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			return (
+				selected?.value === expected &&
+				count?.textContent?.includes("슬롯 0개") &&
+				canvas?.dataset.visiblePortSlotMarks === "0" &&
+				canvas?.dataset.renderedPassivePortSlotMarkers === "0" &&
+				!document.querySelector('[data-testid="ordinary-port-keyboard-target"]')
+			);
+		},
+		String(loopId),
+		{ timeout: 10_000 },
+	);
+	await assertOrdinaryPortProcessLoopIdentity(page, loopId, label);
+	for (const testId of ["ordinary-port-process-loop-start", "ordinary-port-keyboard-start"]) {
+		const start = page.getByTestId(testId);
+		await start.waitFor({ state: "visible" });
+		await start.scrollIntoViewIfNeeded();
+		await assertLocatorInsideViewport(page, start);
+		assertEqual(await start.isDisabled(), true, `${label} ${testId} is disabled`);
 	}
 }
 
@@ -31565,6 +31867,18 @@ async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 					metrics.modelRelationships === String(preset.groups.length) &&
 					metrics.staticFabOrganizations === preset.organizations,
 				{ timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS },
+			);
+			await page.waitForFunction(
+				() =>
+					document.querySelector(".tilefab-project-trigger")?.getAttribute("data-save-status") ===
+					"저장 필요",
+				undefined,
+				{ timeout: 10_000 },
+			);
+			assertEqual(
+				await page.getByTestId("project-save-status").innerText(),
+				"저장 필요",
+				`${preset.label} unsaved created project status`,
 			);
 			assertEqual(
 				created.modelNextRelationshipId,

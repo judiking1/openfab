@@ -6,7 +6,31 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-09-28
+
+- Show the current project name and save state in the compact header. Distinguish an untouched
+  Blank Canvas, a newly generated preset that still needs a file, unsaved edits, an active save,
+  and a downloaded or read-only file copy without changing the existing dirty-project protection.
+  Keep project, Checks, Guide Resume, Save, and Help actions reachable on narrow screens. Truncate
+  long filenames before the save state and use a short visible `사본 있음` label on narrow screens.
+- For a Process Loop with no directly eligible Port slots, show the scoped zero count and a
+  specific recovery action in the main OHB/EQ/Stocker instructions. Suppress unrelated global
+  Port marks on the Canvas while that Loop is selected. Browser acceptance uses an independently
+  generated turn-only Loop to verify refusal without project/Worker/history changes, recovery
+  to all slots, one atomic OHB creation, and Undo/Redo at 390×600.
+- Scope candidate wording only to ordinary Port placement; Guided Build and OHB move/copy keep
+  their own instructions when an ordinary Loop choice was left selected. Keep Port targets visible
+  during EQ/Stocker group edits, and recommend adding straight rail when even the global slot
+  count is zero.
+- Bound compact header commands to an internally scrollable track so an offscreen action cannot
+  shift the entire app root and misplace the derived 3D Inspector. Cover phone widths below
+  390px and the paused Guide breakpoint around 450px.
+
 ## [0.1.23] - 2026-09-28
+
+Public `main` `5eb25dc` passed both jobs of CI `36419502758`; Pages `b142873` deployed
+successfully. All 65 served files and both entry URLs matched the reviewed build SHA-256.
+V1 authoring remains incomplete.
 
 - Put an explicit “이 Process Loop에 소속” action directly below the selected OHB, EQ, or
   Stocker Inspector header. It remains visible with compact details closed, appears only for

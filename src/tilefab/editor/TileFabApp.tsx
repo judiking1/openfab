@@ -10915,7 +10915,9 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		if (row === null) {
 			setStatus(
-				ordinaryPortProcessLoopTargetRef.current && !ohbPlacementIntentRef.current
+				binding.slots.legalCount === 0
+					? portAuthoringSurfacePresentation(portType, binding.slots.count, 0).instruction
+					: ordinaryPortProcessLoopTargetRef.current && !ohbPlacementIntentRef.current
 					? `선택한 Process Loop에 배치 가능한 ${portType} Port가 없습니다 · 다른 Loop 또는 전체 슬롯을 선택하세요`
 					: `${portType} 슬롯이 없습니다 · 직선 레일을 먼저 만드세요`,
 			);
@@ -10987,7 +10989,9 @@ export default function TileFabApp(): React.ReactElement {
 			: null;
 		const retry = organizationId === null ? "전체 Port 슬롯에서 다시 선택하세요" : "새 Loop에서 다시 선택하세요";
 		const missingSlots = organizationId !== null && (!scope || scope.eligibleCount === 0)
-			? `선택한 Loop에 직접 연결된 ${portType ?? "장비"} 슬롯이 없습니다 · 다른 Loop 또는 전체 Port 슬롯을 선택하세요`
+			? slots?.legalCount === 0 && portType
+				? portAuthoringSurfacePresentation(portType, slots.count, 0).instruction
+				: `선택한 Loop에 직접 연결된 ${portType ?? "장비"} 슬롯이 없습니다 · 다른 Loop 또는 전체 Port 슬롯을 선택하세요`
 			: null;
 		const feedback = discardedDraft
 			? `${discardedDraft} · ${missingSlots ?? retry}`
@@ -12872,6 +12876,14 @@ export default function TileFabApp(): React.ReactElement {
 			if (!stkCandidateFilter) stkCandidateFilterRef.current.clear();
 			const railCoachInsets = guidedBuildRailSelectionCoach ? fitMapInsets(canvas) : null;
 			const portCoachInsets = guidedBuildPortPlacementCoach?.scopeIncludesRow ? fitMapInsets(canvas) : null;
+			const ordinaryPortScopeHasNoSlots =
+				(toolRef.current === "ohb" || toolRef.current === "eq" || toolRef.current === "stk") &&
+				!guidedBuildExperienceActive &&
+				!ohbPlacementIntentRef.current &&
+				!portEquipmentGroupEditSessionRef.current &&
+				ordinaryPortProcessLoopTargetRef.current !== null &&
+				stkSlots !== null &&
+				currentOrdinaryPortProcessLoopScope(stkSlots)?.eligibleCount === 0;
 			rendererRef.current.render(staticContext, overlayContext, {
 				map: activeModel.map,
 				physicalPaths: activeModel.physical.paths,
@@ -12901,6 +12913,7 @@ export default function TileFabApp(): React.ReactElement {
 				guidedOrganizationPlacement: guidedBuildOrganizationPlacementCoach,
 				showPortSlots:
 					activeArrangementPreview === null &&
+					(!ordinaryPortScopeHasNoSlots || portEquipmentMembershipEditSessionRef.current !== null) &&
 					(toolRef.current === "ohb" ||
 						toolRef.current === "eq" ||
 						toolRef.current === "stk" ||
@@ -28042,6 +28055,25 @@ export default function TileFabApp(): React.ReactElement {
 	const activePortLegalSlotCount = activePortAuthoringType
 		? editorModel.portSlotArtifacts[activePortAuthoringType].slots.legalCount
 		: 0;
+	const scopedPortLegalSlotCount =
+		guidedBuildExperienceActive ||
+		ohbPlacementIntent ||
+		ordinaryPortProcessLoopTargetId === null ||
+		selectedEquipmentProcessLoopScope === null
+			? null
+			: selectedEquipmentProcessLoopScope.eligibleCount;
+	const scopedPortAuthoringInstruction = activePortAuthoringType && scopedPortLegalSlotCount !== null
+		? scopedPortLegalSlotCount === 0
+			? activePortLegalSlotCount === 0
+				? activePortAuthoringPresentation?.instruction ?? ""
+				: `선택한 Process Loop에 직접 연결된 ${activePortAuthoringType} 슬롯이 없습니다 · 다른 Process Loop 또는 전체 Port 슬롯을 선택하세요`
+			: portAuthoringSurfacePresentation(
+					activePortAuthoringType,
+					editorModel.portSlotArtifacts[activePortAuthoringType].slots.count,
+					scopedPortLegalSlotCount,
+					guidedPortKeyboard?.portType === activePortAuthoringType,
+				).instruction
+		: null;
 	const activeStkZoomActionLabel = (stkDraftSelection?.rows.length ?? 0) === 0 ? "첫 Port 확대" : "현재 Port 확대";
 	const ordinaryPortKeyboardEntryVisible =
 		equipmentWorkspaceActive &&
@@ -28050,7 +28082,9 @@ export default function TileFabApp(): React.ReactElement {
 		guidedPortKeyboard === null &&
 		activePortLegalSlotCount > 0;
 	const basePortAuthoringInstruction =
-		tool === "stk"
+		scopedPortLegalSlotCount === 0 && !guidedBuildExperienceActive && !ohbPlacementIntent
+			? scopedPortAuthoringInstruction ?? ""
+			: tool === "stk"
 			? activePortLegalSlotCount === 0
 				? activePortAuthoringPresentation?.instruction ?? ""
 				: stkDraftReview.instruction
@@ -28059,9 +28093,9 @@ export default function TileFabApp(): React.ReactElement {
 				guidedPortKeyboard.portType === "EQ"
 				? ordinaryEqAuthoringInstruction(
 						guidedPortKeyboard.phase,
-						activePortLegalSlotCount,
+						scopedPortLegalSlotCount ?? activePortLegalSlotCount,
 					)
-				: activePortAuthoringPresentation?.instruction ?? "";
+				: scopedPortAuthoringInstruction ?? activePortAuthoringPresentation?.instruction ?? "";
 	const ordinaryEqRowExit = ordinaryEqRowExitPresentation(
 		tool === "eq" &&
 			guidedPortKeyboard !== null &&
@@ -28420,6 +28454,46 @@ export default function TileFabApp(): React.ReactElement {
 		editorModel.authoredChecksum,
 		operationalConfigurationFingerprint,
 	);
+	const projectUnchangedWithoutFile =
+		projectSession.fileReference === null &&
+		projectSession.needsSave &&
+		!projectSession.migrated &&
+		projectSession.savedChecksum === editorModel.authoredChecksum &&
+		projectSession.savedOperationalConfigurationFingerprint ===
+			operationalConfigurationFingerprint;
+	const projectUntouchedBlank =
+		projectUnchangedWithoutFile &&
+		editorModel.map.size === 0 &&
+		editorModel.document.portEquipment.ports.length === 0 &&
+		editorModel.document.portEquipment.equipmentGroups.length === 0 &&
+		editorModel.document.organizations.records.length === 0 &&
+		projectBlueprints.records.length === 0;
+	const projectSaveStatusLabel =
+		projectSession.operation === "saving"
+			? "저장 중"
+			: projectSession.operation === "opening"
+				? "여는 중"
+				: projectSession.operation === "creating"
+					? "만드는 중"
+				: projectSession.operation === "recovering"
+					? "복구 중"
+					: projectUntouchedBlank
+						? "미저장"
+						: projectUnchangedWithoutFile
+							? "저장 필요"
+						: projectDirty
+							? "수정됨 · 저장 필요"
+							: projectSession.fileReference === null
+								? "미저장"
+								: projectSession.fileReference.writable
+									? "파일 저장됨"
+									: "파일 사본 있음";
+	const projectSaveStatusCompactLabel =
+		projectSaveStatusLabel === "수정됨 · 저장 필요"
+			? "저장 필요"
+			: projectSaveStatusLabel === "파일 사본 있음"
+				? "사본 있음"
+				: null;
 	const projectBusy = projectSession.operation !== "idle";
 	useEffect(() => {
 		if (
@@ -31577,9 +31651,10 @@ export default function TileFabApp(): React.ReactElement {
 						className="tilefab-project-trigger"
 						ref={projectMenuTriggerRef}
 						data-dirty={projectDirty}
+						data-save-status={projectSaveStatusLabel}
 						aria-label={`프로젝트 메뉴 · ${projectSession.manifest.name} · ${
 							projectSession.fileReference?.name ?? "저장되지 않음"
-						}${projectDirty ? " · 수정됨" : " · 저장 상태"}`}
+						} · ${projectSaveStatusLabel}`}
 						aria-expanded={projectMenuOpen}
 						aria-controls="tilefab-project-menu"
 						onClick={() => setProjectMenuOpen((open) => !open)}
@@ -31587,11 +31662,18 @@ export default function TileFabApp(): React.ReactElement {
 						<span className="tilefab-project-compact-icon" aria-hidden="true">
 							<FolderOpen size={18} />
 						</span>
-						<span>
+						<span className="tilefab-project-caption">
 							<strong>{projectSession.manifest.name}</strong>
 							<small>
-								{projectSession.fileReference?.name ?? "Not saved"}
-								{projectDirty ? " · Modified" : " · Saved state"}
+								{projectSession.fileReference ? (
+									<span className="tilefab-project-file-name">{projectSession.fileReference.name}</span>
+								) : null}
+								<span className="tilefab-project-save-state" data-testid="project-save-status">
+									<span className="tilefab-project-save-state-full">{projectSaveStatusLabel}</span>
+									{projectSaveStatusCompactLabel ? (
+										<span className="tilefab-project-save-state-short">{projectSaveStatusCompactLabel}</span>
+									) : null}
+								</span>
 							</small>
 						</span>
 						<ChevronDown size={14} />
@@ -31608,8 +31690,10 @@ export default function TileFabApp(): React.ReactElement {
 								<span>
 									<strong>{projectSession.manifest.name}</strong>
 									<small>
-										{projectSession.fileReference?.name ?? "Not saved"}
-										{projectDirty ? " · Modified" : " · Saved state"}
+										{projectSession.fileReference ? (
+											<span className="tilefab-project-file-name">{projectSession.fileReference.name}</span>
+										) : null}
+										<span className="tilefab-project-save-state">{projectSaveStatusLabel}</span>
 									</small>
 								</span>
 							</header>

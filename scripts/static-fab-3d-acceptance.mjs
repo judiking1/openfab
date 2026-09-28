@@ -705,6 +705,8 @@ try {
 		{ timeout: 2_000 },
 	);
 	await assertMinimumTargetSize(page, ".tilefab-view-switch button", 44, "mobile view switch");
+	await assertMinimumTargetSize(page, ".tilefab-project-trigger", 44, "mobile project menu");
+	await assertMinimumTargetSize(page, '[data-testid="rail-readiness-toggle"]', 44, "mobile Checks");
 	for (const label of [
 		"선택 전체 프레임",
 		"위에서 보기",
@@ -725,14 +727,24 @@ try {
 	result.mobile = await page.evaluate(() => {
 		const canvas = document.querySelector('[data-testid="static-fab-inspection-3d-canvas"]');
 		const inspector = document.querySelector(".tilefab-inspector");
+		const workspace = document.querySelector(".tilefab-workspace");
+		const commands = document.querySelector(".tilefab-commands");
 		const canvasBounds = canvas?.getBoundingClientRect();
 		const inspectorBounds = inspector?.getBoundingClientRect();
 		return {
 			width: innerWidth,
 			height: innerHeight,
+			pageScrollX: scrollX,
+			bodyScrollLeft: document.body.scrollLeft,
+			rootScrollLeft: document.getElementById("root")?.scrollLeft ?? null,
+			appLeft: document.querySelector(".tilefab-app")?.getBoundingClientRect().left ?? null,
 			overflow: document.documentElement.scrollWidth - innerWidth,
+			workspaceLeft: workspace?.getBoundingClientRect().left ?? null,
+			commandsClientWidth: commands?.clientWidth ?? 0,
+			commandsScrollWidth: commands?.scrollWidth ?? 0,
 			buildbarPresent: document.querySelector(".tilefab-buildbar") !== null,
 			canvasWidth: canvas?.clientWidth ?? 0,
+			canvasLeft: canvasBounds?.left ?? 0,
 			canvasHeight: canvas?.clientHeight ?? 0,
 			canvasBottom: canvasBounds?.bottom ?? 0,
 			inspectorTop: inspectorBounds?.top ?? 0,
@@ -747,7 +759,12 @@ try {
 			),
 		};
 	});
+	assertEqual(result.mobile.pageScrollX, 0, "mobile 3D page stays at left edge");
+	assertEqual(result.mobile.rootScrollLeft, 0, "mobile 3D root stays at left edge");
 	assertEqual(result.mobile.overflow, 0, "mobile horizontal overflow");
+	assertEqual(result.mobile.workspaceLeft, 0, "mobile 3D workspace left edge");
+	assertEqual(result.mobile.canvasLeft, 0, "mobile 3D canvas left edge");
+	assertAtLeast(result.mobile.commandsClientWidth, 44, "mobile 3D command scrollport");
 	assertEqual(result.mobile.buildbarPresent, false, "mobile authoring toolbar isolation");
 	assertEqual(result.mobile.canvasWidth, 390, "mobile 3D canvas width");
 	assertAtLeast(result.mobile.canvasHeight, 300, "mobile 3D usable canvas height");
@@ -764,6 +781,56 @@ try {
 	);
 	await page.screenshot({ path: path.join(artifactRoot, "mobile-390x844.png") });
 	assertIdentityEqual(await readCanonicalIdentity(page), canonicalBefore, "after mobile resize");
+	result.mobileNarrow = [];
+	for (const width of [320, 360]) {
+		await page.setViewportSize({ width, height: 844 });
+		await waitForAnimationFrames(page, 2);
+		for (const selector of [
+			'.tilefab-view-switch button[aria-label="2D 편집 뷰"]',
+			'.tilefab-view-switch button[aria-label="3D 검사 뷰"]',
+			'button[aria-label="선택 전체 프레임"]',
+			'button[aria-label="위에서 보기"]',
+			'button[aria-label="아이소메트릭 보기"]',
+			'button[aria-label="3D 표시 레이어"]',
+		]) {
+			await assertMinimumTargetSize(page, selector, 44, `${width}px 3D command`);
+		}
+		const layout = await page.evaluate(() => {
+			const canvasBounds = document
+				.querySelector('[data-testid="static-fab-inspection-3d-canvas"]')
+				?.getBoundingClientRect();
+			const inspectorBounds = document.querySelector(".tilefab-inspector")?.getBoundingClientRect();
+			const topbar = document.querySelector(".tilefab-topbar");
+			return {
+				pageScrollX: scrollX,
+				rootScrollLeft: document.getElementById("root")?.scrollLeft ?? null,
+				topbarOverflow: (topbar?.scrollWidth ?? 0) - (topbar?.clientWidth ?? 0),
+				canvasLeft: canvasBounds?.left ?? null,
+				canvasWidth: canvasBounds?.width ?? 0,
+				canvasHeight: canvasBounds?.height ?? 0,
+				canvasBottom: canvasBounds?.bottom ?? 0,
+				inspectorLeft: inspectorBounds?.left ?? null,
+				inspectorRight: inspectorBounds?.right ?? null,
+				inspectorTop: inspectorBounds?.top ?? 0,
+			};
+		});
+		assertEqual(layout.pageScrollX, 0, `${width}px 3D page stays at left edge`);
+		assertEqual(layout.rootScrollLeft, 0, `${width}px 3D root stays at left edge`);
+		assertEqual(layout.topbarOverflow, 0, `${width}px 3D topbar fits`);
+		assertEqual(layout.canvasLeft, 0, `${width}px 3D canvas left edge`);
+		assertEqual(layout.canvasWidth, width, `${width}px 3D canvas width`);
+		assertAtLeast(layout.canvasHeight, 300, `${width}px 3D canvas height`);
+		assertAtLeast(layout.inspectorLeft, 10, `${width}px 3D Inspector left edge`);
+		assertAtMost(layout.inspectorRight, width - 10, `${width}px 3D Inspector right edge`);
+		assertAtMost(
+			layout.canvasBottom,
+			layout.inspectorTop,
+			`${width}px 3D canvas/Inspector overlap`,
+		);
+		result.mobileNarrow.push({ width, ...layout });
+		await page.screenshot({ path: path.join(artifactRoot, `mobile-${width}x844.png`) });
+	}
+	await page.setViewportSize({ width: 390, height: 844 });
 
 	await canvas3D.evaluate((canvas) => {
 		const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
