@@ -1258,6 +1258,13 @@ interface EquipmentDeletionRecovery {
 	readonly continuation: EquipmentAuthoringContinuation;
 }
 
+interface RecentPlacedOhb {
+	readonly projectId: string;
+	readonly document: RailDocument;
+	readonly patchSequence: number;
+	readonly selection: PortEquipmentSelection;
+}
+
 interface OrdinaryStaticFabIssueRecheckOutcome {
 	readonly projectId: string;
 	readonly document: RailDocument;
@@ -2575,6 +2582,7 @@ export default function TileFabApp(): React.ReactElement {
 	const equipmentDeletionRecoveryUndoRef = useRef<HTMLButtonElement | null>(null);
 	const nextPortEquipmentButtonRef = useRef<HTMLButtonElement | null>(null);
 	const nextPortEquipmentFocusPendingRef = useRef(false);
+	const recentPlacedOhbFocusPendingRef = useRef(false);
 	const historyUndoRef = useRef<() => void>(() => undefined);
 	const equipmentRepeatReturnSelectionRef = useRef<PortEquipmentSelection | null>(null);
 	const ohbPlacementIntentRef = useRef<OhbPlacementIntent | null>(null);
@@ -3285,6 +3293,7 @@ export default function TileFabApp(): React.ReactElement {
 		useState<PortEquipmentSelection | null>(null);
 	const [equipmentDeletionRecovery, setEquipmentDeletionRecovery] =
 		useState<EquipmentDeletionRecovery | null>(null);
+	const [recentPlacedOhb, setRecentPlacedOhb] = useState<RecentPlacedOhb | null>(null);
 	const [ohbPlacementIntent, setOhbPlacementIntentState] = useState<OhbPlacementIntent | null>(
 		null,
 	);
@@ -18659,6 +18668,15 @@ export default function TileFabApp(): React.ReactElement {
 		const skippedRows = "skippedRows" in selection ? selection.skippedRows.length : 0;
 		const exclusionMessage = skippedRows ? ` · 충돌 ${skippedRows}개 제외` : "";
 		const firstPort = plan.portMutations.find((mutation) => mutation.after)?.after;
+		const latestPort = plan.portMutations.findLast((mutation) => mutation.after)?.after;
+		if (!guidedBuildExperienceActive && portDrag.portType === "OHB" && latestPort) {
+			setRecentPlacedOhb({
+				projectId: projectSession.manifest.id,
+				document: portDrag.document,
+				patchSequence: portDrag.document.getPatchSequence(),
+				selection: { portId: latestPort.id, equipmentGroupId: latestPort.equipmentGroupId },
+			});
+		}
 		const retainsSelection =
 			portDrag.portType === "EQ" &&
 			guidedBuildPortPlacementRetainsSelection(
@@ -28090,6 +28108,32 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedPortDetails = selectedPortEquipment
 		? resolveExactPortEquipmentSelection(railDocument.portEquipment, selectedPortEquipment)
 		: null;
+	const currentRecentPlacedOhb =
+		!guidedBuildExperienceActive &&
+		!ohbPlacementIntent &&
+		tool === "ohb" &&
+		editorActivity === "equip" &&
+		recentPlacedOhb?.projectId === projectSession.manifest.id &&
+		recentPlacedOhb.document === railDocument &&
+		recentPlacedOhb.patchSequence === railDocument.getPatchSequence()
+			? recentPlacedOhb
+			: null;
+	useEffect(() => {
+		if (recentPlacedOhb && !currentRecentPlacedOhb) setRecentPlacedOhb(null);
+	}, [recentPlacedOhb, currentRecentPlacedOhb]);
+	const recentPlacedOhbDetails = useMemo(
+		() => currentRecentPlacedOhb
+			? resolveExactPortEquipmentSelection(railDocument.portEquipment, currentRecentPlacedOhb.selection)
+			: null,
+		[currentRecentPlacedOhb, railDocument],
+	);
+	const visibleRecentPlacedOhb =
+		currentRecentPlacedOhb &&
+		recentPlacedOhbDetails?.port.equipmentGroupId === currentRecentPlacedOhb.selection.equipmentGroupId &&
+		recentPlacedOhbDetails.equipmentGroup.kind === "OHB" &&
+		recentPlacedOhbDetails.equipmentGroup.portIds.includes(currentRecentPlacedOhb.selection.portId)
+			? currentRecentPlacedOhb
+			: null;
 	const selectedEquipmentGroup = selectedPortDetails?.equipmentGroup;
 	const selectedEquipmentProcessLoopMembership = useMemo(
 		() => selectedEquipmentGroup
@@ -28113,10 +28157,16 @@ export default function TileFabApp(): React.ReactElement {
 		) ?? null;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: equipment identity changes intentionally trigger focus even though the effect reads the stable button ref.
 	useLayoutEffect(() => {
+		if (recentPlacedOhbFocusPendingRef.current) {
+			recentPlacedOhbFocusPendingRef.current = false;
+			(processLoopPrimaryActionRef.current ?? processLoopPrimaryStatusRef.current ?? compactInspectorCloseRef.current)
+				?.focus({ preventScroll: true });
+			return;
+		}
 		if (!nextPortEquipmentFocusPendingRef.current) return;
 		nextPortEquipmentFocusPendingRef.current = false;
 		nextPortEquipmentButtonRef.current?.focus({ preventScroll: true });
-	}, [selectedPortDetails?.equipmentGroup.id, selectedPortDetails?.port.id]);
+	}, [editorActivity, selectedPortDetails?.equipmentGroup.id, selectedPortDetails?.port.id]);
 	const selectedPortEditableDetails = selectedPortEquipment
 		? resolveEditablePortEquipmentSelection(
 				railDocument.portEquipment,
@@ -30184,6 +30234,26 @@ export default function TileFabApp(): React.ReactElement {
 		// Rebind against the current model without clearing selected Stocker ports or repeat return.
 		setOrdinaryPortProcessLoopFeedback(null);
 		startOrdinaryPortKeyboard(portType);
+	};
+	const inspectRecentPlacedOhb = (): void => {
+		const recent = recentPlacedOhb;
+		const document = editorModelRef.current.document;
+		const exact = recent && recent.projectId === projectSession.manifest.id &&
+			recent.document === document &&
+			recent.patchSequence === document.getPatchSequence()
+			? resolveExactPortEquipmentSelection(document.portEquipment, recent.selection)
+			: null;
+		if (!exact || exact.port.equipmentGroupId !== recent?.selection.equipmentGroupId ||
+			exact.equipmentGroup.kind !== "OHB" || !exact.equipmentGroup.portIds.includes(recent.selection.portId)) {
+			setRecentPlacedOhb(null);
+			setStatus("방금 만든 OHB가 현재 프로젝트에 없습니다 · Canvas에서 장비를 다시 선택하세요");
+			return;
+		}
+		if (!chooseExplicitEditorTool("inspect")) return;
+		recentPlacedOhbFocusPendingRef.current = true;
+		setRecentPlacedOhb(null);
+		setPortEquipmentSelection(recent.selection);
+		setStatus(`OHB-${recent.selection.equipmentGroupId} 속성 · Process Loop 소속을 확인하세요`);
 	};
 	const startEquipmentAuthoringContinuation = (
 		continuation: EquipmentAuthoringContinuation,
@@ -38300,10 +38370,21 @@ export default function TileFabApp(): React.ReactElement {
 														<ChevronRight size={14} aria-hidden="true" /> 다른 Port 보기
 													</button>
 												) : null}
+												{guidedPortKeyboard?.scope === "ordinary" && visibleRecentPlacedOhb ? (
+													<button
+														type="button"
+														className="tilefab-equipment-fit-selection tilefab-recent-ohb-inspect"
+														data-testid="ordinary-recent-ohb-inspect"
+														aria-label={`방금 만든 OHB-${visibleRecentPlacedOhb.selection.equipmentGroupId} 속성 보기`}
+														disabled={editorMutationWaitActive || modelSyncPending || workerState.status !== "ready"}
+														onClick={inspectRecentPlacedOhb}
+													>OHB-{visibleRecentPlacedOhb.selection.equipmentGroupId} 속성 보기</button>
+												) : null}
 											</span>
-								</span>
-								{ordinaryPortKeyboardEntryVisible ? (
-									<button
+										</span>
+								{ordinaryPortKeyboardEntryVisible || (visibleRecentPlacedOhb && guidedPortKeyboard?.scope !== "ordinary") ? (
+									<span className="tilefab-port-postplacement-actions">
+									{ordinaryPortKeyboardEntryVisible ? <button
 										type="button"
 										className="tilefab-port-keyboard-start"
 										data-testid="ordinary-port-keyboard-start"
@@ -38312,7 +38393,16 @@ export default function TileFabApp(): React.ReactElement {
 										onClick={resumeOrdinaryPortKeyboard}
 									>
 										키보드 배치 시작
-									</button>
+									</button> : null}
+									{visibleRecentPlacedOhb && guidedPortKeyboard?.scope !== "ordinary" ? <button
+										type="button"
+										className="tilefab-port-keyboard-start tilefab-recent-ohb-inspect"
+										data-testid="ordinary-recent-ohb-inspect"
+										aria-label={`방금 만든 OHB-${visibleRecentPlacedOhb.selection.equipmentGroupId} 속성 보기`}
+										disabled={editorMutationWaitActive || modelSyncPending || workerState.status !== "ready"}
+										onClick={inspectRecentPlacedOhb}
+									>OHB-{visibleRecentPlacedOhb.selection.equipmentGroupId} 속성 보기</button> : null}
+									</span>
 								) : null}
 								{tool !== "stk" ? (
 									<span

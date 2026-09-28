@@ -6,7 +6,22 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-09-29
+
+- Show a direct shortcut to the exact OHB group just placed, while keeping repeat placement
+  available. The shortcut opens the Inspector and focuses its Process Loop ownership action.
+  It expires after another authored change, Undo/Redo, or project replacement.
+- Keep the shortcut in the existing action row at compact widths. Check the 390/760/1440px
+  touch route from a verified template through OHB creation, Inspector handoff, direct Loop
+  ownership, and Undo/Redo without a Canvas reselection; also check a second OHB, Undo before
+  shortcut activation, repeated keyboard placement and Tab order at 15 widths. The final-source
+  authoring gate passed 72 steps with 579 screenshots and no browser errors.
+
 ## [0.1.27] - 2026-09-29
+
+Private `bfa76f9` and public `75ee0c2` were normally pushed. Both public CI jobs passed in
+run `36468419905`; Pages `c12f039` deployed in run `36472282936`. All 65 served files
+(26,999,989 bytes) and both entry URLs matched the reviewed build SHA-256. V1 remains incomplete.
 
 - Add a visible “다른 Port 보기” action for ordinary OHB, EQ, and Stocker placement. It moves
   the current Canvas target within the selected Process Loop without changing authored data,

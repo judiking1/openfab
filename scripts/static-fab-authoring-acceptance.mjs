@@ -8313,6 +8313,7 @@ async function auditOrdinaryNoSlotPortRecoverySeparation(browserInstance) {
 
 async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 	const viewports = [
+		{ label: "compact-extra-short", width: 390, height: 600 },
 		{ label: "compact", width: 390, height: 844 },
 		{ label: "compact-short", width: 390, height: 720 },
 		{ label: "compact-editor-boundary", width: 430, height: 844 },
@@ -8888,7 +8889,10 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 			const nextCandidate = page.getByTestId("ordinary-port-next-candidate");
 			await nextCandidate.waitFor({ state: "visible" });
 			await assertLocatorInsideViewport(page, nextCandidate);
-			await assertLocatorOwnsHitArea(nextCandidate, `${viewport.label} next Port before EQ handoff`);
+			await assertLocatorOwnsHitArea(
+				nextCandidate,
+				`${viewport.label} next Port before EQ handoff`,
+			);
 			await portExit.focus();
 			await portExit.press("Tab");
 			assertEqual(
@@ -8896,13 +8900,38 @@ async function exerciseOrdinaryRailKeyboardAcceptance(browserInstance) {
 				true,
 				`${viewport.label} Port candidate Tab order`,
 			);
+			const recentOhbInspect = page.getByTestId("ordinary-recent-ohb-inspect");
+			await recentOhbInspect.waitFor({ state: "visible" });
+			await assertLocatorInsideViewport(page, recentOhbInspect);
+			await assertLocatorOwnsHitArea(
+				recentOhbInspect,
+				`${viewport.label} recent OHB Inspector action`,
+			);
+			if (viewport.label === "compact-extra-short") {
+				await assertLocatorOwnsHitArea(
+					nextPortHandoff,
+					`${viewport.label} EQ handoff below recent OHB action`,
+				);
+			}
 			await nextCandidate.press("Tab");
+			assertEqual(
+				await recentOhbInspect.evaluate((element) => document.activeElement === element),
+				true,
+				`${viewport.label} recent OHB Inspector Tab order`,
+			);
+			await recentOhbInspect.press("Tab");
 			assertEqual(
 				await nextPortHandoff.evaluate((element) => document.activeElement === element),
 				true,
 				`${viewport.label} contextual recommendation Tab order`,
 			);
 			await nextPortHandoff.press("Shift+Tab");
+			assertEqual(
+				await recentOhbInspect.evaluate((element) => document.activeElement === element),
+				true,
+				`${viewport.label} recent OHB Inspector reverse Tab order`,
+			);
+			await recentOhbInspect.press("Shift+Tab");
 			assertEqual(
 				await nextCandidate.evaluate((element) => document.activeElement === element),
 				true,
@@ -32314,21 +32343,18 @@ async function exerciseVisibleTemplatePortDiscovery(activeBrowser) {
 			await page.screenshot({
 				path: path.join(artifactRoot, `visible-template-port-placed-${label}.png`),
 			});
-			let inspectSelectionRoute = "retained";
-			if (
-				(await inspector.count()) === 0 ||
-				(await inspector.getAttribute("data-equipment-group-id")) !== String(groupId)
-			) {
-				await page.getByTestId("editor-activity-inspect").click();
-				inspectSelectionRoute = "activity";
-				if (
-					(await inspector.count()) === 0 ||
-					(await inspector.getAttribute("data-equipment-group-id")) !== String(groupId)
-				) {
-					await page.touchscreen.tap(point.x, point.y);
-					inspectSelectionRoute = "visible-canvas";
-				}
-			}
+			assertEqual(await inspector.count(), 0, `${label} OHB placement keeps repeat authoring open`);
+			const recentInspect = page.getByTestId("ordinary-recent-ohb-inspect");
+			await recentInspect.waitFor({ state: "visible" });
+			await assertLocatorInsideViewport(page, recentInspect);
+			await assertLocatorOwnsHitArea(recentInspect, `${label} recent OHB Inspector action`);
+			assertEqual(
+				await recentInspect.getAttribute("aria-label"),
+				`방금 만든 OHB-${groupId} 속성 보기`,
+				`${label} recent OHB action names its exact group`,
+			);
+			const beforeInspect = await readMetrics(page);
+			await recentInspect.tap();
 			await page.waitForFunction(
 				(id) =>
 					document
@@ -32336,7 +32362,17 @@ async function exerciseVisibleTemplatePortDiscovery(activeBrowser) {
 						?.getAttribute("data-equipment-group-id") === String(id),
 				groupId,
 			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				beforeInspect,
+				`${label} recent OHB Inspector handoff`,
+			);
 			const attach = inspector.getByTestId("attach-equipment-process-loop-primary");
+			await page.waitForFunction(
+				() =>
+					document.activeElement ===
+					document.querySelector('[data-testid="attach-equipment-process-loop-primary"]'),
+			);
 			await attach.scrollIntoViewIfNeeded();
 			await assertLocatorOwnsHitArea(attach, `${label} selected OHB direct Loop attach`);
 			assertEqual(
@@ -32358,7 +32394,68 @@ async function exerciseVisibleTemplatePortDiscovery(activeBrowser) {
 				`${label} visible template OHB Loop owner`,
 			);
 			await undoAndRedo(page, placed, attached, null, true);
-			evidence.push({ viewport: label, selectedLoopId, firstRow, groupId, touch: true, inspectSelectionRoute });
+			await clickActivityCommand(page, "equip", "OHB 포트 배치");
+			assertEqual(
+				await page.getByTestId("ordinary-recent-ohb-inspect").count(),
+				0,
+				`${label} authored Loop change expires the old OHB shortcut`,
+			);
+			if (viewport.width === 390) {
+				await selector.selectOption(String(selectedLoopId));
+				await startPlacement.click();
+				await assertOrdinaryPortKeyboardTargetVisible(page, `${label} second OHB Port`);
+				await zoomOrdinaryPortTargetIfOffered(page, "OHB", `${label} second OHB`);
+				const secondPoint = await page.evaluate(() => {
+					const canvas = document.querySelector('[data-testid="rail-canvas"]');
+					const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+					if (!(canvas instanceof HTMLCanvasElement) || !(marker instanceof HTMLElement))
+						return null;
+					const bounds = canvas.getBoundingClientRect();
+					const x = bounds.left + Number.parseFloat(marker.style.left);
+					const y = bounds.top + Number.parseFloat(marker.style.top);
+					return document.elementFromPoint(x, y) === canvas ? { x, y } : null;
+				});
+				if (!secondPoint)
+					throw new Error(`${label} second OHB Port has no touchable Canvas target.`);
+				const beforeSecond = await readMetrics(page);
+				await page.touchscreen.tap(secondPoint.x, secondPoint.y);
+				const secondPlaced = await waitForWorker(
+					page,
+					(metrics) =>
+						Number(metrics.workerTargetSequence) ===
+							Number(beforeSecond.workerTargetSequence) + 1 &&
+						metrics.equipmentGroups === "2" &&
+						metrics.equipmentPorts === "2",
+				);
+				assertSingleGuidedPortCommit(secondPlaced, beforeSecond, `${label} second OHB`);
+				const secondGroupId = Number(beforeSecond.modelNextEquipmentGroupId);
+				const secondShortcut = page.getByTestId("ordinary-recent-ohb-inspect");
+				await secondShortcut.waitFor({ state: "visible" });
+				assertEqual(
+					await secondShortcut.getAttribute("aria-label"),
+					`방금 만든 OHB-${secondGroupId} 속성 보기`,
+					`${label} second shortcut targets the latest OHB group`,
+				);
+				await page.getByRole("button", { name: "실행 취소" }).click();
+				const secondUndone = await waitForWorker(
+					page,
+					(metrics) =>
+						Number(metrics.workerTargetSequence) ===
+							Number(secondPlaced.workerTargetSequence) + 1 &&
+						metrics.modelChecksum === beforeSecond.modelChecksum &&
+						metrics.workerChecksum === beforeSecond.workerChecksum,
+				);
+				assertEqual(secondUndone.equipmentGroups, "1", `${label} second OHB Undo`);
+				assertEqual(await secondShortcut.count(), 0, `${label} Undo expires second OHB shortcut`);
+			}
+			evidence.push({
+				viewport: label,
+				selectedLoopId,
+				firstRow,
+				groupId,
+				touch: true,
+				inspectSelectionRoute: "recent-button",
+			});
 		} finally {
 			await context.close();
 		}
