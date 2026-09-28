@@ -2795,7 +2795,7 @@ export default function TileFabApp(): React.ReactElement {
 	);
 	const projectOperationControllerRef = useRef<AbortController | null>(null);
 	const [projectSaveFocusOwner, setProjectSaveFocusOwner] = useState<
-		"default" | "project-guard" | null
+		"default" | "project-guard" | "checks" | null
 	>(null);
 	const pendingNewFabProjectCompletionRef = useRef<PendingNewOpenFabProjectCompletion | null>(null);
 	const cancelPendingProjectActionRef = useRef<() => void>(() => undefined);
@@ -3520,6 +3520,11 @@ export default function TileFabApp(): React.ReactElement {
 		readonly publishStatus: boolean;
 	} | null>(null);
 	const ordinaryPortKeyboardMarkerRef = useRef<HTMLDivElement | null>(null);
+	const bindOrdinaryPortKeyboardMarker = useCallback((node: HTMLDivElement | null): void => {
+		ordinaryPortKeyboardMarkerRef.current = node;
+		// A new scoped cursor can be painted before React commits its marker.
+		if (node) scheduleRenderRef.current();
+	}, []);
 	const portTargetZoomButtonRef = useRef<HTMLButtonElement | null>(null);
 	const equipmentTargetPresentationRef = useRef<{
 		readonly session: GuidedPortKeyboardSession;
@@ -3550,6 +3555,11 @@ export default function TileFabApp(): React.ReactElement {
 	const cancelGuidedPortKeyboardForLifecycleRef = useRef<() => void>(() => undefined);
 	const [guidedPortKeyboard, setGuidedPortKeyboard] =
 		useState<GuidedBuildKeyboardPortState | null>(null);
+	useLayoutEffect(() => {
+		// The canvas reads the session ref; its DOM marker is committed by React.
+		// Repaint after a Loop switch even when the marker node is reused.
+		if (guidedPortKeyboard?.scope === "ordinary") scheduleRenderRef.current();
+	}, [guidedPortKeyboard]);
 	const [guidedBuildChapterCheckpoint, setGuidedBuildChapterCheckpoint] =
 		useState<GuidedBuildChapterId | null>(null);
 	const guidedBuildPreviousChapterRef = useRef<GuidedBuildChapterId | null>(null);
@@ -4475,6 +4485,16 @@ export default function TileFabApp(): React.ReactElement {
 		if (projectOperationControllerRef.current !== null) return;
 		if (projectSaveFocusOwner === "project-guard") {
 			projectGuardDialogRef.current?.focus({ preventScroll: true });
+			return;
+		}
+		if (projectSaveFocusOwner === "checks") {
+			const saveFromChecks = appRootRef.current?.querySelector<HTMLButtonElement>(
+				'[data-testid="static-fab-checks-save-project"]',
+			);
+			(saveFromChecks && !saveFromChecks.disabled
+				? saveFromChecks
+				: projectMenuTriggerRef.current
+			)?.focus({ preventScroll: true });
 			return;
 		}
 		if (guidedBuildExperienceActive) {
@@ -19921,7 +19941,7 @@ export default function TileFabApp(): React.ReactElement {
 
 	const handleSaveProject = async (
 		forceSaveAs = false,
-		focusOwner: "default" | "project-guard" = "default",
+		focusOwner: "default" | "project-guard" | "checks" = "default",
 	): Promise<OpenFabProjectSaveOutcome> => {
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return "failed";
 		const restoreSaveFocus = (): void => {
@@ -19929,6 +19949,10 @@ export default function TileFabApp(): React.ReactElement {
 				if (projectOperationControllerRef.current !== controller) return;
 				if (focusOwner === "project-guard") {
 					projectGuardDialogRef.current?.focus({ preventScroll: true });
+					return;
+				}
+				if (focusOwner === "checks") {
+					staticFabChecksPanelRef.current?.focus({ preventScroll: true });
 					return;
 				}
 				if (guidedBuildExperienceActive) {
@@ -32445,7 +32469,7 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 				{guidedPortKeyboard?.scope === "ordinary" ? (
 					<div
-						ref={ordinaryPortKeyboardMarkerRef}
+						ref={bindOrdinaryPortKeyboardMarker}
 						className="tilefab-guided-canvas-marker tilefab-guided-canvas-marker--ordinary-port"
 						data-testid="ordinary-port-keyboard-target"
 						data-port-type={guidedPortKeyboard.portType}
@@ -33962,16 +33986,26 @@ export default function TileFabApp(): React.ReactElement {
 										<span>현재 프로젝트를 검사하고 있습니다</span>
 									</div>
 								) : staticFabCheckIssueCount === 0 && currentStaticFabProjectChecks ? (
-									<div
-										className="tilefab-readiness-clear"
-										role={
-											ordinaryStaticFabIssueRecheckOutcomeCurrent
-												? undefined
-												: "status"
-										}
-									>
-										<Check size={16} />
-										<span>모든 정적 FAB 검사를 통과했습니다</span>
+									<div className="tilefab-readiness-clear tilefab-readiness-clear--save">
+										{!ordinaryStaticFabIssueRecheckOutcomeCurrent ? (
+											<span className="tilefab-sr-only" role="status">
+												모든 정적 FAB 검사를 통과했습니다
+											</span>
+										) : null}
+										<button
+											type="button"
+											className="tilefab-readiness-save"
+											data-testid="static-fab-checks-save-project"
+											disabled={!startupReady || projectBusy || modelSyncPending}
+											onClick={() => void handleSaveProject(false, "checks")}
+										>
+											<Check size={16} aria-hidden="true" />
+											<span className="tilefab-readiness-save-copy">
+												<strong>모든 정적 FAB 검사 통과</strong>
+												<small>프로젝트 파일 저장 (.openfab)</small>
+											</span>
+											<Save size={16} aria-hidden="true" />
+										</button>
 									</div>
 								) : null}
 								{currentStaticFabInspectionError ? (

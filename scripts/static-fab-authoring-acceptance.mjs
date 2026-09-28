@@ -30624,6 +30624,7 @@ async function exerciseFirstRunVerifiedTemplate(activeBrowser) {
 	for (const viewport of viewports) {
 		const context = await activeBrowser.newContext({
 			viewport: { width: viewport.width, height: viewport.height },
+			acceptDownloads: true,
 		});
 		try {
 			const page = await context.newPage();
@@ -30782,7 +30783,360 @@ async function exerciseFirstRunVerifiedTemplate(activeBrowser) {
 				path: path.join(artifactRoot, "first-run-template-created-390x844.png"),
 			});
 			const relationships = await readAssemblyRelationships(page);
-			const saved = await saveProjectFromCompactRoute(page);
+			assertEqual(created.equipmentGroups, "0", "first-run template starts without equipment");
+			const firstPortHandoff = page.getByTestId("ordinary-first-port-handoff");
+			await firstPortHandoff.waitFor({ state: "visible" });
+			await assertLocatorOwnsHitArea(firstPortHandoff, "first-run next OHB Port handoff");
+			await firstPortHandoff.click();
+			await page.waitForFunction(
+				() => {
+					const app = document.querySelector('[data-testid="tilefab-app"]');
+					return (
+						app?.getAttribute("data-editor-activity") === "equip" &&
+						app?.getAttribute("data-editor-tool") === "ohb"
+					);
+				},
+				undefined,
+				{ timeout: 10_000 },
+			);
+			const menuDensity = page.getByTestId("editor-tool-description-toggle");
+			if ((await menuDensity.getAttribute("aria-pressed")) === "true") {
+				await assertLocatorOwnsHitArea(menuDensity, "first-run compact activity menu");
+				await menuDensity.click();
+				assertEqual(
+					await menuDensity.getAttribute("aria-pressed"),
+					"false",
+					"first-run activity menu compacts before Port placement",
+				);
+			}
+			await waitForLegalPortSlots(page);
+			const loopOptions = await page
+				.getByTestId("ordinary-port-process-loop-target")
+				.locator('option:not([value=""])')
+				.evaluateAll((options) => options.map((option) => Number(option.value)));
+			assertAtLeast(loopOptions.length, 1, "first-run template offers a Process Loop option");
+			const loopId = loopOptions[0];
+			if (!Number.isSafeInteger(loopId) || loopId <= 0) {
+				throw new Error(`First-run Process Loop option has invalid ID: ${loopId}.`);
+			}
+			await selectOrdinaryPortProcessLoop(page, loopId, "390x844 first-run template");
+			const loopName = await assertOrdinaryPortProcessLoopIdentity(
+				page,
+				loopId,
+				"390x844 first-run template",
+			);
+			const startPort = page.getByTestId("ordinary-port-process-loop-start");
+			await assertLocatorOwnsHitArea(startPort, "first-run Loop placement start");
+			await startPort.click();
+			await zoomOrdinaryPortTargetIfOffered(page, "OHB", "390x844 first-run OHB");
+			await waitForOrdinaryPortKeyboardTargetInLoop(page, "OHB", loopId, "390x844 first-run OHB");
+			const targetRow = Number(
+				await page.getByTestId("ordinary-port-keyboard-target").getAttribute("data-port-slot-row"),
+			);
+			const target = (await readDirectProcessLoopPortCandidates(page, "OHB", loopId)).find(
+				(candidate) => candidate.row === targetRow,
+			);
+			if (!target)
+				throw new Error(`First-run visible OHB row ${targetRow} is outside ${loopName}.`);
+			const beforeOhb = await readMetrics(page);
+			assertProjectUnchanged(beforeOhb, created, "first-run scoped OHB selection is transient");
+			assertEqual(
+				await clickVisibleOrdinaryPortKeyboardTarget(page, "390x844 first-run OHB"),
+				targetRow,
+				"first-run clicks the app-rendered scoped OHB row",
+			);
+			const placed = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.workerTargetSequence) === Number(beforeOhb.workerTargetSequence) + 1 &&
+					metrics.equipmentGroups === "1" &&
+					metrics.equipmentPorts === "1",
+			);
+			assertSingleGuidedPortCommit(placed, beforeOhb, "first-run visible OHB placement");
+			const groupId = Number(beforeOhb.modelNextEquipmentGroupId);
+			const attached = await attachOrdinaryEquipmentToDirectLoop(
+				page,
+				groupId,
+				"OHB",
+				loopId,
+				target,
+				"390x844 first-run template",
+			);
+			assertEqual(attached.evidence.ports.length, 1, "first-run complete OHB group");
+			await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
+			await page
+				.locator('.tilefab-port-buildbar[data-port-type="EQ"]')
+				.waitFor({ state: "visible" });
+			await selectOrdinaryPortProcessLoop(page, loopId, "390x844 first-run EQ");
+			await page.getByTestId("ordinary-port-process-loop-start").click();
+			await zoomOrdinaryPortTargetIfOffered(page, "EQ", "390x844 first-run EQ");
+			await waitForOrdinaryPortKeyboardTargetInLoop(page, "EQ", loopId, "390x844 first-run EQ");
+			const eqStartRow = Number(
+				await page.getByTestId("ordinary-port-keyboard-target").getAttribute("data-port-slot-row"),
+			);
+			const eqScopeRows = new Set(
+				(await readDirectProcessLoopPortCandidates(page, "EQ", loopId)).map(
+					(candidate) => candidate.row,
+				),
+			);
+			const eqDirectedLaneByRow = new Map(
+				await page.evaluate(
+					(rows) => {
+						const slots = window.__tileFab?.getEditorModel().portSlotArtifacts.EQ?.slots;
+						if (!slots) throw new Error("First-run EQ slot directions are unavailable.");
+						return rows.map((row) => [
+							row,
+							`${slots.routeFromDirections[row]}:${slots.routeToDirections[row]}:${slots.sides[row]}`,
+						]);
+					},
+					[...eqScopeRows],
+				),
+			);
+			const eqStartLane = eqDirectedLaneByRow.get(eqStartRow);
+			if (!eqStartLane) throw new Error(`First-run EQ row ${eqStartRow} has no directed lane.`);
+			const eqRuns = await readLegalStraightPortRuns(page, "EQ");
+			let eqPlan = null;
+			for (const run of eqRuns) {
+				const anchorIndex = run.items.findIndex((item) => item.row === eqStartRow);
+				if (anchorIndex < 0) continue;
+				for (const direction of [1, -1]) {
+					const endIndex = anchorIndex + direction * 2;
+					if (endIndex < 0 || endIndex >= run.items.length) continue;
+					const span = run.items.slice(
+						Math.min(anchorIndex, endIndex),
+						Math.max(anchorIndex, endIndex) + 1,
+					);
+					if (!span.every((item) => eqDirectedLaneByRow.get(item.row) === eqStartLane)) continue;
+					const start = run.items[anchorIndex];
+					const end = run.items[endIndex];
+					eqPlan = {
+						start,
+						end,
+						key:
+							Math.abs(end.x - start.x) > Math.abs(end.y - start.y)
+								? end.x > start.x
+									? "ArrowRight"
+									: "ArrowLeft"
+								: end.y > start.y
+									? "ArrowDown"
+									: "ArrowUp",
+					};
+					break;
+				}
+				if (eqPlan) break;
+			}
+			if (!eqPlan) {
+				throw new Error(
+					`First-run visible EQ row ${eqStartRow} has no three-Port span directly inside ${loopName}.`,
+				);
+			}
+			const beforeEq = await readMetrics(page);
+			assertProjectUnchanged(beforeEq, attached.after, "first-run EQ scope is transient");
+			assertEqual(
+				await clickVisibleOrdinaryPortKeyboardTarget(page, "390x844 first-run EQ start"),
+				eqStartRow,
+				"first-run clicks the app-rendered EQ start",
+			);
+			await page.waitForFunction(
+				(expectedRow) =>
+					document
+						.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+						?.getAttribute("data-port-slot-row") === String(expectedRow) &&
+					document
+						.querySelector('[data-testid="ordinary-port-keyboard-target"]')
+						?.getAttribute("data-phase") === "choose-end",
+				eqStartRow,
+				{ timeout: 10_000 },
+			);
+			const eqCanvas = page.getByTestId("rail-canvas");
+			await eqCanvas.focus();
+			let eqCursorRow = eqStartRow;
+			for (let step = 0; step < 16 && eqCursorRow !== eqPlan.end.row; step++) {
+				await eqCanvas.press(eqPlan.key);
+				await page.waitForFunction(
+					(previousRow) =>
+						Number(
+							document
+								.querySelector('[data-testid="ordinary-port-keyboard-target"]')
+								?.getAttribute("data-port-slot-row"),
+						) !== previousRow,
+					eqCursorRow,
+					{ timeout: 2_000 },
+				);
+				eqCursorRow = Number(
+					await page
+						.getByTestId("ordinary-port-keyboard-target")
+						.getAttribute("data-port-slot-row"),
+				);
+			}
+			assertEqual(eqCursorRow, eqPlan.end.row, "first-run EQ keyboard reaches legal end");
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-eq-draft-rows") === "3" &&
+					document
+						.querySelector('[data-testid="guided-port-keyboard-readout"]')
+						?.textContent?.includes("배치 가능") === true,
+				undefined,
+				{ timeout: 10_000 },
+			);
+			assertEqual(
+				await clickVisibleOrdinaryPortKeyboardTarget(page, "390x844 first-run EQ end"),
+				eqPlan.end.row,
+				"first-run clicks the app-rendered EQ end",
+			);
+			const eqPlaced = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.workerTargetSequence) === Number(beforeEq.workerTargetSequence) + 1 &&
+					metrics.equipmentGroups === "2" &&
+					metrics.equipmentPorts === "4",
+			);
+			assertSingleGuidedPortCommit(eqPlaced, beforeEq, "first-run visible three-Port EQ placement");
+			const eqId = Number(beforeEq.modelNextEquipmentGroupId);
+			const eqAttached = await attachOrdinaryEquipmentToDirectLoop(
+				page,
+				eqId,
+				"EQ",
+				loopId,
+				eqPlan.start,
+				"390x844 first-run template",
+			);
+			assertEqual(eqAttached.evidence.ports.length, 3, "first-run complete three-Port EQ group");
+
+			await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
+			await page
+				.locator('.tilefab-port-buildbar[data-port-type="STK"]')
+				.waitFor({ state: "visible" });
+			await chooseStkTemplate(page, "FLEX");
+			await selectOrdinaryPortProcessLoop(page, loopId, "390x844 first-run Stocker");
+			await page.getByTestId("ordinary-port-process-loop-start").click();
+			await zoomOrdinaryPortTargetIfOffered(page, "STK", "390x844 first-run Stocker");
+			await waitForOrdinaryPortKeyboardTargetInLoop(
+				page,
+				"STK",
+				loopId,
+				"390x844 first-run Stocker",
+			);
+			const stkTargetRow = Number(
+				await page.getByTestId("ordinary-port-keyboard-target").getAttribute("data-port-slot-row"),
+			);
+			const stkTarget = (await readDirectProcessLoopPortCandidates(page, "STK", loopId)).find(
+				(candidate) => candidate.row === stkTargetRow,
+			);
+			if (!stkTarget)
+				throw new Error(`First-run visible Stocker row ${stkTargetRow} is outside ${loopName}.`);
+			const beforeStk = await readMetrics(page);
+			assertProjectUnchanged(beforeStk, eqAttached.after, "first-run Stocker scope is transient");
+			assertEqual(
+				await clickVisibleOrdinaryPortKeyboardTarget(page, "390x844 first-run Stocker first Port"),
+				stkTargetRow,
+				"first-run clicks the app-rendered Stocker row",
+			);
+			await page.waitForFunction(
+				(expectedRow) =>
+					document
+						.querySelector('[data-testid="tilefab-app"]')
+						?.getAttribute("data-stk-draft-rows") === "1" &&
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-stk-draft-selected-rows") === String(expectedRow),
+				stkTargetRow,
+				{ timeout: 10_000 },
+			);
+			const completeStk = page.getByTestId("stk-complete");
+			await completeStk.scrollIntoViewIfNeeded();
+			await assertLocatorOwnsHitArea(completeStk, "first-run FLEX Stocker complete");
+			await completeStk.click();
+			const stkPlaced = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.workerTargetSequence) === Number(beforeStk.workerTargetSequence) + 1 &&
+					metrics.equipmentGroups === "3" &&
+					metrics.equipmentPorts === "5",
+			);
+			assertSingleGuidedPortCommit(
+				stkPlaced,
+				beforeStk,
+				"first-run visible FLEX Stocker placement",
+			);
+			const stkId = Number(beforeStk.modelNextEquipmentGroupId);
+			const stkAttached = await attachOrdinaryEquipmentToDirectLoop(
+				page,
+				stkId,
+				"STK",
+				loopId,
+				stkTarget,
+				"390x844 first-run template",
+			);
+			assertEqual(stkAttached.evidence.template, "FLEX", "first-run Stocker template");
+			assertEqual(stkAttached.evidence.ports.length, 1, "first-run complete FLEX Stocker group");
+			assertEqual(
+				isDeepStrictEqual(await readAssemblyRelationships(page), relationships),
+				true,
+				"first-run equipment ownership preserves declared relationships",
+			);
+			await openStaticFabNavigatorTab(page, "checks");
+			await page.waitForFunction(
+				() =>
+					["ready", "issues", "error"].includes(
+						document
+							.querySelector('[data-testid="tilefab-app"]')
+							?.getAttribute("data-static-fab-check-status") ?? "",
+					),
+				undefined,
+				{ timeout: 30_000 },
+			);
+			const checked = await readMetrics(page);
+			assertEqual(checked.staticFabCheckStatus, "ready", "first-run Checks ready");
+			assertEqual(checked.staticFabCheckIssues, "0", "first-run Checks zero issues");
+			assertEqual(checked.equipmentGroups, "3", "first-run three equipment groups");
+			assertEqual(checked.equipmentPorts, "5", "first-run five equipment Ports");
+			assertEqual(
+				checked.modelChecksum,
+				checked.workerChecksum,
+				"first-run equipment Worker parity",
+			);
+			assertEqual(checked.workerSimulationReady, "false", "first-run equipment simulation gate");
+			const equipment = await readPortEquipmentContract(page);
+			const groupIds = [groupId, eqId, stkId];
+			const ownership = await readDirectProcessLoopEquipmentEvidence(page, groupIds);
+			assertEqual(
+				ownership.every(
+					(group) =>
+						isDeepStrictEqual(group.ownerIds, [loopId]) &&
+						group.ports.every((port) => port.covered),
+				),
+				true,
+				"first-run all complete groups belong directly to the selected Loop",
+			);
+			await page.screenshot({
+				path: path.join(artifactRoot, "first-run-template-all-equipment-owned-390x844.png"),
+			});
+			const saveFromChecks = page.getByTestId("static-fab-checks-save-project");
+			await assertLocatorInsideViewport(page, saveFromChecks);
+			await assertLocatorOwnsHitArea(saveFromChecks, "first-run Checks project Save");
+			await page.setViewportSize({ width: 390, height: 600 });
+			await assertLocatorInsideViewport(page, saveFromChecks);
+			await assertLocatorOwnsHitArea(saveFromChecks, "short first-run Checks project Save");
+			await page.screenshot({
+				path: path.join(artifactRoot, "first-run-template-checks-save-390x600.png"),
+			});
+			await page.setViewportSize({ width: 390, height: 844 });
+			assertEqual(await saveFromChecks.isDisabled(), false, "first-run Checks Save is enabled");
+			await waitForProjectOperation(page, "idle");
+			const downloadPromise = page.waitForEvent("download");
+			await saveFromChecks.click();
+			const saved = await (await downloadPromise).path();
+			if (!saved) throw new Error("First-run Checks Save has no readable download.");
+			await waitForProjectOperation(page, "idle");
+			await page.waitForFunction(
+				() =>
+					document.activeElement?.getAttribute("data-testid") === "static-fab-checks-save-project",
+				undefined,
+				{ timeout: 10_000 },
+			);
 			await createSyntheticFabProject(page, "blank");
 			assertEqual((await readMetrics(page)).modelRelationships, "0", "blank before compact reopen");
 			const chooserPromise = page.waitForEvent("filechooser");
@@ -30794,20 +31148,67 @@ async function exerciseFirstRunVerifiedTemplate(activeBrowser) {
 			await continueWithoutSavingIfVisible(page);
 			const chooser = await chooserPromise;
 			await chooser.setFiles(saved);
-			const reopened = await waitForWorker(page, (metrics) => metrics.modelRelationships === "2");
+			const reopened = await waitForWorker(
+				page,
+				(metrics) =>
+					metrics.modelRelationships === "2" &&
+					metrics.equipmentGroups === "3" &&
+					metrics.equipmentPorts === "5" &&
+					metrics.modelChecksum === checked.modelChecksum,
+				{ timeout: 30_000 },
+			);
 			for (const key of [
+				"projectId",
 				"projectName",
 				"modelChecksum",
 				"workerChecksum",
 				"workerPhysicalFingerprint",
+				"modelNextPortId",
+				"modelNextEquipmentGroupId",
 				"modelNextRelationshipId",
+				"modelRelationships",
 				"staticFabOrganizations",
+				"equipmentGroups",
+				"equipmentPorts",
 			])
-				assertEqual(reopened[key], created[key], `first-run compact reopen ${key}`);
+				assertEqual(reopened[key], checked[key], `first-run compact reopen ${key}`);
 			assertEqual(
-				JSON.stringify(await readAssemblyRelationships(page)),
-				JSON.stringify(relationships),
+				reopened.modelChecksum,
+				reopened.workerChecksum,
+				"first-run reopened Worker parity",
+			);
+			assertEqual(
+				isDeepStrictEqual(await readPortEquipmentContract(page), equipment),
+				true,
+				"first-run compact reopen preserves all groups and Ports",
+			);
+			assertEqual(
+				isDeepStrictEqual(await readDirectProcessLoopEquipmentEvidence(page, groupIds), ownership),
+				true,
+				"first-run compact reopen preserves three direct Loop owners",
+			);
+			assertEqual(
+				isDeepStrictEqual(await readAssemblyRelationships(page), relationships),
+				true,
 				"first-run compact reopen preserves declared relationships",
+			);
+			await openStaticFabNavigatorTab(page, "checks");
+			await page.waitForFunction(
+				() =>
+					["ready", "issues", "error"].includes(
+						document
+							.querySelector('[data-testid="tilefab-app"]')
+							?.getAttribute("data-static-fab-check-status") ?? "",
+					),
+				undefined,
+				{ timeout: 30_000 },
+			);
+			const reopenedChecks = await readMetrics(page);
+			assertEqual(reopenedChecks.staticFabCheckStatus, "ready", "first-run reopened Checks ready");
+			assertEqual(
+				reopenedChecks.staticFabCheckIssues,
+				"0",
+				"first-run reopened Checks zero issues",
 			);
 			await page.screenshot({
 				path: path.join(artifactRoot, "first-run-template-reopened-390x844.png"),
@@ -30817,6 +31218,14 @@ async function exerciseFirstRunVerifiedTemplate(activeBrowser) {
 				settingsHit: true,
 				configuredBays: 14,
 				relationships: 2,
+				equipmentGroupIds: groupIds,
+				processLoopId: loopId,
+				processLoopName: loopName,
+				ohbTargetRow: targetRow,
+				eqStartRow,
+				eqEndRow: eqPlan.end.row,
+				stkTargetRow,
+				checks: reopenedChecks.staticFabCheckIssues,
 				createTransition: action.transitionState,
 				compactSaveAndOpen: true,
 			});

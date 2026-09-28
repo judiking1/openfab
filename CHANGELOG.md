@@ -6,7 +6,26 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-09-28
+
+- Complete the actual first-screen Verified Template journey at 390 px: configure and create a
+  14-Bay FAB, place OHB, three-Port EQ, and FLEX Stocker through visible Port targets, attach all
+  three groups directly to a Process Loop, pass Checks, save a native `.openfab` file, and reopen
+  with the same relationships, ownership, equipment, and Worker checksum.
+- Put an explicit project-file Save action in the successful Checks panel. Keep it fully clickable
+  at 390×844 and 390×600 by reducing the compact success row and scrolling the detailed pass
+  results inside the short panel.
+- Repaint the ordinary Port keyboard marker after React commits it. This closes a Linux CI race
+  where changing a Stocker Process Loop updated the Canvas target but left the old marker offscreen.
+  The same readiness and save checks still apply. Final local authoring passed 68 steps / 558
+  screenshots / zero browser errors, and the 428-file suite passed 4,750 tests (two existing
+  skips). Core, build, lint, Biome and public safety checks also passed. V1 remains incomplete.
+
 ## [0.1.20] - 2026-09-28
+
+This source was pushed as public `b173943` but not deployed. CI `36393825757` passed `verify`
+and failed `authoring` on the Stocker Loop marker race fixed in 0.1.21. The last verified live
+Pages release remains 0.1.19 until a later exact-source CI and served-file check succeeds.
 
 - Keep an EQ endpoint or Stocker Port draft intact when a user clicks a valid Port outside the
   selected Process Loop. Explain the scope mismatch beside the Loop picker and offer a different
@@ -31,8 +50,8 @@ All notable public OpenFab changes will be documented here. The format follows
   build, lint, release safety, bundle and four-width smoke. A later read-only review found
   the repeated-warning gap; its focused 390px regression, final-source full 68-step gate,
   4,750 tests, Core, build, lint, public safety, bundle and four-width smoke all pass.
-  Exact export, repeat CI and Pages verification remain open. V1 authoring
-  remains incomplete.
+  Exact export passed for the final source; public CI found the separate marker race above.
+  V1 authoring remains incomplete.
 
 ## [0.1.19] - 2026-09-28
 
