@@ -58,6 +58,10 @@ describe("GuidedPortKeyboardSession", () => {
 			}),
 		});
 		expect(nearestPortKeyboardInitialRow(binding, { x: 3, z: 4 })).toBe(1);
+		expect(nearestPortKeyboardInitialRow(binding, { x: 3, z: 4 }, new Uint8Array([1, 0, 0]))).toBe(
+			0,
+		);
+		expect(nearestPortKeyboardInitialRow(binding, { x: 3, z: 4 }, new Uint8Array(3))).toBeNull();
 		expect(createGuidedPortKeyboardSession("OHB", 1, binding, "ordinary").scope).toBe("ordinary");
 	});
 

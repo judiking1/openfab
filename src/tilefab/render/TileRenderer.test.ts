@@ -1604,6 +1604,59 @@ describe("port slot rendering", () => {
 			(stroke) => stroke.style === "rgba(91, 221, 227, 0.68)",
 		).length;
 		expect(renderer.hitTestPortSlot(slots, world, TEST_CAMERA.zoom)).toBe(row);
+		const allowedRows = new Uint8Array(slots.count);
+		expect(
+			renderer.hitTestPortSlot(
+				slots,
+				world,
+				TEST_CAMERA.zoom,
+				undefined,
+				0,
+				false,
+				0,
+				false,
+				allowedRows,
+			),
+		).toBeNull();
+		allowedRows[row] = 1;
+		expect(
+			renderer.hitTestPortSlot(
+				slots,
+				world,
+				TEST_CAMERA.zoom,
+				undefined,
+				0,
+				false,
+				0,
+				false,
+				allowedRows,
+			),
+		).toBe(row);
+		const neighboringRow = Array.from({ length: slots.count }, (_, index) => index).find(
+			(candidate) =>
+				candidate !== row &&
+				slots.statuses[candidate] === PORT_SLOT_STATUS.LEGAL &&
+				Math.hypot(
+					(slots.worldPositions[candidate * 2] as number) - world.x,
+					(slots.worldPositions[candidate * 2 + 1] as number) - world.y,
+				) <= 1.5,
+		);
+		expect(neighboringRow).toBeDefined();
+		allowedRows[row] = 0;
+		allowedRows[neighboringRow as number] = 1;
+		expect(
+			renderer.hitTestPortSlot(
+				slots,
+				world,
+				TEST_CAMERA.zoom,
+				1.5,
+				0,
+				false,
+				0,
+				false,
+				allowedRows,
+			),
+		).toBe(neighboringRow);
 
 		const routeX = slots.routeXs[row] as number;
 		slots.routeXs[row] = routeX + 1;

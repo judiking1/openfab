@@ -59,6 +59,75 @@
 	min-width: 0;
 }
 
+.tilefab-equipment-process-loop-target {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(140px, 1.4fr) 86px;
+	align-items: center;
+	gap: 6px 10px;
+	min-width: 0;
+	color: #d6e9e7;
+	font-size: 12px;
+}
+
+.tilefab-equipment-process-loop-label-compact {
+	display: none;
+}
+
+.tilefab-equipment-process-loop-target select {
+	min-width: 0;
+	min-height: 44px;
+	padding: 7px;
+	border: 1px solid #527c7b;
+	border-radius: 4px;
+	background: #132a29;
+	color: #e8f4f3;
+}
+
+.tilefab-equipment-process-loop-target select:focus-visible {
+	outline: 2px solid #99e4e2;
+	outline-offset: 2px;
+}
+
+.tilefab-equipment-process-loop-start {
+	min-height: 44px;
+	padding: 6px;
+	border: 1px solid #527c7b;
+	border-radius: 4px;
+	background: #1f4542;
+	color: #e8f4f3;
+	font: inherit;
+	font-weight: 700;
+	cursor: pointer;
+}
+
+.tilefab-equipment-process-loop-start:focus-visible {
+	outline: 2px solid #99e4e2;
+	outline-offset: 2px;
+}
+
+.tilefab-equipment-process-loop-start:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.tilefab-equipment-process-loop-target small {
+	grid-column: 1 / -1;
+	line-height: 1.35;
+	color: #b6e4d7;
+}
+
+@media (max-width: 520px) {
+	.tilefab-equipment-process-loop-target {
+		grid-template-columns: auto minmax(0, 1fr) 86px;
+	}
+	.tilefab-equipment-process-loop-label-full {
+		display: none;
+	}
+	.tilefab-equipment-process-loop-label-compact {
+		display: inline;
+	}
+}
+
 .tilefab-equipment-workspace .tilefab-port-keyboard-start {
 	min-height: 44px;
 	width: 100%;

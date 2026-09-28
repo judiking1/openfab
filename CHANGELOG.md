@@ -6,7 +6,29 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
-### Preview candidate 0.1.18
+## [0.1.19] - 2026-09-28
+
+- Choose a Process Loop before ordinary OHB, EQ, or Stocker Port placement. Targeting and
+  previews use that Loop's direct rail ownership; edits, OHB move/copy, and Station Proposal
+  exact-slot review retain their own scopes. The picker is labeled `Port 배치 범위` to separate
+  location targeting from the later ownership action, preserves keyboard focus, has an
+  explicit 44 px action to return to Canvas placement, and uses one compact row below 520 px.
+- Reuse the current organization role and record while the immutable organization state is
+  unchanged, avoiding full hierarchy recomputation for each pointer candidate.
+- Verify the visible Blank Canvas → Twin Bay → EQ/OHB/FLEX Stocker → direct Loop ownership →
+  Checks → native save/reopen journey at 390×600, 760×900, and 1440×900. The focused run passes
+  all three widths. Reopening the same project ID also clears the transient Loop scope while
+  retaining exact authored equipment and Worker parity. The regular authoring run passed 68
+  steps, 552 screenshots, and zero browser errors; final unit tests passed 4,750 tests with two
+  skipped. Core, build, lint, project round trip, strict public safety, initial bundle audit,
+  and four-width production smoke also passed locally. Exact public export, CI, and Pages
+  verification remain pending at this checkpoint.
+
+## [0.1.18] - 2026-09-28
+
+Published Pages preview. Public `main` `4a2a89e`, CI `36372132693` (both jobs), and Pages
+`5cc26f5` / deployment `36373764806` passed. All 65 served files (26,976,298 bytes) and
+both entry URLs matched the reviewed build SHA-256. V1 authoring remains incomplete.
 
 - Let a selected OHB, EQ, or Stocker group join an existing Process Loop explicitly from its
   Equipment Inspector. Offer only Loops whose direct rail or switch membership covers every Port
@@ -22,8 +44,9 @@ All notable public OpenFab changes will be documented here. The format follows
 - Include Process Loop equipment membership as step 67 of the full authoring browser gate. The
   local run passed 67 steps, 548 screenshots, and zero browser errors. Strict public safety and
   provenance, the 20-file initial bundle (1,028,558 gzip bytes, with Three.js deferred), and
-  production smoke at 1440/1280/886/390px also passed locally. Private commit, exact public
-  export, CI, and Pages publication remain pending.
+  production smoke at 1440/1280/886/390px also passed locally. Private `4ffd2b7` and exact
+  public `4a2a89e` were normally pushed after the 1,037-file safe export. Public build/smoke,
+  CI and Pages verification passed.
 
 ## [0.1.17] - 2026-09-28
 

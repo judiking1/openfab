@@ -14,6 +14,7 @@ export interface PortEquipmentKeyboardNavigationRequest {
 	readonly deltaZ: number;
 	readonly candidateRows: readonly number[];
 	readonly scope: PortEquipmentKeyboardNavigationScope;
+	readonly allowedRows?: Uint8Array;
 }
 
 export interface ProgressivePortEquipmentKeyboardNavigationRequest
@@ -41,7 +42,7 @@ export interface ProgressivePortEquipmentKeyboardNavigationResult {
 export function directionalPortEquipmentSlotRow(
 	request: PortEquipmentKeyboardNavigationRequest,
 ): number | null {
-	const { slots, currentRow, deltaX, deltaZ, candidateRows, scope } = request;
+	const { slots, currentRow, deltaX, deltaZ, candidateRows, scope, allowedRows } = request;
 	if (
 		!Number.isInteger(currentRow) ||
 		currentRow < 0 ||
@@ -57,6 +58,7 @@ export function directionalPortEquipmentSlotRow(
 	let winnerScore = Number.POSITIVE_INFINITY;
 	for (const row of candidateRows) {
 		if (!Number.isInteger(row) || row < 0 || row >= slots.count || row === currentRow) continue;
+		if (allowedRows && allowedRows[row] !== 1) continue;
 		if (scope === "same-directed-lane" && !sameDirectedLane(slots, currentRow, row)) continue;
 		const offsetX = (slots.routeXs[row] as number) - currentX;
 		const offsetZ = (slots.routeZs[row] as number) - currentZ;
@@ -86,6 +88,7 @@ export function progressiveDirectionalPortEquipmentSlotRow(
 		query,
 		target,
 		searchRadii = PORT_EQUIPMENT_KEYBOARD_SEARCH_RADII,
+		allowedRows,
 	} = request;
 	if (
 		!Number.isInteger(currentRow) ||
@@ -130,6 +133,7 @@ export function progressiveDirectionalPortEquipmentSlotRow(
 			deltaZ,
 			candidateRows: candidates,
 			scope,
+			allowedRows,
 		});
 		if (row !== null) {
 			return {

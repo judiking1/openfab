@@ -68,6 +68,42 @@ describe("directionalPortEquipmentSlotRow", () => {
 		).toBe(2);
 	});
 
+	it("skips Port rows outside an explicitly selected Process Loop", () => {
+		const slots = fixtureSlots([
+			[0, 0, DIR_W, DIR_E],
+			[1, 0, DIR_W, DIR_E],
+			[2, 0, DIR_W, DIR_E],
+		]);
+		const allowedRows = new Uint8Array([1, 0, 1]);
+		expect(
+			directionalPortEquipmentSlotRow({
+				slots,
+				currentRow: 0,
+				deltaX: 1,
+				deltaZ: 0,
+				candidateRows: [1, 2],
+				scope: "same-directed-lane",
+				allowedRows,
+			}),
+		).toBe(2);
+		expect(
+			progressiveDirectionalPortEquipmentSlotRow({
+				slots,
+				currentRow: 0,
+				deltaX: 1,
+				deltaZ: 0,
+				scope: "nearby",
+				target: [],
+				searchRadii: [4],
+				query: (_bounds, target) => {
+					target.splice(0, target.length, 1, 2);
+					return target;
+				},
+				allowedRows,
+			}).row,
+		).toBe(2);
+	});
+
 	it("is deterministic and scans only the caller-provided bounded candidates", () => {
 		const slots = fixtureSlots(
 			Array.from({ length: 50_000 }, (_, row) => [row, 0, DIR_W, DIR_E] as const),

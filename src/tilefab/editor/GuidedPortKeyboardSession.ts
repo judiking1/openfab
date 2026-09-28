@@ -105,6 +105,7 @@ export function createGuidedPortKeyboardSession(
 export function nearestPortKeyboardInitialRow(
 	binding: GuidedPortKeyboardBinding,
 	target: Readonly<{ x: number; z: number }>,
+	allowedRows?: Uint8Array,
 ): number | null {
 	if (!Number.isFinite(target.x) || !Number.isFinite(target.z)) {
 		throw new TypeError("Port keyboard initial target must be finite.");
@@ -115,6 +116,7 @@ export function nearestPortKeyboardInitialRow(
 	let nearestLegalRow: number | null = null;
 	let nearestLegalDistance = Number.POSITIVE_INFINITY;
 	for (let row = 0; row < slots.count; row++) {
+		if (allowedRows && allowedRows[row] !== 1) continue;
 		const deltaX = (slots.routeXs[row] as number) - target.x;
 		const deltaZ = (slots.routeZs[row] as number) - target.z;
 		const distance = deltaX * deltaX + deltaZ * deltaZ;

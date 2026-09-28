@@ -1134,6 +1134,11 @@ import {
 } from "./UserBlueprintLibraryCrossTabRefreshController";
 import "./TileFabApp.css";
 import { EquipmentAuthoringWorkspace } from "./EquipmentAuthoringWorkspace";
+import {
+	compileOrdinaryPortProcessLoopScope,
+	ordinaryPortProcessLoopScopeMatches,
+	type OrdinaryPortProcessLoopScope,
+} from "./OrdinaryPortProcessLoopScope";
 import { useEditorNavigationScroll } from "./useEditorNavigationScroll";
 import { useEquipmentWorkspaceFraming } from "./useEquipmentWorkspaceFraming";
 import "./EquipmentAuthoringWorkspace.css";
@@ -2951,6 +2956,17 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	}, []);
 	const [tool, setTool] = useState<EditorTool>("build");
+	const [ordinaryPortProcessLoopTargetId, setOrdinaryPortProcessLoopTargetId] = useState<number | null>(null);
+	const ordinaryPortProcessLoopTargetRef = useRef<Readonly<{
+		projectId: string;
+		organizationId: number;
+	}> | null>(null);
+	const ordinaryPortProcessLoopScopeRef = useRef<OrdinaryPortProcessLoopScope | null>(null);
+	const ordinaryPortProcessLoopSourceRef = useRef<Readonly<{
+		organizations: StaticFabOrganizationState;
+		organizationId: number;
+		organization: StaticFabOrganizationRecord | null;
+	}> | null>(null);
 	const [bend, setBend] = useState<BendPreference>("auto");
 	const [buildMode, setBuildMode] = useState<RailBuildMode>("route");
 	const [moduleSpan, setModuleSpan] = useState<RailModuleSpan>("compact");
@@ -3588,6 +3604,31 @@ export default function TileFabApp(): React.ReactElement {
 		() => deriveStaticFabOrganizationSemanticRoles(activeOrganizations),
 		[activeOrganizations],
 	);
+	const equipmentProcessLoopChoices = useMemo(
+		() => activeOrganizations.records
+			.filter((record) => organizationSemanticRoles.get(record.id) === "PROCESS_LOOP")
+			.map((record, index) => {
+				const bayId = record.parentOrganizationIds?.find(
+					(id) => organizationSemanticRoles.get(id) === "BAY",
+				);
+				const bay = bayId === undefined ? null : organizationRecordsById.get(bayId);
+				const prefix = `Loop ${index + 1}`;
+				return { id: record.id, label: bay ? `${prefix} · ${record.name} · ${bay.name}` : `${prefix} · ${record.name}` };
+			}),
+		[activeOrganizations, organizationRecordsById, organizationSemanticRoles],
+	);
+	useEffect(() => {
+		const target = ordinaryPortProcessLoopTargetRef.current;
+		if (!target) return;
+		if (
+			target.projectId === projectSession.manifest.id &&
+			organizationSemanticRoles.get(target.organizationId) === "PROCESS_LOOP"
+		) return;
+		ordinaryPortProcessLoopTargetRef.current = null;
+		ordinaryPortProcessLoopScopeRef.current = null;
+		ordinaryPortProcessLoopSourceRef.current = null;
+		setOrdinaryPortProcessLoopTargetId(null);
+	}, [projectSession.manifest.id, organizationSemanticRoles]);
 	const staticFabOuterCirculationIndex = useMemo(
 		() =>
 			createStaticFabOuterCirculationIndex(
@@ -7514,6 +7555,10 @@ export default function TileFabApp(): React.ReactElement {
 	): void => {
 		closeContextPalette();
 		clearTransientConstruction();
+		ordinaryPortProcessLoopTargetRef.current = null;
+		ordinaryPortProcessLoopScopeRef.current = null;
+		ordinaryPortProcessLoopSourceRef.current = null;
+		setOrdinaryPortProcessLoopTargetId(null);
 		setTemplatePaletteOpen(false);
 		closeBlueprintLibrary(false);
 		const nextTool = request.portType === "OHB" ? "ohb" : request.portType === "EQ" ? "eq" : "stk";
@@ -10744,15 +10789,52 @@ export default function TileFabApp(): React.ReactElement {
 		scheduleRender();
 	};
 
+	const currentOrdinaryPortProcessLoopScope = (
+		slots: CompiledPortSlots,
+	): OrdinaryPortProcessLoopScope | null => {
+		if (ohbPlacementIntentRef.current) return null;
+		const target = ordinaryPortProcessLoopTargetRef.current;
+		if (!target) return null;
+		const model = editorModelRef.current;
+		if (target.projectId !== projectSession.manifest.id) return null;
+		const organizations = model.document.organizations;
+		let source = ordinaryPortProcessLoopSourceRef.current;
+		if (source?.organizations !== organizations || source.organizationId !== target.organizationId) {
+			const candidate = organizations.records.find((record) => record.id === target.organizationId);
+			source = {
+				organizations,
+				organizationId: target.organizationId,
+				organization: candidate &&
+					deriveStaticFabOrganizationSemanticRoles(organizations).get(candidate.id) === "PROCESS_LOOP"
+					? candidate
+					: null,
+			};
+			ordinaryPortProcessLoopSourceRef.current = source;
+		}
+		const organization = source.organization;
+		if (!organization) return null;
+		const cached = ordinaryPortProcessLoopScopeRef.current;
+		if (cached && ordinaryPortProcessLoopScopeMatches(cached, slots, organization)) return cached;
+		const scope = compileOrdinaryPortProcessLoopScope(slots, organization);
+		ordinaryPortProcessLoopScopeRef.current = scope;
+		return scope;
+	};
+
+	const ordinaryPortRowAllowed = (slots: CompiledPortSlots, row: number): boolean => {
+		if (!ordinaryPortProcessLoopTargetRef.current || ohbPlacementIntentRef.current) return true;
+		return currentOrdinaryPortProcessLoopScope(slots)?.rowMask[row] === 1;
+	};
+
 	const startOrdinaryPortKeyboard = (
 		portType: GuidedPortKeyboardType,
 		statusMessage?: string,
 		initialTarget?: Readonly<{ x: number; z: number }>,
+		focusCanvas = true,
 	): void => {
 		const binding = currentGuidedPortKeyboardBinding();
 		if (!binding || binding.slots.portType !== portType) {
 			setStatus(`${portType} 슬롯을 준비하지 못했습니다 · 직선 레일을 먼저 확인하세요`);
-			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+			if (focusCanvas) requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 			return;
 		}
 		const canvas = canvasRef.current;
@@ -10764,10 +10846,21 @@ export default function TileFabApp(): React.ReactElement {
 					x: ((canvas?.clientWidth ?? 0) * 0.5 - camera.offsetX) / camera.zoom,
 					z: ((canvas?.clientHeight ?? 0) * 0.5 - camera.offsetY) / camera.zoom,
 				});
-		const row = nearestPortKeyboardInitialRow(binding, target);
+		const scope = currentOrdinaryPortProcessLoopScope(binding.slots);
+		const row = nearestPortKeyboardInitialRow(
+			binding,
+			target,
+			ordinaryPortProcessLoopTargetRef.current && !ohbPlacementIntentRef.current
+				? scope?.rowMask ?? new Uint8Array(0)
+				: undefined,
+		);
 		if (row === null) {
-			setStatus(`${portType} 슬롯이 없습니다 · 직선 레일을 먼저 만드세요`);
-			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+			setStatus(
+				ordinaryPortProcessLoopTargetRef.current && !ohbPlacementIntentRef.current
+					? `선택한 Process Loop에 배치 가능한 ${portType} Port가 없습니다 · 다른 Loop 또는 전체 슬롯을 선택하세요`
+					: `${portType} 슬롯이 없습니다 · 직선 레일을 먼저 만드세요`,
+			);
+			if (focusCanvas) requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 			return;
 		}
 		const session = createGuidedPortKeyboardSession(portType, row, binding, "ordinary");
@@ -10795,10 +10888,33 @@ export default function TileFabApp(): React.ReactElement {
 					rendererRef.current.invalidateStatic();
 					scheduleRender();
 				}
-				if (document.activeElement === focusOwner || document.activeElement === document.body) currentCanvas.focus({ preventScroll: true });
+				if (
+					focusCanvas &&
+					(document.activeElement === focusOwner || document.activeElement === document.body)
+				) currentCanvas.focus({ preventScroll: true });
 			}
 		});
 		scheduleRender();
+	};
+
+	const chooseOrdinaryPortProcessLoop = (organizationId: number | null): void => {
+		const model = editorModelRef.current;
+		if (organizationId !== null) {
+			const roles = deriveStaticFabOrganizationSemanticRoles(model.document.organizations);
+			if (roles.get(organizationId) !== "PROCESS_LOOP") {
+				setStatus("Process Loop가 변경됐습니다 · 목록에서 다시 선택하세요");
+				return;
+			}
+		}
+		clearTransientConstruction("장비 배치 범위를 변경했습니다");
+		ordinaryPortProcessLoopTargetRef.current = organizationId === null
+			? null
+			: { projectId: projectSession.manifest.id, organizationId };
+		ordinaryPortProcessLoopScopeRef.current = null;
+		ordinaryPortProcessLoopSourceRef.current = null;
+		setOrdinaryPortProcessLoopTargetId(organizationId);
+		const portType = portTypeForTool(toolRef.current);
+		if (portType) startOrdinaryPortKeyboard(portType, undefined, undefined, false);
 	};
 
 	const cancelGuidedPortKeyboard = (
@@ -10901,12 +11017,25 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const deltaX = direction === "left" ? -1 : direction === "right" ? 1 : 0;
 		const deltaZ = direction === "up" ? -1 : direction === "down" ? 1 : 0;
+		const processLoopScope = session.scope === "ordinary"
+			? currentOrdinaryPortProcessLoopScope(session.binding.slots)
+			: null;
+		if (
+			session.scope === "ordinary" &&
+			ordinaryPortProcessLoopTargetRef.current &&
+			!ohbPlacementIntentRef.current &&
+			!processLoopScope
+		) {
+			cancelGuidedPortKeyboard("Process Loop가 변경되어 Port 배치를 다시 선택해야 합니다");
+			return;
+		}
 		const search = progressiveDirectionalPortEquipmentSlotRow({
 			slots: session.binding.slots,
 			currentRow: session.currentRow,
 			deltaX,
 			deltaZ,
 			scope: session.portType === "EQ" && session.phase === "choose-end" ? "same-directed-lane" : "nearby",
+			allowedRows: processLoopScope?.rowMask,
 			target: membershipCandidateBufferRef.current,
 			query: (bounds, target) =>
 				rendererRef.current.queryPortSlots(session.binding.slots, bounds, target),
@@ -11056,6 +11185,13 @@ export default function TileFabApp(): React.ReactElement {
 			}
 		}
 		const { slots, availability, document } = session.binding;
+		if (
+			session.scope === "ordinary" &&
+			!ordinaryPortRowAllowed(slots, session.currentRow)
+		) {
+			setStatus("선택한 Process Loop 밖의 Port입니다 · Loop 내부 슬롯을 선택하세요");
+			return;
+		}
 		const placementIntent =
 			session.portType === "OHB" ? ohbPlacementIntentRef.current : null;
 		const slotAvailability = availability.statusFor(
@@ -15797,7 +15933,10 @@ export default function TileFabApp(): React.ReactElement {
 				const markerWorldX = slots.worldPositions[row * 2] as number;
 				const markerWorldY = slots.worldPositions[row * 2 + 1] as number;
 				const markerRadiusMeters = 22 / cameraRef.current.zoom;
-				if (Math.hypot(world.x - markerWorldX, world.y - markerWorldY) <= markerRadiusMeters) {
+				if (
+					Math.hypot(world.x - markerWorldX, world.y - markerWorldY) <= markerRadiusMeters &&
+					ordinaryPortRowAllowed(slots, row)
+				) {
 					return row;
 				}
 			}
@@ -15809,7 +15948,14 @@ export default function TileFabApp(): React.ReactElement {
 		const ignoredEquipmentGroupId =
 			membershipEdit?.sourceEquipmentGroupId ??
 			(groupEdit?.mode === "move" ? groupEdit.sourceEquipmentGroupId : 0);
-		return rendererRef.current.hitTestPortSlot(
+		const scopedOrdinaryPlacement =
+			!guidedBuildExperienceActive && !placementIntent && !groupEdit && !membershipEdit &&
+			ordinaryPortProcessLoopTargetRef.current !== null;
+		const processLoopScope = scopedOrdinaryPlacement
+			? currentOrdinaryPortProcessLoopScope(slots)
+			: null;
+		if (scopedOrdinaryPlacement && !processLoopScope) return null;
+		const row = rendererRef.current.hitTestPortSlot(
 			slots,
 			world,
 			cameraRef.current.zoom,
@@ -15818,7 +15964,9 @@ export default function TileFabApp(): React.ReactElement {
 			true,
 			ignoredEquipmentGroupId,
 			groupEdit !== null || membershipEdit !== null,
+			processLoopScope?.rowMask,
 		);
+		return row;
 	};
 
 	const portEquipmentAtWorld = (world: { x: number; y: number }) => {
@@ -16489,6 +16637,10 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus("현재 STK 슬롯 세대가 준비되지 않았습니다");
 			return;
 		}
+		if (!guidedBuildExperienceActive && !ordinaryPortRowAllowed(slots, row)) {
+			setStatus("선택한 Process Loop 밖의 Port입니다 · Loop 내부 슬롯을 선택하세요");
+			return;
+		}
 		let draft = stkDraftSessionRef.current;
 		if (!draft || !isCurrentStkDraft(draft)) {
 			const template = stkTemplateRef.current;
@@ -16585,6 +16737,13 @@ export default function TileFabApp(): React.ReactElement {
 			scheduleRender();
 			return;
 		}
+		if (
+			!guidedBuildExperienceActive &&
+			draft.selection.rows.some((row) => !ordinaryPortRowAllowed(draft.slots, row))
+		) {
+			setStatus("Process Loop가 변경됐거나 선택한 Port가 밖에 있습니다 · Port를 다시 선택하세요");
+			return;
+		}
 		if (!draft.selection.canComplete || draft.selection.rows.length < guidedStkMinimumPorts) {
 			setStatus(draft.selection.rows.length < guidedStkMinimumPorts
 				? `Port ${guidedStkMinimumPorts}개를 선택한 뒤 Stocker를 생성하세요`
@@ -16653,6 +16812,13 @@ export default function TileFabApp(): React.ReactElement {
 			portRowDragTargetBounds(world),
 			portRowCandidateBufferRef.current,
 		);
+		if (!guidedBuildExperienceActive && ordinaryPortProcessLoopTargetRef.current) {
+			let write = 0;
+			for (const row of candidates) {
+				if (ordinaryPortRowAllowed(drag.slots, row)) candidates[write++] = row;
+			}
+			candidates.length = write;
+		}
 		return findPortRowDragTarget(drag.slots, drag.anchorRow, world, candidates);
 	};
 
@@ -16710,6 +16876,13 @@ export default function TileFabApp(): React.ReactElement {
 					targetRow,
 					candidates,
 				);
+				if (
+					!guidedBuildExperienceActive &&
+					selection.rows.some((row) => !ordinaryPortRowAllowed(drag.slots, row))
+				) {
+					invalidatePortRowDrag(drag, "선택한 Process Loop 밖의 Port가 포함돼 있습니다");
+					return drag.selection;
+				}
 				drag.selection = selection;
 				if (previewReadoutRef.current) previewReadoutRef.current.textContent = selection.reason;
 				return selection;
@@ -16722,6 +16895,13 @@ export default function TileFabApp(): React.ReactElement {
 				candidates,
 				drag.pitchMillimeters,
 			);
+			if (
+				!guidedBuildExperienceActive &&
+				selection.rows.some((row) => !ordinaryPortRowAllowed(drag.slots, row))
+			) {
+				invalidatePortRowDrag(drag, "선택한 Process Loop 밖의 Port가 포함돼 있습니다");
+				return drag.selection;
+			}
 			const plan =
 				selection.state === "READY"
 					? planEqRowPlacement(
@@ -18137,6 +18317,14 @@ export default function TileFabApp(): React.ReactElement {
 			scheduleRender();
 			return false;
 		}
+		if (
+			!guidedBuildExperienceActive &&
+			selection.rows.some((row) => !ordinaryPortRowAllowed(portDrag.slots, row))
+		) {
+			setStatus("선택한 Process Loop 밖의 Port가 포함돼 배치하지 않았습니다 · 내부 슬롯을 다시 고르세요");
+			scheduleRender();
+			return false;
+		}
 		const plan =
 			portDrag.portType === "OHB"
 				? planOhbRowPlacement(
@@ -19066,6 +19254,10 @@ export default function TileFabApp(): React.ReactElement {
 		cancelGuidedPortKeyboard(undefined, false);
 		cancelStaticFabArrangement();
 		cancelStaticFabAssemblyConnector();
+		ordinaryPortProcessLoopTargetRef.current = null;
+		ordinaryPortProcessLoopScopeRef.current = null;
+		ordinaryPortProcessLoopSourceRef.current = null;
+		setOrdinaryPortProcessLoopTargetId(null);
 		pendingStaticFabArrangementSelectionRef.current = null;
 		pendingConnectedBayBankSelectionRef.current = null;
 		connectedBayBankHistoryReceiptRef.current = null;
@@ -27651,6 +27843,23 @@ export default function TileFabApp(): React.ReactElement {
 		selectedPhysical?.geometryKind === "BASELINE_STITCHED" ? "BASELINE" : selectedPhysical?.fitKind;
 	const activeCatalogItem = railConstructionCatalogItem(buildMode);
 	const activePortAuthoringType = portTypeForTool(tool);
+	const selectedEquipmentProcessLoopScope = useMemo(() => {
+		if (!activePortAuthoringType || ordinaryPortProcessLoopTargetId === null) return null;
+		if (ordinaryPortProcessLoopTargetRef.current?.projectId !== projectSession.manifest.id) return null;
+		const record = organizationRecordsById.get(ordinaryPortProcessLoopTargetId);
+		if (!record || organizationSemanticRoles.get(record.id) !== "PROCESS_LOOP") return null;
+		return compileOrdinaryPortProcessLoopScope(
+			editorModel.portSlotArtifacts[activePortAuthoringType].slots,
+			record,
+		);
+	}, [
+		activePortAuthoringType,
+		editorModel,
+		ordinaryPortProcessLoopTargetId,
+		organizationRecordsById,
+		organizationSemanticRoles,
+		projectSession.manifest.id,
+	]);
 	const activePortAuthoringPresentation = activePortAuthoringType
 		? portAuthoringSurfacePresentation(
 				activePortAuthoringType,
@@ -37571,6 +37780,44 @@ export default function TileFabApp(): React.ReactElement {
 						}
 						selection={
 							<>
+								{!guidedBuildExperienceActive && !ohbPlacementIntent && equipmentProcessLoopChoices.length > 0 ? (
+									<div className="tilefab-equipment-process-loop-target">
+										<label htmlFor="tilefab-ordinary-port-process-loop-target">
+											<span className="tilefab-equipment-process-loop-label-full">Port 배치 범위</span>
+											<span className="tilefab-equipment-process-loop-label-compact">Port 범위</span>
+										</label>
+										<select
+											id="tilefab-ordinary-port-process-loop-target"
+											aria-label="Port 배치 범위 (Process Loop)"
+											data-testid="ordinary-port-process-loop-target"
+											value={ordinaryPortProcessLoopTargetId ?? ""}
+											onChange={(event) => chooseOrdinaryPortProcessLoop(
+												event.currentTarget.value === "" ? null : Number(event.currentTarget.value),
+											)}
+										>
+											<option value="">전체 Port 슬롯</option>
+											{equipmentProcessLoopChoices.map((choice) => (
+												<option key={choice.id} value={choice.id}>{choice.label}</option>
+											))}
+										</select>
+										<button
+											type="button"
+											className="tilefab-equipment-process-loop-start"
+											data-testid="ordinary-port-process-loop-start"
+											disabled={ordinaryPortProcessLoopTargetId !== null && !selectedEquipmentProcessLoopScope?.eligibleCount}
+											onClick={() => {
+												if (!guidedPortKeyboardSessionRef.current && activePortAuthoringType) {
+													startOrdinaryPortKeyboard(activePortAuthoringType);
+												} else canvasRef.current?.focus({ preventScroll: true });
+											}}
+										>배치 시작</button>
+										{ordinaryPortProcessLoopTargetId !== null ? (
+											<small data-testid="ordinary-port-process-loop-target-count">
+												직접 연결된 {activePortAuthoringType} 슬롯 {selectedEquipmentProcessLoopScope?.eligibleCount ?? 0}개 · 생성 뒤 장비 속성에서 소속 확정
+											</small>
+										) : null}
+									</div>
+								) : null}
 								<span
 									id="tilefab-port-authoring-instruction"
 									className="tilefab-port-authoring-instruction"

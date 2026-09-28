@@ -981,6 +981,7 @@ export class TileRenderer {
 		includeDynamicConflicts = false,
 		ignoredEquipmentGroupId = 0,
 		includeStaticConflicts = false,
+		allowedRows?: Uint8Array,
 	): number | null {
 		if (this.boundPortSlots !== slots || !this.portSlotSpatialIndex) return null;
 		this.portSlotSpatialIndex.query(
@@ -995,6 +996,7 @@ export class TileRenderer {
 		let nearest: number | null = null;
 		let nearestDistance = maximumDistanceMeters;
 		for (const row of this.hitPortSlotBuffer) {
+			if (allowedRows && allowedRows[row] !== 1) continue;
 			const status =
 				this.boundPortSlotAvailability?.statusFor(
 					slots,
