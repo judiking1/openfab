@@ -1259,6 +1259,7 @@ describe("GuidedBuildMission", () => {
 			review.missions.find((mission) => mission.definition.id === "checks")?.prompt,
 		).toMatchObject({
 			title: "현재 검증 결과 확인",
+			objective: "검사 탭에 0이 표시되고 검사 패널에 '정적 FAB 검사 통과'가 보이는지 확인하세요.",
 			suggestedAction: "confirm-checks",
 		});
 		expect(staleAcknowledgement.complete).toBe(false);
@@ -1359,6 +1360,14 @@ describe("GuidedBuildMission", () => {
 				projectPersistence: reopenedProjectEvidence(),
 			}),
 		);
+		const reopenedFinalCheck = evaluateGuidedBuildFoundation(
+			evidence({
+				...completedThroughFabEquipment(),
+				checks: checksEvidence({ available: true, ready: true, fingerprint: "checks-reopened" }),
+				checksGuidance: checksGuidance({ navigatorOpen: true }),
+				projectPersistence: reopenedProjectEvidence(),
+			}),
+		);
 
 		expect(unsaved.currentMissionId).toBe("project-save");
 		expect(unsaved.missions.at(-2)?.prompt).toMatchObject({
@@ -1394,6 +1403,17 @@ describe("GuidedBuildMission", () => {
 				"방금 저장한 같은 프로젝트를 다시 열었습니다. 마지막 확인으로 CHECKS를 한 번 실행하세요.",
 			suggestedAction: "open-checks",
 			suggestedActionLabel: "다시 연 파일 검사",
+			progressPresentation: "reopen-final-check",
+		});
+		expect(reopenedFinalCheck.currentMissionId).toBe("checks");
+		expect(
+			reopenedFinalCheck.missions.find((mission) => mission.definition.id === "checks")?.prompt,
+		).toMatchObject({
+			eyebrow: "MISSION 13 · REOPEN · FINAL CHECK",
+			title: "다시 연 프로젝트 최종 확인",
+			objective: "검사 탭에 0이 표시되고 검사 패널에 '정적 FAB 검사 통과'가 보이는지 확인하세요.",
+			suggestedAction: "confirm-checks",
+			suggestedActionLabel: "최종 검사 통과 확인",
 			progressPresentation: "reopen-final-check",
 		});
 		expect(reopened.complete).toBe(true);

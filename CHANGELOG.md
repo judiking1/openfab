@@ -6,7 +6,29 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-09-28
+
+- Put an explicit “이 Process Loop에 소속” action directly below the selected OHB, EQ, or
+  Stocker Inspector header. It remains visible with compact details closed, appears only for
+  an eligible unowned group in the selected Loop, and reuses the atomic membership command.
+  After attachment, show the owned Loop in the same place and move keyboard focus to it.
+- Exercise an ordinary two-Port FLEX Stocker from two real Canvas Port clicks inside one Loop.
+  Both draft clicks leave the project and Worker unchanged; completion creates one group and
+  two exact-barcode Ports in one patch. Verify placement and direct ownership through Undo/Redo,
+  Checks, native save, and reopen in the three-width Blank Canvas journey. The first-screen
+  template journey also verifies EQ ownership Undo/Redo.
+- Describe the visible `검사` tab's zero badge and the passing panel heading in the Guided
+  Checks instruction, including after file reopen. Browser acceptance checks the prompt against
+  those rendered controls.
+- The final-source authoring acceptance passed 68 steps / 560 screenshots with no browser errors.
+  Core, 428 test files / 4,750 passing tests (two existing skips), build, zero-warning lint,
+  Biome (zero errors), and the public bundle audit passed with zero measured swaps.
+
 ## [0.1.22] - 2026-09-28
+
+Public `main` `cd9ec7f` passed both jobs of CI `36411689639`; Pages `f7767a0` deployed
+successfully. All 65 served files and both entry URLs matched the reviewed build SHA-256.
+V1 authoring remains incomplete.
 
 - Keep the ordinary Port marker hidden while a Process Loop change replaces its cursor, then
   repaint after the selected Loop commits even when React reuses the same marker and keyboard

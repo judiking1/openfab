@@ -1410,7 +1410,7 @@ function guidedBuildChecksPrompt(
 		definition,
 		"MISSION 11 · CHECKS · 3/3",
 		"현재 검증 결과 확인",
-		"CHECKS에서 '0 ISSUES'와 'ALL STATIC FAB CHECKS PASSED'가 표시되는지 확인하세요.",
+		"검사 탭에 0이 표시되고 검사 패널에 '정적 FAB 검사 통과'가 보이는지 확인하세요.",
 		null,
 		"confirm-checks",
 		"검사 통과 확인",
@@ -1448,7 +1448,7 @@ function guidedBuildReopenFinalCheckPrompt(
 		eyebrow: "MISSION 13 · REOPEN · FINAL CHECK",
 		title: guidance.navigatorOpen ? "다시 연 프로젝트 최종 확인" : "최종 검사 결과 검토",
 		objective: guidance.navigatorOpen
-			? "CHECKS에서 '0 ISSUES'와 'ALL STATIC FAB CHECKS PASSED'가 표시되는지 확인하세요."
+			? "검사 탭에 0이 표시되고 검사 패널에 '정적 FAB 검사 통과'가 보이는지 확인하세요."
 			: "다시 연 FAB의 검사가 통과했습니다. CHECKS를 열어 저장 전과 같은 결과인지 확인하세요.",
 		suggestedActionLabel: guidance.navigatorOpen ? "최종 검사 통과 확인" : "최종 결과 보기",
 		progressPresentation: "reopen-final-check",

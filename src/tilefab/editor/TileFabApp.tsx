@@ -2564,6 +2564,8 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedModuleRef = useRef<RailModuleOwnership | null>(null);
 	const selectedPortEquipmentRef = useRef<PortEquipmentSelection | null>(null);
 	const processLoopMembershipDisclosureRef = useRef<HTMLElement | null>(null);
+	const processLoopPrimaryActionRef = useRef<HTMLButtonElement | null>(null);
+	const processLoopPrimaryStatusRef = useRef<HTMLDivElement | null>(null);
 	const equipmentDeletionRecoveryUndoRef = useRef<HTMLButtonElement | null>(null);
 	const nextPortEquipmentButtonRef = useRef<HTMLButtonElement | null>(null);
 	const nextPortEquipmentFocusPendingRef = useRef(false);
@@ -23598,7 +23600,18 @@ export default function TileFabApp(): React.ReactElement {
 		operation: "attach" | "detach",
 		processLoopOrganizationId: number,
 		expectedSelection: PortEquipmentSelection,
+		focusTarget: "disclosure" | "primary" = "disclosure",
 	): void => {
+		const focusMembershipResult = (committed: boolean): void => {
+			requestAnimationFrame(() => {
+				if (focusTarget === "primary") {
+					(committed ? processLoopPrimaryStatusRef : processLoopPrimaryActionRef).current?.focus({ preventScroll: true });
+					return;
+				}
+				processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
+				processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
+			});
+		};
 		const blockedReason = editorActivityTransitionBlockedReason();
 		if (blockedReason || staticFabExclusiveCommandActive) {
 			setStatus(blockedReason ?? "현재 FAB 편집을 적용하거나 취소한 뒤 장비 소속을 변경하세요");
@@ -23643,18 +23656,12 @@ export default function TileFabApp(): React.ReactElement {
 				);
 		if (!plan.valid) {
 			setStatus(plan.reason);
-			requestAnimationFrame(() => {
-				processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
-				processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
-			});
+			focusMembershipResult(false);
 			return;
 		}
 		if (!document.commitOrganization(plan)) {
 			setStatus(document.getLastCommandError() ?? plan.reason);
-			requestAnimationFrame(() => {
-				processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
-				processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
-			});
+			focusMembershipResult(false);
 			return;
 		}
 		const label = processLoop?.name ?? `Process Loop ${processLoopOrganizationId}`;
@@ -23663,10 +23670,7 @@ export default function TileFabApp(): React.ReactElement {
 				? `${selection.equipmentGroup.kind}-${selection.equipmentGroup.id}을(를) ${label}에 소속시켰습니다 · 실행 취소 가능`
 				: `${selection.equipmentGroup.kind}-${selection.equipmentGroup.id}의 ${label} 소속을 분리했습니다 · 장비와 Port는 유지됩니다`,
 		);
-		requestAnimationFrame(() => {
-			processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
-			processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
-		});
+		focusMembershipResult(true);
 	};
 
 	const renameSelectedStaticFabOrganization = (): void => {
@@ -27937,6 +27941,10 @@ export default function TileFabApp(): React.ReactElement {
 		selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.some(
 			(id) => organizationSemanticRoles.get(id) !== "PROCESS_LOOP",
 		) ?? false;
+	const selectedEquipmentOwnedProcessLoopId =
+		selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.find(
+			(id) => organizationSemanticRoles.get(id) === "PROCESS_LOOP",
+		) ?? null;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: equipment identity changes intentionally trigger focus even though the effect reads the stable button ref.
 	useLayoutEffect(() => {
 		if (!nextPortEquipmentFocusPendingRef.current) return;
@@ -27987,6 +27995,15 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedEquipmentProcessLoopChoice = ordinaryPortProcessLoopTargetId === null
 		? null
 		: equipmentProcessLoopChoices.find((choice) => choice.id === ordinaryPortProcessLoopTargetId) ?? null;
+	const selectedEquipmentPrimaryProcessLoopId = viewMode === "2d" &&
+		selectedPortEditableDetails &&
+		selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.length === 0 &&
+		selectedEquipmentProcessLoopChoice &&
+		ordinaryPortProcessLoopTargetRef.current?.projectId === projectSession.manifest.id &&
+		ordinaryPortProcessLoopTargetRef.current.organizationId === selectedEquipmentProcessLoopChoice.id &&
+		selectedEquipmentProcessLoopMembership.eligibleProcessLoopIds.includes(selectedEquipmentProcessLoopChoice.id)
+		? selectedEquipmentProcessLoopChoice.id
+		: null;
 	const selectedEquipmentProcessLoopScope = useMemo(() => {
 		if (!activePortAuthoringType || ordinaryPortProcessLoopTargetId === null) return null;
 		if (ordinaryPortProcessLoopTargetRef.current?.projectId !== projectSession.manifest.id) return null;
@@ -39457,6 +39474,9 @@ export default function TileFabApp(): React.ReactElement {
 						data-port-id={selectedPortDetails.port.id}
 						data-equipment-group-id={selectedEquipmentGroup.id}
 						data-editable={selectedPortEditableDetails !== null}
+						data-primary-process-loop-visible={
+							selectedEquipmentPrimaryProcessLoopId !== null || selectedEquipmentDirectlyOwned
+						}
 						data-compact-layout={compactInspectorSheetActive ? "bottom-sheet" : "side-panel"}
 						data-compact-obstruction="equipment"
 						data-compact-expanded={compactInspectorSheetActive ? compactInspectorExpanded : true}
@@ -39521,6 +39541,42 @@ export default function TileFabApp(): React.ReactElement {
 								</button>
 							</div>
 						</header>
+						{selectedEquipmentPrimaryProcessLoopId !== null ? (
+							<div className="tilefab-equipment-process-loop-primary">
+								<button
+									ref={processLoopPrimaryActionRef}
+									type="button"
+									data-testid="attach-equipment-process-loop-primary"
+									data-process-loop-id={selectedEquipmentPrimaryProcessLoopId}
+									aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}을(를) ${organizationRecordsById.get(selectedEquipmentPrimaryProcessLoopId)?.name ?? `Process Loop ${selectedEquipmentPrimaryProcessLoopId}`}에 소속시키기`}
+									disabled={modelSyncPending || workerState.status !== "ready"}
+									onClick={() => commitSelectedEquipmentProcessLoopMembership("attach", selectedEquipmentPrimaryProcessLoopId, {
+										portId: selectedPortDetails.port.id,
+										equipmentGroupId: selectedEquipmentGroup.id,
+									}, "primary")}
+								>
+									<Plus className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
+									<span className="tilefab-equipment-process-loop-primary-copy"><strong className="tilefab-equipment-process-loop-primary-title">이 Process Loop에 소속</strong><small className="tilefab-equipment-process-loop-primary-name">{organizationRecordsById.get(selectedEquipmentPrimaryProcessLoopId)?.name ?? `Process Loop ${selectedEquipmentPrimaryProcessLoopId}`}</small></span>
+								</button>
+							</div>
+						) : selectedEquipmentDirectlyOwned && selectedEquipmentProcessLoopMembership ? (
+							<div className="tilefab-equipment-process-loop-primary">
+								<div
+									ref={processLoopPrimaryStatusRef}
+									className="tilefab-equipment-process-loop-primary-owned"
+									data-testid="equipment-process-loop-primary-status"
+									data-process-loop-id={selectedEquipmentOwnedProcessLoopId ?? undefined}
+									role="status"
+									tabIndex={-1}
+								>
+									<Check className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
+									<span className="tilefab-equipment-process-loop-primary-copy">
+										<strong className="tilefab-equipment-process-loop-primary-title">{selectedEquipmentOwnedOutsideProcessLoop ? "FAB 조직 소속" : "Process Loop 소속 완료"}</strong>
+										<small className="tilefab-equipment-process-loop-primary-name">{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.map((id) => organizationRecordsById.get(id)?.name ?? `조직 ${id}`).join(", ")}</small>
+									</span>
+								</div>
+							</div>
+						) : null}
 						<div
 							id="port-equipment-inspector-content"
 							className="tilefab-contextual-inspector-content"

@@ -6131,25 +6131,39 @@ async function attachOrdinaryEquipmentToDirectLoop(page, groupId, kind, loopId, 
 	const disclosure = page.getByTestId("compact-inspector-disclosure");
 	if (
 		(await disclosure.count()) > 0 &&
-		(await disclosure.getAttribute("aria-expanded")) === "false"
+		(await disclosure.getAttribute("aria-expanded")) === "true"
 	) {
 		await disclosure.click();
 	}
+	if ((await disclosure.count()) > 0) {
+		assertEqual(
+			await disclosure.getAttribute("aria-expanded"),
+			"false",
+			`${label} ${kind} top action stays available with details collapsed`,
+		);
+	}
 	const membership = inspector.getByTestId("equipment-process-loop-membership");
-	const summary = membership.locator(":scope > summary");
-	await summary.scrollIntoViewIfNeeded();
-	await summary.click();
 	assertEqual(
 		await membership.getAttribute("data-owner-ids"),
 		"",
 		`${label} ${kind} begins unowned`,
 	);
-	const attach = membership.locator(
-		`[data-testid="attach-equipment-process-loop"][data-process-loop-id="${loopId}"]`,
+	const attach = inspector.getByTestId("attach-equipment-process-loop-primary");
+	await attach.waitFor({ state: "visible" });
+	assertEqual(
+		await attach.getAttribute("data-process-loop-id"),
+		String(loopId),
+		`${label} ${kind} top action targets selected Loop`,
 	);
-	await attach.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, attach);
-	await assertLocatorOwnsHitArea(attach, `${label} ${kind} direct Loop attach`);
+	await assertLocatorOwnsHitArea(attach, `${label} ${kind} visible top Loop attach`);
+	const attachBounds = await attach.boundingBox();
+	assertAtLeast(attachBounds?.height ?? 0, 44, `${label} ${kind} top Loop attach height`);
+	if (label === "390x600" && kind === "EQ") {
+		await page.screenshot({
+			path: path.join(artifactRoot, "ordinary-eq-top-loop-attach-390x600.png"),
+		});
+	}
 	const before = await readMetrics(page);
 	await attach.click();
 	const after = await waitForWorker(
@@ -6162,6 +6176,25 @@ async function attachOrdinaryEquipmentToDirectLoop(page, groupId, kind, loopId, 
 		String(loopId),
 		`${label} ${kind} owner`,
 	);
+	const topStatus = inspector.getByTestId("equipment-process-loop-primary-status");
+	await topStatus.waitFor({ state: "visible" });
+	assertEqual(
+		await topStatus.getAttribute("data-process-loop-id"),
+		String(loopId),
+		`${label} ${kind} top ownership status`,
+	);
+	await page.waitForFunction(
+		() =>
+			document.activeElement?.getAttribute("data-testid") ===
+			"equipment-process-loop-primary-status",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	if (label === "390x600" && kind === "STK") {
+		await page.screenshot({
+			path: path.join(artifactRoot, "ordinary-stk-top-loop-owned-390x600.png"),
+		});
+	}
 	assertEqual(
 		after.modelPhysicalFingerprint,
 		before.modelPhysicalFingerprint,
@@ -6387,14 +6420,24 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 			);
 			const stkOptions = await readDirectProcessLoopPortCandidates(page, "STK", eqPlan.loopId);
 			const occupied = [...eqAttached.evidence.ports, ...ohbAttached.evidence.ports];
-			const stkPlan = stkOptions.find((candidate) =>
+			const availableStkOptions = stkOptions.filter((candidate) =>
 				occupied.every(
 					(port) =>
 						Math.abs(candidate.routeX - port.routeX) + Math.abs(candidate.routeZ - port.routeZ) >=
 						5,
 				),
 			);
-			if (!stkPlan) throw new Error(`${label} has no separate directly owned FLEX STK slot.`);
+			const stkPlan = availableStkOptions[0];
+			if (!stkPlan) throw new Error(`${label} has no directly owned FLEX STK slot.`);
+			const stkSecond = availableStkOptions.find(
+				(candidate) =>
+					candidate.row !== stkPlan.row &&
+					Math.abs(candidate.routeX - stkPlan.routeX) +
+						Math.abs(candidate.routeZ - stkPlan.routeZ) >=
+						3,
+			);
+			if (!stkSecond)
+				throw new Error(`${label} has no distinct two-Port FLEX STK slots inside one Loop.`);
 			const beforeStk = await readMetrics(page);
 			await revealOrdinaryEquipmentSlot(page, stkPlan, `${label} FLEX STK`);
 			await moveToWorld(page, stkPlan);
@@ -6416,16 +6459,64 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 						?.getAttribute("data-stk-draft-selected-rows") === String(row),
 				stkPlan.row,
 			);
+			assertProjectUnchanged(await readMetrics(page), beforeStk, `${label} FLEX STK P1 draft`);
+			await revealOrdinaryEquipmentSlot(page, stkSecond, `${label} FLEX STK P2`);
+			await moveToWorld(page, stkSecond);
+			await page.waitForFunction(
+				(row) =>
+					document
+						.querySelector('[data-testid="rail-canvas"]')
+						?.getAttribute("data-hover-port-slot") === String(row),
+				stkSecond.row,
+			);
+			await clickWorld(page, stkSecond, false);
+			await page.waitForFunction(
+				({ first, second }) => {
+					const rows = (
+						document
+							.querySelector('[data-testid="rail-canvas"]')
+							?.getAttribute("data-stk-draft-selected-rows") ?? ""
+					)
+						.split(",")
+						.filter(Boolean);
+					return (
+						document
+							.querySelector('[data-testid="tilefab-app"]')
+							?.getAttribute("data-stk-draft-rows") === "2" &&
+						rows.length === 2 &&
+						rows.includes(String(first)) &&
+						rows.includes(String(second))
+					);
+				},
+				{ first: stkPlan.row, second: stkSecond.row },
+				{ timeout: 10_000 },
+			);
+			assertProjectUnchanged(await readMetrics(page), beforeStk, `${label} FLEX STK P1/P2 draft`);
 			await page.getByTestId("stk-complete").click();
 			const stkPlaced = await waitForWorker(
 				page,
 				(metrics) =>
 					Number(metrics.workerTargetSequence) === Number(beforeStk.workerTargetSequence) + 1 &&
 					Number(metrics.equipmentGroups) === Number(beforeStk.equipmentGroups) + 1 &&
-					Number(metrics.equipmentPorts) === Number(beforeStk.equipmentPorts) + 1,
+					Number(metrics.equipmentPorts) === Number(beforeStk.equipmentPorts) + 2,
 			);
 			assertSingleGuidedPortCommit(stkPlaced, beforeStk, `${label} actual Port FLEX STK placement`);
 			const stkId = Number(beforeStk.modelNextEquipmentGroupId);
+			const stkBarcodes = await page.evaluate((id) => {
+				const equipment = window.__tileFab?.getEditorModel().document.portEquipment;
+				const group = equipment?.equipmentGroups.find((item) => item.id === id);
+				return (
+					group?.portIds.map(
+						(portId) => equipment.ports.find((port) => port.id === portId)?.barcode ?? null,
+					) ?? []
+				);
+			}, stkId);
+			assertEqual(
+				JSON.stringify(stkBarcodes),
+				JSON.stringify([`STK-${stkId}-P01`, `STK-${stkId}-P02`]),
+				`${label} FLEX STK exact two-Port barcodes`,
+			);
+			await undoAndRedo(page, beforeStk, stkPlaced, null, true);
 			const stkAttached = await attachOrdinaryEquipmentToDirectLoop(
 				page,
 				stkId,
@@ -6435,7 +6526,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				label,
 			);
 			assertEqual(stkAttached.evidence.template, "FLEX", `${label} FLEX STK template`);
-			assertEqual(stkAttached.evidence.ports.length, 1, `${label} complete FLEX STK group`);
+			assertEqual(stkAttached.evidence.ports.length, 2, `${label} complete FLEX STK group`);
+			await undoAndRedo(page, stkAttached.before, stkAttached.after, null, true);
 
 			const groupIds = [eqId, ohbId, stkId];
 			const owned = await readDirectProcessLoopEquipmentEvidence(page, groupIds);
@@ -6465,7 +6557,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 			);
 			const checked = await readMetrics(page);
 			assertEqual(checked.equipmentGroups, "3", `${label} three authored equipment groups`);
-			assertEqual(checked.equipmentPorts, "5", `${label} five authored Ports`);
+			assertEqual(checked.equipmentPorts, "6", `${label} six authored Ports`);
 			assertEqual(checked.staticFabCheckStatus, "ready", `${label} Checks ready`);
 			assertEqual(checked.staticFabCheckIssues, "0", `${label} Checks zero issues`);
 			assertEqual(checked.workerChecksum, checked.modelChecksum, `${label} Worker parity`);
@@ -6614,7 +6706,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				assertEqual(reopenedInPlace.modelChecksum, saved.modelChecksum, `${label} same checksum`);
 				assertEqual(reopenedInPlace.workerChecksum, saved.workerChecksum, `${label} Worker parity`);
 				assertEqual(reopenedInPlace.equipmentGroups, "3", `${label} preserved groups`);
-				assertEqual(reopenedInPlace.equipmentPorts, "5", `${label} preserved Ports`);
+				assertEqual(reopenedInPlace.equipmentPorts, "6", `${label} preserved Ports`);
 				const alternateLoopId = loopIds.find((id) => id !== eqPlan.loopId);
 				if (alternateLoopId === undefined)
 					throw new Error(`${label} has no alternate Process Loop.`);
@@ -14888,6 +14980,27 @@ async function exerciseGuidedPortHandoffRegression(
 		assertEqual(guidedChecks.readinessReady, "true", "Guided Checks rail readiness");
 		assertEqual(guidedChecks.workerChecksum, guidedChecks.modelChecksum, "Guided Checks source");
 		assertEqual(guidedChecks.workerSimulationReady, "false", "Guided Checks simulation gate");
+		await panel
+			.getByText("검사 탭에 0이 표시되고 검사 패널에 '정적 FAB 검사 통과'가 보이는지 확인하세요.", {
+				exact: true,
+			})
+			.waitFor({ state: "visible" });
+		const checksTab = checksPanel.getByTestId("static-fab-navigator-tab-checks");
+		assertEqual(
+			(await checksTab.locator(".tilefab-navigator-tab-label").textContent())?.trim(),
+			"검사",
+			"Guided Checks prompt names the visible tab",
+		);
+		assertEqual(
+			(await checksTab.locator(".tilefab-navigator-tab-count").textContent())?.trim(),
+			"0",
+			"Guided Checks prompt matches the visible zero badge",
+		);
+		assertEqual(
+			(await checksPanel.locator(":scope > header strong").textContent())?.trim(),
+			"정적 FAB 검사 통과",
+			"Guided Checks prompt matches the visible passing heading",
+		);
 		const confirmChecks = panel.getByRole("button", {
 			name: "검사 통과 확인",
 			exact: true,
@@ -15203,6 +15316,21 @@ async function exerciseGuidedPortHandoffRegression(
 			exact: true,
 		});
 		await reopenedFinalConfirmation.waitFor({ state: "visible" });
+		await panel
+			.getByText("검사 탭에 0이 표시되고 검사 패널에 '정적 FAB 검사 통과'가 보이는지 확인하세요.", {
+				exact: true,
+			})
+			.waitFor({ state: "visible" });
+		assertEqual(
+			(
+				await checksPanel
+					.getByTestId("static-fab-navigator-tab-checks")
+					.locator(".tilefab-navigator-tab-count")
+					.textContent()
+			)?.trim(),
+			"0",
+			"Guided reopened final prompt matches visible zero badge",
+		);
 		assertIncludes(
 			await panel.innerText(),
 			"전체 미션 13/13 · 최종 확인",
@@ -31013,6 +31141,13 @@ async function exerciseFirstRunVerifiedTemplate(activeBrowser) {
 				"390x844 first-run template",
 			);
 			assertEqual(eqAttached.evidence.ports.length, 3, "first-run complete three-Port EQ group");
+			await undoAndRedo(page, eqAttached.before, eqAttached.after, null, true);
+			assertEqual(
+				JSON.stringify((await readDirectProcessLoopEquipmentEvidence(page, [eqId]))[0].ownerIds),
+				JSON.stringify([loopId]),
+				"first-run Undo/Redo restores EQ direct Process Loop owner",
+			);
+			const afterEqRedo = await readMetrics(page);
 
 			await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
 			await page
@@ -31037,7 +31172,7 @@ async function exerciseFirstRunVerifiedTemplate(activeBrowser) {
 			if (!stkTarget)
 				throw new Error(`First-run visible Stocker row ${stkTargetRow} is outside ${loopName}.`);
 			const beforeStk = await readMetrics(page);
-			assertProjectUnchanged(beforeStk, eqAttached.after, "first-run Stocker scope is transient");
+			assertProjectUnchanged(beforeStk, afterEqRedo, "first-run Stocker scope is transient");
 			assertEqual(
 				await clickVisibleOrdinaryPortKeyboardTarget(page, "390x844 first-run Stocker first Port"),
 				stkTargetRow,

@@ -64,6 +64,86 @@
 	text-align: right;
 }
 
+.tilefab-equipment-process-loop-primary {
+	min-width: 0;
+	padding: 4px 8px;
+}
+
+.tilefab-equipment-process-loop-primary > button,
+.tilefab-equipment-process-loop-primary-owned {
+	box-sizing: border-box;
+	display: flex;
+	min-height: 44px;
+	width: 100%;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 10px;
+	border: 1px solid #55999a;
+	border-radius: 4px;
+	color: #e4f4f4;
+	background: #1a393a;
+	font: inherit;
+	text-align: left;
+}
+
+.tilefab-equipment-process-loop-primary > button {
+	cursor: pointer;
+}
+
+.tilefab-equipment-process-loop-primary > button:hover:not(:disabled) {
+	border-color: #82d9dd;
+	background: #24494a;
+}
+
+.tilefab-equipment-process-loop-primary > button:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.tilefab-equipment-process-loop-primary > button:focus-visible,
+.tilefab-equipment-process-loop-primary-owned:focus {
+	outline: 3px solid #8de3ea;
+	outline-offset: -3px;
+}
+
+.tilefab-equipment-process-loop-primary-owned {
+	border-color: #5d9c79;
+	color: #dbf5e4;
+	background: #1b3a32;
+}
+
+.tilefab-equipment-process-loop-primary-icon {
+	flex: 0 0 auto;
+}
+
+.tilefab-equipment-process-loop-primary-copy {
+	display: grid;
+	min-width: 0;
+	gap: 1px;
+}
+
+.tilefab-equipment-process-loop-primary-title {
+	font-size: var(--tilefab-font-label);
+}
+
+.tilefab-equipment-process-loop-primary-name {
+	overflow: hidden;
+	color: #b4d5d3;
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+@media (max-width: 430px) {
+	.tilefab-inspector.tilefab-equipment-inspector[data-compact-layout="bottom-sheet"][data-primary-process-loop-visible="true"] {
+		grid-template-rows: 64px 52px minmax(0, 1fr);
+	}
+
+	.tilefab-inspector.tilefab-equipment-inspector[data-compact-layout="bottom-sheet"][data-compact-expanded="false"][data-primary-process-loop-visible="true"] {
+		height: 116px;
+	}
+}
+
 .tilefab-equipment-process-loop {
 	margin: 0 8px 8px;
 	border: 1px solid #3a6061;
@@ -187,7 +267,9 @@
 	.tilefab-equipment-process-loop,
 	.tilefab-equipment-process-loop-choice,
 	.tilefab-equipment-process-loop-row,
-	.tilefab-equipment-process-loop-row > button {
+	.tilefab-equipment-process-loop-row > button,
+	.tilefab-equipment-process-loop-primary > button,
+	.tilefab-equipment-process-loop-primary-owned {
 		border-color: ButtonText;
 		color: ButtonText;
 		background: ButtonFace;
