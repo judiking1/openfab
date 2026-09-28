@@ -6,7 +6,24 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-09-29
+
+- Complete a visible-control browser journey from both Blank Canvas and Verified Template at
+  390×600, 760×900, and 1440×900: build rails, place OHB, three-Port EQ, and two-Port FLEX
+  Stocker, assign each directly to a Process Loop, pass Checks, save, and reopen the exact
+  equipment and ownership in a fresh session. Input choices come from rendered controls and
+  painted Port targets rather than diagnostic model coordinates.
+- Keep the Stocker completion action visible for every short-screen draft, including a full
+  six-Port draft without a selected Process Loop, while leaving clearance for the active Port
+  caption beside the 390px camera controls. Let expanded EQ settings scroll on a short screen
+  while checking that every pitch control and Recipe input remains visible and clickable.
+
 ## [0.1.28] - 2026-09-29
+
+Private `fd6c633` and public `acf01ff` were normally pushed. The exact 1,039-file public
+export and ordinary public build passed, but public CI `36475041557` failed its `authoring`
+job on a 390×600 Linux EQ settings dock assertion. This source was not deployed to Pages;
+the verified 0.1.27 build remains live.
 
 - Show a direct shortcut to the exact OHB group just placed, while keeping repeat placement
   available. The shortcut opens the Inspector and focuses its Process Loop ownership action.
