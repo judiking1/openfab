@@ -78,6 +78,9 @@ const FIRST_RUN_TEMPLATE_ONLY_COMPLETE = new Error("First-run verified template 
 const START_CHOICE_CLARITY_ONLY_COMPLETE = new Error("Start choice clarity completed.");
 const VISIBLE_TEMPLATE_PORT_ONLY_COMPLETE = new Error("Visible template Port discovery completed.");
 const NOVICE_VISIBLE_FAB_ONLY_COMPLETE = new Error("Visible-only novice FAB acceptance completed.");
+const UNSCOPED_OHB_OWNERSHIP_ONLY_COMPLETE = new Error(
+	"Unscoped visible OHB ownership acceptance completed.",
+);
 const PRESET_RECOVERY_ONLY_COMPLETE = new Error("Synthetic preset recovery completed.");
 const PROJECT_STARTER_RETRY_ONLY_COMPLETE = new Error("Project starter retry completed.");
 const STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE = new Error(
@@ -182,6 +185,16 @@ try {
 		assertEqual(result.pageErrors.length, 0, "Novice FAB page errors");
 		result.status = "PASS";
 		throw NOVICE_VISIBLE_FAB_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_UNSCOPED_OHB_OWNERSHIP_ONLY === "1") {
+		recordStep(
+			"unscoped-ohb-process-loop-ownership",
+			await exerciseUnscopedOhbProcessLoopOwnership(browser),
+		);
+		assertEqual(result.consoleErrors.length, 0, "Unscoped OHB console errors");
+		assertEqual(result.pageErrors.length, 0, "Unscoped OHB page errors");
+		result.status = "PASS";
+		throw UNSCOPED_OHB_OWNERSHIP_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_PRESET_RECOVERY_ONLY === "1") {
 		recordStep("synthetic-fab-preset-recovery", await exerciseSyntheticFabPresetRecovery(browser));
@@ -381,6 +394,10 @@ try {
 		await exerciseVisibleTemplatePortDiscovery(browser),
 	);
 	recordStep("novice-visible-fab", await exerciseNoviceVisibleFab(browser));
+	recordStep(
+		"unscoped-ohb-process-loop-ownership",
+		await exerciseUnscopedOhbProcessLoopOwnership(browser),
+	);
 	recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
 	recordStep("factory-scale-ordinary-port-overview", factoryPortOverview);
@@ -2811,6 +2828,7 @@ try {
 		error === START_CHOICE_CLARITY_ONLY_COMPLETE ||
 		error === VISIBLE_TEMPLATE_PORT_ONLY_COMPLETE ||
 		error === NOVICE_VISIBLE_FAB_ONLY_COMPLETE ||
+		error === UNSCOPED_OHB_OWNERSHIP_ONLY_COMPLETE ||
 		error === PRESET_RECOVERY_ONLY_COMPLETE ||
 		error === PROJECT_STARTER_RETRY_ONLY_COMPLETE ||
 		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE
@@ -32957,6 +32975,364 @@ async function exerciseNoviceVisibleFab(activeBrowser) {
 	return Object.freeze({ journeys: evidence });
 }
 
+async function startUnscopedVisiblePort(page, kind, label) {
+	const selector = page.getByTestId("ordinary-port-process-loop-target");
+	await selector.waitFor({ state: "visible" });
+	assertEqual(await selector.inputValue(), "", `${label} ${kind} retains all Port slots`);
+	assertEqual(
+		await page.getByTestId("ordinary-port-process-loop-selected-name").count(),
+		0,
+		`${label} ${kind} has no chosen Process Loop`,
+	);
+	const start = page.getByTestId("ordinary-port-process-loop-start");
+	await start.scrollIntoViewIfNeeded();
+	await assertLocatorOwnsHitArea(start, `${label} ${kind} all-slot placement start`);
+	assertEqual(await start.isEnabled(), true, `${label} ${kind} unscoped placement enabled`);
+	await start.tap();
+	await zoomOrdinaryPortTargetIfOffered(page, kind, label);
+	await noviceVisiblePortPoint(page, `${label} ${kind} painted Port`);
+}
+
+async function frameVisibleProcessLoopFromOrganizations(page, label) {
+	await openStaticFabNavigatorTab(page, "organizations");
+	const library = page.getByTestId("static-fab-organization-library");
+	const processLoops = library.getByTestId("static-fab-organization-item").filter({
+		has: page.locator("em").getByText("PROCESS LOOP", { exact: true }),
+	});
+	assertAtLeast(await processLoops.count(), 1, `${label} visible Process Loop organization`);
+	const loop = processLoops.first();
+	assertEqual(await loop.locator("em").innerText(), "PROCESS LOOP", `${label} organization role`);
+	await loop.scrollIntoViewIfNeeded();
+	await assertLocatorOwnsHitArea(loop, `${label} Process Loop organization row`);
+	if ((await loop.getAttribute("aria-selected")) !== "true") await loop.click();
+	assertEqual(
+		await loop.getAttribute("aria-selected"),
+		"true",
+		`${label} Loop organization selected`,
+	);
+	const show = library.getByRole("button", { name: "지도 보기", exact: true });
+	await show.scrollIntoViewIfNeeded();
+	await assertLocatorOwnsHitArea(show, `${label} show Loop direct rails`);
+	await show.click();
+	await page.waitForFunction(() =>
+		Boolean(document.querySelector('[data-testid="rail-canvas"]')?.dataset.fittedSelectionBounds),
+	);
+}
+
+async function attachUnscopedOhb(page, expectedGroupId, label) {
+	const kind = "OHB";
+	const inspector = page.getByTestId("port-equipment-inspector");
+	assertEqual(await inspector.count(), 0, `${label} OHB continues repeat Port placement`);
+	const shortcut = page.getByTestId("ordinary-recent-ohb-inspect");
+	await shortcut.waitFor({ state: "visible" });
+	assertEqual(
+		await shortcut.getAttribute("aria-label"),
+		`방금 만든 OHB-${expectedGroupId} 속성 보기`,
+		`${label} recent OHB shortcut names the new group`,
+	);
+	await shortcut.scrollIntoViewIfNeeded();
+	await assertLocatorOwnsHitArea(shortcut, `${label} recent OHB Inspector shortcut`);
+	const beforeInspect = await readMetrics(page);
+	await shortcut.tap();
+	await inspector.waitFor({ state: "visible" });
+	assertProjectUnchanged(await readMetrics(page), beforeInspect, `${label} OHB Inspector handoff`);
+
+	assertEqual(
+		await inspector.getAttribute("aria-label"),
+		`${kind} 장비 속성`,
+		`${label} Inspector kind`,
+	);
+	assertEqual(
+		await inspector.getAttribute("data-equipment-group-id"),
+		String(expectedGroupId),
+		`${label} Inspector selects the new ${kind} group`,
+	);
+	assertIncludes(await inspector.locator("header").innerText(), "Port 1개", `${label} Port count`);
+	assertEqual(
+		await inspector.getByTestId("equipment-process-loop-membership").getAttribute("data-owner-ids"),
+		"",
+		`${label} ${kind} begins without direct ownership`,
+	);
+	assertEqual(
+		await page.evaluate(
+			() => document.activeElement?.getAttribute("aria-label") === "장비 선택 닫기",
+		),
+		false,
+		`${label} ${kind} Inspector focus is not Close`,
+	);
+	const direct = inspector.getByTestId("attach-equipment-process-loop-primary");
+	if (!(await direct.isVisible().catch(() => false))) {
+		throw new Error(`${label} ${kind} has no visible top Process Loop ownership action.`);
+	}
+	await page.waitForFunction(
+		() =>
+			document.activeElement?.getAttribute("data-testid") ===
+			"attach-equipment-process-loop-primary",
+		undefined,
+		{ timeout: 10_000 },
+	);
+	await direct.scrollIntoViewIfNeeded();
+	await assertLocatorInsideViewport(page, direct);
+	await assertLocatorOwnsHitArea(direct, `${label} ${kind} direct Process Loop ownership`);
+	assertAtLeast(
+		(await direct.boundingBox())?.height ?? 0,
+		44,
+		`${label} ${kind} direct target height`,
+	);
+	assertIncludes(
+		await direct.innerText(),
+		"이 Process Loop에 소속",
+		`${label} direct ownership copy`,
+	);
+	const ownerId = Number(await direct.getAttribute("data-process-loop-id"));
+	if (!Number.isSafeInteger(ownerId) || ownerId <= 0)
+		throw new Error(`${label} ${kind} direct action has no valid Process Loop identity.`);
+	const before = await readMetrics(page);
+	await direct.tap();
+	const after = await waitForWorker(
+		page,
+		(metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1,
+	);
+	assertSingleGuidedPortCommit(after, before, `${label} ${kind} ownership`);
+	const status = inspector.getByTestId("equipment-process-loop-primary-status");
+	await status.waitFor({ state: "visible" });
+	assertEqual(
+		await status.getAttribute("data-process-loop-id"),
+		String(ownerId),
+		`${label} ${kind} owner status`,
+	);
+	const owner = (await readDirectProcessLoopEquipmentEvidence(page, [expectedGroupId]))[0];
+	assertEqual(
+		JSON.stringify(owner.ownerIds),
+		JSON.stringify([ownerId]),
+		`${label} ${kind} direct owner`,
+	);
+	assertEqual(
+		owner.ports.every((port) => port.covered),
+		true,
+		`${label} ${kind} covered Port routes`,
+	);
+	return { kind, groupId: expectedGroupId, ownerId, action: "direct", before, after };
+}
+
+async function exerciseUnscopedOhbProcessLoopOwnership(activeBrowser) {
+	const label = "390x600 unscoped OHB Blank Canvas";
+	const viewport = { width: 390, height: 600 };
+	const context = await activeBrowser.newContext({
+		viewport,
+		hasTouch: true,
+		acceptDownloads: true,
+	});
+	const page = await context.newPage();
+	let phase = "Blank Canvas";
+	page.on("console", (message) => {
+		if (message.type() === "error") result.consoleErrors.push(`[${label}] ${message.text()}`);
+	});
+	page.on("pageerror", (error) => result.pageErrors.push(`[${label}] ${error.message}`));
+	try {
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		await page
+			.getByTestId("openfab-start-dialog")
+			.getByRole("button", { name: /BLANK CANVAS/ })
+			.click();
+		const beforeBay = await readMetrics(page);
+		await page.getByTestId("editor-activity-assemble").click();
+		await page.getByTestId("production-bay-module-browser").click();
+		const panel = page.getByTestId("production-bay-module-panel");
+		await panel.waitFor({ state: "visible" });
+		await panel.getByRole("button", { name: "배치 위치 선택" }).click();
+		const placementPoint = await page.getByTestId("rail-canvas").evaluate((canvas) => {
+			const bounds = canvas.getBoundingClientRect();
+			for (const [xRatio, yRatio] of [
+				[0.5, 0.3],
+				[0.7, 0.3],
+				[0.5, 0.4],
+				[0.7, 0.4],
+			]) {
+				const x = bounds.left + bounds.width * xRatio;
+				const y = bounds.top + bounds.height * yRatio;
+				if (document.elementFromPoint(x, y) === canvas) return { x, y };
+			}
+			return null;
+		});
+		if (!placementPoint)
+			throw new Error(`${label}: Twin Bay preview has no touchable Canvas point.`);
+		await page.touchscreen.tap(placementPoint.x, placementPoint.y);
+		await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeBay.workerTargetSequence) + 1 &&
+				Number(metrics.authoredCells) > 0 &&
+				metrics.staticFabOrganizations === "3",
+			{ timeout: 30_000 },
+		);
+
+		phase = "unscoped OHB";
+		await frameVisibleProcessLoopFromOrganizations(page, `${label} OHB`);
+		await clickActivityCommand(page, "equip", "OHB 포트 배치");
+		await waitForLegalPortSlots(page);
+		await startUnscopedVisiblePort(page, "OHB", label);
+		const beforeOhb = await readMetrics(page);
+		await clickVisibleOrdinaryPortKeyboardTarget(page, `${label} OHB`, "touch");
+		const placedOhb = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeOhb.workerTargetSequence) + 1 &&
+				metrics.equipmentGroups === "1" &&
+				metrics.equipmentPorts === "1",
+		);
+		assertSingleGuidedPortCommit(placedOhb, beforeOhb, `${label} OHB creation`);
+		const ohb = await attachUnscopedOhb(page, Number(beforeOhb.modelNextEquipmentGroupId), label);
+		assertEqual(ohb.action, "direct", `${label} one eligible Loop has a direct OHB action`);
+		const redoneOhb = await undoAndRedo(page, ohb.before, ohb.after, null, true);
+		assertEqual(redoneOhb.modelChecksum, ohb.after.modelChecksum, `${label} OHB owner Redo`);
+		assertEqual(
+			JSON.stringify(
+				(await readDirectProcessLoopEquipmentEvidence(page, [ohb.groupId]))[0].ownerIds,
+			),
+			JSON.stringify([ohb.ownerId]),
+			`${label} OHB direct owner after Redo`,
+		);
+
+		phase = "Checks and native Save";
+		await openStaticFabNavigatorTab(page, "checks");
+		const save = page.getByTestId("static-fab-checks-save-project");
+		await save.waitFor({ state: "visible", timeout: 30_000 });
+		await assertLocatorInsideViewport(page, save);
+		await assertLocatorOwnsHitArea(save, `${label} Checks Save`);
+		const checked = await readMetrics(page);
+		assertEqual(checked.staticFabCheckStatus, "ready", `${label} Checks ready`);
+		assertEqual(checked.staticFabCheckIssues, "0", `${label} Checks zero issues`);
+		assertEqual(checked.workerChecksum, checked.modelChecksum, `${label} Worker parity`);
+		const checksAnnouncement = page
+			.getByTestId("rail-readiness-panel")
+			.locator(":scope > .tilefab-sr-only[role='status']");
+		assertEqual(
+			await checksAnnouncement.getAttribute("aria-live"),
+			"polite",
+			`${label} completed Checks live announcement`,
+		);
+		assertIncludes(
+			await checksAnnouncement.textContent(),
+			"정적 FAB 검사 통과",
+			`${label} completed Checks announcement content`,
+		);
+		const checksStatus = (await page.getByTestId("rail-status-message").innerText()).trim();
+		assertIncludes(
+			checksStatus,
+			"정적 FAB 검사가 통과했습니다",
+			`${label} completed Checks status`,
+		);
+		assertEqual(checksStatus.includes("계속 진행"), false, `${label} no stale Checks progress`);
+		const scrollHint = page.locator(".tilefab-readiness-checks-scroll-hint");
+		await scrollHint.waitFor({ state: "visible" });
+		await assertLocatorInsideViewport(page, scrollHint);
+		assertIncludes(
+			await scrollHint.innerText(),
+			"검사 목록을 스크롤",
+			`${label} compact Checks hint`,
+		);
+		const groupIds = [ohb.groupId];
+		const equipment = await readPortEquipmentContract(page);
+		const ownership = await readDirectProcessLoopEquipmentEvidence(page, groupIds);
+		await page.screenshot({
+			path: path.join(artifactRoot, "unscoped-equipment-ownership-390x600-checks.png"),
+		});
+		await waitForProjectOperation(page, "idle");
+		const downloadPromise = page.waitForEvent("download");
+		await save.tap();
+		const savedPath = await (await downloadPromise).path();
+		if (!savedPath) throw new Error(`${label}: Checks Save produced no readable file.`);
+		await waitForProjectOperation(page, "idle");
+
+		phase = "native reopen";
+		const reopenedContext = await activeBrowser.newContext({ viewport, acceptDownloads: true });
+		try {
+			const reopenedPage = await reopenedContext.newPage();
+			reopenedPage.on("console", (message) => {
+				if (message.type() === "error")
+					result.consoleErrors.push(`[${label} reopened] ${message.text()}`);
+			});
+			reopenedPage.on("pageerror", (error) =>
+				result.pageErrors.push(`[${label} reopened] ${error.message}`),
+			);
+			await reopenedPage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(reopenedPage, { physicalPaths: 0 });
+			await reopenedPage
+				.getByTestId("openfab-start-dialog")
+				.getByRole("button", { name: /BLANK CANVAS/ })
+				.click();
+			const chooserPromise = reopenedPage.waitForEvent("filechooser");
+			await reopenedPage.locator(".tilefab-project-trigger").click();
+			await reopenedPage
+				.locator(".tilefab-project-menu-commands")
+				.getByRole("button", { name: "열기", exact: true })
+				.click();
+			await (await chooserPromise).setFiles(savedPath);
+			const reopened = await waitForWorker(
+				reopenedPage,
+				(metrics) =>
+					metrics.modelChecksum === checked.modelChecksum &&
+					metrics.equipmentGroups === "1" &&
+					metrics.equipmentPorts === "1",
+				{ timeout: 30_000 },
+			);
+			assertEqual(
+				reopened.workerChecksum,
+				reopened.modelChecksum,
+				`${label} reopened Worker parity`,
+			);
+			assertEqual(
+				isDeepStrictEqual(await readPortEquipmentContract(reopenedPage), equipment),
+				true,
+				`${label} reopened equipment`,
+			);
+			assertEqual(
+				isDeepStrictEqual(
+					await readDirectProcessLoopEquipmentEvidence(reopenedPage, groupIds),
+					ownership,
+				),
+				true,
+				`${label} reopened owners`,
+			);
+			await openStaticFabNavigatorTab(reopenedPage, "checks");
+			await reopenedPage
+				.getByTestId("static-fab-checks-save-project")
+				.waitFor({ state: "visible", timeout: 30_000 });
+			assertEqual(
+				(await readMetrics(reopenedPage)).staticFabCheckIssues,
+				"0",
+				`${label} reopened Checks`,
+			);
+		} finally {
+			await closeBrowserResource(reopenedContext, `${label} reopened context`);
+		}
+		return Object.freeze({
+			entry: "blank",
+			viewport: "390x600",
+			mode: "OHB",
+			groupIds,
+			ownerIds: [ohb.ownerId],
+			actions: [ohb.action],
+			checks: checked.staticFabCheckIssues,
+		});
+	} catch (error) {
+		await page
+			.screenshot({
+				path: path.join(artifactRoot, "unscoped-equipment-ownership-390x600-failure.png"),
+			})
+			.catch(() => undefined);
+		throw new Error(
+			`${label} ${phase}: ${error instanceof Error ? error.message : String(error)}`,
+			{ cause: error },
+		);
+	} finally {
+		await closeBrowserResource(page, `${label} page`);
+		await closeBrowserResource(context, `${label} context`);
+	}
+}
+
 async function exerciseFirstRunVerifiedTemplate(activeBrowser) {
 	const viewports = [
 		{ width: 390, height: 600, create: false },
@@ -36554,6 +36930,36 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			await assertLocatorInsideViewport(page, action);
 			await assertLocatorOwnsHitArea(action, `ordinary ${portType} initial short Inspector action`);
 			assertAtLeast((await action.boundingBox())?.height ?? 0, 44, "short Inspector action height");
+		}
+		const unavailableLoop = page.getByTestId("equipment-process-loop-unavailable");
+		if (await unavailableLoop.count()) {
+			await assertLocatorInsideViewport(page, unavailableLoop);
+			assertEqual(
+				await inspector.getAttribute("data-primary-process-loop-availability"),
+				"none",
+				`ordinary ${portType} short Inspector has a visible no-Loop explanation`,
+			);
+			const legibleReason = await unavailableLoop.evaluate((element) => {
+				const title = element.querySelector(".tilefab-equipment-process-loop-primary-title");
+				const hint = element.querySelector(".tilefab-equipment-process-loop-primary-name");
+				return {
+					title: title?.textContent ?? "",
+					hint: hint?.textContent ?? "",
+					fits:
+						title instanceof HTMLElement &&
+						hint instanceof HTMLElement &&
+						title.scrollWidth <= title.clientWidth + 1 &&
+						hint.scrollWidth <= hint.clientWidth + 1,
+				};
+			});
+			assertEqual(legibleReason.fits, true, `ordinary ${portType} short no-Loop text fits`);
+			const spokenReason = await unavailableLoop.getAttribute("aria-label");
+			assertIncludes(
+				spokenReason,
+				legibleReason.title,
+				`ordinary ${portType} no-Loop spoken title`,
+			);
+			assertIncludes(spokenReason, legibleReason.hint, `ordinary ${portType} no-Loop spoken hint`);
 		}
 		for (const control of await page
 			.locator(".tilefab-tools button:visible, .tilefab-camera-controls button:visible")
@@ -46391,6 +46797,12 @@ async function assertRaisedCompactInspectorCanvasOwnership(page, inspectorTestId
 async function assertCompactContextualInspectorSheet(page, inspectorTestId, label) {
 	const inspector = page.getByTestId(inspectorTestId);
 	await inspector.waitFor({ state: "visible" });
+	const primaryLoopVisible = await inspector.getAttribute("data-primary-process-loop-visible");
+	const primaryLoopAvailability = await inspector.getAttribute(
+		"data-primary-process-loop-availability",
+	);
+	const expectedPeekHeight =
+		primaryLoopAvailability === "none" ? 88 : primaryLoopVisible === "true" ? 116 : 64;
 	assertEqual(
 		await inspector.getAttribute("data-compact-layout"),
 		"bottom-sheet",
@@ -46506,11 +46918,14 @@ async function assertCompactContextualInspectorSheet(page, inspectorTestId, labe
 	await disclosure.focus();
 	await disclosure.press("Enter");
 	await page.waitForFunction(
-		(expectedTestId) => {
+		({ expectedTestId, expectedHeight }) => {
 			const element = document.querySelector(`[data-testid="${expectedTestId}"]`);
-			return element instanceof HTMLElement && element.getBoundingClientRect().height <= 64.5;
+			return (
+				element instanceof HTMLElement &&
+				element.getBoundingClientRect().height <= expectedHeight + 0.5
+			);
 		},
-		inspectorTestId,
+		{ expectedTestId: inspectorTestId, expectedHeight: expectedPeekHeight },
 		{ timeout: 2_000 },
 	);
 	assertEqual(await disclosure.getAttribute("aria-expanded"), "false", `${label} Enter peeks`);
@@ -46532,8 +46947,8 @@ async function assertCompactContextualInspectorSheet(page, inspectorTestId, labe
 		`${label} Enter retains disclosure focus`,
 	);
 	const peekHeight = (await inspector.boundingBox())?.height ?? 0;
-	assertAtLeast(peekHeight, 56, `${label} peek minimum height`);
-	assertAtMost(peekHeight, 64, `${label} peek maximum height`);
+	assertAtLeast(peekHeight, expectedPeekHeight - 1, `${label} peek minimum height`);
+	assertAtMost(peekHeight, expectedPeekHeight, `${label} peek maximum height`);
 	await assertLocatorOwnsHitArea(disclosure, `${label} peek disclosure`);
 	await assertLocatorOwnsHitArea(close, `${label} peek close`);
 	assertExactStaticFabModelIdentity(
@@ -46544,11 +46959,14 @@ async function assertCompactContextualInspectorSheet(page, inspectorTestId, labe
 
 	await disclosure.press("Space");
 	await page.waitForFunction(
-		(expectedTestId) => {
+		({ expectedTestId, expectedHeight }) => {
 			const element = document.querySelector(`[data-testid="${expectedTestId}"]`);
-			return element instanceof HTMLElement && element.getBoundingClientRect().height > 64.5;
+			return (
+				element instanceof HTMLElement &&
+				element.getBoundingClientRect().height > expectedHeight + 0.5
+			);
 		},
-		inspectorTestId,
+		{ expectedTestId: inspectorTestId, expectedHeight: expectedPeekHeight },
 		{ timeout: 2_000 },
 	);
 	assertEqual(await disclosure.getAttribute("aria-expanded"), "true", `${label} Space expands`);

@@ -2051,6 +2051,10 @@ const USER_BLUEPRINT_DRAG_MIME = "application/x-openfab-user-blueprint-id";
 const PAN_STEP = 34;
 const PORT_EQUIPMENT_MEMBERSHIP_UI_PUBLISH_DELAY_MILLISECONDS = 32;
 const PROJECT_AUTOSAVE_DELAY_MILLISECONDS = 1_500;
+const STATIC_FAB_CHECKS_PENDING_STATUS =
+	"레일 검사가 통과했습니다 · 정적 FAB의 포트·장비·조직 검증은 계속 진행합니다";
+const STATIC_FAB_CHECKS_READY_STATUS =
+	"정적 FAB 검사가 통과했습니다 · 레일·포트·장비·조직을 모두 확인했습니다";
 const STATIC_FAB_ARRANGEMENT_MODES: readonly StaticFabArrangementMode[] = Object.freeze([
 	"ALIGN_MIN",
 	"ALIGN_CENTER",
@@ -20906,6 +20910,11 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const closeReadiness = (): void => {
+		setStatus((current) =>
+			current === STATIC_FAB_CHECKS_PENDING_STATUS
+				? "정적 FAB 검사를 닫았습니다 · 다시 열어 현재 프로젝트를 확인하세요"
+				: current,
+		);
 		if (pendingOrdinaryStaticFabIssueRecheckRef.current) {
 			pendingOrdinaryStaticFabIssueRecheckRef.current = null;
 			setOrdinaryStaticFabIssueRecheckPending(false);
@@ -23204,7 +23213,9 @@ export default function TileFabApp(): React.ReactElement {
 			setReadinessOpen(true);
 			setStatus(
 				readiness.ready
-					? "레일 검사가 통과했습니다 · 정적 FAB의 포트·장비·조직 검증은 계속 진행합니다"
+					? currentStaticFabProjectChecks?.ready
+						? STATIC_FAB_CHECKS_READY_STATUS
+						: STATIC_FAB_CHECKS_PENDING_STATUS
 					: `${readinessActionCount}개 레일 수정 작업이 필요합니다`,
 			);
 			return;
@@ -28211,15 +28222,30 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedEquipmentProcessLoopChoice = ordinaryPortProcessLoopTargetId === null
 		? null
 		: equipmentProcessLoopChoices.find((choice) => choice.id === ordinaryPortProcessLoopTargetId) ?? null;
-	const selectedEquipmentPrimaryProcessLoopId = viewMode === "2d" &&
+	const selectedEquipmentUnownedProcessLoopMembership =
+		viewMode === "2d" &&
 		selectedPortEditableDetails &&
-		selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.length === 0 &&
+		selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.length === 0
+			? selectedEquipmentProcessLoopMembership
+			: null;
+	const selectedEquipmentScopedProcessLoopId =
 		selectedEquipmentProcessLoopChoice &&
 		ordinaryPortProcessLoopTargetRef.current?.projectId === projectSession.manifest.id &&
 		ordinaryPortProcessLoopTargetRef.current.organizationId === selectedEquipmentProcessLoopChoice.id &&
-		selectedEquipmentProcessLoopMembership.eligibleProcessLoopIds.includes(selectedEquipmentProcessLoopChoice.id)
-		? selectedEquipmentProcessLoopChoice.id
-		: null;
+		selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.includes(
+			selectedEquipmentProcessLoopChoice.id,
+		)
+			? selectedEquipmentProcessLoopChoice.id
+			: null;
+	const selectedEquipmentPrimaryProcessLoopId =
+		selectedEquipmentScopedProcessLoopId ??
+		(selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 1
+			? selectedEquipmentUnownedProcessLoopMembership.eligibleProcessLoopIds[0] ?? null
+			: null);
+	const selectedEquipmentNoProcessLoopHint =
+		equipmentProcessLoopChoices.length === 0
+			? "FAB 구조에서 Loop 생성"
+			: "Loop 직접 레일로 장비 이동";
 	const selectedEquipmentProcessLoopScope = useMemo(() => {
 		if (!activePortAuthoringType || ordinaryPortProcessLoopTargetId === null) return null;
 		if (ordinaryPortProcessLoopTargetRef.current?.projectId !== projectSession.manifest.id) return null;
@@ -29764,6 +29790,20 @@ export default function TileFabApp(): React.ReactElement {
 		staticFabCurrentSourceKey,
 		staticFabInspectionMatchesCurrentSource,
 	]);
+	useEffect(() => {
+		if (!readinessOpen) return;
+		const completedStatus = currentStaticFabInspectionError
+			? "정적 FAB 검사를 완료하지 못했습니다 · 검사 패널에서 다시 시도하세요"
+			: !currentStaticFabProjectChecks
+				? null
+				: readiness.ready && currentStaticFabProjectChecks.ready
+					? STATIC_FAB_CHECKS_READY_STATUS
+					: "정적 FAB 검사 결과가 나왔습니다 · 검사 패널에서 수정할 항목을 확인하세요";
+		if (!completedStatus) return;
+		setStatus((current) =>
+			current === STATIC_FAB_CHECKS_PENDING_STATUS ? completedStatus : current,
+		);
+	}, [currentStaticFabInspectionError, currentStaticFabProjectChecks, readiness.ready, readinessOpen]);
 	useEffect(
 		() => () => {
 			staticFabOrganizationOverviewBridge.dispose();
@@ -30969,6 +31009,8 @@ export default function TileFabApp(): React.ReactElement {
 			ordinaryStaticFabIssueRecheckOutcome.document === railDocument &&
 			ordinaryStaticFabIssueRecheckOutcome.sourceKey === staticFabCurrentSourceKey,
 	);
+	const ordinaryStaticFabIssueRecheckOwnsAnnouncement =
+		ordinaryStaticFabIssueRecheckPending || ordinaryStaticFabIssueRecheckOutcomeCurrent;
 	const compactInspectorObstructionIdentity =
 		compactInspectorSheetActive && contextualInspectorVisible
 			? portEquipmentInspectorVisible
@@ -33836,6 +33878,22 @@ export default function TileFabApp(): React.ReactElement {
 								<X size={15} />
 							</button>
 						</header>
+						<span
+							className="tilefab-sr-only"
+							role={ordinaryStaticFabIssueRecheckOwnsAnnouncement ? undefined : "status"}
+							aria-live={ordinaryStaticFabIssueRecheckOwnsAnnouncement ? "off" : "polite"}
+							aria-atomic="true"
+						>
+							{ordinaryStaticFabIssueRecheckOwnsAnnouncement
+								? ""
+								: staticFabCheckStatus === "ready"
+									? "정적 FAB 검사 통과. 저장하거나 검사 목록을 확인하세요."
+								: staticFabCheckStatus === "error"
+									? "정적 FAB 검사를 완료하지 못했습니다. 검사 패널의 오류와 다시 검사 방법을 확인하세요."
+									: staticFabCheckStatus === "issues"
+										? `정적 FAB 검사 완료. 수정할 항목 ${staticFabCheckActionCount}건을 확인하세요.`
+										: ""}
+						</span>
 						<StaticFabNavigator
 							tab="checks"
 							model={navigatorModel}
@@ -34019,6 +34077,11 @@ export default function TileFabApp(): React.ReactElement {
 								}
 							/>
 						</dl>
+						{staticFabCheckStatus === "ready" && staticFabCheckIssueCount === 0 ? (
+							<p className="tilefab-readiness-checks-scroll-hint">
+								검사 목록을 스크롤해 장비·구조 결과도 확인하세요
+							</p>
+						) : null}
 						{OPENFAB_RELEASE_CAPABILITIES.simulation ? (
 							<>
 								<button
@@ -34325,11 +34388,6 @@ export default function TileFabApp(): React.ReactElement {
 									</div>
 								) : staticFabCheckIssueCount === 0 && currentStaticFabProjectChecks ? (
 									<div className="tilefab-readiness-clear tilefab-readiness-clear--save">
-										{!ordinaryStaticFabIssueRecheckOutcomeCurrent ? (
-											<span className="tilefab-sr-only" role="status">
-												모든 정적 FAB 검사를 통과했습니다
-											</span>
-										) : null}
 										<button
 											type="button"
 											className="tilefab-readiness-save"
@@ -39814,7 +39872,12 @@ export default function TileFabApp(): React.ReactElement {
 						data-equipment-group-id={selectedEquipmentGroup.id}
 						data-editable={selectedPortEditableDetails !== null}
 						data-primary-process-loop-visible={
-							selectedEquipmentPrimaryProcessLoopId !== null || selectedEquipmentDirectlyOwned
+							selectedEquipmentPrimaryProcessLoopId !== null ||
+							selectedEquipmentDirectlyOwned ||
+							selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
+						}
+						data-primary-process-loop-availability={
+							selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 ? "none" : undefined
 						}
 						data-compact-layout={compactInspectorSheetActive ? "bottom-sheet" : "side-panel"}
 						data-compact-obstruction="equipment"
@@ -39913,6 +39976,21 @@ export default function TileFabApp(): React.ReactElement {
 										<strong className="tilefab-equipment-process-loop-primary-title">{selectedEquipmentOwnedOutsideProcessLoop ? "FAB 조직 소속" : "Process Loop 소속 완료"}</strong>
 										<small className="tilefab-equipment-process-loop-primary-name">{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.map((id) => organizationRecordsById.get(id)?.name ?? `조직 ${id}`).join(", ")}</small>
 									</span>
+								</div>
+							</div>
+						) : selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 ? (
+							<div className="tilefab-equipment-process-loop-primary">
+								<div
+									ref={processLoopPrimaryStatusRef}
+									className="tilefab-equipment-process-loop-primary-owned tilefab-equipment-process-loop-primary-unavailable"
+									data-testid="equipment-process-loop-unavailable"
+									role="status"
+									aria-label={`연결할 Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
+									title={selectedEquipmentUnownedProcessLoopMembership?.reason ?? undefined}
+									tabIndex={-1}
+								>
+									<AlertTriangle className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
+									<span className="tilefab-equipment-process-loop-primary-copy"><strong className="tilefab-equipment-process-loop-primary-title">연결할 Loop 없음</strong><small className="tilefab-equipment-process-loop-primary-name">{selectedEquipmentNoProcessLoopHint}</small></span>
 								</div>
 							</div>
 						) : null}

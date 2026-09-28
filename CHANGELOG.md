@@ -6,7 +6,20 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-09-29
+
+- Let an unscoped OHB, EQ, or Stocker use an explicit Inspector action to join its sole
+  route-eligible Process Loop. When none is eligible, explain the missing route. Valid
+  projects cannot have several eligible Loops because same-kind rail ownership is exclusive.
+  Ownership still changes only after a user action and remains undoable.
+- Update the Checks footer when asynchronous validation passes, finds issues, or fails, and
+  identify the scrollable equipment and organization results on a short compact screen.
+
 ## [0.1.29] - 2026-09-29
+
+Private `2bca6a1` and exact public `d027de8` were normally pushed. Both public CI jobs
+passed in `36486220607`, and Pages `995ec44` deployed in `36489224740`; all 65 live
+files and both entry URLs matched the reviewed build SHA-256. V1 remains incomplete.
 
 - Complete a visible-control browser journey from both Blank Canvas and Verified Template at
   390×600, 760×900, and 1440×900: build rails, place OHB, three-Port EQ, and two-Port FLEX
