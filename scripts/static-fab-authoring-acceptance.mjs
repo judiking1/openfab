@@ -75,6 +75,7 @@ const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconn
 const STATION_REVIEW_APPLY_ONLY_COMPLETE = new Error("Station review Apply acceptance completed.");
 const COMPACT_STARTER_NAV_ONLY_COMPLETE = new Error("Compact starter navigation completed.");
 const FIRST_RUN_TEMPLATE_ONLY_COMPLETE = new Error("First-run verified template completed.");
+const START_CHOICE_CLARITY_ONLY_COMPLETE = new Error("Start choice clarity completed.");
 const PRESET_RECOVERY_ONLY_COMPLETE = new Error("Synthetic preset recovery completed.");
 const PROJECT_STARTER_RETRY_ONLY_COMPLETE = new Error("Project starter retry completed.");
 const STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE = new Error(
@@ -155,6 +156,13 @@ try {
 		assertEqual(result.pageErrors.length, 0, "First-run template page errors");
 		result.status = "PASS";
 		throw FIRST_RUN_TEMPLATE_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_START_CHOICE_CLARITY_ONLY === "1") {
+		recordStep("start-choice-clarity", await exerciseStartChoiceClarity(browser));
+		assertEqual(result.consoleErrors.length, 0, "Start choice console errors");
+		assertEqual(result.pageErrors.length, 0, "Start choice page errors");
+		result.status = "PASS";
+		throw START_CHOICE_CLARITY_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_PRESET_RECOVERY_ONLY === "1") {
 		recordStep("synthetic-fab-preset-recovery", await exerciseSyntheticFabPresetRecovery(browser));
@@ -348,6 +356,7 @@ try {
 	);
 	recordStep("zero-eligible-process-loop", await exerciseZeroEligibleProcessLoop(browser));
 	recordStep("adjacent-process-loop-port-hit", await exerciseAdjacentProcessLoopPortHit(browser));
+	recordStep("start-choice-clarity", await exerciseStartChoiceClarity(browser));
 	recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
 	recordStep("factory-scale-ordinary-port-overview", factoryPortOverview);
@@ -2775,6 +2784,7 @@ try {
 		error === STATION_REVIEW_APPLY_ONLY_COMPLETE ||
 		error === COMPACT_STARTER_NAV_ONLY_COMPLETE ||
 		error === FIRST_RUN_TEMPLATE_ONLY_COMPLETE ||
+		error === START_CHOICE_CLARITY_ONLY_COMPLETE ||
 		error === PRESET_RECOVERY_ONLY_COMPLETE ||
 		error === PROJECT_STARTER_RETRY_ONLY_COMPLETE ||
 		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE
@@ -31869,6 +31879,199 @@ async function startSyntheticFabPresetAction(page, testId) {
 		throw new Error(`${testId} published an unexpected transition state: ${transitionState}`);
 	}
 	return Object.freeze({ initialState, transitionState, transitionMilliseconds });
+}
+
+async function exerciseStartChoiceClarity(activeBrowser) {
+	const evidence = [];
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 760, height: 900 },
+		{ width: 1440, height: 900 },
+	]) {
+		const label = `${viewport.width}x${viewport.height}`;
+		const context = await activeBrowser.newContext({ viewport });
+		try {
+			const page = await context.newPage();
+			page.on("pageerror", (error) =>
+				result.pageErrors.push(`[start-choice ${label}] ${error.message}`),
+			);
+			page.on("console", (message) => {
+				if (message.type() === "error")
+					result.consoleErrors.push(`[start-choice ${label}] ${message.text()}`);
+			});
+			await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(page, { physicalPaths: 0 });
+			const startDialog = page.getByTestId("openfab-start-dialog");
+			await startDialog.waitFor({ state: "visible" });
+			const blank = startDialog.getByRole("button", { name: /BLANK CANVAS/ });
+			const template = startDialog.getByRole("button", { name: /VERIFIED TEMPLATE/ });
+			const firstRunText = (await blank.innerText()).trim();
+			assertEqual(
+				firstRunText.includes("현재 FAB를 유지"),
+				false,
+				`${label} initial Blank Canvas copy does not imply an existing project`,
+			);
+			assertIncludes(
+				await template.innerText(),
+				"장비는 직접 배치",
+				`${label} template equipment copy`,
+			);
+			for (const card of await startDialog.locator(".tilefab-openfab-start-option").all()) {
+				await card.scrollIntoViewIfNeeded();
+				await assertLocatorInsideViewport(page, card);
+				await assertLocatorOwnsHitArea(card, `${label} first-run choice`);
+				const typography = await card.evaluate((element) => ({
+					title: Number.parseFloat(getComputedStyle(element.querySelector("strong")).fontSize),
+					description: Number.parseFloat(getComputedStyle(element.querySelector("small")).fontSize),
+					height: element.getBoundingClientRect().height,
+				}));
+				assertAtLeast(typography.title, 12, `${label} choice title font`);
+				assertAtLeast(typography.description, 12, `${label} choice description font`);
+				assertAtLeast(typography.height, 44, `${label} choice hit height`);
+			}
+			const blankBaseline = await readMetrics(page);
+			await blank.click();
+			await startDialog.waitFor({ state: "hidden" });
+			assertProjectUnchanged(
+				await readMetrics(page),
+				blankBaseline,
+				`${label} initial Blank Canvas`,
+			);
+			const created = await createSyntheticFabProject(page, "bay-assembly");
+			assertAtLeast(Number(created.authoredCells), 1, `${label} existing FAB source cells`);
+			await page.getByTestId("ordinary-first-port-handoff").click();
+			await waitForLegalPortSlots(page);
+			await assertOrdinaryPortKeyboardTargetVisible(page, `${label} first Port marker`);
+			const beforePort = await readMetrics(page);
+			const placedRow = await clickVisibleOrdinaryPortKeyboardTarget(
+				page,
+				`${label} first Port pointer click`,
+			);
+			const committed = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.workerTargetSequence) === Number(beforePort.workerTargetSequence) + 1 &&
+					metrics.equipmentGroups === "1" &&
+					metrics.equipmentPorts === "1",
+			);
+			assertEqual(committed.historyCanUndo, "true", `${label} seeded undo history`);
+			const authored = await undoAndRedo(page, beforePort, committed, null, true);
+			assertEqual(authored.workerStatus, "ready", `${label} authored Worker ready`);
+			assertEqual(
+				authored.modelChecksum,
+				authored.workerChecksum,
+				`${label} authored Worker parity`,
+			);
+			const openStartChoice = async () => {
+				await page.locator(".tilefab-project-trigger").click();
+				await page
+					.locator(".tilefab-project-menu-commands")
+					.getByRole("button", { name: "시작 방법 선택 · Guided Build 추천", exact: true })
+					.click();
+				await startDialog.waitFor({ state: "visible" });
+			};
+			await openStartChoice();
+			assertIncludes(await blank.innerText(), "현재 FAB를 유지", `${label} existing FAB copy`);
+			assertIncludes(await template.innerText(), "장비는 직접 배치", `${label} template copy`);
+			for (const card of await startDialog.locator(".tilefab-openfab-start-option").all()) {
+				await card.scrollIntoViewIfNeeded();
+				await assertLocatorInsideViewport(page, card);
+				await assertLocatorOwnsHitArea(card, `${label} existing FAB choice`);
+			}
+			const overflow = await startDialog.evaluate(
+				(element) => element.scrollWidth - element.clientWidth,
+			);
+			assertAtMost(overflow, 1, `${label} start choices horizontal overflow`);
+			await page.screenshot({
+				path: path.join(artifactRoot, `start-choice-existing-${label}.png`),
+			});
+			await blank.click();
+			await startDialog.waitFor({ state: "hidden" });
+			await page.waitForFunction(
+				() => document.activeElement === document.querySelector('[data-testid="rail-canvas"]'),
+				undefined,
+				{ timeout: 10_000 },
+			);
+			const returned = await readMetrics(page);
+			assertProjectUnchanged(returned, authored, `${label} return to existing FAB`);
+			assertEqual(returned.workerStatus, "ready", `${label} return Worker ready`);
+			assertEqual(returned.modelChecksum, returned.workerChecksum, `${label} return Worker parity`);
+			await openStartChoice();
+			await template.click();
+			await startDialog.waitFor({ state: "hidden" });
+			const preset = page.getByTestId("synthetic-fab-starter-dialog");
+			await preset.waitFor({ state: "visible" });
+			assertEqual(await preset.getAttribute("data-mode"), "preset", `${label} template mode`);
+			for (const action of [
+				"create-project-from-synthetic-fab-preset",
+				"place-synthetic-fab-preset",
+			]) {
+				const button = preset.getByTestId(action);
+				assertEqual(await button.isEnabled(), true, `${label} template ${action} enabled`);
+				await button.scrollIntoViewIfNeeded();
+				await assertLocatorInsideViewport(page, button);
+				await assertLocatorOwnsHitArea(button, `${label} template ${action}`);
+			}
+			await preset.getByTestId("close-synthetic-fab-starter").click();
+			await preset.waitFor({ state: "hidden" });
+			await page.waitForFunction(
+				() => document.activeElement?.classList.contains("tilefab-project-trigger") === true,
+				undefined,
+				{ timeout: 10_000 },
+			);
+			const cancelled = await readMetrics(page);
+			assertProjectUnchanged(cancelled, authored, `${label} template cancellation`);
+			assertEqual(cancelled.workerStatus, "ready", `${label} cancelled Worker ready`);
+			assertEqual(
+				cancelled.modelChecksum,
+				cancelled.workerChecksum,
+				`${label} cancelled Worker parity`,
+			);
+			await openStartChoice();
+			await template.click();
+			await preset.waitFor({ state: "visible" });
+			await startSyntheticFabPresetAction(page, "place-synthetic-fab-preset");
+			await preset.waitFor({
+				state: "hidden",
+				timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS,
+			});
+			await page.waitForFunction(
+				() =>
+					document.querySelector('[data-testid="tilefab-app"]')?.dataset
+						.organizationBundleActive === "true",
+				undefined,
+				{ timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS },
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				authored,
+				`${label} template placement preview`,
+			);
+			await page.getByTestId("rail-canvas").press("Escape");
+			await page.waitForFunction(
+				() =>
+					document.querySelector('[data-testid="tilefab-app"]')?.dataset
+						.organizationBundleActive === "false",
+				undefined,
+				{ timeout: 10_000 },
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				authored,
+				`${label} placement preview cancel`,
+			);
+			evidence.push({
+				viewport: label,
+				firstRunText,
+				placedRow,
+				existingFabPreserved: true,
+				overflow,
+			});
+		} finally {
+			await context.close();
+		}
+	}
+	return Object.freeze({ viewports: evidence });
 }
 
 async function exerciseFirstRunVerifiedTemplate(activeBrowser) {

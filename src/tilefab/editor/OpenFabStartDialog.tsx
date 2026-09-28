@@ -3,6 +3,7 @@ import { type KeyboardEvent, useEffect, useRef } from "react";
 
 export interface OpenFabStartDialogProps {
 	readonly busy?: boolean;
+	readonly hasCurrentFabContent?: boolean;
 	readonly returnFocus?: HTMLElement | null;
 	readonly recovery?: Readonly<{
 		readonly projectName: string;
@@ -18,6 +19,7 @@ export interface OpenFabStartDialogProps {
 
 export function OpenFabStartDialog({
 	busy = false,
+	hasCurrentFabContent = false,
 	returnFocus = null,
 	recovery = null,
 	onGuidedBuild,
@@ -100,7 +102,9 @@ export function OpenFabStartDialog({
 				<p id="openfab-start-description">
 					{recovery
 						? "저장되지 않은 작업의 로컬 복구본이 있습니다. 이어서 열거나 새 FAB를 시작하세요. 새로 시작해도 복구본은 자동으로 삭제되지 않습니다."
-						: "처음이라면 Guided Build로 첫 정적 FAB를 완성하세요. 같은 프로젝트와 편집 명령으로 레일부터 검증·저장까지 이어집니다."}
+						: hasCurrentFabContent
+							? "현재 FAB를 계속 편집할 수 있습니다. 빈 프로젝트가 필요하면 프로젝트 메뉴에서 새 프로젝트를 선택하세요."
+							: "처음이라면 Guided Build로 첫 정적 FAB를 완성하세요. 같은 프로젝트와 편집 명령으로 레일부터 검증·저장까지 이어집니다."}
 				</p>
 				{recovery && onResumeRecovery && onReviewRecovery ? (
 					<section className="tilefab-openfab-start-recovery" aria-label="복구본 이어하기">
@@ -153,7 +157,11 @@ export function OpenFabStartDialog({
 						<Factory size={22} />
 						<span>
 							<strong>VERIFIED TEMPLATE</strong>
-							<small>합성 OpenFab 템플릿에서 시작</small>
+							<small>
+								{hasCurrentFabContent
+									? "합성 레일·FAB 구조를 새 프로젝트 또는 현재 FAB에 배치 · 장비는 직접 배치"
+									: "합성 레일·FAB 구조 예제 · 장비는 직접 배치"}
+							</small>
 						</span>
 					</button>
 					<button
@@ -165,7 +173,11 @@ export function OpenFabStartDialog({
 						<MousePointer2 size={22} />
 						<span>
 							<strong>BLANK CANVAS</strong>
-							<small>전체 Editor v1 도구를 직접 사용</small>
+							<small>
+								{hasCurrentFabContent
+									? "현재 FAB를 유지하고 편집기로 돌아가기"
+									: "빈 프로젝트에서 편집 도구 직접 사용"}
+							</small>
 						</span>
 					</button>
 				</div>

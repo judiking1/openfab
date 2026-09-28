@@ -31604,6 +31604,7 @@ export default function TileFabApp(): React.ReactElement {
 			{openFabStartDialogOpen ? (
 				<OpenFabStartDialog
 					busy={projectBusy}
+					hasCurrentFabContent={!projectUntouchedBlank}
 					returnFocus={openFabStartReturnFocusRef.current}
 					recovery={
 						recoveryProject

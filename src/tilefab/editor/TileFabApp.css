@@ -1221,9 +1221,16 @@
 .tilefab-openfab-start-dialog > header small,
 .tilefab-guided-build-panel header small {
 	color: #77cbd1;
-	font-size: 9px;
 	font-weight: 760;
 	letter-spacing: 0.08em;
+}
+
+.tilefab-openfab-start-dialog > header small {
+	font-size: 11px;
+}
+
+.tilefab-guided-build-panel header small {
+	font-size: 9px;
 }
 
 .tilefab-openfab-start-dialog h2 {
@@ -1269,7 +1276,7 @@
 	margin: 0;
 	padding: 14px 16px 0;
 	color: #9cabad;
-	font-size: 12px;
+	font-size: 13px;
 	line-height: 1.55;
 }
 
@@ -1297,13 +1304,13 @@
 }
 
 .tilefab-openfab-start-recovery strong {
-	font-size: 11px;
+	font-size: 13px;
 }
 
 .tilefab-openfab-start-recovery small {
 	overflow: hidden;
 	color: #aeb690;
-	font-size: 9px;
+	font-size: 12px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -1320,7 +1327,7 @@
 	border-radius: 5px;
 	color: #dce6bc;
 	background: #2b301c;
-	font-size: 9px;
+	font-size: 12px;
 	font-weight: 720;
 	cursor: pointer;
 }
@@ -1372,12 +1379,12 @@
 }
 
 .tilefab-openfab-start-option strong {
-	font-size: 11px;
+	font-size: 13px;
 }
 
 .tilefab-openfab-start-option small {
 	color: #839395;
-	font-size: 9px;
+	font-size: 12px;
 	line-height: 1.35;
 }
 
@@ -1389,7 +1396,7 @@
 	align-items: center;
 	gap: 3px;
 	color: #85d8dd;
-	font-size: 8px;
+	font-size: 11px;
 	font-style: normal;
 }
 

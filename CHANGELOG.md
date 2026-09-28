@@ -6,7 +6,22 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-09-29
+
+- Clarify the start chooser when an authored FAB is already open: `BLANK CANVAS` returns to
+  the current project without clearing it, and a new empty project starts from the Project menu.
+  Explain that verified templates contain synthetic rail/FAB structure but equipment must be
+  placed separately; from an existing project the template dialog offers new-project and
+  in-place placement paths.
+- Raise start chooser card, recovery, and introduction text sizes while preserving reachable
+  controls on short screens. Browser acceptance exercises all three choices at 390×600,
+  760×900, and 1440×900, including hit areas, horizontal overflow, unchanged project/Worker/
+  history on return and cancellation, and actual template-dialog actions.
+
 ## [0.1.25] - 2026-09-29
+
+Public `main` `47fdb49` passed both CI jobs; Pages `74dd2d1` deployed successfully.
+All 65 served files and both entry URLs matched the reviewed build SHA-256.
 
 - Keep the Stocker completion actions visible inside a short, Loop-scoped equipment dock.
   Reserve scroll room for its wrapped action row and bring Loop refusal feedback above that row,

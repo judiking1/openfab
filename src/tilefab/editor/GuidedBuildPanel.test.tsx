@@ -25,6 +25,27 @@ describe("OpenFabStartDialog", () => {
 		expect(markup).toContain("레일 → Port → Bay/Bank → Fab → 검증·저장");
 		expect(markup).toContain("VERIFIED TEMPLATE");
 		expect(markup).toContain("BLANK CANVAS");
+		expect(markup).toContain("장비는 직접 배치");
+		expect(markup).toContain("빈 프로젝트에서 편집 도구 직접 사용");
+		expect(markup).not.toContain("현재 FAB를 유지");
+	});
+
+	it("explains that returning from an authored FAB keeps it and that templates have no equipment", () => {
+		const markup = renderToStaticMarkup(
+			<OpenFabStartDialog
+				hasCurrentFabContent
+				onGuidedBuild={() => undefined}
+				onVerifiedTemplate={() => undefined}
+				onBlankCanvas={() => undefined}
+				onClose={() => undefined}
+			/>,
+		);
+
+		expect(markup).toContain("BLANK CANVAS");
+		expect(markup).toContain("현재 FAB를 유지하고 편집기로 돌아가기");
+		expect(markup).toContain("프로젝트 메뉴에서 새 프로젝트");
+		expect(markup).toContain("새 프로젝트 또는 현재 FAB에 배치");
+		expect(markup).toContain("장비는 직접 배치");
 	});
 
 	it("offers protected recovery without removing the three new-project paths", () => {
