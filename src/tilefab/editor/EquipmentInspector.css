@@ -32,8 +32,13 @@
 	white-space: normal;
 }
 
-.tilefab-device-actions > button:only-child {
+.tilefab-device-actions > .tilefab-inspector-notice,
+.tilefab-device-actions > button:only-of-type {
 	grid-column: 1 / -1;
+}
+
+.tilefab-device-actions > .tilefab-inspector-notice {
+	margin: 0;
 }
 
 @media (min-width: 431px) and (max-width: 650px) {
@@ -57,4 +62,134 @@
 .tilefab-equipment-inspector dd {
 	overflow-wrap: anywhere;
 	text-align: right;
+}
+
+.tilefab-equipment-process-loop {
+	margin: 0 8px 8px;
+	border: 1px solid #3a6061;
+	border-radius: 4px;
+	background: #142123;
+}
+
+.tilefab-equipment-process-loop > summary {
+	display: flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 5px 10px;
+	color: #d3e8e8;
+	cursor: pointer;
+	list-style: none;
+}
+
+.tilefab-equipment-process-loop > summary::-webkit-details-marker {
+	display: none;
+}
+
+.tilefab-equipment-process-loop-choice > span,
+.tilefab-equipment-process-loop-row > span,
+.tilefab-equipment-process-loop > summary > span {
+	display: grid;
+	min-width: 0;
+	gap: 2px;
+}
+
+.tilefab-equipment-process-loop small {
+	overflow: hidden;
+	color: #a9c4c6;
+	font-size: 11px;
+	font-weight: 500;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tilefab-equipment-process-loop > summary > svg {
+	flex: 0 0 auto;
+}
+
+.tilefab-equipment-process-loop[open] > summary > svg {
+	transform: rotate(180deg);
+}
+
+.tilefab-equipment-process-loop > summary:hover,
+.tilefab-equipment-process-loop > summary:focus-visible {
+	background: #1b3032;
+}
+
+.tilefab-equipment-process-loop > summary:focus-visible,
+.tilefab-equipment-process-loop button:focus-visible {
+	outline: 3px solid #8de3ea;
+	outline-offset: -3px;
+}
+
+.tilefab-equipment-process-loop-body {
+	display: grid;
+	gap: 7px;
+	padding: 8px;
+	border-top: 1px solid #3a6061;
+}
+
+.tilefab-equipment-process-loop-body > p {
+	margin: 0;
+	color: #bfd1d2;
+	font-size: var(--tilefab-font-label);
+	line-height: 1.45;
+}
+
+.tilefab-equipment-process-loop-choice,
+.tilefab-equipment-process-loop-row {
+	display: flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 6px 8px;
+	border: 1px solid #3c6869;
+	border-radius: 4px;
+	color: #e4f4f4;
+	background: #1a3032;
+	font: inherit;
+	text-align: left;
+}
+
+.tilefab-equipment-process-loop-choice {
+	width: 100%;
+	cursor: pointer;
+}
+
+.tilefab-equipment-process-loop-choice:hover:not(:disabled),
+.tilefab-equipment-process-loop-row > button:hover:not(:disabled) {
+	border-color: #82d9dd;
+	background: #244043;
+}
+
+.tilefab-equipment-process-loop-choice:disabled,
+.tilefab-equipment-process-loop-row > button:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.tilefab-equipment-process-loop-row > button {
+	min-height: 44px;
+	flex: 0 0 auto;
+	padding: 0 9px;
+	border: 1px solid #63777a;
+	border-radius: 4px;
+	color: #d7e7e8;
+	background: #263437;
+	cursor: pointer;
+	font: inherit;
+	font-size: var(--tilefab-font-label);
+}
+
+@media (forced-colors: active) {
+	.tilefab-equipment-process-loop,
+	.tilefab-equipment-process-loop-choice,
+	.tilefab-equipment-process-loop-row,
+	.tilefab-equipment-process-loop-row > button {
+		border-color: ButtonText;
+		color: ButtonText;
+		background: ButtonFace;
+	}
 }

@@ -59,6 +59,9 @@ const ORDINARY_HIERARCHY_CONTINUATION_ONLY_COMPLETE = new Error(
 const COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE = new Error(
 	"Compact Bay configuration continuation completed.",
 );
+const PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ONLY_COMPLETE = new Error(
+	"Process Loop equipment membership acceptance completed.",
+);
 const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconnection completed.");
 const STATION_REVIEW_APPLY_ONLY_COMPLETE = new Error("Station review Apply acceptance completed.");
 const COMPACT_STARTER_NAV_ONLY_COMPLETE = new Error("Compact starter navigation completed.");
@@ -164,6 +167,17 @@ try {
 		assertEqual(result.pageErrors.length, 0, "Compact Bay page errors");
 		result.status = "PASS";
 		throw COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ACCEPTANCE_ONLY === "1") {
+		recordStep(
+			"process-loop-equipment-membership",
+			await exerciseProcessLoopEquipmentMembership(browser),
+		);
+		assertEqual(result.consoleErrors.length, 0, "Process Loop equipment console errors");
+		assertEqual(result.pageErrors.length, 0, "Process Loop equipment page errors");
+		result.status = "PASS";
+		console.log("PASS Process Loop equipment membership acceptance");
+		throw PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_STATIC_FAB_ISSUE_RECHECK_ACCEPTANCE_ONLY === "1") {
 		const staticFabIssueRecheck = await exerciseStaticFabIssueInspectorRecheck(browser);
@@ -285,6 +299,10 @@ try {
 	);
 	const ordinaryHierarchyContinuation = await exerciseOrdinaryModuleHierarchyContinuation(browser);
 	recordStep("ordinary-module-hierarchy-continuation", ordinaryHierarchyContinuation);
+	recordStep(
+		"process-loop-equipment-membership",
+		await exerciseProcessLoopEquipmentMembership(browser),
+	);
 	recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
 	recordStep("factory-scale-ordinary-port-overview", factoryPortOverview);
@@ -2704,6 +2722,7 @@ try {
 		error === FACTORY_PORT_OVERVIEW_ONLY_COMPLETE ||
 		error === ORDINARY_HIERARCHY_CONTINUATION_ONLY_COMPLETE ||
 		error === COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE ||
+		error === PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ONLY_COMPLETE ||
 		error === DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE ||
 		error === STATION_REVIEW_APPLY_ONLY_COMPLETE ||
 		error === COMPACT_STARTER_NAV_ONLY_COMPLETE ||
@@ -5048,6 +5067,307 @@ async function waitForCompactBayFrame(page, reviewing, minimumWidth = 0) {
 		return await handle.jsonValue();
 	} finally {
 		await handle.dispose();
+	}
+}
+
+async function exerciseProcessLoopEquipmentMembership(browserInstance) {
+	const context = await browserInstance.newContext({
+		viewport: { width: 1440, height: 900 },
+		acceptDownloads: true,
+	});
+	const page = await context.newPage();
+	page.on("console", (message) => {
+		if (message.type() === "error") result.consoleErrors.push(message.text());
+	});
+	page.on("pageerror", (error) => result.pageErrors.push(error.message));
+	try {
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		await page
+			.getByTestId("openfab-start-dialog")
+			.getByRole("button", { name: /BLANK CANVAS/ })
+			.click();
+		const bay = await createSyntheticFabProject(page, "bay-assembly");
+		assertEqual(bay.staticFabOrganizations, "3", "Bay starter owns two Process Loops");
+		assertEqual(bay.equipmentGroups, "0", "Bay starter starts without equipment");
+		await clickActivityCommand(page, "equip", "OHB 포트 배치");
+		await waitForLegalPortSlots(page);
+		const loopSlots = await page.evaluate(() => {
+			const model = window.__tileFab.getEditorModel();
+			const slots = model.portSlotArtifacts.OHB?.slots;
+			if (!slots) throw new Error("OHB slots are unavailable for Process Loop acceptance.");
+			const records = model.document.organizations.records;
+			const bays = new Set(
+				records.filter((record) => record.kind === "BAY").map((record) => record.id),
+			);
+			const loops = records.filter(
+				(record) =>
+					record.kind === "AISLE" && record.parentOrganizationIds?.some((id) => bays.has(id)),
+			);
+			const offset = (direction) => {
+				if (direction === 1) return [0, -1];
+				if (direction === 2) return [1, 0];
+				if (direction === 4) return [0, 1];
+				return [-1, 0];
+			};
+			const edgeKey = (fromX, fromY, toX, toY) => `${fromX},${fromY}>${toX},${toY}`;
+			for (const loop of loops) {
+				const edges = new Set(
+					loop.membership.railEdges.map((edge) =>
+						edgeKey(edge.from.x, edge.from.y, edge.to.x, edge.to.y),
+					),
+				);
+				const candidates = [];
+				for (let row = 0; row < slots.count && candidates.length < 32; row++) {
+					if (slots.statuses[row] !== 0) continue;
+					const x = slots.routeXs[row];
+					const y = slots.routeZs[row];
+					const from = slots.routeFromDirections[row];
+					const to = slots.routeToDirections[row];
+					if (from !== 0) {
+						const [dx, dy] = offset(from);
+						if (!edges.has(edgeKey(x + dx, y + dy, x, y))) continue;
+					}
+					if (to !== 0) {
+						const [dx, dy] = offset(to);
+						if (!edges.has(edgeKey(x, y, x + dx, y + dy))) continue;
+					}
+					candidates.push({
+						row,
+						x: slots.worldPositions[row * 2],
+						y: slots.worldPositions[row * 2 + 1],
+					});
+				}
+				if (candidates.length > 0) return { loopId: loop.id, candidates };
+			}
+			return { loopId: null, candidates: [] };
+		});
+		assertAtLeast(loopSlots.candidates.length, 1, "certified Bay has a legal direct Loop OHB slot");
+		const beforeEquipment = await readMetrics(page);
+		const placedCandidate = await clickAvailableOhbCandidate(
+			page,
+			loopSlots.candidates,
+			beforeEquipment,
+		);
+		const equipmentReady = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeEquipment.workerTargetSequence) + 1 &&
+				Number(metrics.equipmentGroups) === 1 &&
+				Number(metrics.equipmentPorts) === 1,
+		);
+		await page.getByTestId("rail-canvas").press("Escape");
+		await page.getByTestId("editor-activity-inspect").click();
+		await clickWorld(page, placedCandidate, false);
+		const inspector = page.getByTestId("port-equipment-inspector");
+		await inspector.waitFor({ state: "visible" });
+		const equipmentGroupId = Number(await inspector.getAttribute("data-equipment-group-id"));
+		await page.setViewportSize({ width: 390, height: 600 });
+		const disclosure = page.getByTestId("compact-inspector-disclosure");
+		if (
+			(await disclosure.count()) > 0 &&
+			(await disclosure.getAttribute("aria-expanded")) === "false"
+		) {
+			await disclosure.click();
+		}
+		const membership = inspector.getByTestId("equipment-process-loop-membership");
+		const summary = membership.locator(":scope > summary");
+		await summary.scrollIntoViewIfNeeded();
+		await summary.click();
+		assertEqual(await membership.getAttribute("data-owner-ids"), "", "new OHB is unowned");
+		const attach = membership.locator(
+			`[data-testid="attach-equipment-process-loop"][data-process-loop-id="${loopSlots.loopId}"]`,
+		);
+		await attach.scrollIntoViewIfNeeded();
+		await assertLocatorInsideViewport(page, attach);
+		await assertLocatorOwnsHitArea(attach, "390x600 Process Loop attach");
+		assertAtLeast(
+			(await attach.boundingBox())?.height ?? 0,
+			44,
+			"390x600 Process Loop attach target",
+		);
+		const beforeAttach = await readMetrics(page);
+		await attach.click();
+		const attached = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeAttach.workerTargetSequence) + 1,
+		);
+		assertEqual(
+			await membership.getAttribute("data-owner-ids"),
+			String(loopSlots.loopId),
+			"OHB direct Loop owner",
+		);
+		assertEqual(
+			await inspector.getByTestId("move-ohb-port").isDisabled(),
+			true,
+			"owned OHB move fails closed before placement",
+		);
+		const mutationNote = inspector.getByTestId("equipment-organization-mutation-note");
+		assertEqual(await mutationNote.isVisible(), true, "owned OHB explains detach first");
+		const actionBox = await inspector.locator(".tilefab-device-actions").boundingBox();
+		const noteBox = await mutationNote.boundingBox();
+		assertEqual(
+			Boolean(actionBox && noteBox && noteBox.width >= actionBox.width - 1),
+			true,
+			"owned OHB guidance spans the narrow action panel",
+		);
+		await page.waitForFunction(() => {
+			const heading = document.querySelector(
+				'[data-testid="equipment-process-loop-membership"] > summary',
+			);
+			const scrollport = heading?.closest(".tilefab-contextual-inspector-content");
+			if (!(heading instanceof HTMLElement) || !(scrollport instanceof HTMLElement)) return false;
+			const target = heading.getBoundingClientRect();
+			const clip = scrollport.getBoundingClientRect();
+			return (
+				document.activeElement === heading &&
+				target.top >= clip.top - 0.5 &&
+				target.bottom <= clip.bottom + 0.5
+			);
+		});
+		const moreActions = inspector.getByTestId("port-equipment-more-actions");
+		await moreActions.locator(":scope > summary").click();
+		assertEqual(
+			await inspector.getByTestId("copy-ohb-port").isEnabled(),
+			true,
+			"owned OHB remains copyable",
+		);
+		assertEqual(
+			await inspector.getByTestId("delete-port-equipment").isDisabled(),
+			true,
+			"owned OHB delete fails closed",
+		);
+		assertNotEqual(
+			attached.modelChecksum,
+			beforeAttach.modelChecksum,
+			"attach changes authored checksum",
+		);
+		assertEqual(attached.modelChecksum, attached.workerChecksum, "attach Worker checksum parity");
+		await undoAndRedo(page, beforeAttach, attached, null, true);
+		assertEqual(
+			await membership.getAttribute("data-owner-ids"),
+			String(loopSlots.loopId),
+			"Redo restores OHB Loop owner",
+		);
+		const detach = membership.getByTestId("detach-equipment-process-loop");
+		await detach.scrollIntoViewIfNeeded();
+		await assertLocatorInsideViewport(page, detach);
+		await assertLocatorOwnsHitArea(detach, "390x600 Process Loop detach");
+		assertAtLeast(
+			(await detach.boundingBox())?.height ?? 0,
+			44,
+			"390x600 Process Loop detach target",
+		);
+		const beforeDetach = await readMetrics(page);
+		await detach.click();
+		const detached = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeDetach.workerTargetSequence) + 1,
+		);
+		assertEqual(
+			await membership.getAttribute("data-owner-ids"),
+			"",
+			"detach clears direct Loop owner",
+		);
+		assertEqual(
+			await inspector.getByTestId("move-ohb-port").isEnabled(),
+			true,
+			"detached OHB move is available again",
+		);
+		assertEqual(
+			await inspector.getByTestId("delete-port-equipment").isEnabled(),
+			true,
+			"detached OHB delete is available again",
+		);
+		assertEqual(detached.equipmentGroups, equipmentReady.equipmentGroups, "detach preserves OHB");
+		assertEqual(detached.equipmentPorts, equipmentReady.equipmentPorts, "detach preserves Port");
+		await undoAndRedo(page, beforeDetach, detached, null, true);
+		const reattach = membership.locator(
+			`[data-testid="attach-equipment-process-loop"][data-process-loop-id="${loopSlots.loopId}"]`,
+		);
+		await reattach.click();
+		const finalAttached = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(detached.workerTargetSequence) + 3,
+		);
+		assertEqual(
+			await membership.getAttribute("data-owner-ids"),
+			String(loopSlots.loopId),
+			"reattach restores direct owner",
+		);
+		await page.screenshot({
+			path: path.join(artifactRoot, "process-loop-equipment-attached-390x600.png"),
+		});
+		const savedPath = await saveProject(page);
+		const reopenedContext = await browserInstance.newContext({
+			viewport: { width: 390, height: 600 },
+			acceptDownloads: true,
+		});
+		const reopenedPage = await reopenedContext.newPage();
+		let reopened;
+		try {
+			reopenedPage.on("console", (message) => {
+				if (message.type() === "error") result.consoleErrors.push(message.text());
+			});
+			reopenedPage.on("pageerror", (error) => result.pageErrors.push(error.message));
+			await reopenedPage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(reopenedPage, { physicalPaths: 0 });
+			const startDialog = reopenedPage.getByTestId("openfab-start-dialog");
+			if (await startDialog.isVisible().catch(() => false)) {
+				await startDialog.getByRole("button", { name: /BLANK CANVAS/ }).click();
+				await startDialog.waitFor({ state: "hidden" });
+			}
+			const chooserPromise = reopenedPage.waitForEvent("filechooser");
+			await reopenedPage.locator(".tilefab-project-trigger").click();
+			await reopenedPage
+				.locator(".tilefab-project-menu-commands")
+				.getByRole("button", { name: "열기", exact: true })
+				.click();
+			const chooser = await chooserPromise;
+			await chooser.setFiles(savedPath);
+			reopened = await waitForWorker(
+				reopenedPage,
+				(metrics) =>
+					metrics.modelChecksum === finalAttached.modelChecksum &&
+					Number(metrics.physicalPaths) > 0,
+			);
+			const recovered = await reopenedPage.evaluate((groupId) => {
+				const document = window.__tileFab.getEditorModel().document;
+				return {
+					group: document.portEquipment.equipmentGroups.find((item) => item.id === groupId),
+					ownerIds: document.organizations.records
+						.filter((record) => record.membership.equipmentGroupIds.includes(groupId))
+						.map((record) => record.id),
+				};
+			}, equipmentGroupId);
+			assertEqual(recovered.group?.kind, "OHB", "native reopen preserves OHB group");
+			assertEqual(
+				JSON.stringify(recovered.ownerIds),
+				JSON.stringify([loopSlots.loopId]),
+				"native reopen preserves direct Loop owner",
+			);
+			assertEqual(
+				reopened.workerChecksum,
+				finalAttached.workerChecksum,
+				"native reopen Worker parity",
+			);
+		} finally {
+			await closeBrowserResource(reopenedPage, "reopened Process Loop equipment page");
+			await closeBrowserResource(reopenedContext, "reopened Process Loop equipment context");
+		}
+		return Object.freeze({
+			loopId: loopSlots.loopId,
+			equipmentGroupId,
+			portCount: Number(reopened.equipmentPorts),
+			checksum: reopened.modelChecksum,
+			viewport: "390x600",
+		});
+	} finally {
+		await closeBrowserResource(page, "Process Loop equipment page");
+		await closeBrowserResource(context, "Process Loop equipment context");
 	}
 }
 
@@ -32119,6 +32439,37 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		`Port ${expectedDevice.count}개`,
 		`ordinary ${portType} whole-device Port count ${viewportLabel}`,
 	);
+	const processLoopMembership = inspector.getByTestId("equipment-process-loop-membership");
+	assertEqual(
+		await processLoopMembership.count(),
+		1,
+		`ordinary ${portType} has one Process Loop membership disclosure ${viewportLabel}`,
+	);
+	assertEqual(
+		await processLoopMembership.getAttribute("open"),
+		null,
+		`ordinary ${portType} Process Loop chooser starts collapsed ${viewportLabel}`,
+	);
+	assertIncludes(
+		await processLoopMembership.locator(":scope > summary").innerText(),
+		"Process Loop 소속",
+		`ordinary ${portType} Process Loop membership signpost ${viewportLabel}`,
+	);
+	const authoredOwnerIds = await inspector.evaluate((element) => {
+		const groupId = Number(element.getAttribute("data-equipment-group-id"));
+		return window.__tileFab
+			.getEditorModel()
+			.document.organizations.records.filter((record) =>
+				record.membership.equipmentGroupIds.includes(groupId),
+			)
+			.map((record) => record.id)
+			.join(",");
+	});
+	assertEqual(
+		await processLoopMembership.getAttribute("data-owner-ids"),
+		authoredOwnerIds,
+		`ordinary ${portType} Process Loop owner comes from authored state ${viewportLabel}`,
+	);
 	const connectionDetails = page.getByTestId("equipment-port-connection-details");
 	assertEqual(
 		await connectionDetails.getAttribute("open"),
@@ -32607,6 +32958,39 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		);
 	}
 	const detailsBaseline = await readMetrics(page);
+	const processLoopSummary = processLoopMembership.locator(":scope > summary");
+	await processLoopSummary.scrollIntoViewIfNeeded();
+	await processLoopSummary.focus();
+	await processLoopSummary.press("Enter");
+	assertEqual(
+		await processLoopMembership.getAttribute("open"),
+		"",
+		`ordinary ${portType} Process Loop chooser opens by keyboard ${viewportLabel}`,
+	);
+	assertAtLeast(
+		(await processLoopSummary.boundingBox())?.height ?? 0,
+		44,
+		`ordinary ${portType} Process Loop target height ${viewportLabel}`,
+	);
+	if (viewportLabel === "390x844") {
+		await page.screenshot({
+			path: path.join(
+				artifactRoot,
+				`ordinary-${portType.toLowerCase()}-process-loop-membership-${viewportLabel}.png`,
+			),
+		});
+	}
+	await processLoopSummary.press("Escape");
+	assertEqual(
+		await processLoopMembership.getAttribute("open"),
+		null,
+		`ordinary ${portType} Process Loop chooser closes with Escape ${viewportLabel}`,
+	);
+	assertEqual(
+		await processLoopSummary.evaluate((element) => element === document.activeElement),
+		true,
+		`ordinary ${portType} Process Loop chooser restores focus ${viewportLabel}`,
+	);
 	const connectionSummary = connectionDetails.locator(":scope > summary");
 	await connectionSummary.scrollIntoViewIfNeeded();
 	await connectionSummary.focus();
@@ -32647,7 +33031,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		true,
 		`ordinary ${portType} keyboard returns from details to placement ${viewportLabel}`,
 	);
-	for (const disclosure of [moreActions, connectionDetails]) {
+	for (const disclosure of [processLoopMembership, moreActions, connectionDetails]) {
 		await assertInspectorDisclosureKeepsNewFocus(
 			page,
 			disclosure,

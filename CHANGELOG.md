@@ -6,7 +6,30 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
-### Preview candidate 0.1.17
+### Preview candidate 0.1.18
+
+- Let a selected OHB, EQ, or Stocker group join an existing Process Loop explicitly from its
+  Equipment Inspector. Offer only Loops whose direct rail or switch membership covers every Port
+  route; show the current direct owner and require explicit separation before reassignment.
+- Make attach and detach one undoable organization edit each, mirrored by the existing typed Worker
+  patch. Preserve equipment, Ports, rail ownership, organization IDs, and the native project format.
+- Keep the new choice collapsed after the ordinary equipment continuation action. Verify keyboard
+  open/Escape focus, a 390×600 OHB attach/detach/Undo/Redo journey, and same-width native reopen.
+  The complete first-user V1 journey and public release checks remain open.
+- Reject an attach/detach click when the selected Port or group changed after the choice rendered.
+  For directly owned equipment, disable move, Port membership edit, and delete until its ownership
+  is explicitly cleared; ordinary copy remains available.
+- Include Process Loop equipment membership as step 67 of the full authoring browser gate. The
+  local run passed 67 steps, 548 screenshots, and zero browser errors. Strict public safety and
+  provenance, the 20-file initial bundle (1,028,558 gzip bytes, with Three.js deferred), and
+  production smoke at 1440/1280/886/390px also passed locally. Private commit, exact public
+  export, CI, and Pages publication remain pending.
+
+## [0.1.17] - 2026-09-28
+
+Published Pages preview. Public `main` `1b0de9c`, CI `36366966395` (both jobs), and Pages
+`2e0ff06` / deployment `36368903514` passed. All 65 served files (26,963,991 bytes) and both
+entry URLs matched the reviewed build SHA-256. V1 authoring remains incomplete.
 
 - Start short blank-project Rail authoring with a compact activity menu so the first pointer
   drag remains on the canvas at 390×600. Keep explicit menu-density choices across resizing

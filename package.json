@@ -1,7 +1,7 @@
 {
 	"name": "openfab-builder",
 	"private": true,
-	"version": "0.1.17",
+	"version": "0.1.18",
 	"license": "Apache-2.0",
 	"packageManager": "pnpm@10.33.0",
 	"engines": {
@@ -52,6 +52,7 @@
 		"test:ordinary-rail-pointer": "OPENFAB_ORDINARY_RAIL_POINTER_ACCEPTANCE_ONLY=1 node scripts/static-fab-authoring-acceptance.mjs",
 		"check:ordinary-rail-pointer": "npm run build:authoring && npm run test:ordinary-rail-pointer",
 		"test:mid-width-topbar": "OPENFAB_MID_WIDTH_TOPBAR_ACCEPTANCE_ONLY=1 node scripts/static-fab-authoring-acceptance.mjs",
+		"test:process-loop-equipment-membership": "OPENFAB_PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ACCEPTANCE_ONLY=1 node scripts/static-fab-authoring-acceptance.mjs",
 		"check:mid-width-topbar": "npm run build:authoring && npm run test:mid-width-topbar",
 		"test:compact-help-scroll": "OPENFAB_COMPACT_HELP_SCROLL_ACCEPTANCE_ONLY=1 node scripts/static-fab-authoring-acceptance.mjs",
 		"check:compact-help-scroll": "npm run build:authoring && npm run test:compact-help-scroll",

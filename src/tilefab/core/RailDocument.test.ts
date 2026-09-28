@@ -20,9 +20,12 @@ import {
 	planRailTemplate,
 } from "./RailTemplateCatalog";
 import { DIR_E, DIR_W } from "./railShape";
+import { compareDirectedRailEdges, copyStaticFabOrganizationState } from "./StaticFabOrganization";
 import {
 	planAssignStaticFabOrganizationFromSelection,
+	planAttachEquipmentGroupToProcessLoop,
 	planCreateStaticFabOrganizationFromSelection,
+	planDetachEquipmentGroupFromProcessLoop,
 	planRemoveStaticFabOrganization,
 	planRenameStaticFabOrganization,
 } from "./StaticFabOrganizationPlan";
@@ -410,6 +413,107 @@ describe("RailDocument", () => {
 		expect(document.organizations.records).toMatchObject([{ id: 1, name: "Area A" }]);
 		expect(document.redo()).toBe(true);
 		expect(document.organizations.records).toMatchObject([{ id: 2, name: "Area B" }]);
+	});
+
+	it("attaches and detaches Process Loop equipment with one organization-only patch per command", () => {
+		const source = new RailDocument();
+		expect(source.commit(planRailConstruction(source.map, { x: 0, y: 0 }, { x: 5, y: 0 }))).toBe(
+			true,
+		);
+		expect(source.commitPortEquipment(ohbPlan(source))).toBe(true);
+		const railEdges = buildRailModuleOwnershipIndex(source.map)
+			.modules.flatMap((module) => module.eraseEdges)
+			.sort(compareDirectedRailEdges);
+		const organizations = copyStaticFabOrganizationState({
+			nextOrganizationId: 3,
+			records: [
+				{
+					id: 1,
+					kind: "BAY",
+					name: "Synthetic Bay",
+					membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [] },
+				},
+				{
+					id: 2,
+					kind: "AISLE",
+					name: "Synthetic Process Loop",
+					parentOrganizationIds: [1],
+					membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [] },
+				},
+			],
+		});
+		const document = RailDocument.fromLoadedMap(
+			source.map,
+			source.getPatchSequence(),
+			source.portEquipment,
+			organizations,
+		);
+		const originalMap = document.map;
+		const originalEquipment = document.portEquipment;
+		const originalSequence = document.getPatchSequence();
+		const events: Parameters<Parameters<RailDocument["subscribe"]>[0]>[0][] = [];
+		document.subscribe((event) => events.push(event));
+		const attach = planAttachEquipmentGroupToProcessLoop(
+			document.map,
+			document.portEquipment,
+			originalSequence,
+			document.organizations,
+			1,
+			2,
+		);
+		const staleDuplicate = planAttachEquipmentGroupToProcessLoop(
+			document.map,
+			document.portEquipment,
+			originalSequence,
+			document.organizations,
+			1,
+			2,
+		);
+		expect(attach.valid, attach.reason).toBe(true);
+		expect(document.commitOrganization(attach)).toBe(true);
+		expect(document.map).toBe(originalMap);
+		expect(document.portEquipment).toBe(originalEquipment);
+		expect(document.getPatchSequence()).toBe(originalSequence + 1);
+		expect(document.organizations.nextOrganizationId).toBe(3);
+		expect(document.organizations.records[1]?.membership.equipmentGroupIds).toEqual([1]);
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			kind: "update-static-fab-organization",
+			changes: [],
+			portChanges: [],
+			equipmentGroupChanges: [],
+			organizationNextIdBefore: 3,
+			organizationNextIdAfter: 3,
+			organizationChanges: [{ id: 2 }],
+		});
+		expect(document.commitOrganization(staleDuplicate)).toBe(false);
+		expect(document.getLastCommandError()).toContain("편집 순서가 변경");
+		expect(events).toHaveLength(1);
+		expect(document.undo()).toBe(true);
+		expect(document.organizations.records[1]?.membership.equipmentGroupIds).toEqual([]);
+		expect(document.redo()).toBe(true);
+		expect(document.organizations.records[1]?.membership.equipmentGroupIds).toEqual([1]);
+		expect(events.map((event) => event.kind)).toEqual([
+			"update-static-fab-organization",
+			"undo",
+			"redo",
+		]);
+
+		const detach = planDetachEquipmentGroupFromProcessLoop(
+			document.map,
+			document.portEquipment,
+			document.getPatchSequence(),
+			document.organizations,
+			1,
+			2,
+		);
+		expect(detach.valid, detach.reason).toBe(true);
+		expect(document.commitOrganization(detach)).toBe(true);
+		expect(document.organizations.records[1]?.membership.equipmentGroupIds).toEqual([]);
+		expect(document.map).toBe(originalMap);
+		expect(document.portEquipment).toBe(originalEquipment);
+		expect(events).toHaveLength(4);
+		expect(events[3]?.organizationChanges).toHaveLength(1);
 	});
 
 	it("rejects equipment edits that touch protected organization membership", () => {

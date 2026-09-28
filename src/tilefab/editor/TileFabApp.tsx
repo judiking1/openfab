@@ -465,10 +465,13 @@ import {
 } from "../core/StaticFabOrganizationBundlePlacementPreview";
 import {
 	planAssignStaticFabOrganizationFromSelection,
+	planAttachEquipmentGroupToProcessLoop,
 	planCreateStaticFabOrganizationFromSelection,
+	planDetachEquipmentGroupFromProcessLoop,
 	planRemoveStaticFabOrganization,
 	planRenameStaticFabOrganization,
 	planUpdateStaticFabOrganizationDetails,
+	queryStaticFabProcessLoopEquipmentMembership,
 	staticFabOrganizationAssignmentSourcesForSelection,
 	staticFabOrganizationMembershipFromSelection,
 } from "../core/StaticFabOrganizationPlan";
@@ -2555,6 +2558,7 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedModuleKeyRef = useRef<string | null>(null);
 	const selectedModuleRef = useRef<RailModuleOwnership | null>(null);
 	const selectedPortEquipmentRef = useRef<PortEquipmentSelection | null>(null);
+	const processLoopMembershipDisclosureRef = useRef<HTMLElement | null>(null);
 	const equipmentDeletionRecoveryUndoRef = useRef<HTMLButtonElement | null>(null);
 	const nextPortEquipmentButtonRef = useRef<HTMLButtonElement | null>(null);
 	const nextPortEquipmentFocusPendingRef = useRef(false);
@@ -20673,6 +20677,21 @@ export default function TileFabApp(): React.ReactElement {
 		else focusStaticFabProjectIssue(next.issue);
 	};
 
+	const blockDirectlyOwnedEquipmentMutation = (equipmentGroupId: number): boolean => {
+		const owner = editorModelRef.current.document.organizations.records.find((record) =>
+			record.membership.equipmentGroupIds.includes(equipmentGroupId),
+		);
+		if (!owner) return false;
+		setStatus(
+			`장비 그룹 ${equipmentGroupId}은 '${owner.name}'에 소속되어 있습니다 · 소속을 먼저 분리한 뒤 이동·Port 편집·철거하세요`,
+		);
+		requestAnimationFrame(() => {
+			processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
+			processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
+		});
+		return true;
+	};
+
 	const deleteSelected = (): void => {
 		if (modelSyncPendingRef.current) return;
 		const selectedArea = areaSelectionRef.current;
@@ -20759,6 +20778,7 @@ export default function TileFabApp(): React.ReactElement {
 				scheduleRender();
 				return;
 			}
+			if (blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
 			clearTransientConstruction();
 			const plan = planEraseEquipmentGroup(
 				railDocument.portEquipment,
@@ -20827,6 +20847,7 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
+		if (kind === "move" && blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
 		const presentation = portEquipmentPresentationRef.current;
 		const sourceRow = presentation?.portIds.indexOf(resolved.port.id) ?? -1;
 		if (!presentation || sourceRow < 0) {
@@ -20876,6 +20897,7 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
+		if (mode === "move" && blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
 		const portType = resolved.equipmentGroup.kind;
 		lastEquipmentToolRef.current = portType === "EQ" ? "eq" : "stk";
 		updateEditorActivity("equip");
@@ -20938,6 +20960,7 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
+		if (blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
 		if (resolved.equipmentGroup.kind === "STK" && resolved.equipmentGroup.template === "CUSTOM") {
 			setStatus("기존 CUSTOM STK는 읽기 전용입니다 · FLEX STK로 다시 배치하세요");
 			return;
@@ -23236,6 +23259,81 @@ export default function TileFabApp(): React.ReactElement {
 					)),
 			shiftModifier,
 		);
+	};
+
+	const commitSelectedEquipmentProcessLoopMembership = (
+		operation: "attach" | "detach",
+		processLoopOrganizationId: number,
+		expectedSelection: PortEquipmentSelection,
+	): void => {
+		const blockedReason = editorActivityTransitionBlockedReason();
+		if (blockedReason || staticFabExclusiveCommandActive) {
+			setStatus(blockedReason ?? "현재 FAB 편집을 적용하거나 취소한 뒤 장비 소속을 변경하세요");
+			return;
+		}
+		const document = editorModelRef.current.document;
+		const selectedPort = selectedPortEquipmentRef.current;
+		if (
+			selectedPort?.portId !== expectedSelection.portId ||
+			selectedPort.equipmentGroupId !== expectedSelection.equipmentGroupId
+		) {
+			setStatus("장비 선택이 바뀌었습니다 · 장비를 다시 선택하세요");
+			return;
+		}
+		const selection = resolveEditablePortEquipmentSelection(
+			document.portEquipment,
+			expectedSelection,
+		);
+		if (!selection) {
+			setStatus("장비 선택 또는 연결 상태가 바뀌었습니다 · 장비를 다시 선택하세요");
+			return;
+		}
+		const processLoop = document.organizations.records.find(
+			(record) => record.id === processLoopOrganizationId,
+		);
+		const plan = operation === "attach"
+			? planAttachEquipmentGroupToProcessLoop(
+					document.map,
+					document.portEquipment,
+					document.getPatchSequence(),
+					document.organizations,
+					selection.equipmentGroup.id,
+					processLoopOrganizationId,
+				)
+			: planDetachEquipmentGroupFromProcessLoop(
+					document.map,
+					document.portEquipment,
+					document.getPatchSequence(),
+					document.organizations,
+					selection.equipmentGroup.id,
+					processLoopOrganizationId,
+				);
+		if (!plan.valid) {
+			setStatus(plan.reason);
+			requestAnimationFrame(() => {
+				processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
+				processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
+			});
+			return;
+		}
+		if (!document.commitOrganization(plan)) {
+			setStatus(document.getLastCommandError() ?? plan.reason);
+			requestAnimationFrame(() => {
+				processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
+				processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
+			});
+			return;
+		}
+		const label = processLoop?.name ?? `Process Loop ${processLoopOrganizationId}`;
+		syncModelUi(
+			operation === "attach"
+				? `${selection.equipmentGroup.kind}-${selection.equipmentGroup.id}을(를) ${label}에 소속시켰습니다 · 실행 취소 가능`
+				: `${selection.equipmentGroup.kind}-${selection.equipmentGroup.id}의 ${label} 소속을 분리했습니다 · 장비와 Port는 유지됩니다`,
+		);
+		requestAnimationFrame(() => {
+			processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
+			processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
+		});
 	};
 
 	const renameSelectedStaticFabOrganization = (): void => {
@@ -27490,6 +27588,22 @@ export default function TileFabApp(): React.ReactElement {
 		? resolveExactPortEquipmentSelection(railDocument.portEquipment, selectedPortEquipment)
 		: null;
 	const selectedEquipmentGroup = selectedPortDetails?.equipmentGroup;
+	const selectedEquipmentProcessLoopMembership = useMemo(
+		() => selectedEquipmentGroup
+			? queryStaticFabProcessLoopEquipmentMembership(
+					activePortEquipment,
+					activeOrganizations,
+					selectedEquipmentGroup.id,
+				)
+			: null,
+		[activePortEquipment, activeOrganizations, selectedEquipmentGroup],
+	);
+	const selectedEquipmentDirectlyOwned =
+		(selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.length ?? 0) > 0;
+	const selectedEquipmentOwnedOutsideProcessLoop =
+		selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.some(
+			(id) => organizationSemanticRoles.get(id) !== "PROCESS_LOOP",
+		) ?? false;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: equipment identity changes intentionally trigger focus even though the effect reads the stable button ref.
 	useLayoutEffect(() => {
 		if (!nextPortEquipmentFocusPendingRef.current) return;
@@ -34232,7 +34346,7 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={!selectedPortEditableDetails}
+												disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
 												onClick={() =>
 													runContextPaletteAction(() => startSelectedOhbPlacementIntent("move"))
 												}
@@ -34257,6 +34371,7 @@ export default function TileFabApp(): React.ReactElement {
 												role="menuitem"
 												disabled={
 													!selectedPortEditableDetails ||
+													selectedEquipmentDirectlyOwned ||
 													(selectedPortDetails.equipmentGroup.kind === "STK" &&
 														selectedPortDetails.equipmentGroup.template === "CUSTOM")
 												}
@@ -34269,7 +34384,7 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={!selectedPortEditableDetails}
+												disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
 												onClick={() =>
 													runContextPaletteAction(() => startSelectedPortEquipmentGroupEdit("move"))
 												}
@@ -39076,12 +39191,20 @@ export default function TileFabApp(): React.ReactElement {
 										</>
 									) : null}
 									<div className="tilefab-device-actions">
+										{selectedEquipmentDirectlyOwned ? (
+											<p className="tilefab-inspector-notice" id="tilefab-equipment-organization-mutation-note" data-testid="equipment-organization-mutation-note">
+												{selectedEquipmentOwnedOutsideProcessLoop
+												? "이 장비는 기존 FAB 조직에 소속되어 있습니다. 이동·Port 편집·철거하려면 FAB 구조에서 소속을 먼저 정리하세요. 복제는 계속할 수 있습니다."
+												: "이 장비는 Process Loop에 소속되어 있습니다. 이동·Port 편집·철거하려면 아래 소속을 먼저 분리하세요. 복제는 계속할 수 있습니다."}
+											</p>
+										) : null}
 										{selectedEquipmentGroup.kind === "OHB" ? (
 											<button
 												type="button"
 												className="tilefab-inspector-primary"
 												data-testid="move-ohb-port"
-												disabled={!selectedPortEditableDetails}
+												disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
+												aria-describedby={selectedEquipmentDirectlyOwned ? "tilefab-equipment-organization-mutation-note" : undefined}
 												onClick={() => startSelectedOhbPlacementIntent("move")}
 											>
 												<Move size={15} /> 위치 이동
@@ -39093,15 +39216,18 @@ export default function TileFabApp(): React.ReactElement {
 													className="tilefab-inspector-primary"
 													data-testid="edit-port-equipment-membership"
 													aria-describedby={
-														selectedPortEditableDetails &&
+														selectedEquipmentDirectlyOwned
+															? "tilefab-equipment-organization-mutation-note"
+															: selectedPortEditableDetails &&
 														selectedEquipmentGroup.kind === "STK" &&
 														selectedEquipmentGroup.template === "CUSTOM"
 															? "tilefab-stk-membership-note"
 															: undefined
 													}
 													disabled={
-														!selectedPortEditableDetails ||
-														(selectedEquipmentGroup.kind === "STK" &&
+													!selectedPortEditableDetails ||
+													selectedEquipmentDirectlyOwned ||
+													(selectedEquipmentGroup.kind === "STK" &&
 															selectedEquipmentGroup.template === "CUSTOM")
 													}
 													onClick={startSelectedPortEquipmentMembershipEdit}
@@ -39112,7 +39238,8 @@ export default function TileFabApp(): React.ReactElement {
 													type="button"
 													className="tilefab-inspector-primary"
 													data-testid="move-port-equipment-group"
-													disabled={!selectedPortEditableDetails}
+													disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
+													aria-describedby={selectedEquipmentDirectlyOwned ? "tilefab-equipment-organization-mutation-note" : undefined}
 													onClick={() => startSelectedPortEquipmentGroupEdit("move")}
 												>
 													<Move size={15} /> 장비 이동
@@ -39139,6 +39266,97 @@ export default function TileFabApp(): React.ReactElement {
 											equipmentAuthoringContinuation(selectedEquipmentGroup),
 										)}
 									</p>
+									{selectedEquipmentProcessLoopMembership ? (
+										<details
+											key={`process-loop-${selectedEquipmentGroup.id}`}
+											className="tilefab-equipment-process-loop"
+											data-testid="equipment-process-loop-membership"
+											data-owner-ids={selectedEquipmentProcessLoopMembership.ownerOrganizationIds.join(",")}
+											onToggle={(event) => scrollFocusedInspectorDisclosure(event.currentTarget)}
+											onKeyDown={(event) => {
+												if (event.key !== "Escape" || !event.currentTarget.open) return;
+												event.preventDefault();
+												event.stopPropagation();
+												event.currentTarget.open = false;
+												processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
+											}}
+										>
+											<summary ref={processLoopMembershipDisclosureRef}>
+												<span>
+													<strong>Process Loop 소속</strong>
+													<small>
+														{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.length === 0
+															? "미지정 · 연결할 Loop 선택"
+															: selectedEquipmentProcessLoopMembership.ownerOrganizationIds
+																.map((id) => organizationRecordsById.get(id)?.name ?? `조직 ${id}`)
+																.join(", ")}
+													</small>
+												</span>
+												<ChevronDown size={15} aria-hidden="true" />
+											</summary>
+											<div className="tilefab-equipment-process-loop-body">
+												{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.length > 0 ? (
+													<>
+														<p>현재 장비가 직접 속한 조직입니다. 다른 Loop로 옮기려면 먼저 소속을 분리하세요.</p>
+														{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.map((id) => {
+															const record = organizationRecordsById.get(id);
+															const isProcessLoop = organizationSemanticRoles.get(id) === "PROCESS_LOOP";
+															return (
+																<div className="tilefab-equipment-process-loop-row" key={id}>
+																	<span>{record?.name ?? `조직 ${id}`}<small>{isProcessLoop ? "Process Loop" : "기존 조직 소속"}</small></span>
+																	{isProcessLoop ? (
+																		<button
+																			type="button"
+																			data-testid="detach-equipment-process-loop"
+																			disabled={!selectedPortEditableDetails || modelSyncPending || workerState.status !== "ready"}
+																					onClick={() => commitSelectedEquipmentProcessLoopMembership("detach", id, {
+																					portId: selectedPortDetails.port.id,
+																					equipmentGroupId: selectedEquipmentGroup.id,
+																				})}
+																		>
+																			소속 분리
+																		</button>
+																	) : null}
+																</div>
+															);
+														})}
+														{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.some(
+															(id) => organizationSemanticRoles.get(id) !== "PROCESS_LOOP",
+														) ? <p>다른 종류의 기존 소속은 구조 편집에서 정리하세요.</p> : null}
+													</>
+												) : selectedEquipmentProcessLoopMembership.eligibleProcessLoopIds.length > 0 ? (
+													<>
+														<p>장비의 모든 Port 경로가 포함된 Process Loop를 선택하세요. 장비와 Port의 위치는 유지됩니다.</p>
+														{selectedEquipmentProcessLoopMembership.eligibleProcessLoopIds.map((id) => {
+															const record = organizationRecordsById.get(id);
+															const bay = record ? staticFabOrganizationParentIds(record)
+																.map((parentId) => organizationRecordsById.get(parentId))
+																.find((parent) => parent && organizationSemanticRoles.get(parent.id) === "BAY") : undefined;
+															return (
+																<button
+																	key={id}
+																	type="button"
+																	className="tilefab-equipment-process-loop-choice"
+																	data-testid="attach-equipment-process-loop"
+																	data-process-loop-id={id}
+																	disabled={!selectedPortEditableDetails || modelSyncPending || workerState.status !== "ready"}
+																		onClick={() => commitSelectedEquipmentProcessLoopMembership("attach", id, {
+																		portId: selectedPortDetails.port.id,
+																		equipmentGroupId: selectedEquipmentGroup.id,
+																	})}
+																>
+																	<span><strong>{record?.name ?? `Process Loop ${id}`}</strong><small>{bay ? `${bay.name} / Process Loop` : "Process Loop"}</small></span>
+																	<Plus size={15} aria-hidden="true" />
+																</button>
+															);
+														})}
+													</>
+												) : (
+													<p role="status">{selectedEquipmentProcessLoopMembership.reason ?? "연결 가능한 Process Loop가 없습니다."} · FAB 구조에서 Loop와 Port 경로를 확인하세요.</p>
+												)}
+											</div>
+										</details>
+									) : null}
 								</>
 							) : null}
 
@@ -39178,8 +39396,9 @@ export default function TileFabApp(): React.ReactElement {
 										<button
 											type="button"
 											className="tilefab-inspector-danger"
-											data-testid="delete-port-equipment"
-											disabled={!selectedPortEditableDetails}
+															data-testid="delete-port-equipment"
+															disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
+															aria-describedby={selectedEquipmentDirectlyOwned ? "tilefab-equipment-organization-mutation-note" : undefined}
 											onClick={deleteSelected}
 										>
 											<Trash2 size={15} /> 장비와 연결 Port 철거

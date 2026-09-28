@@ -1,10 +1,12 @@
-import type { PortEquipmentState } from "./EquipmentGroup";
+import type { EquipmentGroupRecord, PortEquipmentState } from "./EquipmentGroup";
 import type { RailModuleOwnershipIndex } from "./RailModuleOwnership";
 import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
+	deriveStaticFabOrganizationSemanticRoles,
 	renameStaticFabOrganizationRecord,
+	replaceStaticFabOrganizationRecordMembership,
 	type StaticFabOrganizationColor,
 	type StaticFabOrganizationKind,
 	type StaticFabOrganizationMutation,
@@ -396,6 +398,270 @@ export function staticFabOrganizationAssignmentSourcesForSelection(
 				equipmentGroupIds,
 			);
 			return [Object.freeze({ record, empties: organizationMembershipIsEmpty(remaining) })];
+		}),
+	);
+}
+
+export interface StaticFabProcessLoopEquipmentMembershipQuery {
+	readonly ownerOrganizationIds: readonly number[];
+	readonly eligibleProcessLoopIds: readonly number[];
+	readonly reason: string | null;
+}
+
+/** Inspect authored ownership and exact direct-route eligibility without changing project state. */
+export function queryStaticFabProcessLoopEquipmentMembership(
+	portEquipment: PortEquipmentState,
+	organizations: StaticFabOrganizationState,
+	equipmentGroupId: number,
+): StaticFabProcessLoopEquipmentMembershipQuery {
+	const ownerOrganizationIds = Object.freeze(
+		organizations.records
+			.filter((record) => record.membership.equipmentGroupIds.includes(equipmentGroupId))
+			.map((record) => record.id),
+	);
+	const groupPorts = resolveCompleteEquipmentGroupPorts(portEquipment, equipmentGroupId);
+	if (!groupPorts.valid) {
+		return Object.freeze({
+			ownerOrganizationIds,
+			eligibleProcessLoopIds: Object.freeze([]),
+			reason: groupPorts.reason,
+		});
+	}
+	if (ownerOrganizationIds.length > 0) {
+		return Object.freeze({
+			ownerOrganizationIds,
+			eligibleProcessLoopIds: Object.freeze([]),
+			reason: `장비 그룹 ${equipmentGroupId}은 조직 ${ownerOrganizationIds.join(", ")}에 이미 직접 소속되어 있습니다`,
+		});
+	}
+	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
+	const loops = organizations.records.filter((record) => roles.get(record.id) === "PROCESS_LOOP");
+	const eligibleProcessLoopIds = Object.freeze(
+		loops
+			.filter(
+				(record) =>
+					supportedEquipmentGroupPortCount(record, groupPorts.ports) === groupPorts.ports.length,
+			)
+			.map((record) => record.id),
+	);
+	return Object.freeze({
+		ownerOrganizationIds,
+		eligibleProcessLoopIds,
+		reason:
+			eligibleProcessLoopIds.length > 0
+				? null
+				: loops.length === 0
+					? "장비를 소속시킬 Process Loop 조직이 없습니다"
+					: `장비 그룹 ${equipmentGroupId}의 모든 Port 경로를 직접 포함하는 Process Loop가 없습니다 · 장비 전체를 합법 슬롯으로 이동하세요`,
+	});
+}
+
+/** Attach one complete unowned group to one current semantic Process Loop without moving rail or Ports. */
+export function planAttachEquipmentGroupToProcessLoop(
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+	basePatchSequence: number,
+	organizations: StaticFabOrganizationState,
+	equipmentGroupId: number,
+	processLoopOrganizationId: number,
+): StaticFabOrganizationMutationPlan {
+	const kind = "update-static-fab-organization";
+	const target = organizations.records.find((record) => record.id === processLoopOrganizationId);
+	if (
+		!target ||
+		deriveStaticFabOrganizationSemanticRoles(organizations).get(target.id) !== "PROCESS_LOOP"
+	) {
+		return invalidPlan(
+			kind,
+			map,
+			basePatchSequence,
+			organizations,
+			`조직 ${processLoopOrganizationId}은 현재 Process Loop가 아닙니다`,
+		);
+	}
+	const groupPorts = resolveCompleteEquipmentGroupPorts(portEquipment, equipmentGroupId);
+	if (!groupPorts.valid)
+		return invalidPlan(kind, map, basePatchSequence, organizations, groupPorts.reason);
+	const owner = organizations.records.find((record) =>
+		record.membership.equipmentGroupIds.includes(equipmentGroupId),
+	);
+	if (owner) {
+		return invalidPlan(
+			kind,
+			map,
+			basePatchSequence,
+			organizations,
+			owner.id === target.id
+				? `장비 그룹 ${equipmentGroupId}은 Process Loop '${target.name}'에 이미 직접 소속되어 있습니다`
+				: `장비 그룹 ${equipmentGroupId}은 ${owner.kind} 조직 '${owner.name}'에 이미 직접 소속되어 있습니다 · 자동 이동하지 않습니다`,
+		);
+	}
+	const supported = supportedEquipmentGroupPortCount(target, groupPorts.ports);
+	if (supported !== groupPorts.ports.length) {
+		return invalidPlan(
+			kind,
+			map,
+			basePatchSequence,
+			organizations,
+			`장비 그룹 ${equipmentGroupId}의 Port ${supported}/${groupPorts.ports.length}개만 Process Loop '${target.name}'의 직접 레일·스위치에 포함됩니다 · 장비 전체를 합법 슬롯으로 이동하세요`,
+		);
+	}
+	let after: StaticFabOrganizationRecord;
+	try {
+		after = replaceEquipmentGroupMembership(
+			target,
+			[...target.membership.equipmentGroupIds, equipmentGroupId].sort(
+				(left, right) => left - right,
+			),
+		);
+	} catch (error) {
+		return invalidPlan(
+			kind,
+			map,
+			basePatchSequence,
+			organizations,
+			error instanceof Error ? error.message : "장비 소속을 검증할 수 없습니다",
+		);
+	}
+	return validatePlan(
+		kind,
+		map,
+		portEquipment,
+		basePatchSequence,
+		organizations,
+		organizations.nextOrganizationId,
+		[Object.freeze({ id: target.id, before: target, after })],
+		`장비 그룹 ${equipmentGroupId}을 Process Loop '${target.name}'에 직접 소속시킵니다`,
+	);
+}
+
+/** Remove only one explicit Process Loop group membership; equipment and Port records stay put. */
+export function planDetachEquipmentGroupFromProcessLoop(
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+	basePatchSequence: number,
+	organizations: StaticFabOrganizationState,
+	equipmentGroupId: number,
+	processLoopOrganizationId: number,
+): StaticFabOrganizationMutationPlan {
+	const kind = "update-static-fab-organization";
+	const target = organizations.records.find((record) => record.id === processLoopOrganizationId);
+	if (
+		!target ||
+		deriveStaticFabOrganizationSemanticRoles(organizations).get(target.id) !== "PROCESS_LOOP"
+	) {
+		return invalidPlan(
+			kind,
+			map,
+			basePatchSequence,
+			organizations,
+			`조직 ${processLoopOrganizationId}은 현재 Process Loop가 아닙니다`,
+		);
+	}
+	const groupPorts = resolveCompleteEquipmentGroupPorts(portEquipment, equipmentGroupId);
+	if (!groupPorts.valid)
+		return invalidPlan(kind, map, basePatchSequence, organizations, groupPorts.reason);
+	if (!target.membership.equipmentGroupIds.includes(equipmentGroupId)) {
+		return invalidPlan(
+			kind,
+			map,
+			basePatchSequence,
+			organizations,
+			`장비 그룹 ${equipmentGroupId}은 Process Loop '${target.name}'에 직접 소속되어 있지 않습니다`,
+		);
+	}
+	let after: StaticFabOrganizationRecord;
+	try {
+		after = replaceEquipmentGroupMembership(
+			target,
+			target.membership.equipmentGroupIds.filter((id) => id !== equipmentGroupId),
+		);
+	} catch (error) {
+		return invalidPlan(
+			kind,
+			map,
+			basePatchSequence,
+			organizations,
+			error instanceof Error ? error.message : "장비 소속 해제를 검증할 수 없습니다",
+		);
+	}
+	return validatePlan(
+		kind,
+		map,
+		portEquipment,
+		basePatchSequence,
+		organizations,
+		organizations.nextOrganizationId,
+		[Object.freeze({ id: target.id, before: target, after })],
+		`장비 그룹 ${equipmentGroupId}의 Process Loop '${target.name}' 직접 소속을 해제합니다`,
+	);
+}
+
+type CompleteEquipmentGroupPorts =
+	| { readonly valid: true; readonly ports: readonly PortEquipmentState["ports"][number][] }
+	| { readonly valid: false; readonly reason: string };
+
+function resolveCompleteEquipmentGroupPorts(
+	portEquipment: PortEquipmentState,
+	equipmentGroupId: number,
+): CompleteEquipmentGroupPorts {
+	const groups = portEquipment.equipmentGroups.filter((group) => group.id === equipmentGroupId);
+	if (groups.length !== 1) {
+		return {
+			valid: false,
+			reason: `장비 그룹 ${equipmentGroupId}을 현재 프로젝트에서 정확히 찾을 수 없습니다`,
+		};
+	}
+	const group = groups[0] as EquipmentGroupRecord;
+	if (group.portIds.length === 0 || new Set(group.portIds).size !== group.portIds.length) {
+		return {
+			valid: false,
+			reason: `장비 그룹 ${equipmentGroupId}의 Port 목록이 완전하지 않습니다`,
+		};
+	}
+	const ports: PortEquipmentState["ports"][number][] = [];
+	for (const portId of group.portIds) {
+		const matching = portEquipment.ports.filter((port) => port.id === portId);
+		const port = matching[0];
+		if (
+			matching.length !== 1 ||
+			!port ||
+			port.equipmentGroupId !== group.id ||
+			port.portType !== group.kind
+		) {
+			return {
+				valid: false,
+				reason: `장비 그룹 ${equipmentGroupId}의 PORT-${portId}가 완전하지 않습니다`,
+			};
+		}
+		ports.push(port);
+	}
+	return { valid: true, ports: Object.freeze(ports) };
+}
+
+function supportedEquipmentGroupPortCount(
+	target: StaticFabOrganizationRecord,
+	ports: readonly PortEquipmentState["ports"][number][],
+): number {
+	const edges = new Set(target.membership.railEdges.map(staticFabOrganizationEdgeKey));
+	const switches = new Set(target.membership.advancedSwitchIds);
+	let supported = 0;
+	for (const port of ports) {
+		if (staticFabOrganizationMembershipSupportsPortRoute(port.route, edges, switches)) supported++;
+	}
+	return supported;
+}
+
+function replaceEquipmentGroupMembership(
+	record: StaticFabOrganizationRecord,
+	equipmentGroupIds: readonly number[],
+): StaticFabOrganizationRecord {
+	return replaceStaticFabOrganizationRecordMembership(
+		record,
+		Object.freeze({
+			railEdges: record.membership.railEdges,
+			advancedSwitchIds: record.membership.advancedSwitchIds,
+			equipmentGroupIds: Object.freeze([...equipmentGroupIds]),
 		}),
 	);
 }

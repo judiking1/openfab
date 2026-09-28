@@ -42,10 +42,13 @@ import {
 } from "./StaticFabOrganization";
 import {
 	planAssignStaticFabOrganizationFromSelection,
+	planAttachEquipmentGroupToProcessLoop,
 	planCreateStaticFabOrganizationFromSelection,
+	planDetachEquipmentGroupFromProcessLoop,
 	planRemoveStaticFabOrganization,
 	planRenameStaticFabOrganization,
 	planUpdateStaticFabOrganizationDetails,
+	queryStaticFabProcessLoopEquipmentMembership,
 	staticFabOrganizationAssignmentSourcesForSelection,
 	staticFabOrganizationConflictsForSelection,
 } from "./StaticFabOrganizationPlan";
@@ -1216,6 +1219,237 @@ describe("StaticFabOrganization", () => {
 		expect(resolved.reason).toContain("정확히 복원");
 	});
 });
+
+describe("Process Loop equipment membership", () => {
+	it("queries exact eligible loops and attaches one complete group without changing geometry or metadata", () => {
+		const { document, organizations, equipment } = processLoopEquipmentFixture();
+		const query = queryStaticFabProcessLoopEquipmentMembership(equipment, organizations, 1);
+		expect(query).toEqual({
+			ownerOrganizationIds: [],
+			eligibleProcessLoopIds: [2],
+			reason: null,
+		});
+		expect(Object.isFrozen(query.eligibleProcessLoopIds)).toBe(true);
+
+		const plan = planAttachEquipmentGroupToProcessLoop(
+			document.map,
+			equipment,
+			document.getPatchSequence(),
+			organizations,
+			1,
+			2,
+		);
+		expect(plan.valid, plan.reason).toBe(true);
+		expect(plan.kind).toBe("update-static-fab-organization");
+		expect(plan.nextOrganizationIdAfter).toBe(organizations.nextOrganizationId);
+		expect(plan.organizationMutations).toHaveLength(1);
+		const mutation = plan.organizationMutations[0];
+		const before = organizations.records[1];
+		expect(mutation?.before).toBe(before);
+		expect(mutation?.after?.membership.equipmentGroupIds).toEqual([1]);
+		expect(mutation?.after?.membership.railEdges).toEqual(before?.membership.railEdges);
+		expect(mutation?.after?.membership.railEdges).toBe(before?.membership.railEdges);
+		expect(mutation?.after?.membership.advancedSwitchIds).toEqual(
+			before?.membership.advancedSwitchIds,
+		);
+		expect(mutation?.after?.membership.advancedSwitchIds).toBe(
+			before?.membership.advancedSwitchIds,
+		);
+		expect(mutation?.after?.parentOrganizationIds).toEqual(before?.parentOrganizationIds);
+		expect(mutation?.after?.properties).toEqual(before?.properties);
+		expect(mutation?.after?.name).toBe(before?.name);
+		const attached = applyStaticFabOrganizationMutations(
+			organizations,
+			plan.organizationMutations,
+			plan.nextOrganizationIdAfter,
+		);
+		expect(staticFabOrganizationStateError(document.map, equipment, attached)).toBeNull();
+		expect(resolveStaticFabOrganizationCoverage(attached, 1)?.effective.equipmentGroupIds).toEqual([
+			1,
+		]);
+		expect(queryStaticFabProcessLoopEquipmentMembership(equipment, attached, 1)).toMatchObject({
+			ownerOrganizationIds: [2],
+			eligibleProcessLoopIds: [],
+		});
+		expect(
+			planAttachEquipmentGroupToProcessLoop(
+				document.map,
+				equipment,
+				document.getPatchSequence(),
+				attached,
+				1,
+				2,
+			),
+		).toMatchObject({ valid: false, organizationMutations: [] });
+
+		const detach = planDetachEquipmentGroupFromProcessLoop(
+			document.map,
+			equipment,
+			document.getPatchSequence(),
+			attached,
+			1,
+			2,
+		);
+		expect(detach.valid, detach.reason).toBe(true);
+		expect(detach.nextOrganizationIdAfter).toBe(organizations.nextOrganizationId);
+		expect(detach.organizationMutations[0]?.after).toEqual(before);
+		const detached = applyStaticFabOrganizationMutations(
+			attached,
+			detach.organizationMutations,
+			detach.nextOrganizationIdAfter,
+		);
+		expect(queryStaticFabProcessLoopEquipmentMembership(equipment, detached, 1)).toEqual(query);
+	});
+
+	it("refuses the wrong semantic role, incomplete Port set, partial route, and other-kind owner", () => {
+		const { document, organizations, equipment, route } = processLoopEquipmentFixture();
+		const wrongRole = planAttachEquipmentGroupToProcessLoop(
+			document.map,
+			equipment,
+			document.getPatchSequence(),
+			organizations,
+			1,
+			1,
+		);
+		expect(wrongRole.valid).toBe(false);
+		expect(wrongRole.reason).toContain("Process Loop가 아닙니다");
+
+		const incomplete: PortEquipmentState = {
+			...equipment,
+			ports: [],
+		};
+		expect(
+			queryStaticFabProcessLoopEquipmentMembership(incomplete, organizations, 1).reason,
+		).toContain("완전하지 않습니다");
+		expect(
+			planAttachEquipmentGroupToProcessLoop(
+				document.map,
+				incomplete,
+				document.getPatchSequence(),
+				organizations,
+				1,
+				2,
+			).valid,
+		).toBe(false);
+
+		const sourcePort = equipment.ports[0];
+		if (!sourcePort) {
+			throw new Error("Expected fixture Port");
+		}
+		const partialEquipment: PortEquipmentState = {
+			nextPortId: 3,
+			nextEquipmentGroupId: 3,
+			ports: [
+				{
+					...sourcePort,
+					id: 1,
+					equipmentGroupId: 2,
+					portType: "EQ",
+					route: { kind: "CARDINAL_CELL", ...route },
+				},
+				{
+					...sourcePort,
+					id: 2,
+					equipmentGroupId: 2,
+					portType: "EQ",
+					route: { kind: "CARDINAL_CELL", ...route, x: route.x + 1_000 },
+				},
+			],
+			equipmentGroups: [
+				{ id: 2, kind: "EQ", pitchMillimeters: 2_000, recipe: null, portIds: [1, 2] },
+			],
+		};
+		expect(
+			queryStaticFabProcessLoopEquipmentMembership(partialEquipment, organizations, 2)
+				.eligibleProcessLoopIds,
+		).toEqual([]);
+		const partial = planAttachEquipmentGroupToProcessLoop(
+			document.map,
+			partialEquipment,
+			document.getPatchSequence(),
+			organizations,
+			2,
+			2,
+		);
+		expect(partial.valid).toBe(false);
+		expect(partial.reason).toContain("Port 1/2개");
+
+		const otherKindOwner = copyStaticFabOrganizationState({
+			...organizations,
+			records: organizations.records.map((record) =>
+				record.id === 1
+					? { ...record, membership: { ...record.membership, equipmentGroupIds: [1] } }
+					: record,
+			),
+		});
+		expect(staticFabOrganizationStateError(document.map, equipment, otherKindOwner)).toBeNull();
+		expect(
+			queryStaticFabProcessLoopEquipmentMembership(equipment, otherKindOwner, 1),
+		).toMatchObject({ ownerOrganizationIds: [1], eligibleProcessLoopIds: [] });
+		const occupied = planAttachEquipmentGroupToProcessLoop(
+			document.map,
+			equipment,
+			document.getPatchSequence(),
+			otherKindOwner,
+			1,
+			2,
+		);
+		expect(occupied.valid).toBe(false);
+		expect(occupied.reason).toContain("자동 이동하지 않습니다");
+	});
+});
+
+function processLoopEquipmentFixture(): {
+	readonly document: RailDocument;
+	readonly organizations: StaticFabOrganizationState;
+	readonly equipment: PortEquipmentState;
+	readonly route: ReturnType<typeof firstRegularRoute>;
+} {
+	const document = longBayDocument();
+	const route = firstRegularRoute(document);
+	const railEdges = buildRailModuleOwnershipIndex(document.map)
+		.modules.flatMap((module) => module.eraseEdges)
+		.sort(compareDirectedRailEdges);
+	const organizations = copyStaticFabOrganizationState({
+		nextOrganizationId: 3,
+		records: [
+			{
+				id: 1,
+				kind: "BAY",
+				name: "Bay A",
+				membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [] },
+			},
+			{
+				id: 2,
+				kind: "AISLE",
+				name: "Process Loop A",
+				parentOrganizationIds: [1],
+				properties: { description: "Synthetic loop", color: "CYAN" },
+				membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [] },
+			},
+		],
+	});
+	const equipment: PortEquipmentState = {
+		nextPortId: 2,
+		nextEquipmentGroupId: 2,
+		ports: [
+			{
+				id: 1,
+				equipmentGroupId: 1,
+				route: { kind: "CARDINAL_CELL", ...route },
+				stationMillimeters: 500,
+				side: "LEFT",
+				lateralOffsetMillimeters: 700,
+				direction: "WITH_TRAVEL",
+				portType: "OHB",
+				barcode: null,
+			},
+		],
+		equipmentGroups: [{ id: 1, kind: "OHB", template: "SINGLE", portIds: [1] }],
+	};
+	expect(staticFabOrganizationStateError(document.map, equipment, organizations)).toBeNull();
+	return { document, organizations, equipment, route };
+}
 
 function longBayDocument(): RailDocument {
 	const document = new RailDocument();
