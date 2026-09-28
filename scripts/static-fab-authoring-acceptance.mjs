@@ -5491,14 +5491,22 @@ async function selectOrdinaryPortProcessLoop(page, loopId, label, verifyChangeFo
 	}
 	await select.selectOption(String(loopId));
 	await page.waitForFunction(
-		(expected) =>
-			document.querySelector('[data-testid="ordinary-port-process-loop-target"]')?.value ===
-				expected &&
-			Number(
-				document
-					.querySelector('[data-testid="ordinary-port-process-loop-target-count"]')
-					?.textContent?.match(/슬롯 (\d+)개/)?.[1],
-			) > 0,
+		(expected) => {
+			const selector = document.querySelector('[data-testid="ordinary-port-process-loop-target"]');
+			if (!(selector instanceof HTMLSelectElement) || selector.value !== expected) return false;
+			const selectedLabel = selector.selectedOptions[0]?.textContent?.trim();
+			const renderedLabel = document
+				.querySelector('[data-testid="ordinary-port-process-loop-selected-name"]')
+				?.textContent?.trim();
+			return (
+				Boolean(selectedLabel && renderedLabel?.startsWith(selectedLabel)) &&
+				Number(
+					document
+						.querySelector('[data-testid="ordinary-port-process-loop-target-count"]')
+						?.textContent?.match(/슬롯 (\d+)개/)?.[1],
+				) > 0
+			);
+		},
 		String(loopId),
 		{ timeout: 10_000 },
 	);
@@ -5643,35 +5651,11 @@ async function waitForOrdinaryPortKeyboardTargetInLoop(page, portType, loopId, l
 		(candidate) => candidate.row,
 	);
 	if (rows.length === 0) throw new Error(`${label} selected Loop has no legal ${portType} row.`);
-	await page.waitForFunction(
-		({ type, allowedRows }) => {
-			const canvas = document.querySelector('[data-testid="rail-canvas"]');
-			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
-			const slots = window.__tileFab?.getEditorModel().portSlotArtifacts[type]?.slots;
-			const camera = window.__tileFab?.camera;
-			if (
-				!(canvas instanceof HTMLCanvasElement) ||
-				!(marker instanceof HTMLElement) ||
-				!slots ||
-				!camera
-			)
-				return false;
-			const row = Number(canvas.dataset.guidedPortKeyboardRow);
-			if (!allowedRows.includes(row) || marker.dataset.portSlotRow !== String(row)) return false;
-			const expectedX = camera.offsetX + slots.worldPositions[row * 2] * camera.zoom;
-			const expectedY = camera.offsetY + slots.worldPositions[row * 2 + 1] * camera.zoom;
-			return (
-				Math.abs(Number.parseFloat(marker.style.left) - expectedX) <= 2 &&
-				Math.abs(Number.parseFloat(marker.style.top) - expectedY) <= 2
-			);
-		},
-		{ type: portType, allowedRows: rows },
-		{ timeout: 10_000 },
-	);
-	await page.evaluate(
-		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-	);
-	await assertOrdinaryPortKeyboardTargetVisible(page, label);
+	await assertOrdinaryPortKeyboardTargetVisible(page, label, {
+		type: portType,
+		loopId,
+		allowedRows: rows,
+	});
 }
 
 async function assertOrdinaryPortKeyboardTargetClearsWorkspace(page, label) {
@@ -5850,7 +5834,12 @@ async function exerciseOrdinaryEqProcessLoopRecovery(page, selectedLoopId, alter
 	await page.evaluate(
 		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 	);
-	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} alternate EQ first Port`);
+	await waitForOrdinaryPortKeyboardTargetInLoop(
+		page,
+		"EQ",
+		alternateLoopId,
+		`${label} alternate EQ first Port`,
+	);
 	if (label === "390x600") {
 		await assertOrdinaryPortKeyboardTargetClearsWorkspace(page, `${label} alternate EQ first Port`);
 	}
@@ -5875,7 +5864,12 @@ async function exerciseOrdinaryEqProcessLoopRecovery(page, selectedLoopId, alter
 		`${label} EQ anchor cleared`,
 	);
 	await selectOrdinaryPortProcessLoop(page, selectedLoopId, label);
-	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} recovered EQ first Port`);
+	await waitForOrdinaryPortKeyboardTargetInLoop(
+		page,
+		"EQ",
+		selectedLoopId,
+		`${label} recovered EQ first Port`,
+	);
 	assertProjectUnchanged(await readMetrics(page), beforeDraft, `${label} EQ scope restored`);
 	return { selectedName, rejected, cancelledEnd };
 }
@@ -5935,9 +5929,17 @@ async function exerciseOrdinaryStkProcessLoopRecovery(
 		`${label} outside-Loop Stocker preserves keyboard target`,
 	);
 	await selectOrdinaryPortProcessLoop(page, alternateLoopId, label);
-	await selectOrdinaryPortProcessLoop(page, selectedLoopId, label);
-	await assertOrdinaryPortKeyboardTargetVisible(
+	await waitForOrdinaryPortKeyboardTargetInLoop(
 		page,
+		"STK",
+		alternateLoopId,
+		`${label} alternate Stocker first Port after refusal`,
+	);
+	await selectOrdinaryPortProcessLoop(page, selectedLoopId, label);
+	await waitForOrdinaryPortKeyboardTargetInLoop(
+		page,
+		"STK",
+		selectedLoopId,
 		`${label} recovered Stocker first Port after refusal`,
 	);
 	assertProjectUnchanged(
@@ -5969,7 +5971,12 @@ async function exerciseOrdinaryStkProcessLoopRecovery(
 	await page.evaluate(
 		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 	);
-	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} alternate Stocker first Port`);
+	await waitForOrdinaryPortKeyboardTargetInLoop(
+		page,
+		"STK",
+		alternateLoopId,
+		`${label} alternate Stocker first Port`,
+	);
 	await assertOrdinaryPortKeyboardTargetClearsWorkspace(
 		page,
 		`${label} alternate Stocker first Port`,
@@ -6048,8 +6055,10 @@ async function exerciseOrdinaryStkProcessLoopRecovery(
 	await page.waitForFunction(
 		() => document.querySelector('[data-testid="ordinary-port-process-loop-feedback"]') === null,
 	);
-	await assertOrdinaryPortKeyboardTargetVisible(
+	await waitForOrdinaryPortKeyboardTargetInLoop(
 		page,
+		"STK",
+		selectedLoopId,
 		`${label} Stocker Loop reselected after all-slots`,
 	);
 	await assertOrdinaryPortKeyboardTargetClearsWorkspace(
@@ -44635,111 +44644,102 @@ async function assertOrdinaryPortToolDensity(
 	return Object.freeze(initialLayout);
 }
 
-async function assertOrdinaryPortKeyboardTargetVisible(page, label) {
-	await page.waitForFunction(
-		() => {
-			const canvas = document.querySelector('[data-testid="rail-canvas"]');
-			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
-			if (!(canvas instanceof HTMLCanvasElement)) return false;
-			if (!(marker instanceof HTMLElement)) return false;
-			const screenX = marker.style.left;
-			const screenY = marker.style.top;
-			const localX = Number.parseFloat(screenX);
-			const localY = Number.parseFloat(screenY);
-			const rect = canvas.getBoundingClientRect();
-			return (
-				canvas?.getAttribute("data-port-keyboard-scope") === "ordinary" &&
-				marker.dataset.portSlotRow === canvas.dataset.guidedPortKeyboardRow &&
-				marker.dataset.portType === canvas.dataset.guidedPortKeyboardType &&
-				marker.style.left.length > 0 &&
-				marker.style.top.length > 0 &&
-				screenX.length > 0 &&
-				screenY.length > 0 &&
-				Number.isFinite(localX) &&
-				Number.isFinite(localY) &&
-				localX >= 0 &&
-				localX <= rect.width &&
-				localY >= 0 &&
-				localY <= rect.height &&
-				document.elementFromPoint(rect.left + localX, rect.top + localY) === canvas
-			);
-		},
-		undefined,
-		{ timeout: 10_000 },
-	);
-	const visibility = await page.getByTestId("rail-canvas").evaluate((canvas) => {
-		const rect = canvas.getBoundingClientRect();
-		const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
-		if (!(marker instanceof HTMLElement)) return null;
-		const markerRect = marker.getBoundingClientRect();
-		const markerLabelRect = marker.querySelector("span")?.getBoundingClientRect() ?? null;
-		const localX = Number.parseFloat(marker.style.left);
-		const localY = Number.parseFloat(marker.style.top);
-		const clientX = rect.left + localX;
-		const clientY = rect.top + localY;
-		const hit = document.elementFromPoint(clientX, clientY);
-		return {
-			localX,
-			localY,
-			width: rect.width,
-			height: rect.height,
-			inside: localX >= 0 && localX <= rect.width && localY >= 0 && localY <= rect.height,
-			hitCanvas: hit === canvas,
-			marker: {
-				row: marker.dataset.portSlotRow ?? "",
-				expectedRow: canvas.dataset.guidedPortKeyboardRow ?? "",
-				portType: marker.dataset.portType ?? "",
-				expectedPortType: canvas.dataset.guidedPortKeyboardType ?? "",
-				phase: marker.dataset.phase ?? "",
-				label: marker.textContent?.trim() ?? "",
-				pointerEvents: getComputedStyle(marker).pointerEvents,
-				rect: {
-					x: markerRect.x,
-					y: markerRect.y,
-					width: markerRect.width,
-					height: markerRect.height,
-				},
-				labelRect: markerLabelRect
-					? {
-							x: markerLabelRect.x,
-							y: markerLabelRect.y,
-							width: markerLabelRect.width,
-							height: markerLabelRect.height,
-						}
-					: null,
+async function assertOrdinaryPortKeyboardTargetVisible(page, label, expectedScope = null) {
+	try {
+		await page.waitForFunction(
+			(scope) => {
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+				if (!(canvas instanceof HTMLCanvasElement) || !(marker instanceof HTMLElement))
+					return false;
+				const localX = Number.parseFloat(marker.style.left);
+				const localY = Number.parseFloat(marker.style.top);
+				if (scope) {
+					const selector = document.querySelector(
+						'[data-testid="ordinary-port-process-loop-target"]',
+					);
+					const slots = window.__tileFab?.getEditorModel().portSlotArtifacts[scope.type]?.slots;
+					const camera = window.__tileFab?.camera;
+					const row = Number(canvas.dataset.guidedPortKeyboardRow);
+					if (
+						!(selector instanceof HTMLSelectElement) ||
+						selector.value !== String(scope.loopId) ||
+						!slots ||
+						!camera ||
+						canvas.dataset.guidedPortKeyboardType !== scope.type ||
+						!scope.allowedRows.includes(row)
+					)
+						return false;
+					const expectedX = camera.offsetX + slots.worldPositions[row * 2] * camera.zoom;
+					const expectedY = camera.offsetY + slots.worldPositions[row * 2 + 1] * camera.zoom;
+					if (Math.abs(localX - expectedX) > 2 || Math.abs(localY - expectedY) > 2) return false;
+				}
+				const canvasRect = canvas.getBoundingClientRect();
+				const markerRect = marker.getBoundingClientRect();
+				const labelRect = marker.querySelector("span")?.getBoundingClientRect();
+				return (
+					canvas.dataset.portKeyboardScope === "ordinary" &&
+					marker.dataset.portSlotRow === canvas.dataset.guidedPortKeyboardRow &&
+					marker.dataset.portType === canvas.dataset.guidedPortKeyboardType &&
+					(marker.dataset.phase?.length ?? 0) > 0 &&
+					(marker.textContent?.trim().length ?? 0) > 0 &&
+					getComputedStyle(marker).pointerEvents === "none" &&
+					Number.isFinite(localX) &&
+					Number.isFinite(localY) &&
+					localX >= 0 &&
+					localX <= canvasRect.width &&
+					localY >= 0 &&
+					localY <= canvasRect.height &&
+					document.elementFromPoint(canvasRect.left + localX, canvasRect.top + localY) === canvas &&
+					markerRect.left >= 0 &&
+					markerRect.top >= 0 &&
+					markerRect.width >= 44 &&
+					markerRect.height >= 44 &&
+					markerRect.right <= innerWidth &&
+					markerRect.bottom <= innerHeight &&
+					labelRect !== undefined &&
+					labelRect.left >= 0 &&
+					labelRect.top >= 0 &&
+					labelRect.right <= innerWidth &&
+					labelRect.bottom <= innerHeight
+				);
 			},
-			viewport: { width: innerWidth, height: innerHeight },
-			hit:
-				hit === null
-					? null
-					: {
-							tagName: hit.tagName,
-							className: hit.getAttribute("class") ?? "",
-							testId: hit.getAttribute("data-testid") ?? "",
-						},
-		};
-	});
-	if (
-		!visibility?.inside ||
-		!visibility.hitCanvas ||
-		visibility.marker.row !== visibility.marker.expectedRow ||
-		visibility.marker.portType !== visibility.marker.expectedPortType ||
-		visibility.marker.phase.length === 0 ||
-		visibility.marker.label.length === 0 ||
-		visibility.marker.pointerEvents !== "none" ||
-		visibility.marker.rect.x < 0 ||
-		visibility.marker.rect.y < 0 ||
-		visibility.marker.rect.width < 44 ||
-		visibility.marker.rect.height < 44 ||
-		visibility.marker.rect.x + visibility.marker.rect.width > visibility.viewport.width ||
-		visibility.marker.rect.y + visibility.marker.rect.height > visibility.viewport.height ||
-		!visibility.marker.labelRect ||
-		visibility.marker.labelRect.x < 0 ||
-		visibility.marker.labelRect.y < 0 ||
-		visibility.marker.labelRect.x + visibility.marker.labelRect.width > visibility.viewport.width ||
-		visibility.marker.labelRect.y + visibility.marker.labelRect.height > visibility.viewport.height
-	) {
-		throw new Error(`${label} keyboard target is hidden: ${JSON.stringify(visibility)}.`);
+			expectedScope,
+			{ timeout: 10_000 },
+		);
+	} catch (error) {
+		const visibility = await page.getByTestId("rail-canvas").evaluate((canvas) => {
+			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+			if (!(marker instanceof HTMLElement)) return null;
+			const rect = canvas.getBoundingClientRect();
+			const localX = Number.parseFloat(marker.style.left);
+			const localY = Number.parseFloat(marker.style.top);
+			const label = marker.querySelector("span");
+			return {
+				localX,
+				localY,
+				canvas: { width: rect.width, height: rect.height },
+				marker: {
+					row: marker.dataset.portSlotRow ?? "",
+					expectedRow: canvas.dataset.guidedPortKeyboardRow ?? "",
+					portType: marker.dataset.portType ?? "",
+					expectedPortType: canvas.dataset.guidedPortKeyboardType ?? "",
+					phase: marker.dataset.phase ?? "",
+					label: marker.textContent?.trim() ?? "",
+					pointerEvents: getComputedStyle(marker).pointerEvents,
+					rect: marker.getBoundingClientRect().toJSON(),
+					labelRect: label?.getBoundingClientRect().toJSON() ?? null,
+				},
+				viewport: { width: innerWidth, height: innerHeight },
+				hit:
+					document
+						.elementFromPoint(rect.left + localX, rect.top + localY)
+						?.getAttribute("data-testid") ?? null,
+			};
+		});
+		throw new Error(`${label} keyboard target is hidden: ${JSON.stringify(visibility)}.`, {
+			cause: error,
+		});
 	}
 }
 

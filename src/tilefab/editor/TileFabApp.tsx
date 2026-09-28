@@ -3557,9 +3557,12 @@ export default function TileFabApp(): React.ReactElement {
 		useState<GuidedBuildKeyboardPortState | null>(null);
 	useLayoutEffect(() => {
 		// The canvas reads the session ref; its DOM marker is committed by React.
-		// Repaint after a Loop switch even when the marker node is reused.
-		if (guidedPortKeyboard?.scope === "ordinary") scheduleRenderRef.current();
-	}, [guidedPortKeyboard]);
+		// Repaint after a Loop switch even when the marker node and keyboard UI
+		// state are reused for a different scoped row.
+		if (guidedPortKeyboard?.scope === "ordinary" || ordinaryPortProcessLoopTargetId !== null) {
+			scheduleRenderRef.current();
+		}
+	}, [guidedPortKeyboard, ordinaryPortProcessLoopTargetId]);
 	const [guidedBuildChapterCheckpoint, setGuidedBuildChapterCheckpoint] =
 		useState<GuidedBuildChapterId | null>(null);
 	const guidedBuildPreviousChapterRef = useRef<GuidedBuildChapterId | null>(null);
@@ -10641,6 +10644,16 @@ export default function TileFabApp(): React.ReactElement {
 		ordinaryPortKeyboardPaintedSessionRef.current = null;
 		ordinaryPortKeyboardPresentationRequestRef.current = null;
 		equipmentTargetPresentationRef.current = null;
+		// The old marker can survive React's batched Loop change until the next Canvas frame.
+		// Hide it immediately so a previous Loop never appears to own the next target.
+		const ordinaryMarker = ordinaryPortKeyboardMarkerRef.current;
+		if (ordinaryMarker) {
+			ordinaryMarker.style.removeProperty("left");
+			ordinaryMarker.style.removeProperty("top");
+			delete ordinaryMarker.dataset.portSlotRow;
+			delete ordinaryMarker.dataset.portType;
+			delete ordinaryMarker.dataset.phase;
+		}
 		if (guidedPortKeyboardAnnouncementTimerRef.current !== null) {
 			window.clearTimeout(guidedPortKeyboardAnnouncementTimerRef.current);
 			guidedPortKeyboardAnnouncementTimerRef.current = null;

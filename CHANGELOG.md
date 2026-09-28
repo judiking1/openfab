@@ -6,7 +6,25 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-09-28
+
+- Keep the ordinary Port marker hidden while a Process Loop change replaces its cursor, then
+  repaint after the selected Loop commits even when React reuses the same marker and keyboard
+  state. This prevents a previous Loop target from appearing during a rapid Stocker scope switch.
+- Make the 390×600 recovery check wait for the selected Loop's rendered name and the matching
+  Canvas target, marker row, and screen position. Evaluate the Loop identity, expected camera
+  position, and complete visible target in one browser read so a transition between reads
+  cannot produce a false pass or failure.
+- Final-source authoring acceptance passed 68 steps with 558 screenshots and no browser errors;
+  the 428-file unit suite passed 4,750 tests with two existing skips. Core, production build,
+  lint, Biome, release safety, public bundle audit, and four-width live smoke also passed.
+
 ## [0.1.21] - 2026-09-28
+
+Public `main` `1477205` passed local and exact-export gates, but CI `36402627212` failed
+`authoring` during the rapid 390×600 Stocker Loop recovery. The assertion read an old valid
+marker, then a new Canvas row in separate browser calls. The last verified Pages release is
+still 0.1.19 until the corrected source passes public CI and served-file verification.
 
 - Complete the actual first-screen Verified Template journey at 390 px: configure and create a
   14-Bay FAB, place OHB, three-Port EQ, and FLEX Stocker through visible Port targets, attach all
