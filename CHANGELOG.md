@@ -18,13 +18,21 @@ All notable public OpenFab changes will be documented here. The format follows
   when placement resumes.
 - When a Loop name or recovery feedback expands the equipment dock on a short compact screen,
   limit its height so the current keyboard Port marker remains in a visible Canvas band. Keep
-  the dock scrollable for remaining Stocker controls.
+  the dock scrollable for remaining Stocker controls. Reveal recovery feedback within that
+  internal scroll area after a Loop change, including with Ubuntu font metrics at 390×600.
+  Reveal the notice again when the same wrong-Port warning is repeated after manual scrolling.
 - Extend the three-width ordinary equipment browser journey with EQ scope-refusal and recovery,
   unchanged project/Worker/history checks, and 390 px Stocker draft/all-slots recovery plus
   visible-marker boundary checks. The local full authoring gate passed 68 steps / 556 screenshots /
   zero browser errors; 428 test files passed 4,750 tests (two existing skips), Core, build, lint,
-  Biome, public safety, bundle audit, and production smoke. Exact public export/CI/Pages and V1
-  authoring completion remain open.
+  Biome, public safety, bundle audit, and production smoke. Exact public export passed for
+  private `7202977` / public `c8cf380`, but the first public CI exposed clipped recovery text;
+  the first follow-up source passed all 68 authoring steps / 556 screenshots, 4,750 tests,
+  build, lint, release safety, bundle and four-width smoke. A later read-only review found
+  the repeated-warning gap; its focused 390px regression, final-source full 68-step gate,
+  4,750 tests, Core, build, lint, public safety, bundle and four-width smoke all pass.
+  Exact export, repeat CI and Pages verification remain open. V1 authoring
+  remains incomplete.
 
 ## [0.1.19] - 2026-09-28
 

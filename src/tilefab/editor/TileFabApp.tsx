@@ -2957,7 +2957,27 @@ export default function TileFabApp(): React.ReactElement {
 	}, []);
 	const [tool, setTool] = useState<EditorTool>("build");
 	const [ordinaryPortProcessLoopTargetId, setOrdinaryPortProcessLoopTargetId] = useState<number | null>(null);
-	const [ordinaryPortProcessLoopFeedback, setOrdinaryPortProcessLoopFeedback] = useState<string | null>(null);
+	const [ordinaryPortProcessLoopFeedback, setOrdinaryPortProcessLoopFeedbackState] = useState<Readonly<{
+		message: string;
+	}> | null>(null);
+	const setOrdinaryPortProcessLoopFeedback = useCallback((message: string | null): void => {
+		setOrdinaryPortProcessLoopFeedbackState(message === null ? null : { message });
+	}, []);
+	const ordinaryPortProcessLoopFeedbackRef = useRef<HTMLSpanElement | null>(null);
+	useLayoutEffect(() => {
+		if (!ordinaryPortProcessLoopFeedback) return;
+		const feedback = ordinaryPortProcessLoopFeedbackRef.current;
+		const dock = feedback?.closest<HTMLElement>(".tilefab-equipment-workspace");
+		if (!feedback || !dock) return;
+		const feedbackBounds = feedback.getBoundingClientRect();
+		const dockBounds = dock.getBoundingClientRect();
+		const clearance = 8;
+		if (feedbackBounds.bottom > dockBounds.bottom - clearance) {
+			dock.scrollTop += Math.ceil(feedbackBounds.bottom - dockBounds.bottom + clearance);
+		} else if (feedbackBounds.top < dockBounds.top + clearance) {
+			dock.scrollTop -= Math.ceil(dockBounds.top - feedbackBounds.top + clearance);
+		}
+	}, [ordinaryPortProcessLoopFeedback]);
 	const ordinaryPortProcessLoopTargetRef = useRef<Readonly<{
 		projectId: string;
 		organizationId: number;
@@ -3630,7 +3650,7 @@ export default function TileFabApp(): React.ReactElement {
 		ordinaryPortProcessLoopSourceRef.current = null;
 		setOrdinaryPortProcessLoopTargetId(null);
 		setOrdinaryPortProcessLoopFeedback(null);
-	}, [projectSession.manifest.id, organizationSemanticRoles]);
+	}, [projectSession.manifest.id, organizationSemanticRoles, setOrdinaryPortProcessLoopFeedback]);
 	const staticFabOuterCirculationIndex = useMemo(
 		() =>
 			createStaticFabOuterCirculationIndex(
@@ -37914,8 +37934,8 @@ export default function TileFabApp(): React.ReactElement {
 													</>
 												) : null}
 												{ordinaryPortProcessLoopFeedback ? (
-													<span className="tilefab-equipment-process-loop-feedback" data-testid="ordinary-port-process-loop-feedback" role="status">
-														{ordinaryPortProcessLoopFeedback}
+													<span ref={ordinaryPortProcessLoopFeedbackRef} className="tilefab-equipment-process-loop-feedback" data-testid="ordinary-port-process-loop-feedback" role="status">
+														{ordinaryPortProcessLoopFeedback.message}
 													</span>
 												) : null}
 											</small>

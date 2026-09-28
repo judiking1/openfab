@@ -5783,6 +5783,37 @@ async function exerciseOrdinaryEqProcessLoopRecovery(page, selectedLoopId, alter
 		await page.screenshot({
 			path: path.join(artifactRoot, "ordinary-process-loop-outside-rejection-390x600.png"),
 		});
+		const clippedBeforeRetry = await page.evaluate(() => {
+			const dock = document.querySelector(".tilefab-equipment-workspace");
+			const feedback = document.querySelector(
+				'[data-testid="ordinary-port-process-loop-feedback"]',
+			);
+			if (!(dock instanceof HTMLElement) || !(feedback instanceof HTMLElement)) return false;
+			dock.style.maxHeight = "260px";
+			dock.scrollTop = 0;
+			return feedback.getBoundingClientRect().bottom > dock.getBoundingClientRect().bottom;
+		});
+		assertEqual(
+			clippedBeforeRetry,
+			true,
+			`${label} repeated warning starts below the compact dock`,
+		);
+		await clickWorld(page, outside, false);
+		await assertOrdinaryPortProcessLoopFeedback(page, `${label} repeated outside-Loop EQ`, [
+			"선택한 Process Loop 밖의 Port",
+			"다른 Loop 또는 전체 Port 슬롯",
+		]);
+		assertAtLeast(
+			await page.locator(".tilefab-equipment-workspace").evaluate((dock) => dock.scrollTop),
+			1,
+			`${label} repeated warning scrolls inside the dock`,
+		);
+		await page.evaluate(() => {
+			const dock = document.querySelector(".tilefab-equipment-workspace");
+			if (!(dock instanceof HTMLElement)) return;
+			dock.style.removeProperty("max-height");
+			dock.scrollTop = 0;
+		});
 	}
 	assertProjectUnchanged(
 		await readMetrics(page),
