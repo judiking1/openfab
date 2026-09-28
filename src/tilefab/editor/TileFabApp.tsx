@@ -2973,9 +2973,15 @@ export default function TileFabApp(): React.ReactElement {
 		if (!feedback || !dock) return;
 		const feedbackBounds = feedback.getBoundingClientRect();
 		const dockBounds = dock.getBoundingClientRect();
+		const actions = dock.querySelector<HTMLElement>(".tilefab-equipment-actions");
+		const stickyActionsTop =
+			actions && getComputedStyle(actions).position === "sticky"
+				? actions.getBoundingClientRect().top
+				: dockBounds.bottom;
+		const visibleBottom = Math.min(dockBounds.bottom, stickyActionsTop);
 		const clearance = 8;
-		if (feedbackBounds.bottom > dockBounds.bottom - clearance) {
-			dock.scrollTop += Math.ceil(feedbackBounds.bottom - dockBounds.bottom + clearance);
+		if (feedbackBounds.bottom > visibleBottom - clearance) {
+			dock.scrollTop += Math.ceil(feedbackBounds.bottom - visibleBottom + clearance);
 		} else if (feedbackBounds.top < dockBounds.top + clearance) {
 			dock.scrollTop -= Math.ceil(dockBounds.top - feedbackBounds.top + clearance);
 		}

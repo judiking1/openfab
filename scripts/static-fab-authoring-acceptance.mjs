@@ -68,6 +68,9 @@ const ORDINARY_ALL_EQUIPMENT_LOOP_MEMBERSHIP_ONLY_COMPLETE = new Error(
 const ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE = new Error(
 	"Zero-eligible Process Loop acceptance completed.",
 );
+const ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE = new Error(
+	"Adjacent Process Loop Port hit acceptance completed.",
+);
 const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconnection completed.");
 const STATION_REVIEW_APPLY_ONLY_COMPLETE = new Error("Station review Apply acceptance completed.");
 const COMPACT_STARTER_NAV_ONLY_COMPLETE = new Error("Compact starter navigation completed.");
@@ -86,6 +89,8 @@ let browser;
 let desktopPage;
 let legacyLargeFabAcceptanceFixturePath = null;
 let zeroEligibleProcessLoopFixture = null;
+let adjacentProcessLoopPortFixture = null;
+let adjacentPortPickRadiusMeters = null;
 const result = {
 	status: "FAIL",
 	failure: null,
@@ -204,6 +209,14 @@ try {
 		result.status = "PASS";
 		console.log("PASS zero-eligible Process Loop acceptance");
 		throw ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY === "1") {
+		recordStep("adjacent-process-loop-port-hit", await exerciseAdjacentProcessLoopPortHit(browser));
+		assertEqual(result.consoleErrors.length, 0, "Adjacent Loop Port hit console errors");
+		assertEqual(result.pageErrors.length, 0, "Adjacent Loop Port hit page errors");
+		result.status = "PASS";
+		console.log("PASS adjacent Process Loop Port hit acceptance");
+		throw ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_STATIC_FAB_ISSUE_RECHECK_ACCEPTANCE_ONLY === "1") {
 		const staticFabIssueRecheck = await exerciseStaticFabIssueInspectorRecheck(browser);
@@ -334,6 +347,7 @@ try {
 		await exerciseOrdinaryAllEquipmentLoopMembership(browser),
 	);
 	recordStep("zero-eligible-process-loop", await exerciseZeroEligibleProcessLoop(browser));
+	recordStep("adjacent-process-loop-port-hit", await exerciseAdjacentProcessLoopPortHit(browser));
 	recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
 	recordStep("factory-scale-ordinary-port-overview", factoryPortOverview);
@@ -2756,6 +2770,7 @@ try {
 		error === PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ONLY_COMPLETE ||
 		error === ORDINARY_ALL_EQUIPMENT_LOOP_MEMBERSHIP_ONLY_COMPLETE ||
 		error === ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE ||
+		error === ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE ||
 		error === DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE ||
 		error === STATION_REVIEW_APPLY_ONLY_COMPLETE ||
 		error === COMPACT_STARTER_NAV_ONLY_COMPLETE ||
@@ -5526,6 +5541,808 @@ async function createZeroEligibleProcessLoopFixture() {
 	}
 }
 
+async function createAdjacentProcessLoopPortFixture() {
+	if (adjacentProcessLoopPortFixture) return adjacentProcessLoopPortFixture;
+	const { createServer } = await import("vite");
+	const vite = await createServer({
+		root,
+		appType: "custom",
+		logLevel: "silent",
+		server: { middlewareMode: true },
+	});
+	try {
+		const [
+			rail,
+			templates,
+			ownership,
+			physical,
+			ports,
+			scope,
+			organizations,
+			project,
+			codec,
+			renderer,
+		] = await Promise.all([
+			vite.ssrLoadModule("/src/tilefab/core/RailDocument.ts"),
+			vite.ssrLoadModule("/src/tilefab/core/RailTemplateCatalog.ts"),
+			vite.ssrLoadModule("/src/tilefab/core/RailModuleOwnership.ts"),
+			vite.ssrLoadModule("/src/tilefab/compile/PhysicalRailCompiler.ts"),
+			vite.ssrLoadModule("/src/tilefab/compile/PortSlotCompiler.ts"),
+			vite.ssrLoadModule("/src/tilefab/editor/OrdinaryPortProcessLoopScope.ts"),
+			vite.ssrLoadModule("/src/tilefab/core/StaticFabOrganization.ts"),
+			vite.ssrLoadModule("/src/tilefab/project/OpenFabProject.ts"),
+			vite.ssrLoadModule("/src/tilefab/project/OpenFabProjectCodec.ts"),
+			vite.ssrLoadModule("/src/tilefab/render/TileRenderer.ts"),
+		]);
+		const source = new rail.RailDocument();
+		const rectangles = [
+			{ id: 1, kind: "BAY", name: "Synthetic outer Bay", x: -4, z: -4, length: 32, depth: 16 },
+			{ id: 2, kind: "AISLE", name: "Synthetic Process Loop A", x: 0, z: 0, length: 24, depth: 8 },
+			{ id: 3, kind: "AISLE", name: "Synthetic Process Loop B", x: 2, z: 1, length: 20, depth: 5 },
+		];
+		for (const rectangle of rectangles) {
+			const parameters = {
+				...templates.defaultRailTemplateParameters("long-bay"),
+				aisleLengthMeters: rectangle.length,
+				laneSpacingMeters: rectangle.depth,
+			};
+			const plan = templates.planRailTemplate(
+				source.map,
+				"long-bay",
+				{ x: rectangle.x, y: rectangle.z },
+				templates.initialRailTemplatePose(),
+				parameters,
+			);
+			if (!plan.valid || !source.commit(plan)) {
+				throw new Error(
+					`Adjacent Loop ${rectangle.name} rail failed: ${plan.reason ?? source.getLastCommandError()}`,
+				);
+			}
+		}
+		const modules = ownership.buildRailModuleOwnershipIndex(source.map).modules;
+		const onPerimeter = (cell, rectangle) =>
+			cell.x >= rectangle.x &&
+			cell.x <= rectangle.x + rectangle.length &&
+			cell.y >= rectangle.z &&
+			cell.y <= rectangle.z + rectangle.depth &&
+			(cell.x === rectangle.x ||
+				cell.x === rectangle.x + rectangle.length ||
+				cell.y === rectangle.z ||
+				cell.y === rectangle.z + rectangle.depth);
+		const edgeKeys = new Set();
+		const records = rectangles.map((rectangle) => {
+			const railEdges = modules
+				.filter(
+					(module) =>
+						module.eraseEdges.length > 0 &&
+						module.eraseEdges.every(
+							(edge) => onPerimeter(edge.from, rectangle) && onPerimeter(edge.to, rectangle),
+						),
+				)
+				.flatMap((module) => module.eraseEdges)
+				.sort(organizations.compareDirectedRailEdges);
+			if (railEdges.length < 20) {
+				throw new Error(`${rectangle.name} lacks direct perimeter rail ownership.`);
+			}
+			for (const edge of railEdges) {
+				const key = organizations.staticFabOrganizationEdgeKey(edge);
+				if (edgeKeys.has(key)) throw new Error(`Adjacent Loop fixture duplicates edge ${key}.`);
+				edgeKeys.add(key);
+			}
+			return {
+				id: rectangle.id,
+				kind: rectangle.kind,
+				name: rectangle.name,
+				parentOrganizationIds: rectangle.id === 1 ? [] : [1],
+				properties: { description: "", color: "TEAL" },
+				membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [] },
+			};
+		});
+		const document = rail.RailDocument.fromLoadedMap(
+			source.map,
+			source.getPatchSequence(),
+			source.portEquipment,
+			{ nextOrganizationId: 4, records },
+		);
+		const paths = physical.compilePhysicalRail(document.map);
+		const eligibleCounts = {};
+		for (const type of ["OHB", "EQ", "STK"]) {
+			const slots = ports.compilePortSlots(paths, document.portEquipment, type);
+			const loopCounts = document.organizations.records
+				.filter((record) => record.kind === "AISLE")
+				.map((record) => scope.compileOrdinaryPortProcessLoopScope(slots, record).eligibleCount);
+			if (loopCounts.some((count) => count < 3)) {
+				throw new Error(`Adjacent Loop ${type} direct Port slots are insufficient: ${loopCounts}.`);
+			}
+			eligibleCounts[type] = loopCounts;
+		}
+		const manifest = project.createOpenFabProjectManifest(
+			"openfab-adjacent-loop-port-hit-acceptance",
+			"Adjacent synthetic Loops",
+			"2024-01-01T00:00:00.000Z",
+		);
+		const fixturePath = path.join(artifactRoot, "adjacent-process-loop-port-hit.openfab");
+		await writeFile(
+			fixturePath,
+			codec.serializeOpenFabProject(project.captureOpenFabProject(document, { manifest })),
+			"utf8",
+		);
+		adjacentProcessLoopPortFixture = Object.freeze({
+			path: fixturePath,
+			loopAId: 2,
+			loopBId: 3,
+			eligibleCounts,
+			hitRadiiAt22: Object.fromEntries(
+				["OHB", "EQ", "STK"].map((type) => [type, renderer.portSlotPickRadiusMeters(type, 22)]),
+			),
+		});
+		adjacentPortPickRadiusMeters = renderer.portSlotPickRadiusMeters;
+		return adjacentProcessLoopPortFixture;
+	} finally {
+		await vite.close();
+	}
+}
+
+async function readAdjacentProcessLoopPortPair(page, type, selectedLoopId, outsideLoopId, label) {
+	const selected = await readDirectProcessLoopPortCandidates(page, type, selectedLoopId);
+	const outside = await readDirectProcessLoopPortCandidates(page, type, outsideLoopId);
+	const available = await page.evaluate((portType) => {
+		const slots = window.__tileFab?.getEditorModel().portSlotArtifacts[portType]?.slots;
+		if (!slots) throw new Error(`${portType} slots are unavailable for adjacent Loop hit.`);
+		const rows = [];
+		for (let row = 0; row < slots.count; row++) {
+			if (![0, 5, 6].includes(slots.statuses[row])) continue;
+			rows.push({
+				row,
+				x: slots.worldPositions[row * 2],
+				y: slots.worldPositions[row * 2 + 1],
+			});
+		}
+		return rows;
+	}, type);
+	const authoredRoutes = await page.evaluate(
+		() =>
+			window.__tileFab
+				?.getEditorModel()
+				.document.portEquipment.ports.filter((port) => port.route.kind === "CARDINAL_CELL")
+				.map((port) => ({ x: port.route.x, z: port.route.z })) ?? [],
+	);
+	const clearOfExistingPorts = (candidate) =>
+		authoredRoutes.every(
+			(route) => Math.abs(candidate.routeX - route.x) + Math.abs(candidate.routeZ - route.z) >= 8,
+		);
+	const zoom = Number((await readMetrics(page)).cameraZoom);
+	const radius = adjacentPortPickRadiusMeters?.(type, zoom);
+	if (!Number.isFinite(radius) || radius <= 0) {
+		throw new Error(`${label} lacks a valid production ${type} pick radius at zoom ${zoom}.`);
+	}
+	const bias = type === "OHB" ? 0.25 : 0.4;
+	for (const a of selected) {
+		if (!clearOfExistingPorts(a)) continue;
+		for (const b of outside) {
+			if (!clearOfExistingPorts(b)) continue;
+			const separation = Math.hypot(a.x - b.x, a.y - b.y);
+			if (separation < 0.2 || separation >= radius / (1 - bias)) continue;
+			const point = {
+				x: b.x + bias * (a.x - b.x),
+				y: b.y + bias * (a.y - b.y),
+			};
+			const distanceToA = Math.hypot(point.x - a.x, point.y - a.y);
+			const distanceToB = Math.hypot(point.x - b.x, point.y - b.y);
+			if (!(distanceToB < distanceToA && distanceToA < radius && distanceToB < radius)) {
+				continue;
+			}
+			let nearest = null;
+			let nearestDistance = radius;
+			for (const candidate of available) {
+				const distance = Math.hypot(point.x - candidate.x, point.y - candidate.y);
+				if (distance <= nearestDistance) {
+					nearest = candidate.row;
+					nearestDistance = distance;
+				}
+			}
+			if (nearest !== b.row) continue;
+			const actualPick = await page.evaluate(
+				({ type, selected, outside, point, zoom }) => {
+					const app = window.__tileFab;
+					const slots = app?.getEditorModel().portSlotArtifacts[type]?.slots;
+					if (!slots || !app?.renderer) return null;
+					return {
+						selected: app.renderer.hitTestPortSlot(slots, selected, zoom),
+						outside: app.renderer.hitTestPortSlot(slots, outside, zoom),
+						wrong: app.renderer.hitTestPortSlot(slots, point, zoom, undefined, 0, true),
+					};
+				},
+				{ type, selected: a, outside: b, point, zoom },
+			);
+			if (
+				actualPick?.selected !== a.row ||
+				actualPick?.outside !== b.row ||
+				actualPick?.wrong !== b.row
+			) {
+				continue;
+			}
+			return { selected: a, outside: b, point, radius, zoom, distanceToA, distanceToB };
+		}
+	}
+	throw new Error(
+		`${label} ${type} lacks distinct Loop candidates within both hit disks: ${JSON.stringify({ zoom, radius, selected: selected.length, outside: outside.length })}`,
+	);
+}
+
+async function readAdjacentPortDraftState(page) {
+	return page.evaluate(() => {
+		const app = document.querySelector('[data-testid="tilefab-app"]');
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		return {
+			eqPhase: canvas?.dataset.guidedPortKeyboardPhase ?? "",
+			eqAnchorRow:
+				document.querySelector('[data-testid="ordinary-eq-anchor-marker"]')?.dataset.portSlotRow ??
+				"",
+			stkDraftCount: app?.dataset.stkDraftRows ?? "",
+			stkDraftRows: canvas?.dataset.stkDraftSelectedRows ?? "",
+		};
+	});
+}
+
+async function assertAdjacentWrongLoopClick(page, pair, type, label) {
+	const before = await readMetrics(page);
+	const draft = await readAdjacentPortDraftState(page);
+	await revealOrdinaryEquipmentSlot(page, pair.point, `${label} ${type} overlapping hit disks`);
+	assertEqual(
+		Number((await readMetrics(page)).cameraZoom),
+		pair.zoom,
+		`${label} ${type} hit radius precondition keeps camera zoom`,
+	);
+	await clickWorld(page, pair.point, false);
+	const feedback = await assertOrdinaryPortProcessLoopFeedback(
+		page,
+		`${label} ${type} nearest outside Loop refusal`,
+		["선택한 Process Loop 밖의 Port", "다른 Loop 또는 전체 Port 슬롯"],
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		before,
+		`${label} ${type} wrong-biased outside Loop click`,
+	);
+	assertEqual(
+		JSON.stringify(await readAdjacentPortDraftState(page)),
+		JSON.stringify(draft),
+		`${label} ${type} rejected click preserves visible draft state`,
+	);
+	let stickyClearance = null;
+	if (type === "STK") {
+		stickyClearance = await page.evaluate(() => {
+			const feedback = document.querySelector(
+				'[data-testid="ordinary-port-process-loop-feedback"]',
+			);
+			const dock = document.querySelector('.tilefab-equipment-workspace[data-port-type="STK"]');
+			const actions = document.querySelector(
+				'.tilefab-equipment-workspace[data-port-type="STK"] .tilefab-equipment-actions',
+			);
+			if (
+				!(feedback instanceof HTMLElement) ||
+				!(dock instanceof HTMLElement) ||
+				!(actions instanceof HTMLElement)
+			)
+				return null;
+			const feedbackBounds = feedback.getBoundingClientRect();
+			const dockBounds = dock.getBoundingClientRect();
+			return {
+				feedbackTop: feedbackBounds.top,
+				feedbackBottom: feedbackBounds.bottom,
+				dockTop: dockBounds.top,
+				actionsTop: actions.getBoundingClientRect().top,
+				centerOwned: feedback.contains(
+					document.elementFromPoint(
+						feedbackBounds.left + feedbackBounds.width / 2,
+						feedbackBounds.top + feedbackBounds.height / 2,
+					),
+				),
+			};
+		});
+		if (!stickyClearance)
+			throw new Error(`${label} Stocker feedback or sticky actions are missing.`);
+		assertAtLeast(
+			stickyClearance.feedbackTop,
+			stickyClearance.dockTop,
+			`${label} Stocker refusal feedback clears the dock top`,
+		);
+		assertAtMost(
+			stickyClearance.feedbackBottom,
+			stickyClearance.actionsTop,
+			`${label} Stocker refusal feedback clears sticky actions`,
+		);
+		assertEqual(
+			stickyClearance.centerOwned,
+			true,
+			`${label} Stocker refusal feedback owns its on-screen center`,
+		);
+		await page.screenshot({
+			path: path.join(artifactRoot, "adjacent-stk-refusal-390x600.png"),
+		});
+	}
+	return { feedback, stickyClearance };
+}
+
+async function exerciseAdjacentProcessLoopPortHit(browserInstance) {
+	const fixture = await createAdjacentProcessLoopPortFixture();
+	const context = await browserInstance.newContext({
+		viewport: { width: 390, height: 600 },
+		acceptDownloads: true,
+	});
+	const page = await context.newPage();
+	page.on("console", (message) => {
+		if (message.type() === "error") result.consoleErrors.push(message.text());
+	});
+	page.on("pageerror", (error) => result.pageErrors.push(error.message));
+	try {
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		await page
+			.getByTestId("openfab-start-dialog")
+			.getByRole("button", { name: /BLANK CANVAS/ })
+			.click();
+		const chooserPromise = page.waitForEvent("filechooser");
+		await page.locator(".tilefab-project-trigger").click();
+		await page
+			.locator(".tilefab-project-menu-commands")
+			.getByRole("button", { name: "열기", exact: true })
+			.click();
+		await (await chooserPromise).setFiles(fixture.path);
+		await waitForWorker(
+			page,
+			(metrics) =>
+				metrics.projectName === "Adjacent synthetic Loops" &&
+				metrics.staticFabOrganizations === "3",
+		);
+		const label = "390x600 adjacent Loops";
+		const pairs = {};
+		const groupIds = [];
+		await clickActivityCommand(page, "equip", "OHB 포트 배치");
+		await waitForLegalPortSlots(page);
+		await selectOrdinaryPortProcessLoop(page, fixture.loopAId, label);
+		pairs.OHB = await readAdjacentProcessLoopPortPair(
+			page,
+			"OHB",
+			fixture.loopAId,
+			fixture.loopBId,
+			label,
+		);
+		await assertAdjacentWrongLoopClick(page, pairs.OHB, "OHB", label);
+		const beforeOhb = await readMetrics(page);
+		await revealOrdinaryEquipmentSlot(page, pairs.OHB.selected, `${label} legal OHB`);
+		await clickWorld(page, pairs.OHB.selected, false);
+		const ohbPlaced = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeOhb.workerTargetSequence) + 1 &&
+				Number(metrics.equipmentGroups) === Number(beforeOhb.equipmentGroups) + 1 &&
+				Number(metrics.equipmentPorts) === Number(beforeOhb.equipmentPorts) + 1,
+		);
+		assertSingleGuidedPortCommit(ohbPlaced, beforeOhb, `${label} legal OHB`);
+		await undoAndRedo(page, beforeOhb, ohbPlaced, null, true);
+		const ohbId = Number(beforeOhb.modelNextEquipmentGroupId);
+		groupIds.push(ohbId);
+		const ohbAttached = await attachOrdinaryEquipmentToDirectLoop(
+			page,
+			ohbId,
+			"OHB",
+			fixture.loopAId,
+			pairs.OHB.selected,
+			label,
+		);
+		await undoAndRedo(page, ohbAttached.before, ohbAttached.after, null, true);
+
+		await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
+		await waitForLegalPortSlots(page);
+		await selectOrdinaryPortProcessLoop(page, fixture.loopAId, label);
+		pairs.EQ = await readAdjacentProcessLoopPortPair(
+			page,
+			"EQ",
+			fixture.loopAId,
+			fixture.loopBId,
+			label,
+		);
+		const eqRows = new Set(
+			(await readDirectProcessLoopPortCandidates(page, "EQ", fixture.loopAId)).map(
+				(candidate) => candidate.row,
+			),
+		);
+		const eqRun = (await readLegalStraightPortRuns(page, "EQ"))
+			.flatMap((run) =>
+				Array.from({ length: run.items.length - 2 }, (_, index) =>
+					run.items.slice(index, index + 3),
+				),
+			)
+			.find((items) => items.every((item) => eqRows.has(item.row)));
+		if (!eqRun) throw new Error(`${label} lacks a three-Port EQ run directly in Loop A.`);
+		const beforeEq = await readMetrics(page);
+		await revealOrdinaryEquipmentSlot(page, eqRun[0], `${label} legal EQ anchor`);
+		await clickWorld(page, eqRun[0], false);
+		await page.waitForFunction(
+			(row) =>
+				document
+					.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+					?.getAttribute("data-port-slot-row") === String(row) &&
+				document.querySelector('[data-testid="rail-canvas"]')?.dataset.guidedPortKeyboardPhase ===
+					"choose-end",
+			eqRun[0].row,
+		);
+		assertProjectUnchanged(await readMetrics(page), beforeEq, `${label} EQ anchor draft`);
+		await assertAdjacentWrongLoopClick(page, pairs.EQ, "EQ", label);
+		await revealOrdinaryEquipmentSlot(page, eqRun[2], `${label} legal EQ end`);
+		await clickWorld(page, eqRun[2], false);
+		const eqPlaced = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeEq.workerTargetSequence) + 1 &&
+				Number(metrics.equipmentGroups) === Number(beforeEq.equipmentGroups) + 1 &&
+				Number(metrics.equipmentPorts) === Number(beforeEq.equipmentPorts) + 3,
+		);
+		assertSingleGuidedPortCommit(eqPlaced, beforeEq, `${label} legal three-Port EQ`);
+		await undoAndRedo(page, beforeEq, eqPlaced, null, true);
+		const eqId = Number(beforeEq.modelNextEquipmentGroupId);
+		groupIds.push(eqId);
+		const eqAttached = await attachOrdinaryEquipmentToDirectLoop(
+			page,
+			eqId,
+			"EQ",
+			fixture.loopAId,
+			eqRun[0],
+			label,
+		);
+		await undoAndRedo(page, eqAttached.before, eqAttached.after, null, true);
+
+		await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
+		await chooseStkTemplate(page, "FLEX");
+		await waitForLegalPortSlots(page);
+		await selectOrdinaryPortProcessLoop(page, fixture.loopAId, label);
+		const templateSelect = page.getByTestId("stk-template-select");
+		await templateSelect.focus();
+		assertEqual(
+			await templateSelect.evaluate((element) => document.activeElement === element),
+			true,
+			`${label} focused Stocker template select`,
+		);
+		await assertLocatorInsideViewport(page, templateSelect);
+		await assertLocatorOwnsHitArea(templateSelect, `${label} focused Stocker template select`);
+		const templateVisibility = await templateSelect.evaluate((element) => {
+			const bounds = element.getBoundingClientRect();
+			return {
+				top: bounds.top,
+				bottom: bounds.bottom,
+				centerOwned: element.contains(
+					document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2),
+				),
+			};
+		});
+		await page.getByTestId("rail-canvas").focus();
+		pairs.STK = await readAdjacentProcessLoopPortPair(
+			page,
+			"STK",
+			fixture.loopAId,
+			fixture.loopBId,
+			label,
+		);
+		const stkCandidates = await readDirectProcessLoopPortCandidates(page, "STK", fixture.loopAId);
+		const occupiedByEq = stkCandidates.find((candidate) =>
+			eqAttached.evidence.ports.some(
+				(port) => port.routeX === candidate.routeX && port.routeZ === candidate.routeZ,
+			),
+		);
+		if (!occupiedByEq) {
+			throw new Error(`${label} fixture lacks a statically legal Stocker row occupied by EQ.`);
+		}
+		const beforeOccupied = await readMetrics(page);
+		await revealOrdinaryEquipmentSlot(page, occupiedByEq, `${label} occupied EQ/STK row`);
+		await clickWorld(page, occupiedByEq, false);
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="rail-status-message"]')
+					?.textContent?.includes("이미 Port #"),
+			undefined,
+			{ timeout: 10_000 },
+		);
+		assertProjectUnchanged(
+			await readMetrics(page),
+			beforeOccupied,
+			`${label} EQ-occupied Stocker row refuses the draft`,
+		);
+		assertEqual(
+			(await readAdjacentPortDraftState(page)).stkDraftCount,
+			"0",
+			`${label} EQ-occupied Stocker row keeps the draft empty`,
+		);
+		let stkSecond = null;
+		for (const candidate of stkCandidates) {
+			if (
+				candidate.row === pairs.STK.selected.row ||
+				Math.abs(candidate.routeX - pairs.STK.selected.routeX) +
+					Math.abs(candidate.routeZ - pairs.STK.selected.routeZ) <
+					3
+			) {
+				continue;
+			}
+			const probe = await page.evaluate(
+				({ firstRow, second }) => {
+					const app = window.__tileFab;
+					const slots = app?.getEditorModel().portSlotArtifacts.STK.slots;
+					const zoom = app?.camera?.zoom;
+					if (!slots || !app?.renderer || !zoom) return null;
+					return {
+						actualRow: app.renderer.hitTestPortSlot(slots, second, zoom),
+						preview: app.previewStkPlacement([firstRow, second.row], "FLEX"),
+					};
+				},
+				{ firstRow: pairs.STK.selected.row, second: candidate },
+			);
+			if (
+				probe?.actualRow === candidate.row &&
+				probe.preview?.valid &&
+				probe.preview?.canComplete
+			) {
+				stkSecond = candidate;
+				break;
+			}
+		}
+		if (!stkSecond) throw new Error(`${label} lacks a second direct FLEX Stocker Port.`);
+		const beforeStk = await readMetrics(page);
+		await revealOrdinaryEquipmentSlot(page, pairs.STK.selected, `${label} FLEX first Port`);
+		await moveToWorld(page, pairs.STK.selected);
+		const hoveredStkRow = await page
+			.getByTestId("rail-canvas")
+			.getAttribute("data-hover-port-slot");
+		await clickWorld(page, pairs.STK.selected, false);
+		const firstStkDraft = await page
+			.waitForFunction(
+				(row) =>
+					document.querySelector('[data-testid="tilefab-app"]')?.dataset.stkDraftRows === "1" &&
+					document.querySelector('[data-testid="rail-canvas"]')?.dataset.stkDraftSelectedRows ===
+						String(row),
+				pairs.STK.selected.row,
+				{ timeout: 5_000 },
+			)
+			.then(() => true)
+			.catch(() => false);
+		if (!firstStkDraft) {
+			const diagnostic = await page.evaluate((pair) => {
+				const app = document.querySelector('[data-testid="tilefab-app"]');
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				const slots = window.__tileFab?.getEditorModel().portSlotArtifacts.STK.slots;
+				return {
+					tool: app?.getAttribute("data-editor-tool"),
+					selectedLoop: document.querySelector('[data-testid="ordinary-port-process-loop-target"]')
+						?.value,
+					draftCount: app?.dataset.stkDraftRows,
+					draftRows: canvas?.dataset.stkDraftSelectedRows,
+					hoverRow: canvas?.dataset.hoverPortSlot,
+					keyboardRow: canvas?.dataset.guidedPortKeyboardRow,
+					selectedStatus: slots?.statuses[pair.selected.row],
+					outsideStatus: slots?.statuses[pair.outside.row],
+					statusMessage: document.querySelector('[data-testid="rail-status-message"]')?.textContent,
+					scopeFeedback: document.querySelector(
+						'[data-testid="ordinary-port-process-loop-feedback"]',
+					)?.textContent,
+				};
+			}, pairs.STK);
+			throw new Error(
+				`${label} first Stocker draft failed: ${JSON.stringify({ pair: pairs.STK, hoveredStkRow, diagnostic })}`,
+			);
+		}
+		assertProjectUnchanged(await readMetrics(page), beforeStk, `${label} first FLEX draft Port`);
+		const stkWrong = await assertAdjacentWrongLoopClick(page, pairs.STK, "STK", label);
+		await revealOrdinaryEquipmentSlot(page, stkSecond, `${label} FLEX second Port`);
+		await clickWorld(page, stkSecond, false);
+		await page.waitForFunction(
+			({ first, second }) => {
+				const rows = (
+					document.querySelector('[data-testid="rail-canvas"]')?.dataset.stkDraftSelectedRows ?? ""
+				)
+					.split(",")
+					.filter(Boolean);
+				return (
+					document.querySelector('[data-testid="tilefab-app"]')?.dataset.stkDraftRows === "2" &&
+					rows.includes(String(first)) &&
+					rows.includes(String(second))
+				);
+			},
+			{ first: pairs.STK.selected.row, second: stkSecond.row },
+		);
+		assertProjectUnchanged(await readMetrics(page), beforeStk, `${label} two-Port FLEX draft`);
+		const stkComplete = page.getByTestId("stk-complete");
+		assertEqual(await stkComplete.isEnabled(), true, `${label} FLEX completion is enabled`);
+		const stkReadyDraft = await readAdjacentPortDraftState(page);
+		const stkReadyWrong = await assertAdjacentWrongLoopClick(
+			page,
+			pairs.STK,
+			"STK",
+			`${label} complete FLEX draft`,
+		);
+		assertEqual(
+			await stkComplete.isEnabled(),
+			true,
+			`${label} wrong-Loop refusal keeps FLEX completion enabled`,
+		);
+		assertEqual(
+			JSON.stringify(await readAdjacentPortDraftState(page)),
+			JSON.stringify(stkReadyDraft),
+			`${label} wrong-Loop refusal preserves the complete FLEX draft`,
+		);
+		await assertLocatorInsideViewport(page, stkComplete);
+		await assertLocatorOwnsHitArea(stkComplete, `${label} FLEX completion with refusal visible`);
+		const completionVisibility = await stkComplete.evaluate((element) => {
+			const bounds = element.getBoundingClientRect();
+			return {
+				top: bounds.top,
+				bottom: bounds.bottom,
+				centerOwned: element.contains(
+					document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2),
+				),
+			};
+		});
+		await page.screenshot({
+			path: path.join(artifactRoot, "adjacent-stk-ready-390x600.png"),
+		});
+		await stkComplete.focus();
+		let templateKeyboardSteps = 0;
+		while (templateKeyboardSteps < 20) {
+			await page.keyboard.press("Shift+Tab");
+			templateKeyboardSteps++;
+			if (await templateSelect.evaluate((element) => document.activeElement === element)) break;
+		}
+		assertEqual(
+			await templateSelect.evaluate((element) => document.activeElement === element),
+			true,
+			`${label} Shift+Tab reaches the FLEX template after refusal`,
+		);
+		await assertLocatorInsideViewport(page, templateSelect);
+		await assertLocatorOwnsHitArea(templateSelect, `${label} FLEX template after refusal`);
+		const templateAfterRefusalVisibility = await templateSelect.evaluate((element) => {
+			const bounds = element.getBoundingClientRect();
+			return {
+				top: bounds.top,
+				bottom: bounds.bottom,
+				centerOwned: element.contains(
+					document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2),
+				),
+			};
+		});
+		assertProjectUnchanged(
+			await readMetrics(page),
+			beforeStk,
+			`${label} template scroll after refusal does not commit`,
+		);
+		assertEqual(
+			JSON.stringify(await readAdjacentPortDraftState(page)),
+			JSON.stringify(stkReadyDraft),
+			`${label} template focus after refusal preserves the complete FLEX draft`,
+		);
+		await assertLocatorOwnsHitArea(stkComplete, `${label} FLEX completion after template scroll`);
+		await page.screenshot({
+			path: path.join(artifactRoot, "adjacent-stk-template-after-refusal-390x600.png"),
+		});
+		await stkComplete.click();
+		const stkPlaced = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeStk.workerTargetSequence) + 1 &&
+				Number(metrics.equipmentGroups) === Number(beforeStk.equipmentGroups) + 1 &&
+				Number(metrics.equipmentPorts) === Number(beforeStk.equipmentPorts) + 2,
+		);
+		assertSingleGuidedPortCommit(stkPlaced, beforeStk, `${label} legal two-Port FLEX Stocker`);
+		await undoAndRedo(page, beforeStk, stkPlaced, null, true);
+		const stkId = Number(beforeStk.modelNextEquipmentGroupId);
+		groupIds.push(stkId);
+		const stkAttached = await attachOrdinaryEquipmentToDirectLoop(
+			page,
+			stkId,
+			"STK",
+			fixture.loopAId,
+			pairs.STK.selected,
+			label,
+		);
+		assertEqual(stkAttached.evidence.template, "FLEX", `${label} Stocker template`);
+		assertEqual(stkAttached.evidence.ports.length, 2, `${label} Stocker Port count`);
+		await undoAndRedo(page, stkAttached.before, stkAttached.after, null, true);
+
+		const owned = await readDirectProcessLoopEquipmentEvidence(page, groupIds);
+		assertEqual(
+			owned.every(
+				(group) =>
+					isDeepStrictEqual(group.ownerIds, [fixture.loopAId]) &&
+					group.ports.every((port) => port.covered),
+			),
+			true,
+			`${label} all three complete groups have exact Loop A ownership`,
+		);
+		const savedPath = await saveProjectFromCompactRoute(page);
+		const saved = await readMetrics(page);
+		const savedEquipment = await readPortEquipmentContract(page);
+		const reopenedContext = await browserInstance.newContext({
+			viewport: { width: 390, height: 600 },
+			acceptDownloads: true,
+		});
+		const reopenedPage = await reopenedContext.newPage();
+		let reopened;
+		try {
+			reopenedPage.on("console", (message) => {
+				if (message.type() === "error") result.consoleErrors.push(message.text());
+			});
+			reopenedPage.on("pageerror", (error) => result.pageErrors.push(error.message));
+			await reopenedPage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(reopenedPage, { physicalPaths: 0 });
+			await reopenedPage
+				.getByTestId("openfab-start-dialog")
+				.getByRole("button", { name: /BLANK CANVAS/ })
+				.click();
+			const reopenChooserPromise = reopenedPage.waitForEvent("filechooser");
+			await reopenedPage.locator(".tilefab-project-trigger").click();
+			await reopenedPage
+				.locator(".tilefab-project-menu-commands")
+				.getByRole("button", { name: "열기", exact: true })
+				.click();
+			await (await reopenChooserPromise).setFiles(savedPath);
+			reopened = await waitForWorker(
+				reopenedPage,
+				(metrics) =>
+					metrics.modelChecksum === saved.modelChecksum &&
+					metrics.staticFabOrganizations === "3" &&
+					metrics.equipmentGroups === "3" &&
+					metrics.equipmentPorts === "6",
+			);
+			assertEqual(reopened.workerChecksum, saved.workerChecksum, `${label} native Worker parity`);
+			assertEqual(
+				isDeepStrictEqual(await readPortEquipmentContract(reopenedPage), savedEquipment),
+				true,
+				`${label} native reopen keeps all group and Port records`,
+			);
+			assertEqual(
+				isDeepStrictEqual(
+					await readDirectProcessLoopEquipmentEvidence(reopenedPage, groupIds),
+					owned,
+				),
+				true,
+				`${label} native reopen preserves exact direct Loop ownership`,
+			);
+		} finally {
+			await closeBrowserResource(reopenedPage, "reopened adjacent Loop Port hit page");
+			await closeBrowserResource(reopenedContext, "reopened adjacent Loop Port hit context");
+		}
+		return {
+			eligibleCounts: fixture.eligibleCounts,
+			pairs: Object.fromEntries(
+				Object.entries(pairs).map(([type, pair]) => [
+					type,
+					{
+						selectedRow: pair.selected.row,
+						outsideRow: pair.outside.row,
+						zoom: pair.zoom,
+						distanceToA: pair.distanceToA,
+						distanceToB: pair.distanceToB,
+						radius: pair.radius,
+					},
+				]),
+			),
+			groupIds,
+			stockerCompactHitAreas: {
+				template: templateVisibility,
+				templateAfterRefusal: templateAfterRefusalVisibility,
+				templateKeyboardSteps,
+				feedback: stkWrong.stickyClearance,
+				feedbackWithCompleteDraft: stkReadyWrong.stickyClearance,
+				completion: completionVisibility,
+			},
+			eqOccupiedStockerRow: occupiedByEq.row,
+			checksum: reopened.modelChecksum,
+		};
+	} finally {
+		await closeBrowserResource(page, "adjacent Loop Port hit page");
+		await closeBrowserResource(context, "adjacent Loop Port hit context");
+	}
+}
+
 async function exerciseZeroEligibleProcessLoop(browserInstance) {
 	const fixture = await createZeroEligibleProcessLoopFixture();
 	const context = await browserInstance.newContext({
@@ -5714,7 +6531,7 @@ async function readDirectProcessLoopPortCandidates(page, portType, loopId) {
 				const z = slots.routeZs[row];
 				const from = slots.routeFromDirections[row];
 				const to = slots.routeToDirections[row];
-				if (!from && !to) continue;
+				if (!from || !to) continue;
 				if (from) {
 					const delta = offset[from];
 					if (!delta || !edges.has(`${x + delta[0]},${z + delta[1]}>${x},${z}`)) continue;

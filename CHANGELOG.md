@@ -6,6 +6,20 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-09-29
+
+- Keep the Stocker completion actions visible inside a short, Loop-scoped equipment dock.
+  Reserve scroll room for its wrapped action row and bring Loop refusal feedback above that row,
+  so the message remains visible while the template selector and enabled completion button
+  remain clickable.
+- Add a self-generated three-rectangle, two-Process-Loop acceptance fixture with adjacent Port
+  candidates inside the same hit radius. Exercise OHB, EQ, and FLEX Stocker wrong-Loop refusal
+  without project, Worker, history, or visible draft mutation; then verify legal creation, direct Loop ownership, Undo/Redo, and
+  native save/reopen with all three groups in one project. Reject dynamically occupied Stocker
+  routes even when their static slot remains legal. Recheck refusal after both FLEX Ports are
+  drafted: the message stays visible, the enabled completion control stays clear, and the
+  template remains reachable by keyboard without changing the visible draft.
+
 ## [0.1.24] - 2026-09-28
 
 - Show the current project name and save state in the compact header. Distinguish an untouched
