@@ -520,6 +520,18 @@ export function SyntheticFabStarterDialog({
 							</strong>
 						</span>
 					</div>
+					{mode !== "project" ? (
+						<button
+							type="button"
+							className="tilefab-starter-config-jump"
+							aria-label="구성 설정으로 이동"
+							data-testid="synthetic-fab-config-jump"
+							disabled={busy}
+							onClick={focusStarterConfiguration}
+						>
+							설정
+						</button>
+					) : null}
 					<button
 						type="button"
 						disabled={!canCancel}

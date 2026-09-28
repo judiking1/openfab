@@ -62,6 +62,7 @@ const COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE = new Error(
 const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconnection completed.");
 const STATION_REVIEW_APPLY_ONLY_COMPLETE = new Error("Station review Apply acceptance completed.");
 const COMPACT_STARTER_NAV_ONLY_COMPLETE = new Error("Compact starter navigation completed.");
+const FIRST_RUN_TEMPLATE_ONLY_COMPLETE = new Error("First-run verified template completed.");
 const PRESET_RECOVERY_ONLY_COMPLETE = new Error("Synthetic preset recovery completed.");
 const PROJECT_STARTER_RETRY_ONLY_COMPLETE = new Error("Project starter retry completed.");
 const STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE = new Error(
@@ -132,6 +133,13 @@ try {
 		assertEqual(result.pageErrors.length, 0, "Compact starter page errors");
 		result.status = "PASS";
 		throw COMPACT_STARTER_NAV_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_FIRST_RUN_TEMPLATE_ONLY === "1") {
+		recordStep("first-run-verified-template", await exerciseFirstRunVerifiedTemplate(browser));
+		assertEqual(result.consoleErrors.length, 0, "First-run template console errors");
+		assertEqual(result.pageErrors.length, 0, "First-run template page errors");
+		result.status = "PASS";
+		throw FIRST_RUN_TEMPLATE_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_PRESET_RECOVERY_ONLY === "1") {
 		recordStep("synthetic-fab-preset-recovery", await exerciseSyntheticFabPresetRecovery(browser));
@@ -2620,6 +2628,7 @@ try {
 		"restored whole-flow project after New Fab dirty state",
 	);
 	await exerciseActivityDensityFitStability(desktopPage);
+	recordStep("first-run-verified-template", await exerciseFirstRunVerifiedTemplate(browser));
 	const presetRecovery = await exerciseSyntheticFabPresetRecovery(browser);
 	recordStep("compact-project-starter-retry", await exerciseCompactProjectStarterRetry(browser));
 	const maximumLargeFab = await createMaximumLargeFabPreset(desktopPage);
@@ -2698,6 +2707,7 @@ try {
 		error === DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE ||
 		error === STATION_REVIEW_APPLY_ONLY_COMPLETE ||
 		error === COMPACT_STARTER_NAV_ONLY_COMPLETE ||
+		error === FIRST_RUN_TEMPLATE_ONLY_COMPLETE ||
 		error === PRESET_RECOVERY_ONLY_COMPLETE ||
 		error === PROJECT_STARTER_RETRY_ONLY_COMPLETE ||
 		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE
@@ -8772,25 +8782,49 @@ async function exerciseGuidedPortHandoffRegression(
 		const guidedCommandHelp = panel.getByTestId("guided-build-command-help");
 		await guidedCommandHelp.focus();
 		await page.keyboard.press("Escape");
-		await page.waitForFunction(
-			() => {
+		try {
+			await page.waitForFunction(
+				() => {
+					const app = document.querySelector('[data-testid="tilefab-app"]');
+					const canvas = document.querySelector('[data-testid="rail-canvas"]');
+					const targetRow =
+						document
+							.querySelector('[data-testid="guided-port-target"]')
+							?.getAttribute("data-port-slot-row") ?? "";
+					return (
+						app?.getAttribute("data-stk-draft-rows") === "0" &&
+						canvas?.getAttribute("data-guided-port-keyboard-type") === "STK" &&
+						targetRow.length > 0 &&
+						canvas?.getAttribute("data-guided-port-keyboard-row") === targetRow &&
+						document.activeElement === canvas
+					);
+				},
+				undefined,
+				{ timeout: 10_000 },
+			);
+		} catch (error) {
+			const details = await page.evaluate(() => {
 				const app = document.querySelector('[data-testid="tilefab-app"]');
 				const canvas = document.querySelector('[data-testid="rail-canvas"]');
-				const targetRow =
-					document
-						.querySelector('[data-testid="guided-port-target"]')
-						?.getAttribute("data-port-slot-row") ?? "";
-				return (
-					app?.getAttribute("data-stk-draft-rows") === "0" &&
-					canvas?.getAttribute("data-guided-port-keyboard-type") === "STK" &&
-					targetRow.length > 0 &&
-					canvas?.getAttribute("data-guided-port-keyboard-row") === targetRow &&
-					document.activeElement === canvas
-				);
-			},
-			undefined,
-			{ timeout: 10_000 },
-		);
+				const target = document.querySelector('[data-testid="guided-port-target"]');
+				const active = document.activeElement;
+				return {
+					draftRows: app?.getAttribute("data-stk-draft-rows"),
+					markerRow: target?.getAttribute("data-port-slot-row"),
+					keyboardType: canvas?.getAttribute("data-guided-port-keyboard-type"),
+					keyboardRow: canvas?.getAttribute("data-guided-port-keyboard-row"),
+					activeElement: active?.getAttribute("data-testid") ?? active?.tagName,
+					currentMission: document
+						.querySelector('[data-testid="guided-build-panel"]')
+						?.getAttribute("data-current-mission"),
+					markerFingerprint: canvas?.getAttribute("data-guided-canvas-markers"),
+					status: document.querySelector(".tilefab-statusbar")?.textContent,
+				};
+			});
+			throw new Error(`Guided STK Escape did not resume: ${JSON.stringify(details)}.`, {
+				cause: error,
+			});
+		}
 		assertEqual(await panel.isVisible(), true, "Guided STK panel Escape keeps the Guide open");
 		assertEqual(
 			await panel.getAttribute("data-current-mission"),
@@ -8818,6 +8852,30 @@ async function exerciseGuidedPortHandoffRegression(
 			"Guided STK panel Escape returns focus to the Canvas when the active action is implicit",
 		);
 		assertProjectUnchanged(await readMetrics(page), stkBefore, "Guided STK panel Escape");
+		await page.keyboard.press("Enter");
+		await page.waitForFunction(
+			() => document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "1",
+			undefined,
+			{ timeout: 2_000 },
+		);
+		await guidedCommandHelp.focus();
+		await page.keyboard.press("Escape");
+		await page.waitForFunction(
+			() => {
+				const canvas = document.querySelector('[data-testid="rail-canvas"]');
+				const marker = document.querySelector('[data-testid="guided-port-target"]');
+				return (
+					document.querySelector(".tilefab-app")?.getAttribute("data-stk-draft-rows") === "0" &&
+					marker?.getAttribute("data-port-slot-row") ===
+						canvas?.getAttribute("data-guided-port-keyboard-row") &&
+					canvas?.getAttribute("data-guided-port-keyboard-type") === "STK" &&
+					document.activeElement === canvas
+				);
+			},
+			undefined,
+			{ timeout: 10_000 },
+		);
+		assertProjectUnchanged(await readMetrics(page), stkBefore, "Guided STK quick repeat Escape");
 		const restartedStkFirstRow =
 			(await page.getByTestId("guided-port-target").getAttribute("data-port-slot-row")) ?? "";
 		await page.keyboard.press("Enter");
@@ -23699,6 +23757,31 @@ async function saveProject(page) {
 	return downloadPath;
 }
 
+async function saveProjectFromCompactRoute(page) {
+	const directSave = page.getByRole("button", { name: "프로젝트 저장", exact: true });
+	if (await directSave.isVisible().catch(() => false)) {
+		await assertLocatorOwnsHitArea(directSave, "compact direct Save");
+		return saveProject(page);
+	}
+	assertEqual(
+		await page.locator(".tilefab-view-switch").getAttribute("data-derived-3d"),
+		"true",
+		"compact Save uses the menu only when the derived 3D switch owns its slot",
+	);
+	await waitForProjectOperation(page, "idle");
+	await page.locator(".tilefab-project-trigger").click();
+	const menuSave = page
+		.locator(".tilefab-project-menu-commands")
+		.getByRole("button", { name: "프로젝트 파일 저장 (.openfab)", exact: true });
+	await assertLocatorOwnsHitArea(menuSave, "compact project-menu Save");
+	const downloadPromise = page.waitForEvent("download");
+	await menuSave.click();
+	const downloadPath = await (await downloadPromise).path();
+	if (!downloadPath) throw new Error("Compact project-menu Save has no readable download.");
+	await waitForProjectOperation(page, "idle");
+	return downloadPath;
+}
+
 async function putRawUserBlueprintRecord(page, value) {
 	await page.evaluate(async (record) => {
 		const database = await new Promise((resolve, reject) => {
@@ -28923,6 +29006,218 @@ async function startSyntheticFabPresetAction(page, testId) {
 	return Object.freeze({ initialState, transitionState, transitionMilliseconds });
 }
 
+async function exerciseFirstRunVerifiedTemplate(activeBrowser) {
+	const viewports = [
+		{ width: 390, height: 600, create: false },
+		{ width: 390, height: 844, create: true },
+	];
+	const evidence = [];
+	for (const viewport of viewports) {
+		const context = await activeBrowser.newContext({
+			viewport: { width: viewport.width, height: viewport.height },
+		});
+		try {
+			const page = await context.newPage();
+			page.on("pageerror", (error) =>
+				result.pageErrors.push(`[first-run-template] ${error.message}`),
+			);
+			page.on("console", (message) => {
+				if (message.type() === "error")
+					result.consoleErrors.push(`[first-run-template] ${message.text()}`);
+			});
+			await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(page, { physicalPaths: 0 });
+			const before = await readMetrics(page);
+			const startDialog = page.getByTestId("openfab-start-dialog");
+			await startDialog.waitFor({ state: "visible" });
+			await startDialog.getByRole("button", { name: /VERIFIED TEMPLATE/ }).click();
+			await startDialog.waitFor({ state: "hidden" });
+			const dialog = page.getByTestId("synthetic-fab-starter-dialog");
+			await dialog.waitFor({ state: "visible" });
+			assertEqual(await dialog.getAttribute("data-mode"), "preset", "first-run template mode");
+			assertEqual(
+				await dialog.evaluate((element) => element.contains(document.activeElement)),
+				true,
+				"first-run template receives modal focus",
+			);
+			const jump = dialog.getByTestId("synthetic-fab-config-jump");
+			const close = dialog.getByTestId("close-synthetic-fab-starter");
+			await jump.waitFor({ state: "visible" });
+			await assertLocatorInsideViewport(page, jump);
+			await assertLocatorOwnsHitArea(jump, `first-run ${viewport.height}px Settings`);
+			await assertLocatorOwnsHitArea(close, `first-run ${viewport.height}px Close`);
+			assertAtLeast((await jump.boundingBox())?.height ?? 0, 44, "first-run Settings hit height");
+			assertAtLeast((await close.boundingBox())?.height ?? 0, 44, "first-run Close hit height");
+			const headerGeometry = await dialog.locator(":scope > header").evaluate((header) => {
+				const heading = header.querySelector(":scope > div")?.getBoundingClientRect();
+				const jumpButton = header
+					.querySelector(".tilefab-starter-config-jump")
+					?.getBoundingClientRect();
+				const closeButton = header
+					.querySelector("[data-testid=close-synthetic-fab-starter]")
+					?.getBoundingClientRect();
+				return {
+					overflow: header.scrollWidth - header.clientWidth,
+					headingRight: heading?.right ?? Infinity,
+					jumpLeft: jumpButton?.left ?? -Infinity,
+					jumpRight: jumpButton?.right ?? Infinity,
+					closeLeft: closeButton?.left ?? -Infinity,
+				};
+			});
+			assertAtMost(headerGeometry.overflow, 1, "first-run header horizontal overflow");
+			assertAtMost(
+				headerGeometry.headingRight,
+				headerGeometry.jumpLeft + 1,
+				"first-run heading avoids Settings",
+			);
+			assertAtMost(
+				headerGeometry.jumpRight,
+				headerGeometry.closeLeft + 1,
+				"first-run Settings avoids Close",
+			);
+			await jump.click();
+			const configuration = dialog.getByRole("group", { name: "스타터 치수" });
+			assertEqual(
+				await configuration.evaluate((element) => element.contains(document.activeElement)),
+				true,
+				"first-run Settings moves keyboard focus into configuration",
+			);
+			await assertLocatorInsideViewport(page, page.getByTestId("synthetic-fab-parameter-bayCount"));
+			await page.screenshot({
+				path: path.join(artifactRoot, `first-run-template-settings-390x${viewport.height}.png`),
+			});
+			if (!viewport.create) {
+				await dialog.getByTestId("close-synthetic-fab-starter").click();
+				await dialog.waitFor({ state: "hidden" });
+				assertProjectUnchanged(
+					await readMetrics(page),
+					before,
+					"toolbar preset cancellation after first-run",
+				);
+				assertProjectUnchanged(await readMetrics(page), before, "first-run template cancellation");
+				await page.waitForFunction(
+					() => document.activeElement === document.querySelector('[data-testid="rail-canvas"]'),
+					undefined,
+					{ timeout: 2_000 },
+				);
+				assertEqual(
+					await page
+						.getByTestId("rail-canvas")
+						.evaluate((element) => element === document.activeElement),
+					true,
+					"first-run template cancellation restores connected canvas focus",
+				);
+				const toolbarPreset = page.getByRole("button", { name: "FAB 프리셋", exact: true });
+				await toolbarPreset.click();
+				await dialog.waitFor({ state: "visible" });
+				await dialog.getByTestId("close-synthetic-fab-starter").click();
+				await dialog.waitFor({ state: "hidden" });
+				await page.waitForFunction(
+					() =>
+						document.activeElement instanceof HTMLButtonElement &&
+						document.activeElement.getAttribute("aria-label") === "FAB 프리셋",
+					undefined,
+					{ timeout: 2_000 },
+				);
+				evidence.push({
+					viewport: "390x600",
+					settingsHit: true,
+					cancellationPreserved: true,
+					returnFocusRoutes: 2,
+				});
+				continue;
+			}
+			await page.getByTestId("synthetic-fab-starter-parallel-hall-fab-12").click();
+			await jump.click();
+			const bayCount = page.getByTestId("synthetic-fab-parameter-bayCount");
+			await bayCount.fill("14");
+			await bayCount.press("Enter");
+			assertEqual(await bayCount.inputValue(), "14", "first-run nondefault Bay count");
+			const catalog = await waitForStarterCatalogReady(
+				page,
+				(metrics) => metrics.starterId === "parallel-hall-fab-12" && metrics.processRows === "28",
+			);
+			assertEqual(catalog.previewSource, "catalog", "custom preset stays schematic before Apply");
+			assertIncludes(
+				await page.getByTestId("synthetic-fab-preview-source").innerText(),
+				"실행 시 레일 검증",
+				"first-run preset does not claim unperformed verification",
+			);
+			await page.getByTestId("synthetic-fab-project-name").fill("첫 프리셋 FAB");
+			const create = page.getByTestId("create-project-from-synthetic-fab-preset");
+			await assertLocatorInsideViewport(page, create);
+			await assertLocatorOwnsHitArea(create, "first-run preset Create");
+			const action = await startSyntheticFabPresetAction(
+				page,
+				"create-project-from-synthetic-fab-preset",
+			);
+			await continueWithoutSavingIfVisible(page);
+			const created = await waitForWorker(
+				page,
+				(metrics) => metrics.modelRelationships === "2" && metrics.staticFabOrganizations === "45",
+				{ timeout: PRESET_SOURCE_PREPARATION_BUDGET_MILLISECONDS },
+			);
+			assertEqual(created.projectName, "첫 프리셋 FAB", "first-run configured project name");
+			assertEqual(
+				created.modelChecksum,
+				created.workerChecksum,
+				"first-run Worker checksum parity",
+			);
+			assertEqual(
+				created.modelPhysicalFingerprint,
+				created.workerPhysicalFingerprint,
+				"first-run Worker physical parity",
+			);
+			assertEqual(created.workerSimulationReady, "false", "first-run simulation gate");
+			await page.screenshot({
+				path: path.join(artifactRoot, "first-run-template-created-390x844.png"),
+			});
+			const relationships = await readAssemblyRelationships(page);
+			const saved = await saveProjectFromCompactRoute(page);
+			await createSyntheticFabProject(page, "blank");
+			assertEqual((await readMetrics(page)).modelRelationships, "0", "blank before compact reopen");
+			const chooserPromise = page.waitForEvent("filechooser");
+			await page.locator(".tilefab-project-trigger").click();
+			await page
+				.locator(".tilefab-project-menu-commands")
+				.getByRole("button", { name: "열기", exact: true })
+				.click();
+			await continueWithoutSavingIfVisible(page);
+			const chooser = await chooserPromise;
+			await chooser.setFiles(saved);
+			const reopened = await waitForWorker(page, (metrics) => metrics.modelRelationships === "2");
+			for (const key of [
+				"projectName",
+				"modelChecksum",
+				"workerChecksum",
+				"workerPhysicalFingerprint",
+				"modelNextRelationshipId",
+				"staticFabOrganizations",
+			])
+				assertEqual(reopened[key], created[key], `first-run compact reopen ${key}`);
+			assertEqual(
+				JSON.stringify(await readAssemblyRelationships(page)),
+				JSON.stringify(relationships),
+				"first-run compact reopen preserves declared relationships",
+			);
+			await page.screenshot({
+				path: path.join(artifactRoot, "first-run-template-reopened-390x844.png"),
+			});
+			evidence.push({
+				viewport: "390x844",
+				settingsHit: true,
+				configuredBays: 14,
+				relationships: 2,
+				createTransition: action.transitionState,
+				compactSaveAndOpen: true,
+			});
+		} finally {
+			await context.close();
+		}
+	}
+	return evidence;
+}
+
 async function exerciseSyntheticFabPresetRecovery(activeBrowser) {
 	const context = await activeBrowser.newContext({ viewport: { width: 390, height: 720 } });
 	try {
@@ -30403,6 +30698,23 @@ async function exerciseSyntheticStarterLayout(page) {
 	const patternDialog = page.getByTestId("synthetic-fab-starter-dialog");
 	const placePattern = page.getByTestId("place-synthetic-fab-pattern");
 	await assertLocatorInsideViewport(page, patternDialog);
+	if (viewport.width <= 560) {
+		const configJump = patternDialog.getByTestId("synthetic-fab-config-jump");
+		await assertLocatorInsideViewport(page, configJump);
+		await assertLocatorOwnsHitArea(configJump, "compact pattern Settings");
+		await configJump.click();
+		assertEqual(
+			await patternDialog
+				.getByRole("group", { name: "스타터 치수" })
+				.evaluate((element) => element.contains(document.activeElement)),
+			true,
+			"compact pattern Settings transfers focus into configuration",
+		);
+		await assertLocatorInsideViewport(
+			page,
+			patternDialog.locator(".tilefab-starter-config input").first(),
+		);
+	}
 	await placePattern.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, placePattern);
 	await page.screenshot({

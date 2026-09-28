@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+### Preview candidate 0.1.16
+
+- Add a reachable Settings action for compact FAB presets and patterns, including the
+  first-screen Verified Template path. Return keyboard focus to the canvas or preset
+  launcher after closing the dialog.
+- Check a nondefault 14-Bay preset from the first screen through creation, declared
+  relationships, compact save, and file reopen.
+- Resume Guided Stocker keyboard input from a freshly painted target after clearing a Port
+  draft, including same-row targets and rapid Escape. Preserve an intentional focus change.
+
 ### Preview candidate 0.1.15
 
 - Keep a direct Save action visible on compact public 2D screens after the first edit. Preserve

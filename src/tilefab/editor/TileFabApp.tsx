@@ -3438,6 +3438,7 @@ export default function TileFabApp(): React.ReactElement {
 	);
 	const [projectMenuOpen, setProjectMenuOpen] = useState(false);
 	const starterDialogReturnFocusRef = useRef<HTMLElement | null>(null);
+	const fabPresetDialogReturnFocusRef = useRef<HTMLElement | null>(null);
 	const [commandHelpOpen, setCommandHelpOpen] = useState(false);
 	const commandHelpReturnFocusRef = useRef<HTMLElement | null>(null);
 	const [openFabStartDialogOpen, setOpenFabStartDialogOpen] = useState(false);
@@ -3495,6 +3496,14 @@ export default function TileFabApp(): React.ReactElement {
 	const guidedPortKeyboardAnnouncementTimerRef = useRef<number | null>(null);
 	const guidedPortKeyboardLastValidityRef = useRef<string | null>(null);
 	const guidedPortKeyboardFocusRequestRef = useRef<GuidedPortKeyboardType | null>(null);
+	const guidedPortKeyboardResumeRef = useRef<
+		{
+			session: GuidedPortKeyboardSession;
+			focusOwner: Element | null;
+			publishedMarkers: readonly GuidedCanvasActionMarker[] | null;
+			missingPaints: number;
+		} | null
+	>(null);
 	const guidedPrimaryFocusHandoffRef = useRef(false);
 	const cancelGuidedPortKeyboardForLifecycleRef = useRef<() => void>(() => undefined);
 	const [guidedPortKeyboard, setGuidedPortKeyboard] =
@@ -8596,6 +8605,7 @@ export default function TileFabApp(): React.ReactElement {
 			setGuidedPortKeyboard(null);
 			guidedPortKeyboardFocusRequestRef.current = null;
 		}
+		guidedPortKeyboardResumeRef.current = null;
 		const editedRail = reshapeRef.current?.origin ?? null;
 		const selectedEquipmentEditWasActive =
 			ohbPlacementIntentRef.current !== null ||
@@ -10804,9 +10814,24 @@ export default function TileFabApp(): React.ReactElement {
 					)
 				: null;
 		const finalMessage = message ?? ordinaryEscape?.message ?? "키보드 Port 배치를 취소했습니다";
+		const guidedStkResume =
+			resumeKeyboard && session.scope === "guided" && portType === "STK" && selectedPortCount > 0;
+		const focusOwner = document.activeElement;
 		clearTransientConstruction(resumeKeyboard && session.scope === "ordinary" ? undefined : finalMessage);
 		if (resumeKeyboard && session.scope === "ordinary") {
 			startOrdinaryPortKeyboard(portType, finalMessage);
+			return;
+		}
+		if (guidedStkResume) {
+			// Read the target only from a canvas paint after the draft has cleared.
+			// The old second-Port marker may still be visible for several frames, or
+			// the new first-Port target may legitimately have the same row.
+			guidedPortKeyboardResumeRef.current = {
+				session,
+				focusOwner,
+				publishedMarkers: null,
+				missingPaints: 0,
+			};
 			return;
 		}
 		if (restoreFocus) {
@@ -12992,9 +13017,51 @@ export default function TileFabApp(): React.ReactElement {
 				markers: guidedCanvasMarkers,
 			});
 			canvas.dataset.guidedCanvasMarkers = guidedCanvasMarkerFingerprint;
-			if (guidedCanvasActionMarkerFingerprintRef.current !== guidedCanvasMarkerFingerprint) {
+			const pendingGuidedResume = guidedPortKeyboardResumeRef.current;
+			let resumeMarkers: readonly GuidedCanvasActionMarker[] | null = null;
+			const markerChanged =
+				guidedCanvasActionMarkerFingerprintRef.current !== guidedCanvasMarkerFingerprint;
+			if (pendingGuidedResume && pendingGuidedResume.publishedMarkers === null) {
+				if (!guidedPortKeyboardSessionCurrent(pendingGuidedResume.session)) {
+					guidedPortKeyboardResumeRef.current = null;
+				} else if ((stkDraftSessionRef.current?.selection.rows.length ?? 0) === 0) {
+					const target = guidedCanvasMarkers.find((marker) => marker.role === "target");
+					if (target?.portSlotRow !== undefined) {
+						resumeMarkers = [...guidedCanvasMarkers];
+						pendingGuidedResume.publishedMarkers = resumeMarkers;
+					} else if (++pendingGuidedResume.missingPaints <= 8) {
+						schedule();
+					} else {
+						guidedPortKeyboardResumeRef.current = null;
+						setStatus("Stocker 추천 슬롯을 준비하지 못했습니다 · Stocker 도구에서 다시 시작하세요");
+						if (
+							document.activeElement === pendingGuidedResume.focusOwner ||
+							document.activeElement === document.body
+						) {
+							canvas.focus({ preventScroll: true });
+						}
+					}
+				}
+			}
+			if (
+				guidedPortKeyboardResumeRef.current === pendingGuidedResume &&
+				pendingGuidedResume?.publishedMarkers &&
+				markerChanged &&
+				resumeMarkers === null
+			) {
+				const target = guidedCanvasMarkers.find((marker) => marker.role === "target");
+				if (target?.portSlotRow !== undefined) {
+					resumeMarkers = [...guidedCanvasMarkers];
+					pendingGuidedResume.publishedMarkers = resumeMarkers;
+				} else {
+					pendingGuidedResume.publishedMarkers = null;
+					pendingGuidedResume.missingPaints = 0;
+					schedule();
+				}
+			}
+			if (markerChanged || resumeMarkers !== null) {
 				guidedCanvasActionMarkerFingerprintRef.current = guidedCanvasMarkerFingerprint;
-				setGuidedCanvasActionMarkers(guidedCanvasMarkers);
+				setGuidedCanvasActionMarkers(resumeMarkers ?? guidedCanvasMarkers);
 			}
 			const equipmentReadout = equipmentSelectionReadoutRef.current;
 			if (equipmentReadout) {
@@ -30304,6 +30371,8 @@ export default function TileFabApp(): React.ReactElement {
 		// A reviewed STK draft still owns Escape, reset and lifecycle cleanup through this cursor.
 		if (guidedBuildOpen && portType === "STK" && stkDraftReady) return;
 		if (!guidedBuildOpen || !guidedBuildPortPlacementCoach || portType === null) {
+			guidedPortKeyboardResumeRef.current = null;
+			guidedPortKeyboardFocusRequestRef.current = null;
 			if (guidedPortKeyboardSessionRef.current?.scope === "guided") {
 				clearGuidedPortKeyboardAccessibility();
 				guidedPortKeyboardSessionRef.current = null;
@@ -30317,6 +30386,33 @@ export default function TileFabApp(): React.ReactElement {
 				? guidedCanvasActionMarkers.find((candidate) => candidate.role === "start")
 				: guidedCanvasActionMarkers.find((candidate) => candidate.role === "target");
 		if (marker?.portSlotRow === undefined) return;
+		const pendingResume = guidedPortKeyboardResumeRef.current;
+		if (pendingResume?.session.portType === portType) {
+			if (pendingResume.publishedMarkers !== guidedCanvasActionMarkers) return;
+			guidedPortKeyboardResumeRef.current = null;
+			const binding = currentGuidedPortKeyboardBinding();
+			if (
+				!binding ||
+				binding.slots.portType !== portType ||
+				!guidedPortKeyboardSessionIsCurrent(pendingResume.session, binding) ||
+				marker.portSlotRow >= binding.slots.routeXs.length
+			) return;
+			const resumed = createGuidedPortKeyboardSession(portType, marker.portSlotRow, binding);
+			presentGuidedPortKeyboardSession(resumed);
+			setStatus(`키보드 ${portType} 배치를 처음 추천 슬롯에서 다시 시작합니다`);
+			scheduleRender();
+			requestAnimationFrame(() => {
+				if (guidedPortKeyboardSessionRef.current !== resumed) return;
+				if (
+					document.activeElement === pendingResume.focusOwner ||
+					document.activeElement === document.body
+				) {
+					canvasRef.current?.focus({ preventScroll: true });
+				}
+			});
+			return;
+		}
+		if (pendingResume) guidedPortKeyboardResumeRef.current = null;
 		const current = guidedPortKeyboardSessionRef.current;
 		if (
 			current?.portType === "STK" &&
@@ -30955,6 +31051,8 @@ export default function TileFabApp(): React.ReactElement {
 					onGuidedBuild={startGuidedBuild}
 					onVerifiedTemplate={() => {
 						recordGuidedBuildChoice("template");
+						fabPresetDialogReturnFocusRef.current =
+							openFabStartReturnFocusRef.current ?? canvasRef.current;
 						setOpenFabStartDialogOpen(false);
 						setGuidedBuildOpen(false);
 						setFabPresetDialogOpen(true);
@@ -31200,7 +31298,10 @@ export default function TileFabApp(): React.ReactElement {
 						label="FAB 프리셋"
 						exclusiveCommandScope="project"
 						disabled={viewMode === "3d" || projectBusy}
-						onClick={() => setFabPresetDialogOpen(true)}
+						onClick={(event) => {
+							fabPresetDialogReturnFocusRef.current = event.currentTarget;
+							setFabPresetDialogOpen(true);
+						}}
 					>
 						<Factory size={16} />
 					</IconButton>
@@ -32584,6 +32685,7 @@ export default function TileFabApp(): React.ReactElement {
 					<SyntheticFabStarterDialog
 						busy={projectBusy}
 						mode="preset"
+						returnFocus={fabPresetDialogReturnFocusRef.current}
 						operationError={starterDialogOperationError}
 						placementBlockedReason={
 							staticFabBayFlowEdit

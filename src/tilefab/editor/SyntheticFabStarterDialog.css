@@ -111,6 +111,10 @@
 	cursor: default;
 }
 
+.tilefab-starter-dialog > header > .tilefab-starter-config-jump {
+	display: none;
+}
+
 .tilefab-starter-operation-error {
 	position: absolute;
 	top: 76px;
@@ -1142,6 +1146,16 @@
 	}
 	.tilefab-starter-dialog > header strong {
 		font-size: 15px;
+	}
+	.tilefab-starter-dialog > header > .tilefab-starter-config-jump {
+		display: grid;
+		width: 62px;
+		flex-basis: 62px;
+		border-color: #40595c;
+		color: #d7ecee;
+		background: #17282a;
+		font-size: 12px;
+		font-weight: 750;
 	}
 	.tilefab-starter-workspace {
 		display: flex;
