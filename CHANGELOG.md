@@ -6,7 +6,26 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.27] - 2026-09-29
+
+- Add a visible “다른 Port 보기” action for ordinary OHB, EQ, and Stocker placement. It moves
+  the current Canvas target within the selected Process Loop without changing authored data,
+  keeps EQ endpoints on the same directed lane, and preserves Stocker drafts. Search stays
+  within 32 m and checks at most 64 dynamic candidates per tap; another tap continues an
+  unfinished local sweep. Restore Canvas focus and explain a full Stocker draft or missing
+  nearby candidate in context.
+- Exercise first OHB placement from Blank Canvas and a verified synthetic template at
+  390×600, 760×900, and 1440×900 using the visible action and real touch input. Keep the
+  existing scoped EQ/Stocker draft and Loop-ownership browser checks.
+  The final-source authoring gate passed 72 steps with 576 screenshots and no browser errors;
+  4,754 unit tests passed across 428 files with two existing skips. The strict public-release,
+  initial bundle, four-width live smoke, and 10k/50k/100k-cell scale checks also passed.
+
 ## [0.1.26] - 2026-09-29
+
+Private `06333d8` and public `dddd4ba` were normally pushed. Both public CI jobs passed in
+run `36458506306`; Pages `649ab87` deployed in run `36462287378`. All 65 served files
+(26,995,600 bytes) and both entry URLs matched the reviewed build SHA-256. V1 remains incomplete.
 
 - Clarify the start chooser when an authored FAB is already open: `BLANK CANVAS` returns to
   the current project without clearing it, and a new empty project starts from the Project menu.

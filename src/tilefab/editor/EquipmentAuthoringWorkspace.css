@@ -439,6 +439,7 @@
 
 .tilefab-equipment-view-actions {
 	display: flex;
+	flex-wrap: wrap;
 	width: 100%;
 	min-width: 0;
 	gap: 8px;
@@ -447,9 +448,10 @@
 	display: none;
 }
 .tilefab-equipment-workspace .tilefab-equipment-view-actions > button {
-	flex: 1;
+	flex: 1 1 120px;
 	width: auto;
 	min-width: 0;
+	min-height: 44px;
 }
 
 /* Range review keeps the active caption without covering adjacent one-metre Ports. */

@@ -216,6 +216,7 @@ import {
 	collectPortEquipmentIntegrityIssues,
 	EQ_MAXIMUM_PORT_COUNT,
 	type PortEquipmentState,
+	STK_MAXIMUM_PORT_COUNT,
 	type StkEquipmentTemplate,
 } from "../core/EquipmentGroup";
 import {
@@ -938,7 +939,12 @@ import {
 	resolveEditablePortEquipmentSelection,
 	resolveExactPortEquipmentSelection,
 } from "./PortEquipmentInspectorSelection";
-import { progressiveDirectionalPortEquipmentSlotRow } from "./PortEquipmentKeyboardNavigation";
+import {
+	nextPortEquipmentSlotRow,
+	PORT_EQUIPMENT_NEXT_CANDIDATE_CHECK_BUDGET,
+	PORT_EQUIPMENT_NEXT_CANDIDATE_RADIUS_METERS,
+	progressiveDirectionalPortEquipmentSlotRow,
+} from "./PortEquipmentKeyboardNavigation";
 import {
 	decideOrdinaryPortKeyboardApply,
 	resolveOrdinaryPortKeyboardDeferredApply,
@@ -3510,6 +3516,18 @@ export default function TileFabApp(): React.ReactElement {
 	const cancelGuidedRailKeyboardForMissionChangeRef = useRef<() => void>(() => undefined);
 	const [guidedRailKeyboard, setGuidedRailKeyboard] = useState<RailKeyboardUiState | null>(null);
 	const guidedPortKeyboardSessionRef = useRef<GuidedPortKeyboardSession | null>(null);
+	const ordinaryPortNextProbeRef = useRef<{
+		readonly session: GuidedPortKeyboardSession;
+		readonly eqDraft: PortRowDragState | null;
+		readonly eqPitchMillimeters: number | null;
+		readonly stkDraft: StkDraftSession | null;
+		readonly stkDraftRowsKey: string;
+		readonly stkTemplate: StkAuthoringTemplate;
+		readonly rowMask: Uint8Array | null;
+		readonly candidateCount: number;
+		readonly afterRow: number;
+		readonly inspectedCandidateRows: number;
+	} | null>(null);
 	const eqPointerHoverSessionRef = useRef<GuidedPortKeyboardSession | null>(null);
 	const ordinaryPortKeyboardPaintedSessionRef = useRef<GuidedPortKeyboardSession | null>(null);
 	const ordinaryPortKeyboardPendingApplyRef = useRef<GuidedPortKeyboardSession | null>(null);
@@ -11088,6 +11106,46 @@ export default function TileFabApp(): React.ReactElement {
 		);
 	};
 
+	const presentMovedPortKeyboard = (
+		session: GuidedPortKeyboardSession,
+		row: number,
+		repeat: boolean,
+	): void => {
+		if (session.scope === "ordinary") setOrdinaryPortProcessLoopFeedback(null);
+		const next = moveGuidedPortKeyboardCursor(session, row);
+		if (cameraFitScopeRef.current === "stk-selection") cameraFitScopeRef.current = null;
+		if (next.scope === "ordinary") {
+			const canvas = canvasRef.current;
+			if (
+				canvas &&
+				centerPortKeyboardRowIfObscured(
+					next,
+					canvas,
+					cameraRef.current,
+					rendererRef.current,
+					fitMapInsets(canvas),
+				)
+			) {
+				cameraReadyRef.current = true;
+				rendererRef.current.invalidateStatic();
+			}
+		}
+		const eqSelection =
+			next.portType === "EQ" && next.phase === "choose-end" && portRowDragRef.current
+				? recomputePortRowDrag(portRowDragRef.current, next.currentRow)
+				: null;
+		const evaluation = eqSelection
+			? { legal: eqSelection.valid, reason: eqSelection.reason }
+			: undefined;
+		presentGuidedPortKeyboardSession(next, evaluation, !repeat);
+		if (next.portType === "STK") requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
+		if (next.scope === "guided") {
+			const summary = guidedPortKeyboardRowPresentation(next, evaluation);
+			if (!repeat) setStatus(summary.replace(/^키보드 /, ""));
+		}
+		scheduleRender();
+	};
+
 	const moveGuidedPortKeyboard = (
 		direction: GuidedPortKeyboardDirection,
 		repeat: boolean,
@@ -11133,39 +11191,128 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus(`해당 방향에 다음 ${session.portType} 슬롯이 없습니다`);
 			return;
 		}
-		if (session.scope === "ordinary") setOrdinaryPortProcessLoopFeedback(null);
-		const next = moveGuidedPortKeyboardCursor(session, search.row);
-		if (cameraFitScopeRef.current === "stk-selection") cameraFitScopeRef.current = null;
-		if (next.scope === "ordinary") {
-			const canvas = canvasRef.current;
-			if (
-				canvas &&
-				centerPortKeyboardRowIfObscured(
-					next,
-					canvas,
-					cameraRef.current,
-					rendererRef.current,
-					fitMapInsets(canvas),
-				)
-			) {
-				cameraReadyRef.current = true;
-				rendererRef.current.invalidateStatic();
-			}
+		presentMovedPortKeyboard(session, search.row, repeat);
+	};
+
+	const showNextOrdinaryPort = (): void => {
+		const session = guidedPortKeyboardSessionRef.current;
+		if (!session || session.scope !== "ordinary") return;
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+		cancelOrdinaryPortKeyboardDeferredApply();
+		const blockedReason = guidedBuildInputBlockedReason();
+		if (blockedReason) {
+			setStatus(blockedReason);
+			return;
 		}
-		const eqSelection =
-			next.portType === "EQ" && next.phase === "choose-end" && portRowDragRef.current
-				? recomputePortRowDrag(portRowDragRef.current, next.currentRow)
+		if (!guidedPortKeyboardSessionCurrent(session)) {
+			cancelGuidedPortKeyboard("FAB 데이터가 변경되어 Port 배치를 취소했습니다");
+			return;
+		}
+		const processLoopScope = currentOrdinaryPortProcessLoopScope(session.binding.slots);
+		if (ordinaryPortProcessLoopTargetRef.current && !ohbPlacementIntentRef.current && !processLoopScope) {
+			cancelGuidedPortKeyboard("Process Loop가 변경되어 Port 배치를 다시 선택해야 합니다");
+			return;
+		}
+		const eqDraft = session.portType === "EQ" && session.phase === "choose-end"
+			? portRowDragRef.current
+			: null;
+		if (session.portType === "EQ" && session.phase === "choose-end" &&
+			(!eqDraft || eqDraft.portType !== "EQ" || !isCurrentPortRowDrag(eqDraft))) {
+			setStatus("EQ 시작점이 바뀌었습니다 · 시작점을 다시 선택하세요");
+			return;
+		}
+		const stkDraft = session.portType === "STK" ? stkDraftSessionRef.current : null;
+		if (stkDraft && !isCurrentStkDraft(stkDraft)) {
+			setStatus("Stocker 초안이 바뀌었습니다 · Port를 다시 선택하세요");
+			return;
+		}
+		const stkSelectedRows = stkDraft?.selection.rows ?? [];
+		const stkTemplate = stkDraft?.template ?? stkTemplateRef.current;
+		const stkDraftRowsKey = stkSelectedRows.join(",");
+		const stkMaximumRows = stkTemplate === "FOUR_PORT" ? 4 : stkTemplate === "SIX_PORT" ? 6 : STK_MAXIMUM_PORT_COUNT;
+		if (session.portType === "STK" && stkSelectedRows.length >= stkMaximumRows) {
+			setStatus(`Stocker 초안이 ${stkMaximumRows}개 Port로 찼습니다 · 생성하거나 선택을 해제하세요`);
+			return;
+		}
+		const slots = session.binding.slots;
+		const worldX = slots.worldPositions[session.currentRow * 2] as number;
+		const worldZ = slots.worldPositions[session.currentRow * 2 + 1] as number;
+		const radius = PORT_EQUIPMENT_NEXT_CANDIDATE_RADIUS_METERS;
+		const candidates = rendererRef.current.queryPortSlots(
+			slots,
+			{ minX: worldX - radius, minZ: worldZ - radius, maxX: worldX + radius, maxZ: worldZ + radius },
+			membershipCandidateBufferRef.current,
+		);
+		const priorProbe = ordinaryPortNextProbeRef.current;
+		const continuing = priorProbe?.session === session && priorProbe.eqDraft === eqDraft &&
+			priorProbe.eqPitchMillimeters === (eqDraft?.pitchMillimeters ?? null) &&
+			priorProbe.stkDraft === stkDraft && priorProbe.stkDraftRowsKey === stkDraftRowsKey &&
+			priorProbe.stkTemplate === stkTemplate &&
+			priorProbe.rowMask === (processLoopScope?.rowMask ?? null) &&
+			priorProbe.candidateCount === candidates.length;
+		const inspectedBefore = continuing ? priorProbe.inspectedCandidateRows : 0;
+		const next = nextPortEquipmentSlotRow({
+			slots,
+			currentRow: session.currentRow,
+			candidateRows: candidates,
+			scope: eqDraft ? "same-directed-lane" : "nearby",
+			allowedRows: processLoopScope?.rowMask,
+			maximumAvailabilityChecks: PORT_EQUIPMENT_NEXT_CANDIDATE_CHECK_BUDGET,
+			startAfterRow: continuing ? priorProbe.afterRow : session.currentRow,
+			maximumCandidateRowsToInspect: candidates.length - inspectedBefore,
+			isAvailable: (row) => {
+				if (session.binding.availability.statusForAdvisoryDiscovery(slots, row).status !== PORT_SLOT_STATUS.LEGAL) return false;
+				if (session.binding.availability.statusFor(slots, row).status !== PORT_SLOT_STATUS.LEGAL) return false;
+				if (eqDraft) {
+					if (eqRowDraftExceedsMaximum(slots, eqDraft.anchorRow, row, eqDraft.pitchMillimeters)) return false;
+					const candidates = rendererRef.current.queryPortSlots(
+						slots,
+						portRowDragBounds(slots, eqDraft.anchorRow, row),
+						portRowCandidateBufferRef.current,
+					);
+					const selection = selectEqRowDraft(
+						slots,
+						eqDraft.availability,
+						eqDraft.anchorRow,
+						row,
+						candidates,
+						eqDraft.pitchMillimeters,
+					);
+					return selection.valid && selection.state === "READY" &&
+						selection.rows.every((selectionRow) => !processLoopScope || processLoopScope.rowMask[selectionRow] === 1);
+				}
+				if (session.portType === "STK") {
+					if (stkSelectedRows.includes(row)) return false;
+					const selection = toggleStkDraftRow(
+						slots,
+						session.binding.availability,
+						stkSelectedRows,
+						row,
+						stkTemplate,
+						(bounds, target) => rendererRef.current.queryPortSlots(slots, bounds, target),
+					);
+					return selection.valid && selection.rejectedRow === null;
+				}
+				return true;
+			},
+		});
+		if (next.row === null) {
+			ordinaryPortNextProbeRef.current = next.budgetExhausted && next.lastInspectedRow !== null
+				? { session, eqDraft, eqPitchMillimeters: eqDraft?.pitchMillimeters ?? null,
+					stkDraft, stkDraftRowsKey, stkTemplate, rowMask: processLoopScope?.rowMask ?? null,
+					candidateCount: candidates.length, afterRow: next.lastInspectedRow,
+					inspectedCandidateRows: inspectedBefore + next.inspectedCandidateRows }
 				: null;
-		const evaluation = eqSelection
-			? { legal: eqSelection.valid, reason: eqSelection.reason }
-			: undefined;
-		presentGuidedPortKeyboardSession(next, evaluation, !repeat);
-		if (next.portType === "STK") requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
-		if (next.scope === "guided") {
-			const summary = guidedPortKeyboardRowPresentation(next, evaluation);
-			if (!repeat) setStatus(summary.replace(/^키보드 /, ""));
+			const recovery = processLoopScope
+				? "방향키로 이동하거나 다른 Process Loop를 선택하세요"
+				: "방향키로 이동하거나 다른 레일 구간을 선택하세요";
+			setStatus(next.budgetExhausted
+				? "주변 후보가 많아 일부만 확인했습니다 · 다시 눌러 나머지 후보를 확인하세요"
+				: `${radius}m 주변에 다른 ${session.portType} Port 후보가 없습니다 · ${recovery}`);
+			return;
 		}
-		scheduleRender();
+		ordinaryPortNextProbeRef.current = null;
+		presentMovedPortKeyboard(session, next.row, false);
 	};
 
 	const commitOhbPlacementIntentAtRow = (
@@ -38140,9 +38287,20 @@ export default function TileFabApp(): React.ReactElement {
 										>
 											<Search size={14} aria-hidden="true" />
 											{tool === "stk" ? activeStkZoomActionLabel : "현재 Port 확대"}
-										</button>
-									) : null}
-									</span>
+														</button>
+													) : null}
+												{guidedPortKeyboard?.scope === "ordinary" && !guidedBuildExperienceActive && !ohbPlacementIntent ? (
+													<button
+														type="button"
+														className="tilefab-equipment-fit-selection"
+														data-testid="ordinary-port-next-candidate"
+														aria-label="다른 Port 후보 보기"
+														onClick={showNextOrdinaryPort}
+													>
+														<ChevronRight size={14} aria-hidden="true" /> 다른 Port 보기
+													</button>
+												) : null}
+											</span>
 								</span>
 								{ordinaryPortKeyboardEntryVisible ? (
 									<button

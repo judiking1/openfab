@@ -3,6 +3,7 @@ import type { CompiledPortSlots } from "../compile/PortSlotCompiler";
 import { DIR_E, DIR_N, DIR_S, DIR_W } from "../core/railShape";
 import {
 	directionalPortEquipmentSlotRow,
+	nextPortEquipmentSlotRow,
 	progressiveDirectionalPortEquipmentSlotRow,
 } from "./PortEquipmentKeyboardNavigation";
 
@@ -188,6 +189,145 @@ describe("directionalPortEquipmentSlotRow", () => {
 			candidateRows: 1,
 			maximumCandidateRows: 1,
 		});
+	});
+
+	it("cycles visible targets through available scoped rows and wraps without changing the EQ lane", () => {
+		const slots = fixtureSlots([
+			[0, 0, DIR_W, DIR_E],
+			[1, 0, DIR_W, DIR_E],
+			[2, 0, DIR_W, DIR_E],
+			[1, 1, DIR_W, DIR_E],
+			[3, 0, DIR_E, DIR_W],
+		]);
+		const allowedRows = new Uint8Array([1, 1, 1, 1, 1]);
+		const available = (row: number) => row !== 1;
+		const candidateRows = [4, 3, 2, 1, 0];
+		expect(
+			nextPortEquipmentSlotRow({
+				slots,
+				currentRow: 0,
+				candidateRows,
+				scope: "same-directed-lane",
+				allowedRows,
+				maximumAvailabilityChecks: 64,
+				isAvailable: available,
+			}).row,
+		).toBe(2);
+		expect(
+			nextPortEquipmentSlotRow({
+				slots,
+				currentRow: 2,
+				candidateRows,
+				scope: "same-directed-lane",
+				allowedRows,
+				maximumAvailabilityChecks: 64,
+				isAvailable: available,
+			}).row,
+		).toBe(0);
+		allowedRows[2] = 0;
+		expect(
+			nextPortEquipmentSlotRow({
+				slots,
+				currentRow: 0,
+				candidateRows,
+				scope: "same-directed-lane",
+				allowedRows,
+				maximumAvailabilityChecks: 64,
+				isAvailable: available,
+			}).row,
+		).toBeNull();
+		expect(
+			nextPortEquipmentSlotRow({
+				slots,
+				currentRow: 0,
+				candidateRows,
+				scope: "nearby",
+				allowedRows,
+				maximumAvailabilityChecks: 64,
+				isAvailable: available,
+			}).row,
+		).toBe(3);
+	});
+
+	it("bounds dynamic validation even when a large local query has no usable candidate", () => {
+		const slots = fixtureSlots(
+			Array.from({ length: 50_000 }, (_, row) => [row, 0, DIR_W, DIR_E] as const),
+		);
+		let checks = 0;
+		const candidateRows = Array.from({ length: 2_000 }, (_, index) => 25_001 + index);
+		const result = nextPortEquipmentSlotRow({
+			slots,
+			currentRow: 25_000,
+			candidateRows,
+			scope: "nearby",
+			maximumAvailabilityChecks: 64,
+			isAvailable: () => {
+				checks++;
+				return false;
+			},
+		});
+		expect(result).toEqual({
+			row: null,
+			availabilityChecks: 64,
+			budgetExhausted: true,
+			inspectedCandidateRows: 64,
+			lastInspectedRow: 25_064,
+		});
+		expect(checks).toBe(64);
+		const continued = nextPortEquipmentSlotRow({
+			slots,
+			currentRow: 25_000,
+			candidateRows,
+			scope: "nearby",
+			maximumAvailabilityChecks: 64,
+			startAfterRow: result.lastInspectedRow as number,
+			maximumCandidateRowsToInspect: candidateRows.length - result.inspectedCandidateRows,
+			isAvailable: (row) => row === 25_065,
+		});
+		expect(continued).toEqual({
+			row: 25_065,
+			availabilityChecks: 1,
+			budgetExhausted: false,
+			inspectedCandidateRows: 1,
+			lastInspectedRow: 25_065,
+		});
+	});
+
+	it("resumes across the row-order wrap and ends after one complete local sweep", () => {
+		const slots = fixtureSlots(
+			Array.from({ length: 7 }, (_, row) => [row, 0, DIR_W, DIR_E] as const),
+		);
+		const candidateRows = [5, 1, 4, 0, 3, 2, 6];
+		let afterRow = 3;
+		let inspected = 0;
+		const results = [];
+		for (let click = 0; click < 3; click++) {
+			const result = nextPortEquipmentSlotRow({
+				slots,
+				currentRow: 3,
+				candidateRows,
+				scope: "nearby",
+				maximumAvailabilityChecks: 2,
+				startAfterRow: afterRow,
+				maximumCandidateRowsToInspect: candidateRows.length - inspected,
+				isAvailable: () => false,
+			});
+			results.push(result);
+			inspected += result.inspectedCandidateRows;
+			afterRow = result.lastInspectedRow as number;
+		}
+		expect(
+			results.map((result) => [
+				result.budgetExhausted,
+				result.inspectedCandidateRows,
+				result.lastInspectedRow,
+			]),
+		).toEqual([
+			[true, 2, 5],
+			[true, 2, 0],
+			[false, 3, 3],
+		]);
+		expect(inspected).toBe(candidateRows.length);
 	});
 });
 

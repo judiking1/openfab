@@ -1,4 +1,8 @@
-import type { CompiledPortSlots, PortSlotBounds } from "../compile/PortSlotCompiler";
+import {
+	type CompiledPortSlots,
+	PORT_SLOT_STATUS,
+	type PortSlotBounds,
+} from "../compile/PortSlotCompiler";
 import { DIR_E, DIR_N, DIR_S, DIR_W, type Direction } from "../core/railShape";
 
 export type PortEquipmentKeyboardNavigationScope = "same-directed-lane" | "nearby";
@@ -6,6 +10,8 @@ export type PortEquipmentKeyboardNavigationScope = "same-directed-lane" | "nearb
 export const PORT_EQUIPMENT_KEYBOARD_SEARCH_RADII = Object.freeze([
 	32, 64, 128, 256, 512, 1_024, 2_048, 4_096, 8_192,
 ]);
+export const PORT_EQUIPMENT_NEXT_CANDIDATE_RADIUS_METERS = 32;
+export const PORT_EQUIPMENT_NEXT_CANDIDATE_CHECK_BUDGET = 64;
 
 export interface PortEquipmentKeyboardNavigationRequest {
 	readonly slots: CompiledPortSlots;
@@ -30,6 +36,114 @@ export interface ProgressivePortEquipmentKeyboardNavigationResult {
 	readonly searchSteps: number;
 	readonly candidateRows: number;
 	readonly maximumCandidateRows: number;
+}
+
+export interface NextPortEquipmentSlotRequest {
+	readonly slots: CompiledPortSlots;
+	readonly currentRow: number;
+	readonly candidateRows: readonly number[];
+	readonly scope: PortEquipmentKeyboardNavigationScope;
+	readonly allowedRows?: Uint8Array;
+	readonly maximumAvailabilityChecks: number;
+	readonly startAfterRow?: number;
+	readonly maximumCandidateRowsToInspect?: number;
+	readonly isAvailable: (row: number) => boolean;
+}
+
+export interface NextPortEquipmentSlotResult {
+	readonly row: number | null;
+	readonly availabilityChecks: number;
+	readonly budgetExhausted: boolean;
+	readonly inspectedCandidateRows: number;
+	readonly lastInspectedRow: number | null;
+}
+
+/** Cycle only through an indexed local query; cap expensive dynamic availability checks. */
+export function nextPortEquipmentSlotRow(
+	request: NextPortEquipmentSlotRequest,
+): NextPortEquipmentSlotResult {
+	const {
+		slots,
+		currentRow,
+		candidateRows,
+		scope,
+		allowedRows,
+		maximumAvailabilityChecks,
+		startAfterRow = currentRow,
+		maximumCandidateRowsToInspect = candidateRows.length,
+		isAvailable,
+	} = request;
+	if (
+		!Number.isInteger(currentRow) ||
+		currentRow < 0 ||
+		currentRow >= slots.count ||
+		!Number.isSafeInteger(maximumAvailabilityChecks) ||
+		maximumAvailabilityChecks < 1 ||
+		!Number.isInteger(startAfterRow) ||
+		!Number.isSafeInteger(maximumCandidateRowsToInspect) ||
+		maximumCandidateRowsToInspect < 0
+	) {
+		return {
+			row: null,
+			availabilityChecks: 0,
+			budgetExhausted: false,
+			inspectedCandidateRows: 0,
+			lastInspectedRow: null,
+		};
+	}
+	const ordered = candidateRows.slice().sort((left, right) => left - right);
+	let firstAfterCurrent = 0;
+	while (
+		firstAfterCurrent < ordered.length &&
+		(ordered[firstAfterCurrent] as number) <= startAfterRow
+	)
+		firstAfterCurrent++;
+	let availabilityChecks = 0;
+	const scanLimit = Math.min(ordered.length, Math.max(0, maximumCandidateRowsToInspect));
+	for (let offset = 0; offset < scanLimit; offset++) {
+		const candidate = ordered[(firstAfterCurrent + offset) % ordered.length] as number;
+		if (
+			!Number.isInteger(candidate) ||
+			candidate < 0 ||
+			candidate >= slots.count ||
+			candidate === currentRow
+		)
+			continue;
+		if (allowedRows && allowedRows[candidate] !== 1) continue;
+		if (slots.statuses[candidate] !== PORT_SLOT_STATUS.LEGAL) continue;
+		if (scope === "same-directed-lane" && !sameDirectedLane(slots, currentRow, candidate)) continue;
+		if (availabilityChecks >= maximumAvailabilityChecks) {
+			return {
+				row: null,
+				availabilityChecks,
+				budgetExhausted: true,
+				inspectedCandidateRows: offset,
+				lastInspectedRow:
+					offset > 0
+						? (ordered[(firstAfterCurrent + offset - 1) % ordered.length] as number)
+						: null,
+			};
+		}
+		availabilityChecks++;
+		if (isAvailable(candidate))
+			return {
+				row: candidate,
+				availabilityChecks,
+				budgetExhausted: false,
+				inspectedCandidateRows: offset + 1,
+				lastInspectedRow: candidate,
+			};
+	}
+	return {
+		row: null,
+		availabilityChecks,
+		budgetExhausted: false,
+		inspectedCandidateRows: scanLimit,
+		lastInspectedRow:
+			scanLimit > 0
+				? (ordered[(firstAfterCurrent + scanLimit - 1) % ordered.length] as number)
+				: null,
+	};
 }
 
 /**
