@@ -114,6 +114,19 @@
 	grid-column: 1 / -1;
 	line-height: 1.35;
 	color: #b6e4d7;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-equipment-process-loop-selected-name {
+	font-weight: 700;
+	color: #e8f4f3;
+}
+
+.tilefab-equipment-process-loop-feedback {
+	display: block;
+	margin-top: 3px;
+	color: #ffe3a7;
 }
 
 @media (max-width: 520px) {
@@ -125,6 +138,17 @@
 	}
 	.tilefab-equipment-process-loop-label-compact {
 		display: inline;
+	}
+}
+
+@media (max-width: 520px) and (max-height: 780px) {
+	.tilefab-buildbar.tilefab-port-buildbar.tilefab-equipment-workspace:has(
+			.tilefab-equipment-process-loop-selected-name,
+			.tilefab-equipment-process-loop-feedback
+		) {
+		/* Leave a real canvas target area between the top controls and this scrollable dock. */
+		max-height: min(300px, 50vh);
+		scrollbar-width: thin;
 	}
 }
 

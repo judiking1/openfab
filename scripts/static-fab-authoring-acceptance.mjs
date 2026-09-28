@@ -5557,6 +5557,482 @@ async function selectOrdinaryPortProcessLoop(page, loopId, label, verifyChangeFo
 	}
 }
 
+async function assertOrdinaryPortProcessLoopIdentity(page, loopId, label) {
+	const name = await page.evaluate(
+		(id) =>
+			window.__tileFab
+				?.getEditorModel()
+				.document.organizations.records.find((record) => record.id === id)?.name ?? null,
+		loopId,
+	);
+	if (!name) throw new Error(`${label} Process Loop ${loopId} has no authored name.`);
+	const selectedName = page.getByTestId("ordinary-port-process-loop-selected-name");
+	await selectedName.waitFor({ state: "visible" });
+	await assertLocatorInsideViewport(page, selectedName);
+	const display = await selectedName.evaluate((element) => {
+		const host = element.closest("small");
+		const hostRect = host?.getBoundingClientRect();
+		return {
+			text: element.innerText,
+			host: hostRect?.toJSON() ?? null,
+			fragments: Array.from(element.getClientRects(), (rect) => rect.toJSON()),
+			viewport: { width: innerWidth, height: innerHeight },
+		};
+	});
+	assertEqual(display.text.includes(name), true, `${label} full selected Process Loop identity`);
+	if (!display.host || display.fragments.length === 0) {
+		throw new Error(`${label} selected Loop has no rendered text fragments.`);
+	}
+	for (const fragment of display.fragments) {
+		assertEqual(
+			fragment.left >= display.host.left - 1 &&
+				fragment.right <= display.host.right + 1 &&
+				fragment.top >= display.host.top - 1 &&
+				fragment.bottom <= display.host.bottom + 1 &&
+				fragment.left >= 0 &&
+				fragment.right <= display.viewport.width &&
+				fragment.top >= 0 &&
+				fragment.bottom <= display.viewport.height,
+			true,
+			`${label} complete Loop name fragment remains readable: ${JSON.stringify(display)}`,
+		);
+	}
+	return name;
+}
+
+async function assertOrdinaryPortProcessLoopFeedback(page, label, fragments) {
+	const feedback = page.getByTestId("ordinary-port-process-loop-feedback");
+	await page.waitForFunction(
+		(expected) => {
+			const element = document.querySelector('[data-testid="ordinary-port-process-loop-feedback"]');
+			return (
+				element instanceof HTMLElement &&
+				getComputedStyle(element).visibility !== "hidden" &&
+				expected.every((fragment) => element.innerText.includes(fragment))
+			);
+		},
+		fragments,
+		{ timeout: 10_000 },
+	);
+	await assertLocatorInsideViewport(page, feedback);
+	assertEqual(await feedback.getAttribute("role"), "status", `${label} actionable feedback role`);
+	return feedback.innerText();
+}
+
+async function clickVisibleOrdinaryPortKeyboardTarget(page, label) {
+	await assertOrdinaryPortKeyboardTargetVisible(page, label);
+	const point = await page.evaluate(() => {
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+		if (!(canvas instanceof HTMLCanvasElement) || !(marker instanceof HTMLElement)) return null;
+		const canvasRect = canvas.getBoundingClientRect();
+		const x = canvasRect.left + Number.parseFloat(marker.style.left);
+		const y = canvasRect.top + Number.parseFloat(marker.style.top);
+		if (document.elementFromPoint(x, y) !== canvas) return null;
+		return { x, y, row: Number(marker.dataset.portSlotRow) };
+	});
+	if (!point || !Number.isInteger(point.row)) {
+		throw new Error(`${label} visible Port keyboard target cannot be clicked on the Canvas.`);
+	}
+	await page.mouse.click(point.x, point.y);
+	return point.row;
+}
+
+async function waitForOrdinaryPortKeyboardTargetInLoop(page, portType, loopId, label) {
+	const rows = (await readDirectProcessLoopPortCandidates(page, portType, loopId)).map(
+		(candidate) => candidate.row,
+	);
+	if (rows.length === 0) throw new Error(`${label} selected Loop has no legal ${portType} row.`);
+	await page.waitForFunction(
+		({ type, allowedRows }) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+			const slots = window.__tileFab?.getEditorModel().portSlotArtifacts[type]?.slots;
+			const camera = window.__tileFab?.camera;
+			if (
+				!(canvas instanceof HTMLCanvasElement) ||
+				!(marker instanceof HTMLElement) ||
+				!slots ||
+				!camera
+			)
+				return false;
+			const row = Number(canvas.dataset.guidedPortKeyboardRow);
+			if (!allowedRows.includes(row) || marker.dataset.portSlotRow !== String(row)) return false;
+			const expectedX = camera.offsetX + slots.worldPositions[row * 2] * camera.zoom;
+			const expectedY = camera.offsetY + slots.worldPositions[row * 2 + 1] * camera.zoom;
+			return (
+				Math.abs(Number.parseFloat(marker.style.left) - expectedX) <= 2 &&
+				Math.abs(Number.parseFloat(marker.style.top) - expectedY) <= 2
+			);
+		},
+		{ type: portType, allowedRows: rows },
+		{ timeout: 10_000 },
+	);
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
+	await assertOrdinaryPortKeyboardTargetVisible(page, label);
+}
+
+async function assertOrdinaryPortKeyboardTargetClearsWorkspace(page, label) {
+	const overlap = await page.evaluate(() => {
+		const marker = document.querySelector('[data-testid="ordinary-port-keyboard-target"]');
+		const workspace = document.querySelector(".tilefab-equipment-workspace");
+		if (!(marker instanceof HTMLElement) || !(workspace instanceof HTMLElement)) return null;
+		const label = marker.querySelector("span");
+		if (!(label instanceof HTMLElement)) return null;
+		const markerRect = marker.getBoundingClientRect();
+		const labelRect = label.getBoundingClientRect();
+		const workspaceRect = workspace.getBoundingClientRect();
+		const intersectionArea = (rect) =>
+			Math.max(
+				0,
+				Math.min(rect.right, workspaceRect.right) - Math.max(rect.left, workspaceRect.left),
+			) *
+			Math.max(
+				0,
+				Math.min(rect.bottom, workspaceRect.bottom) - Math.max(rect.top, workspaceRect.top),
+			);
+		return {
+			markerArea: intersectionArea(markerRect),
+			labelArea: intersectionArea(labelRect),
+			marker: markerRect.toJSON(),
+			label: labelRect.toJSON(),
+			workspace: workspaceRect.toJSON(),
+		};
+	});
+	if (!overlap) throw new Error(`${label} Port marker or equipment workspace is unavailable.`);
+	assertEqual(
+		overlap.markerArea,
+		0,
+		`${label} Port target must not paint over the equipment workspace: ${JSON.stringify(overlap)}`,
+	);
+	assertEqual(
+		overlap.labelArea,
+		0,
+		`${label} Port target label must not paint over the equipment workspace: ${JSON.stringify(overlap)}`,
+	);
+}
+
+async function exerciseOrdinaryEqProcessLoopRecovery(page, selectedLoopId, alternateLoopId, label) {
+	const selectedName = await assertOrdinaryPortProcessLoopIdentity(page, selectedLoopId, label);
+	// This marker is positioned by the app after choosing a Loop. Click it at its
+	// actual screen coordinates before any acceptance-only camera centering.
+	const beforeDraft = await readMetrics(page);
+	const anchorRow = await clickVisibleOrdinaryPortKeyboardTarget(
+		page,
+		`${label} EQ scoped first Port`,
+	);
+	await page.waitForFunction(
+		() =>
+			document
+				.querySelector('[data-testid="rail-canvas"]')
+				?.getAttribute("data-guided-port-keyboard-phase") === "choose-end",
+	);
+	await page.waitForFunction(
+		(row) =>
+			document
+				.querySelector('[data-testid="ordinary-eq-anchor-marker"]')
+				?.getAttribute("data-port-slot-row") === String(row),
+		anchorRow,
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeDraft,
+		`${label} EQ end draft is transient`,
+	);
+	assertEqual(
+		await page.getByTestId("ordinary-eq-anchor-marker").count(),
+		1,
+		`${label} EQ start anchor is visible`,
+	);
+	const alternateCandidates = await readDirectProcessLoopPortCandidates(
+		page,
+		"EQ",
+		alternateLoopId,
+	);
+	const selectedCandidates = await readDirectProcessLoopPortCandidates(page, "EQ", selectedLoopId);
+	const selectedRows = new Set(selectedCandidates.map((item) => item.row));
+	const clearance = (candidate) =>
+		Math.min(
+			...selectedCandidates.map((selected) =>
+				Math.hypot(candidate.x - selected.x, candidate.y - selected.y),
+			),
+		);
+	const outside = alternateCandidates
+		.filter((candidate) => !selectedRows.has(candidate.row))
+		.sort((left, right) => clearance(right) - clearance(left))[0];
+	if (!outside) throw new Error(`${label} has no separate legal EQ slot in the alternate Loop.`);
+	await revealOrdinaryEquipmentSlot(page, outside, `${label} outside-Loop EQ`);
+	const beforeOutside = await readMetrics(page);
+	const beforeEndRow = await page
+		.getByTestId("rail-canvas")
+		.getAttribute("data-guided-port-keyboard-row");
+	assertEqual(
+		await page.getByTestId("rail-canvas").getAttribute("data-guided-port-keyboard-phase"),
+		"choose-end",
+		`${label} outside-Loop EQ preserves the pending end before click`,
+	);
+	await moveToWorld(page, outside);
+	await clickWorld(page, outside, false);
+	const rejected = await assertOrdinaryPortProcessLoopFeedback(page, `${label} outside-Loop EQ`, [
+		"선택한 Process Loop 밖의 Port",
+		"다른 Loop 또는 전체 Port 슬롯",
+	]);
+	if (label === "390x600") {
+		await page.screenshot({
+			path: path.join(artifactRoot, "ordinary-process-loop-outside-rejection-390x600.png"),
+		});
+	}
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeOutside,
+		`${label} rejected outside-Loop EQ`,
+	);
+	assertEqual(
+		await page.getByTestId("rail-canvas").getAttribute("data-guided-port-keyboard-phase"),
+		"choose-end",
+		`${label} outside-Loop EQ preserves the pending end after click`,
+	);
+	assertEqual(
+		await page.getByTestId("ordinary-eq-anchor-marker").count(),
+		1,
+		`${label} outside-Loop EQ does not clear the anchor`,
+	);
+	assertEqual(
+		await page.getByTestId("ordinary-eq-anchor-marker").getAttribute("data-port-slot-row"),
+		String(anchorRow),
+		`${label} outside-Loop EQ preserves the exact start row`,
+	);
+	assertEqual(
+		await page.getByTestId("rail-canvas").getAttribute("data-guided-port-keyboard-row"),
+		beforeEndRow,
+		`${label} outside-Loop EQ preserves the pending end row`,
+	);
+
+	await selectOrdinaryPortProcessLoop(page, alternateLoopId, label);
+	const cancelledEnd = await assertOrdinaryPortProcessLoopFeedback(
+		page,
+		`${label} EQ Loop switch`,
+		["EQ 끝점 선택을 취소", "새 Loop에서 다시 선택"],
+	);
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
+	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} alternate EQ first Port`);
+	if (label === "390x600") {
+		await assertOrdinaryPortKeyboardTargetClearsWorkspace(page, `${label} alternate EQ first Port`);
+	}
+	if (label === "390x600") {
+		await page.screenshot({
+			path: path.join(artifactRoot, "ordinary-process-loop-eq-switch-recovery-390x600.png"),
+		});
+	}
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeOutside,
+		`${label} EQ Loop switch clears draft`,
+	);
+	assertEqual(
+		await page.getByTestId("rail-canvas").getAttribute("data-guided-port-keyboard-phase"),
+		"choose-slot",
+		`${label} EQ Loop switch returns to first Port`,
+	);
+	assertEqual(
+		await page.getByTestId("ordinary-eq-anchor-marker").count(),
+		0,
+		`${label} EQ anchor cleared`,
+	);
+	await selectOrdinaryPortProcessLoop(page, selectedLoopId, label);
+	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} recovered EQ first Port`);
+	assertProjectUnchanged(await readMetrics(page), beforeDraft, `${label} EQ scope restored`);
+	return { selectedName, rejected, cancelledEnd };
+}
+
+async function exerciseOrdinaryStkProcessLoopRecovery(
+	page,
+	selectedLoopId,
+	alternateLoopId,
+	label,
+) {
+	if (label !== "390x600") return null;
+	await assertOrdinaryPortProcessLoopIdentity(page, selectedLoopId, label);
+	const selectedCandidates = await readDirectProcessLoopPortCandidates(page, "STK", selectedLoopId);
+	const selectedRows = new Set(selectedCandidates.map((candidate) => candidate.row));
+	const outside = (await readDirectProcessLoopPortCandidates(page, "STK", alternateLoopId))
+		.filter((candidate) => !selectedRows.has(candidate.row))
+		.sort((left, right) => {
+			const clearance = (candidate) =>
+				Math.min(
+					...selectedCandidates.map((selected) =>
+						Math.hypot(candidate.x - selected.x, candidate.y - selected.y),
+					),
+				);
+			return clearance(right) - clearance(left);
+		})[0];
+	if (!outside) throw new Error(`${label} has no separate legal STK slot in the alternate Loop.`);
+	await revealOrdinaryEquipmentSlot(page, outside, `${label} outside-Loop Stocker`);
+	const beforeOutside = await readMetrics(page);
+	const beforeKeyboardRow = await page
+		.getByTestId("rail-canvas")
+		.getAttribute("data-guided-port-keyboard-row");
+	assertEqual(
+		await page.getByTestId("tilefab-app").getAttribute("data-stk-draft-rows"),
+		"0",
+		`${label} outside-Loop Stocker begins without a draft`,
+	);
+	await moveToWorld(page, outside);
+	await clickWorld(page, outside, false);
+	const rejected = await assertOrdinaryPortProcessLoopFeedback(
+		page,
+		`${label} outside-Loop Stocker`,
+		["선택한 Process Loop 밖의 Port", "다른 Loop 또는 전체 Port 슬롯"],
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeOutside,
+		`${label} rejected outside-Loop Stocker`,
+	);
+	assertEqual(
+		await page.getByTestId("tilefab-app").getAttribute("data-stk-draft-rows"),
+		"0",
+		`${label} outside-Loop Stocker does not start a draft`,
+	);
+	assertEqual(
+		await page.getByTestId("rail-canvas").getAttribute("data-guided-port-keyboard-row"),
+		beforeKeyboardRow,
+		`${label} outside-Loop Stocker preserves keyboard target`,
+	);
+	await selectOrdinaryPortProcessLoop(page, alternateLoopId, label);
+	await selectOrdinaryPortProcessLoop(page, selectedLoopId, label);
+	await assertOrdinaryPortKeyboardTargetVisible(
+		page,
+		`${label} recovered Stocker first Port after refusal`,
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeOutside,
+		`${label} Stocker refusal recovery`,
+	);
+	const beforeDraft = await readMetrics(page);
+	const row = await clickVisibleOrdinaryPortKeyboardTarget(page, `${label} Stocker scope recovery`);
+	await page.waitForFunction((expectedRow) => {
+		const app = document.querySelector('[data-testid="tilefab-app"]');
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		return (
+			app?.getAttribute("data-stk-draft-rows") === "1" &&
+			canvas?.getAttribute("data-stk-draft-selected-rows") === String(expectedRow)
+		);
+	}, row);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeDraft,
+		`${label} Stocker draft is transient`,
+	);
+	await selectOrdinaryPortProcessLoop(page, alternateLoopId, label);
+	const cancelledDraft = await assertOrdinaryPortProcessLoopFeedback(
+		page,
+		`${label} Stocker Loop switch`,
+		["Stocker Port 1개 초안을 취소", "새 Loop에서 다시 선택"],
+	);
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
+	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} alternate Stocker first Port`);
+	await assertOrdinaryPortKeyboardTargetClearsWorkspace(
+		page,
+		`${label} alternate Stocker first Port`,
+	);
+	await page.screenshot({
+		path: path.join(artifactRoot, "ordinary-process-loop-stk-switch-recovery-390x600.png"),
+	});
+	assertEqual(
+		await page.getByTestId("tilefab-app").getAttribute("data-stk-draft-rows"),
+		"0",
+		`${label} Stocker Loop switch clears selected Port`,
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeDraft,
+		`${label} Stocker Loop switch clears draft`,
+	);
+	await selectOrdinaryPortProcessLoop(page, selectedLoopId, label);
+	await waitForOrdinaryPortKeyboardTargetInLoop(
+		page,
+		"STK",
+		selectedLoopId,
+		`${label} recovered Stocker first Port`,
+	);
+	assertProjectUnchanged(await readMetrics(page), beforeDraft, `${label} Stocker scope restored`);
+	const beforeAllSlots = await readMetrics(page);
+	const allSlotsDraftRow = await clickVisibleOrdinaryPortKeyboardTarget(
+		page,
+		`${label} Stocker all-slots return draft`,
+	);
+	await page.waitForFunction(
+		(expectedRow) =>
+			document.querySelector('[data-testid="tilefab-app"]')?.getAttribute("data-stk-draft-rows") ===
+				"1" &&
+			document
+				.querySelector('[data-testid="rail-canvas"]')
+				?.getAttribute("data-stk-draft-selected-rows") === String(expectedRow),
+		allSlotsDraftRow,
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeAllSlots,
+		`${label} all-slots return draft is transient`,
+	);
+	const selector = page.getByTestId("ordinary-port-process-loop-target");
+	await selector.selectOption("");
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="ordinary-port-process-loop-target"]')?.value === "" &&
+			document.querySelector('[data-testid="ordinary-port-process-loop-selected-name"]') === null &&
+			document.querySelector('[data-testid="tilefab-app"]')?.getAttribute("data-stk-draft-rows") ===
+				"0",
+	);
+	const allSlotsCancelled = await assertOrdinaryPortProcessLoopFeedback(
+		page,
+		`${label} Stocker all-slots return`,
+		["Stocker Port 1개 초안을 취소", "전체 Port 슬롯에서 다시 선택"],
+	);
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
+	await assertOrdinaryPortKeyboardTargetVisible(page, `${label} all-slots Stocker first Port`);
+	await assertOrdinaryPortKeyboardTargetClearsWorkspace(
+		page,
+		`${label} all-slots Stocker first Port`,
+	);
+	await page.screenshot({
+		path: path.join(artifactRoot, "ordinary-process-loop-all-slots-recovery-390x600.png"),
+	});
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeAllSlots,
+		`${label} Stocker all-slots return`,
+	);
+	await selectOrdinaryPortProcessLoop(page, selectedLoopId, label);
+	await page.waitForFunction(
+		() => document.querySelector('[data-testid="ordinary-port-process-loop-feedback"]') === null,
+	);
+	await assertOrdinaryPortKeyboardTargetVisible(
+		page,
+		`${label} Stocker Loop reselected after all-slots`,
+	);
+	await assertOrdinaryPortKeyboardTargetClearsWorkspace(
+		page,
+		`${label} Stocker Loop reselected after all-slots`,
+	);
+	assertProjectUnchanged(
+		await readMetrics(page),
+		beforeAllSlots,
+		`${label} Stocker all-slots recovery`,
+	);
+	return { selectedRow: row, rejected, cancelledDraft, allSlotsDraftRow, allSlotsCancelled };
+}
+
 async function revealOrdinaryEquipmentSlot(page, world, label) {
 	// The compact Port dock covers much of the Canvas. Pan to a Canvas-owned point
 	// instead of using ensureWorldPointVisible's desktop-only 340 px right gutter.
@@ -5755,7 +6231,15 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				if (eqPlan) break;
 			}
 			if (!eqPlan) throw new Error(`${label} Twin Bay has no direct three-Port EQ run.`);
+			const alternateLoopId = loopIds.find((id) => id !== eqPlan.loopId);
+			if (alternateLoopId === undefined) throw new Error(`${label} has no alternate Process Loop.`);
 			await selectOrdinaryPortProcessLoop(page, eqPlan.loopId, label, true);
+			const eqScopeRecovery = await exerciseOrdinaryEqProcessLoopRecovery(
+				page,
+				eqPlan.loopId,
+				alternateLoopId,
+				label,
+			);
 			if (viewport.width === 390) {
 				await page.screenshot({
 					path: path.join(artifactRoot, "ordinary-process-loop-picker-390x600.png"),
@@ -5855,6 +6339,12 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 			await waitForLegalPortSlots(page);
 			await selectOrdinaryPortProcessLoop(page, eqPlan.loopId, label);
 			await zoomOrdinaryPortTargetIfOffered(page, "STK", label);
+			const stkScopeRecovery = await exerciseOrdinaryStkProcessLoopRecovery(
+				page,
+				eqPlan.loopId,
+				alternateLoopId,
+				label,
+			);
 			const stkOptions = await readDirectProcessLoopPortCandidates(page, "STK", eqPlan.loopId);
 			const occupied = [...eqAttached.evidence.ports, ...ohbAttached.evidence.ports];
 			const stkPlan = stkOptions.find((candidate) =>
@@ -6115,6 +6605,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				viewport: label,
 				groupIds,
 				loopIds,
+				eqScopeRecovery,
+				stkScopeRecovery,
 				checks: checked.staticFabCheckIssues,
 				checksum: reopened.modelChecksum,
 			});

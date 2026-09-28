@@ -6,7 +6,31 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-09-28
+
+- Keep an EQ endpoint or Stocker Port draft intact when a user clicks a valid Port outside the
+  selected Process Loop. Explain the scope mismatch beside the Loop picker and offer a different
+  Loop or all Port slots as a recovery path. Compare the nearest original slot before applying
+  the Loop mask so an adjacent in-Loop slot cannot be selected instead.
+- Explain that changing the Loop discards an unfinished EQ endpoint or Stocker Port selection,
+  including when switching back to all Port slots. Show the selected Loop's full name, disable
+  keyboard and pointer start actions for a Loop with no eligible slots, and clear recovery text
+  when placement resumes.
+- When a Loop name or recovery feedback expands the equipment dock on a short compact screen,
+  limit its height so the current keyboard Port marker remains in a visible Canvas band. Keep
+  the dock scrollable for remaining Stocker controls.
+- Extend the three-width ordinary equipment browser journey with EQ scope-refusal and recovery,
+  unchanged project/Worker/history checks, and 390 px Stocker draft/all-slots recovery plus
+  visible-marker boundary checks. The local full authoring gate passed 68 steps / 556 screenshots /
+  zero browser errors; 428 test files passed 4,750 tests (two existing skips), Core, build, lint,
+  Biome, public safety, bundle audit, and production smoke. Exact public export/CI/Pages and V1
+  authoring completion remain open.
+
 ## [0.1.19] - 2026-09-28
+
+Published Pages preview. Public `main` `f50b6cf`, CI `36379659268` (both jobs), and Pages
+`1c71cb4` / deployment `36381897154` passed. All 65 served files (26,982,749 bytes) and
+both entry URLs matched the reviewed build SHA-256. V1 authoring remains incomplete.
 
 - Choose a Process Loop before ordinary OHB, EQ, or Stocker Port placement. Targeting and
   previews use that Loop's direct rail ownership; edits, OHB move/copy, and Station Proposal
@@ -21,8 +45,8 @@ All notable public OpenFab changes will be documented here. The format follows
   retaining exact authored equipment and Worker parity. The regular authoring run passed 68
   steps, 552 screenshots, and zero browser errors; final unit tests passed 4,750 tests with two
   skipped. Core, build, lint, project round trip, strict public safety, initial bundle audit,
-  and four-width production smoke also passed locally. Exact public export, CI, and Pages
-  verification remain pending at this checkpoint.
+  and four-width production smoke also passed locally. The exact public export, CI, and Pages
+  verification passed as recorded above.
 
 ## [0.1.18] - 2026-09-28
 
