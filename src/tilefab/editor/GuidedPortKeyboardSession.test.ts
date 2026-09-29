@@ -65,6 +65,23 @@ describe("GuidedPortKeyboardSession", () => {
 		expect(createGuidedPortKeyboardSession("OHB", 1, binding, "ordinary").scope).toBe("ordinary");
 	});
 
+	it("keeps an exact preferred row only while it is legal and within the selected scope", () => {
+		const { binding, availability } = fixture("STK");
+		let occupiedRow = -1;
+		Object.assign(availability, {
+			statusFor: (_slots: CompiledPortSlots, row: number) => ({
+				status: row === occupiedRow ? PORT_SLOT_STATUS.PORT_OCCUPIED : PORT_SLOT_STATUS.LEGAL,
+				conflictingEquipmentGroupId: 0,
+			}),
+		});
+		const target = { x: 1, z: 4 };
+		expect(nearestPortKeyboardInitialRow(binding, target, undefined, 2)).toBe(2);
+		expect(nearestPortKeyboardInitialRow(binding, target, new Uint8Array([1, 1, 0]), 2)).toBe(0);
+		occupiedRow = 2;
+		expect(nearestPortKeyboardInitialRow(binding, target, undefined, 2)).toBe(0);
+		expect(nearestPortKeyboardInitialRow(binding, target, undefined, 99)).toBe(0);
+	});
+
 	it("publishes a stable coordinate, selection count, and legality description", () => {
 		const { binding } = fixture("STK");
 		const session = createGuidedPortKeyboardSession("STK", 0, binding, "ordinary");

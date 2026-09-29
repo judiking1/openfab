@@ -129,6 +129,12 @@
 	color: #ffe3a7;
 }
 
+.tilefab-equipment-process-loop-feedback-standalone {
+	font-size: 12px;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
 @media (max-width: 520px) {
 	.tilefab-equipment-process-loop-target {
 		grid-template-columns: auto minmax(0, 1fr) 86px;

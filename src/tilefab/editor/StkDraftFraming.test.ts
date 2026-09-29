@@ -25,6 +25,47 @@ describe("stkDraftFrameTranslation", () => {
 			),
 		).toEqual({ x: 0, y: 56 });
 	});
+	it("keeps six horizontal Ports together when a short frame cannot fit the caption vertically", () => {
+		const shortFrame = { left: 78, top: 74, width: 312, height: 65.421875 };
+		const points = Array.from({ length: 6 }, (_, index) => ({ x: 234 + index * 38, y: 106.711 }));
+		expect(stkDraftFrameTranslation(points, { x: 234, y: 106.711 }, shortFrame)).toEqual({
+			x: -62,
+			y: 0,
+		});
+		expect(
+			stkDraftFrameTranslation(points, { x: 234, y: 106.711 }, shortFrame, {
+				left: 220,
+				top: -2,
+				width: 172,
+				height: 76,
+			}),
+		).toEqual({ x: -78, y: 0 });
+		expect(
+			stkDraftFrameTranslation(points, { x: 424, y: 106.711 }, shortFrame, {
+				left: 220,
+				top: -2,
+				width: 172,
+				height: 76,
+			}),
+		).toEqual({ x: -268, y: 0 });
+	});
+	it("moves a tall B2B draft caption beside the compact camera controls", () => {
+		const shortFrame = { left: 78, top: 74, width: 312, height: 65.421875 };
+		const selected = [
+			{ x: 196, y: -121.289 },
+			{ x: 234, y: -121.289 },
+			{ x: 196, y: 106.711 },
+			{ x: 234, y: 106.711 },
+		];
+		expect(
+			stkDraftFrameTranslation(selected, { x: 234, y: 106.711 }, shortFrame, {
+				left: 220,
+				top: -2,
+				width: 172,
+				height: 76,
+			}),
+		).toEqual({ x: -78, y: 0 });
+	});
 	it("defers oversized sparse drafts to cursor following instead of changing scale", () => {
 		expect(
 			stkDraftFrameTranslation(
@@ -40,10 +81,32 @@ describe("stkDraftFrameTranslation", () => {
 			stkDraftFrameTranslation(
 				[
 					{ x: 200, y: 132 },
+					{ x: 1200, y: 132 },
+				],
+				{ x: 200, y: 132 },
+				frame,
+				{ left: 232, top: 10, width: 148, height: 52 },
+			),
+		).toBeNull();
+		expect(
+			stkDraftFrameTranslation(
+				[
+					{ x: 200, y: 132 },
 					{ x: 200, y: 400 },
 				],
 				{ x: 200, y: 132 },
 				frame,
+			),
+		).toBeNull();
+		expect(
+			stkDraftFrameTranslation(
+				[
+					{ x: 200, y: 132 },
+					{ x: 200, y: 400 },
+				],
+				{ x: 200, y: 132 },
+				frame,
+				{ left: 232, top: 10, width: 148, height: 52 },
 			),
 		).toBeNull();
 		expect(stkDraftFrameTranslation([], { x: 200, y: 132 }, frame)).toBeNull();

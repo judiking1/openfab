@@ -6,7 +6,26 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-09-29
+
+- Keep the exact legal Port marker when switching from a Process Loop scope back to all Port
+  slots. The scope change remains transient: no project mutation, history entry, or Worker patch.
+- Name the `다른 Port` action's local X/Z ±32 m search area and provide visible recovery when
+  its candidates are exhausted, including projects without a Process Loop. Keep keyboard focus
+  on the action after failure and announce the reason to assistive technology, including when
+  the same failure happens twice in a row. Match its accessible name to the visible label.
+- Exercise unscoped EQ and two-Port FLEX Stocker creation, explicit Loop ownership, Checks,
+  Save, and native reopen through visible 390/760/1440px controls. Candidate discovery can still
+  cross Loop boundaries; a successful Port slot alone does not guarantee group ownership.
+- Keep six-Port and B2B Stocker draft labels clear of the compact camera controls at 390×600.
+  A frame that cannot contain the whole vertical group still keeps the feasible horizontal
+  selection together and places the current Port caption beside the obstruction.
+
 ## [0.1.30] - 2026-09-29
+
+Private `e57a01c` and exact public `ba67428` were normally pushed. Both public CI jobs passed
+in `36500412735`; Pages `3bc62bf` deployed in `36503025124`. All 65 live files and both entry
+URLs matched the reviewed build SHA-256. V1 remains incomplete.
 
 - Let an unscoped OHB, EQ, or Stocker use an explicit Inspector action to join its sole
   route-eligible Process Loop. When none is eligible, explain the missing route. Valid

@@ -106,11 +106,22 @@ export function nearestPortKeyboardInitialRow(
 	binding: GuidedPortKeyboardBinding,
 	target: Readonly<{ x: number; z: number }>,
 	allowedRows?: Uint8Array,
+	preferredRow?: number,
 ): number | null {
 	if (!Number.isFinite(target.x) || !Number.isFinite(target.z)) {
 		throw new TypeError("Port keyboard initial target must be finite.");
 	}
 	const { slots, availability } = binding;
+	if (
+		preferredRow !== undefined &&
+		Number.isInteger(preferredRow) &&
+		preferredRow >= 0 &&
+		preferredRow < slots.count &&
+		(!allowedRows || allowedRows[preferredRow] === 1) &&
+		availability.statusFor(slots, preferredRow).status === PORT_SLOT_STATUS.LEGAL
+	) {
+		return preferredRow;
+	}
 	let nearestAnyRow: number | null = null;
 	let nearestAnyDistance = Number.POSITIVE_INFINITY;
 	let nearestLegalRow: number | null = null;

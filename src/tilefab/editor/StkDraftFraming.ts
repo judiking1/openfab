@@ -5,11 +5,12 @@ interface ScreenPoint {
 	readonly y: number;
 }
 
-/** A camera-only translation; oversized drafts keep the existing cursor-follow behavior. */
+/** A camera-only translation; oversized groups follow the current Port instead of changing zoom. */
 export function stkDraftFrameTranslation(
 	selected: readonly ScreenPoint[],
 	cursor: ScreenPoint,
 	frame: Readonly<{ left: number; top: number; width: number; height: number }>,
+	obstruction?: Readonly<{ left: number; top: number; width: number; height: number }>,
 ): ScreenPoint | null {
 	if (selected.length === 0) return null;
 	// The active target has a caption above it; selected diamonds only need their marker margin.
@@ -23,11 +24,71 @@ export function stkDraftFrameTranslation(
 		top = Math.min(top, point.y - 28);
 		bottom = Math.max(bottom, point.y + 28);
 	}
-	if (right - left > frame.width || bottom - top > frame.height) return null;
-	return {
-		x: Math.max(frame.left - left, Math.min(0, frame.left + frame.width - right)),
-		y: Math.max(frame.top - top, Math.min(0, frame.top + frame.height - bottom)),
-	};
+	const horizontalFits = right - left <= frame.width;
+	const verticalFits = bottom - top <= frame.height;
+	if (!horizontalFits || !verticalFits) {
+		// A caption can exceed a short frame even while every selected diamond fits. Keep
+		// the usable axis grouped and clamp the cursor ring on the constrained axis.
+		let minimumX = cursor.x;
+		let maximumX = cursor.x;
+		let minimumY = cursor.y;
+		let maximumY = cursor.y;
+		for (const point of selected) {
+			minimumX = Math.min(minimumX, point.x);
+			maximumX = Math.max(maximumX, point.x);
+			minimumY = Math.min(minimumY, point.y);
+			maximumY = Math.max(maximumY, point.y);
+		}
+		if (
+			frame.width < 56 ||
+			frame.height < 56 ||
+			maximumX - minimumX + 56 > frame.width ||
+			(maximumY - minimumY + 56 > frame.height && (!obstruction || frame.height >= 80))
+		)
+			return null;
+	}
+	const horizontalCursorMargin = frame.width >= 128 ? 64 : 28;
+	const minimumTranslationX = horizontalFits
+		? frame.left - left
+		: frame.left + horizontalCursorMargin - cursor.x;
+	const maximumTranslationX = horizontalFits
+		? frame.left + frame.width - right
+		: frame.left + frame.width - horizontalCursorMargin - cursor.x;
+	let translationX = Math.max(minimumTranslationX, Math.min(0, maximumTranslationX));
+	const verticalCursorTopMargin = frame.height >= 80 ? 52 : 28;
+	const translationY = verticalFits
+		? Math.max(frame.top - top, Math.min(0, frame.top + frame.height - bottom))
+		: Math.max(
+				frame.top + verticalCursorTopMargin - cursor.y,
+				Math.min(0, frame.top + frame.height - 28 - cursor.y),
+			);
+	if (
+		obstruction &&
+		cursor.y + translationY + 28 > obstruction.top &&
+		cursor.y + translationY - 52 < obstruction.top + obstruction.height &&
+		cursor.x + translationX + 64 > obstruction.left &&
+		cursor.x + translationX - 64 < obstruction.left + obstruction.width
+	) {
+		const leftOfObstruction = obstruction.left - cursor.x - 64;
+		const rightOfObstruction = obstruction.left + obstruction.width - cursor.x + 64;
+		let alternatives = [leftOfObstruction, rightOfObstruction].filter(
+			(candidate) => candidate >= minimumTranslationX && candidate <= maximumTranslationX,
+		);
+		if (alternatives.length === 0) {
+			// A selected group can be too wide to fit beside the toolbar. Keep the
+			// current Port caption readable even when other selected markers leave view.
+			const cursorMinimumX = frame.left + horizontalCursorMargin - cursor.x;
+			const cursorMaximumX = frame.left + frame.width - horizontalCursorMargin - cursor.x;
+			alternatives = [leftOfObstruction, rightOfObstruction].filter(
+				(candidate) => candidate >= cursorMinimumX && candidate <= cursorMaximumX,
+			);
+		}
+		if (alternatives.length === 0) return null;
+		translationX = alternatives.sort(
+			(a, b) => Math.abs(a - translationX) - Math.abs(b - translationX),
+		)[0] as number;
+	}
+	return { x: translationX, y: translationY };
 }
 
 interface SelectionFrame {
