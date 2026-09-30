@@ -52689,9 +52689,16 @@ async function exerciseEqClickEndpoints(page, label) {
 				await page.mouse.click(wrongPoint.x, wrongPoint.y);
 				await page.waitForFunction(() => {
 					const feedback = document.querySelector(".tilefab-equipment-selection-readout");
+					const reason = feedback?.textContent ?? "";
+					// Hover selection and pointer release reject the same wrong-line endpoint at
+					// different input boundaries. Both retain the anchored EQ draft below.
 					return feedback?.getAttribute("data-state") === "blocked" &&
-						feedback.textContent?.includes("평행하거나 떨어진 레일은 하나의 EQ로 묶을 수 없습니다");
+						(reason.includes("평행하거나 떨어진 레일은 하나의 EQ로 묶을 수 없습니다") ||
+							reason.includes("EQ 행을 시작한 연속 직선 레일에서 포인터를 놓으세요"));
 				});
+				const rejectedEndpoint = page.locator(".tilefab-equipment-selection-readout[data-state='blocked']");
+				await rejectedEndpoint.waitFor({ state: "visible" });
+				console.log(`EQ wrong-line recovery ${label}: ${(await rejectedEndpoint.innerText()).trim()}`);
 				await page.waitForFunction(
 					() =>
 						document
