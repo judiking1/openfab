@@ -164,7 +164,11 @@ function fullAuthoringEnvironment() {
 	// A clean export must exercise the whole journey even when launched from a diagnostic shell.
 	// Keep browser selection and ordinary configuration, but remove every narrow acceptance scope.
 	for (const key of Object.keys(environment)) {
-		if (key === "OPENFAB_AUTHORING_PORT" || (key.startsWith("OPENFAB_") && key.endsWith("_ONLY"))) {
+		if (
+			key === "OPENFAB_AUTHORING_PORT" ||
+			key === "OPENFAB_AUTHORING_DEV_SERVER" ||
+			(key.startsWith("OPENFAB_") && key.endsWith("_ONLY"))
+		) {
 			delete environment[key];
 		}
 	}

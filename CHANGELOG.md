@@ -6,6 +6,22 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.32] - 2026-09-29
+
+- Expose the existing whole-Stocker Move command in the primary Inspector row when an
+  editable, unowned multi-Port Stocker has no eligible Process Loop. The 44 px recovery
+  control is visible in the compact peek, updates the mounted live status with the missing
+  Loop, and points to the Process Loop map. Move remains transient until committed; Loop
+  membership still requires a separate explicit action.
+- Verify a synthetic Stocker whose two Ports lie on different Process Loops at 390 and
+  1440 px. Entering and cancelling Move preserves its group, Port IDs, Worker state, and
+  history without assigning ownership.
+- Correct the ordinary EQ pointer acceptance to require the visible invalid-row reason
+  and unchanged anchor instead of one transient status-bar phrase. The public 0.1.31
+  candidate was withheld from Pages after that brittle CI assertion failed.
+- Force history-independent public export acceptance to use the built preview even when
+  a diagnostic shell sets `OPENFAB_AUTHORING_DEV_SERVER=1`.
+
 ## [0.1.31] - 2026-09-29
 
 - Keep the exact legal Port marker when switching from a Process Loop scope back to all Port

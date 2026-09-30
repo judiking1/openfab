@@ -71,6 +71,9 @@ const ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE = new Error(
 const ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE = new Error(
 	"Adjacent Process Loop Port hit acceptance completed.",
 );
+const CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY_COMPLETE = new Error(
+	"Cross-Loop Stocker Inspector recovery acceptance completed.",
+);
 const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconnection completed.");
 const STATION_REVIEW_APPLY_ONLY_COMPLETE = new Error("Station review Apply acceptance completed.");
 const COMPACT_STARTER_NAV_ONLY_COMPLETE = new Error("Compact starter navigation completed.");
@@ -270,6 +273,14 @@ try {
 		console.log("PASS adjacent Process Loop Port hit acceptance");
 		throw ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE;
 	}
+	if (process.env.OPENFAB_CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY === "1") {
+		recordStep("cross-loop-stk-inspector-recovery", await exerciseCrossLoopStkInspectorRecovery(browser));
+		assertEqual(result.consoleErrors.length, 0, "Cross-Loop Stocker recovery console errors");
+		assertEqual(result.pageErrors.length, 0, "Cross-Loop Stocker recovery page errors");
+		result.status = "PASS";
+		console.log("PASS cross-Loop Stocker Inspector recovery acceptance");
+		throw CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY_COMPLETE;
+	}
 	if (process.env.OPENFAB_STATIC_FAB_ISSUE_RECHECK_ACCEPTANCE_ONLY === "1") {
 		const staticFabIssueRecheck = await exerciseStaticFabIssueInspectorRecheck(browser);
 		recordStep("static-fab-issue-inspector-recheck", staticFabIssueRecheck);
@@ -401,6 +412,7 @@ try {
 	recordStep("zero-eligible-process-loop", await exerciseZeroEligibleProcessLoop(browser));
 	recordStep("no-process-loop-port-feedback", await exerciseNoProcessLoopPortFeedback(browser));
 	recordStep("adjacent-process-loop-port-hit", await exerciseAdjacentProcessLoopPortHit(browser));
+	recordStep("cross-loop-stk-inspector-recovery", await exerciseCrossLoopStkInspectorRecovery(browser));
 	recordStep("start-choice-clarity", await exerciseStartChoiceClarity(browser));
 	recordStep(
 		"visible-template-port-discovery",
@@ -2835,6 +2847,7 @@ try {
 		error === ORDINARY_ALL_EQUIPMENT_LOOP_MEMBERSHIP_ONLY_COMPLETE ||
 		error === ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE ||
 		error === ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE ||
+		error === CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY_COMPLETE ||
 		error === DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE ||
 		error === STATION_REVIEW_APPLY_ONLY_COMPLETE ||
 		error === COMPACT_STARTER_NAV_ONLY_COMPLETE ||
@@ -6459,6 +6472,206 @@ async function exerciseAdjacentProcessLoopPortHit(browserInstance) {
 		await closeBrowserResource(page, "adjacent Loop Port hit page");
 		await closeBrowserResource(context, "adjacent Loop Port hit context");
 	}
+}
+
+async function exerciseCrossLoopStkInspectorRecovery(browserInstance) {
+	const fixture = await createAdjacentProcessLoopPortFixture();
+	const proofs = [];
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 1440, height: 900 },
+	]) {
+		const label = `${viewport.width}x${viewport.height} cross-Loop Stocker`;
+		const context = await browserInstance.newContext({ viewport, acceptDownloads: true });
+		const page = await context.newPage();
+		page.on("console", (message) => {
+			if (message.type() === "error") result.consoleErrors.push(message.text());
+		});
+		page.on("pageerror", (error) => result.pageErrors.push(error.message));
+		try {
+			await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(page, { physicalPaths: 0 });
+			await page
+				.getByTestId("openfab-start-dialog")
+				.getByRole("button", { name: /BLANK CANVAS/ })
+				.click();
+			const chooserPromise = page.waitForEvent("filechooser");
+			if (viewport.width <= 760) {
+				await page.locator(".tilefab-project-trigger").click();
+				await page
+					.locator(".tilefab-project-menu-commands")
+					.getByRole("button", { name: "열기", exact: true })
+					.click();
+			} else {
+				await page.getByRole("button", { name: "프로젝트 열기" }).click();
+			}
+			await (await chooserPromise).setFiles(fixture.path);
+			const loaded = await waitForWorker(
+				page,
+				(metrics) =>
+					metrics.projectName === "Adjacent synthetic Loops" &&
+					metrics.staticFabOrganizations === "3" &&
+					metrics.equipmentGroups === "0",
+			);
+			assertEqual(loaded.workerChecksum, loaded.modelChecksum, `${label} native fixture parity`);
+
+			await clickActivityCommand(page, "equip", "Stocker 포트 그룹 배치");
+			await chooseStkTemplate(page, "FLEX");
+			await waitForLegalPortSlots(page);
+			const scope = page.getByTestId("ordinary-port-process-loop-target");
+			assertEqual(await scope.inputValue(), "", `${label} uses all Port slots`);
+			const loopA = await readDirectProcessLoopPortCandidates(page, "STK", fixture.loopAId);
+			const loopB = await readDirectProcessLoopPortCandidates(page, "STK", fixture.loopBId);
+			assertAtLeast(loopA.length, 2, `${label} Loop A direct STK candidates`);
+			assertAtLeast(loopB.length, 2, `${label} Loop B direct STK candidates`);
+			const pair = await page.evaluate(({ firstCandidates, secondCandidates }) => {
+				const app = window.__tileFab;
+				const slots = app?.getEditorModel().portSlotArtifacts.STK.slots;
+				const zoom = app?.camera?.zoom;
+				if (!app?.renderer || !slots || !zoom) return null;
+				for (const first of firstCandidates) {
+					if (app.renderer.hitTestPortSlot(slots, first, zoom) !== first.row) continue;
+					for (const second of secondCandidates) {
+						if (
+							first.row === second.row ||
+							Math.hypot(first.x - second.x, first.y - second.y) < 3 ||
+							app.renderer.hitTestPortSlot(slots, second, zoom) !== second.row
+						) continue;
+						const preview = app.previewStkPlacement([first.row, second.row], "FLEX");
+						if (preview?.valid && preview.canComplete) return { first, second };
+					}
+				}
+				return null;
+			}, {
+				firstCandidates: loopA.slice(0, 32),
+				secondCandidates: loopB.slice(0, 32),
+			});
+			if (!pair) throw new Error(`${label} has no preview-valid, visible cross-Loop FLEX pair in 32 candidates per Loop.`);
+			const beforePlacement = await readMetrics(page);
+			await revealOrdinaryEquipmentSlot(page, pair.first, `${label} Loop A Port`);
+			await clickWorld(page, pair.first, false);
+			await page.waitForFunction(
+				(row) =>
+					document.querySelector("[data-testid='tilefab-app']")?.dataset.stkDraftRows === "1" &&
+					document.querySelector("[data-testid='rail-canvas']")?.dataset.stkDraftSelectedRows === String(row),
+				pair.first.row,
+			);
+			await revealOrdinaryEquipmentSlot(page, pair.second, `${label} Loop B Port`);
+			await clickWorld(page, pair.second, false);
+			await page.waitForFunction(
+				({ firstRow, secondRow }) => {
+					const rows = (document.querySelector("[data-testid='rail-canvas']")?.dataset.stkDraftSelectedRows ?? "")
+						.split(",")
+						.filter(Boolean);
+					return (
+						document.querySelector("[data-testid='tilefab-app']")?.dataset.stkDraftRows === "2" &&
+						rows.length === 2 &&
+						rows.includes(String(firstRow)) &&
+						rows.includes(String(secondRow))
+					);
+				},
+				{ firstRow: pair.first.row, secondRow: pair.second.row },
+			);
+			assertProjectUnchanged(await readMetrics(page), beforePlacement, `${label} transient draft`);
+			const complete = page.getByTestId("stk-complete");
+			await complete.scrollIntoViewIfNeeded();
+			await assertLocatorOwnsHitArea(complete, `${label} explicit Stocker creation`);
+			assertEqual(await complete.isEnabled(), true, `${label} FLEX completion enabled`);
+			await complete.click();
+			const placed = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.workerTargetSequence) === Number(beforePlacement.workerTargetSequence) + 1 &&
+					Number(metrics.equipmentGroups) === Number(beforePlacement.equipmentGroups) + 1 &&
+					Number(metrics.equipmentPorts) === Number(beforePlacement.equipmentPorts) + 2,
+			);
+			assertSingleGuidedPortCommit(placed, beforePlacement, `${label} cross-Loop FLEX creation`);
+			const groupId = Number(beforePlacement.modelNextEquipmentGroupId);
+			const inspector = page.getByTestId("port-equipment-inspector");
+			await inspector.waitFor({ state: "visible" });
+			assertEqual(await inspector.getAttribute("data-equipment-group-id"), String(groupId), `${label} exact group Inspector`);
+			assertEqual(await inspector.getAttribute("data-editable"), "true", `${label} editable group`);
+			assertEqual(await inspector.getAttribute("data-primary-process-loop-availability"), "move", `${label} no eligible Loop recovery`);
+			assertIncludes(await inspector.locator("header").innerText(), "Port 2개", `${label} two-Port group`);
+			assertEqual(await inspector.getByTestId("equipment-process-loop-membership").getAttribute("data-owner-ids"), "", `${label} unowned group`);
+			assertEqual(await inspector.getByTestId("attach-equipment-process-loop-primary").count(), 0, `${label} no automatic Loop attachment`);
+			assertEqual(await inspector.getByTestId("attach-equipment-process-loop").count(), 0, `${label} no eligible Loop attachment choice`);
+			const beforeMove = await readMetrics(page);
+			const assertRecoveryHistoryUnchanged = (actual, phase) => {
+				for (const key of ["historyCanUndo", "historyCanRedo", "documentCanUndo", "documentCanRedo"]) {
+					assertEqual(actual[key], beforeMove[key], `${phase} ${key}`);
+				}
+			};
+			const beforeEquipment = await readPortEquipmentContract(page);
+			const beforeOwnership = await readDirectProcessLoopEquipmentEvidence(page, [groupId]);
+			assertEqual(JSON.stringify(beforeOwnership[0]?.ownerIds), "[]", `${label} no direct owner`);
+			const primaryMove = inspector.getByTestId("move-port-equipment-group-primary");
+			assertEqual(await primaryMove.count(), 1, `${label} one primary recovery action`);
+			assertEqual(await inspector.getByTestId("move-port-equipment-group").count(), 0, `${label} no duplicate body Move action`);
+			const recoveryStatus = page.getByTestId("rail-status-message");
+			await page.waitForFunction((id) => {
+				const status = document.querySelector("[data-testid='rail-status-message']");
+				return status?.getAttribute("role") === "status" &&
+					status.getAttribute("aria-live") === "polite" &&
+					status.textContent?.includes(`STK-${id} · 연결할 Loop 없음`);
+			}, groupId);
+			assertIncludes(await recoveryStatus.textContent(), "이동 전에 FAB 조직", `${label} live recovery sequence`);
+			assertIncludes(await primaryMove.innerText(), "전체 이동", `${label} visible move guidance`);
+			assertIncludes(await primaryMove.innerText(), "FAB 조직", `${label} organization navigator guidance`);
+			assertIncludes(await primaryMove.innerText(), "지도 보기", `${label} existing Loop map guidance`);
+			assertEqual(
+				await primaryMove.locator(".tilefab-equipment-process-loop-primary-name").evaluate(
+					(element) => element.scrollWidth <= element.clientWidth + 1,
+				),
+				true,
+				`${label} prerequisite map hint fits without truncation`,
+			);
+			if (viewport.width <= 430) {
+				const disclosure = inspector.getByTestId("compact-inspector-disclosure");
+				await disclosure.click();
+				assertEqual(await inspector.getAttribute("data-compact-snap"), "peek", `${label} compact peek`);
+				const sheet = await inspector.boundingBox();
+				assertAtLeast(sheet?.height ?? 0, 115, `${label} compact recovery height`);
+				assertAtMost(sheet?.height ?? 0, 117, `${label} compact recovery height`);
+			} else {
+				assertEqual(await inspector.getAttribute("data-compact-layout"), "side-panel", `${label} side Inspector`);
+			}
+			await assertLocatorInsideViewport(page, primaryMove);
+			await assertLocatorOwnsHitArea(primaryMove, `${label} primary group Move`);
+			const primaryBounds = await primaryMove.boundingBox();
+			assertAtLeast(primaryBounds?.width ?? 0, 44, `${label} primary Move width`);
+			assertAtLeast(primaryBounds?.height ?? 0, 44, `${label} primary Move height`);
+			const afterDisclosure = await readMetrics(page);
+			assertExactStaticFabModelIdentity(afterDisclosure, beforeMove, `${label} Inspector disclosure isolation`);
+			assertRecoveryHistoryUnchanged(afterDisclosure, `${label} Inspector disclosure isolation`);
+			await page.screenshot({ path: path.join(artifactRoot, `cross-loop-stk-inspector-${viewport.width}x${viewport.height}.png`) });
+			await primaryMove.click();
+			const transform = page.getByTestId("port-equipment-group-transformbar");
+			await transform.waitFor({ state: "visible" });
+			assertEqual(await transform.getAttribute("data-port-type"), "STK", `${label} group Move kind`);
+			assertEqual(await transform.getAttribute("data-mode"), "move", `${label} group Move mode`);
+			await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-canvas");
+			const afterMoveEntry = await readMetrics(page);
+			assertExactStaticFabModelIdentity(afterMoveEntry, beforeMove, `${label} Move entry isolation`);
+			assertRecoveryHistoryUnchanged(afterMoveEntry, `${label} Move entry isolation`);
+			await page.getByTestId("rail-canvas").press("Escape");
+			await inspector.waitFor({ state: "visible" });
+			assertEqual(await transform.count(), 0, `${label} Move cancel clears transient bar`);
+			assertEqual(await inspector.getAttribute("data-equipment-group-id"), String(groupId), `${label} cancel restores group`);
+			assertEqual(await inspector.getAttribute("data-primary-process-loop-availability"), "move", `${label} cancel preserves recovery`);
+			assertEqual(await inspector.getByTestId("equipment-process-loop-membership").getAttribute("data-owner-ids"), "", `${label} cancel leaves ownership explicit`);
+			assertEqual(JSON.stringify(await readPortEquipmentContract(page)), JSON.stringify(beforeEquipment), `${label} cancel preserves exact group and Ports`);
+			assertEqual(JSON.stringify(await readDirectProcessLoopEquipmentEvidence(page, [groupId])), JSON.stringify(beforeOwnership), `${label} cancel preserves no direct owner`);
+			const afterMoveCancel = await readMetrics(page);
+			assertExactStaticFabModelIdentity(afterMoveCancel, beforeMove, `${label} Move cancel isolation`);
+			assertRecoveryHistoryUnchanged(afterMoveCancel, `${label} Move cancel isolation`);
+			proofs.push({ viewport: `${viewport.width}x${viewport.height}`, groupId, loopIds: [fixture.loopAId, fixture.loopBId], rows: [pair.first.row, pair.second.row], ownerIds: beforeOwnership[0]?.ownerIds ?? [], checksum: beforeMove.modelChecksum });
+		} finally {
+			await closeBrowserResource(page, `${label} page`);
+			await closeBrowserResource(context, `${label} context`);
+		}
+	}
+	return Object.freeze({ proofs });
 }
 
 async function exerciseNoProcessLoopPortFeedback(browserInstance) {
@@ -37180,6 +37393,13 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			const canvas = document.querySelector('[data-testid="rail-canvas"]');
 			const inspector = document.querySelector('[data-testid="port-equipment-inspector"]');
 			const status = document.querySelector(".tilefab-statusbar [role='status']")?.textContent;
+			const needsGroupMove = inspector?.getAttribute("data-primary-process-loop-availability") === "move";
+			const expectedStatus =
+				expectedType === "STK"
+					? needsGroupMove
+						? "연결할 Loop 없음"
+						: "다음 작업은 Inspector에서 선택"
+					: "다음 배치: 장비 메뉴";
 			return (
 				app?.getAttribute("data-editor-activity") === "inspect" &&
 				app.getAttribute("data-editor-tool") === "inspect" &&
@@ -37188,9 +37408,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 				inspector instanceof HTMLElement &&
 				document.activeElement === canvas &&
 				status?.includes(`${expectedType}-`) === true &&
-				status.includes(
-					expectedType === "STK" ? "다음 작업은 Inspector에서 선택" : "다음 배치: 장비 메뉴",
-				) === true
+				status.includes(expectedStatus) === true
 			);
 		},
 		portType,
@@ -37331,7 +37549,20 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		null,
 		`ordinary ${portType} connection details start collapsed ${viewportLabel}`,
 	);
-	for (const id of ["edit-port-equipment-membership", "move-port-equipment-group"]) {
+	const usesPrimaryMoveRecovery =
+		(await inspector.getAttribute("data-primary-process-loop-availability")) === "move";
+	const moveActionId = usesPrimaryMoveRecovery
+		? "move-port-equipment-group-primary"
+		: "move-port-equipment-group";
+	const duplicateMoveActionId = usesPrimaryMoveRecovery
+		? "move-port-equipment-group"
+		: "move-port-equipment-group-primary";
+	assertEqual(
+		await inspector.getByTestId(duplicateMoveActionId).count(),
+		0,
+		`ordinary ${portType} has no duplicate Move action ${viewportLabel}`,
+	);
+	for (const id of ["edit-port-equipment-membership", moveActionId]) {
 		const action = inspector.getByTestId(id);
 		assertEqual(
 			await action.isVisible(),
@@ -37345,28 +37576,34 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		);
 		await assertLocatorInsideViewport(page, action);
 		await assertLocatorOwnsHitArea(action, `ordinary ${portType} primary ${id} ${viewportLabel}`);
-		assertEqual(
-			await action.evaluate((element) => {
-				const textBoxes = [...element.childNodes].flatMap((node) => {
-					if (!(node instanceof Text) || !node.textContent.trim()) return [];
-					const range = document.createRange();
-					range.selectNodeContents(node);
-					return [...range.getClientRects()];
-				});
-				const bounds = element.getBoundingClientRect();
-				return (
-					textBoxes.length > 0 &&
-					textBoxes.every(
-						(box) =>
-							Math.abs(box.top - textBoxes[0].top) < 0.5 &&
-							box.left >= bounds.left &&
-							box.right <= bounds.right,
-					)
-				);
-			}),
-			true,
-			`ordinary ${portType} primary ${id} label fits one line ${viewportLabel}`,
-		);
+		if (id === "move-port-equipment-group-primary") {
+			const actionCopy = await action.innerText();
+			assertIncludes(actionCopy, "전체 이동", `ordinary ${portType} recovery Move label ${viewportLabel}`);
+			assertIncludes(actionCopy, "Loop 지도", `ordinary ${portType} recovery map guidance ${viewportLabel}`);
+		} else {
+			assertEqual(
+				await action.evaluate((element) => {
+					const textBoxes = [...element.childNodes].flatMap((node) => {
+						if (!(node instanceof Text) || !node.textContent.trim()) return [];
+						const range = document.createRange();
+						range.selectNodeContents(node);
+						return [...range.getClientRects()];
+					});
+					const bounds = element.getBoundingClientRect();
+					return (
+						textBoxes.length > 0 &&
+						textBoxes.every(
+							(box) =>
+								Math.abs(box.top - textBoxes[0].top) < 0.5 &&
+								box.left >= bounds.left &&
+								box.right <= bounds.right,
+						)
+					);
+				}),
+				true,
+				`ordinary ${portType} primary ${id} label fits one line ${viewportLabel}`,
+			);
+		}
 		assertAtLeast(
 			(await action.boundingBox())?.height ?? 0,
 			44,
@@ -37702,7 +37939,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 	);
 	const disclosedActionIds = [
 		"edit-port-equipment-membership",
-		"move-port-equipment-group",
+		...(usesPrimaryMoveRecovery ? [] : ["move-port-equipment-group"]),
 		"copy-port-equipment-group",
 		"delete-port-equipment",
 	];
@@ -52450,11 +52687,11 @@ async function exerciseEqClickEndpoints(page, label) {
 					`${label} EQ hover feedback keeps the pointed-at slot stable`,
 				);
 				await page.mouse.click(wrongPoint.x, wrongPoint.y);
-				await page.waitForFunction(() =>
-					document
-						.querySelector(".tilefab-statusbar > span[aria-live]")
-						?.textContent?.includes("시작점은 유지됩니다"),
-				);
+				await page.waitForFunction(() => {
+					const feedback = document.querySelector(".tilefab-equipment-selection-readout");
+					return feedback?.getAttribute("data-state") === "blocked" &&
+						feedback.textContent?.includes("평행하거나 떨어진 레일은 하나의 EQ로 묶을 수 없습니다");
+				});
 				await page.waitForFunction(
 					() =>
 						document

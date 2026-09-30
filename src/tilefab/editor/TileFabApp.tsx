@@ -28297,6 +28297,21 @@ export default function TileFabApp(): React.ReactElement {
 			: selectedEquipmentGroup && selectedEquipmentGroup.portIds.length > 1
 				? "모든 Port를 같은 Loop로 이동"
 				: "Port를 Loop 직접 레일로 이동";
+	const selectedEquipmentNeedsGroupMoveForProcessLoop =
+		selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 &&
+		selectedEquipmentGroup?.kind === "STK" &&
+		selectedEquipmentGroup.portIds.length > 1 &&
+		equipmentProcessLoopChoices.length > 0;
+	const selectedEquipmentGroupMoveRecoveryId = selectedEquipmentNeedsGroupMoveForProcessLoop
+		? (selectedEquipmentGroup?.id ?? null)
+		: null;
+	useEffect(() => {
+		if (selectedEquipmentGroupMoveRecoveryId === null) return;
+		const frame = window.requestAnimationFrame(() => {
+			setStatus(`STK-${selectedEquipmentGroupMoveRecoveryId} · 연결할 Loop 없음 · 이동 전에 FAB 조직의 Process Loop 지도에서 위치를 확인하세요`);
+		});
+		return () => window.cancelAnimationFrame(frame);
+	}, [selectedEquipmentGroupMoveRecoveryId]);
 	const selectedEquipmentProcessLoopScope = useMemo(() => {
 		if (!activePortAuthoringType || ordinaryPortProcessLoopTargetId === null) return null;
 		if (ordinaryPortProcessLoopTargetRef.current?.projectId !== projectSession.manifest.id) return null;
@@ -39944,7 +39959,11 @@ export default function TileFabApp(): React.ReactElement {
 							selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
 						}
 						data-primary-process-loop-availability={
-							selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 ? "none" : undefined
+							selectedEquipmentNeedsGroupMoveForProcessLoop
+								? "move"
+								: selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
+									? "none"
+									: undefined
 						}
 						data-compact-layout={compactInspectorSheetActive ? "bottom-sheet" : "side-panel"}
 						data-compact-obstruction="equipment"
@@ -40044,6 +40063,23 @@ export default function TileFabApp(): React.ReactElement {
 										<small className="tilefab-equipment-process-loop-primary-name">{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.map((id) => organizationRecordsById.get(id)?.name ?? `조직 ${id}`).join(", ")}</small>
 									</span>
 								</div>
+							</div>
+						) : selectedEquipmentNeedsGroupMoveForProcessLoop ? (
+							<div className="tilefab-equipment-process-loop-primary">
+								<button
+									ref={processLoopPrimaryActionRef}
+									type="button"
+									data-testid="move-port-equipment-group-primary"
+									aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 먼저 FAB 조직의 Process Loop 지도에서 위치를 확인한 뒤 장비 전체 이동을 시작하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
+									disabled={modelSyncPending || workerState.status !== "ready"}
+									onClick={() => startSelectedPortEquipmentGroupEdit("move")}
+								>
+									<Move className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
+									<span className="tilefab-equipment-process-loop-primary-copy">
+										<strong className="tilefab-equipment-process-loop-primary-title">연결할 Loop 없음 · 전체 이동</strong>
+										<small className="tilefab-equipment-process-loop-primary-name">먼저 FAB 조직 → Loop 지도 보기</small>
+									</span>
+								</button>
 							</div>
 						) : selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 ? (
 							<div className="tilefab-equipment-process-loop-primary">
@@ -40193,7 +40229,7 @@ export default function TileFabApp(): React.ReactElement {
 												>
 													<MousePointer2 size={15} /> Port 구성 편집
 												</button>
-												<button
+												{!selectedEquipmentNeedsGroupMoveForProcessLoop ? <button
 													type="button"
 													className="tilefab-inspector-primary"
 													data-testid="move-port-equipment-group"
@@ -40202,7 +40238,7 @@ export default function TileFabApp(): React.ReactElement {
 													onClick={() => startSelectedPortEquipmentGroupEdit("move")}
 												>
 													<Move size={15} /> 장비 이동
-												</button>
+												</button> : null}
 											</>
 										)}
 									</div>
