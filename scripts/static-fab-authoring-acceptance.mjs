@@ -326,6 +326,14 @@ try {
 		console.log("PASS preset and Recent placement lifecycle acceptance");
 		throw PLACEMENT_LIFECYCLE_ONLY_COMPLETE;
 	}
+	if (process.env.OPENFAB_GUIDED_RAIL_KEYBOARD_CONTINUITY_ONLY === "1") {
+		recordStep("guided-rail-keyboard-continuity", await exerciseGuidedRailKeyboardContinuity(browser));
+		assertEqual(result.consoleErrors.length, 0, "Guided keyboard continuity console errors");
+		assertEqual(result.pageErrors.length, 0, "Guided keyboard continuity page errors");
+		result.status = "PASS";
+		console.log("PASS Guided First Rail keyboard continuation into Process Loop");
+		throw GUIDED_ONLY_COMPLETE;
+	}
 	if (process.env.OPENFAB_FIRST_RAIL_BOUNDARY_ACCEPTANCE_ONLY === "1") {
 		recordStep("guided-first-rail-boundary", await exerciseGuidedFirstRailBoundary(browser));
 		assertEqual(result.consoleErrors.length, 0, "First Rail boundary console errors");
@@ -335,6 +343,7 @@ try {
 		throw GUIDED_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_GUIDED_ACCEPTANCE_ONLY === "1") {
+		recordStep("guided-rail-keyboard-continuity", await exerciseGuidedRailKeyboardContinuity(browser));
 		recordStep("guided-first-rail-boundary", await exerciseGuidedFirstRailBoundary(browser));
 		const guidedPortHandoff = await exerciseGuidedPortHandoffRegression(browser, "save");
 		recordStep("guided-port-handoff", guidedPortHandoff);
@@ -2827,6 +2836,7 @@ try {
 	});
 	const retainedHeap = await exerciseEditorV1RetainedHeap(desktopPage);
 	recordStep("editor-v1-retained-heap", retainedHeap);
+	recordStep("guided-rail-keyboard-continuity", await exerciseGuidedRailKeyboardContinuity(browser));
 	recordStep("guided-first-rail-boundary", await exerciseGuidedFirstRailBoundary(browser));
 	const guidedPortHandoff = await exerciseGuidedPortHandoffRegression(browser, "save");
 	recordStep("guided-port-handoff", guidedPortHandoff);
@@ -12311,6 +12321,151 @@ async function exerciseGuidedCopyRecovery(page, label) {
 	await page.setViewportSize({ width: 390, height: 844 });
 }
 
+async function exerciseGuidedRailKeyboardContinuity(browser) {
+	const cases = [];
+	for (const viewport of [{ width: 390, height: 600 }, { width: 760, height: 900 }, { width: 1440, height: 900 }]) {
+		for (const input of ["keyboard", "pointer-keyboard"]) {
+			const label = `${input}-${viewport.width}x${viewport.height}`;
+			const context = await browser.newContext({ viewport });
+			const page = await context.newPage();
+			page.on("console", (message) => {
+				if (message.type() === "error") result.consoleErrors.push(message.text());
+			});
+			page.on("pageerror", (error) => result.pageErrors.push(error.message));
+			try {
+				await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+				await waitForReady(page, { physicalPaths: 0 });
+				await page.getByTestId("openfab-start-dialog").getByRole("button", { name: /GUIDED BUILD/ }).click();
+				const panel = page.getByTestId("guided-build-panel");
+				await panel.waitFor({ state: "visible" });
+				const acknowledge = panel.getByRole("button", { name: "이동을 익혔어요", exact: true });
+				if (await acknowledge.count()) await acknowledge.click();
+				await page.waitForFunction(() => document.querySelector('[data-testid="guided-build-panel"]')?.getAttribute("data-current-mission") === "first-rail");
+				const before = await readMetrics(page);
+				const canvas = page.getByTestId("rail-canvas");
+				const readCursor = async () => {
+					const text = await page.getByTestId("guided-rail-keyboard-readout").textContent();
+					const match = text?.match(/X\s*(-?\d+)미터\s*·\s*Z\s*(-?\d+)미터/);
+					if (!match) throw new Error(`${label} missing accessible keyboard coordinates: ${text}`);
+					return { x: Number(match[1]), y: Number(match[2]) };
+				};
+				const waitForCursor = () => page.waitForFunction(() => /X\s*(-?\d+)미터\s*·\s*Z\s*(-?\d+)미터/.test(document.querySelector('[data-testid="guided-rail-keyboard-readout"]')?.textContent ?? ""));
+				const enterKeyboard = async () => {
+					await panel.getByTestId("guided-build-keyboard-rail-entry").click();
+					await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-guided-rail-keyboard") === "choose-start");
+					await waitForCursor();
+				};
+				const assertSingleCommand = (actual, previous, phase) => {
+					for (const key of ["modelSequence", "workerTargetSequence", "workerSequence"]) assertEqual(Number(actual[key]), Number(previous[key]) + 1, `${label} ${phase} single ${key}`);
+					for (const key of ["equipmentGroups", "equipmentPorts", "projectBlueprints", "staticFabOrganizations", "modelNextAdvancedSwitchId", "modelNextPortId", "modelNextEquipmentGroupId", "modelNextOrganizationId"]) assertEqual(actual[key], previous[key], `${label} ${phase} preserves ${key}`);
+					assertEqual(actual.workerSimulationReady, "false", `${label} ${phase} simulation gate`);
+				};
+				let expectedEnd;
+				if (input === "pointer-keyboard") {
+					const [start, end] = await frameRailPointerGesture(page, { x: 0.5, y: 0.5 }, { x: 14.5, y: 0.5 }, 22);
+					assertExactStaticFabModelIdentity(await readMetrics(page), before, `${label} framing preserves source`);
+					await page.mouse.move(start.x, start.y);
+					await page.mouse.down();
+					await page.mouse.move(end.x, end.y, { steps: 12 });
+					await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-draft-preview-valid") === "true");
+					await page.mouse.up();
+					expectedEnd = { x: 14, y: 0 };
+				} else {
+					await enterKeyboard();
+					const initial = await readCursor();
+					expectedEnd = { x: initial.x + 14, y: initial.y };
+					await canvas.press("Enter");
+					for (const key of ["Shift+ArrowRight", "Shift+ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight"]) await canvas.press(key);
+					await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-draft-preview-valid") === "true");
+					await canvas.press("Enter");
+				}
+				const fourteen = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1);
+				assertSingleCommand(fourteen, before, "14m draft");
+				assertEqual(Number(fourteen.authoredEdges), 14, `${label} exact 14m edges`);
+				assertEqual((await readRailGeometry(page)).cells.length, 15, `${label} exact 14m cells`);
+				assertEqual(await panel.getAttribute("data-current-mission"), "first-rail", `${label} 14m incomplete First Rail`);
+				if (input === "pointer-keyboard") {
+					await enterKeyboard();
+					for (const [axis, positive, negative] of [["x", "ArrowRight", "ArrowLeft"], ["y", "ArrowDown", "ArrowUp"]]) {
+						let coordinate = (await readCursor())[axis];
+						assertAtMost(Math.abs(expectedEnd[axis] - coordinate), 500, `${label} bounded visible-key positioning`);
+						while (coordinate !== expectedEnd[axis]) {
+							const delta = expectedEnd[axis] - coordinate;
+							const step = Math.abs(delta) >= 5 ? 5 : 1;
+							await canvas.press(`${step === 5 ? "Shift+" : ""}${delta > 0 ? positive : negative}`);
+							coordinate += Math.sign(delta) * step;
+							await page.waitForFunction(({ axis, coordinate }) => (document.querySelector('[data-testid="guided-rail-keyboard-readout"]')?.textContent ?? "").includes(`${axis === "x" ? "X" : "Z"} ${coordinate}미터`), { axis, coordinate });
+						}
+					}
+				}
+				await waitForCursor();
+				for (const axis of ["x", "y"]) assertEqual((await readCursor())[axis], expectedEnd[axis], `${label} 14m forward endpoint ${axis}`);
+				await canvas.press("Enter");
+				await canvas.press("ArrowRight");
+				await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-draft-preview-valid") === "true");
+				await canvas.press("Enter");
+				const fifteen = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(fourteen.workerTargetSequence) + 1);
+				assertSingleCommand(fifteen, fourteen, "1m extension");
+				assertEqual(Number(fifteen.authoredEdges), 15, `${label} exact 15m edges`);
+				assertEqual((await readRailGeometry(page)).cells.length, 16, `${label} exact 15m cells`);
+				await page.waitForFunction(() => document.querySelector('[data-testid="guided-build-panel"]')?.getAttribute("data-current-mission") === "process-loop" && document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-guided-rail-keyboard") === "choose-start", undefined, { timeout: 10000 });
+				await waitForCursor();
+				const cursor = await readCursor();
+				assertEqual(cursor.x, expectedEnd.x + 1, `${label} continued same endpoint X`);
+				assertEqual(cursor.y, expectedEnd.y, `${label} continued same endpoint Z`);
+				assertIncludes(await page.locator(".tilefab-statusbar").innerText(), "첫 직선을 완성했습니다", `${label} explicit completed mission status`);
+				await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+				const cursorPoint = await screenPointForWorld(page, { x: cursor.x + 0.5, y: cursor.y + 0.5 });
+				const cursorVisible = await page.evaluate((point) => [-12, 0, 12].every((dx) => [-12, 0, 12].every((dy) => document.elementFromPoint(point.x + dx, point.y + dy) === document.querySelector('[data-testid="rail-canvas"]'))), cursorPoint);
+				assertEqual(cursorVisible, true, `${label} continued keyboard cursor ring visible on Canvas`);
+				await page.waitForTimeout(200);
+				const settledCursorPoint = await screenPointForWorld(page, { x: cursor.x + 0.5, y: cursor.y + 0.5 });
+				assertAtMost(Math.hypot(settledCursorPoint.x - cursorPoint.x, settledCursorPoint.y - cursorPoint.y), 1, `${label} continued cursor remains stable after layout`);
+				assertExactStaticFabModelIdentity(await readMetrics(page), fifteen, `${label} layout framing preserves source/Worker`);
+				await page.screenshot({ path: path.join(artifactRoot, `guided-keyboard-continuity-${label}.png`), fullPage: true });
+				await canvas.press("Enter");
+				await canvas.press("Shift+ArrowDown");
+				await canvas.press("ArrowDown");
+				await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-draft-preview-valid") === "true");
+				await canvas.press("Enter");
+				const nextLeg = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(fifteen.workerTargetSequence) + 1);
+				assertSingleCommand(nextLeg, fifteen, "next Loop leg");
+				assertEqual(Number(nextLeg.authoredEdges), 21, `${label} exact next-leg edges`);
+				assertEqual((await readRailGeometry(page)).cells.length, 22, `${label} exact next-leg cells`);
+				assertEqual(await panel.getAttribute("data-current-mission"), "process-loop", `${label} next leg remains Process Loop`);
+				assertEqual(await canvas.getAttribute("data-guided-rail-keyboard"), "choose-start", `${label} next leg retains keyboard session`);
+				assertIncludes(await page.locator(".tilefab-statusbar").innerText(), "Loop 구간 6 m를 확정했습니다", `${label} next leg uses Process Loop session instructions`);
+				let restored = null;
+				if (viewport.width === 1440 && input === "keyboard") {
+					await page.getByRole("button", { name: "실행 취소", exact: true }).click();
+					const undone = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(nextLeg.workerTargetSequence) + 1);
+					assertSingleCommand(undone, nextLeg, "Undo");
+					assertStaticFabAuthoredContentIdentity(undone, fifteen, `${label} Undo content`);
+					assertEqual(await canvas.getAttribute("data-guided-rail-keyboard"), "", `${label} Undo clears stale keyboard session`);
+					await page.getByRole("button", { name: "다시 실행", exact: true }).click();
+					restored = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(undone.workerTargetSequence) + 1);
+					assertSingleCommand(restored, undone, "Redo");
+					assertStaticFabAuthoredContentIdentity(restored, nextLeg, `${label} Redo content`);
+					assertEqual(await canvas.getAttribute("data-guided-rail-keyboard"), "", `${label} Redo keeps cancelled session clear`);
+				} else if (viewport.width === 1440) {
+					await panel.getByRole("button", { name: "Guided Build 최소화", exact: true }).click();
+					await panel.waitFor({ state: "hidden" });
+					await page.getByTestId("guided-build-resume").waitFor({ state: "visible" });
+					assertEqual(await canvas.getAttribute("data-guided-rail-keyboard"), "", `${label} minimizing clears transient keyboard session`);
+					assertExactStaticFabModelIdentity(await readMetrics(page), nextLeg, `${label} minimizing preserves source/Worker`);
+				}
+				cases.push({ input, viewport, before, fourteen, fifteen, cursor, nextLeg, restored });
+			} catch (error) {
+				await page.screenshot({ path: path.join(artifactRoot, `guided-keyboard-continuity-${label}-failure.png`), fullPage: true }).catch(() => undefined);
+				throw error;
+			} finally {
+				await closeBrowserResource(context, `Guided keyboard continuity ${label}`);
+			}
+		}
+	}
+	return { cases };
+}
+
 async function exerciseGuidedFirstRailBoundary(browser) {
 	const cases = [];
 	for (const meters of [14, 15]) {
@@ -12717,6 +12872,7 @@ async function exerciseGuidedPortHandoffRegression(
 		await assertGuidedPrimaryTarget(page, "canvas:rail", "Guided Process Loop outer leg");
 		await commitScreenRail(outerLegEnd, { x: firstRailStart.x, y: outerLegEnd.y }, "return-leg");
 		await assertGuidedPrimaryTarget(page, "canvas:rail", "Guided Process Loop return leg");
+		const beforeClosure = await readMetrics(page);
 		const closedLoop = await commitScreenRail(
 			{ x: firstRailStart.x, y: outerLegEnd.y },
 			firstRailStart,
@@ -12734,7 +12890,7 @@ async function exerciseGuidedPortHandoffRegression(
 			{ timeout: 10_000 },
 		);
 		assertEqual(closedLoop.workerSimulationReady, "false", "Guided Port simulation gate");
-		const quickStartCheckpoint = await readMetrics(page);
+		let quickStartCheckpoint = await readMetrics(page);
 		const continueToEquip = panel.getByRole("button", {
 			name: "다음 과정 · 장비 배치",
 			exact: true,
@@ -12765,6 +12921,69 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		// Retain the separate manual activity-entry and pause/resume journey.
 		await page.getByTestId("editor-activity-build").click();
+		let loopRepair = null;
+		if (practiceTransitionMode === "save") {
+			const waitMission = (mission) => page.waitForFunction((expected) => document.querySelector('[data-testid="guided-build-panel"]')?.getAttribute("data-current-mission") === expected, mission);
+			const replayHistory = async (name, previous, expected, label) => {
+				const button = page.getByRole("button", { name, exact: true });
+				if (await button.count()) await button.click();
+				else if (name === "다시 실행") {
+					// Compact topbars expose Undo directly; Redo remains a real Canvas shortcut.
+					await canvas.focus();
+					await canvas.press("ControlOrMeta+Shift+z");
+				} else throw new Error(`${label} required visible history control is missing`);
+				const restored = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(previous.workerTargetSequence) + 1 && metrics.modelChecksum === expected.modelChecksum && metrics.workerChecksum === expected.workerChecksum);
+				assertSingleGuidedPortCommit(restored, previous, label);
+				assertStaticFabAuthoredContentIdentity(restored, expected, label);
+				assertEqual(restored.workerSimulationReady, "false", `${label} simulation gate`);
+				return restored;
+			};
+			await clickActivityCommand(page, "build", "레일 건설");
+			const closedBaseline = await readMetrics(page);
+			assertStaticFabAuthoredContentIdentity(closedBaseline, closedLoop, "Closed Loop before separate draft");
+			const { bounds } = await readRailGeometry(page);
+			if (!bounds) throw new Error("Closed Loop has no bounds for separate-draft repair audit.");
+			const originalEdges = await readNormalizedAuthoredRailEdges(page);
+			const draftStartWorld = { x: bounds.maxX + 8.5, y: bounds.maxY + 8.5 };
+			const [draftStart, draftEnd] = await frameRailPointerGesture(page, draftStartWorld, { x: draftStartWorld.x + 5, y: draftStartWorld.y });
+			assertProjectUnchanged(await readMetrics(page), closedBaseline, "Separate draft framing preserves project");
+			assertExactStaticFabModelIdentity(await readMetrics(page), closedBaseline, "Separate draft framing preserves source/Worker");
+			const withDraft = await commitScreenRail(draftStart, draftEnd, "separate 5m draft");
+			assertSingleGuidedPortCommit(withDraft, closedBaseline, "Separate draft single commit");
+			assertEqual(Number(withDraft.authoredEdges), Number(closedBaseline.authoredEdges) + 5, "Separate draft exact added edges");
+			assertEqual(Number(withDraft.authoredCells), Number(closedBaseline.authoredCells) + 6, "Separate draft exact added cells");
+			for (const key of ["equipmentGroups", "equipmentPorts", "projectBlueprints", "staticFabOrganizations", "modelNextAdvancedSwitchId", "modelNextPortId", "modelNextEquipmentGroupId", "modelNextOrganizationId"]) assertEqual(withDraft[key], closedBaseline[key], `Separate draft preserves ${key}`);
+			const draftEdges = new Set((await readNormalizedAuthoredRailEdges(page)).map((edge) => JSON.stringify(edge)));
+			assertEqual(originalEdges.every((edge) => draftEdges.has(JSON.stringify(edge))), true, "Separate draft preserves original directed Loop");
+			await waitMission("ports");
+			await assertGuidedPrimaryTarget(page, "activity:equip", "Surviving Loop remains complete");
+			const draftUndone = await replayHistory("실행 취소", withDraft, closedBaseline, "Undo separate draft");
+			await waitMission("ports");
+			const reopened = await replayHistory("실행 취소", draftUndone, beforeClosure, "Undo Loop closure");
+			await waitMission("process-loop");
+			assertEqual(Number(reopened.openTerminals), 2, "Reopened Loop exact two open terminals");
+			await page.getByTestId("guided-build-chapter-checkpoint").waitFor({ state: "hidden" });
+			await assertGuidedPrimaryTarget(page, "canvas:rail", "Reopened Loop returns to rail repair");
+			assertIncludes(await panel.innerText(), "열린 끝 2개", "Reopened Loop visible current condition");
+			assertIncludes(await panel.innerText(), "편집·실행 취소로 열린 회로", "Reopened Loop explains why the mission resumes");
+			await page.screenshot({ path: path.join(artifactRoot, "guided-reopened-loop.png"), fullPage: true });
+			// Reframe while Canvas is actionable; the restored chapter checkpoint covers it.
+			await frameRailPointerGesture(page, endpointWorlds[0], endpointWorlds[1]);
+			assertProjectUnchanged(await readMetrics(page), reopened, "Loop repair framing preserves project");
+			const restored = await replayHistory("다시 실행", reopened, closedBaseline, "Redo Loop closure");
+			await waitMission("ports");
+			await page.getByTestId("guided-build-chapter-checkpoint").waitFor({ state: "visible" });
+			assertEqual(restored.historyCanRedo, "true", "Separate draft remains redoable after closure recovery");
+			quickStartCheckpoint = await readMetrics(page);
+			await continueToEquip.click();
+			await page.getByTestId("guided-build-chapter-checkpoint").waitFor({ state: "hidden" });
+			await page.waitForFunction(() => document.querySelector('[data-testid="tilefab-app"]')?.getAttribute("data-editor-activity") === "equip" && document.activeElement === document.querySelector('[data-testid="rail-canvas"]'));
+			await assertGuidedPrimaryTarget(page, "canvas:ohb", "Recovered Loop continues into OHB");
+			assertProjectUnchanged(await readMetrics(page), quickStartCheckpoint, "Recovered Loop equipment entry preserves source");
+			await page.getByTestId("editor-activity-build").click();
+			assertProjectUnchanged(await readMetrics(page), quickStartCheckpoint, "Recovered Loop manual Build preserves source");
+			loopRepair = { closedBaseline, withDraft, draftUndone, reopened, restored };
+		}
 		assertEqual(
 			await page.getByTestId("editor-activity-equip").getAttribute("data-guided-target"),
 			"true",
@@ -21199,6 +21418,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		return Object.freeze({
 			practiceTransitionMode,
+			loopRepair,
 			equipmentGroups: stkPlaced.equipmentGroups,
 			equipmentPorts: stkPlaced.equipmentPorts,
 			mission: guidedMissionComplete,
@@ -54360,6 +54580,7 @@ async function exerciseEqClickEndpoints(page, label) {
 				if (!otherLine) throw new Error(`${label} requires another straight line for EQ recovery.`);
 				await centerWorld(page, otherLine);
 				const wrongPoint = await screenPointForWorld(page, otherLine);
+				const dockBeforeFeedback = await page.locator(".tilefab-equipment-workspace").boundingBox();
 				assertEqual(
 					await page.evaluate(
 						(point) =>
@@ -54383,12 +54604,21 @@ async function exerciseEqClickEndpoints(page, label) {
 						new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 				);
 				const afterFeedbackPoint = await screenPointForWorld(page, otherLine);
+				const dockAfterFeedback = await page.locator(".tilefab-equipment-workspace").boundingBox();
+				if (!dockBeforeFeedback || !dockAfterFeedback) throw new Error(`${label} missing EQ dock bounds`);
+				assertAtMost(Math.abs(dockAfterFeedback.y - dockBeforeFeedback.y), 1,
+					`${label} EQ hover feedback keeps dock position stable`);
+				assertAtMost(Math.abs(dockAfterFeedback.height - dockBeforeFeedback.height), 1,
+					`${label} EQ hover feedback keeps dock height stable`);
 				assertAtMost(
 					Math.hypot(afterFeedbackPoint.x - wrongPoint.x, afterFeedbackPoint.y - wrongPoint.y),
 					1,
 					`${label} EQ hover feedback keeps the pointed-at slot stable`,
 				);
 				for (let repeat = 0; repeat < 2; repeat += 1) {
+					assertEqual(await page.evaluate((point) => document.elementFromPoint(point.x, point.y) ===
+						document.querySelector('[data-testid="rail-canvas"]'), wrongPoint), true,
+						`${label} wrong-line endpoint still owns Canvas before release ${repeat + 1}`);
 					await page.mouse.down();
 					const proof = await observeOrdinaryPortRelease(page, {
 						owner: "dedicated", type: "EQ", label: `${label} wrong-line EQ release ${repeat + 1}`,

@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-10-02
+
+- Keep ordinary EQ feedback at a stable height so an invalid endpoint's explanation
+  cannot grow the equipment dock over the point being clicked. Longer feedback scrolls.
+- Continue Guided keyboard construction at the same endpoint when a short draft plus
+  an extension completes First Rail, with an explicit transition to Process Loop.
+- Verify actual keyboard and pointer-to-keyboard continuation on phone, tablet and desktop,
+  and verify a surviving Loop, reopening through Undo, and restoration through Redo.
+- Keep the keyboard endpoint visible after layout changes, avoid reserving an obscured
+  compact camera toolbar twice, and explain why editing can reopen the Loop guide mission.
+
 ## [0.1.34] - 2026-10-02
 
 - Preserve the current First Rail repair and Process Loop guide's arrow direction, forward

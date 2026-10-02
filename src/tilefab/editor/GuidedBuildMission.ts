@@ -119,7 +119,8 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		activity: "build",
 		eyebrow: "MISSION 3 · PROCESS LOOP",
 		title: "닫힌 Process Loop",
-		objective: "레일을 계속 연결해 열린 끝이 없는 하나의 닫힌 방향성 회로를 만드세요.",
+		objective:
+			"레일을 계속 연결해 열린 끝이 없는 하나의 닫힌 방향성 회로를 만드세요. 편집·실행 취소로 열린 회로는 이 단계에서 이어갑니다.",
 		rationale: "작은 닫힌 회로는 Bay가 아니라 장비 접근의 기본 단위인 Process Loop입니다.",
 		primaryCommandId: "canvas.primary-drag",
 	}),

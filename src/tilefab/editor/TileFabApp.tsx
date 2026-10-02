@@ -3536,7 +3536,7 @@ export default function TileFabApp(): React.ReactElement {
 	const guidedRailKeyboardAnnouncementRef = useRef<HTMLSpanElement | null>(null);
 	const guidedRailKeyboardAnnouncementTimerRef = useRef<number | null>(null);
 	const guidedRailKeyboardLastValidityRef = useRef<string | null>(null);
-	const cancelGuidedRailKeyboardForMissionChangeRef = useRef<() => void>(() => undefined);
+	const reconcileGuidedRailKeyboardForMissionChangeRef = useRef<() => void>(() => undefined);
 	const [guidedRailKeyboard, setGuidedRailKeyboard] = useState<RailKeyboardUiState | null>(null);
 	const guidedPortKeyboardSessionRef = useRef<GuidedPortKeyboardSession | null>(null);
 	const ordinaryPortNextProbeRef = useRef<{
@@ -4115,7 +4115,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (lifecycleCurrent && sessionBindingCurrent) {
 			return;
 		}
-		cancelGuidedRailKeyboardForMissionChangeRef.current();
+		reconcileGuidedRailKeyboardForMissionChangeRef.current();
 	}, [
 		editorModel.document,
 		editorModel.generation,
@@ -10333,8 +10333,10 @@ export default function TileFabApp(): React.ReactElement {
 			cursorReadoutRef.current.textContent = `KEY · X ${session.endpoint.x} m · Z ${session.endpoint.y} m`;
 		}
 		requestAnimationFrame(() => {
-			if (guidedRailKeyboardSessionRef.current !== session) return;
+			if (guidedRailKeyboardSessionRef.current !== session || !guidedRailKeyboardSessionCurrent(session)) return;
+			if (panRef.current === null) keepGuidedRailKeyboardCursorVisible(session.endpoint);
 			updateGuidedRailKeyboardAccessibility(session, plan, evaluation, "immediate");
+			scheduleRender();
 		});
 	};
 
@@ -10652,10 +10654,33 @@ export default function TileFabApp(): React.ReactElement {
 			});
 		}
 	};
-	cancelGuidedRailKeyboardForMissionChangeRef.current = () => {
+	reconcileGuidedRailKeyboardForMissionChangeRef.current = () => {
 		const session = guidedRailKeyboardSessionRef.current;
 		if (!session) return;
 		const staleBinding = !guidedRailKeyboardSessionCurrent(session);
+		if (
+			!staleBinding &&
+			guidedBuildOpen &&
+			viewMode === "2d" &&
+			editorActivityRef.current === "build" &&
+			toolRef.current === "build" &&
+			buildModeRef.current === "route" &&
+			session.scope === "guided" &&
+			session.mission === "first-rail" &&
+			session.phase === "choose-start" &&
+			session.source === null &&
+			guidedBuildEvaluation.currentMissionId === "process-loop"
+		) {
+			const continued = continueGuidedRailKeyboardSession(
+				{ ...session, mission: "process-loop" },
+				session.endpoint,
+				currentGuidedRailKeyboardBinding(),
+			);
+			presentGuidedRailKeyboardSession(continued);
+			setStatus("첫 직선을 완성했습니다 · 같은 끝점에서 Enter를 눌러 Loop를 시작하세요");
+			scheduleRender();
+			return;
+		}
 		const completedProcessLoop =
 			session.scope === "guided" &&
 			session.mission === "process-loop" &&
@@ -38616,6 +38641,8 @@ export default function TileFabApp(): React.ReactElement {
 									<span
 										ref={bindEquipmentSelectionReadout}
 										className="tilefab-equipment-selection-readout"
+										data-reserve-feedback={tool === "eq" && !guidedBuildExperienceActive}
+										tabIndex={tool === "eq" && !guidedBuildExperienceActive ? 0 : undefined}
 										aria-live={guidedPortKeyboard ? "off" : "polite"}
 									/>
 								) : null}
@@ -43382,6 +43409,7 @@ function fitMapInsets(
 	let right = 0;
 	let top = 12;
 	let obstructionTop = canvasRect.bottom;
+	let compactCameraControlsRect: DOMRect | null = null;
 	for (const selector of [
 		".tilefab-tools",
 		".tilefab-camera-controls",
@@ -43400,9 +43428,7 @@ function fitMapInsets(
 			rect.width > rect.height &&
 			rect.height <= Math.min(96, canvasRect.height * 0.25);
 		if (isCompactHorizontalCameraControls) {
-			// The horizontal toolbar sits at the top or below Guide. Reserve its actual bottom edge,
-			// not a full-height right wall that can leave no room for a guided selection target.
-			top = Math.max(top, rect.bottom - canvasRect.top + 12);
+			compactCameraControlsRect = rect;
 		} else if (
 			isCameraControls &&
 			(rect.left + rect.right) * 0.5 > (canvasRect.left + canvasRect.right) * 0.5
@@ -43455,6 +43481,10 @@ function fitMapInsets(
 		const rect = element.getBoundingClientRect();
 		if (rect.bottom <= canvasRect.top || rect.top >= canvasRect.bottom) continue;
 		obstructionTop = Math.min(obstructionTop, rect.top);
+	}
+	if (compactCameraControlsRect && compactCameraControlsRect.top < obstructionTop) {
+		// A toolbar already inside the bottom dock's reserved area must not also consume the top.
+		top = Math.max(top, compactCameraControlsRect.bottom - canvasRect.top + 12);
 	}
 	return Object.freeze({
 		left,
