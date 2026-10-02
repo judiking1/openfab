@@ -80,6 +80,8 @@ import {
 	staticFabOrganizationImpactsForPatch,
 	unhandledStaticFabOrganizationImpacts,
 } from "../core/StaticFabOrganizationImpactIndex";
+import { assertStaticFabProcessLoopRepairSourceSteps } from "../core/StaticFabProcessLoopRepair";
+import { STATIC_FAB_PROCESS_LOOP_REPAIR_KIND } from "../core/StaticFabProcessLoopRepairContract";
 import {
 	STATIC_FAB_SEMANTIC_BAY_DELETE_KIND,
 	STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND,
@@ -398,6 +400,17 @@ export class RailPatchMirror {
 		}
 		const expectedSequence = this.currentSequence + 1;
 		const historyOriginKind = this.validateHistoryTransition(patch);
+		if (historyOriginKind === STATIC_FAB_PROCESS_LOOP_REPAIR_KIND) {
+			const validation = assertStaticFabProcessLoopRepairSourceSteps(
+				this.mirroredMap,
+				this.mirroredOrganizations,
+				patch,
+				patch.kind === "undo" || patch.kind === "redo" ? "exact-history" : "authored",
+			);
+			while (!validation.next().done) {
+				/* Worker-owned synchronous validation. */
+			}
+		}
 		const authoredHistoryEntry =
 			patch.kind === "undo" || patch.kind === "redo"
 				? null

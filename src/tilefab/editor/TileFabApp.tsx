@@ -990,6 +990,8 @@ import {
 	type RailStartupActivationMetrics,
 } from "./RailEditorStartup";
 import { createStaticFabArrangementCheckpoint } from "./StaticFabArrangementCheckpoint";
+import { StandaloneProcessLoopAuthoringController } from "./StandaloneProcessLoopAuthoringController";
+import { StandaloneProcessLoopAuthoringBar, StandaloneProcessLoopRegistrationForm } from "./StandaloneProcessLoopAuthoringPanel";
 import {
 	railReadinessIssueCorridorAt,
 	railReadinessIssueGuide,
@@ -2361,6 +2363,10 @@ export default function TileFabApp(): React.ReactElement {
 	const staticFabArrangementBridgeRef = useRef<StaticFabArrangementBridge | null>(null);
 	const staticFabArrangementBindingRef = useRef<StaticFabArrangementBinding | null>(null);
 	const staticFabArrangementCaptureRef = useRef<AbortController | null>(null);
+	const processLoopAuthoringControllerRef = useRef<StandaloneProcessLoopAuthoringController | null>(null);
+	const processLoopOperationRef = useRef<{ readonly document: RailDocument } | null>(null);
+	const processLoopRailEditRef = useRef<{ readonly document: RailDocument; readonly organizationId: number } | null>(null);
+	const processLoopNameDraftRef = useRef("작업 루프 1");
 	const staticFabMutationHistoryRef = useRef<AbortController | null>(null);
 	const [staticFabMutationHistory, setStaticFabMutationHistory] = useState<"undo" | "redo" | null>(null);
 	const [staticFabHistoryLabel, setStaticFabHistoryLabel] = useState("정렬");
@@ -3005,19 +3011,27 @@ export default function TileFabApp(): React.ReactElement {
 		const feedback = ordinaryPortProcessLoopFeedbackRef.current;
 		const dock = feedback?.closest<HTMLElement>(".tilefab-equipment-workspace");
 		if (!feedback || !dock) return;
+		const content = feedback.closest<HTMLElement>(".tilefab-equipment-scroll-content");
+		const canScroll = (element: HTMLElement): boolean =>
+			/auto|scroll/.test(getComputedStyle(element).overflowY) &&
+			element.scrollHeight > element.clientHeight;
+		const scroller = content && canScroll(content) ? content : canScroll(dock) ? dock : null;
+		if (!scroller) return;
 		const feedbackBounds = feedback.getBoundingClientRect();
-		const dockBounds = dock.getBoundingClientRect();
+		const scrollBounds = scroller.getBoundingClientRect();
 		const actions = dock.querySelector<HTMLElement>(".tilefab-equipment-actions");
 		const stickyActionsTop =
 			actions && getComputedStyle(actions).position === "sticky"
 				? actions.getBoundingClientRect().top
-				: dockBounds.bottom;
-		const visibleBottom = Math.min(dockBounds.bottom, stickyActionsTop);
+				: scrollBounds.bottom;
+		const visibleBottom = Math.min(scrollBounds.bottom, stickyActionsTop);
 		const clearance = 8;
-		if (feedbackBounds.bottom > visibleBottom - clearance) {
-			dock.scrollTop += Math.ceil(feedbackBounds.bottom - visibleBottom + clearance);
-		} else if (feedbackBounds.top < dockBounds.top + clearance) {
-			dock.scrollTop -= Math.ceil(dockBounds.top - feedbackBounds.top + clearance);
+		if (feedbackBounds.height > visibleBottom - scrollBounds.top - clearance * 2) {
+			scroller.scrollTop += Math.floor(feedbackBounds.top - scrollBounds.top - clearance);
+		} else if (feedbackBounds.bottom > visibleBottom - clearance) {
+			scroller.scrollTop += Math.ceil(feedbackBounds.bottom - visibleBottom + clearance);
+		} else if (feedbackBounds.top < scrollBounds.top + clearance) {
+			scroller.scrollTop -= Math.ceil(scrollBounds.top - feedbackBounds.top + clearance);
 		}
 	}, [ordinaryPortProcessLoopFeedback]);
 	const ordinaryPortProcessLoopTargetRef = useRef<Readonly<{
@@ -3154,6 +3168,10 @@ export default function TileFabApp(): React.ReactElement {
 	}, []);
 	const [organizationSearch, setOrganizationSearch] = useState("");
 	const [organizationParentSearch, setOrganizationParentSearch] = useState("");
+	const [processLoopOperation, setProcessLoopOperation] = useState<string | null>(null);
+	const [processLoopRailEditFeedback, setProcessLoopRailEditFeedback] = useState<string | null>(null);
+	const [processLoopRailEdit, setProcessLoopRailEdit] = useState<{ readonly document: RailDocument; readonly organizationId: number } | null>(null);
+	const [processLoopNameDraft, setProcessLoopNameDraft] = useState("작업 루프 1");
 	const [organizationNameDraft, setOrganizationNameDraft] = useState("Area 1");
 	const [organizationKindDraft, setOrganizationKindDraft] =
 		useState<StaticFabOrganizationKind>("AREA");
@@ -4271,7 +4289,7 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildPreferences?.lastEntryChoice === "guided" &&
 		startupState.status === "ready";
 	const guidedBuildExperienceActive = !guidedBuildCopyRecovering && (guidedBuildOpen || guidedBuildResumeAvailable);
-	const staticFabExclusiveCommandActive = staticFabMutationHistory !== null ||
+	const staticFabExclusiveCommandActive = processLoopOperation !== null || staticFabMutationHistory !== null ||
 		operationalConfigurationOpen ||
 		stationProposalReview !== null ||
 		staticFabArrangement !== null ||
@@ -5627,6 +5645,9 @@ export default function TileFabApp(): React.ReactElement {
 						new Error("OpenFab Fab project creation was cancelled during editor shutdown."),
 					);
 				}
+				processLoopAuthoringControllerRef.current?.dispose();
+				processLoopAuthoringControllerRef.current = null;
+				processLoopOperationRef.current = null;
 				projectLoader.dispose();
 				projectSerializer.dispose();
 				autosaveSerializer.dispose();
@@ -6840,6 +6861,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const closeContextPalette = (): void => updateContextPalette(null);
 	const blockStaticFabExclusiveCommand = (): boolean => {
+		if (processLoopOperationRef.current) { setStatus("작업 루프 준비를 기다리거나 Esc로 취소하세요"); return true; }
 		if (staticFabMutationHistoryRef.current) { setStatus("편집 이력 처리를 기다리거나 Esc로 취소하세요"); return true; }
 		if (operationalConfigurationOpen) {
 			setStatus("운영 설정 편집기를 적용하거나 되돌린 뒤 닫으세요");
@@ -7029,6 +7051,10 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			return { committed: false, evaluation: null };
 		}
+		if (processLoopRailEditRef.current) {
+			setStatus("이 배치는 작업 루프 레일 편집을 종료한 뒤 사용하세요");
+			return { committed: false, evaluation: null };
+		}
 		const activeDocument = editorModelRef.current.document;
 		if (plan.kind === "erase") {
 			return { committed: activeDocument.commit(plan), evaluation: null };
@@ -7053,6 +7079,10 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const publishEditorModel = (nextModel: ActiveRailEditorModel, message: string): void => {
+		cancelProcessLoopOperation();
+		const loopContext = processLoopRailEditRef.current;
+		const retainedLoop = loopContext?.document === nextModel.document ? nextModel.document.organizations.records.find((record) => record.id === loopContext.organizationId) : null;
+		if (loopContext && (!retainedLoop || retainedLoop.kind !== "AISLE" || retainedLoop.declaredSemanticRole !== "PROCESS_LOOP" || staticFabOrganizationParentIds(retainedLoop).length > 0)) { processLoopRailEditRef.current = null; setProcessLoopRailEdit(null); setProcessLoopRailEditFeedback(null); }
 		const previousModel = editorModelRef.current;
 		if (stationProposalReviewUiRef.current) {
 			cancelStationProposalReviewRef.current(
@@ -8751,6 +8781,7 @@ export default function TileFabApp(): React.ReactElement {
 		message?: string,
 		options: Readonly<{ scheduleCanvas?: boolean }> = {},
 	): void => {
+		cancelProcessLoopOperation();
 		ordinaryPortScopeReturnSessionRef.current = null;
 		if (cameraFitScopeRef.current === "assembly-review") cameraFitScopeRef.current = null;
 		assemblyReviewBoundsRef.current = null;
@@ -9464,6 +9495,7 @@ export default function TileFabApp(): React.ReactElement {
 		return true;
 	};
 	const editorMutationWaitBlockedReason = (): string | null => {
+		if (processLoopOperationRef.current) return "작업 루프 준비를 기다리거나 Esc로 취소하세요";
 		if (staticFabMutationHistoryRef.current) return "편집 이력 처리를 기다리거나 Esc로 취소하세요";
 		if (startupState.status !== "ready") return "프로젝트 시작이 끝난 뒤 편집을 시작하세요";
 		if (projectOperationControllerRef.current !== null || projectSession.operation !== "idle") {
@@ -9547,6 +9579,7 @@ export default function TileFabApp(): React.ReactElement {
 			| "preserve-port" = "clear",
 	): void => {
 		if (blockStaticFabExclusiveCommand()) return;
+		if (next !== "build" && next !== "erase") { processLoopRailEditRef.current = null; setProcessLoopRailEdit(null); setProcessLoopRailEditFeedback(null); }
 		setOrdinaryPortProcessLoopFeedback(null);
 		if (next !== "inspect") setEquipmentDeletionRecovery(null);
 		closeContextPalette();
@@ -10222,6 +10255,8 @@ export default function TileFabApp(): React.ReactElement {
 	}
 
 	const chooseBuildMode = (next: RailBuildMode): void => {
+		if (processLoopOperationRef.current) { setStatus("작업 루프 준비를 기다리거나 Esc로 취소하세요"); return; }
+		if (processLoopRailEditRef.current && next !== "route") { setStatus("작업 루프에서는 일반 레일 그리기를 사용하세요 · 다른 모듈 배치는 편집 종료 후 사용할 수 있습니다"); return; }
 		const guidedRailKeyboardEndpoint = guidedRailKeyboardSessionRef.current?.endpoint ?? null;
 		if (guidedRailKeyboardEndpoint) {
 			clearGuidedRailKeyboardAccessibility();
@@ -10603,6 +10638,21 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus(evaluation.reason);
 			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 			scheduleRender();
+			return;
+		}
+		if (processLoopRailEditRef.current) {
+			void runProcessLoopRepair(plan, null, () => {
+				const model = editorModelRef.current;
+				if (modelSyncPendingRef.current || model.map !== model.document.map) {
+					clearGuidedRailKeyboardAccessibility();
+					guidedRailKeyboardSessionRef.current = null;
+					ordinaryRailKeyboardReturnFocusRef.current = null;
+					setGuidedRailKeyboard(null);
+					return;
+				}
+				const continued = continueGuidedRailKeyboardSession(session, session.endpoint, currentGuidedRailKeyboardBinding());
+				presentGuidedRailKeyboardSession(continued);
+			});
 			return;
 		}
 		const result = commitPlan(plan);
@@ -12215,6 +12265,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const replayStaticFabHistory = async (direction: "undo" | "redo"): Promise<boolean> => {
+		if (editorModelRef.current.document.canReplayStaticFabProcessLoopRegistration(direction) || editorModelRef.current.document.canReplayStaticFabProcessLoopRepair(direction)) return replayProcessLoopHistory(direction);
 		const document = railDocument,
 			mirror = workerBridgeRef.current;
 		const preparePatch = mirror?.prepareStaticFabMutationPatchCooperatively?.bind(mirror);
@@ -12351,7 +12402,7 @@ export default function TileFabApp(): React.ReactElement {
 			? null
 			: removedOrganizationContextRef.current;
 		if (!retained) clearTransientConstruction();
-		if ((railDocument.canReplayStaticFabArrangement("undo") || railDocument.canReplayStaticFabAssemblyConnector("undo"))) { if (!(await replayStaticFabHistory("undo"))) return false; } else if (!railDocument.undo()) return false;
+		if ((railDocument.canReplayStaticFabProcessLoopRegistration("undo") || railDocument.canReplayStaticFabProcessLoopRepair("undo") || railDocument.canReplayStaticFabArrangement("undo") || railDocument.canReplayStaticFabAssemblyConnector("undo"))) { if (!(await replayStaticFabHistory("undo"))) return false; } else if (!railDocument.undo()) return false;
 		const duplicatedAssemblyUndoProjection = duplicatedAssemblyUndoCandidate
 			? ordinaryDuplicatedAssemblyUndoProjection(duplicatedAssemblyUndoCandidate, {
 					document: railDocument,
@@ -12540,7 +12591,7 @@ export default function TileFabApp(): React.ReactElement {
 			? null
 			: removedOrganizationContextRef.current;
 		if (!retained) clearTransientConstruction();
-		if ((railDocument.canReplayStaticFabArrangement("redo") || railDocument.canReplayStaticFabAssemblyConnector("redo"))) { if (!(await replayStaticFabHistory("redo"))) return; } else if (!railDocument.redo()) return;
+		if ((railDocument.canReplayStaticFabProcessLoopRegistration("redo") || railDocument.canReplayStaticFabProcessLoopRepair("redo") || railDocument.canReplayStaticFabArrangement("redo") || railDocument.canReplayStaticFabAssemblyConnector("redo"))) { if (!(await replayStaticFabHistory("redo"))) return; } else if (!railDocument.redo()) return;
 		const duplicatedAssemblyRedoProjection = duplicatedAssemblyRedoCandidate
 			? ordinaryDuplicatedAssemblyRedoProjection(duplicatedAssemblyRedoCandidate, {
 					document: railDocument,
@@ -12777,6 +12828,8 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		keyboardActionsRef.current = {
 			cancel: () => {
+				if (processLoopOperationRef.current) { cancelProcessLoopOperation(); return; }
+				if (processLoopRailEditRef.current && !guidedRailKeyboardSessionRef.current && !inspectAreaKeyboardSessionRef.current) { exitProcessLoopRailEdit(); return; }
 				if (staticFabMutationHistoryRef.current) { staticFabMutationHistoryRef.current.abort(); setStatus("편집 이력 처리를 취소하고 있습니다"); return; }
 				if (inspectAreaKeyboardSessionRef.current) {
 					cancelInspectAreaKeyboardRef.current("키보드 부분 선택을 취소했습니다", true);
@@ -19267,6 +19320,10 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 
+		if (processLoopRailEditRef.current && finalPlan && (drag.tool === "build" || drag.tool === "erase")) {
+			void runProcessLoopRepair(finalPlan);
+			return;
+		}
 		const commitResult = finalPlan ? commitPlan(finalPlan) : { committed: false, evaluation: null };
 		if (!commitResult.committed) {
 			if (
@@ -19807,6 +19864,10 @@ export default function TileFabApp(): React.ReactElement {
 			activationMaxSlicePhase: "idle",
 			preparationMilliseconds: 0,
 		});
+		cancelProcessLoopOperation();
+		processLoopRailEditRef.current = null;
+		setProcessLoopRailEdit(null);
+		setProcessLoopRailEditFeedback(null);
 		cancelStationProposalReview();
 		cancelBlueprintPlacement();
 		cancelGuidedPortKeyboard(undefined, false);
@@ -21619,7 +21680,18 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const deleteSelected = (): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		if (modelSyncPendingRef.current) return;
+		if (processLoopRailEditRef.current) {
+			const area = areaSelectionRef.current;
+			const selection = staticFabSelectionRef.current;
+			if (area && selection?.rail !== area) { setStatus("선택 범위가 변경되었습니다 · 레일과 장비 선택을 다시 확인하세요"); return; }
+			if ((selection?.equipmentGroups.length ?? 0) > 0 || selectedPortEquipmentRef.current !== null) { setStatus("루프 레일 편집에서는 레일만 선택하세요 · 장비 선택과 소속은 유지됩니다"); return; }
+			const modules = area?.ownerships ?? (selectedModuleRef.current ? Object.freeze([selectedModuleRef.current]) : null);
+			if (!modules?.length) { setStatus("철거할 레일 모듈을 먼저 선택하세요"); return; }
+			void runProcessLoopRepair(null, modules);
+			return;
+		}
 		const selectedArea = areaSelectionRef.current;
 		if (selectedArea) {
 			clearTransientConstruction();
@@ -23764,7 +23836,232 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => canvasRef.current?.focus());
 	};
 
+	function getProcessLoopAuthoringController(): StandaloneProcessLoopAuthoringController {
+		if (!processLoopAuthoringControllerRef.current) {
+			processLoopAuthoringControllerRef.current = new StandaloneProcessLoopAuthoringController({
+				readSource: () => {
+					const model = editorModelRef.current;
+					return { document: model.document, modelGeneration: model.generation, ownership: model.ownership,
+						selection: staticFabSelectionRef.current, mirror: workerBridgeRef.current,
+						projectIdle: projectOperationControllerRef.current === null && projectSessionRef.current.operation === "idle" &&
+							!modelSyncPendingRef.current && workerBridgeDocumentRef.current === model.document &&
+							!staticFabMutationHistoryRef.current && !staticFabArrangementUiRef.current &&
+							!staticFabAssemblyConnectorUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
+							!staticFabBayFlowEditUiRef.current && !stationProposalReviewUiRef.current };
+				},
+				createCheckpoint: createStaticFabArrangementCheckpoint,
+				now: performanceNow,
+			});
+		}
+		return processLoopAuthoringControllerRef.current;
+	}
+
+	function cancelProcessLoopOperation(message = "작업 루프 준비를 취소했습니다 · 기존 레일과 장비는 유지됩니다"): void {
+		if (!processLoopOperationRef.current) return;
+		processLoopOperationRef.current = null;
+		processLoopAuthoringControllerRef.current?.cancel();
+		setProcessLoopOperation(null);
+		restoreProcessLoopKeyboardPreview();
+		if (processLoopRailEditRef.current) setProcessLoopRailEditFeedback(message);
+		setStatus(message);
+	}
+
+	function restoreProcessLoopKeyboardPreview(): void {
+		const session = guidedRailKeyboardSessionRef.current;
+		if (!processLoopEditOwner() || !session?.source || session.phase !== "choose-end" || !guidedRailKeyboardSessionCurrent(session)) return;
+		const plan = planGuidedRailKeyboardEndpoint(session.source, session.endpoint);
+		const evaluation = publishBuildPreview(plan);
+		updateGuidedRailKeyboardAccessibility(session, plan, evaluation, "immediate");
+		scheduleRender();
+	}
+
+	function exitProcessLoopRailEdit(): void {
+		cancelProcessLoopOperation();
+		processLoopRailEditRef.current = null;
+		setProcessLoopRailEdit(null);
+		setProcessLoopRailEditFeedback(null);
+		clearTransientConstruction();
+		setStatus("작업 루프 레일 편집을 종료했습니다 · 확정한 편집은 유지됩니다");
+		scheduleRender();
+	}
+
+	function selectProcessLoopRailForRepair(): void {
+		const context = processLoopRailEditRef.current;
+		if (!context || !processLoopEditOwner() || blockStaticFabExclusiveCommand()) return;
+		chooseTool("inspect");
+		clearRailSelection();
+		clearPortEquipmentSelection();
+		setCompactInspectorExpanded(false);
+		setProcessLoopRailEditFeedback(null);
+		processLoopRailEditRef.current = context;
+		setProcessLoopRailEdit(context);
+		updateEditorActivity("inspect");
+		setStatus("모듈을 클릭하거나 레일만 드래그로 선택한 뒤 Delete를 누르세요 · 장비는 선택하지 마세요");
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+	}
+
+	function processLoopEditOwner() {
+		const context = processLoopRailEditRef.current;
+		const document = editorModelRef.current.document;
+		if (!context || context.document !== document) return null;
+		const owner = document.organizations.records.find((record) => record.id === context.organizationId);
+		return owner?.kind === "AISLE" && owner.declaredSemanticRole === "PROCESS_LOOP" &&
+			staticFabOrganizationParentIds(owner).length === 0 ? owner : null;
+	}
+
+	function startProcessLoopRailEdit(organizationId: number): void {
+		if (blockStaticFabExclusiveCommand() || editorMutationWaitBlockedReason()) return;
+		const document = editorModelRef.current.document;
+		const owner = document.organizations.records.find((record) => record.id === organizationId);
+		if (owner?.kind !== "AISLE" || owner.declaredSemanticRole !== "PROCESS_LOOP" || staticFabOrganizationParentIds(owner).length > 0) {
+			setStatus("직접 등록한 독립 작업 루프에서 레일 편집을 열어 주세요");
+			return;
+		}
+		if (!closeOrganizationLibrary(false)) return;
+		chooseTool("build");
+		chooseBuildMode("route");
+		clearAreaSelection();
+		clearRailSelection();
+		clearPortEquipmentSelection();
+		setCompactInspectorExpanded(false);
+		updateEditorActivity("build");
+		const context = Object.freeze({ document, organizationId });
+		setProcessLoopRailEditFeedback(null);
+		processLoopRailEditRef.current = context;
+		setProcessLoopRailEdit(context);
+		setStatus(`${owner.name} 레일 편집 · 그리기·지우기·Delete · Esc로 종료`);
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+	}
+
+	async function registerSelectedProcessLoop(): Promise<void> {
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const document = editorModelRef.current.document;
+		const selection = staticFabSelectionRef.current;
+		const name = processLoopNameDraftRef.current.trim();
+		const request = Object.freeze({ document });
+		processLoopOperationRef.current = request;
+		setProcessLoopOperation("루프 등록 검사 중 · Esc로 취소");
+		setStatus("선택한 레일의 폐합과 소속을 검사합니다 · Esc로 취소");
+		try {
+			const result = await getProcessLoopAuthoringController().register(name, () =>
+				processLoopOperationRef.current === request && processLoopNameDraftRef.current.trim() === name &&
+				staticFabSelectionRef.current === selection,
+			);
+			if (processLoopOperationRef.current !== request || editorModelRef.current.document !== document) return;
+			if (!result.commit.committed || result.organizationId === null) throw new Error(document.getLastCommandError() ?? "루프를 등록하지 못했습니다 · 다시 시도하세요");
+			processLoopOperationRef.current = null;
+			setProcessLoopOperation(null);
+			const organizationId = result.organizationId;
+			syncModelUi(`${name} 작업 루프를 등록했습니다 · 이제 장비를 배치하거나 레일 편집을 열 수 있습니다`);
+			restoreStaticFabOrganizationContext(organizationId);
+			setOrganizationDetailTab("overview");
+			setOrganizationFilter("AISLE");
+			if (result.commit.publicationError) setStatus(`${name} 등록 완료 · 동기화 오류: ${result.commit.publicationError}`);
+		} catch (error) {
+			if (processLoopOperationRef.current === request && editorModelRef.current.document === document)
+				setStatus(error instanceof Error ? error.message : "루프를 등록하지 못했습니다 · 선택한 레일은 유지됩니다");
+		} finally {
+			if (processLoopOperationRef.current === request) {
+				processLoopOperationRef.current = null;
+				setProcessLoopOperation(null);
+			}
+		}
+	}
+
+	async function runProcessLoopRepair(
+		plan: RailDraftPlan | RailErasePlan | null,
+		selectedModules: readonly RailModuleOwnership[] | null = null,
+		onSuccess?: () => void,
+	): Promise<void> {
+		const context = processLoopRailEditRef.current;
+		const owner = processLoopEditOwner();
+		if (!context || !owner) { setStatus("작업 루프 레일 편집을 다시 열어 주세요"); return; }
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		if (plan && plan.kind !== "erase" && (plan.kind !== "build" ||
+			isRailModuleStampPlan(plan) || isRailAreaStampPlan(plan) || isRailTemplatePlan(plan) ||
+			isAdvancedSwitchPlan(plan) || isRailNetworkLinkPlan(plan) || isStaticFabMutationPlan(plan))) {
+			setStatus("작업 루프 편집에서는 일반 레일 그리기와 지우기를 사용하세요 · 다른 배치는 편집 종료 후 사용하세요");
+			return;
+		}
+		if (plan) {
+			if (!plan.valid) { setStatus(plan.reason); return; }
+			if (plan.kind !== "erase") {
+				const evaluation = evaluateBuildPlan(plan);
+				if (!evaluation.valid) { setStatus(evaluation.reason); return; }
+			}
+		}
+		const document = context.document;
+		const selectionIntent = Object.freeze({ area: areaSelectionRef.current, selection: staticFabSelectionRef.current, module: selectedModuleRef.current, port: selectedPortEquipmentRef.current, keyboard: guidedRailKeyboardSessionRef.current });
+		const request = Object.freeze({ document });
+		processLoopOperationRef.current = request;
+		setProcessLoopOperation("루프 레일 편집 준비 중 · Esc로 취소");
+		setProcessLoopRailEditFeedback(null);
+		previewRef.current = null;
+		clearDraftPreviewTelemetry(canvasRef.current);
+		if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
+		setStatus(`${owner.name} 레일 편집을 준비합니다 · Esc로 취소`);
+		try {
+			const controller = getProcessLoopAuthoringController();
+			const isCurrent = () => processLoopOperationRef.current === request && processLoopRailEditRef.current === context &&
+				areaSelectionRef.current === selectionIntent.area && staticFabSelectionRef.current === selectionIntent.selection &&
+				selectedModuleRef.current === selectionIntent.module && selectedPortEquipmentRef.current === selectionIntent.port && guidedRailKeyboardSessionRef.current === selectionIntent.keyboard;
+			const result = selectedModules
+				? await controller.repairSelection(owner.id, selectedModules, isCurrent)
+				: plan ? await controller.repair(owner.id, plan.mutations, plan.switchMutations ?? [], isCurrent) : null;
+			if (processLoopOperationRef.current !== request || editorModelRef.current.document !== document) return;
+			if (!result?.commit.committed) throw new Error(document.getLastCommandError() ?? "루프 레일 편집을 적용하지 못했습니다");
+			processLoopOperationRef.current = null;
+			setProcessLoopOperation(null);
+			clearRailSelection();
+			setBuildAnchor(null);
+			const keyboardRestart = onSuccess && document.map.size >= ASYNC_MODEL_DERIVATION_CELL_THRESHOLD ? " · 동기화 후 키보드 레일 건설을 다시 시작하세요" : "";
+			syncModelUi(`${owner.name} 레일을 편집했습니다 · 루프 ID와 장비 소속은 유지됩니다 · Undo로 되돌릴 수 있습니다${keyboardRestart}`);
+			onSuccess?.();
+			if (result.commit.publicationError) setStatus(`레일 편집 완료 · 동기화 오류: ${result.commit.publicationError}${keyboardRestart}`);
+		} catch (error) {
+			if (processLoopOperationRef.current === request && editorModelRef.current.document === document) {
+				restoreProcessLoopKeyboardPreview();
+				const reason = error instanceof Error ? error.message : "루프 레일 편집을 적용하지 못했습니다";
+				const feedback = `${reason.startsWith("Port equipment layout is invalid") ? "장비 포트 경로에 필요한 레일입니다 · 다른 구간을 선택하세요" : reason === "New repair rail must touch the existing Loop footprint." ? "새 레일은 이 작업 루프와 이어져야 합니다 · 시작점을 기존 루프에 맞추세요" : reason} · 기존 레일과 장비는 유지됩니다`;
+				setProcessLoopRailEditFeedback(feedback);
+				setStatus(feedback);
+			}
+		} finally {
+			if (processLoopOperationRef.current === request) {
+				processLoopOperationRef.current = null;
+				setProcessLoopOperation(null);
+			}
+		}
+	}
+
+	async function replayProcessLoopHistory(direction: "undo" | "redo"): Promise<boolean> {
+		if (blockStaticFabExclusiveCommand()) return false;
+		const document = editorModelRef.current.document;
+		const request = Object.freeze({ document });
+		processLoopOperationRef.current = request;
+		setProcessLoopOperation(direction === "undo" ? "루프 실행 취소 준비 중 · Esc로 취소" : "루프 다시 실행 준비 중 · Esc로 취소");
+		setProcessLoopRailEditFeedback(null);
+		try {
+			const result = await getProcessLoopAuthoringController().replay(direction, () => processLoopOperationRef.current === request);
+			return processLoopOperationRef.current === request && editorModelRef.current.document === document && result.commit.committed;
+		} catch (error) {
+			if (processLoopOperationRef.current === request && editorModelRef.current.document === document)
+				setStatus(error instanceof Error ? error.message : "루프 이력 처리를 완료하지 못했습니다");
+			return false;
+		} finally {
+			if (processLoopOperationRef.current === request) {
+				processLoopOperationRef.current = null;
+				setProcessLoopOperation(null);
+			}
+		}
+	}
+
 	const saveStaticFabSelectionAsOrganization = (): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		if (modelSyncPendingRef.current) return;
 		const selection = staticFabSelectionRef.current;
 		if (!selection || selection.rail !== areaSelectionRef.current) {
@@ -23871,6 +24168,9 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus(reason);
 			return false;
 		}
+		// Explicit organization selection owns the Inspector. Retaining a previously inspected
+		// Port would put its sheet over the newly selected organization's rail sheet on close.
+		clearPortEquipmentSelection();
 		if (selectedOrganizationId === record.id) {
 			if (
 				!preserveMultiSelection &&
@@ -28648,7 +28948,7 @@ export default function TileFabApp(): React.ReactElement {
 			: null);
 	const selectedEquipmentNoProcessLoopHint =
 		equipmentProcessLoopChoices.length === 0
-			? "FAB 구조에서 Loop 생성"
+			? "검사에서 폐쇄 레일 등록"
 			: selectedEquipmentGroup && selectedEquipmentGroup.portIds.length > 1
 				? "모든 Port를 같은 Loop로 이동"
 				: "Port를 Loop 직접 레일로 이동";
@@ -29513,7 +29813,8 @@ export default function TileFabApp(): React.ReactElement {
 		? guidedSelectionCommandHintId
 			? Object.freeze(actionHints.filter((hint) => hint.id === guidedSelectionCommandHintId))
 			: Object.freeze([])
-		: ordinaryBuildSurfaceHandoff || ordinaryPortInstructionOwner
+		: ordinaryBuildSurfaceHandoff || ordinaryPortInstructionOwner ||
+			(processLoopRailEdit?.document === railDocument && (tool === "inspect" || tool === "erase") && !ordinaryRailKeyboardHints)
 			? Object.freeze([])
 			: (ordinaryRailKeyboardHints ??
 				(completedModuleHandoff
@@ -31453,8 +31754,8 @@ export default function TileFabApp(): React.ReactElement {
 		areaSelection || selectedPortDetails || (selected && selectedRail),
 	);
 	useLayoutEffect(() => {
-		if (!contextualSelectionPresent) setCompactInspectorExpanded(true);
-	}, [contextualSelectionPresent]);
+		if (!contextualSelectionPresent && processLoopRailEdit?.document !== railDocument) setCompactInspectorExpanded(true);
+	}, [contextualSelectionPresent, processLoopRailEdit, railDocument]);
 	useLayoutEffect(() => {
 		if (!compactInspectorSheetActive && !compactInspectorExpanded) {
 			setCompactInspectorExpanded(true);
@@ -32124,6 +32425,8 @@ export default function TileFabApp(): React.ReactElement {
 			data-ordinary-completed-module-cheap-eligible={ordinaryCompletedModuleCheapEligible}
 			data-ordinary-completed-module-handoff={completedModuleHandoff !== null}
 			data-ordinary-connected-copy-twin-bay-handoff={connectedCopyTwinBayHandoff !== null}
+			data-process-loop-operation={processLoopOperation ?? ""}
+			data-process-loop-edit-owner={processLoopRailEdit?.document === railDocument ? processLoopRailEdit.organizationId : ""}
 			data-area-selection-modules={areaSelection?.ownerships.length ?? 0}
 			data-area-selection-cells={areaSelectionCellCount}
 			data-area-selection-equipment-groups={staticFabEquipmentGroupCount}
@@ -33220,7 +33523,9 @@ export default function TileFabApp(): React.ReactElement {
 					data-selected-module-id={selectedOwnership?.key ?? ""}
 					data-selected-module-source={selectedOwnership?.kind ?? ""}
 					data-selected-module-cells={selectedOwnership?.footprintCells.length ?? 0}
-					data-area-selection-modules={areaSelection?.ownerships.length ?? 0}
+					data-process-loop-operation={processLoopOperation ?? ""}
+			data-process-loop-edit-owner={processLoopRailEdit?.document === railDocument ? processLoopRailEdit.organizationId : ""}
+			data-area-selection-modules={areaSelection?.ownerships.length ?? 0}
 					data-area-selection-cells={areaSelectionCellCount}
 					data-area-selection-provenance={areaSelectionProvenance ?? ""}
 					data-static-fab-hierarchy-requested={staticFabHierarchyRequested}
@@ -37640,6 +37945,8 @@ export default function TileFabApp(): React.ReactElement {
 					</>
 				) : null}
 
+				<StandaloneProcessLoopAuthoringBar ownerName={processLoopRailEdit?.document === railDocument ? activeOrganizations.records.find((record) => record.id === processLoopRailEdit.organizationId)?.name ?? null : null}
+					pendingLabel={processLoopOperation} feedback={processLoopRailEditFeedback} onSelectRail={selectProcessLoopRailForRepair} onExit={exitProcessLoopRailEdit} onCancel={() => cancelProcessLoopOperation()} />
 				{staticFabMutationHistory ? (
 					<section className="tilefab-arrangement-historybar" data-testid="static-fab-arrangement-history" aria-label={`${staticFabHistoryLabel} 이력 처리`} aria-busy="true">
 						<p className="tilefab-arrangement-history-copy" role="status">{staticFabHistoryLabel} {staticFabMutationHistory === "undo" ? "실행 취소" : "다시 실행"} 준비 중</p>
@@ -39560,6 +39867,9 @@ export default function TileFabApp(): React.ReactElement {
 											</div>
 										</dl>
 										<div className="tilefab-organization-editor-actions">
+											{selectedStaticFabOrganization.kind === "AISLE" && selectedStaticFabOrganization.declaredSemanticRole === "PROCESS_LOOP" && staticFabOrganizationParentIds(selectedStaticFabOrganization).length === 0 ? (
+												<button type="button" data-testid="edit-process-loop-rail" disabled={modelSyncPending || staticFabExclusiveCommandActive} onClick={() => startProcessLoopRailEdit(selectedStaticFabOrganization.id)}>작업 루프 레일 편집</button>
+											) : null}
 											<button
 												type="button"
 												onClick={() => showSelectedStaticFabOrganizationOnMap("DIRECT")}
@@ -39817,6 +40127,13 @@ export default function TileFabApp(): React.ReactElement {
 								</button>
 							</div>
 						</header>
+						{areaSelectionProvenance === "ad-hoc" && staticFabEquipmentGroupCount === 0 && compactInspectorSheetActive && !compactInspectorExpanded ? (
+							<button type="button" className="tilefab-selection-loop-entry" data-testid="start-process-loop-registration"
+								onClick={() => { setCompactInspectorExpanded(true); requestAnimationFrame(() => {
+									const input = document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
+									input?.scrollIntoView({ block: "nearest" }); input?.focus({ preventScroll: true });
+								}); }}>선택한 레일을 작업 루프로 등록</button>
+						) : null}
 						<div
 							id="rail-area-selection-inspector-content"
 							className="tilefab-contextual-inspector-content"
@@ -39854,6 +40171,13 @@ export default function TileFabApp(): React.ReactElement {
 									? ` · 장비 ${staticFabEquipmentGroupCount}개`
 									: ""} 복제
 							</button>
+						) : null}
+						{areaSelectionProvenance === "ad-hoc" ? (
+							<StandaloneProcessLoopRegistrationForm name={processLoopNameDraft} busy={processLoopOperation !== null}
+								selectionAvailable={staticFabSelection !== null && staticFabSelection.rail === areaSelection && staticFabEquipmentGroupCount === 0}
+								selectionUnavailableReason={staticFabEquipmentGroupCount > 0 ? `장비가 함께 선택되어 등록할 수 없습니다. ${compactInspectorSheetActive ? "패널을 접은 뒤 " : ""}장비를 Ctrl/⌘+클릭해 선택에서 제외하세요.` : undefined}
+								onNameChange={(name) => { processLoopNameDraftRef.current = name; setProcessLoopNameDraft(name); }}
+								onRegister={() => { void registerSelectedProcessLoop(); }} />
 						) : null}
 						<dl>
 							<div>
@@ -40470,12 +40794,12 @@ export default function TileFabApp(): React.ReactElement {
 									className="tilefab-equipment-process-loop-primary-owned tilefab-equipment-process-loop-primary-unavailable"
 									data-testid="equipment-process-loop-unavailable"
 									role="status"
-									aria-label={`연결할 Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
+									aria-label={`Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
 									title={selectedEquipmentUnownedProcessLoopMembership?.reason ?? undefined}
 									tabIndex={-1}
 								>
 									<AlertTriangle className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
-									<span className="tilefab-equipment-process-loop-primary-copy"><strong className="tilefab-equipment-process-loop-primary-title">연결할 Loop 없음</strong><small className="tilefab-equipment-process-loop-primary-name">{selectedEquipmentNoProcessLoopHint}</small></span>
+									<span className="tilefab-equipment-process-loop-primary-copy"><strong className="tilefab-equipment-process-loop-primary-title">Loop 없음</strong><small className="tilefab-equipment-process-loop-primary-name">{selectedEquipmentNoProcessLoopHint}</small></span>
 								</div>
 							</div>
 						) : null}
@@ -43735,6 +44059,13 @@ function fitMapInsets(
 			} else {
 				right = Math.max(right, canvasRect.right - rect.left + 12);
 			}
+		}
+	}
+	const processLoopBar = workspace.querySelector<HTMLElement>(".tilefab-process-loop-contextbar");
+	if (processLoopBar && processLoopBar.offsetParent !== null) {
+		const rect = processLoopBar.getBoundingClientRect();
+		if (rect.right > canvasRect.left && rect.left < canvasRect.right) {
+			top = Math.max(top, rect.bottom - canvasRect.top + 12);
 		}
 	}
 	for (const selector of [

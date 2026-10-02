@@ -53,16 +53,18 @@ export function EquipmentAuthoringWorkspace({
 				</div>
 				{exit}
 			</header>
-			<div className="tilefab-equipment-selection">{selection}</div>
-			{settings ? <div className="tilefab-equipment-settings">{settings}</div> : null}
+			<div className="tilefab-equipment-scroll-content">
+				<div className="tilefab-equipment-selection">{selection}</div>
+				{settings ? <div className="tilefab-equipment-settings">{settings}</div> : null}
+				{continuation ? <div className="tilefab-equipment-next">{continuation}</div> : null}
+				{optionalSettings ? (
+					<details className="tilefab-equipment-options">
+						<summary>추가 설정</summary>
+						{optionalSettings}
+					</details>
+				) : null}
+			</div>
 			{actions ? <div className="tilefab-equipment-actions">{actions}</div> : null}
-			{continuation ? <div className="tilefab-equipment-next">{continuation}</div> : null}
-			{optionalSettings ? (
-				<details className="tilefab-equipment-options">
-					<summary>추가 설정</summary>
-					{optionalSettings}
-				</details>
-			) : null}
 		</section>
 	);
 }

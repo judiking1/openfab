@@ -16,6 +16,7 @@ import { planEqRowPlacement } from "../compile/PortPlacementPlanner";
 import { PortSlotAvailabilityIndex } from "../compile/PortSlotCompiler";
 import { compilePortSlotPreparedArtifactCatalog } from "../compile/PortSlotPreparedArtifacts";
 import { compileStaticFabHierarchyIndex } from "../compile/StaticFabHierarchy";
+import { evaluateStaticFabProcessLoopTopology } from "../compile/StaticFabProcessLoopTopology";
 import {
 	buildSyntheticFabStarter,
 	defaultSyntheticFabStarterRequest,
@@ -33,7 +34,7 @@ import {
 	createPortEquipmentMutationPlanWithImmutableGraphCertificate,
 } from "../core/PortEquipmentPlan";
 import type { PortRecord } from "../core/PortRecord";
-import { planRailConstruction } from "../core/paint";
+import { planRailConstruction, planRailErase } from "../core/paint";
 import {
 	createRailAreaSelection,
 	createRailAreaSelectionFromOwnerships,
@@ -61,11 +62,15 @@ import {
 	planRenameStaticFabOrganization,
 	planUpdateStaticFabOrganizationDetails,
 } from "../core/StaticFabOrganizationPlan";
+import { createStaticFabProcessLoopRailCandidatePreparation } from "../core/StaticFabProcessLoopRailCandidate";
+import { prepareStaticFabProcessLoopRegistrationCooperatively } from "../core/StaticFabProcessLoopRegistration";
+import { prepareStaticFabProcessLoopRepairCooperatively } from "../core/StaticFabProcessLoopRepair";
 import { createStaticFabSelection } from "../core/StaticFabSelection";
 import { prepareBlueprintPlacement } from "./BlueprintPlacementRuntime";
 import {
 	captureRailMirrorSnapshot,
 	checksumRailMap,
+	checksumRailPatchResultCooperatively,
 	consumeRailMirrorSnapshotCaptureAuthority,
 	RailChecksumAccumulator,
 	type RailMirrorSnapshot,
@@ -102,6 +107,340 @@ import {
 import { STATIC_FAB_ORGANIZATION_PATCH_OPERATIONS } from "./StaticFabOrganizationSoA";
 
 describe("RailWorkerBridge", () => {
+	it.each([
+		"roundtrip",
+		"wrong-checksum",
+		"replacement",
+		"disposed-in-guard",
+		"unprepared",
+	] as const)("requires an exact independently checked repair packet: %s", async (scenario) => {
+		const base = closedLoopDocument(30, 20),
+			ownership = buildRailModuleOwnershipIndex(base.map);
+		const edges = new Map(
+			ownership.modules
+				.flatMap((module) => module.eraseEdges)
+				.map((edge) => [`${edge.from.x},${edge.from.y}>${edge.to.x},${edge.to.y}`, edge]),
+		);
+		const organizations = copyStaticFabOrganizationState({
+			nextOrganizationId: 2,
+			records: [
+				{
+					id: 1,
+					kind: "AISLE",
+					name: "Manual Loop",
+					declaredSemanticRole: "PROCESS_LOOP",
+					parentOrganizationIds: [],
+					membership: {
+						railEdges: [...edges.values()].sort(compareDirectedRailEdges),
+						advancedSwitchIds: [],
+						equipmentGroupIds: [],
+					},
+				},
+			],
+		});
+		const document = RailDocument.fromLoadedMap(base.map, 0, base.portEquipment, organizations);
+		const worker = new InProcessRailWorker(),
+			bridge = new RailWorkerBridge(
+				document,
+				() => {},
+				() => worker,
+			);
+		let disposeInGuard = false;
+		try {
+			await bridge.waitUntilReady(readyExpectation(document));
+			const before = {
+				map: document.map,
+				organizations: document.organizations,
+				checksum: bridge.getState().checksum,
+				sequence: document.getPatchSequence(),
+				ledger: document.captureRailMirrorHistoryLedger(),
+				messages: worker.messageCount,
+				syncs: worker.syncCount,
+			};
+			const erase = planRailErase(document.map, [{ x: 18, y: 20 }]);
+			const apply = await prepareStaticFabProcessLoopRepairCooperatively(
+				{
+					document,
+					ownership,
+					organizationId: 1,
+					changes: Object.freeze(erase.mutations.map((change) => Object.freeze({ ...change }))),
+					sourceChecksum: before.checksum,
+					mirrorEpoch: bridge.getState().epoch,
+				},
+				{
+					checkpoint: async () => {},
+					checksumTransition: checksumRailPatchResultCooperatively,
+					isCurrent: () => {
+						if (disposeInGuard) bridge.dispose();
+						return true;
+					},
+				},
+			).promise;
+			const options = () => ({
+				checkpoint: async () => {},
+				now: () => 0,
+				checkCancelled: () => {},
+				sourceChecksum: bridge.getState().checksum,
+				mirrorEpoch: bridge.getState().epoch,
+				checksumTransition: checksumRailPatchResultCooperatively,
+				preparePatch: async (
+					event: Parameters<RailWorkerBridge["prepareProcessLoopRepairPatchCooperatively"]>[0],
+					check: () => Promise<void>,
+					digest: string,
+				) => {
+					const wrong = digest.replace(/.$/, digest.endsWith("0") ? "1" : "0");
+					if (scenario === "unprepared") return { isCurrent: () => true };
+					if (scenario === "wrong-checksum")
+						return bridge.prepareProcessLoopRepairPatchCooperatively(event, wrong, check, 8);
+					const lease = await bridge.prepareProcessLoopRepairPatchCooperatively(
+						event,
+						digest,
+						check,
+						8,
+					);
+					if (scenario === "replacement") {
+						await expect(
+							bridge.prepareProcessLoopRepairPatchCooperatively(event, wrong, check, 8),
+						).rejects.toThrow(/checksum/);
+						expect(lease.isCurrent()).toBe(false);
+					}
+					if (scenario === "disposed-in-guard") disposeInGuard = true;
+					return lease;
+				},
+			});
+			if (scenario === "wrong-checksum")
+				await expect(
+					document.commitStaticFabProcessLoopRepairCooperatively(apply, options()),
+				).rejects.toThrow(/checksum/);
+			else {
+				const result = await document.commitStaticFabProcessLoopRepairCooperatively(
+					apply,
+					options(),
+				);
+				expect(result.committed).toBe(scenario === "roundtrip" || scenario === "unprepared");
+			}
+			if (scenario === "roundtrip") {
+				await bridge.waitUntilReady(readyExpectation(document));
+				expect(worker.lastOrganizationOperationCodes).toEqual([
+					STATIC_FAB_ORGANIZATION_PATCH_OPERATIONS.FULL,
+				]);
+				for (const direction of ["undo", "redo"] as const) {
+					expect(
+						(
+							await document.replayStaticFabProcessLoopRepairCooperatively(
+								direction,
+								buildRailModuleOwnershipIndex(document.map),
+								options(),
+							)
+						).committed,
+					).toBe(true);
+					await bridge.waitUntilReady(readyExpectation(document));
+					expect(worker.mirror.state.checksum).toBe(bridge.getState().checksum);
+				}
+				expect(worker.syncCount).toBe(before.syncs);
+				expect(worker.messageCount - before.messages).toBe(3);
+				expect(bridge.getState().simulationReady).toBe(false);
+			} else if (scenario === "unprepared") {
+				expect(bridge.getState()).toMatchObject({
+					status: "error",
+					message: "Loop rail repair publication requires its exact prepared Worker packet.",
+				});
+				expect(worker.messageCount).toBe(before.messages);
+				expect(worker.mirror.state.checksum).toBe(before.checksum);
+			} else {
+				expect(document.map).toBe(before.map);
+				expect(document.organizations).toBe(before.organizations);
+				expect(document.getPatchSequence()).toBe(before.sequence);
+				expect(document.captureRailMirrorHistoryLedger()).toEqual(before.ledger);
+				expect(worker.messageCount).toBe(before.messages);
+			}
+		} finally {
+			bridge.dispose();
+		}
+	});
+	it.each([
+		"roundtrip",
+		"wrong-checksum",
+		"revoked-replacement",
+		"disposed",
+		"disposed-in-final-source-guard",
+	] as const)("binds the org-only Loop registration packet and lease: %s", async (scenario) => {
+		const document = closedLoopDocument(30, 20),
+			worker = new InProcessRailWorker();
+		const bridge = new RailWorkerBridge(
+			document,
+			() => {},
+			() => worker,
+		);
+		let disposeInSourceGuard = false;
+		try {
+			await bridge.waitUntilReady(readyExpectation(document));
+			const before = {
+				map: document.map,
+				equipment: document.portEquipment,
+				organizations: document.organizations,
+				relationships: document.relationships,
+				operations: document.operationalConfiguration,
+				sequence: document.getPatchSequence(),
+				history: document.captureRailMirrorHistoryLedger(),
+				messages: worker.messageCount,
+				syncs: worker.syncCount,
+			};
+			const ownership = buildRailModuleOwnershipIndex(document.map),
+				rail = createRailAreaSelectionFromOwnerships(ownership, ownership.modules);
+			const source = Object.freeze({
+				map: document.map,
+				ownership,
+				organizations: document.organizations,
+				patchSequence: before.sequence,
+				selection: Object.freeze({
+					baseRevision: document.map.getRevision(),
+					basePatchSequence: before.sequence,
+					rail,
+					equipmentGroups: Object.freeze([]),
+				}),
+			});
+			const candidateTask = createStaticFabProcessLoopRailCandidatePreparation(source, () => true);
+			while (!candidateTask.done) candidateTask.step(128);
+			const candidate = candidateTask.finish();
+			if (!candidate.valid) throw new Error(candidate.error.code);
+			const sourceChecksum = bridge.getState().checksum;
+			const apply = await prepareStaticFabProcessLoopRegistrationCooperatively(
+				{
+					document,
+					source,
+					candidate: candidate.candidate,
+					name: "Independent Loop",
+					sourceChecksum,
+					mirrorEpoch: bridge.getState().epoch,
+				},
+				{
+					checkpoint: async () => {},
+					isCurrent: () => {
+						if (disposeInSourceGuard) bridge.dispose();
+						return true;
+					},
+					cancelTopology: () => {},
+					checksumTransition: checksumRailPatchResultCooperatively,
+					validateTopology: async (request) => ({
+						request,
+						candidateFingerprint: "12345678:abcdef01",
+						result: evaluateStaticFabProcessLoopTopology(
+							request.source.map,
+							request.candidate.topologyMembership,
+						),
+					}),
+				},
+			).promise;
+			const commitOptions = (expectedScenario = "roundtrip") => ({
+				checkpoint: async () => {},
+				now: () => 0,
+				checkCancelled: () => {},
+				sourceChecksum: bridge.getState().checksum,
+				checksumTransition: checksumRailPatchResultCooperatively,
+				preparePatch: async (
+					event: Parameters<RailWorkerBridge["prepareStaticFabMutationPatchCooperatively"]>[0],
+					checkpoint: () => Promise<void>,
+					digest: string,
+				) => {
+					const wrong = digest.replace(/.$/, digest.endsWith("0") ? "1" : "0");
+					if (expectedScenario === "wrong-checksum")
+						return bridge.prepareProcessLoopRegistrationPatchCooperatively(
+							event,
+							wrong,
+							checkpoint,
+							8,
+						);
+					const lease = await bridge.prepareProcessLoopRegistrationPatchCooperatively(
+						event,
+						digest,
+						checkpoint,
+						8,
+					);
+					if (expectedScenario === "revoked-replacement") {
+						await expect(
+							bridge.prepareProcessLoopRegistrationPatchCooperatively(event, wrong, checkpoint, 8),
+						).rejects.toThrow("checksum");
+						expect(lease.isCurrent()).toBe(false);
+					} else if (expectedScenario === "disposed") bridge.dispose();
+					else if (expectedScenario === "disposed-in-final-source-guard")
+						disposeInSourceGuard = true;
+					return lease;
+				},
+			});
+			if (scenario === "wrong-checksum")
+				await expect(
+					document.commitStaticFabProcessLoopRegistrationCooperatively(
+						apply,
+						commitOptions(scenario),
+					),
+				).rejects.toThrow("checksum");
+			else {
+				const committed = await document.commitStaticFabProcessLoopRegistrationCooperatively(
+					apply,
+					commitOptions(scenario),
+				);
+				expect(committed.committed).toBe(scenario === "roundtrip");
+			}
+			if (scenario === "roundtrip") {
+				await bridge.waitUntilReady(readyExpectation(document));
+				const loop = document.organizations.records[0],
+					registered = bridge.getState().checksum;
+				expect(loop).toMatchObject({ id: 1, declaredSemanticRole: "PROCESS_LOOP" });
+				expect(worker.mirror.state.checksum).toBe(registered);
+				const registeredSequence = document.getPatchSequence();
+				const registeredHistory = document.captureRailMirrorHistoryLedger();
+				await expect(
+					document.replayStaticFabProcessLoopRegistrationCooperatively("undo", ownership, {
+						...commitOptions(),
+						sourceChecksum: registered.replace(/.$/, registered.endsWith("0") ? "1" : "0"),
+					}),
+				).rejects.toThrow("checksum");
+				expect(document.organizations.records[0]).toBe(loop);
+				expect(document.getPatchSequence()).toBe(registeredSequence);
+				expect(document.captureRailMirrorHistoryLedger()).toEqual(registeredHistory);
+				expect(worker.messageCount - before.messages).toBe(1);
+				expect(
+					(
+						await document.replayStaticFabProcessLoopRegistrationCooperatively(
+							"undo",
+							ownership,
+							commitOptions(),
+						)
+					).committed,
+				).toBe(true);
+				await bridge.waitUntilReady(readyExpectation(document));
+				expect(document.organizations).toMatchObject({ nextOrganizationId: 2, records: [] });
+				expect(
+					(
+						await document.replayStaticFabProcessLoopRegistrationCooperatively(
+							"redo",
+							ownership,
+							commitOptions(),
+						)
+					).committed,
+				).toBe(true);
+				await bridge.waitUntilReady(readyExpectation(document));
+				expect(document.organizations.records[0]).toBe(loop);
+				expect(bridge.getState().checksum).toBe(registered);
+				expect(worker.syncCount).toBe(before.syncs);
+				expect(worker.messageCount - before.messages).toBe(3);
+				expect(bridge.getState().simulationReady).toBe(false);
+			} else {
+				expect(document.organizations).toBe(before.organizations);
+				expect(document.getPatchSequence()).toBe(before.sequence);
+				expect(document.captureRailMirrorHistoryLedger()).toEqual(before.history);
+				expect(worker.messageCount).toBe(before.messages);
+			}
+			expect(document.map).toBe(before.map);
+			expect(document.portEquipment).toBe(before.equipment);
+			expect(document.relationships).toBe(before.relationships);
+			expect(document.operationalConfiguration).toBe(before.operations);
+		} finally {
+			bridge.dispose();
+		}
+	});
+
 	it.each([
 		"edit",
 		"dispose",

@@ -13783,3 +13783,117 @@ button.tilefab-action-hint[data-guided-target="true"] {
 .tilefab-buildbar[data-area-stamp-modules]:not([data-area-stamp-modules="0"]) {
 	max-height: min(340px, calc(100% - 90px));
 }
+
+.tilefab-loop-registration {
+	display: grid;
+	gap: 10px;
+	margin: 12px 0;
+	padding: 12px;
+	border: 1px solid #476b68;
+	border-radius: 6px;
+	background: #142423;
+}
+.tilefab-selection-loop-entry {
+	min-height: 44px;
+	margin: 0 8px 8px;
+	padding: 8px;
+	border: 1px solid #476b68;
+	border-radius: 6px;
+	background: #142423;
+	color: #e4f5f0;
+	white-space: normal;
+}
+@media (max-width: 860px) {
+	.tilefab-inspector[data-compact-layout="bottom-sheet"][data-compact-expanded="false"]:has(
+			.tilefab-selection-loop-entry
+		) {
+		height: 120px;
+		grid-template-rows: 64px minmax(0, 1fr);
+	}
+}
+.tilefab-loop-registration h3,
+.tilefab-loop-registration p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.tilefab-loop-registration h3 {
+	color: #e4f5f0;
+	font-size: 14px;
+}
+.tilefab-loop-registration h3 small {
+	display: block;
+	margin-top: 4px;
+	color: #b2ceca;
+	font-size: 11px;
+}
+.tilefab-loop-registration p,
+.tilefab-loop-registration > small {
+	color: #bfd3d0;
+	font-size: 12px;
+	line-height: 1.5;
+}
+.tilefab-loop-registration-control {
+	box-sizing: border-box;
+	min-height: 44px;
+	width: 100%;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+.tilefab-loop-registration-input {
+	padding: 8px 10px;
+	border: 1px solid #476b68;
+	border-radius: 4px;
+	background: #102522;
+	color: #e4f5f0;
+	font: inherit;
+}
+.tilefab-loop-registration-input:focus-visible {
+	outline: 2px solid #99e4e2;
+	outline-offset: 2px;
+}
+.tilefab-process-loop-contextbar {
+	position: absolute;
+	z-index: 5;
+	top: 10px;
+	left: 192px;
+	width: min(620px, calc(100% - 202px));
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px;
+	border: 1px solid #476b68;
+	border-radius: 6px;
+	background: rgb(17 31 30 / 97%);
+	color: #e4f5f0;
+}
+.tilefab-workspace:has(.tilefab-tools[data-tool-density="compact"])
+	.tilefab-process-loop-contextbar {
+	left: 72px;
+	width: min(620px, calc(100% - 82px));
+}
+.tilefab-process-loop-contextbar > div {
+	flex: 1;
+	min-width: 0;
+}
+.tilefab-process-loop-contextbar strong,
+.tilefab-process-loop-contextbar p {
+	overflow-wrap: anywhere;
+	font-size: 12px;
+}
+.tilefab-process-loop-contextbar p {
+	margin: 4px 0 0;
+	color: #bfd3d0;
+	line-height: 1.4;
+}
+@media (max-width: 600px) {
+	.tilefab-process-loop-contextbar {
+		flex-wrap: wrap;
+	}
+	.tilefab-process-loop-contextbar > div {
+		flex-basis: 100%;
+	}
+	.tilefab-process-loop-context-action {
+		flex: 1;
+	}
+}

@@ -142,6 +142,10 @@
 
 .tilefab-equipment-process-loop-primary-unavailable .tilefab-equipment-process-loop-primary-name {
 	color: #e4c5a6;
+	overflow: visible;
+	text-overflow: clip;
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
 
 @media (max-width: 430px) {
@@ -177,6 +181,11 @@
 		display: flex;
 		align-items: baseline;
 		gap: 5px;
+	}
+
+	.tilefab-equipment-inspector[data-primary-process-loop-availability="none"]
+		.tilefab-equipment-process-loop-primary-name {
+		white-space: nowrap;
 	}
 
 	.tilefab-equipment-inspector[data-primary-process-loop-availability="none"]

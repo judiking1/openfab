@@ -3,7 +3,9 @@ import {
 	type AdvancedSwitchRecord,
 	deriveAdvancedSwitchGeometry,
 	validateAdvancedSwitchPatch,
+	validateAdvancedSwitchPatchSteps,
 } from "./AdvancedSwitch";
+import { completeCooperativeSteps } from "./CooperativeTask";
 import { classifyRailCell } from "./RailCellClassification";
 import { isSupportedRailCoordinate, RAIL_COORDINATE_DOMAIN_REASON } from "./RailCoordinateDomain";
 import {
@@ -18,9 +20,9 @@ import {
 } from "./railShape";
 import { type Cell, cellKey, decodeRailCell, encodeRailCell, type RailCell } from "./TileMap";
 import {
-	collectAffectedTurnoutFootprints,
+	collectAffectedTurnoutFootprintSteps,
 	type TurnoutValidationIssue,
-	validateTurnoutFootprints,
+	validateTurnoutFootprintsSteps,
 } from "./turnout";
 
 export type BendPreference = "auto" | "horizontal-first" | "vertical-first";
@@ -186,11 +188,22 @@ export function planClosedRailPathComponent(
 }
 
 export function planRailErase(map: RailMapReader, cells: readonly Cell[]): RailErasePlan {
+	return completeCooperativeSteps(planRailEraseSteps(map, cells, false));
+}
+
+/** Caller owns stable map/input and cancellation between steps; this plan grants no commit authority. */
+export function* planRailEraseSteps(
+	map: RailMapReader,
+	cells: readonly Cell[],
+	cooperative = true,
+): Generator<void, RailErasePlan> {
+	const baseRevision = map.getRevision();
 	const overlay = new Map<string, RailMutation>();
 	const switchMutationsById = new Map<number, AdvancedSwitchMutation>();
 	const expandedCells = new Map<string, Cell>();
 	const ordinaryCells = new Map<string, Cell>();
 	for (const cell of cells) {
+		if (cooperative) yield;
 		const owner = map.getAdvancedSwitchOwningCell(cell.x, cell.y);
 		if (!owner) {
 			expandedCells.set(cellKey(cell.x, cell.y), cell);
@@ -200,10 +213,15 @@ export function planRailErase(map: RailMapReader, cells: readonly Cell[]): RailE
 		if (switchMutationsById.has(owner.id)) continue;
 		switchMutationsById.set(owner.id, { id: owner.id, before: owner, after: null });
 		for (const occupied of deriveAdvancedSwitchGeometry(owner).occupiedCells) {
+			if (cooperative) yield;
 			expandedCells.set(cellKey(occupied.x, occupied.y), occupied);
 		}
 	}
-	const switchMutations = [...switchMutationsById.values()];
+	const switchMutations: AdvancedSwitchMutation[] = [];
+	for (const mutation of switchMutationsById.values()) {
+		if (cooperative) yield;
+		switchMutations.push(mutation);
+	}
 	const read = (cell: Cell): number =>
 		overlay.get(cellKey(cell.x, cell.y))?.after ?? map.getEncoded(cell.x, cell.y);
 	const write = (cell: Cell, after: number): void => {
@@ -219,6 +237,7 @@ export function planRailErase(map: RailMapReader, cells: readonly Cell[]): RailE
 	for (const mutation of switchMutations) {
 		if (!mutation.before) continue;
 		for (const expected of deriveAdvancedSwitchGeometry(mutation.before).cellStates) {
+			if (cooperative) yield;
 			const actual = decodeRailCell(read(expected));
 			write(
 				expected,
@@ -231,9 +250,11 @@ export function planRailErase(map: RailMapReader, cells: readonly Cell[]): RailE
 	}
 
 	for (const cell of ordinaryCells.values()) {
+		if (cooperative) yield;
 		const state = decodeRailCell(read(cell));
 		if ((state.incoming | state.outgoing) === 0) continue;
 		for (const direction of ALL_DIRECTIONS) {
+			if (cooperative) yield;
 			const neighbor = moveCell(cell, direction);
 			const opposite = oppositeDirection(direction);
 			const neighborState = decodeRailCell(read(neighbor));
@@ -259,12 +280,26 @@ export function planRailErase(map: RailMapReader, cells: readonly Cell[]): RailE
 		write(cell, 0);
 	}
 
-	const mutations = [...overlay.values()].filter((mutation) => mutation.before !== mutation.after);
-	const topologyError = railMutationTopologyError(map, mutations, switchMutations);
+	const mutations: RailMutation[] = [];
+	for (const mutation of overlay.values()) {
+		if (cooperative) yield;
+		if (mutation.before !== mutation.after) mutations.push(mutation);
+	}
+	const selectedCells: Cell[] = [];
+	for (const cell of expandedCells.values()) {
+		if (cooperative) yield;
+		selectedCells.push(cell);
+	}
+	const topologyError = yield* railMutationTopologyErrorSteps(
+		map,
+		mutations,
+		switchMutations,
+		cooperative,
+	);
 	return {
 		kind: "erase",
-		baseRevision: map.getRevision(),
-		cells: [...expandedCells.values()],
+		baseRevision,
+		cells: selectedCells,
 		mutations,
 		switchMutations,
 		valid: (mutations.length > 0 || switchMutations.length > 0) && topologyError === null,
@@ -284,27 +319,45 @@ export function railMutationTopologyError(
 	mutations: readonly RailMutation[],
 	switchMutations: readonly AdvancedSwitchMutation[] = [],
 ): string | null {
-	const afterByCell = new Map(
-		mutations.map((mutation) => [cellKey(mutation.x, mutation.y), mutation.after]),
+	return completeCooperativeSteps(
+		railMutationTopologyErrorSteps(map, mutations, switchMutations, false),
 	);
+}
+
+/** Validate a stable candidate overlay without whole-batch copy, scan, or native sort steps. */
+export function* railMutationTopologyErrorSteps(
+	map: RailMapReader,
+	mutations: readonly RailMutation[],
+	switchMutations: readonly AdvancedSwitchMutation[] = [],
+	cooperative = true,
+): Generator<void, string | null> {
+	const afterByCell = new Map<string, number>();
+	for (const mutation of mutations) {
+		if (cooperative) yield;
+		afterByCell.set(cellKey(mutation.x, mutation.y), mutation.after);
+	}
 	const readEncoded = (x: number, y: number): number =>
 		afterByCell.get(cellKey(x, y)) ?? map.getEncoded(x, y);
 	const affected = new Map<string, Cell>();
 	for (const mutation of mutations) {
+		if (cooperative) yield;
 		const cell = { x: mutation.x, y: mutation.y };
 		affected.set(cellKey(cell.x, cell.y), cell);
 		for (const direction of ALL_DIRECTIONS) {
+			if (cooperative) yield;
 			const neighbor = moveCell(cell, direction);
 			affected.set(cellKey(neighbor.x, neighbor.y), neighbor);
 		}
 	}
 	for (const cell of affected.values()) {
+		if (cooperative) yield;
 		const encoded = readEncoded(cell.x, cell.y);
 		if (encoded !== 0 && classifyRailCell(decodeRailCell(encoded)) === "INVALID") {
 			return `철거 후 X ${cell.x} · Z ${cell.y}의 방향 토폴로지가 유효하지 않습니다`;
 		}
 		const rail = decodeRailCell(encoded);
 		for (const direction of ALL_DIRECTIONS) {
+			if (cooperative) yield;
 			const neighbor = moveCell(cell, direction);
 			const neighborRail = decodeRailCell(readEncoded(neighbor.x, neighbor.y));
 			const opposite = oppositeDirection(direction);
@@ -314,9 +367,17 @@ export function railMutationTopologyError(
 		}
 	}
 	const read = (cell: Cell): number => readEncoded(cell.x, cell.y);
-	const turnoutIssue = validateAffectedTurnouts(map, read, mutations, switchMutations)[0];
+	const turnoutIssues = yield* validateAffectedTurnoutsSteps(
+		map,
+		read,
+		mutations,
+		switchMutations,
+		cooperative,
+	);
+	const turnoutIssue = turnoutIssues[0];
 	if (turnoutIssue) return turnoutIssue.message;
-	return validateAdvancedSwitchPatch(map, mutations, switchMutations)[0]?.message ?? null;
+	const switchIssues = yield* validateAdvancedSwitchPatchSteps(map, mutations, switchMutations);
+	return switchIssues[0]?.message ?? null;
 }
 
 function evaluateRoute(
@@ -466,22 +527,49 @@ function validateAffectedTurnouts(
 	mutations: readonly RailMutation[],
 	switchMutations: readonly AdvancedSwitchMutation[] = [],
 ): TurnoutValidationIssue[] {
+	return completeCooperativeSteps(
+		validateAffectedTurnoutsSteps(map, readEncoded, mutations, switchMutations, false),
+	);
+}
+
+function* validateAffectedTurnoutsSteps(
+	map: RailMapReader,
+	readEncoded: (cell: Cell) => number,
+	mutations: readonly RailMutation[],
+	switchMutations: readonly AdvancedSwitchMutation[] = [],
+	cooperative = true,
+): Generator<void, TurnoutValidationIssue[]> {
 	if (mutations.length === 0) return [];
-	const changedCells = mutations.map(({ x, y }) => ({ x, y }));
+	const changedCells: Cell[] = [];
+	for (const { x, y } of mutations) {
+		if (cooperative) yield;
+		changedCells.push({ x, y });
+	}
 	const readRail = (x: number, y: number): RailCell => decodeRailCell(readEncoded({ x, y }));
-	const footprints = collectAffectedTurnoutFootprints(readRail, changedCells);
+	const footprints = yield* collectAffectedTurnoutFootprintSteps(
+		readRail,
+		changedCells,
+		cooperative,
+	);
 	const switches = new Map<number, AdvancedSwitchRecord>();
 	for (const footprint of footprints) {
 		for (const cell of footprint.reservedCells) {
+			if (cooperative) yield;
 			const owner = map.getAdvancedSwitchOwningCell(cell.x, cell.y);
 			if (owner) switches.set(owner.id, owner);
 		}
 	}
 	for (const mutation of switchMutations) {
+		if (cooperative) yield;
 		if (mutation.after) switches.set(mutation.id, mutation.after);
 		else switches.delete(mutation.id);
 	}
-	return validateTurnoutFootprints(readRail, footprints, [...switches.values()]);
+	const records: AdvancedSwitchRecord[] = [];
+	for (const record of switches.values()) {
+		if (cooperative) yield;
+		records.push(record);
+	}
+	return yield* validateTurnoutFootprintsSteps(readRail, footprints, records, cooperative);
 }
 
 function routeScore(map: RailMapReader, plan: RailConstructionPlan): number {

@@ -94,6 +94,7 @@ const RAIL_HISTORY_ORIGIN_KINDS = Object.freeze({
 	"edit-static-fab-bay-flow": true,
 	"place-static-fab-organization-bundle": true,
 	"erase-static-fab-selection": true,
+	"repair-static-fab-process-loop": true,
 	"place-ohb": true,
 	"place-eq": true,
 	"place-stk": true,

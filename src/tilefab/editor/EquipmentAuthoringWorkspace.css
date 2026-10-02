@@ -59,6 +59,13 @@
 	min-width: 0;
 }
 
+.tilefab-equipment-scroll-content {
+	display: grid;
+	gap: 10px;
+	min-width: 0;
+	min-height: 0;
+}
+
 .tilefab-equipment-process-loop-target {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) minmax(140px, 1.4fr) 86px;
@@ -215,17 +222,27 @@
 }
 
 @media (max-width: 520px) and (max-height: 780px) {
-	.tilefab-equipment-workspace[data-port-type="STK"] {
-		/* Every short Stocker draft needs its completion action in view, including all-slot drafts. */
-		scroll-padding-bottom: 120px;
+	.tilefab-buildbar.tilefab-port-buildbar.tilefab-equipment-workspace[data-port-type="STK"] {
+		/* Reserve completion controls outside the scroll area so they cannot cover draft details. */
+		grid-template-rows: auto minmax(0, 1fr) auto;
+		align-items: stretch;
+		gap: 8px;
+		height: min(360px, calc(100% - 160px));
+		overflow: hidden;
+	}
+	.tilefab-equipment-workspace[data-port-type="STK"] .tilefab-equipment-scroll-content {
+		gap: 4px;
+		overflow: auto;
+		overscroll-behavior: contain;
+		scrollbar-width: thin;
+		scroll-padding-block: 6px;
+	}
+	.tilefab-equipment-workspace[data-port-type="STK"] .tilefab-equipment-selection {
+		gap: 4px;
 	}
 	.tilefab-equipment-workspace[data-port-type="STK"] .tilefab-equipment-actions {
-		/* Keep the draft's completion action in view while Loop feedback and settings scroll. */
-		position: sticky;
-		z-index: 1;
-		bottom: 0;
+		position: static;
 		margin: 0 -8px -8px;
-		/* Keep the action row visible without stealing height from the Port target gap. */
 		padding: 2px 8px;
 		border-top: 1px solid #354143;
 		background: rgb(18 24 25 / 98%);

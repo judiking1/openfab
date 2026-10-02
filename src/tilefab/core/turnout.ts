@@ -190,11 +190,21 @@ export function collectAffectedTurnoutFootprints(
 	read: RailReader,
 	changedCells: readonly Cell[],
 ): TurnoutFootprint[] {
+	return completeCooperativeSteps(collectAffectedTurnoutFootprintSteps(read, changedCells, false));
+}
+
+/** Keep nearby discovery and canonical ordering bounded for caller-owned repair preparation. */
+export function* collectAffectedTurnoutFootprintSteps(
+	read: RailReader,
+	changedCells: readonly Cell[],
+	cooperative = true,
+): Generator<void, TurnoutFootprint[]> {
 	const anchors = new Map<string, TurnoutFootprint>();
 	const visited = new Set<string>();
 	for (const changed of changedCells) {
 		for (let dy = -2; dy <= 2; dy++) {
 			for (let dx = -2; dx <= 2; dx++) {
+				if (cooperative) yield;
 				const cell = { x: changed.x + dx, y: changed.y + dy };
 				const key = cellKey(cell.x, cell.y);
 				if (visited.has(key)) continue;
@@ -204,7 +214,13 @@ export function collectAffectedTurnoutFootprints(
 			}
 		}
 	}
-	return [...anchors.values()].sort(compareFootprints);
+	const footprints: TurnoutFootprint[] = [];
+	for (const footprint of anchors.values()) {
+		if (cooperative) yield;
+		footprints.push(footprint);
+	}
+	yield* (cooperative ? stableSortSteps : synchronousSortSteps)(footprints, compareFootprints);
+	return footprints;
 }
 
 export function validateTurnoutFootprints(
@@ -212,9 +228,23 @@ export function validateTurnoutFootprints(
 	footprints: readonly TurnoutFootprint[],
 	advancedSwitches: readonly AdvancedSwitchRecord[] = [],
 ): TurnoutValidationIssue[] {
+	return completeCooperativeSteps(
+		validateTurnoutFootprintsSteps(read, footprints, advancedSwitches, false),
+	);
+}
+
+/** Preserve trim/overlap diagnostic order and exact compound-switch authority in bounded steps. */
+export function* validateTurnoutFootprintsSteps(
+	read: RailReader,
+	footprints: readonly TurnoutFootprint[],
+	advancedSwitches: readonly AdvancedSwitchRecord[] = [],
+	cooperative = true,
+): Generator<void, TurnoutValidationIssue[]> {
 	const issues: TurnoutValidationIssue[] = [];
 	for (const footprint of footprints) {
+		if (cooperative) yield;
 		for (const trim of footprint.trims) {
+			if (cooperative) yield;
 			const support = read(trim.cell.x, trim.cell.y);
 			if (!isExactStraightRoute(support, trim.from, trim.to)) {
 				issues.push({
@@ -232,10 +262,13 @@ export function validateTurnoutFootprints(
 		{ left: TurnoutFootprint; right: TurnoutFootprint; cells: Cell[] }
 	>();
 	for (const footprint of footprints) {
+		if (cooperative) yield;
 		for (const cell of footprint.reservedCells) {
+			if (cooperative) yield;
 			const key = cellKey(cell.x, cell.y);
 			const owners = ownersByCell.get(key) ?? [];
 			for (const owner of owners) {
+				if (cooperative) yield;
 				const pairKey = `${owner.id}|${footprint.id}`;
 				const overlap = overlaps.get(pairKey) ?? { left: owner, right: footprint, cells: [] };
 				overlap.cells.push(cell);
@@ -255,6 +288,7 @@ export function validateTurnoutFootprints(
 	>();
 	if (overlaps.size > 0) {
 		for (const record of advancedSwitches) {
+			if (cooperative) yield;
 			if (advancedSwitchRecordError(record)) continue;
 			const { mergeAnchor, branchAnchor, sharedTrunkSupport } =
 				deriveAdvancedSwitchGeometry(record);
@@ -265,14 +299,18 @@ export function validateTurnoutFootprints(
 		}
 	}
 	for (const overlap of overlaps.values()) {
+		if (cooperative) yield;
 		const merge = overlap.left.kind === TURNOUT_KIND.MERGE ? overlap.left : overlap.right;
 		const candidates = switchesByMergeAnchor.get(cellKey(merge.cell.x, merge.cell.y)) ?? [];
-		if (
-			candidates.some(({ record, anchors }) =>
-				isAuthorizedTurnoutOverlap(record, anchors, overlap.left, overlap.right, overlap.cells),
-			)
-		)
-			continue;
+		let authorized = false;
+		for (const { record, anchors } of candidates) {
+			if (cooperative) yield;
+			if (isAuthorizedTurnoutOverlap(record, anchors, overlap.left, overlap.right, overlap.cells)) {
+				authorized = true;
+				break;
+			}
+		}
+		if (authorized) continue;
 		issues.push({
 			code: "OVERLAPPING_FOOTPRINT",
 			message: "두 turnout의 물리 footprint가 겹칩니다. junction 사이 간격을 늘리세요",

@@ -3,11 +3,16 @@ import {
 	type StaticFabOrganizationOutlineIndex,
 	type StaticFabOrganizationOutlineIndexSourceIdentity,
 } from "../compile/StaticFabOrganizationOutlineIndex";
+import { createCooperativeTask } from "../core/CooperativeTask";
 import {
 	checksumOperationalConfigurationState,
 	emptyOperationalConfigurationState,
 } from "../core/OperationalConfiguration";
 import type { RailDocument, RailPatchEvent } from "../core/RailDocument";
+import {
+	assertStaticFabProcessLoopRepairTransitionSteps,
+	STATIC_FAB_PROCESS_LOOP_REPAIR_KIND,
+} from "../core/StaticFabProcessLoopRepairContract";
 import {
 	adoptRailMirrorSnapshotCaptureHandoffCooperatively,
 	captureRailMirrorSnapshot,
@@ -171,6 +176,18 @@ export interface RailPreparedStaticPatchLease {
 export type RailPreparedAdditionPatchLease = RailPreparedStaticPatchLease;
 
 export interface RailWorkerBridgeHandle {
+	prepareProcessLoopRepairPatchCooperatively?(
+		event: RailPatchEvent,
+		expectedChecksum: string,
+		checkpoint: () => Promise<void>,
+		operationBudget?: number,
+	): Promise<RailPreparedStaticPatchLease>;
+	prepareProcessLoopRegistrationPatchCooperatively?(
+		event: RailPatchEvent,
+		expectedChecksum: string,
+		checkpoint: () => Promise<void>,
+		operationBudget?: number,
+	): Promise<RailPreparedStaticPatchLease>;
 	prepareStaticFabMutationPatchCooperatively?(
 		event: RailPatchEvent,
 		checkpoint: () => Promise<void>,
@@ -518,11 +535,117 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		return this.prepareStaticFabPatchCooperatively(event, checkpoint, operationBudget, false);
 	}
 
+	/** Exact org-only registration/replay packet; the independent digest is checked before lease admission. */
+	async prepareProcessLoopRegistrationPatchCooperatively(
+		event: RailPatchEvent,
+		expectedChecksum: string,
+		checkpoint: () => Promise<void>,
+		operationBudget = 128,
+	): Promise<RailPreparedStaticPatchLease> {
+		this.preparedAuthoredPatches.delete(event);
+		const change = event.organizationChanges[0];
+		const record = change?.before ?? change?.after;
+		if (
+			!record ||
+			record.kind !== "AISLE" ||
+			record.declaredSemanticRole !== "PROCESS_LOOP" ||
+			(record.parentOrganizationIds?.length ?? 0) !== 0 ||
+			record.membership.equipmentGroupIds.length !== 0 ||
+			(change?.before !== null && change?.after !== null) ||
+			(event.kind !== "create-static-fab-organization" &&
+				!(
+					(event.kind === "undo" || event.kind === "redo") &&
+					event.historyOriginKind === "create-static-fab-organization"
+				)) ||
+			event.baseRevision !== event.revision ||
+			event.changes.length ||
+			event.switchChanges.length ||
+			event.portChanges.length ||
+			event.equipmentGroupChanges.length ||
+			event.relationshipChanges.length ||
+			event.organizationChanges.length !== 1 ||
+			(event.organizationImpactAuthorizations?.length ?? 0) ||
+			event.operationalConfigurationPatch ||
+			typeof expectedChecksum !== "string" ||
+			!/^00000003(?::[0-9a-f]{8}){11}$/.test(expectedChecksum)
+		)
+			throw new Error("Loop registration packet must be a bounded org-only transition.");
+		return this.prepareStaticFabPatchCooperatively(
+			event,
+			checkpoint,
+			operationBudget,
+			false,
+			expectedChecksum,
+		);
+	}
+
+	/** Rail + same-owner membership repair; preserve independent checksum and exact event admission. */
+	async prepareProcessLoopRepairPatchCooperatively(
+		event: RailPatchEvent,
+		expectedChecksum: string,
+		checkpoint: () => Promise<void>,
+		operationBudget = 128,
+	): Promise<RailPreparedStaticPatchLease> {
+		this.preparedAuthoredPatches.delete(event);
+		if (
+			(event.kind !== STATIC_FAB_PROCESS_LOOP_REPAIR_KIND &&
+				!(
+					(event.kind === "undo" || event.kind === "redo") &&
+					event.historyOriginKind === STATIC_FAB_PROCESS_LOOP_REPAIR_KIND
+				)) ||
+			(event.kind === STATIC_FAB_PROCESS_LOOP_REPAIR_KIND &&
+				event.historyOriginKind !== undefined) ||
+			typeof expectedChecksum !== "string" ||
+			!/^00000003(?::[0-9a-f]{8}){11}$/.test(expectedChecksum) ||
+			!Number.isSafeInteger(operationBudget) ||
+			operationBudget <= 0
+		)
+			throw new Error("Loop repair packet kind, checksum or operation budget is invalid.");
+		const epoch = this.epoch,
+			baseSequence = this.latestSentSequence;
+		const map = this.document.map,
+			generation = map.getMutationGeneration();
+		const equipment = this.document.portEquipment,
+			organizations = this.document.organizations;
+		const relationships = this.document.relationships,
+			operations = this.document.operationalConfiguration;
+		const sourceIsCurrent = () =>
+			this.patchPreparationSourceIsCurrent(epoch, baseSequence, event) &&
+			this.document.map === map &&
+			map.getMutationGeneration() === generation &&
+			this.document.portEquipment === equipment &&
+			this.document.organizations === organizations &&
+			this.document.relationships === relationships &&
+			this.document.operationalConfiguration === operations &&
+			this.document.getPatchSequence() === baseSequence &&
+			map.getRevision() === event.baseRevision;
+		const check = async (): Promise<void> => {
+			if (!sourceIsCurrent()) throw new Error("Loop repair packet source became stale.");
+			await checkpoint();
+			if (!sourceIsCurrent()) throw new Error("Loop repair packet source became stale.");
+		};
+		await check();
+		const task = createCooperativeTask(assertStaticFabProcessLoopRepairTransitionSteps(event));
+		while (!task.done) {
+			task.step(operationBudget);
+			await check();
+		}
+		task.finish();
+		return this.prepareStaticFabPatchCooperatively(
+			event,
+			check,
+			operationBudget,
+			false,
+			expectedChecksum,
+		);
+	}
+
 	private async prepareStaticFabPatchCooperatively(
 		event: RailPatchEvent,
 		checkpoint: () => Promise<void>,
 		operationBudget: number,
 		additionsOnly: boolean,
+		expectedChecksum?: string,
 	): Promise<RailPreparedStaticPatchLease> {
 		const epoch = this.epoch;
 		const baseSequence = this.latestSentSequence;
@@ -557,6 +680,8 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			check,
 			operationBudget,
 		);
+		if (expectedChecksum !== undefined && digest !== expectedChecksum)
+			throw new Error("Loop packet checksum differs from the independently adopted transition.");
 		await check();
 		const prepared = Object.freeze({
 			epoch,
@@ -964,6 +1089,14 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				preparedOperationalFingerprint = prepared.operationalConfigurationFingerprint;
 				this.expectedChecksum = prepared.expectedChecksum;
 			} else {
+				if (
+					patch.kind === STATIC_FAB_PROCESS_LOOP_REPAIR_KIND ||
+					((patch.kind === "undo" || patch.kind === "redo") &&
+						patch.historyOriginKind === STATIC_FAB_PROCESS_LOOP_REPAIR_KIND)
+				)
+					throw new Error(
+						"Loop rail repair publication requires its exact prepared Worker packet.",
+					);
 				this.expectedChecksum.applyOrganizationNextId(
 					patch.organizationNextIdBefore,
 					patch.organizationNextIdAfter,

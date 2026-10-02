@@ -802,6 +802,77 @@ export function assertStaticFabOrganizationState(
 	if (error) throw new Error(error);
 }
 
+/** Only one parentless rail-only declared Loop can cross this narrow reversible state boundary. */
+export function* applyStaticFabProcessLoopRegistrationMutationSteps(
+	state: StaticFabOrganizationState,
+	mutation: StaticFabOrganizationMutation,
+	nextOrganizationId: number,
+	direction: "register" | "undo" | "redo",
+): Generator<void, StaticFabOrganizationState> {
+	if (!isCanonicalStaticFabOrganizationState(state) || !Object.isFrozen(mutation))
+		throw new Error("Loop registration requires a canonical source and immutable mutation.");
+	const record = direction === "undo" ? mutation.before : mutation.after;
+	if (
+		!record ||
+		!isCanonicalStaticFabOrganizationRecord(record) ||
+		record.id !== mutation.id ||
+		record.kind !== "AISLE" ||
+		record.declaredSemanticRole !== "PROCESS_LOOP" ||
+		staticFabOrganizationParentIds(record).length !== 0 ||
+		record.membership.equipmentGroupIds.length !== 0 ||
+		(direction === "undo" ? mutation.after !== null : mutation.before !== null)
+	)
+		throw new Error("Loop registration can only add or reverse one parentless rail-only Loop.");
+	if (direction !== "register" && direction !== "undo" && direction !== "redo")
+		throw new Error("Loop registration transition direction is invalid.");
+	const expectedNextId =
+		direction === "register" ? state.nextOrganizationId + 1 : state.nextOrganizationId;
+	if (
+		!isPositiveInt32(nextOrganizationId) ||
+		nextOrganizationId !== expectedNextId ||
+		(direction === "register"
+			? record.id !== state.nextOrganizationId
+			: record.id >= state.nextOrganizationId)
+	)
+		throw new Error("Loop registration must retain the monotonic organization cursor.");
+	const records: StaticFabOrganizationRecord[] = [];
+	let found = false,
+		inserted = false;
+	const normalizedName = normalizeStaticFabOrganizationName(record.name);
+	for (const existing of state.records) {
+		yield;
+		if (existing.id === record.id) {
+			if (direction !== "undo" || existing !== record)
+				throw new Error("Loop registration before identity does not match the source.");
+			found = true;
+			continue;
+		}
+		if (direction === "undo") {
+			for (const parentId of staticFabOrganizationParentIds(existing)) {
+				yield;
+				if (parentId === record.id)
+					throw new Error("A Loop with children cannot be removed by registration Undo.");
+			}
+		} else if (
+			existing.kind === "AISLE" &&
+			normalizeStaticFabOrganizationName(existing.name) === normalizedName
+		)
+			throw new Error(`AISLE 조직 이름 '${record.name}'이 중복되었습니다`);
+		if (direction !== "undo" && !inserted && existing.id > record.id) {
+			records.push(record);
+			inserted = true;
+		}
+		records.push(existing);
+	}
+	if (direction === "undo" && !found) throw new Error("Loop registration Undo owner is missing.");
+	if (direction !== "undo" && !inserted) records.push(record);
+	const candidate = Object.freeze({ nextOrganizationId, records: Object.freeze(records) });
+	// Existing canonical descendants are retained. Count their lengths, never rewalk each edge.
+	const budgetError = yield* staticFabOrganizationRailStateBudgetSteps(candidate);
+	if (budgetError) throw new Error(budgetError);
+	return brandCanonicalStaticFabOrganizationState(candidate);
+}
+
 /** Prepare canonical additions privately while retaining unchanged immutable memberships. */
 export function* applyStaticFabOrganizationAdditionsSteps(
 	state: StaticFabOrganizationState,

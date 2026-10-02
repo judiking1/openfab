@@ -37,6 +37,7 @@ import {
 	reverseOperationalConfigurationPatch,
 } from "./OperationalConfigurationMutation";
 import {
+	assertPortEquipmentActivation,
 	legacyCustomEquipmentBaselineForPortEquipmentActivation,
 	type ValidatedPortEquipmentActivation,
 } from "./PortEquipmentActivation";
@@ -62,6 +63,10 @@ import {
 	type PortRouteIdentity,
 } from "./PortRecord";
 import type { RailConstructionPlan, RailErasePlan, RailMutation } from "./paint";
+import {
+	type RailModuleOwnershipIndex,
+	railModuleOwnershipIndexMatchesMap,
+} from "./RailModuleOwnership";
 import {
 	appendBoundedRailHistoryEntry,
 	createRailMirrorHistoryAdditionLedgerEntryCooperatively,
@@ -113,6 +118,7 @@ import {
 import {
 	assertStaticFabAssemblyRelationshipActivation,
 	type ValidatedStaticFabAssemblyRelationshipActivation,
+	validateStaticFabAssemblyRelationshipActivation,
 	validateStaticFabAssemblyRelationshipSourceActivation,
 } from "./StaticFabAssemblyRelationshipActivation";
 import {
@@ -132,6 +138,7 @@ import {
 	applyStaticFabOrganizationAdditionsSteps,
 	applyStaticFabOrganizationMutations,
 	applyStaticFabOrganizationMutationsSteps,
+	applyStaticFabProcessLoopRegistrationMutationSteps,
 	assertStaticFabOrganizationState,
 	copyStaticFabOrganizationState,
 	emptyStaticFabOrganizationState,
@@ -145,8 +152,10 @@ import {
 	staticFabOrganizationRecordEquals,
 } from "./StaticFabOrganization";
 import {
+	assertStaticFabOrganizationActivation,
 	consumeStaticFabOrganizationImpactIndex,
 	type ValidatedStaticFabOrganizationActivation,
+	validateStaticFabOrganizationActivation,
 } from "./StaticFabOrganizationActivation";
 import {
 	consumeCertifiedStaticFabOrganizationBundlePlacementPlanCooperatively,
@@ -169,6 +178,19 @@ import {
 	type StaticFabOrganizationMutationPlan,
 	type StaticFabOrganizationPlanKind,
 } from "./StaticFabOrganizationPlan";
+import {
+	consumeStaticFabProcessLoopRegistrationApplyCooperatively,
+	revokeStaticFabProcessLoopRegistrationApply,
+	type StaticFabProcessLoopRegistrationApply,
+} from "./StaticFabProcessLoopRegistration";
+import {
+	consumeStaticFabProcessLoopRepairApplyCooperatively,
+	type OwnedStaticFabProcessLoopRepairPlan,
+	prepareStaticFabProcessLoopRepairHistoryCandidateCooperatively,
+	revokeStaticFabProcessLoopRepairApply,
+	type StaticFabProcessLoopRepairApply,
+} from "./StaticFabProcessLoopRepair";
+import { STATIC_FAB_PROCESS_LOOP_REPAIR_KIND } from "./StaticFabProcessLoopRepairContract";
 import type { StaticFabSelectionErasePlan } from "./StaticFabSelection";
 import {
 	STATIC_FAB_SEMANTIC_BAY_DELETE_KIND,
@@ -194,6 +216,7 @@ export type RailPatchKind =
 	| typeof STATIC_FAB_BAY_FLOW_EDIT_KIND
 	| typeof STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_KIND
 	| "erase-static-fab-selection"
+	| typeof STATIC_FAB_PROCESS_LOOP_REPAIR_KIND
 	| PortEquipmentPlanKind
 	| StaticFabOrganizationPlanKind
 	| typeof OPERATIONAL_CONFIGURATION_PATCH_KIND
@@ -255,6 +278,28 @@ export interface RailDocumentCooperativeCommitOptions {
 	readonly preparePatch?: (event: RailPatchEvent, checkpoint: () => Promise<void>) => Promise<void>;
 }
 
+export interface RailDocumentProcessLoopRegistrationCommitOptions
+	extends Omit<RailDocumentCooperativeCommitOptions, "preparePatch" | "checkCancelled"> {
+	readonly sourceChecksum: string;
+	/** Includes exact ready mirror checksum/epoch, document/session and prepared lease freshness. */
+	readonly checkCancelled: () => void;
+	readonly checksumTransition: (
+		sourceChecksum: string,
+		event: RailPatchEvent,
+		checkpoint: () => Promise<void>,
+	) => Promise<string>;
+	readonly preparePatch: (
+		event: RailPatchEvent,
+		checkpoint: () => Promise<void>,
+		expectedChecksum: string,
+	) => Promise<{ readonly isCurrent: () => boolean }>;
+}
+
+export interface RailDocumentProcessLoopRepairCommitOptions
+	extends RailDocumentProcessLoopRegistrationCommitOptions {
+	readonly mirrorEpoch: number;
+}
+
 /** Shared deadline-check granularity for bundle state, history and typed transport preparation. */
 export const STATIC_FAB_ORGANIZATION_BUNDLE_PREPARATION_OPERATION_BUDGET = 16;
 
@@ -266,6 +311,8 @@ interface PortEquipmentCommitResult {
 type Listener = (event: RailPatchEvent) => void;
 
 const STATIC_FAB_BAY_FLOW_EDIT_HISTORY_EVIDENCE = Symbol("static-fab-bay-flow-edit-history");
+const processLoopRegistrationHistory = new WeakSet<object>();
+const processLoopRepairHistory = new WeakSet<object>();
 const STATIC_FAB_ASSEMBLY_CONNECTOR_HISTORY_EVIDENCE = Symbol(
 	"static-fab-assembly-connector-history",
 );
@@ -2546,6 +2593,648 @@ export class RailDocument {
 		}
 	}
 
+	/** Adopt exactly one prepared repair candidate; retain Port, relationship and operational truth. */
+	async commitStaticFabProcessLoopRepairCooperatively(
+		apply: StaticFabProcessLoopRepairApply,
+		options: RailDocumentProcessLoopRepairCommitOptions,
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		this.lastCommandError = null;
+		const source = captureRailDocumentPortEquipmentSource(this);
+		const sourceUndo = this.undoStack,
+			sourceRedo = this.redoStack;
+		let cooperative: RailDocumentCommitCooperativeController | null = null;
+		let totalStartedAt = 0;
+		let ownsApply = false;
+		try {
+			// Reservation happens before option callbacks. A duplicate call returns null and
+			// must never revoke the first consumer's still-running preparation.
+			const plan = await consumeStaticFabProcessLoopRepairApplyCooperatively(
+				apply,
+				this,
+				async () => {
+					if (!cooperative) {
+						cooperative = createRailDocumentCommitCooperativeController(this, source, options);
+						totalStartedAt = cooperative.readTime(0);
+					}
+					await cooperative.checkTime();
+				},
+			);
+			if (!plan) return cooperativeCommitRejected();
+			ownsApply = true;
+			if (!cooperative) throw new Error("Loop repair consumption lost its cooperative controller.");
+			const controller = cooperative as RailDocumentCommitCooperativeController;
+			const authorityFinishedAt = controller.readTime(totalStartedAt);
+			plan.assertCurrent();
+			if (plan.sourceChecksum !== options.sourceChecksum)
+				throw new Error("Loop rail repair source checksum changed.");
+			const transition = Object.freeze({
+				kind: STATIC_FAB_PROCESS_LOOP_REPAIR_KIND,
+				changes: plan.changes,
+				switchChanges: plan.switchChanges,
+				portChanges: plan.portChanges,
+				equipmentGroupChanges: plan.equipmentGroupChanges,
+				organizationChanges: plan.organizationChanges,
+				organizationNextIdBefore: plan.organizationNextIdBefore,
+				organizationNextIdAfter: plan.organizationNextIdAfter,
+				relationshipChanges: plan.relationshipChanges,
+				relationshipNextIdBefore: plan.relationshipNextIdBefore,
+				relationshipNextIdAfter: plan.relationshipNextIdAfter,
+				organizationImpactAuthorizations: plan.organizationImpactAuthorizations,
+				operationalConfigurationPatch: null,
+				staticFabAssemblyConnectorEvidence: null,
+				staticFabBayFlowEditEvidence: null,
+			});
+			const commandValidationFinishedAt = controller.readTime(authorityFinishedAt);
+			const mirrorHistoryEntry = await createRailMirrorHistoryMutationLedgerEntryCooperatively(
+				transition.kind,
+				transition,
+				controller.checkTime,
+			);
+			const entry: HistoryEntry = Object.freeze({ ...transition, mirrorHistoryEntry });
+			processLoopRepairHistory.add(entry);
+			const nextUndoStack = await finishDocumentPreparationSteps(
+				prepareRailHistoryAppendSteps(sourceUndo, entry, (item) => item.mirrorHistoryEntry),
+				controller.checkTime,
+			);
+			return await this.publishProcessLoopRepairCooperatively(
+				entry,
+				plan,
+				source,
+				controller,
+				options,
+				sourceUndo,
+				sourceRedo,
+				nextUndoStack,
+				[],
+				null,
+				{
+					totalStartedAt,
+					authorityFinishedAt,
+					commandValidationFinishedAt,
+					historyCreationFinishedAt: controller.readTime(commandValidationFinishedAt),
+				},
+			);
+		} catch (error) {
+			if (error instanceof RailDocumentCommitSourceChangedError) return cooperativeCommitRejected();
+			throw error;
+		} finally {
+			if (ownsApply) revokeStaticFabProcessLoopRepairApply(apply);
+		}
+	}
+
+	canReplayStaticFabProcessLoopRepair(direction: "undo" | "redo"): boolean {
+		if (direction !== "undo" && direction !== "redo") return false;
+		const entry = (direction === "undo" ? this.undoStack : this.redoStack).at(-1);
+		return entry !== undefined && processLoopRepairHistory.has(entry);
+	}
+
+	/** Only the exact privately issued top history may restore a detached erased fragment. */
+	async replayStaticFabProcessLoopRepairCooperatively(
+		direction: "undo" | "redo",
+		ownership: RailModuleOwnershipIndex,
+		options: RailDocumentProcessLoopRepairCommitOptions,
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		this.lastCommandError = null;
+		if (!this.canReplayStaticFabProcessLoopRepair(direction)) return cooperativeCommitRejected();
+		const source = captureRailDocumentPortEquipmentSource(this);
+		const sourceUndo = this.undoStack,
+			sourceRedo = this.redoStack;
+		const original = (direction === "undo" ? sourceUndo : sourceRedo).at(-1);
+		if (!original || !processLoopRepairHistory.has(original)) return cooperativeCommitRejected();
+		const cooperative = createRailDocumentCommitCooperativeController(this, source, options);
+		const totalStartedAt = cooperative.readTime(0);
+		try {
+			cooperative.assertCurrent();
+			const entry = await finishDocumentPreparationSteps(
+				immutableHistoryTransitionSteps(
+					original,
+					direction,
+					source.organizations.nextOrganizationId,
+					source.relationships.nextRelationshipId,
+				),
+				cooperative.checkTime,
+			);
+			const authorityFinishedAt = cooperative.readTime(totalStartedAt);
+			const plan = await prepareStaticFabProcessLoopRepairHistoryCandidateCooperatively(
+				{
+					document: this,
+					ownership,
+					organizationId: entry.organizationChanges[0]?.id ?? 0,
+					changes: entry.changes,
+					switchChanges: entry.switchChanges,
+					sourceChecksum: options.sourceChecksum,
+					mirrorEpoch: options.mirrorEpoch,
+				},
+				entry,
+				{
+					checkpoint: cooperative.checkTime,
+					isCurrent: () => {
+						cooperative.assertCurrent();
+						return true;
+					},
+					checksumTransition: async (checksum, transition, checkpoint) =>
+						options.checksumTransition(
+							checksum,
+							{
+								...transition,
+								relationshipChanges: transition.relationshipChanges ?? Object.freeze([]),
+								relationshipNextIdBefore: source.relationships.nextRelationshipId,
+								relationshipNextIdAfter: source.relationships.nextRelationshipId,
+								sequence: source.patchSequence + 1,
+								kind: direction,
+								historyOriginKind: STATIC_FAB_PROCESS_LOOP_REPAIR_KIND,
+								baseRevision: source.revision,
+								revision: source.revision + transition.changes.length,
+							},
+							checkpoint,
+						),
+				},
+			);
+			const commandValidationFinishedAt = cooperative.readTime(authorityFinishedAt);
+			const nextUndoStack = await finishDocumentPreparationSteps(
+				copyImmutableHistoryStackSteps(
+					sourceUndo,
+					direction === "undo",
+					direction === "redo" ? original : null,
+				),
+				cooperative.checkTime,
+			);
+			const nextRedoStack = await finishDocumentPreparationSteps(
+				copyImmutableHistoryStackSteps(
+					sourceRedo,
+					direction === "redo",
+					direction === "undo" ? original : null,
+				),
+				cooperative.checkTime,
+			);
+			return await this.publishProcessLoopRepairCooperatively(
+				entry,
+				plan,
+				source,
+				cooperative,
+				options,
+				sourceUndo,
+				sourceRedo,
+				nextUndoStack,
+				nextRedoStack,
+				direction,
+				{
+					totalStartedAt,
+					authorityFinishedAt,
+					commandValidationFinishedAt,
+					historyCreationFinishedAt: cooperative.readTime(commandValidationFinishedAt),
+				},
+			);
+		} catch (error) {
+			if (error instanceof RailDocumentCommitSourceChangedError) return cooperativeCommitRejected();
+			throw error;
+		}
+	}
+
+	private async publishProcessLoopRepairCooperatively(
+		entry: HistoryEntry,
+		plan: OwnedStaticFabProcessLoopRepairPlan,
+		source: RailDocumentPortEquipmentSource,
+		cooperative: RailDocumentCommitCooperativeController,
+		options: RailDocumentProcessLoopRepairCommitOptions,
+		sourceUndo: HistoryEntry[],
+		sourceRedo: HistoryEntry[],
+		nextUndoStack: HistoryEntry[],
+		nextRedoStack: HistoryEntry[],
+		direction: "undo" | "redo" | null,
+		times: {
+			totalStartedAt: number;
+			authorityFinishedAt: number;
+			commandValidationFinishedAt: number;
+			historyCreationFinishedAt: number;
+		},
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		const assertPreparedCandidate = (): void => {
+			plan.assertSourceCurrent();
+			if (
+				entry.kind !== STATIC_FAB_PROCESS_LOOP_REPAIR_KIND ||
+				plan.nextMap.getRevision() !== source.revision + entry.changes.length ||
+				!railModuleOwnershipIndexMatchesMap(plan.ownership, plan.nextMap) ||
+				!Number.isSafeInteger(source.patchSequence + 1)
+			)
+				throw new Error("Loop rail repair candidate is no longer publishable.");
+			assertPortEquipmentActivation(
+				plan.portEquipmentActivation,
+				plan.nextMap,
+				source.portEquipment,
+			);
+			assertStaticFabOrganizationActivation(
+				plan.organizationActivation,
+				plan.nextMap,
+				source.portEquipment,
+				plan.nextOrganizations,
+			);
+			assertStaticFabAssemblyRelationshipActivation(
+				plan.relationshipActivation,
+				plan.nextMap,
+				source.portEquipment,
+				plan.nextOrganizations,
+				source.relationships,
+			);
+		};
+		const check = async (): Promise<void> => {
+			plan.assertCurrent();
+			await cooperative.checkTime();
+			plan.assertCurrent();
+		};
+		await check();
+		assertPreparedCandidate();
+		const stateApplicationFinishedAt = cooperative.readTime(times.historyCreationFinishedAt);
+		const event: RailPatchEvent = Object.freeze({
+			sequence: source.patchSequence + 1,
+			kind: direction ?? entry.kind,
+			...(direction ? { historyOriginKind: entry.kind } : {}),
+			baseRevision: source.revision,
+			revision: plan.nextMap.getRevision(),
+			changes: entry.changes,
+			switchChanges: entry.switchChanges,
+			portChanges: entry.portChanges,
+			equipmentGroupChanges: entry.equipmentGroupChanges,
+			organizationChanges: entry.organizationChanges,
+			organizationNextIdBefore: entry.organizationNextIdBefore,
+			organizationNextIdAfter: entry.organizationNextIdAfter,
+			relationshipChanges: entry.relationshipChanges,
+			relationshipNextIdBefore: entry.relationshipNextIdBefore,
+			relationshipNextIdAfter: entry.relationshipNextIdAfter,
+			organizationImpactAuthorizations: entry.organizationImpactAuthorizations,
+			operationalConfigurationPatch: null,
+		});
+		const checksum = await options.checksumTransition(options.sourceChecksum, event, check);
+		if (checksum !== plan.prospectiveChecksum)
+			throw new Error("Loop rail repair checksum disagrees with the prepared candidate.");
+		const lease = await options.preparePatch(event, check, checksum);
+		const patchPreparationFinishedAt = cooperative.readTime(stateApplicationFinishedAt);
+		const maximumPreparationSliceMilliseconds = cooperative.maximumSliceAt(
+			patchPreparationFinishedAt,
+		);
+		cooperative.assertCurrent();
+		plan.assertCurrent();
+		if (!lease || typeof lease.isCurrent !== "function" || !lease.isCurrent())
+			return cooperativeCommitRejected();
+		cooperative.assertSourceCurrent();
+		assertPreparedCandidate();
+		if (this.undoStack !== sourceUndo || this.redoStack !== sourceRedo)
+			return cooperativeCommitRejected();
+		// Adopt the single owned candidate and index; no callbacks/awaits before truth and history installation.
+		this.currentMap = plan.nextMap;
+		this.currentOrganizations = plan.nextOrganizations;
+		this.organizationImpactIndex = plan.nextImpactIndex;
+		this.undoStack = nextUndoStack;
+		this.redoStack = nextRedoStack;
+		let publicationError: string | undefined;
+		this.publishPatchEvent(event, (error) => {
+			publicationError ??=
+				error instanceof Error && error.message
+					? error.message
+					: "문서 변경 통지를 완료하지 못했습니다";
+		});
+		const finishedAt = cooperative.readTime(patchPreparationFinishedAt);
+		return Object.freeze({
+			committed: true,
+			...(publicationError ? { publicationError } : {}),
+			timings: Object.freeze({
+				maximumPreparationSliceMilliseconds,
+				authorityConsumptionMilliseconds: times.authorityFinishedAt - times.totalStartedAt,
+				commandValidationMilliseconds:
+					times.commandValidationFinishedAt - times.authorityFinishedAt,
+				historyCreationMilliseconds:
+					times.historyCreationFinishedAt - times.commandValidationFinishedAt,
+				stateApplicationMilliseconds: stateApplicationFinishedAt - times.historyCreationFinishedAt,
+				patchPreparationMilliseconds: patchPreparationFinishedAt - stateApplicationFinishedAt,
+				historyPublicationMilliseconds: null,
+				patchPublicationMilliseconds: finishedAt - patchPreparationFinishedAt,
+				totalMilliseconds: finishedAt - times.totalStartedAt,
+			}),
+		});
+	}
+
+	/** Consume a document-bound one-shot registration; keep every non-organization source object. */
+	async commitStaticFabProcessLoopRegistrationCooperatively(
+		apply: StaticFabProcessLoopRegistrationApply,
+		options: RailDocumentProcessLoopRegistrationCommitOptions,
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		this.lastCommandError = null;
+		const source = captureRailDocumentPortEquipmentSource(this);
+		let cooperative: RailDocumentCommitCooperativeController;
+		try {
+			cooperative = createRailDocumentCommitCooperativeController(this, source, options);
+		} catch (error) {
+			revokeStaticFabProcessLoopRegistrationApply(apply);
+			throw error;
+		}
+		const totalStartedAt = cooperative.readTime(0);
+		const sourceUndo = this.undoStack,
+			sourceRedo = this.redoStack;
+		try {
+			cooperative.assertCurrent();
+			const check = cooperative.checkTime;
+			const plan = await consumeStaticFabProcessLoopRegistrationApplyCooperatively(
+				apply,
+				this,
+				check,
+			);
+			const authorityFinishedAt = cooperative.readTime(totalStartedAt);
+			if (!plan) return cooperativeCommitRejected();
+			plan.assertCurrent();
+			if (plan.sourceChecksum !== options.sourceChecksum)
+				throw new Error("Loop registration source checksum changed.");
+			const transition = Object.freeze({
+				kind: "create-static-fab-organization" as const,
+				changes: plan.changes,
+				switchChanges: plan.switchChanges,
+				portChanges: plan.portChanges,
+				equipmentGroupChanges: plan.equipmentGroupChanges,
+				organizationChanges: plan.organizationChanges,
+				organizationNextIdBefore: plan.organizationNextIdBefore,
+				organizationNextIdAfter: plan.organizationNextIdAfter,
+				relationshipChanges: Object.freeze([]),
+				relationshipNextIdBefore: source.relationships.nextRelationshipId,
+				relationshipNextIdAfter: source.relationships.nextRelationshipId,
+				organizationImpactAuthorizations: Object.freeze([]),
+				operationalConfigurationPatch: null,
+				staticFabAssemblyConnectorEvidence: null,
+				staticFabBayFlowEditEvidence: null,
+			});
+			const commandValidationFinishedAt = cooperative.readTime(authorityFinishedAt);
+			const mirrorHistoryEntry = await createRailMirrorHistoryAdditionLedgerEntryCooperatively(
+				transition.kind,
+				transition,
+				check,
+			);
+			const entry: HistoryEntry = Object.freeze({ ...transition, mirrorHistoryEntry });
+			processLoopRegistrationHistory.add(entry);
+			const nextUndoStack = await finishDocumentPreparationSteps(
+				prepareRailHistoryAppendSteps(sourceUndo, entry, (item) => item.mirrorHistoryEntry),
+				check,
+			);
+			const historyCreationFinishedAt = cooperative.readTime(commandValidationFinishedAt);
+			return await this.publishProcessLoopRegistrationCooperatively(
+				entry,
+				plan.nextOrganizations,
+				plan.ownership,
+				source,
+				cooperative,
+				options,
+				sourceUndo,
+				sourceRedo,
+				nextUndoStack,
+				[],
+				null,
+				plan.assertCurrent,
+				plan.assertSourceCurrent,
+				plan.prospectiveChecksum,
+				{
+					totalStartedAt,
+					authorityFinishedAt,
+					commandValidationFinishedAt,
+					historyCreationFinishedAt,
+				},
+			);
+		} catch (error) {
+			revokeStaticFabProcessLoopRegistrationApply(apply);
+			if (error instanceof RailDocumentCommitSourceChangedError) return cooperativeCommitRejected();
+			throw error;
+		}
+	}
+
+	canReplayStaticFabProcessLoopRegistration(direction: "undo" | "redo"): boolean {
+		if (direction !== "undo" && direction !== "redo") return false;
+		const entry = (direction === "undo" ? this.undoStack : this.redoStack).at(-1);
+		return entry !== undefined && processLoopRegistrationHistory.has(entry);
+	}
+
+	/** Replay intent, not initial closure certification; preserve cursor and the exact record ID. */
+	async replayStaticFabProcessLoopRegistrationCooperatively(
+		direction: "undo" | "redo",
+		ownership: RailModuleOwnershipIndex,
+		options: RailDocumentProcessLoopRegistrationCommitOptions,
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		this.lastCommandError = null;
+		if (!this.canReplayStaticFabProcessLoopRegistration(direction))
+			return cooperativeCommitRejected();
+		const source = captureRailDocumentPortEquipmentSource(this);
+		const cooperative = createRailDocumentCommitCooperativeController(this, source, options);
+		const totalStartedAt = cooperative.readTime(0);
+		const sourceUndo = this.undoStack,
+			sourceRedo = this.redoStack;
+		const original = (direction === "undo" ? sourceUndo : sourceRedo).at(-1);
+		if (!original || !processLoopRegistrationHistory.has(original))
+			return cooperativeCommitRejected();
+		try {
+			cooperative.assertCurrent();
+			const check = cooperative.checkTime;
+			if (!railModuleOwnershipIndexMatchesMap(ownership, source.map))
+				throw new Error("Loop registration history ownership is stale.");
+			const entry = await finishDocumentPreparationSteps(
+				immutableHistoryTransitionSteps(
+					original,
+					direction,
+					source.organizations.nextOrganizationId,
+					source.relationships.nextRelationshipId,
+				),
+				check,
+			);
+			const authorityFinishedAt = cooperative.readTime(totalStartedAt);
+			if (entry.organizationChanges.length !== 1)
+				throw new Error("Loop registration history must change one owner.");
+			const nextOrganizations = await finishDocumentPreparationSteps(
+				applyStaticFabProcessLoopRegistrationMutationSteps(
+					source.organizations,
+					entry.organizationChanges[0],
+					entry.organizationNextIdAfter,
+					direction,
+				),
+				check,
+			);
+			const commandValidationFinishedAt = cooperative.readTime(authorityFinishedAt);
+			const nextUndoStack = await finishDocumentPreparationSteps(
+				copyImmutableHistoryStackSteps(
+					sourceUndo,
+					direction === "undo",
+					direction === "redo" ? original : null,
+				),
+				check,
+			);
+			const nextRedoStack = await finishDocumentPreparationSteps(
+				copyImmutableHistoryStackSteps(
+					sourceRedo,
+					direction === "redo",
+					direction === "undo" ? original : null,
+				),
+				check,
+			);
+			const historyCreationFinishedAt = cooperative.readTime(commandValidationFinishedAt);
+			return await this.publishProcessLoopRegistrationCooperatively(
+				entry,
+				nextOrganizations,
+				ownership,
+				source,
+				cooperative,
+				options,
+				sourceUndo,
+				sourceRedo,
+				nextUndoStack,
+				nextRedoStack,
+				direction,
+				cooperative.assertCurrent,
+				cooperative.assertSourceCurrent,
+				null,
+				{
+					totalStartedAt,
+					authorityFinishedAt,
+					commandValidationFinishedAt,
+					historyCreationFinishedAt,
+				},
+			);
+		} catch (error) {
+			if (error instanceof RailDocumentCommitSourceChangedError) return cooperativeCommitRejected();
+			throw error;
+		}
+	}
+
+	private async publishProcessLoopRegistrationCooperatively(
+		entry: HistoryEntry,
+		nextOrganizations: StaticFabOrganizationState,
+		ownership: RailModuleOwnershipIndex,
+		source: RailDocumentPortEquipmentSource,
+		cooperative: RailDocumentCommitCooperativeController,
+		options: RailDocumentProcessLoopRegistrationCommitOptions,
+		sourceUndo: HistoryEntry[],
+		sourceRedo: HistoryEntry[],
+		nextUndoStack: HistoryEntry[],
+		nextRedoStack: HistoryEntry[],
+		direction: "undo" | "redo" | null,
+		assertAuthorityCurrent: () => void,
+		assertAuthoritySourceCurrent: () => void,
+		expectedChecksum: string | null,
+		times: {
+			totalStartedAt: number;
+			authorityFinishedAt: number;
+			commandValidationFinishedAt: number;
+			historyCreationFinishedAt: number;
+		},
+	): Promise<MeasuredRailDocumentReviewedPortEquipmentCommit> {
+		if (
+			entry.kind !== "create-static-fab-organization" ||
+			entry.changes.length ||
+			entry.switchChanges.length ||
+			entry.portChanges.length ||
+			entry.equipmentGroupChanges.length ||
+			entry.relationshipChanges.length ||
+			entry.organizationChanges.length !== 1 ||
+			entry.organizationImpactAuthorizations.length ||
+			entry.operationalConfigurationPatch ||
+			entry.staticFabAssemblyConnectorEvidence ||
+			entry.staticFabBayFlowEditEvidence ||
+			entry.relationshipNextIdBefore !== source.relationships.nextRelationshipId ||
+			entry.relationshipNextIdAfter !== source.relationships.nextRelationshipId ||
+			!railModuleOwnershipIndexMatchesMap(ownership, source.map) ||
+			!Number.isSafeInteger(source.patchSequence + 1)
+		)
+			throw new Error("Loop registration publication must be an exact org-only transition.");
+		const check = async (): Promise<void> => {
+			assertAuthorityCurrent();
+			await cooperative.checkTime();
+			assertAuthorityCurrent();
+		};
+		await check();
+		const activation = await validateStaticFabOrganizationActivation(
+			source.map,
+			source.portEquipment,
+			nextOrganizations,
+			ownership,
+			check,
+			128,
+		);
+		await validateStaticFabAssemblyRelationshipActivation(
+			source.map,
+			source.portEquipment,
+			nextOrganizations,
+			source.relationships,
+			ownership,
+			activation,
+			check,
+			128,
+		);
+		const nextImpactIndex = consumeStaticFabOrganizationImpactIndex(
+			activation,
+			source.map,
+			source.portEquipment,
+			nextOrganizations,
+		);
+		const stateApplicationFinishedAt = cooperative.readTime(times.historyCreationFinishedAt);
+		const event: RailPatchEvent = Object.freeze({
+			sequence: source.patchSequence + 1,
+			kind: direction ?? entry.kind,
+			...(direction ? { historyOriginKind: entry.kind } : {}),
+			baseRevision: source.revision,
+			revision: source.revision,
+			changes: entry.changes,
+			switchChanges: entry.switchChanges,
+			portChanges: entry.portChanges,
+			equipmentGroupChanges: entry.equipmentGroupChanges,
+			organizationChanges: entry.organizationChanges,
+			organizationNextIdBefore: entry.organizationNextIdBefore,
+			organizationNextIdAfter: entry.organizationNextIdAfter,
+			relationshipChanges: entry.relationshipChanges,
+			relationshipNextIdBefore: entry.relationshipNextIdBefore,
+			relationshipNextIdAfter: entry.relationshipNextIdAfter,
+			organizationImpactAuthorizations: entry.organizationImpactAuthorizations,
+			operationalConfigurationPatch: null,
+		});
+		const checksum = await options.checksumTransition(options.sourceChecksum, event, check);
+		if (expectedChecksum !== null && checksum !== expectedChecksum)
+			throw new Error("Loop registration checksum disagrees with the adopted plan.");
+		const lease = await options.preparePatch(event, check, checksum);
+		const patchPreparationFinishedAt = cooperative.readTime(stateApplicationFinishedAt);
+		const maximumPreparationSliceMilliseconds = cooperative.maximumSliceAt(
+			patchPreparationFinishedAt,
+		);
+		cooperative.assertCurrent();
+		assertAuthorityCurrent();
+		if (!lease || typeof lease.isCurrent !== "function" || !lease.isCurrent())
+			return cooperativeCommitRejected();
+		cooperative.assertSourceCurrent();
+		assertAuthoritySourceCurrent();
+		if (this.undoStack !== sourceUndo || this.redoStack !== sourceRedo)
+			return cooperativeCommitRejected();
+		// One exact event, no callbacks/awaits until organization truth, index, history and sequence are installed.
+		this.currentOrganizations = nextOrganizations;
+		this.organizationImpactIndex = nextImpactIndex;
+		this.undoStack = nextUndoStack;
+		this.redoStack = nextRedoStack;
+		let publicationError: string | undefined;
+		this.publishPatchEvent(event, (error) => {
+			publicationError ??=
+				error instanceof Error && error.message
+					? error.message
+					: "문서 변경 통지를 완료하지 못했습니다";
+		});
+		const finishedAt = cooperative.readTime(patchPreparationFinishedAt);
+		return Object.freeze({
+			committed: true,
+			...(publicationError ? { publicationError } : {}),
+			timings: Object.freeze({
+				maximumPreparationSliceMilliseconds,
+				authorityConsumptionMilliseconds: times.authorityFinishedAt - times.totalStartedAt,
+				commandValidationMilliseconds:
+					times.commandValidationFinishedAt - times.authorityFinishedAt,
+				historyCreationMilliseconds:
+					times.historyCreationFinishedAt - times.commandValidationFinishedAt,
+				stateApplicationMilliseconds: stateApplicationFinishedAt - times.historyCreationFinishedAt,
+				patchPreparationMilliseconds: patchPreparationFinishedAt - stateApplicationFinishedAt,
+				historyPublicationMilliseconds: null,
+				patchPublicationMilliseconds: finishedAt - patchPreparationFinishedAt,
+				totalMilliseconds: finishedAt - times.totalStartedAt,
+			}),
+		});
+	}
+
 	/** Shared candidate preparation only; callers separately establish Connector or Arrangement authority. */
 	private async publishStaticFabTransitionCooperatively(
 		entry: HistoryEntry,
@@ -2848,6 +3537,11 @@ export class RailDocument {
 		this.lastCommandError = null;
 		const entry = this.undoStack.at(-1);
 		if (!entry) return false;
+		if (processLoopRegistrationHistory.has(entry) || processLoopRepairHistory.has(entry))
+			return this.rejectCommand(
+				"Loop 등록의 되돌리기 준비가 필요합니다",
+				"등록 되돌리기를 거부했습니다",
+			);
 		const baseRevision = this.map.getRevision();
 		const organizationNextIdBefore = this.organizations.nextOrganizationId;
 		const relationshipNextIdBefore = this.relationships.nextRelationshipId;
@@ -2907,6 +3601,11 @@ export class RailDocument {
 		this.lastCommandError = null;
 		const entry = this.redoStack.at(-1);
 		if (!entry) return false;
+		if (processLoopRegistrationHistory.has(entry) || processLoopRepairHistory.has(entry))
+			return this.rejectCommand(
+				"Loop 등록의 재실행 준비가 필요합니다",
+				"등록 재실행을 거부했습니다",
+			);
 		const baseRevision = this.map.getRevision();
 		const organizationNextIdBefore = this.organizations.nextOrganizationId;
 		const relationshipNextIdBefore = this.relationships.nextRelationshipId;
@@ -3470,6 +4169,7 @@ interface RailDocumentPortEquipmentSource {
 interface RailDocumentCommitCooperativeController {
 	readonly maximumSliceAt: (time: number) => number;
 	readonly assertCurrent: () => void;
+	readonly assertSourceCurrent: () => void;
 	readonly checkTime: () => Promise<void>;
 	readonly readTime: (previous: number) => number;
 }
@@ -3499,7 +4199,7 @@ function captureRailDocumentPortEquipmentSource(
 function createRailDocumentCommitCooperativeController(
 	document: RailDocument,
 	source: RailDocumentPortEquipmentSource,
-	options: RailDocumentCooperativeCommitOptions,
+	options: RailDocumentCooperativeCommitOptions | RailDocumentProcessLoopRegistrationCommitOptions,
 ): RailDocumentCommitCooperativeController {
 	if (
 		!options ||
@@ -3523,8 +4223,7 @@ function createRailDocumentCommitCooperativeController(
 		previousTime = readOptionalCommitTime(options.now, Math.max(previous, previousTime));
 		return previousTime;
 	};
-	const assertCurrent = (): void => {
-		options.checkCancelled?.();
+	const assertSourceCurrent = (): void => {
 		if (
 			document.map !== source.map ||
 			document.portEquipment !== source.portEquipment ||
@@ -3538,6 +4237,10 @@ function createRailDocumentCommitCooperativeController(
 			throw new RailDocumentCommitSourceChangedError();
 		}
 	};
+	const assertCurrent = (): void => {
+		options.checkCancelled?.();
+		assertSourceCurrent();
+	};
 	const checkTime = async (): Promise<void> => {
 		assertCurrent();
 		const current = readTime(sliceStartedAt);
@@ -3547,7 +4250,7 @@ function createRailDocumentCommitCooperativeController(
 		assertCurrent();
 		sliceStartedAt = readTime(current);
 	};
-	return Object.freeze({ assertCurrent, checkTime, readTime, maximumSliceAt });
+	return Object.freeze({ assertCurrent, assertSourceCurrent, checkTime, readTime, maximumSliceAt });
 }
 
 function cooperativeCommitRejected(): MeasuredRailDocumentReviewedPortEquipmentCommit {

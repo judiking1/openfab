@@ -65,6 +65,7 @@ const PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ONLY_COMPLETE = new Error(
 const ORDINARY_ALL_EQUIPMENT_LOOP_MEMBERSHIP_ONLY_COMPLETE = new Error(
 	"Ordinary all-equipment Process Loop membership acceptance completed.",
 );
+const STANDALONE_PROCESS_LOOP_FIRST_ONLY_COMPLETE = new Error("Manual standalone Process Loop authoring acceptance completed.");
 const ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE = new Error(
 	"Zero-eligible Process Loop acceptance completed.",
 );
@@ -144,6 +145,21 @@ try {
 	await waitForServer(`${baseUrl}/`);
 	browser = await launchBrowserWithRetry();
 	recordStep("browser-text-line-measurement", await verifyWrappedTextLineCount(browser));
+	if (process.env.OPENFAB_GUIDED_SAVE_HANDOFF_ACCEPTANCE_ONLY === "1") {
+		recordStep("guided-port-handoff", await exerciseGuidedPortHandoffRegression(browser, "save"));
+		assertEqual(result.consoleErrors.length, 0, "Guided save handoff console errors");
+		assertEqual(result.pageErrors.length, 0, "Guided save handoff page errors");
+		result.status = "PASS";
+		throw GUIDED_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_STANDALONE_PROCESS_LOOP_FIRST_ONLY === "1") {
+		recordStep("standalone-process-loop-first", await exerciseOrdinaryAllEquipmentLoopMembership(browser, true));
+		assertEqual(result.consoleErrors.length, 0, "Standalone Loop console errors");
+		assertEqual(result.pageErrors.length, 0, "Standalone Loop page errors");
+		result.status = "PASS";
+		console.log("PASS manual standalone Process Loop authoring acceptance");
+		throw STANDALONE_PROCESS_LOOP_FIRST_ONLY_COMPLETE;
+	}
 	if (process.env.OPENFAB_DECLARED_BAY_DISCONNECTION_ACCEPTANCE_ONLY === "1") {
 		recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
 		assertEqual(result.consoleErrors.length, 0, "Declared Bay console errors");
@@ -442,6 +458,7 @@ try {
 		"ordinary-all-equipment-loop-membership",
 		await exerciseOrdinaryAllEquipmentLoopMembership(browser),
 	);
+	recordStep("standalone-process-loop-first", await exerciseOrdinaryAllEquipmentLoopMembership(browser, true));
 	recordStep("zero-eligible-process-loop", await exerciseZeroEligibleProcessLoop(browser));
 	recordStep("no-process-loop-port-feedback", await exerciseNoProcessLoopPortFeedback(browser));
 	recordStep("adjacent-process-loop-port-hit", await exerciseAdjacentProcessLoopPortHit(browser));
@@ -2884,6 +2901,7 @@ try {
 		error === COMPACT_BAY_CONFIGURATION_ONLY_COMPLETE ||
 		error === PROCESS_LOOP_EQUIPMENT_MEMBERSHIP_ONLY_COMPLETE ||
 		error === ORDINARY_ALL_EQUIPMENT_LOOP_MEMBERSHIP_ONLY_COMPLETE ||
+		error === STANDALONE_PROCESS_LOOP_FIRST_ONLY_COMPLETE ||
 		error === ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE ||
 		error === ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE ||
 		error === CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY_COMPLETE ||
@@ -8527,7 +8545,7 @@ async function selectOrdinaryPortProcessLoop(page, loopId, label, verifyChangeFo
 	await select.waitFor({ state: "visible" });
 	await select.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, select);
-	if (label === "390x600") {
+	if (label === "390x600" || label.startsWith("standalone-")) {
 		await assertLocatorOwnsHitArea(select, `${label} Port Process Loop selector`);
 		const bounds = await select.boundingBox();
 		assertAtLeast(bounds?.width ?? 0, 44, `${label} Port Process Loop selector width`);
@@ -8604,8 +8622,31 @@ async function selectOrdinaryPortProcessLoop(page, loopId, label, verifyChangeFo
 		assertProjectUnchanged(
 			await readMetrics(page),
 			before,
-			`${label} Process Loop placement start`,
+		`${label} Process Loop placement start`,
 		);
+	}
+	if (label.startsWith("standalone-")) {
+		const values = await select.locator("option").evaluateAll((options) => options.map((option) => option.value));
+		assertEqual(JSON.stringify(values.filter(Boolean)), JSON.stringify([String(loopId)]), `${label} single explicit Loop selector`);
+		const before = await readMetrics(page);
+		await select.focus();
+		// Match chooseStkTemplate: macOS headless Chrome cannot operate even a plain native
+		// select popup with arrows. Native keyboard selection is exercised by Linux CI only.
+		if (process.platform === "darwin") await select.selectOption("");
+		else await select.press("Home");
+		await page.waitForFunction(() => document.querySelector('[data-testid="ordinary-port-process-loop-target"]')?.value === "");
+		if (process.platform === "darwin") await select.selectOption(String(loopId));
+		else await select.press("ArrowDown");
+		await page.waitForFunction((id) => document.querySelector('[data-testid="ordinary-port-process-loop-target"]')?.value === String(id), loopId);
+		assertEqual(await select.evaluate((element) => document.activeElement === element), true, `${label} keyboard selector retains focus`);
+		await assertOrdinaryPortProcessLoopIdentity(page, loopId, label);
+		const start = page.getByTestId("ordinary-port-process-loop-start");
+		await assertLocatorInsideViewport(page, start);
+		await assertLocatorOwnsHitArea(start, `${label} placement start`);
+		assertAtLeast((await start.boundingBox())?.height ?? 0, 44, `${label} placement start target`);
+		await start.click();
+		await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-canvas");
+		assertProjectUnchanged(await readMetrics(page), before, `${label} actual selector and start preserve source`);
 	}
 }
 
@@ -8620,6 +8661,7 @@ async function assertOrdinaryPortProcessLoopIdentity(page, loopId, label) {
 	if (!name) throw new Error(`${label} Process Loop ${loopId} has no authored name.`);
 	const selectedName = page.getByTestId("ordinary-port-process-loop-selected-name");
 	await selectedName.waitFor({ state: "visible" });
+	await selectedName.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, selectedName);
 	const display = await selectedName.evaluate((element) => {
 		const host = element.closest("small");
@@ -9315,14 +9357,634 @@ async function attachOrdinaryEquipmentToDirectLoop(page, groupId, kind, loopId, 
 	return { before, after, evidence };
 }
 
-async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
+async function readStandaloneLoopAuthoringContract(page) {
+	return page.evaluate(() => {
+		const model = window.__tileFab.getEditorModel();
+		const document = model.document;
+		const cells = [];
+		document.map.forEachRail((x, y, _rail, encoded) => cells.push([x, y, encoded]));
+		cells.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+		return {
+			cells,
+			organizations: document.organizations,
+			equipment: document.portEquipment,
+			relationships: document.relationships,
+			operations: document.operationalConfiguration,
+		};
+	});
+}
+
+async function assertShortStockerScrollLayout(page, label) {
+	const workspace = page.locator('.tilefab-equipment-workspace[data-port-type="STK"]');
+	const body = workspace.locator(".tilefab-equipment-scroll-content");
+	const heading = workspace.locator(".tilefab-equipment-heading");
+	const actions = workspace.locator(".tilefab-equipment-actions");
+	const measure = async () => workspace.evaluate((element) => {
+		const body = element.querySelector(".tilefab-equipment-scroll-content");
+		const heading = element.querySelector(".tilefab-equipment-heading");
+		const actions = element.querySelector(".tilefab-equipment-actions");
+		const rect = (node) => { const bounds = node.getBoundingClientRect(); return { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right }; };
+		return { workspace: rect(element), heading: rect(heading), body: rect(body), actions: rect(actions), display: getComputedStyle(element).display, alignItems: getComputedStyle(element).alignItems, gridRows: getComputedStyle(element).gridTemplateRows, overflow: getComputedStyle(element).overflowY, bodyOverflow: getComputedStyle(body).overflowY, actionsPosition: getComputedStyle(actions).position, dockScrollTop: element.scrollTop, dockScrollHeight: element.scrollHeight, dockClientHeight: element.clientHeight, scrollTop: body.scrollTop, scrollHeight: body.scrollHeight, clientHeight: body.clientHeight };
+	});
+	const initial = await measure();
+	await writeFile(path.join(artifactRoot, `${label}-stocker-scroll-layout-initial.json`), JSON.stringify(initial, null, 2));
+	await assertLocatorInsideViewport(page, workspace);
+	await assertLocatorInsideViewport(page, heading);
+	await assertLocatorInsideViewport(page, actions);
+	assertEqual(initial.overflow, "hidden", `${label} Stocker scroll belongs to the body`);
+	assertEqual(initial.display, "grid", `${label} Stocker uses the measured three-row layout`);
+	assertEqual(initial.alignItems, "stretch", `${label} Stocker body fills its bounded row`);
+	assertEqual(initial.dockScrollTop, 0, `${label} Stocker outer dock has not scrolled its pinned controls`);
+	assertEqual(["auto", "scroll"].includes(initial.bodyOverflow), true, `${label} Stocker body is scrollable`);
+	assertEqual(initial.actionsPosition, "static", `${label} Stocker footer is outside scrolling content`);
+	assertAtMost(initial.heading.bottom, initial.body.top + 1, `${label} header does not cover body`);
+	assertAtMost(initial.body.bottom, initial.actions.top + 1, `${label} footer does not cover body`);
+	assertAtLeast(initial.scrollHeight, initial.clientHeight + 2, `${label} actual Stocker content overflows the body`);
+	const before = await readMetrics(page);
+	const source = await readStandaloneLoopAuthoringContract(page);
+	let top;
+	let bottom;
+	let wheelTrace;
+	const points = [];
+	const expectedDeltas = [];
+	const settleScroll = async () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+	const wheelTo = async (end) => {
+		// Re-read the live scrolling surface after each move, avoiding native form controls.
+		const point = await body.evaluate((element) => {
+			const bounds = element.getBoundingClientRect();
+			for (const x of [bounds.left + 2, bounds.right - 2, bounds.left + bounds.width / 2]) {
+				for (const ratio of [0.5, 0.1, 0.3, 0.7, 0.9]) {
+					const y = bounds.top + bounds.height * ratio;
+					const target = document.elementFromPoint(x, y);
+					if (target && element.contains(target) && !target.closest('button, select, input, textarea, [role="button"]')) {
+						return { x, y, target: { tag: target.tagName, className: target.className } };
+					}
+				}
+			}
+			throw new Error("Stocker has no unobscured non-control scrolling surface.");
+		});
+		points.push(point);
+		await page.mouse.move(point.x, point.y);
+		await settleScroll();
+		assertEqual(await body.evaluate((element, point) => { const target = document.elementFromPoint(point.x, point.y); return target && element.contains(target) && !target.closest('button, select, input, textarea, [role="button"]'); }, point), true, `${label} settled wheel target remains a body surface`);
+		const delta = end ? 2000 : -2000;
+		expectedDeltas.push(delta);
+		await page.mouse.wheel(0, delta);
+		await body.evaluate((element, end) => new Promise((resolve, reject) => {
+			const deadline = performance.now() + 5_000;
+			const poll = () => (end ? element.scrollHeight - element.clientHeight - element.scrollTop : element.scrollTop) <= 1 ? resolve() : performance.now() > deadline ? reject(new Error(`Stocker wheel did not reach body ${end ? "end" : "start"}.`)) : requestAnimationFrame(poll);
+			poll();
+		}), end);
+		await settleScroll();
+		return measure();
+	};
+	try {
+		await body.evaluate((element) => {
+			const events = [];
+			const listener = (event) => {
+				if (events.length >= 8) return;
+				const target = event.target;
+				const entry = { deltaY: event.deltaY, ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey, clientX: event.clientX, clientY: event.clientY, target: target instanceof Element ? { tag: target.tagName, testId: target.getAttribute("data-testid"), className: target.className } : null, interactiveTarget: target instanceof Element && target.closest('button, select, input, textarea, [role="button"]') !== null, bodyContainsTarget: target instanceof Node && element.contains(target), defaultPrevented: event.defaultPrevented, scrollTop: element.scrollTop };
+				events.push(entry);
+				requestAnimationFrame(() => { entry.defaultPrevented = event.defaultPrevented; });
+			};
+			const scrolls = [];
+			const scrollListener = () => { if (scrolls.length < 32) scrolls.push({ scrollTop: element.scrollTop, at: performance.now() }); };
+			document.addEventListener("wheel", listener, { capture: true, passive: true });
+			element.addEventListener("scroll", scrollListener, { passive: true });
+			Reflect.set(element, "openfabAcceptanceWheelTrace", { events, listener, scrolls, scrollListener });
+		});
+		// At the top, an immediate no-op upward wheel can reverse an unfinished Chromium
+		// transaction. Require a real movement before each reversal instead of a timing sleep.
+		top = initial.scrollTop > 1 ? await wheelTo(false) : await measure();
+		assertAtMost(top.scrollTop, 1, `${label} body starts at the top`);
+		bottom = await wheelTo(true);
+		assertAtLeast(bottom.scrollTop, top.scrollTop + 1, `${label} initial wheel reaches the body end`);
+		top = await wheelTo(false);
+		assertAtMost(top.scrollTop, 1, `${label} reverse wheel reaches the body start`);
+		bottom = await wheelTo(true);
+	} catch (error) {
+		await writeFile(path.join(artifactRoot, `${label}-stocker-wheel-failure.json`), JSON.stringify({ points, expectedDeltas, measured: await measure(), trace: await body.evaluate((element) => { const trace = Reflect.get(element, "openfabAcceptanceWheelTrace"); return trace ? { events: trace.events, scrolls: trace.scrolls } : null; }) }, null, 2));
+		throw error;
+	} finally {
+		wheelTrace = await body.evaluate((element) => { const trace = Reflect.get(element, "openfabAcceptanceWheelTrace"); if (!trace) return { events: [], scrolls: [] }; document.removeEventListener("wheel", trace.listener, true); element.removeEventListener("scroll", trace.scrollListener); Reflect.deleteProperty(element, "openfabAcceptanceWheelTrace"); return { events: trace.events, scrolls: trace.scrolls }; });
+	}
+	assertEqual(JSON.stringify(wheelTrace.events.map((event) => event.deltaY)), JSON.stringify(expectedDeltas), `${label} every actual wheel direction was delivered`);
+	assertAtLeast(wheelTrace.events.length, 3, `${label} actual forward, reverse and final wheel input`);
+	assertEqual(wheelTrace.events.every((event) => event.bodyContainsTarget && !event.interactiveTarget && !event.defaultPrevented && !event.ctrlKey && !event.metaKey && !event.shiftKey), true, `${label} unmodified wheel events reach the neutral body surface`);
+	assertEqual(bottom.dockScrollTop, 0, `${label} Stocker outer dock remains stationary after wheel input`);
+	assertAtLeast(bottom.scrollTop, top.scrollTop + 1, `${label} wheel scrolls the actual inner body`);
+	assertAtMost(bottom.scrollHeight - bottom.clientHeight - bottom.scrollTop, 1, `${label} wheel reaches body end`);
+	for (const area of ["workspace", "heading", "body", "actions"]) {
+		for (const edge of ["top", "bottom"]) assertAtMost(Math.abs(bottom[area][edge] - top[area][edge]), 1, `${label} ${area} ${edge} remains fixed during body scroll`);
+	}
+	for (const button of await actions.getByRole("button").all()) {
+		await assertLocatorInsideViewport(page, button);
+		await assertLocatorOwnsHitArea(button, `${label} Stocker fixed completion control`);
+		assertAtLeast((await button.boundingBox()).height, 44, `${label} Stocker completion control target`);
+	}
+	assertProjectUnchanged(await readMetrics(page), before, `${label} body scrolling leaves the authored project unchanged`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} body scrolling preserves all five contracts`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-stocker-inner-scroll.png`) });
+	await writeFile(path.join(artifactRoot, `${label}-stocker-wheel-input.json`), JSON.stringify({ points, top, bottom, trace: wheelTrace }, null, 2));
+	return { top, bottom, points, trace: wheelTrace, input: "actual-pointer-wheel" };
+}
+
+async function clickStandaloneLoopPortCandidate(page, world, label) {
+	await moveToWorld(page, world);
+	await page.waitForFunction((row) => document.querySelector('[data-testid="rail-canvas"]')?.dataset.hoverPortSlot === String(row), world.row);
+	// Hover may change the compact dock. Re-read the live camera and all nine hit owners
+	// together immediately before the actual pointer input, without setting view/model state.
+	const point = await page.evaluate((world) => {
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		const camera = window.__tileFab.camera;
+		const bounds = canvas.getBoundingClientRect();
+		const x = bounds.left + camera.offsetX + world.x * camera.zoom;
+		const y = bounds.top + camera.offsetY + world.y * camera.zoom;
+		const owns = [-12, 0, 12].every((dx) => [-12, 0, 12].every((dy) => document.elementFromPoint(x + dx, y + dy) === canvas));
+		return { x, y, owns, row: canvas.dataset.hoverPortSlot };
+	}, world);
+	assertEqual(point.owns, true, `${label} live post-hover nine-point Canvas ownership`);
+	assertEqual(point.row, String(world.row), `${label} exact current Port target`);
+	await page.mouse.click(point.x, point.y);
+}
+
+async function openStandaloneLoopRailEdit(page, loopId, label) {
+	await openStaticFabNavigatorTab(page, "organizations");
+	const library = page.getByTestId("static-fab-organization-library");
+	await library.getByRole("tab", { name: "ALL 1" }).click();
+	await library.getByRole("textbox", { name: "저장된 FAB 조직 검색" }).fill("");
+	await library.locator(`[role="option"][data-organization-id="${loopId}"]`).click();
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-selected-port-id"), "", `${label} organization selection clears stale Port Inspector`);
+	const edit = page.getByTestId("edit-process-loop-rail");
+	await edit.scrollIntoViewIfNeeded();
+	await assertLocatorInsideViewport(page, edit);
+	await assertLocatorOwnsHitArea(edit, `${label} explicit owner repair entry`);
+	await edit.click();
+	await page.getByTestId("process-loop-edit-context").waitFor({ state: "visible" });
+}
+
+async function prepareStandaloneDetachedKeyboardDraft(page, source, label, segment = null) {
+	const canvas = page.getByTestId("rail-canvas");
+	await page.getByTestId("ordinary-rail-keyboard-start").click();
+	const readout = page.getByTestId("guided-rail-keyboard-readout");
+	const readCursor = async () => {
+		const coordinates = (await readout.textContent())?.match(/X\s*(-?\d+).*Z\s*(-?\d+)/i);
+		if (!coordinates) throw new Error(`${label} actual keyboard cursor unavailable.`);
+		return { x: Number(coordinates[1]), y: Number(coordinates[2]) };
+	};
+	await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.dataset.railKeyboardPhase === "choose-start");
+	await page.waitForFunction(() => /X\s*(-?\d+).*Z\s*(-?\d+)/i.test(document.querySelector('[data-testid="guided-rail-keyboard-readout"]')?.textContent ?? ""));
+	const initial = await readCursor();
+	const target = segment?.from ?? { x: Math.min(...source.cells.map((cell) => cell[0])) - 20, y: Math.min(...source.cells.map((cell) => cell[1])) - 20 };
+	const moveCursor = async (from, to) => {
+		for (const [axis, negative, positive] of [["x", "ArrowLeft", "ArrowRight"], ["y", "ArrowUp", "ArrowDown"]]) {
+			let delta = to[axis] - from[axis];
+			const direction = delta < 0 ? negative : positive;
+			delta = Math.abs(delta);
+			for (let index = 0; index < Math.floor(delta / 5); index++) await canvas.press(`Shift+${direction}`);
+			for (let index = 0; index < delta % 5; index++) await canvas.press(direction);
+		}
+	};
+	await moveCursor(initial, target);
+	assertEqual(isDeepStrictEqual(await readCursor(), target), true, `${label} independently chosen keyboard start`);
+	await canvas.press("Enter");
+	const endpoint = segment?.to ?? { x: target.x + 10, y: target.y };
+	await moveCursor(target, endpoint);
+	await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.dataset.draftPreviewValid === "true");
+	assertEqual(isDeepStrictEqual(await readCursor(), endpoint), true, `${label} independent expected keyboard endpoint`);
+	return { canvas, readCursor, target };
+}
+
+async function assertStandaloneMixedSelectionRegistrationRefused(page, equipmentTargets, label) {
+	const before = await readMetrics(page);
+	const source = await readStandaloneLoopAuthoringContract(page);
+	await page.getByTestId("editor-activity-inspect").click();
+	const canvas = page.getByTestId("rail-canvas");
+	await canvas.press("ControlOrMeta+a");
+	await page.waitForFunction(() => Number(document.querySelector('[data-testid="tilefab-app"]')?.getAttribute("data-area-selection-equipment-groups")) === 3);
+	const inspector = page.getByTestId("rail-area-selection-inspector");
+	const disclosure = inspector.getByTestId("compact-inspector-disclosure");
+	if ((await disclosure.count()) && (await disclosure.getAttribute("aria-expanded")) === "false") await disclosure.click();
+	const name = page.getByTestId("standalone-process-loop-name");
+	await name.scrollIntoViewIfNeeded();
+	await name.fill("Mixed selection must not register");
+	await name.press("Enter");
+	const register = page.getByTestId("register-process-loop");
+	await register.scrollIntoViewIfNeeded();
+	await assertLocatorInsideViewport(page, register);
+	assertEqual(await register.isDisabled(), true, `${label} mixed selection registration visibly disabled`);
+	const help = page.getByTestId("standalone-process-loop-selection-help");
+	await help.scrollIntoViewIfNeeded();
+	await assertLocatorInsideViewport(page, help);
+	const reason = await help.innerText();
+	assertIncludes(reason, "장비가 함께 선택", `${label} mixed selection explains equipment exclusion`);
+	assertIncludes(reason, "Ctrl/⌘+클릭", `${label} mixed selection explains actual recovery`);
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-operation"), "", `${label} mixed selection Enter starts no operation`);
+	assertProjectUnchanged(await readMetrics(page), before, `${label} mixed selection refusal preserves authored state`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} mixed selection preserves all five authored contracts`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-mixed-selection-registration-refusal.png`) });
+	const mixed = await readMetrics(page);
+	for (const [index, target] of equipmentTargets.entries()) {
+		if ((await disclosure.count()) && (await disclosure.getAttribute("aria-expanded")) === "true") {
+			await assertLocatorInsideViewport(page, disclosure);
+			await assertLocatorOwnsHitArea(disclosure, `${label} recovery disclosure remains usable`);
+			await disclosure.click();
+		}
+		await centerWorld(page, target.world);
+		const point = await screenPointForWorld(page, target.world);
+		assertEqual(await canvas.evaluate((element, point) => document.elementFromPoint(point.x, point.y) === element, point), true, `${label} mixed selection recovery target belongs to Canvas`);
+		await page.keyboard.down("Control");
+		try { await page.mouse.click(point.x, point.y); } finally { await page.keyboard.up("Control"); }
+		await page.waitForFunction((remaining) => Number(document.querySelector('[data-testid="tilefab-app"]')?.getAttribute("data-area-selection-equipment-groups")) === remaining, equipmentTargets.length - index - 1);
+		const recovered = await readMetrics(page);
+		assertEqual(recovered.selectionModules, mixed.selectionModules, `${label} excluding gear ${target.id} keeps every rail module`);
+		assertProjectUnchanged(recovered, before, `${label} equipment exclusion preserves authored state`);
+	}
+	assertEqual(await register.isDisabled(), false, `${label} actual gear exclusion restores rail-only registration eligibility`);
+	if ((await disclosure.count()) && (await disclosure.getAttribute("aria-expanded")) === "false") {
+		const entry = page.getByTestId("start-process-loop-registration");
+		await assertLocatorInsideViewport(page, entry);
+		await assertLocatorOwnsHitArea(entry, `${label} recovered rail-only registration entry`);
+		assertAtLeast((await entry.boundingBox())?.height ?? 0, 44, `${label} recovery registration target height`);
+	}
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} actual selection recovery preserves all five authored contracts`);
+	await canvas.press("Escape");
+	return { selectedEquipmentGroups: 3, registerDisabled: true, reason, recoveredRailOnlySelection: true };
+}
+
+async function exerciseStandaloneLoopRepair(page, loopId, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	const before = await readMetrics(page);
+	const source = await readStandaloneLoopAuthoringContract(page);
+	const targets = await page.evaluate(() => {
+		const model = window.__tileFab.getEditorModel();
+		const ports = model.document.portEquipment.ports;
+		const offsets = { 1: [0, -1], 2: [1, 0], 4: [0, 1], 8: [-1, 0] };
+		const supportedEdges = new Set();
+		for (const port of ports) {
+			const route = port.route;
+			if (route.kind !== "CARDINAL_CELL") throw new Error("Manual Port is not cardinal.");
+			const from = offsets[route.from], to = offsets[route.to];
+			if (from) supportedEdges.add(`${route.x + from[0]},${route.z + from[1]}>${route.x},${route.z}`);
+			if (to) supportedEdges.add(`${route.x},${route.z}>${route.x + to[0]},${route.z + to[1]}`);
+		}
+		let protectedTarget = null, freeTarget = null;
+		for (const module of model.ownership.modules) {
+			if (module.kind !== "straight") continue;
+			const cell = module.primaryCells.find((cell) => model.ownership.candidates(cell).length === 1 && ports.every((port) => Math.abs(cell.x - port.route.x) + Math.abs(cell.y - port.route.z) >= 3));
+			if (!cell) continue;
+			const protectedRail = module.eraseEdges.some((edge) => supportedEdges.has(`${edge.from.x},${edge.from.y}>${edge.to.x},${edge.to.y}`));
+			const first = module.eraseEdges.find((edge) => !module.eraseEdges.some((other) => other.to.x === edge.from.x && other.to.y === edge.from.y));
+			const last = module.eraseEdges.find((edge) => !module.eraseEdges.some((other) => other.from.x === edge.to.x && other.from.y === edge.to.y));
+			if (!first || !last) continue;
+			const target = { key: module.key, x: cell.x + 0.5, y: cell.y + 0.5, edgeCount: module.eraseEdges.length, from: first.from, to: last.to };
+			if (protectedRail && !protectedTarget) protectedTarget = target;
+			if (!protectedRail && !freeTarget) freeTarget = target;
+		}
+		if (!protectedTarget || !freeTarget) throw new Error("Manual Loop has no separate protected/free whole-module targets.");
+		return { protectedTarget, freeTarget };
+	});
+	await openStandaloneLoopRailEdit(page, loopId, label);
+	const context = page.getByTestId("process-loop-edit-context");
+	await context.waitFor({ state: "visible" });
+	const assertNavigationClear = async () => {
+		const tools = await page.locator(".tilefab-tools").boundingBox();
+		const bar = await context.boundingBox();
+		assertAtMost(tools.x + tools.width, bar.x, `${label} Loop context clears the current menu density`);
+		await assertEditorActivityRailLayout(page, `${label} Loop repair navigation`);
+	};
+	await assertNavigationClear();
+	for (const id of ["select-process-loop-rail", "exit-process-loop-edit"]) {
+		const action = page.getByTestId(id);
+		await assertLocatorInsideViewport(page, action);
+		await assertLocatorOwnsHitArea(action, `${label} ${id}`);
+		assertAtLeast((await action.boundingBox())?.height ?? 0, 44, `${label} ${id} target`);
+	}
+	const draft = await prepareStandaloneDetachedKeyboardDraft(page, source, label);
+	const keyboardAttempts = [];
+	const rejectKeyboardDraft = async () => {
+		assertEqual(await canvas.getAttribute("data-draft-preview-valid"), "true", `${label} new Enter starts with a valid ordinary draft`);
+		// Observe DOM publication only. This records a fresh attempt without changing app/model state.
+		await page.evaluate(() => {
+			const app = document.querySelector('[data-testid="tilefab-app"]');
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const observation = { pending: false, restoredPreview: false, records: [] };
+			const observer = new MutationObserver((records) => {
+				for (const record of records) {
+					const value = record.target.getAttribute(record.attributeName);
+					observation.records.push({ attribute: record.attributeName, before: record.oldValue, value });
+					if (record.attributeName === "data-process-loop-operation" && (record.oldValue || value)) observation.pending = true;
+					if (record.attributeName === "data-draft-preview-valid" && record.oldValue === null && value === "true") observation.restoredPreview = true;
+				}
+			});
+			observer.observe(app, { attributes: true, attributeOldValue: true, attributeFilter: ["data-process-loop-operation"] });
+			observer.observe(canvas, { attributes: true, attributeOldValue: true, attributeFilter: ["data-draft-preview-valid"] });
+			window.__openfabLoopAttemptObservation = { observation, observer };
+		});
+		await canvas.press("Enter");
+		await page.waitForFunction(() => window.__openfabLoopAttemptObservation?.observation.pending && window.__openfabLoopAttemptObservation.observation.restoredPreview && document.querySelector('[data-testid="tilefab-app"]')?.dataset.processLoopOperation === "" && document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-draft-preview-valid") === "true" && document.querySelector('[data-testid="process-loop-edit-feedback"]')?.textContent?.includes("새 레일은 이 작업 루프와 이어져야 합니다"));
+		keyboardAttempts.push(await page.evaluate(() => { const observed = window.__openfabLoopAttemptObservation; observed.observer.disconnect(); delete window.__openfabLoopAttemptObservation; return observed.observation; }));
+		assertEqual(await canvas.getAttribute("data-rail-keyboard-scope"), "ordinary", `${label} refused Enter retains keyboard owner`);
+		assertEqual(await canvas.getAttribute("data-rail-keyboard-phase"), "choose-end", `${label} refused Enter retains draft phase`);
+		assertEqual(await canvas.evaluate((element) => document.activeElement === element), true, `${label} refused Enter retains Canvas focus`);
+		assertProjectUnchanged(await readMetrics(page), before, `${label} detached keyboard repair no-op`);
+		assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} keyboard refusal preserves all five contracts`);
+	};
+	await rejectKeyboardDraft();
+	const refusedCursor = await draft.readCursor();
+	await canvas.press("ArrowRight");
+	assertEqual(isDeepStrictEqual(await draft.readCursor(), { x: refusedCursor.x + 1, y: refusedCursor.y }), true, `${label} failure retains movable endpoint`);
+	await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.dataset.draftPreviewValid === "true");
+	await rejectKeyboardDraft();
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-repair-keyboard-refusal.png`) });
+	await canvas.press("Escape");
+	assertEqual(await canvas.getAttribute("data-rail-keyboard-scope"), "", `${label} Escape closes keyboard only`);
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), String(loopId), `${label} keyboard Escape keeps explicit Loop context`);
+	const selectModule = async (target) => {
+		await page.getByTestId("select-process-loop-rail").click();
+		await revealOrdinaryEquipmentSlot(page, target, `${label} whole-module rail target`);
+		await clickWorld(page, target, false);
+		await page.waitForFunction((key) => document.querySelector('[data-testid="rail-canvas"]')?.dataset.selectedModuleId === key, target.key);
+		assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), String(loopId), `${label} explicit owner context survives selection`);
+		await assertNavigationClear();
+	};
+	await selectModule(targets.protectedTarget);
+	await canvas.press("Delete");
+	await page.waitForFunction(() => document.querySelector('[data-testid="tilefab-app"]')?.dataset.processLoopOperation === "" && document.querySelector(".tilefab-statusbar [role='status']")?.textContent?.includes("기존 레일과 장비는 유지됩니다"));
+	const refusal = await page.locator(".tilefab-statusbar [role='status']").textContent();
+	assertEqual(/Port|PORT|포트|경로/.test(refusal), true, `${label} explains protected Port route`);
+	const feedback = page.getByTestId("process-loop-edit-feedback");
+	await assertLocatorInsideViewport(page, feedback);
+	assertEqual((await feedback.textContent())?.includes("장비 포트 경로"), true, `${label} readable Korean protected route reason`);
+	assertProjectUnchanged(await readMetrics(page), before, `${label} protected rail removal no-op`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} protected refusal preserves all five source contracts`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-repair-protected-refusal.png`) });
+	await selectModule(targets.freeTarget);
+	await canvas.press("Delete");
+	const repaired = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1);
+	assertSingleGuidedPortCommit(repaired, before, `${label} atomic whole-module repair`);
+	assertEqual(Number(repaired.authoredEdges), Number(before.authoredEdges) - targets.freeTarget.edgeCount, `${label} exact erased directed edges`);
+	const repairedSource = await readStandaloneLoopAuthoringContract(page);
+	const originalOwner = source.organizations.records[0], repairedOwner = repairedSource.organizations.records[0];
+	for (const field of ["id", "kind", "name", "declaredSemanticRole", "parentOrganizationIds", "properties"]) assertEqual(isDeepStrictEqual(repairedOwner[field], originalOwner[field]), true, `${label} repair preserves owner ${field}`);
+	assertEqual(isDeepStrictEqual(repairedOwner.membership.equipmentGroupIds, originalOwner.membership.equipmentGroupIds), true, `${label} repair preserves all three owners`);
+	for (const field of ["equipment", "relationships", "operations"]) assertEqual(isDeepStrictEqual(repairedSource[field], source[field]), true, `${label} repair preserves ${field}`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-repaired.png`) });
+	await undoAndRedo(page, before, repaired, null, true);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), repairedSource), true, `${label} repair Redo exact five contracts`);
+	const beforeRedraw = await readMetrics(page);
+	await clickActivityCommand(page, "build", "레일 건설");
+	await assertNavigationClear();
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), String(loopId), `${label} rail tool retains explicit repair context`);
+	assertEqual(Math.abs(targets.freeTarget.to.x - targets.freeTarget.from.x) + Math.abs(targets.freeTarget.to.y - targets.freeTarget.from.y), targets.freeTarget.edgeCount, `${label} independent straight gap length`);
+	const redrawDraft = await prepareStandaloneDetachedKeyboardDraft(page, repairedSource, label, targets.freeTarget);
+	await canvas.press("Enter");
+	const restored = await waitForWorker(page, (metrics) => metrics.modelChecksum === before.modelChecksum && Number(metrics.workerTargetSequence) === Number(beforeRedraw.workerTargetSequence) + 1);
+	assertSingleGuidedPortCommit(restored, beforeRedraw, `${label} keyboard redraw one exact patch`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} actual redraw restores exact closed five contracts`);
+	assertEqual(await canvas.getAttribute("data-rail-keyboard-phase"), "choose-start", `${label} successful repair continues keyboard with fresh binding`);
+	assertEqual(isDeepStrictEqual(await redrawDraft.readCursor(), targets.freeTarget.to), true, `${label} successful repair retains the exact endpoint for the next segment`);
+	await canvas.press("ArrowRight");
+	assertEqual(isDeepStrictEqual(await redrawDraft.readCursor(), { x: targets.freeTarget.to.x + 1, y: targets.freeTarget.to.y }), true, `${label} fresh keyboard binding accepts the next cursor move`);
+	await canvas.press("ArrowLeft");
+	assertEqual(isDeepStrictEqual(await redrawDraft.readCursor(), targets.freeTarget.to), true, `${label} next cursor returns without an authored mutation`);
+	assertProjectUnchanged(await readMetrics(page), restored, `${label} continuing keyboard cursor does not change the project`);
+	await canvas.press("Escape");
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-repair-redrawn.png`) });
+	await undoAndRedo(page, beforeRedraw, restored, null, true);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} redraw Undo/Redo exact closed five contracts`);
+	await page.getByTestId("exit-process-loop-edit").click();
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), "", `${label} explicit repair exit`);
+	return { ...targets, refusal, keyboardRecovery: { attempts: keyboardAttempts, refusedCursor, resumedCursor: { x: refusedCursor.x + 1, y: refusedCursor.y } }, repairedSequence: repaired.modelSequence, redrawSequence: restored.modelSequence, restoredChecksum: restored.modelChecksum };
+}
+
+async function exerciseStandaloneLoopIdentityReset(page, savedPath, saved, loopId, label) {
+	const app = page.getByTestId("tilefab-app");
+	const canvas = page.getByTestId("rail-canvas");
+	const source = await readStandaloneLoopAuthoringContract(page);
+	const reopen = async (phase) => {
+		const generation = Number(await canvas.getAttribute("data-model-generation"));
+		const chooserPromise = page.waitForEvent("filechooser");
+		if (page.viewportSize().width <= 760) {
+			await page.locator(".tilefab-project-trigger").click();
+			await page.locator(".tilefab-project-menu-commands").getByRole("button", { name: "열기", exact: true }).click();
+		} else await page.getByRole("button", { name: "프로젝트 열기" }).click();
+		await (await chooserPromise).setFiles(savedPath);
+		await page.waitForFunction((previous) => Number(document.querySelector('[data-testid="rail-canvas"]')?.dataset.modelGeneration) > previous && document.querySelector('[data-testid="tilefab-app"]')?.dataset.projectOperation === "idle", generation);
+		const after = await waitForWorker(page, (metrics) => metrics.projectId === saved.projectId && metrics.modelChecksum === saved.modelChecksum && metrics.workerChecksum === saved.modelChecksum);
+		assertEqual(after.historyCanUndo, "false", `${label} ${phase} Open resets history`);
+		assertEqual(after.historyCanRedo, "false", `${label} ${phase} Open resets Redo`);
+		assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} ${phase} same-file Open exact five contracts`);
+		for (const attribute of ["data-process-loop-edit-owner", "data-process-loop-operation"]) assertEqual(await app.getAttribute(attribute), "", `${label} ${phase} resets ${attribute}`);
+		for (const attribute of ["data-rail-keyboard-scope", "data-rail-keyboard-phase"]) assertEqual(await canvas.getAttribute(attribute), "", `${label} ${phase} resets ${attribute}`);
+		assertEqual(await canvas.getAttribute("data-draft-preview-valid"), null, `${label} ${phase} clears uncommitted preview`);
+		return { beforeGeneration: generation, afterGeneration: Number(await canvas.getAttribute("data-model-generation")), checksum: after.modelChecksum };
+	};
+	await openStandaloneLoopRailEdit(page, loopId, label);
+	await prepareStandaloneDetachedKeyboardDraft(page, source, label);
+	assertEqual(await app.getAttribute("data-process-loop-edit-owner"), String(loopId), `${label} identity reset starts with old edit context`);
+	assertEqual(await canvas.getAttribute("data-rail-keyboard-phase"), "choose-end", `${label} identity reset starts with old draft`);
+	const drawAfterReplacement = async (phase, currentSource) => {
+		// Visible owner attributes can hide an old-document ref. An actual detached commit
+		// proves the new document is editable before changing to a tool that clears context.
+		const before = await readMetrics(page);
+		const segment = currentSource.cells.length === 0 ? { from: { x: 0, y: 0 }, to: { x: 10, y: 0 } } : null;
+		await prepareStandaloneDetachedKeyboardDraft(page, currentSource, `${label} ${phase}`, segment);
+		await canvas.press("Enter");
+		const drawn = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1);
+		assertSingleGuidedPortCommit(drawn, before, `${label} ${phase} actual ordinary rail publication`);
+		assertEqual(Number(drawn.authoredEdges), Number(before.authoredEdges) + 10, `${label} ${phase} independent detached ten-edge segment`);
+		assertEqual(Number(drawn.authoredCells), Number(before.authoredCells) + 11, `${label} ${phase} independent detached eleven-cell segment`);
+		const after = await readStandaloneLoopAuthoringContract(page);
+		for (const field of ["organizations", "equipment", "relationships", "operations"]) assertEqual(isDeepStrictEqual(after[field], currentSource[field]), true, `${label} ${phase} ordinary rail preserves ${field}`);
+		await canvas.press("Escape");
+		await canvas.focus();
+		await canvas.press("ControlOrMeta+z");
+		const undone = await waitForWorker(page, (metrics) => metrics.modelChecksum === before.modelChecksum && Number(metrics.workerTargetSequence) === Number(drawn.workerTargetSequence) + 1);
+		assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), currentSource), true, `${label} ${phase} Undo restores exact five contracts`);
+		assertEqual(undone.workerChecksum, undone.modelChecksum, `${label} ${phase} Undo mirror parity`);
+		return { drawnSequence: drawn.modelSequence, undoneSequence: undone.modelSequence, restoredChecksum: undone.modelChecksum };
+	};
+	const repair = await reopen("repair draft");
+	const openDraw = await drawAfterReplacement("after Open", source);
+	await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
+	await waitForLegalPortSlots(page);
+	await selectOrdinaryPortProcessLoop(page, loopId, label);
+	const port = await reopen("Port scope");
+	await page.getByTestId("ordinary-port-process-loop-target").waitFor({ state: "visible" });
+	assertEqual(await page.getByTestId("ordinary-port-process-loop-target").inputValue(), "", `${label} replacement document clears old Port scope`);
+	assertEqual(await page.getByTestId("ordinary-port-process-loop-target-count").count(), 0, `${label} replacement has no stale scoped slot count`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-same-file-context-reset.png`) });
+	await openStandaloneLoopRailEdit(page, loopId, label);
+	await prepareStandaloneDetachedKeyboardDraft(page, source, label);
+	const previousGeneration = Number(await canvas.getAttribute("data-model-generation"));
+	await openSyntheticFabStarter(page, "blank");
+	const create = page.getByTestId("create-synthetic-fab-project");
+	await create.scrollIntoViewIfNeeded();
+	await assertLocatorInsideViewport(page, create);
+	await assertLocatorOwnsHitArea(create, `${label} real blank replacement action`);
+	await create.click();
+	await page.waitForFunction((previous) => Number(document.querySelector('[data-testid="rail-canvas"]')?.dataset.modelGeneration) > previous && document.querySelector('[data-testid="tilefab-app"]')?.dataset.projectOperation === "idle", previousGeneration);
+	const fresh = await waitForWorker(page, (metrics) => metrics.projectId !== saved.projectId && metrics.authoredCells === "0" && metrics.staticFabOrganizations === "0");
+	for (const attribute of ["data-process-loop-edit-owner", "data-process-loop-operation"]) assertEqual(await app.getAttribute(attribute), "", `${label} New resets ${attribute}`);
+	for (const attribute of ["data-rail-keyboard-scope", "data-rail-keyboard-phase"]) assertEqual(await canvas.getAttribute(attribute), "", `${label} New resets ${attribute}`);
+	const newDraw = await drawAfterReplacement("after New", await readStandaloneLoopAuthoringContract(page));
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-new-project-editable.png`) });
+	return { repair, port, openDraw, newDraw, replacementProjectId: fresh.projectId };
+}
+
+async function exerciseManualStandaloneLoopRegistration(page, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	const empty = await readMetrics(page);
+	assertEqual(empty.authoredCells, "0", `${label} genuine blank source`);
+	assertEqual(empty.equipmentGroups, "0", `${label} no preinstalled equipment`);
+	await page.getByTestId("ordinary-rail-keyboard-start").click();
+	const readout = page.getByTestId("guided-rail-keyboard-readout");
+	await page.waitForFunction(() => (document.querySelector('[data-testid="guided-rail-keyboard-readout"]')?.textContent?.length ?? 0) > 0);
+	const startCoordinates = (await readout.textContent())?.match(/X\s*(-?\d+).*Z\s*(-?\d+)/i);
+	if (!startCoordinates) throw new Error(`${label} keyboard start coordinates are unavailable.`);
+	const start = { x: Number(startCoordinates[1]), y: Number(startCoordinates[2]) };
+	const legs = [
+		["ArrowRight", 6],
+		["ArrowDown", 4],
+		["ArrowLeft", 6],
+		["ArrowUp", 4],
+	];
+	let previous = empty;
+	for (const [direction, steps] of legs) {
+		await canvas.press("Enter");
+		for (let index = 0; index < steps; index++) await canvas.press(`Shift+${direction}`);
+		await page.waitForFunction(
+			() =>
+				document.querySelector('[data-testid="rail-canvas"]')?.dataset.draftPreviewValid === "true",
+		);
+		await canvas.press("Enter");
+		previous = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(previous.workerTargetSequence) + 1,
+		);
+	}
+	await canvas.press("Escape");
+	const rail = await readMetrics(page);
+	assertEqual(rail.authoredCells, "100", `${label} independently expected rectangle cells`);
+	assertEqual(rail.authoredEdges, "100", `${label} independently expected directed edges`);
+	assertEqual(rail.strongComponents, "1", `${label} closed directed SCC`);
+	assertEqual(rail.openTerminals, "0", `${label} closed rail terminals`);
+	assertEqual(rail.workerPhysicalValid, "true", `${label} compiled physical geometry`);
+	assertEqual(rail.staticFabOrganizations, "0", `${label} manual Rail has no inferred Loop`);
+	const before = await readStandaloneLoopAuthoringContract(page);
+	const expectedEdges = [];
+	let position = { ...start };
+	for (const [dx, dy, meters] of [
+		[1, 0, 30],
+		[0, 1, 20],
+		[-1, 0, 30],
+		[0, -1, 20],
+	]) {
+		for (let step = 0; step < meters; step++) {
+			const next = { x: position.x + dx, y: position.y + dy };
+			expectedEdges.push(`${position.x},${position.y}>${next.x},${next.y}`);
+			position = next;
+		}
+	}
+	await page.getByTestId("editor-activity-inspect").click();
+	await canvas.press("ControlOrMeta+a");
+	const selection = await readMetrics(page);
+	assertEqual(selection.selectionCells, "100", `${label} actual whole-rail selection`);
+	assertEqual(selection.selectionEquipmentGroups, "0", `${label} rail-only registration`);
+	const disclosure = page.getByTestId("compact-inspector-disclosure");
+	if ((await disclosure.count()) && (await disclosure.getAttribute("aria-expanded")) === "false") {
+		const entry = page.getByTestId("start-process-loop-registration");
+		await assertLocatorInsideViewport(page, entry);
+		await assertLocatorOwnsHitArea(entry, `${label} visible registration entry`);
+		assertAtLeast((await entry.boundingBox())?.height ?? 0, 44, `${label} entry target height`);
+		await entry.click();
+	}
+	const name = page.getByTestId("standalone-process-loop-name");
+	await name.scrollIntoViewIfNeeded();
+	await name.fill("");
+	const register = page.getByTestId("register-process-loop");
+	assertEqual(await register.isDisabled(), true, `${label} empty name visible refusal`);
+	await name.fill("Manual User Loop");
+	for (const control of [name, register]) {
+		await control.scrollIntoViewIfNeeded();
+		await assertLocatorInsideViewport(page, control);
+		await assertLocatorOwnsHitArea(control, `${label} explicit registration action`);
+		assertAtLeast(
+			(await control.boundingBox())?.height ?? 0,
+			44,
+			`${label} registration target height`,
+		);
+	}
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-register.png`) });
+	await register.click();
+	const registered = await waitForWorker(
+		page,
+		(metrics) =>
+			metrics.staticFabOrganizations === "1" &&
+			Number(metrics.workerTargetSequence) === Number(rail.workerTargetSequence) + 1,
+	);
+	assertSingleGuidedPortCommit(registered, rail, `${label} one explicit registration patch`);
+	const after = await readStandaloneLoopAuthoringContract(page);
+	const owner = after.organizations.records[0];
+	assertEqual(owner.kind, "AISLE", `${label} Loop organization kind`);
+	assertEqual(owner.declaredSemanticRole, "PROCESS_LOOP", `${label} explicitly declared role`);
+	assertEqual(owner.name, "Manual User Loop", `${label} user-owned name`);
+	assertEqual(JSON.stringify(owner.parentOrganizationIds), "[]", `${label} no fake Bay parent`);
+	assertEqual(
+		JSON.stringify(
+			owner.membership.railEdges
+				.map((edge) => `${edge.from.x},${edge.from.y}>${edge.to.x},${edge.to.y}`)
+				.sort(),
+		),
+		JSON.stringify(expectedEdges.sort()),
+		`${label} exact user-authored directed membership`,
+	);
+	for (const field of ["cells", "equipment", "relationships", "operations"])
+		assertEqual(
+			isDeepStrictEqual(after[field], before[field]),
+			true,
+			`${label} registration preserves ${field}`,
+		);
+	// Registration Undo preserves the allocated ID cursor. The checksum's authenticated
+	// header therefore retains that cursor while the exact rail-only hash body is restored.
+	const undoDigest = rail.modelChecksum.split(":");
+	assertEqual(undoDigest.length, 12, `${label} current checksum header contract`);
+	undoDigest[7] = Number(registered.modelNextOrganizationId).toString(16).padStart(8, "0");
+	const undoneSource = { ...rail, modelChecksum: undoDigest.join(":"), workerChecksum: undoDigest.join(":"), modelNextOrganizationId: registered.modelNextOrganizationId };
+	await undoAndRedo(page, undoneSource, registered, null, true);
+	assertEqual(
+		isDeepStrictEqual(
+			(await readStandaloneLoopAuthoringContract(page)).organizations,
+			after.organizations,
+		),
+		true,
+		`${label} registration Undo/Redo exact owner ID and intent`,
+	);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-registered.png`) });
+	return {
+		organizationId: owner.id,
+		name: owner.name,
+		cells: 100,
+		edges: expectedEdges.length,
+		start,
+		source: "ordinary-keyboard-input",
+		registrationSequence: registered.modelSequence,
+	};
+}
+
+async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, standalone = false) {
 	const proofs = [];
 	const viewports = [
 		{ width: 390, height: 600 },
 		{ width: 760, height: 900 },
 		{ width: 1440, height: 900 },
 	];
-	const requestedViewport = process.env.OPENFAB_ORDINARY_ALL_EQUIPMENT_VIEWPORT;
+	const requestedViewport = standalone
+		? process.env.OPENFAB_STANDALONE_PROCESS_LOOP_VIEWPORT
+		: process.env.OPENFAB_ORDINARY_ALL_EQUIPMENT_VIEWPORT;
 	if (
 		requestedViewport &&
 		!viewports.some((viewport) => `${viewport.width}x${viewport.height}` === requestedViewport)
@@ -9333,7 +9995,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 		(candidate) =>
 			!requestedViewport || `${candidate.width}x${candidate.height}` === requestedViewport,
 	)) {
-		const label = `${viewport.width}x${viewport.height}`;
+		const label = `${standalone ? "standalone-" : ""}${viewport.width}x${viewport.height}`;
 		const context = await browserInstance.newContext({ viewport, acceptDownloads: true });
 		const page = await context.newPage();
 		page.on("console", (message) => {
@@ -9349,38 +10011,46 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				.click();
 			const empty = await readMetrics(page);
 			assertEqual(empty.staticFabOrganizations, "0", `${label} starts without a Bay`);
-			await page.getByTestId("editor-activity-assemble").click();
-			await page.getByTestId("production-bay-module-browser").click();
-			const panel = page.getByTestId("production-bay-module-panel");
-			await panel.waitFor({ state: "visible" });
-			await panel.getByRole("button", { name: "배치 위치 선택" }).click();
-			await panel.waitFor({ state: "hidden" });
+			let loopIds;
+			let standaloneRegistration = null;
 			const canvas = page.getByTestId("rail-canvas");
-			await page.waitForFunction(
-				() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
-			);
-			await canvas.press("Enter");
-			const bay = await waitForWorker(
-				page,
-				(metrics) =>
-					Number(metrics.workerTargetSequence) === Number(empty.workerTargetSequence) + 1 &&
-					metrics.staticFabOrganizations === "3",
-				{ timeout: 30_000 },
-			);
-			assertSingleGuidedPortCommit(bay, empty, `${label} actual Assemble Twin Bay`);
-			const loopIds = await page.evaluate(() => {
-				const records = window.__tileFab.getEditorModel().document.organizations.records;
-				const bayIds = new Set(
-					records.filter((record) => record.kind === "BAY").map((record) => record.id),
+			if (standalone) {
+				standaloneRegistration = await exerciseManualStandaloneLoopRegistration(page, label);
+				loopIds = [standaloneRegistration.organizationId];
+			} else {
+				await page.getByTestId("editor-activity-assemble").click();
+				await page.getByTestId("production-bay-module-browser").click();
+				const panel = page.getByTestId("production-bay-module-panel");
+				await panel.waitFor({ state: "visible" });
+				await panel.getByRole("button", { name: "배치 위치 선택" }).click();
+				await panel.waitFor({ state: "hidden" });
+				await page.waitForFunction(
+					() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
 				);
-				return records
-					.filter(
-						(record) =>
-							record.kind === "AISLE" && record.parentOrganizationIds.some((id) => bayIds.has(id)),
-					)
-					.map((record) => record.id);
-			});
-			assertEqual(loopIds.length, 2, `${label} Twin Bay has two semantic Process Loops`);
+				await canvas.press("Enter");
+				const bay = await waitForWorker(
+					page,
+					(metrics) =>
+						Number(metrics.workerTargetSequence) === Number(empty.workerTargetSequence) + 1 &&
+						metrics.staticFabOrganizations === "3",
+					{ timeout: 30_000 },
+				);
+				assertSingleGuidedPortCommit(bay, empty, `${label} actual Assemble Twin Bay`);
+				loopIds = await page.evaluate(() => {
+					const records = window.__tileFab.getEditorModel().document.organizations.records;
+					const bayIds = new Set(
+						records.filter((record) => record.kind === "BAY").map((record) => record.id),
+					);
+					return records
+						.filter(
+							(record) =>
+								record.kind === "AISLE" &&
+								record.parentOrganizationIds.some((id) => bayIds.has(id)),
+						)
+						.map((record) => record.id);
+				});
+				assertEqual(loopIds.length, 2, `${label} Twin Bay has two semantic Process Loops`);
+			}
 
 			await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
 			await waitForLegalPortSlots(page);
@@ -9404,17 +10074,15 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 			}
 			if (!eqPlan) throw new Error(`${label} Twin Bay has no direct three-Port EQ run.`);
 			const alternateLoopId = loopIds.find((id) => id !== eqPlan.loopId);
-			if (alternateLoopId === undefined) throw new Error(`${label} has no alternate Process Loop.`);
-			await selectOrdinaryPortProcessLoop(page, eqPlan.loopId, label, true);
-			const eqScopeRecovery = await exerciseOrdinaryEqProcessLoopRecovery(
-				page,
-				eqPlan.loopId,
-				alternateLoopId,
-				label,
-			);
+			if (!standalone && alternateLoopId === undefined)
+				throw new Error(`${label} has no alternate Process Loop.`);
+			await selectOrdinaryPortProcessLoop(page, eqPlan.loopId, label, !standalone);
+			const eqScopeRecovery = standalone
+				? null
+				: await exerciseOrdinaryEqProcessLoopRecovery(page, eqPlan.loopId, alternateLoopId, label);
 			if (viewport.width === 390) {
 				await page.screenshot({
-					path: path.join(artifactRoot, "ordinary-process-loop-picker-390x600.png"),
+					path: path.join(artifactRoot, `${label}-process-loop-picker.png`),
 				});
 			}
 			await zoomOrdinaryPortTargetIfOffered(page, "EQ", label);
@@ -9428,7 +10096,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 						?.getAttribute("data-hover-port-slot") === String(row),
 				eqPlan.start.row,
 			);
-			await clickWorld(page, eqPlan.start, false);
+			if (standalone) await clickStandaloneLoopPortCandidate(page, eqPlan.start, `${label} live Port input`);
+			else await clickWorld(page, eqPlan.start, false);
 			await page.waitForFunction(
 				() =>
 					document
@@ -9436,7 +10105,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 						?.getAttribute("data-guided-port-keyboard-phase") === "choose-end",
 			);
 			await revealOrdinaryEquipmentSlot(page, eqPlan.end, `${label} EQ end`);
-			await clickWorld(page, eqPlan.end, false);
+			if (standalone) await clickStandaloneLoopPortCandidate(page, eqPlan.end, `${label} live Port input`);
+			else await clickWorld(page, eqPlan.end, false);
 			const eqPlaced = await waitForWorker(
 				page,
 				(metrics) =>
@@ -9486,7 +10156,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 						?.getAttribute("data-hover-port-slot") === String(row),
 				ohbPlan.row,
 			);
-			await clickWorld(page, ohbPlan, false);
+			if (standalone) await clickStandaloneLoopPortCandidate(page, ohbPlan, `${label} live Port input`);
+			else await clickWorld(page, ohbPlan, false);
 			const ohbPlaced = await waitForWorker(
 				page,
 				(metrics) =>
@@ -9511,12 +10182,9 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 			await waitForLegalPortSlots(page);
 			await selectOrdinaryPortProcessLoop(page, eqPlan.loopId, label);
 			await zoomOrdinaryPortTargetIfOffered(page, "STK", label);
-			const stkScopeRecovery = await exerciseOrdinaryStkProcessLoopRecovery(
-				page,
-				eqPlan.loopId,
-				alternateLoopId,
-				label,
-			);
+			const stkScopeRecovery = standalone
+				? null
+				: await exerciseOrdinaryStkProcessLoopRecovery(page, eqPlan.loopId, alternateLoopId, label);
 			const stkOptions = await readDirectProcessLoopPortCandidates(page, "STK", eqPlan.loopId);
 			const occupied = [...eqAttached.evidence.ports, ...ohbAttached.evidence.ports];
 			const availableStkOptions = stkOptions.filter((candidate) =>
@@ -9547,7 +10215,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 						?.getAttribute("data-hover-port-slot") === String(row),
 				stkPlan.row,
 			);
-			await clickWorld(page, stkPlan, false);
+			if (standalone) await clickStandaloneLoopPortCandidate(page, stkPlan, `${label} live Port input`);
+			else await clickWorld(page, stkPlan, false);
 			await page.waitForFunction(
 				(row) =>
 					document
@@ -9598,7 +10267,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 						?.getAttribute("data-hover-port-slot") === String(row),
 				stkSecond.row,
 			);
-			await clickWorld(page, stkSecond, false);
+			if (standalone) await clickStandaloneLoopPortCandidate(page, stkSecond, `${label} live Port input`);
+			else await clickWorld(page, stkSecond, false);
 			await page.waitForFunction(
 				({ first, second }) => {
 					const rows = (
@@ -9621,6 +10291,9 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				{ timeout: 10_000 },
 			);
 			assertProjectUnchanged(await readMetrics(page), beforeStk, `${label} FLEX STK P1/P2 draft`);
+			const standaloneStkScroll = standalone && viewport.width === 390
+				? await assertShortStockerScrollLayout(page, label)
+				: null;
 			await page.getByTestId("stk-complete").click();
 			const stkPlaced = await waitForWorker(
 				page,
@@ -9673,6 +10346,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				true,
 				`${label} all complete groups have direct Loop routes`,
 			);
+			const mixedSelectionRefusal = standalone ? await assertStandaloneMixedSelectionRegistrationRefused(page, [{ id: eqId, world: eqPlan.start }, { id: ohbId, world: ohbPlan }, { id: stkId, world: stkPlan }], label) : null;
+			const standaloneRepair = standalone ? await exerciseStandaloneLoopRepair(page, eqPlan.loopId, label) : null;
 			await openStaticFabNavigatorTab(page, "checks");
 			await page.waitForFunction(
 				() =>
@@ -9733,7 +10408,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 					(metrics) =>
 						metrics.modelChecksum === saved.modelChecksum &&
 						metrics.equipmentGroups === "3" &&
-						metrics.staticFabOrganizations === "3",
+						metrics.staticFabOrganizations === (standalone ? "1" : "3"),
 					{ timeout: 30_000 },
 				);
 				assertEqual(reopened.workerChecksum, saved.workerChecksum, `${label} native Worker parity`);
@@ -9772,7 +10447,8 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				await closeBrowserResource(reopenedPage, `${label} reopened all-equipment page`);
 				await closeBrowserResource(reopenedContext, `${label} reopened all-equipment context`);
 			}
-			if (viewport.width === 390) {
+			const standaloneIdentityReset = standalone ? await exerciseStandaloneLoopIdentityReset(page, savedPath, saved, eqPlan.loopId, label) : null;
+			if (viewport.width === 390 && !standalone) {
 				// Reopening the same project replaces the document even though its project ID and
 				// checksum stay equal. An ordinary Port placement scope belongs to the old view.
 				await clickActivityCommand(page, "equip", "EQ 포트 행 배치");
@@ -9866,6 +10542,12 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance) {
 				viewport: label,
 				groupIds,
 				loopIds,
+				standaloneRegistration,
+				mixedSelectionRefusal,
+				standaloneRepair,
+				standaloneIdentityReset,
+				standaloneStkScroll,
+				standaloneSelectorActivation: standalone ? process.platform === "darwin" ? "native-select-api-with-focus" : "native-keyboard" : null,
 				eqScopeRecovery,
 				stkScopeRecovery,
 				checks: checked.staticFabCheckIssues,
@@ -44704,22 +45386,8 @@ async function exerciseStkSelectionReview(page, label) {
 				0,
 				`${label} short review has no selected Process Loop`,
 			);
-			const stickyLayout = await dock.evaluate((element) => {
-				// Prove completion remains touchable from the top of an overflowing draft.
-				element.scrollTop = 0;
-				const actions = element.querySelector(".tilefab-equipment-actions");
-				return {
-					clientHeight: element.clientHeight,
-					scrollHeight: element.scrollHeight,
-					position: actions ? getComputedStyle(actions).position : null,
-				};
-			});
-			assertAtLeast(
-				stickyLayout.scrollHeight,
-				stickyLayout.clientHeight + 1,
-				`${label} short review really overflows`,
-			);
-			assertEqual(stickyLayout.position, "sticky", `${label} completion stays pinned`);
+			// The body owns overflow; actual wheel input must not move the header or completion row.
+			await assertShortStockerScrollLayout(page, `strict-${label}-selection-review`);
 			const complete = page.getByTestId("stk-complete");
 			assertEqual(await complete.isEnabled(), true, `${label} ready completion remains enabled`);
 			await assertLocatorInsideViewport(page, complete);

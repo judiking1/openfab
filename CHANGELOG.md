@@ -6,6 +6,24 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-10-03
+
+Prepared as the 0.1.39 release candidate. Deployment is verified separately through exact-source
+CI and served-file checks; this version entry alone does not establish publication.
+
+- Register a manually drawn closed rail selection as an explicit standalone Process Loop,
+  then attach OHB, EQ and Stocker through their existing ownership actions.
+- Edit the registered Loop's cardinal rails while preserving its ID, name, declaration and
+  equipment membership. Rail changes and Loop membership commit and replay atomically;
+  other owners and required equipment Port routes remain protected.
+- Keep failed keyboard repair drafts editable, explain refusals in Korean, and clear old
+  repair and Port scopes when reopening a project.
+- Keep the Loop edit bar clear of the current menu width and keep short-screen Stocker
+  completion controls outside its scrolling content.
+- Verify actual blank-canvas drawing, registration, all three equipment kinds, rail repair,
+  Undo/Redo, Checks and save/reopen at 390, 760 and 1440 px. Native OS picker verification
+  and overall V1 completion retain their separate gates.
+
 ## [0.1.38] - 2026-10-03
 
 - Preserve explicit standalone Process Loop intent across project, Worker, blueprint and library
