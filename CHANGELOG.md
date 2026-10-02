@@ -6,6 +6,22 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-10-02
+
+- Preserve the current First Rail repair and Process Loop guide's arrow direction, forward
+  endpoint, clearance and closure coaching when the Canvas is the next pointer target. The visible guide and
+  accessible target description use the same instruction.
+- Verify repeated wrong-lane OHB/EQ pointer release announcements through their actual
+  footer or retained-EQ live region, alongside unchanged source, Worker and draft anchors.
+- Verify compact guide coaching and rejected reverse rail input before valid Loop closure.
+- Keep the rail guide scrollable on short phone screens so it leaves room for
+  actual Canvas input while preserving the current direction instruction.
+- Check cooperative bundle preparation deadlines more frequently across state, history
+  and Worker packet construction, preserving the 2 ms target and 8 ms release gate.
+- Require the same measured 15 m First Rail target in guide evaluation, pointer feedback
+  and keyboard construction. A valid shorter draft stays editable in the current mission;
+  extending its forward endpoint to 15 m advances without changing Network Link geometry.
+
 ## [0.1.33] - 2026-10-02
 
 - Show whether every proposed equipment Port belongs to one Process Loop during whole-group

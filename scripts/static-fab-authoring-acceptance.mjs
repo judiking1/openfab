@@ -326,7 +326,16 @@ try {
 		console.log("PASS preset and Recent placement lifecycle acceptance");
 		throw PLACEMENT_LIFECYCLE_ONLY_COMPLETE;
 	}
+	if (process.env.OPENFAB_FIRST_RAIL_BOUNDARY_ACCEPTANCE_ONLY === "1") {
+		recordStep("guided-first-rail-boundary", await exerciseGuidedFirstRailBoundary(browser));
+		assertEqual(result.consoleErrors.length, 0, "First Rail boundary console errors");
+		assertEqual(result.pageErrors.length, 0, "First Rail boundary page errors");
+		result.status = "PASS";
+		console.log("PASS Guided First Rail 14/15 m boundary and extension recovery");
+		throw GUIDED_ONLY_COMPLETE;
+	}
 	if (process.env.OPENFAB_GUIDED_ACCEPTANCE_ONLY === "1") {
+		recordStep("guided-first-rail-boundary", await exerciseGuidedFirstRailBoundary(browser));
 		const guidedPortHandoff = await exerciseGuidedPortHandoffRegression(browser, "save");
 		recordStep("guided-port-handoff", guidedPortHandoff);
 		const guidedDiscardHandoff = await exerciseGuidedPortHandoffRegression(browser, "discard");
@@ -2818,6 +2827,7 @@ try {
 	});
 	const retainedHeap = await exerciseEditorV1RetainedHeap(desktopPage);
 	recordStep("editor-v1-retained-heap", retainedHeap);
+	recordStep("guided-first-rail-boundary", await exerciseGuidedFirstRailBoundary(browser));
 	const guidedPortHandoff = await exerciseGuidedPortHandoffRegression(browser, "save");
 	recordStep("guided-port-handoff", guidedPortHandoff);
 	const guidedDiscardHandoff = await exerciseGuidedPortHandoffRegression(browser, "discard");
@@ -6016,6 +6026,144 @@ async function assertAdjacentWrongLoopClick(page, pair, type, label) {
 	return { feedback, stickyClearance };
 }
 
+async function observeOrdinaryPortRelease(page, { owner, type, label }) {
+	const expected = `${type} 행을 시작한 연속 직선 레일에서 포인터를 놓으세요`;
+	const probe = await page.evaluateHandle(() => {
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		const footer = document.querySelector('[data-testid="rail-status-message"]');
+		const dedicated = document.querySelector('[data-testid="guided-port-keyboard-announcement"]');
+		if (!canvas || !footer) throw new Error("Port release observation requires Canvas and footer.");
+		const read = (node) => node ? {
+			text: node.textContent ?? "", role: node.getAttribute("role"),
+			live: node.getAttribute("aria-live"), atomic: node.getAttribute("aria-atomic"),
+			connected: node.isConnected,
+		} : null;
+		const changes = [];
+		let releasedAt = null;
+		let before = null;
+		const observers = [];
+		for (const [owner, node] of [["footer", footer], ["dedicated", dedicated]]) {
+			if (!node) continue;
+			const observer = new MutationObserver((records) => {
+				if (releasedAt !== null && records.length > 0) changes.push({
+					owner, at: performance.now(), ...read(node),
+				});
+			});
+			observer.observe(node, {
+				childList: true, characterData: true, subtree: true, attributes: true,
+				attributeFilter: ["role", "aria-live", "aria-atomic"],
+			});
+			observers.push(observer);
+		}
+		const release = () => {
+			// MutationObserver callback time is not mutation time. Discard records from before release.
+			for (const observer of observers) observer.takeRecords();
+			changes.length = 0;
+			before = { footer: read(footer), dedicated: read(dedicated) };
+			releasedAt = performance.now();
+		};
+		canvas.addEventListener("pointerup", release, true);
+		return {
+			before: () => before,
+			snapshot: () => ({
+				footer: read(footer), dedicated: read(dedicated), releasedAt,
+				footerCurrent: document.querySelector('[data-testid="rail-status-message"]') === footer,
+				dedicatedCurrent: document.querySelector('[data-testid="guided-port-keyboard-announcement"]') === dedicated,
+				changes: changes.filter((change) => releasedAt !== null && change.at >= releasedAt),
+			}),
+			close: () => {
+				for (const observer of observers) observer.disconnect();
+				canvas.removeEventListener("pointerup", release, true);
+			},
+		};
+	});
+	try {
+		await page.mouse.up();
+		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		const immediate = await probe.evaluate((value) => value.snapshot());
+		// Observe past the 180 ms row debounce and 50 ms identical-message replay.
+		await page.waitForTimeout(250);
+		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		const settled = await probe.evaluate((value) => value.snapshot());
+		const before = await probe.evaluate((value) => value.before());
+		assertEqual(typeof settled.releasedAt, "number", `${label} real pointer release observed`);
+		assertEqual(settled.footerCurrent, true, `${label} footer observation remains current`);
+		assertEqual(settled.dedicatedCurrent, true, `${label} dedicated observation remains current`);
+		const final = settled[owner];
+		assertEqual(before[owner]?.role, "status", `${label} pre-release live owner role`);
+		assertEqual(before[owner]?.live, "polite", `${label} pre-release live owner polite`);
+		assertEqual(final?.connected, true, `${label} final live owner connected`);
+		assertEqual(final?.role, "status", `${label} final live owner role`);
+		assertEqual(final?.live, "polite", `${label} final live owner polite`);
+		assertEqual(final?.atomic, "true", `${label} final live owner atomic`);
+		assertIncludes(final?.text ?? "", expected, `${label} settled release refusal`);
+		const changed = settled.changes.filter((change) => change.owner === owner);
+		assertEqual(changed.some((change) => change.text.includes(expected)), true,
+			`${label} fresh refusal mutation after mouse-up`);
+		if (owner === "footer") {
+			assertEqual(before.dedicated, null, `${label} fresh drag has no dedicated cursor before release`);
+			assertEqual(settled.dedicated, null, `${label} fresh drag has no competing dedicated owner`);
+		} else {
+			await assertPortKeyboardSoleLiveOwner(page, `${label} retained EQ sole owner`);
+			if (before.dedicated?.text === final.text) {
+				const blank = changed.findIndex((change) => change.text === "");
+				assertAtLeast(blank, 0, `${label} identical dedicated refusal clears before replay`);
+				assertEqual(changed.slice(blank + 1).some((change) => change.text === final.text), true,
+					`${label} identical dedicated refusal replays after clearing`);
+			}
+		}
+		return { owner, before, immediate, settled };
+	} finally {
+		await probe.evaluate((value) => value.close());
+		await probe.dispose();
+	}
+}
+
+async function exerciseAdjacentPortDragRefusal(page, { type, anchor, loopAId, loopBId, retained, label }) {
+	const outside = await readDirectProcessLoopPortCandidates(page, type, loopBId);
+	const horizontal = await page.evaluate(({ type, row }) => {
+		const to = window.__tileFab?.getEditorModel().portSlotArtifacts[type]?.slots.routeToDirections[row];
+		return to === 2 || to === 8;
+	}, { type, row: anchor.row });
+	const end = outside.find((candidate) =>
+		(horizontal ? Math.abs(candidate.y - anchor.y) : Math.abs(candidate.x - anchor.x)) > 1.75);
+	if (!end) throw new Error(`${label} needs an outside Loop endpoint beyond the anchor lane drift.`);
+	const baseline = await readMetrics(page);
+	const anchorBefore = await readAdjacentPortDraftState(page);
+	const proofs = [];
+	for (let repeat = 0; repeat < 2; repeat += 1) {
+		const attempt = `${label} repeated release ${repeat + 1}`;
+		// Framing uses RMB panning; complete it before beginning the primary drag.
+		const [startPoint, endPoint] = await frameRailPointerGesture(page, anchor, end);
+		await page.mouse.move(startPoint.x, startPoint.y);
+		await page.mouse.down();
+		await page.mouse.move(endPoint.x, endPoint.y, { steps: 8 });
+		if (retained) await assertPortKeyboardSoleLiveOwner(page, `${attempt} before release`);
+		proofs.push(await observeOrdinaryPortRelease(page, {
+			owner: retained ? "dedicated" : "footer", type, label: attempt,
+		}));
+		assertProjectUnchanged(await readMetrics(page), baseline, `${attempt} source Worker and history unchanged`);
+		assertEqual(await page.getByTestId("ordinary-port-process-loop-target").inputValue(),
+			String(loopAId), `${attempt} selected Loop retained`);
+		if (retained) {
+			const after = await readAdjacentPortDraftState(page);
+			assertEqual(after.eqPhase, "choose-end", `${attempt} EQ remains choose-end`);
+			assertEqual(after.eqAnchorRow, anchorBefore.eqAnchorRow, `${attempt} exact EQ anchor retained`);
+		} else {
+			assertEqual((await readAdjacentPortDraftState(page)).eqAnchorRow, "", `${attempt} no anchored draft created`);
+			const cursor = await page.getByTestId("rail-canvas").evaluate((canvas) => ({
+				type: canvas.dataset.guidedPortKeyboard ?? "",
+				phase: canvas.dataset.guidedPortKeyboardPhase ?? "",
+				markerCount: document.querySelectorAll('[data-testid="ordinary-port-keyboard-target"]').length,
+			}));
+			assertEqual(cursor.type, "", `${attempt} fresh drag clears keyboard cursor`);
+			assertEqual(cursor.phase, "", `${attempt} fresh drag clears keyboard phase`);
+			assertEqual(cursor.markerCount, 0, `${attempt} fresh drag clears ordinary target marker`);
+		}
+	}
+	return { type, retained, repeats: proofs, anchorRow: anchor.row, outsideRow: end.row };
+}
+
 async function exerciseAdjacentProcessLoopPortHit(browserInstance) {
 	const fixture = await createAdjacentProcessLoopPortFixture();
 	const context = await browserInstance.newContext({
@@ -6061,6 +6209,10 @@ async function exerciseAdjacentProcessLoopPortHit(browserInstance) {
 			label,
 		);
 		await assertAdjacentWrongLoopClick(page, pairs.OHB, "OHB", label);
+		const releaseProofs = [await exerciseAdjacentPortDragRefusal(page, {
+			type: "OHB", anchor: pairs.OHB.selected, loopAId: fixture.loopAId,
+			loopBId: fixture.loopBId, retained: false, label: `${label} fresh OHB`,
+		})];
 		const beforeOhb = await readMetrics(page);
 		await revealOrdinaryEquipmentSlot(page, pairs.OHB.selected, `${label} legal OHB`);
 		await clickWorld(page, pairs.OHB.selected, false);
@@ -6108,6 +6260,12 @@ async function exerciseAdjacentProcessLoopPortHit(browserInstance) {
 			)
 			.find((items) => items.every((item) => eqRows.has(item.row)));
 		if (!eqRun) throw new Error(`${label} lacks a three-Port EQ run directly in Loop A.`);
+		releaseProofs.push(await exerciseAdjacentPortDragRefusal(page, {
+			type: "EQ", anchor: eqRun[0], loopAId: fixture.loopAId,
+			loopBId: fixture.loopBId, retained: false, label: `${label} fresh EQ`,
+		}));
+		// Framing may change zoom; the overlapping-hit-disk precondition belongs to this view.
+		pairs.EQ = await readAdjacentProcessLoopPortPair(page, "EQ", fixture.loopAId, fixture.loopBId, label);
 		const beforeEq = await readMetrics(page);
 		await revealOrdinaryEquipmentSlot(page, eqRun[0], `${label} legal EQ anchor`);
 		await clickWorld(page, eqRun[0], false);
@@ -6122,6 +6280,10 @@ async function exerciseAdjacentProcessLoopPortHit(browserInstance) {
 		);
 		assertProjectUnchanged(await readMetrics(page), beforeEq, `${label} EQ anchor draft`);
 		await assertAdjacentWrongLoopClick(page, pairs.EQ, "EQ", label);
+		releaseProofs.push(await exerciseAdjacentPortDragRefusal(page, {
+			type: "EQ", anchor: eqRun[0], loopAId: fixture.loopAId,
+			loopBId: fixture.loopBId, retained: true, label: `${label} retained EQ`,
+		}));
 		await revealOrdinaryEquipmentSlot(page, eqRun[2], `${label} legal EQ end`);
 		await clickWorld(page, eqRun[2], false);
 		const eqPlaced = await waitForWorker(
@@ -6463,6 +6625,7 @@ async function exerciseAdjacentProcessLoopPortHit(browserInstance) {
 		}
 		return {
 			eligibleCounts: fixture.eligibleCounts,
+			releaseProofs,
 			pairs: Object.fromEntries(
 				Object.entries(pairs).map(([type, pair]) => [
 					type,
@@ -12148,6 +12311,93 @@ async function exerciseGuidedCopyRecovery(page, label) {
 	await page.setViewportSize({ width: 390, height: 844 });
 }
 
+async function exerciseGuidedFirstRailBoundary(browser) {
+	const cases = [];
+	for (const meters of [14, 15]) {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+		const page = await context.newPage();
+		page.on("console", (message) => {
+			if (message.type() === "error") result.consoleErrors.push(message.text());
+		});
+		page.on("pageerror", (error) => result.pageErrors.push(error.message));
+		try {
+			await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(page, { physicalPaths: 0 });
+			await page.getByTestId("openfab-start-dialog").getByRole("button", { name: /GUIDED BUILD/ }).click();
+			const panel = page.getByTestId("guided-build-panel");
+			await panel.waitFor({ state: "visible" });
+			const acknowledge = panel.getByRole("button", { name: "이동을 익혔어요", exact: true });
+			if ((await acknowledge.count()) > 0) await acknowledge.click();
+			await page.waitForFunction(() => document.querySelector('[data-testid="guided-build-panel"]')?.getAttribute("data-current-mission") === "first-rail");
+			await assertGuidedPrimaryTarget(page, "canvas:rail", `${meters} m First Rail target`);
+			const before = await readMetrics(page);
+			const startWorld = { x: 0.5, y: 0.5 };
+			const endWorld = { x: meters + 0.5, y: 0.5 };
+			const [start, end] = await frameRailPointerGesture(page, startWorld, endWorld);
+			assertProjectUnchanged(await readMetrics(page), before, `${meters} m boundary framing preserves project`);
+			assertExactStaticFabModelIdentity(await readMetrics(page), before, `${meters} m boundary framing preserves source/Worker`);
+			await page.mouse.move(start.x, start.y);
+			await page.mouse.down();
+			await page.mouse.move(end.x, end.y, { steps: 12 });
+			await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-draft-preview-valid") === "true");
+			const preview = (await page.locator(".tilefab-status-preview").innerText()).trim();
+			assertEqual(preview, meters === 14 ? "14 m · 1 m 더 끌어 첫 직선을 만드세요" : "15 m · 목표 충족 · 놓아서 건설", `${meters} m exact First Rail preview`);
+			await page.screenshot({ path: path.join(artifactRoot, `guided-first-rail-${meters}m-preview.png`), fullPage: true });
+			await page.mouse.up();
+			const committed = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1);
+			for (const key of ["modelSequence", "workerTargetSequence", "workerSequence"]) assertEqual(Number(committed[key]), Number(before[key]) + 1, `${meters} m boundary single ${key}`);
+			assertEqual(Number(committed.authoredEdges), meters, `${meters} m boundary exact edges`);
+			const geometry = await readRailGeometry(page);
+			assertEqual(geometry.cells.length, meters + 1, `${meters} m boundary exact cells`);
+			const expectedMission = meters === 14 ? "first-rail" : "process-loop";
+			await page.waitForFunction((mission) => document.querySelector('[data-testid="guided-build-panel"]')?.getAttribute("data-current-mission") === mission, expectedMission);
+			await assertGuidedPrimaryTarget(page, "canvas:rail", `${meters} m boundary current target`);
+			assertEqual(committed.workerSimulationReady, "false", `${meters} m boundary simulation gate`);
+			if (meters === 14) {
+				assertIncludes(await panel.innerText(), "가장 긴 직선 14 / 15 m", "14 m incomplete mission progress");
+				assertIncludes(await panel.innerText(), "주황색 열린 끝을 같은 방향으로 늘리거나", "14 m existing-endpoint repair instruction");
+			}
+			for (const key of ["equipmentGroups", "equipmentPorts", "projectBlueprints", "staticFabOrganizations", "modelNextAdvancedSwitchId", "modelNextPortId", "modelNextEquipmentGroupId", "modelNextOrganizationId"]) assertEqual(committed[key], before[key], `${meters} m boundary preserves ${key}`);
+			assertEqual(committed.documentCanUndo, "true", `${meters} m boundary is undoable`);
+			assertEqual(committed.documentCanRedo, "false", `${meters} m boundary has no Redo`);
+			await page.screenshot({ path: path.join(artifactRoot, `guided-first-rail-${meters}m-committed.png`), fullPage: true });
+			let extended = null;
+			if (meters === 14) {
+				await page.setViewportSize({ width: 390, height: 600 });
+				await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+				await assertGuidedPrimaryTarget(page, "canvas:rail", "14 m short-phone repair target");
+				assertProjectUnchanged(await readMetrics(page), committed, "14 m short-phone resize preserves project");
+				assertExactStaticFabModelIdentity(await readMetrics(page), committed, "14 m short-phone resize preserves source/Worker");
+				await page.screenshot({ path: path.join(artifactRoot, "guided-first-rail-14m-short-phone.png"), fullPage: true });
+				const [extendStart, extendEnd] = await frameRailPointerGesture(page, endWorld, { x: 15.5, y: 0.5 }, 22);
+				assertProjectUnchanged(await readMetrics(page), committed, "14 m extension framing preserves project");
+				assertExactStaticFabModelIdentity(await readMetrics(page), committed, "14 m extension framing preserves source/Worker");
+				await page.mouse.move(extendStart.x, extendStart.y);
+				await page.mouse.down();
+				await page.mouse.move(extendEnd.x, extendEnd.y, { steps: 8 });
+				await page.mouse.up();
+				extended = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(committed.workerTargetSequence) + 1);
+				for (const key of ["modelSequence", "workerTargetSequence", "workerSequence"]) assertEqual(Number(extended[key]), Number(committed[key]) + 1, `14→15 m recovery single ${key}`);
+				for (const key of ["equipmentGroups", "equipmentPorts", "projectBlueprints", "staticFabOrganizations", "modelNextAdvancedSwitchId", "modelNextPortId", "modelNextEquipmentGroupId", "modelNextOrganizationId"]) assertEqual(extended[key], committed[key], `14→15 m recovery preserves ${key}`);
+				assertEqual(extended.documentCanUndo, "true", "14→15 m recovery is undoable");
+				assertEqual(extended.documentCanRedo, "false", "14→15 m recovery has no Redo");
+				assertEqual(Number(extended.authoredEdges), 15, "14→15 m recovery exact edges");
+				assertEqual((await readRailGeometry(page)).cells.length, 16, "14→15 m recovery exact cells");
+				await page.waitForFunction(() => document.querySelector('[data-testid="guided-build-panel"]')?.getAttribute("data-current-mission") === "process-loop");
+				await assertGuidedPrimaryTarget(page, "canvas:rail", "14→15 m recovered Process Loop target");
+				await page.screenshot({ path: path.join(artifactRoot, "guided-first-rail-14m-extended.png"), fullPage: true });
+			}
+			cases.push({ meters, preview, expectedMission, geometry, committed, extended });
+		} catch (error) {
+			await page.screenshot({ path: path.join(artifactRoot, `guided-first-rail-${meters}m-failure.png`), fullPage: true }).catch(() => undefined);
+			throw error;
+		} finally {
+			await closeBrowserResource(context, `First Rail ${meters} m boundary context`);
+		}
+	}
+	return { cases };
+}
+
 async function exerciseGuidedPortHandoffRegression(
 	browserInstance,
 	practiceTransitionMode = "save",
@@ -12349,11 +12599,98 @@ async function exerciseGuidedPortHandoffRegression(
 			{ timeout: 10_000 },
 		);
 		await assertGuidedPrimaryTarget(page, "canvas:rail", "Guided Process Loop entry");
+		const coachingBaseline = await readMetrics(page);
+		const readCoachingSession = () => page.evaluate(() => {
+			const attributes = (element, names) => Object.fromEntries(
+				names.map((name) => [name, element?.getAttribute(name)]),
+			);
+			return {
+				app: attributes(document.querySelector('[data-testid="tilefab-app"]'), [
+					"data-editor-activity", "data-editor-tool", "data-view-mode",
+					"data-guided-build-active", "data-guided-build-scoped", "data-guided-build-current",
+					"data-guided-primary-target", "data-guided-build-chapter-checkpoint", "data-port-keyboard-scope",
+				]),
+				canvas: attributes(document.querySelector('[data-testid="rail-canvas"]'), [
+					"data-build-mode", "data-guided-rail-keyboard", "data-rail-keyboard-scope", "data-rail-keyboard-phase",
+					"data-guided-port-keyboard", "data-guided-port-keyboard-phase", "data-port-keyboard-scope",
+				]),
+			};
+		});
+		const coachingSession = await readCoachingSession();
+		const endpointWorlds = await page.getByTestId("rail-canvas").evaluate((canvas, endpoints) => {
+			const bounds = canvas.getBoundingClientRect();
+			const camera = window.__tileFab?.camera;
+			if (!camera) throw new Error("Guided coaching requires the current view camera.");
+			return endpoints.map((point) => ({
+				x: (point.x - bounds.x - camera.offsetX) / camera.zoom,
+				y: (point.y - bounds.y - camera.offsetY) / camera.zoom,
+			}));
+		}, [firstRailStart, firstRailEnd]);
+		for (const viewport of [{width:390,height:600},{width:760,height:900},{width:1440,height:900},{width:390,height:844}]) {
+			await page.setViewportSize(viewport);
+			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+			await assertGuidedPrimaryTarget(page, "canvas:rail", `Guided Loop coaching ${viewport.width}`);
+			const instruction = panel.getByTestId("guided-build-progress-cue").locator("p");
+			await instruction.waitFor({state:"visible"});
+			await assertLocatorInsideViewport(page, instruction);
+			await assertLocatorOwnsHitArea(instruction, `Guided Loop coaching readable ${viewport.width}`);
+			const copy = (await instruction.innerText()).trim();
+			for (const phrase of ["첫 15칸 이상 직선을 유지", "화살표", "주황색 열린 끝", "최소 6칸", "시작점에 닫으세요"]) {
+				assertIncludes(copy, phrase, `Guided Loop coaching ${phrase}`);
+			}
+			assertEqual((await page.locator("#tilefab-guided-primary-target-description").textContent()).trim(), `Guided Build 다음 작업. ${copy}`,
+				"Guided Loop visual and accessible coaching agree");
+			assertProjectUnchanged(await readMetrics(page), coachingBaseline, "Guided coaching resize remains transient");
+			assertEqual(JSON.stringify(await readCoachingSession()), JSON.stringify(coachingSession),
+				"Guided coaching resize preserves editing mode and keyboard session");
+			await page.screenshot({path:path.join(artifactRoot,`guided-loop-coaching-${practiceTransitionMode}-${viewport.width}x${viewport.height}.png`)});
+			if (viewport.width === 390 && viewport.height === 600) {
+				const panelBox = await panel.boundingBox();
+				if (!panelBox) throw new Error("Short-phone Loop guide is unavailable.");
+				await page.mouse.move(panelBox.x + panelBox.width / 2, panelBox.y + panelBox.height / 2);
+				await page.mouse.wheel(0, 600);
+				await page.waitForFunction(() => document.querySelector('[data-testid="guided-build-panel"]')?.scrollTop > 0);
+				for (const name of ["키보드로 레일 만들기", "이 단계 도움말", "이전"]) {
+					const control = panel.getByRole("button", {name,exact:true});
+					await assertLocatorInsideViewport(page, control);
+					await assertLocatorOwnsHitArea(control, `Short-phone Loop guide scrolled control ${name}`);
+					assertAtLeast((await control.boundingBox()).height, 44, `Short-phone Loop guide control ${name} height`);
+				}
+				await page.screenshot({path:path.join(artifactRoot,`guided-loop-controls-${practiceTransitionMode}-390x600.png`)});
+				await page.mouse.wheel(0, -600);
+				await page.waitForFunction(() => document.querySelector('[data-testid="guided-build-panel"]')?.scrollTop === 0);
+				await assertLocatorOwnsHitArea(instruction, "Short-phone Loop coaching after scroll recovery");
+				assertProjectUnchanged(await readMetrics(page), coachingBaseline, "Short-phone Loop guide scroll remains transient");
+				assertEqual(JSON.stringify(await readCoachingSession()), JSON.stringify(coachingSession),
+					"Short-phone Loop guide scroll preserves editing mode and keyboard session");
+			}
+		}
+		// Preserve the original world endpoints when responsive view layout changes screen coordinates.
+		const [framedStart, framedEnd] = await frameRailPointerGesture(page, endpointWorlds[0], endpointWorlds[1]);
+		Object.assign(firstRailStart, framedStart);
+		Object.assign(firstRailEnd, framedEnd);
+		const currentCanvasBox = await page.getByTestId("rail-canvas").boundingBox();
+		if (!currentCanvasBox) throw new Error("Guided Loop recovery Canvas is unavailable.");
+		const reverseBefore = await readMetrics(page);
+		await page.mouse.move(firstRailEnd.x, firstRailEnd.y);
+		await page.mouse.down();
+		await page.mouse.move(firstRailStart.x, firstRailStart.y, {steps:8});
+		await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.dataset.draftPreviewValid === "false");
+		assertIncludes(await guidedPreview.innerText(), "역방향", "Guided reverse rail preview explains direction refusal");
+		await page.mouse.up();
+		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		const reverseAfter = await readMetrics(page);
+		assertProjectUnchanged(reverseAfter, reverseBefore, "Guided reverse rail refusal remains transient");
+		assertExactStaticFabModelIdentity(reverseAfter, reverseBefore, "Guided reverse rail source and Worker identity");
+		for (const key of ["documentCanUndo","documentCanRedo"]) assertEqual(reverseAfter[key], reverseBefore[key], `Guided reverse rail history ${key}`);
+		assertIncludes(await page.getByTestId("rail-status-message").textContent(), "역방향", "Guided reverse release reason");
+		assertEqual(await panel.getAttribute("data-current-mission"), "process-loop", "Guided reverse refusal keeps current mission");
+		await assertGuidedPrimaryTarget(page, "canvas:rail", "Guided reverse refusal Canvas recovery");
 		let outerLegEnd = null;
 		const outerLegCues = new Set();
 		await page.mouse.move(firstRailEnd.x, firstRailEnd.y);
 		await page.mouse.down();
-		for (let y = firstRailEnd.y + 48; y <= canvasBox.y + canvasBox.height - 96; y += 6) {
+		for (let y = firstRailEnd.y + 48; y <= currentCanvasBox.y + currentCanvasBox.height - 96; y += 6) {
 			await page.mouse.move(firstRailEnd.x, y, { steps: 2 });
 			const cue = (await guidedPreview.innerText()).trim();
 			if (cue) outerLegCues.add(cue);
@@ -53817,9 +54154,9 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 	return Object.freeze(proof);
 }
 
-async function frameRailPointerGesture(page, start, end) {
+async function frameRailPointerGesture(page, start, end, clearancePixels = 64) {
 	for (let zoomStep = 0; zoomStep < 8; zoomStep += 1) {
-		await centerWorld(page, { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }, 64);
+		await centerWorld(page, { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }, clearancePixels);
 		const points = [await screenPointForWorld(page, start), await screenPointForWorld(page, end)];
 		if (
 			await page.evaluate(
@@ -54051,7 +54388,17 @@ async function exerciseEqClickEndpoints(page, label) {
 					1,
 					`${label} EQ hover feedback keeps the pointed-at slot stable`,
 				);
-				await page.mouse.click(wrongPoint.x, wrongPoint.y);
+				for (let repeat = 0; repeat < 2; repeat += 1) {
+					await page.mouse.down();
+					const proof = await observeOrdinaryPortRelease(page, {
+						owner: "dedicated", type: "EQ", label: `${label} wrong-line EQ release ${repeat + 1}`,
+					});
+					result.portReleaseProofs ??= [];
+					result.portReleaseProofs.push({ label, proof });
+					assertProjectUnchanged(await readMetrics(page), before, `${label} repeated wrong-line release unchanged`);
+					assertEqual(await page.getByTestId("ordinary-eq-anchor-marker").getAttribute("data-port-slot-row"),
+						String(start.row), `${label} repeated wrong-line release exact anchor`);
+				}
 				await page.waitForFunction(() => {
 					const feedback = document.querySelector(".tilefab-equipment-selection-readout");
 					const reason = feedback?.textContent ?? "";

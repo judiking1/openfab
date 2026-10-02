@@ -255,6 +255,9 @@ export interface RailDocumentCooperativeCommitOptions {
 	readonly preparePatch?: (event: RailPatchEvent, checkpoint: () => Promise<void>) => Promise<void>;
 }
 
+/** Shared deadline-check granularity for bundle state, history and typed transport preparation. */
+export const STATIC_FAB_ORGANIZATION_BUNDLE_PREPARATION_OPERATION_BUDGET = 16;
+
 interface PortEquipmentCommitResult {
 	readonly committed: boolean;
 	readonly timings: RailDocumentPortEquipmentCommitTimings | null;
@@ -1226,6 +1229,9 @@ export class RailDocument {
 			...options,
 			sliceMilliseconds: options.sliceMilliseconds ?? 2,
 		});
+		// Compiler/index steps can be substantially more expensive than a single rail cell.
+		// Recheck the 2 ms deadline in small batches throughout addition preparation.
+		const operationBudget = STATIC_FAB_ORGANIZATION_BUNDLE_PREPARATION_OPERATION_BUDGET;
 		const totalStartedAt = cooperative.readTime(0);
 		try {
 			cooperative.assertCurrent();
@@ -1236,6 +1242,7 @@ export class RailDocument {
 				source.organizations,
 				source.relationships,
 				cooperative.checkTime,
+				operationBudget,
 			);
 			const authorityFinishedAt = cooperative.readTime(totalStartedAt);
 			if (!plan) return cooperativeCommitRejected();
@@ -1251,17 +1258,23 @@ export class RailDocument {
 			)
 				return cooperativeCommitRejected();
 			const check = cooperative.checkTime;
-			await finishDocumentPreparationSteps(this.assertBundleAdditionProtectionSteps(plan), check);
+			await finishDocumentPreparationSteps(
+				this.assertBundleAdditionProtectionSteps(plan),
+				check,
+				operationBudget,
+			);
 			const customError = await legacyCustomEquipmentMutationErrorCooperatively(
 				plan.portMutations,
 				plan.equipmentGroupMutations,
 				this.legacyCustomEquipment,
 				check,
+				operationBudget,
 			);
 			if (customError) throw new Error(customError);
 			const topology = await finishDocumentPreparationSteps(
 				validateAdvancedSwitchPatchSteps(source.map, plan.mutations, plan.switchMutations),
 				check,
+				operationBudget,
 			);
 			if (topology.length > 0)
 				throw new Error("조직 청사진의 고급 스위치 topology가 변경되었습니다");
@@ -1288,6 +1301,7 @@ export class RailDocument {
 				transition.kind,
 				transition,
 				check,
+				operationBudget,
 			);
 			const entry: HistoryEntry = Object.freeze({ ...transition, mirrorHistoryEntry });
 			const nextUndoStack = await finishDocumentPreparationSteps(
@@ -1297,11 +1311,13 @@ export class RailDocument {
 					(candidate) => candidate.mirrorHistoryEntry,
 				),
 				check,
+				operationBudget,
 			);
 			const historyCreationFinishedAt = cooperative.readTime(commandValidationFinishedAt);
 			const nextMap = await finishDocumentPreparationSteps(
 				source.map.createAdditionCandidateSteps(entry.changes, entry.switchChanges),
 				check,
+				operationBudget,
 			);
 			assertRailSourceCapacity(nextMap);
 			const nextPortEquipment = await applyPortEquipmentAdditionsCooperatively(
@@ -1309,8 +1325,14 @@ export class RailDocument {
 				entry.portChanges,
 				entry.equipmentGroupChanges,
 				check,
+				operationBudget,
 			);
-			await assertPortEquipmentLayoutCooperatively(nextMap, nextPortEquipment, check);
+			await assertPortEquipmentLayoutCooperatively(
+				nextMap,
+				nextPortEquipment,
+				check,
+				operationBudget,
+			);
 			const nextOrganizations = await finishDocumentPreparationSteps(
 				applyStaticFabOrganizationAdditionsSteps(
 					source.organizations,
@@ -1318,6 +1340,7 @@ export class RailDocument {
 					entry.organizationNextIdAfter,
 				),
 				check,
+				operationBudget,
 			);
 			const nextRelationships = await finishDocumentPreparationSteps(
 				applyStaticFabAssemblyRelationshipAdditionsSteps(
@@ -1326,6 +1349,7 @@ export class RailDocument {
 					entry.relationshipNextIdAfter,
 				),
 				check,
+				operationBudget,
 			);
 			const activation = await validateStaticFabAssemblyRelationshipSourceActivation(
 				nextMap,
@@ -1333,9 +1357,7 @@ export class RailDocument {
 				nextOrganizations,
 				nextRelationships,
 				check,
-				// Ownership compilation and membership validation can each spend several milliseconds
-				// in 128 operations. Recheck the same deadline more often before publishing additions.
-				32,
+				operationBudget,
 			);
 			const nextImpactIndex = consumeStaticFabOrganizationImpactIndex(
 				activation.organizationActivation,
@@ -3535,10 +3557,11 @@ function cooperativeCommitRejected(): MeasuredRailDocumentReviewedPortEquipmentC
 async function finishDocumentPreparationSteps<T>(
 	steps: Generator<void, T>,
 	checkpoint: () => Promise<void>,
+	operationBudget = 128,
 ): Promise<T> {
 	const task = createCooperativeTask(steps);
 	while (!task.done) {
-		task.step(128);
+		task.step(operationBudget);
 		await checkpoint();
 	}
 	return task.finish();

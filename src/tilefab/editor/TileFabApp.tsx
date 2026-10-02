@@ -282,6 +282,7 @@ import { deriveRailConstructionMetric } from "../core/RailConstructionMetric";
 import { prepareRailAreaCut, prepareRailModuleCut } from "../core/RailCut";
 import {
 	RailDocument,
+	STATIC_FAB_ORGANIZATION_BUNDLE_PREPARATION_OPERATION_BUDGET,
 	type RailPatchEvent,
 	railPatchInvalidatedPorts,
 } from "../core/RailDocument";
@@ -766,6 +767,7 @@ import {
 } from "./GuidedBuildChapter";
 import {
 	evaluateGuidedBuildFoundation,
+	GUIDED_FIRST_RAIL_TARGET_METERS,
 	guidedBuildHidesExpertSelectionInspectors,
 	guidedBuildHidesOrganizationSelectionConstructionBar,
 	guidedBuildHidesPracticeHandoffConstructionBar,
@@ -4453,6 +4455,10 @@ export default function TileFabApp(): React.ReactElement {
 				buildMode,
 				suggestedAction: guidedBuildCurrentSuggestedAction,
 				keyboardRailActive: guidedRailKeyboard?.scope === "guided",
+				railInstruction: guidedBuildEvaluation.currentMissionId === "first-rail" ||
+					guidedBuildEvaluation.currentMissionId === "process-loop"
+					? guidedBuildCurrentPrompt?.progressCue?.instruction
+					: null,
 				commandsActionable: guidedBuildCommandsActionable,
 				portCanvasActionable: guidedPortCanvasActionable,
 				stkDraftReady,
@@ -8537,7 +8543,8 @@ export default function TileFabApp(): React.ReactElement {
 					}
 				},
 				preparePatch: async (event, checkpoint) => {
-					const lease = await prepareAdditionPatch(event, checkpoint);
+				const lease = await prepareAdditionPatch(event, checkpoint,
+					STATIC_FAB_ORGANIZATION_BUNDLE_PREPARATION_OPERATION_BUDGET);
 					preparedPatchIsCurrent = lease.isCurrent;
 				},
 			});
@@ -10604,7 +10611,9 @@ export default function TileFabApp(): React.ReactElement {
 			);
 		} else {
 			const firstRailComplete =
-				session.mission === "first-rail" && plan.turns === 0 && plan.lengthMeters >= 15;
+				session.mission === "first-rail" &&
+				plan.turns === 0 &&
+				plan.lengthMeters >= GUIDED_FIRST_RAIL_TARGET_METERS;
 			const nextMission: GuidedRailKeyboardMission = firstRailComplete
 				? "process-loop"
 				: session.mission;

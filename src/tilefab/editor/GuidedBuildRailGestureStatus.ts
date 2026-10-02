@@ -1,9 +1,13 @@
 import type { GuidedBuildFoundationMissionId } from "./GuidedBuildMission";
-import { guidedBuildIsEquipmentMission } from "./GuidedBuildMission";
+import {
+	GUIDED_FIRST_RAIL_TARGET_METERS,
+	guidedBuildIsEquipmentMission,
+} from "./GuidedBuildMission";
+
+export { GUIDED_FIRST_RAIL_TARGET_METERS } from "./GuidedBuildMission";
 
 export const DEFAULT_RAIL_BUILD_STATUS = "첫 레일의 시작점을 선택하세요";
 export const RAIL_ROUTE_DRAG_STATUS = "레일 시작점에서 끝점까지 드래그하세요";
-export const GUIDED_FIRST_RAIL_TARGET_METERS = 15;
 
 interface GuidedBuildStatusInput {
 	readonly guidedBuildOpen: boolean;

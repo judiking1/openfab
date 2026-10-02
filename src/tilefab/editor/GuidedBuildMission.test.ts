@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { planRailConstruction } from "../core/paint";
+import { RailDocument } from "../core/RailDocument";
 import {
 	evaluateGuidedBuildFoundation,
 	GUIDED_BUILD_FOUNDATION_MISSIONS,
@@ -28,6 +30,7 @@ import {
 	guidedBuildUsesCompactOrganizationPicker,
 	guidedBuildVisibleOrganizationSelectionCount,
 } from "./GuidedBuildMission";
+import { analyzeGuidedBuildRailReuse } from "./GuidedBuildRailReuseEvidence";
 
 describe("GuidedBuildMission", () => {
 	it("maps each guided action family to the activity that should be highlighted", () => {
@@ -152,7 +155,7 @@ describe("GuidedBuildMission", () => {
 		expect(Object.isFrozen(evaluation.missions[1]?.prompt.progressCue)).toBe(true);
 	});
 
-	it("uses an authored edge for First Rail but not for Process Loop", () => {
+	it("uses a supported 15 m authored straight for First Rail but not for Process Loop", () => {
 		const evaluation = evaluateGuidedBuildFoundation(
 			evidence({
 				navigationAcknowledged: true,
@@ -163,13 +166,13 @@ describe("GuidedBuildMission", () => {
 					fingerprint: "open-rail",
 					issues: [{ code: "OPEN_TERMINAL" }],
 					summary: {
-						edges: 5,
+						edges: 15,
 						closure: "open",
 						weakComponents: 1,
-						strongComponents: 6,
+						strongComponents: 16,
 						openTerminals: 2,
 						physicalOpenPaths: 1,
-						physicalStrongComponents: 6,
+						physicalStrongComponents: 16,
 					},
 				},
 				railReuse: linkSupportedRailReuse(),
@@ -199,6 +202,42 @@ describe("GuidedBuildMission", () => {
 			instruction:
 				"공간이 부족하면 −로 축소하세요. 첫 15칸 이상 직선을 유지한 채 레일 화살표가 향하는 주황색 열린 끝에서 먼저 바깥으로 최소 6칸 뻗고, 나머지 두 변을 이어 시작점에 닫으세요.",
 		});
+	});
+
+	it.each([
+		[14, "first-rail"],
+		[15, "process-loop"],
+	] as const)("qualifies an actual %i m straight independently of Network Link support", (meters, mission) => {
+		const document = new RailDocument();
+		const plan = planRailConstruction(document.map, { x: 0, y: 0 }, { x: meters, y: 0 });
+		expect(plan.valid).toBe(true);
+		expect(document.commit(plan)).toBe(true);
+		const railReuse = analyzeGuidedBuildRailReuse(document.map);
+		expect(railReuse.networkLinkSupportedComponentCount).toBe(1);
+		expect(railReuse.longestStraightRunMeters).toBe(meters);
+		const readiness = openRailReadiness(`open-${meters}m`);
+		const evaluation = evaluateGuidedBuildFoundation(
+			evidence({
+				navigationAcknowledged: true,
+				authoredRevision: 1,
+				readiness: { ...readiness, summary: { ...readiness.summary, edges: meters } },
+				railReuse,
+			}),
+		);
+		expect(evaluation.currentMissionId).toBe(mission);
+		expect(evaluation.missions[1]?.status).toBe(meters < 15 ? "current" : "complete");
+	});
+
+	it("does not qualify unmeasured straight support as the 15 m First Rail target", () => {
+		const evaluation = evaluateGuidedBuildFoundation(
+			evidence({
+				navigationAcknowledged: true,
+				authoredRevision: 1,
+				readiness: openRailReadiness("unknown-straight-length"),
+				railReuse: linkSupportedRailReuse({ longestStraightRunMeters: undefined }),
+			}),
+		);
+		expect(evaluation.currentMissionId).toBe("first-rail");
 	});
 
 	it("keeps a short practice rail in First Rail until it can support a later Loop Connect", () => {
@@ -676,6 +715,7 @@ describe("GuidedBuildMission", () => {
 				railReuse: {
 					weakComponentCount: 2,
 					networkLinkSupportedComponentCount: 2,
+					longestStraightRunMeters: 15,
 					repeatedComponentKindCount: 0,
 					repeatedComponentCopyCount: 0,
 				},
@@ -687,6 +727,7 @@ describe("GuidedBuildMission", () => {
 				railReuse: {
 					weakComponentCount: 2,
 					networkLinkSupportedComponentCount: 2,
+					longestStraightRunMeters: 15,
 					repeatedComponentKindCount: 1,
 					repeatedComponentCopyCount: 2,
 				},
@@ -699,6 +740,7 @@ describe("GuidedBuildMission", () => {
 				railReuse: {
 					weakComponentCount: 2,
 					networkLinkSupportedComponentCount: 2,
+					longestStraightRunMeters: 15,
 					repeatedComponentKindCount: 1,
 					repeatedComponentCopyCount: 2,
 				},
@@ -726,6 +768,7 @@ describe("GuidedBuildMission", () => {
 			railReuse: {
 				weakComponentCount: 2,
 				networkLinkSupportedComponentCount: 2,
+				longestStraightRunMeters: 15,
 				repeatedComponentKindCount: 1,
 				repeatedComponentCopyCount: 2,
 			},
@@ -1434,6 +1477,7 @@ describe("GuidedBuildMission", () => {
 				railReuse: {
 					weakComponentCount: 2,
 					networkLinkSupportedComponentCount: 2,
+					longestStraightRunMeters: 15,
 					repeatedComponentKindCount: 1,
 					repeatedComponentCopyCount: 2,
 				},
@@ -1474,6 +1518,7 @@ describe("GuidedBuildMission", () => {
 				railReuse: {
 					weakComponentCount: 2,
 					networkLinkSupportedComponentCount: 2,
+					longestStraightRunMeters: 15,
 					repeatedComponentKindCount: 1,
 					repeatedComponentCopyCount: 2,
 				},
@@ -1553,6 +1598,7 @@ function linkSupportedRailReuse(
 	return {
 		weakComponentCount: 1,
 		networkLinkSupportedComponentCount: 1,
+		longestStraightRunMeters: 15,
 		repeatedComponentKindCount: 0,
 		repeatedComponentCopyCount: 0,
 		...overrides,
@@ -1659,6 +1705,7 @@ function completedThroughTwinBay(): Partial<GuidedBuildEvidence> {
 		railReuse: {
 			weakComponentCount: 2,
 			networkLinkSupportedComponentCount: 2,
+			longestStraightRunMeters: 15,
 			repeatedComponentKindCount: 1,
 			repeatedComponentCopyCount: 2,
 		},

@@ -13592,6 +13592,17 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 @media (max-width: 650px) and (max-height: 780px) {
+	.tilefab-app[data-guided-primary-target="canvas:rail"]:is(
+			[data-guided-build-current="first-rail"],
+			[data-guided-build-current="process-loop"]
+		)
+		.tilefab-workspace:not(:has(.tilefab-navigator-panel, .tilefab-readiness))
+		.tilefab-guided-build-panel {
+		max-height: min(300px, calc(56% - 12px));
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+
 	.tilefab-app[data-guided-build-active="true"]
 		.tilefab-tools[data-tool-density="expanded"]
 		.tilefab-editor-activity-rail {

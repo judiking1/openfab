@@ -62,6 +62,7 @@ export interface GuidedBuildPrimaryTargetContext {
 	readonly buildMode: string;
 	readonly suggestedAction: GuidedBuildSuggestedAction | null;
 	readonly keyboardRailActive: boolean;
+	readonly railInstruction?: string | null;
 	readonly commandsActionable: boolean;
 	readonly portCanvasActionable: boolean;
 	readonly stkDraftReady?: boolean;
@@ -168,9 +169,12 @@ function resolveRailTarget(context: GuidedBuildPrimaryTargetContext): GuidedBuil
 		kind: "canvas",
 		instruction: context.keyboardRailActive
 			? "Canvas의 강조점에서 방향키로 이동하고 Enter로 현재 레일 단계를 확정하세요."
-			: context.currentMissionId === "first-rail"
-				? "Canvas의 빈 격자에서 가로 또는 세로로 15 m 이상 드래그하세요. 키보드는 아래 보조 버튼으로 같은 레일 명령을 시작할 수 있습니다."
-				: "Canvas에서 다음 Loop 구간을 시작점부터 끝점까지 드래그하세요. 키보드는 아래 보조 버튼으로 같은 레일 명령을 시작할 수 있습니다.",
+			: `${
+					context.railInstruction ??
+					(context.currentMissionId === "first-rail"
+						? "Canvas의 빈 격자에서 가로 또는 세로로 15 m 이상 드래그하세요."
+						: "첫 직선을 유지하고, 레일 화살표가 향하는 주황색 열린 끝부터 나머지 변을 이어 시작점에 닫으세요.")
+				} 키보드는 아래 보조 버튼으로 같은 레일 명령을 시작할 수 있습니다.`,
 	});
 }
 

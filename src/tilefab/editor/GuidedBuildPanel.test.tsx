@@ -339,7 +339,7 @@ describe("GuidedBuildPanel", () => {
 		expect(guidedBuildInputHint("selection.copy", keyboardHint)).toBe(keyboardHint);
 	});
 
-	it("turns the first authored rail into an explicit live Loop target", () => {
+	it("turns a supported 15 m authored straight into an explicit live Loop target", () => {
 		const markup = panelMarkup(
 			evidence({
 				navigationAcknowledged: true,
@@ -350,13 +350,13 @@ describe("GuidedBuildPanel", () => {
 					fingerprint: "open-practice-rail",
 					issues: [{ code: "OPEN_TERMINAL" }],
 					summary: {
-						edges: 5,
+						edges: 15,
 						closure: "open",
 						weakComponents: 1,
-						strongComponents: 6,
+						strongComponents: 16,
 						openTerminals: 2,
 						physicalOpenPaths: 1,
-						physicalStrongComponents: 6,
+						physicalStrongComponents: 16,
 					},
 				},
 				railReuse: linkSupportedRailReuse(),
@@ -403,6 +403,7 @@ describe("GuidedBuildPanel", () => {
 				railReuse: {
 					weakComponentCount: 2,
 					networkLinkSupportedComponentCount: 2,
+					longestStraightRunMeters: 15,
 					repeatedComponentKindCount: 1,
 					repeatedComponentCopyCount: 2,
 				},
@@ -723,6 +724,7 @@ describe("GuidedBuildPanel", () => {
 			railReuse: {
 				weakComponentCount: 2,
 				networkLinkSupportedComponentCount: 2,
+				longestStraightRunMeters: 15,
 				repeatedComponentKindCount: 1,
 				repeatedComponentCopyCount: 2,
 			},
@@ -1001,6 +1003,7 @@ function linkSupportedRailReuse(): GuidedBuildEvidence["railReuse"] {
 	return {
 		weakComponentCount: 1,
 		networkLinkSupportedComponentCount: 1,
+		longestStraightRunMeters: 15,
 		repeatedComponentKindCount: 0,
 		repeatedComponentCopyCount: 0,
 	};
@@ -1129,6 +1132,7 @@ function completedThroughTwinBay(): Partial<GuidedBuildEvidence> {
 		railReuse: {
 			weakComponentCount: 2,
 			networkLinkSupportedComponentCount: 2,
+			longestStraightRunMeters: 15,
 			repeatedComponentKindCount: 1,
 			repeatedComponentCopyCount: 2,
 		},

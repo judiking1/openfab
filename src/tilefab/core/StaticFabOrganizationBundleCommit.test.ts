@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { productionBankContactFixture } from "../compile/StaticFabAssemblyRelationshipTestFixture";
 import {
 	buildSyntheticFabStarter,
@@ -44,8 +44,54 @@ import {
 	staticFabOrganizationBundleFingerprint,
 	staticFabOrganizationBundlePlacementFingerprint,
 } from "./StaticFabOrganizationBundlePlacement";
+import { TileMap } from "./TileMap";
 
 describe("StaticFabOrganizationBundle document commit", () => {
+	it("yields during costly cell addition while keeping candidate state private until one publication", async () => {
+		const document = new RailDocument();
+		const plan = adoptedWorkerPlan(document, sourceBundle(120), { x: 30, y: 30 }, 0);
+		expect(plan.mutations.length).toBeGreaterThan(128);
+		const before = snapshotFor(document);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		let time = 0;
+		let checkpoints = 0;
+		const originalSetEncoded = TileMap.prototype.setEncoded;
+		// A deterministic slow-cell clock exposes work hidden between deadline checks.
+		const writes = vi.spyOn(TileMap.prototype, "setEncoded").mockImplementation(function (
+			this: TileMap,
+			x,
+			y,
+			encoded,
+		) {
+			time += 0.125;
+			return originalSetEncoded.call(this, x, y, encoded);
+		});
+		try {
+			const result = await document.commitStaticFabOrganizationBundleCooperatively(plan, {
+				now: () => time,
+				checkpoint: async () => {
+					checkpoints++;
+					expect(snapshotFor(document)).toEqual(before);
+					expect(document.canUndo).toBe(false);
+					expect(events).toHaveLength(0);
+				},
+			});
+			expect(checkpoints).toBeGreaterThan(0);
+			expect(result.committed).toBe(true);
+			expect(result.timings?.maximumPreparationSliceMilliseconds).toBeLessThanOrEqual(8);
+			expect(events).toHaveLength(1);
+			expect(document.getPatchSequence()).toBe(1);
+			expect(document.canUndo).toBe(true);
+			expect(document.undo()).toBe(true);
+			expect(document.map.size).toBe(0);
+			expect(document.redo()).toBe(true);
+			expect(document.map.size).toBe(plan.mutations.length);
+		} finally {
+			writes.mockRestore();
+		}
+	});
+
 	it.each([
 		"single-contact-fixture",
 		"production-generator",
@@ -673,15 +719,14 @@ function snapshotFor(document: RailDocument) {
 	).snapshot;
 }
 
-function sourceBundle() {
+function sourceBundle(aisleLengthMeters = 24) {
 	const source = new RailDocument();
-	const plan = planRailTemplate(
-		source.map,
-		"long-bay",
-		{ x: 0, y: 0 },
-		initialRailTemplatePose(),
-		defaultRailTemplateParameters("long-bay"),
-	);
+	const parameters = defaultRailTemplateParameters("long-bay");
+	if (parameters.templateId !== "long-bay") throw new Error("Expected Long Bay parameters.");
+	const plan = planRailTemplate(source.map, "long-bay", { x: 0, y: 0 }, initialRailTemplatePose(), {
+		...parameters,
+		aisleLengthMeters,
+	});
 	if (!plan.valid || !source.commit(plan)) {
 		throw new Error(`Source Long Bay failed: ${plan.reason}`);
 	}

@@ -15,6 +15,8 @@ import type { GuidedBuildInterbayEvidence } from "./GuidedBuildInterbayEvidence"
 import type { GuidedBuildRailReuseEvidence } from "./GuidedBuildRailReuseEvidence";
 import { isOpenFabProjectDirty } from "./OpenFabProjectSession";
 
+export const GUIDED_FIRST_RAIL_TARGET_METERS = 15;
+
 export const GUIDED_BUILD_FOUNDATION_MISSION_IDS = [
 	"orient",
 	"first-rail",
@@ -631,7 +633,8 @@ export function evaluateGuidedBuildFoundation(
 		"first-rail":
 			evidence.practiceGraduated ||
 			(evidence.readiness.summary.edges > 0 &&
-				evidence.railReuse.networkLinkSupportedComponentCount > 0),
+				evidence.railReuse.networkLinkSupportedComponentCount > 0 &&
+				(evidence.railReuse.longestStraightRunMeters ?? 0) >= GUIDED_FIRST_RAIL_TARGET_METERS),
 		"process-loop":
 			evidence.practiceGraduated ||
 			(processLoopConditionMet(evidence.readiness, evidence.railReuse) &&
