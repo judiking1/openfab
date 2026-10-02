@@ -2042,6 +2042,12 @@ const FIT_MIN_ZOOM = OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER;
 const PORT_AUTHORING_FIT_MIN_ZOOM = OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER;
 const MAX_ZOOM = OPENFAB_PROJECT_VIEW_MAX_ZOOM_PIXELS_PER_METER;
 const PORT_KEYBOARD_TARGET_SAFE_MARGIN = 28;
+const RAIL_KEYBOARD_TARGET_SAFE_MARGINS = Object.freeze({
+	left: 36,
+	right: 36,
+	top: 36,
+	bottom: 36,
+});
 const ORDINARY_STK_ACQUISITION_MIN_ZOOM = 28;
 const ASYNC_MODEL_DERIVATION_CELL_THRESHOLD = 10_000;
 const FACTORY_SCALE_BLUEPRINT_PREVIEW_EDGE_THRESHOLD = 2_000;
@@ -10366,25 +10372,17 @@ export default function TileFabApp(): React.ReactElement {
 	function keepGuidedRailKeyboardCursorVisible(cell: Cell): void {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
-		const frame = visibleCanvasFrame(canvas, fitMapInsets(canvas));
-		const screen = rendererRef.current.tileCenterAtScreen(cell, cameraRef.current);
-		const margin = 36;
 		if (
-			screen.x >= frame.left + margin &&
-			screen.x <= frame.left + frame.width - margin &&
-			screen.y >= frame.top + margin &&
-			screen.y <= frame.top + frame.height - margin
-		) {
-			return;
-		}
-		centerCameraOnWorldPoint(
-			cell.x + 0.5,
-			cell.y + 0.5,
-			canvas,
-			cameraRef.current,
-			rendererRef.current,
-			fitMapInsets(canvas),
-		);
+			!centerWorldPointIfObscured(
+				cell.x + 0.5,
+				cell.y + 0.5,
+				canvas,
+				cameraRef.current,
+				rendererRef.current,
+				fitMapInsets(canvas),
+				RAIL_KEYBOARD_TARGET_SAFE_MARGINS,
+			)
+		) return;
 		cameraReadyRef.current = true;
 		rendererRef.current.invalidateStatic();
 	}
@@ -10696,6 +10694,98 @@ export default function TileFabApp(): React.ReactElement {
 			requestAnimationFrame(() => requestAnimationFrame(fitMap));
 		}
 	};
+
+	useLayoutEffect(() => {
+		if (
+			guidedRailKeyboard?.scope !== "guided" ||
+			!guidedBuildOpen ||
+			viewMode !== "2d" ||
+			editorActivity !== "build" ||
+			tool !== "build" ||
+			buildMode !== "route"
+		) return;
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+		let frame = 0;
+		let deferredForPan = false;
+		const measure = (): void => {
+			frame = 0;
+			const session = guidedRailKeyboardSessionRef.current;
+			const model = editorModelRef.current;
+			if (
+				!session ||
+				session.scope !== "guided" ||
+				session.mission !== guidedBuildEvaluation.currentMissionId ||
+				!guidedRailKeyboardSessionIsCurrent(
+					session,
+					createGuidedRailKeyboardBinding(model.generation, model.document, model.map),
+				)
+			) return;
+			if (panRef.current !== null) {
+				deferredForPan = true;
+				return;
+			}
+			deferredForPan = false;
+			if (
+				!centerWorldPointIfObscured(
+					session.endpoint.x + 0.5,
+					session.endpoint.y + 0.5,
+					canvas,
+					cameraRef.current,
+					rendererRef.current,
+					fitMapInsets(canvas),
+					RAIL_KEYBOARD_TARGET_SAFE_MARGINS,
+				)
+			) return;
+			cameraReadyRef.current = true;
+			rendererRef.current.invalidateStatic();
+			scheduleRenderRef.current();
+		};
+		const scheduleMeasure = (): void => {
+			if (frame !== 0) return;
+			frame = requestAnimationFrame(measure);
+		};
+		const finishDeferredPanFrame = (): void => {
+			if (deferredForPan) scheduleMeasure();
+		};
+		// Mission captions and responsive docks can settle after the session's first paint.
+		// Observe their actual bounds while this input owner is active; never restore a stale session.
+		const observer = new ResizeObserver(scheduleMeasure);
+		observer.observe(canvas);
+		const workspace = canvas.closest(".tilefab-workspace");
+		for (const selector of [
+			".tilefab-guided-build-panel",
+			".tilefab-buildbar",
+			".tilefab-action-hints",
+			".tilefab-tools",
+			".tilefab-camera-controls",
+		]) {
+			const element = workspace?.querySelector(selector);
+			if (element) observer.observe(element);
+		}
+		measure();
+		scheduleMeasure();
+		window.addEventListener("resize", scheduleMeasure);
+		canvas.addEventListener("pointerup", finishDeferredPanFrame);
+		canvas.addEventListener("pointercancel", finishDeferredPanFrame);
+		canvas.addEventListener("lostpointercapture", finishDeferredPanFrame);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("resize", scheduleMeasure);
+			canvas.removeEventListener("pointerup", finishDeferredPanFrame);
+			canvas.removeEventListener("pointercancel", finishDeferredPanFrame);
+			canvas.removeEventListener("lostpointercapture", finishDeferredPanFrame);
+			if (frame !== 0) cancelAnimationFrame(frame);
+		};
+	}, [
+		guidedRailKeyboard,
+		guidedBuildOpen,
+		guidedBuildEvaluation.currentMissionId,
+		viewMode,
+		editorActivity,
+		tool,
+		buildMode,
+	]);
 
 	const currentGuidedPortKeyboardBinding = () => {
 		const model = editorModelRef.current;

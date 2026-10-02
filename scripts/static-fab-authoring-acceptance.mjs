@@ -12350,6 +12350,29 @@ async function exerciseGuidedRailKeyboardContinuity(browser) {
 					return { x: Number(match[1]), y: Number(match[2]) };
 				};
 				const waitForCursor = () => page.waitForFunction(() => /X\s*(-?\d+)미터\s*·\s*Z\s*(-?\d+)미터/.test(document.querySelector('[data-testid="guided-rail-keyboard-readout"]')?.textContent ?? ""));
+				const inspectCursor = () => page.evaluate((cell) => {
+					const canvas = document.querySelector('[data-testid="rail-canvas"]');
+					const camera = window.__tileFab?.camera;
+					if (!canvas || !camera) throw new Error("Keyboard cursor frame is unavailable.");
+					const rect = canvas.getBoundingClientRect();
+					const point = { x: rect.x + camera.offsetX + (cell.x + 0.5) * camera.zoom, y: rect.y + camera.offsetY + (cell.y + 0.5) * camera.zoom };
+					const probes = [-12, 0, 12].flatMap((dx) => [-12, 0, 12].map((dy) => {
+						const element = document.elementFromPoint(point.x + dx, point.y + dy);
+						return { dx, dy, canvas: element === canvas, element: element?.tagName ?? null, className: element?.getAttribute("class") ?? null };
+					}));
+					const obstructions = [".tilefab-guided-build-panel", ".tilefab-action-hints", ".tilefab-buildbar", ".tilefab-camera-controls", ".tilefab-tools"].map((selector) => {
+						const element = document.querySelector(selector);
+						const bounds = element?.getBoundingClientRect();
+						return { selector, bounds: bounds ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : null };
+					});
+					return { point, camera: { offsetX: camera.offsetX, offsetY: camera.offsetY, zoom: camera.zoom, rotation: camera.rotation }, canvasBounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, probes, obstructions, visible: probes.every((probe) => probe.canvas) };
+				}, { x: expectedEnd.x + 1, y: expectedEnd.y });
+				const assertCursorVisible = async (phase) => {
+					const proof = await inspectCursor();
+					await writeFile(path.join(artifactRoot, `guided-keyboard-frame-${label}-${phase}.json`), `${JSON.stringify(proof, null, 2)}\n`);
+					assertEqual(proof.visible, true, `${label} ${phase} keyboard cursor ring visible on Canvas`);
+					return proof;
+				};
 				const enterKeyboard = async () => {
 					await panel.getByTestId("guided-build-keyboard-rail-entry").click();
 					await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-guided-rail-keyboard") === "choose-start");
@@ -12415,14 +12438,61 @@ async function exerciseGuidedRailKeyboardContinuity(browser) {
 				assertEqual(cursor.y, expectedEnd.y, `${label} continued same endpoint Z`);
 				assertIncludes(await page.locator(".tilefab-statusbar").innerText(), "첫 직선을 완성했습니다", `${label} explicit completed mission status`);
 				await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-				const cursorPoint = await screenPointForWorld(page, { x: cursor.x + 0.5, y: cursor.y + 0.5 });
-				const cursorVisible = await page.evaluate((point) => [-12, 0, 12].every((dx) => [-12, 0, 12].every((dy) => document.elementFromPoint(point.x + dx, point.y + dy) === document.querySelector('[data-testid="rail-canvas"]'))), cursorPoint);
-				assertEqual(cursorVisible, true, `${label} continued keyboard cursor ring visible on Canvas`);
+				const cursorPoint = (await assertCursorVisible("continued")).point;
 				await page.waitForTimeout(200);
-				const settledCursorPoint = await screenPointForWorld(page, { x: cursor.x + 0.5, y: cursor.y + 0.5 });
+				const settledCursorPoint = (await assertCursorVisible("settled")).point;
 				assertAtMost(Math.hypot(settledCursorPoint.x - cursorPoint.x, settledCursorPoint.y - cursorPoint.y), 1, `${label} continued cursor remains stable after layout`);
 				assertExactStaticFabModelIdentity(await readMetrics(page), fifteen, `${label} layout framing preserves source/Worker`);
 				await page.screenshot({ path: path.join(artifactRoot, `guided-keyboard-continuity-${label}.png`), fullPage: true });
+				if (viewport.width === 390) {
+					for (const height of [560, 600]) {
+						await page.setViewportSize({ width: 390, height });
+						await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+						await assertCursorVisible(`resize-${height}`);
+						const resizedCursor = await readCursor();
+						assertEqual(resizedCursor.x, cursor.x, `${label} resize preserves accessible cursor X`);
+						assertEqual(resizedCursor.y, cursor.y, `${label} resize preserves accessible cursor Z`);
+						assertEqual((await readMetrics(page)).cameraZoom, fifteen.cameraZoom, `${label} resize preserves zoom`);
+						assertExactStaticFabModelIdentity(await readMetrics(page), fifteen, `${label} viewport resize preserves source/Worker`);
+						await page.screenshot({ path: path.join(artifactRoot, `guided-keyboard-continuity-${label}-resize-${height}.png`), fullPage: true });
+					}
+					const panStart = (await inspectCursor()).point;
+					await page.mouse.move(panStart.x, panStart.y);
+					await page.mouse.down({ button: "right" });
+					try {
+						await page.mouse.move(panStart.x, panStart.y + 24, { steps: 4 });
+						await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+						const movedPan = await inspectCursor();
+						await writeFile(path.join(artifactRoot, `guided-keyboard-frame-${label}-panning-before-resize.json`), `${JSON.stringify(movedPan, null, 2)}\n`);
+						assertAtMost(Math.abs(movedPan.point.y - panStart.y - 24), 1, `${label} active manual pan follows the 24px pointer movement`);
+						assertAtMost(Math.abs(movedPan.point.x - panStart.x), 1, `${label} active vertical pan preserves horizontal framing`);
+						await page.setViewportSize({ width: 390, height: 560 });
+						await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+						const duringPan = await inspectCursor();
+						await writeFile(path.join(artifactRoot, `guided-keyboard-frame-${label}-panning-layout.json`), `${JSON.stringify(duringPan, null, 2)}\n`);
+						assertExactStaticFabModelIdentity(await readMetrics(page), fifteen, `${label} active pan and resize preserve source/Worker`);
+					} finally {
+						await page.mouse.up({ button: "right" });
+					}
+					await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+					await assertCursorVisible("pan-finished");
+					await page.setViewportSize(viewport);
+					await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+					await assertCursorVisible("pan-returned");
+					assertExactStaticFabModelIdentity(await readMetrics(page), fifteen, `${label} deferred pan framing preserves source/Worker`);
+					assertEqual((await readMetrics(page)).cameraZoom, fifteen.cameraZoom, `${label} deferred pan framing preserves zoom`);
+					const afterPanCursor = await readCursor();
+					assertEqual(afterPanCursor.x, cursor.x, `${label} deferred pan framing preserves cursor X`);
+					assertEqual(afterPanCursor.y, cursor.y, `${label} deferred pan framing preserves cursor Z`);
+					const ordinaryPanStart = (await inspectCursor()).point;
+					await page.mouse.move(ordinaryPanStart.x, ordinaryPanStart.y);
+					await page.mouse.down({ button: "right" });
+					await page.mouse.move(ordinaryPanStart.x, ordinaryPanStart.y - 8, { steps: 2 });
+					await page.mouse.up({ button: "right" });
+					await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+					const ordinaryPanEnd = (await inspectCursor()).point;
+					assertAtMost(Math.abs(ordinaryPanEnd.y - ordinaryPanStart.y + 8), 1, `${label} manual pan without layout change remains user-controlled`);
+				}
 				await canvas.press("Enter");
 				await canvas.press("Shift+ArrowDown");
 				await canvas.press("ArrowDown");

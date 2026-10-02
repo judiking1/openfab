@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-10-02
+
+- Keep an active Guided rail keyboard endpoint visible when the guide, dock or viewport
+  changes size after a mission transition. Cancelled or stale sessions do not move the camera.
+- Verify the same endpoint through a short-phone resize and return, preserving the authored
+  project and Worker state. Record each cursor hit-test and the surrounding panel bounds.
+- Defer layout framing during manual panning and restore an obscured endpoint after the drag
+  ends. Ordinary panning without a layout change remains under the user's control.
+
 ## [0.1.35] - 2026-10-02
 
 - Keep ordinary EQ feedback at a stable height so an invalid endpoint's explanation
