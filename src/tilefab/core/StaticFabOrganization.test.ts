@@ -49,6 +49,7 @@ import {
 	planRenameStaticFabOrganization,
 	planUpdateStaticFabOrganizationDetails,
 	queryStaticFabProcessLoopEquipmentMembership,
+	queryStaticFabProcessLoopsSupportingPorts,
 	staticFabOrganizationAssignmentSourcesForSelection,
 	staticFabOrganizationConflictsForSelection,
 } from "./StaticFabOrganizationPlan";
@@ -1221,6 +1222,45 @@ describe("StaticFabOrganization", () => {
 });
 
 describe("Process Loop equipment membership", () => {
+	it("previews whole-group direct routes without inferring ownership or accepting one matching Port", () => {
+		const { organizations, equipment } = processLoopEquipmentFixture();
+		const port = equipment.ports[0] as PortEquipmentState["ports"][number];
+		const before = JSON.stringify({ organizations, equipment });
+		expect(queryStaticFabProcessLoopsSupportingPorts(organizations, [])).toEqual([]);
+		expect(queryStaticFabProcessLoopsSupportingPorts(organizations, equipment.ports)).toEqual([2]);
+		const outside = {
+			...port,
+			route: { kind: "CARDINAL_CELL" as const, x: 999, z: 999, from: 8 as const, to: 2 as const },
+		};
+		expect(queryStaticFabProcessLoopsSupportingPorts(organizations, [port, outside])).toEqual([]);
+		expect(
+			queryStaticFabProcessLoopEquipmentMembership(equipment, organizations, 1)
+				.ownerOrganizationIds,
+		).toEqual([]);
+		expect(JSON.stringify({ organizations, equipment })).toBe(before);
+	});
+
+	it("invalidates preview membership across immutable DAG generations and does not cache mutable inputs", () => {
+		const { organizations, equipment } = processLoopEquipmentFixture();
+		expect(queryStaticFabProcessLoopsSupportingPorts(organizations, equipment.ports)).toEqual([2]);
+		const changed = copyStaticFabOrganizationState({
+			...organizations,
+			records: organizations.records.map((record) => ({ ...record, parentOrganizationIds: [] })),
+		});
+		expect(queryStaticFabProcessLoopsSupportingPorts(changed, equipment.ports)).toEqual([]);
+		expect(queryStaticFabProcessLoopsSupportingPorts(organizations, equipment.ports)).toEqual([2]);
+		const mutable = {
+			...organizations,
+			records: organizations.records.map((record) => ({
+				...record,
+				parentOrganizationIds: [...(record.parentOrganizationIds ?? [])],
+			})),
+		};
+		expect(queryStaticFabProcessLoopsSupportingPorts(mutable, equipment.ports)).toEqual([2]);
+		mutable.records[1]?.parentOrganizationIds.splice(0);
+		expect(queryStaticFabProcessLoopsSupportingPorts(mutable, equipment.ports)).toEqual([]);
+	});
+
 	it("queries exact eligible loops and attaches one complete group without changing geometry or metadata", () => {
 		const { document, organizations, equipment } = processLoopEquipmentFixture();
 		const query = queryStaticFabProcessLoopEquipmentMembership(equipment, organizations, 1);

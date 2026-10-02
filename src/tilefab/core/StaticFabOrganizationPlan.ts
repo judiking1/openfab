@@ -5,6 +5,7 @@ import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
 	deriveStaticFabOrganizationSemanticRoles,
+	isCanonicalStaticFabOrganizationState,
 	renameStaticFabOrganizationRecord,
 	replaceStaticFabOrganizationRecordMembership,
 	type StaticFabOrganizationColor,
@@ -408,6 +409,63 @@ export interface StaticFabProcessLoopEquipmentMembershipQuery {
 	readonly reason: string | null;
 }
 
+interface ProcessLoopPortMembership {
+	readonly id: number;
+	readonly edges: ReadonlySet<string>;
+	readonly switches: ReadonlySet<number>;
+}
+
+const processLoopPortMemberships = new WeakMap<
+	StaticFabOrganizationState,
+	readonly ProcessLoopPortMembership[]
+>();
+
+function directProcessLoopPortMemberships(
+	organizations: StaticFabOrganizationState,
+): readonly ProcessLoopPortMembership[] {
+	const canonical = isCanonicalStaticFabOrganizationState(organizations);
+	const cached = canonical ? processLoopPortMemberships.get(organizations) : undefined;
+	if (cached) return cached;
+	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
+	const loops = Object.freeze(
+		organizations.records
+			.filter((record) => roles.get(record.id) === "PROCESS_LOOP")
+			.map((record) =>
+				Object.freeze({
+					id: record.id,
+					edges: new Set(record.membership.railEdges.map(staticFabOrganizationEdgeKey)),
+					switches: new Set(record.membership.advancedSwitchIds),
+				}),
+			),
+	);
+	if (canonical) processLoopPortMemberships.set(organizations, loops);
+	return loops;
+}
+
+/** Informational route preview only; attachment still requires its explicit validated command. */
+export function queryStaticFabProcessLoopsSupportingPorts(
+	organizations: StaticFabOrganizationState,
+	ports: readonly PortEquipmentState["ports"][number][],
+): readonly number[] {
+	if (ports.length === 0) return Object.freeze([]);
+	return processLoopsSupportingPorts(directProcessLoopPortMemberships(organizations), ports);
+}
+
+function processLoopsSupportingPorts(
+	loops: readonly ProcessLoopPortMembership[],
+	ports: readonly PortEquipmentState["ports"][number][],
+): readonly number[] {
+	return Object.freeze(
+		loops
+			.filter((loop) =>
+				ports.every((port) =>
+					staticFabOrganizationMembershipSupportsPortRoute(port.route, loop.edges, loop.switches),
+				),
+			)
+			.map((loop) => loop.id),
+	);
+}
+
 /** Inspect authored ownership and exact direct-route eligibility without changing project state. */
 export function queryStaticFabProcessLoopEquipmentMembership(
 	portEquipment: PortEquipmentState,
@@ -434,16 +492,8 @@ export function queryStaticFabProcessLoopEquipmentMembership(
 			reason: `장비 그룹 ${equipmentGroupId}은 조직 ${ownerOrganizationIds.join(", ")}에 이미 직접 소속되어 있습니다`,
 		});
 	}
-	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
-	const loops = organizations.records.filter((record) => roles.get(record.id) === "PROCESS_LOOP");
-	const eligibleProcessLoopIds = Object.freeze(
-		loops
-			.filter(
-				(record) =>
-					supportedEquipmentGroupPortCount(record, groupPorts.ports) === groupPorts.ports.length,
-			)
-			.map((record) => record.id),
-	);
+	const loops = directProcessLoopPortMemberships(organizations);
+	const eligibleProcessLoopIds = processLoopsSupportingPorts(loops, groupPorts.ports);
 	return Object.freeze({
 		ownerOrganizationIds,
 		eligibleProcessLoopIds,

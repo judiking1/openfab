@@ -74,6 +74,9 @@ const ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE = new Error(
 const CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY_COMPLETE = new Error(
 	"Cross-Loop Stocker Inspector recovery acceptance completed.",
 );
+const STK_GROUP_LOOP_RECOVERY_ONLY_COMPLETE = new Error(
+	"Stocker whole-group Move and explicit Loop recovery acceptance completed.",
+);
 const DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE = new Error("Declared Bay disconnection completed.");
 const STATION_REVIEW_APPLY_ONLY_COMPLETE = new Error("Station review Apply acceptance completed.");
 const COMPACT_STARTER_NAV_ONLY_COMPLETE = new Error("Compact starter navigation completed.");
@@ -103,6 +106,7 @@ let legacyLargeFabAcceptanceFixturePath = null;
 let zeroEligibleProcessLoopFixture = null;
 let noProcessLoopSinglePortFixture = null;
 let adjacentProcessLoopPortFixture = null;
+let stkGroupLoopRecoveryFixtures = null;
 let adjacentPortPickRadiusMeters = null;
 const result = {
 	status: "FAIL",
@@ -274,12 +278,23 @@ try {
 		throw ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY === "1") {
-		recordStep("cross-loop-stk-inspector-recovery", await exerciseCrossLoopStkInspectorRecovery(browser));
+		recordStep(
+			"cross-loop-stk-inspector-recovery",
+			await exerciseCrossLoopStkInspectorRecovery(browser),
+		);
 		assertEqual(result.consoleErrors.length, 0, "Cross-Loop Stocker recovery console errors");
 		assertEqual(result.pageErrors.length, 0, "Cross-Loop Stocker recovery page errors");
 		result.status = "PASS";
 		console.log("PASS cross-Loop Stocker Inspector recovery acceptance");
 		throw CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_STK_GROUP_LOOP_RECOVERY_ONLY === "1") {
+		recordStep("stk-group-loop-recovery", await exerciseStkGroupLoopRecovery(browser));
+		assertEqual(result.consoleErrors.length, 0, "Stocker whole-group recovery console errors");
+		assertEqual(result.pageErrors.length, 0, "Stocker whole-group recovery page errors");
+		result.status = "PASS";
+		console.log("PASS Stocker whole-group Move and explicit Loop recovery acceptance");
+		throw STK_GROUP_LOOP_RECOVERY_ONLY_COMPLETE;
 	}
 	if (process.env.OPENFAB_STATIC_FAB_ISSUE_RECHECK_ACCEPTANCE_ONLY === "1") {
 		const staticFabIssueRecheck = await exerciseStaticFabIssueInspectorRecheck(browser);
@@ -412,7 +427,11 @@ try {
 	recordStep("zero-eligible-process-loop", await exerciseZeroEligibleProcessLoop(browser));
 	recordStep("no-process-loop-port-feedback", await exerciseNoProcessLoopPortFeedback(browser));
 	recordStep("adjacent-process-loop-port-hit", await exerciseAdjacentProcessLoopPortHit(browser));
-	recordStep("cross-loop-stk-inspector-recovery", await exerciseCrossLoopStkInspectorRecovery(browser));
+	recordStep(
+		"cross-loop-stk-inspector-recovery",
+		await exerciseCrossLoopStkInspectorRecovery(browser),
+	);
+	recordStep("stk-group-loop-recovery", await exerciseStkGroupLoopRecovery(browser));
 	recordStep("start-choice-clarity", await exerciseStartChoiceClarity(browser));
 	recordStep(
 		"visible-template-port-discovery",
@@ -2848,6 +2867,7 @@ try {
 		error === ZERO_ELIGIBLE_PROCESS_LOOP_ONLY_COMPLETE ||
 		error === ADJACENT_PROCESS_LOOP_PORT_HIT_ONLY_COMPLETE ||
 		error === CROSS_LOOP_STK_INSPECTOR_RECOVERY_ONLY_COMPLETE ||
+		error === STK_GROUP_LOOP_RECOVERY_ONLY_COMPLETE ||
 		error === DECLARED_BAY_DISCONNECTION_ONLY_COMPLETE ||
 		error === STATION_REVIEW_APPLY_ONLY_COMPLETE ||
 		error === COMPACT_STARTER_NAV_ONLY_COMPLETE ||
@@ -6524,43 +6544,54 @@ async function exerciseCrossLoopStkInspectorRecovery(browserInstance) {
 			const loopB = await readDirectProcessLoopPortCandidates(page, "STK", fixture.loopBId);
 			assertAtLeast(loopA.length, 2, `${label} Loop A direct STK candidates`);
 			assertAtLeast(loopB.length, 2, `${label} Loop B direct STK candidates`);
-			const pair = await page.evaluate(({ firstCandidates, secondCandidates }) => {
-				const app = window.__tileFab;
-				const slots = app?.getEditorModel().portSlotArtifacts.STK.slots;
-				const zoom = app?.camera?.zoom;
-				if (!app?.renderer || !slots || !zoom) return null;
-				for (const first of firstCandidates) {
-					if (app.renderer.hitTestPortSlot(slots, first, zoom) !== first.row) continue;
-					for (const second of secondCandidates) {
-						if (
-							first.row === second.row ||
-							Math.hypot(first.x - second.x, first.y - second.y) < 3 ||
-							app.renderer.hitTestPortSlot(slots, second, zoom) !== second.row
-						) continue;
-						const preview = app.previewStkPlacement([first.row, second.row], "FLEX");
-						if (preview?.valid && preview.canComplete) return { first, second };
+			const pair = await page.evaluate(
+				({ firstCandidates, secondCandidates }) => {
+					const app = window.__tileFab;
+					const slots = app?.getEditorModel().portSlotArtifacts.STK.slots;
+					const zoom = app?.camera?.zoom;
+					if (!app?.renderer || !slots || !zoom) return null;
+					for (const first of firstCandidates) {
+						if (app.renderer.hitTestPortSlot(slots, first, zoom) !== first.row) continue;
+						for (const second of secondCandidates) {
+							if (
+								first.row === second.row ||
+								Math.hypot(first.x - second.x, first.y - second.y) < 3 ||
+								app.renderer.hitTestPortSlot(slots, second, zoom) !== second.row
+							)
+								continue;
+							const preview = app.previewStkPlacement([first.row, second.row], "FLEX");
+							if (preview?.valid && preview.canComplete) return { first, second };
+						}
 					}
-				}
-				return null;
-			}, {
-				firstCandidates: loopA.slice(0, 32),
-				secondCandidates: loopB.slice(0, 32),
-			});
-			if (!pair) throw new Error(`${label} has no preview-valid, visible cross-Loop FLEX pair in 32 candidates per Loop.`);
+					return null;
+				},
+				{
+					firstCandidates: loopA.slice(0, 32),
+					secondCandidates: loopB.slice(0, 32),
+				},
+			);
+			if (!pair)
+				throw new Error(
+					`${label} has no preview-valid, visible cross-Loop FLEX pair in 32 candidates per Loop.`,
+				);
 			const beforePlacement = await readMetrics(page);
 			await revealOrdinaryEquipmentSlot(page, pair.first, `${label} Loop A Port`);
 			await clickWorld(page, pair.first, false);
 			await page.waitForFunction(
 				(row) =>
 					document.querySelector("[data-testid='tilefab-app']")?.dataset.stkDraftRows === "1" &&
-					document.querySelector("[data-testid='rail-canvas']")?.dataset.stkDraftSelectedRows === String(row),
+					document.querySelector("[data-testid='rail-canvas']")?.dataset.stkDraftSelectedRows ===
+						String(row),
 				pair.first.row,
 			);
 			await revealOrdinaryEquipmentSlot(page, pair.second, `${label} Loop B Port`);
 			await clickWorld(page, pair.second, false);
 			await page.waitForFunction(
 				({ firstRow, secondRow }) => {
-					const rows = (document.querySelector("[data-testid='rail-canvas']")?.dataset.stkDraftSelectedRows ?? "")
+					const rows = (
+						document.querySelector("[data-testid='rail-canvas']")?.dataset.stkDraftSelectedRows ??
+						""
+					)
 						.split(",")
 						.filter(Boolean);
 					return (
@@ -6581,7 +6612,8 @@ async function exerciseCrossLoopStkInspectorRecovery(browserInstance) {
 			const placed = await waitForWorker(
 				page,
 				(metrics) =>
-					Number(metrics.workerTargetSequence) === Number(beforePlacement.workerTargetSequence) + 1 &&
+					Number(metrics.workerTargetSequence) ===
+						Number(beforePlacement.workerTargetSequence) + 1 &&
 					Number(metrics.equipmentGroups) === Number(beforePlacement.equipmentGroups) + 1 &&
 					Number(metrics.equipmentPorts) === Number(beforePlacement.equipmentPorts) + 2,
 			);
@@ -6589,16 +6621,47 @@ async function exerciseCrossLoopStkInspectorRecovery(browserInstance) {
 			const groupId = Number(beforePlacement.modelNextEquipmentGroupId);
 			const inspector = page.getByTestId("port-equipment-inspector");
 			await inspector.waitFor({ state: "visible" });
-			assertEqual(await inspector.getAttribute("data-equipment-group-id"), String(groupId), `${label} exact group Inspector`);
+			assertEqual(
+				await inspector.getAttribute("data-equipment-group-id"),
+				String(groupId),
+				`${label} exact group Inspector`,
+			);
 			assertEqual(await inspector.getAttribute("data-editable"), "true", `${label} editable group`);
-			assertEqual(await inspector.getAttribute("data-primary-process-loop-availability"), "move", `${label} no eligible Loop recovery`);
-			assertIncludes(await inspector.locator("header").innerText(), "Port 2개", `${label} two-Port group`);
-			assertEqual(await inspector.getByTestId("equipment-process-loop-membership").getAttribute("data-owner-ids"), "", `${label} unowned group`);
-			assertEqual(await inspector.getByTestId("attach-equipment-process-loop-primary").count(), 0, `${label} no automatic Loop attachment`);
-			assertEqual(await inspector.getByTestId("attach-equipment-process-loop").count(), 0, `${label} no eligible Loop attachment choice`);
+			assertEqual(
+				await inspector.getAttribute("data-primary-process-loop-availability"),
+				"move",
+				`${label} no eligible Loop recovery`,
+			);
+			assertIncludes(
+				await inspector.locator("header").innerText(),
+				"Port 2개",
+				`${label} two-Port group`,
+			);
+			assertEqual(
+				await inspector
+					.getByTestId("equipment-process-loop-membership")
+					.getAttribute("data-owner-ids"),
+				"",
+				`${label} unowned group`,
+			);
+			assertEqual(
+				await inspector.getByTestId("attach-equipment-process-loop-primary").count(),
+				0,
+				`${label} no automatic Loop attachment`,
+			);
+			assertEqual(
+				await inspector.getByTestId("attach-equipment-process-loop").count(),
+				0,
+				`${label} no eligible Loop attachment choice`,
+			);
 			const beforeMove = await readMetrics(page);
 			const assertRecoveryHistoryUnchanged = (actual, phase) => {
-				for (const key of ["historyCanUndo", "historyCanRedo", "documentCanUndo", "documentCanRedo"]) {
+				for (const key of [
+					"historyCanUndo",
+					"historyCanRedo",
+					"documentCanUndo",
+					"documentCanRedo",
+				]) {
 					assertEqual(actual[key], beforeMove[key], `${phase} ${key}`);
 				}
 			};
@@ -6607,34 +6670,60 @@ async function exerciseCrossLoopStkInspectorRecovery(browserInstance) {
 			assertEqual(JSON.stringify(beforeOwnership[0]?.ownerIds), "[]", `${label} no direct owner`);
 			const primaryMove = inspector.getByTestId("move-port-equipment-group-primary");
 			assertEqual(await primaryMove.count(), 1, `${label} one primary recovery action`);
-			assertEqual(await inspector.getByTestId("move-port-equipment-group").count(), 0, `${label} no duplicate body Move action`);
+			assertEqual(
+				await inspector.getByTestId("move-port-equipment-group").count(),
+				0,
+				`${label} no duplicate body Move action`,
+			);
 			const recoveryStatus = page.getByTestId("rail-status-message");
 			await page.waitForFunction((id) => {
 				const status = document.querySelector("[data-testid='rail-status-message']");
-				return status?.getAttribute("role") === "status" &&
+				return (
+					status?.getAttribute("role") === "status" &&
 					status.getAttribute("aria-live") === "polite" &&
-					status.textContent?.includes(`STK-${id} · 연결할 Loop 없음`);
+					status.textContent?.includes(`STK-${id} · 연결할 Loop 없음`)
+				);
 			}, groupId);
-			assertIncludes(await recoveryStatus.textContent(), "이동 전에 FAB 조직", `${label} live recovery sequence`);
+			assertIncludes(
+				await recoveryStatus.textContent(),
+				"미리보기에서 모든 Port의 Loop 소속 가능 여부",
+				`${label} live recovery sequence`,
+			);
 			assertIncludes(await primaryMove.innerText(), "전체 이동", `${label} visible move guidance`);
-			assertIncludes(await primaryMove.innerText(), "FAB 조직", `${label} organization navigator guidance`);
-			assertIncludes(await primaryMove.innerText(), "지도 보기", `${label} existing Loop map guidance`);
+			assertIncludes(
+				await primaryMove.innerText(),
+				"미리보기",
+				`${label} preview recovery guidance`,
+			);
+			assertIncludes(
+				await primaryMove.innerText(),
+				"Loop 소속 확인",
+				`${label} explicit Loop eligibility guidance`,
+			);
 			assertEqual(
-				await primaryMove.locator(".tilefab-equipment-process-loop-primary-name").evaluate(
-					(element) => element.scrollWidth <= element.clientWidth + 1,
-				),
+				await primaryMove
+					.locator(".tilefab-equipment-process-loop-primary-name")
+					.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
 				true,
-				`${label} prerequisite map hint fits without truncation`,
+				`${label} preview guidance fits without truncation`,
 			);
 			if (viewport.width <= 430) {
 				const disclosure = inspector.getByTestId("compact-inspector-disclosure");
 				await disclosure.click();
-				assertEqual(await inspector.getAttribute("data-compact-snap"), "peek", `${label} compact peek`);
+				assertEqual(
+					await inspector.getAttribute("data-compact-snap"),
+					"peek",
+					`${label} compact peek`,
+				);
 				const sheet = await inspector.boundingBox();
 				assertAtLeast(sheet?.height ?? 0, 115, `${label} compact recovery height`);
 				assertAtMost(sheet?.height ?? 0, 117, `${label} compact recovery height`);
 			} else {
-				assertEqual(await inspector.getAttribute("data-compact-layout"), "side-panel", `${label} side Inspector`);
+				assertEqual(
+					await inspector.getAttribute("data-compact-layout"),
+					"side-panel",
+					`${label} side Inspector`,
+				);
 			}
 			await assertLocatorInsideViewport(page, primaryMove);
 			await assertLocatorOwnsHitArea(primaryMove, `${label} primary group Move`);
@@ -6642,36 +6731,1261 @@ async function exerciseCrossLoopStkInspectorRecovery(browserInstance) {
 			assertAtLeast(primaryBounds?.width ?? 0, 44, `${label} primary Move width`);
 			assertAtLeast(primaryBounds?.height ?? 0, 44, `${label} primary Move height`);
 			const afterDisclosure = await readMetrics(page);
-			assertExactStaticFabModelIdentity(afterDisclosure, beforeMove, `${label} Inspector disclosure isolation`);
+			assertExactStaticFabModelIdentity(
+				afterDisclosure,
+				beforeMove,
+				`${label} Inspector disclosure isolation`,
+			);
 			assertRecoveryHistoryUnchanged(afterDisclosure, `${label} Inspector disclosure isolation`);
-			await page.screenshot({ path: path.join(artifactRoot, `cross-loop-stk-inspector-${viewport.width}x${viewport.height}.png`) });
+			await page.screenshot({
+				path: path.join(
+					artifactRoot,
+					`cross-loop-stk-inspector-${viewport.width}x${viewport.height}.png`,
+				),
+			});
 			await primaryMove.click();
 			const transform = page.getByTestId("port-equipment-group-transformbar");
 			await transform.waitFor({ state: "visible" });
-			assertEqual(await transform.getAttribute("data-port-type"), "STK", `${label} group Move kind`);
+			assertEqual(
+				await transform.getAttribute("data-port-type"),
+				"STK",
+				`${label} group Move kind`,
+			);
 			assertEqual(await transform.getAttribute("data-mode"), "move", `${label} group Move mode`);
-			await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-canvas");
+			await page.waitForFunction(
+				() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+			);
 			const afterMoveEntry = await readMetrics(page);
-			assertExactStaticFabModelIdentity(afterMoveEntry, beforeMove, `${label} Move entry isolation`);
+			assertExactStaticFabModelIdentity(
+				afterMoveEntry,
+				beforeMove,
+				`${label} Move entry isolation`,
+			);
 			assertRecoveryHistoryUnchanged(afterMoveEntry, `${label} Move entry isolation`);
 			await page.getByTestId("rail-canvas").press("Escape");
 			await inspector.waitFor({ state: "visible" });
 			assertEqual(await transform.count(), 0, `${label} Move cancel clears transient bar`);
-			assertEqual(await inspector.getAttribute("data-equipment-group-id"), String(groupId), `${label} cancel restores group`);
-			assertEqual(await inspector.getAttribute("data-primary-process-loop-availability"), "move", `${label} cancel preserves recovery`);
-			assertEqual(await inspector.getByTestId("equipment-process-loop-membership").getAttribute("data-owner-ids"), "", `${label} cancel leaves ownership explicit`);
-			assertEqual(JSON.stringify(await readPortEquipmentContract(page)), JSON.stringify(beforeEquipment), `${label} cancel preserves exact group and Ports`);
-			assertEqual(JSON.stringify(await readDirectProcessLoopEquipmentEvidence(page, [groupId])), JSON.stringify(beforeOwnership), `${label} cancel preserves no direct owner`);
+			assertEqual(
+				await inspector.getAttribute("data-equipment-group-id"),
+				String(groupId),
+				`${label} cancel restores group`,
+			);
+			assertEqual(
+				await inspector.getAttribute("data-primary-process-loop-availability"),
+				"move",
+				`${label} cancel preserves recovery`,
+			);
+			assertEqual(
+				await inspector
+					.getByTestId("equipment-process-loop-membership")
+					.getAttribute("data-owner-ids"),
+				"",
+				`${label} cancel leaves ownership explicit`,
+			);
+			assertEqual(
+				JSON.stringify(await readPortEquipmentContract(page)),
+				JSON.stringify(beforeEquipment),
+				`${label} cancel preserves exact group and Ports`,
+			);
+			assertEqual(
+				JSON.stringify(await readDirectProcessLoopEquipmentEvidence(page, [groupId])),
+				JSON.stringify(beforeOwnership),
+				`${label} cancel preserves no direct owner`,
+			);
 			const afterMoveCancel = await readMetrics(page);
-			assertExactStaticFabModelIdentity(afterMoveCancel, beforeMove, `${label} Move cancel isolation`);
+			assertExactStaticFabModelIdentity(
+				afterMoveCancel,
+				beforeMove,
+				`${label} Move cancel isolation`,
+			);
 			assertRecoveryHistoryUnchanged(afterMoveCancel, `${label} Move cancel isolation`);
-			proofs.push({ viewport: `${viewport.width}x${viewport.height}`, groupId, loopIds: [fixture.loopAId, fixture.loopBId], rows: [pair.first.row, pair.second.row], ownerIds: beforeOwnership[0]?.ownerIds ?? [], checksum: beforeMove.modelChecksum });
+			proofs.push({
+				viewport: `${viewport.width}x${viewport.height}`,
+				groupId,
+				loopIds: [fixture.loopAId, fixture.loopBId],
+				rows: [pair.first.row, pair.second.row],
+				ownerIds: beforeOwnership[0]?.ownerIds ?? [],
+				checksum: beforeMove.modelChecksum,
+			});
 		} finally {
 			await closeBrowserResource(page, `${label} page`);
 			await closeBrowserResource(context, `${label} context`);
 		}
 	}
 	return Object.freeze({ proofs });
+}
+
+async function createStkGroupLoopRecoveryFixtures() {
+	if (stkGroupLoopRecoveryFixtures) return stkGroupLoopRecoveryFixtures;
+	const { createServer } = await import("vite");
+	const vite = await createServer({
+		root,
+		appType: "custom",
+		logLevel: "silent",
+		server: { middlewareMode: true },
+	});
+	try {
+		const [
+			starter,
+			physical,
+			ports,
+			placement,
+			editing,
+			equipment,
+			organizations,
+			scope,
+			project,
+			codec,
+		] = await Promise.all([
+			vite.ssrLoadModule("/src/tilefab/compile/SyntheticFabStarter.ts"),
+			vite.ssrLoadModule("/src/tilefab/compile/PhysicalRailCompiler.ts"),
+			vite.ssrLoadModule("/src/tilefab/compile/PortSlotCompiler.ts"),
+			vite.ssrLoadModule("/src/tilefab/compile/PortPlacementPlanner.ts"),
+			vite.ssrLoadModule("/src/tilefab/compile/PortEquipmentGroupEditPlanner.ts"),
+			vite.ssrLoadModule("/src/tilefab/core/EquipmentGroup.ts"),
+			vite.ssrLoadModule("/src/tilefab/core/StaticFabOrganizationPlan.ts"),
+			vite.ssrLoadModule("/src/tilefab/editor/OrdinaryPortProcessLoopScope.ts"),
+			vite.ssrLoadModule("/src/tilefab/project/OpenFabProject.ts"),
+			vite.ssrLoadModule("/src/tilefab/project/OpenFabProjectCodec.ts"),
+		]);
+		const fixtures = {};
+		for (const [name, sourceXs] of [
+			["achievable", [40, 54]],
+			["impossible", [30, 70]],
+		]) {
+			// An independently generated connected Bay retains its directed gateways and exact owners.
+			// These coordinates describe only this OpenFab-owned synthetic acceptance scene.
+			const document = starter.buildSyntheticFabStarter(
+				starter.defaultSyntheticFabStarterRequest("bay-assembly"),
+			).document;
+			const paths = physical.compilePhysicalRail(document.map);
+			const emptySlots = ports.compilePortSlots(paths, document.portEquipment, "STK");
+			const emptyAvailability = new ports.PortSlotAvailabilityIndex(
+				paths,
+				document.portEquipment,
+				"STK",
+			);
+			const rowAt = (slots, x, z) => {
+				const row = Array.from(slots.statuses).findIndex(
+					(status, candidate) =>
+						status === ports.PORT_SLOT_STATUS.LEGAL &&
+						slots.routeXs[candidate] === x &&
+						slots.routeZs[candidate] === z &&
+						slots.routeFromDirections[candidate] === 8 &&
+						slots.routeToDirections[candidate] === 2,
+				);
+				if (row < 0) throw new Error(`${name} fixture lacks legal W→E STK row at ${x},${z}.`);
+				return row;
+			};
+			const sourceRows = sourceXs.map((x) => rowAt(emptySlots, x, 26));
+			const placementPlan = placement.planStkPlacement(
+				emptySlots,
+				sourceRows,
+				emptyAvailability,
+				document.portEquipment,
+				"FLEX",
+				document.map.getRevision(),
+				document.getPatchSequence(),
+			);
+			assertEqual(
+				placementPlan.valid,
+				true,
+				`${name} synthetic source placement: ${placementPlan.reason}`,
+			);
+			if (!document.commitPortEquipment(placementPlan)) {
+				throw new Error(
+					`${name} synthetic FLEX source commit failed: ${document.getLastCommandError()}`,
+				);
+			}
+			const group = document.portEquipment.equipmentGroups[0];
+			assertEqual(group.kind, "STK", `${name} source kind`);
+			assertEqual(group.template, "FLEX", `${name} source template`);
+			assertEqual(JSON.stringify(group.portIds), "[1,2]", `${name} canonical source Port order`);
+			const anchorPortId = group.portIds[0];
+			const sourceEligibility = organizations.queryStaticFabProcessLoopEquipmentMembership(
+				document.portEquipment,
+				document.organizations,
+				group.id,
+			);
+			assertEqual(
+				JSON.stringify(sourceEligibility.ownerOrganizationIds),
+				"[]",
+				`${name} source is unowned`,
+			);
+			assertEqual(
+				JSON.stringify(sourceEligibility.eligibleProcessLoopIds),
+				"[]",
+				`${name} source crosses Loops`,
+			);
+			const slots = ports.compilePortSlots(paths, document.portEquipment, "STK");
+			const availability = new ports.PortSlotAvailabilityIndex(
+				paths,
+				document.portEquipment,
+				"STK",
+			);
+			const slotIndex = editing.portEquipmentGroupSlotIndexFor(slots);
+			const pointForRow = (row) => ({
+				row,
+				x: slots.worldPositions[row * 2],
+				y: slots.worldPositions[row * 2 + 1],
+				routeX: slots.routeXs[row],
+				routeZ: slots.routeZs[row],
+			});
+			const planAt = (row) =>
+				editing.planPortEquipmentGroupEdit(
+					document.map,
+					slots,
+					slotIndex,
+					availability,
+					document.portEquipment,
+					group.id,
+					anchorPortId,
+					row,
+					"move",
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					"commit",
+				);
+			const proposedPorts = (plan) =>
+				plan.groupEdit.portTargets.map(
+					(target) =>
+						plan.portMutations.find((mutation) => mutation.id === target.targetPortId)?.after ??
+						document.portEquipment.ports.find((port) => port.id === target.sourcePortId),
+				);
+			const eligibleForPlan = (plan) =>
+				organizations.queryStaticFabProcessLoopsSupportingPorts(
+					document.organizations,
+					proposedPorts(plan),
+				);
+			const noneRow = rowAt(slots, 8, 0);
+			const nonePlan = planAt(noneRow);
+			assertEqual(
+				nonePlan.valid,
+				true,
+				`${name} Bay rail move is geometry-valid: ${nonePlan.reason}`,
+			);
+			assertEqual(
+				JSON.stringify(eligibleForPlan(nonePlan)),
+				"[]",
+				`${name} valid Bay move has no eligible Loop`,
+			);
+			let target = null;
+			let movedEquipment = null;
+			let copiedEquipment = null;
+			let copyTarget = null;
+			const enumeration = {
+				legalAnchorRows: 0,
+				validMovePlans: 0,
+				eligibleMovePlans: 0,
+				loops: [],
+			};
+			if (name === "achievable") {
+				const targetRow = rowAt(slots, 10, 26);
+				const plan = planAt(targetRow);
+				assertEqual(plan.valid, true, `achievable rigid move prevalidation: ${plan.reason}`);
+				assertEqual(
+					plan.groupEdit.sourceAnchorPortId,
+					anchorPortId,
+					"achievable canonical first-Port anchor",
+				);
+				assertEqual(
+					plan.groupEdit.quarterTurns,
+					0,
+					"achievable move preserves directed orientation",
+				);
+				assertEqual(
+					JSON.stringify(eligibleForPlan(plan)),
+					"[2]",
+					"achievable target has only Loop A eligibility",
+				);
+				assertEqual(
+					JSON.stringify(proposedPorts(plan).map((port) => [port.route.x, port.route.z])),
+					"[[10,26],[24,26]]",
+					"achievable target retains exact 14m Port span",
+				);
+				target = pointForRow(targetRow);
+				movedEquipment = equipment.applyPortEquipmentMutations(
+					document.portEquipment,
+					plan.portMutations,
+					plan.equipmentGroupMutations,
+				);
+				assertEqual(
+					JSON.stringify(
+						organizations.queryStaticFabProcessLoopsSupportingPorts(
+							document.organizations,
+							movedEquipment.ports,
+						),
+					),
+					"[2]",
+					"copy source has direct Loop A route eligibility",
+				);
+				const copySlots = ports.compilePortSlots(paths, movedEquipment, "STK");
+				const copyPlan = editing.planPortEquipmentGroupEdit(
+					document.map,
+					copySlots,
+					editing.portEquipmentGroupSlotIndexFor(copySlots),
+					new ports.PortSlotAvailabilityIndex(paths, movedEquipment, "STK"),
+					movedEquipment,
+					group.id,
+					anchorPortId,
+					rowAt(copySlots, 40, 26),
+					"copy",
+					document.map.getRevision(),
+					document.getPatchSequence() + 2,
+					"commit",
+				);
+				assertEqual(
+					copyPlan.valid,
+					true,
+					`copy cross-Loop target prevalidation: ${copyPlan.reason}`,
+				);
+				assertEqual(
+					JSON.stringify(eligibleForPlan(copyPlan)),
+					"[]",
+					"copy target routes have no single Loop despite eligible source routes",
+				);
+				const eligibleCopyRow = rowAt(copySlots, 26, 26);
+				const eligibleCopyPlan = editing.planPortEquipmentGroupEdit(
+					document.map,
+					copySlots,
+					editing.portEquipmentGroupSlotIndexFor(copySlots),
+					new ports.PortSlotAvailabilityIndex(paths, movedEquipment, "STK"),
+					movedEquipment,
+					group.id,
+					anchorPortId,
+					eligibleCopyRow,
+					"copy",
+					document.map.getRevision(),
+					document.getPatchSequence() + 2,
+					"commit",
+				);
+				assertEqual(
+					eligibleCopyPlan.valid,
+					true,
+					`copy Loop A target prevalidation: ${eligibleCopyPlan.reason}`,
+				);
+				assertEqual(
+					JSON.stringify(eligibleForPlan(eligibleCopyPlan)),
+					"[2]",
+					"transformed copy can fit Loop A without inheriting ownership",
+				);
+				copyTarget = pointForRow(eligibleCopyRow);
+				copiedEquipment = equipment.applyPortEquipmentMutations(
+					movedEquipment,
+					eligibleCopyPlan.portMutations,
+					eligibleCopyPlan.equipmentGroupMutations,
+				);
+			} else {
+				const loops = document.organizations.records.filter((record) => record.kind === "AISLE");
+				assertEqual(
+					JSON.stringify(loops.map((loop) => loop.id)),
+					"[2,3]",
+					"impossible fixture has both exact Process Loops",
+				);
+				const scopes = loops.map((loop) => scope.compileOrdinaryPortProcessLoopScope(slots, loop));
+				enumeration.loops = scopes.map((loopScope) => ({
+					id: loopScope.organizationId,
+					eligibleAnchorRows: loopScope.eligibleCount,
+					checkedAnchorRows: 0,
+					validMovePlans: 0,
+					singleLoopFits: 0,
+				}));
+				// Exhaust every legal anchor, including every scoped row on both Loops and every rotation
+				// induced by its directed rail. A legal anchor alone does not prove the rigid group fits.
+				for (let row = 0; row < slots.count; row++) {
+					if (slots.statuses[row] !== ports.PORT_SLOT_STATUS.LEGAL) continue;
+					enumeration.legalAnchorRows++;
+					const plan = planAt(row);
+					const eligible = plan.valid ? eligibleForPlan(plan) : [];
+					if (plan.valid) enumeration.validMovePlans++;
+					if (eligible.length > 0) enumeration.eligibleMovePlans++;
+					for (const [index, loopScope] of scopes.entries()) {
+						if (loopScope.rowMask[row] !== 1) continue;
+						const proof = enumeration.loops[index];
+						proof.checkedAnchorRows++;
+						if (plan.valid) proof.validMovePlans++;
+						if (eligible.includes(loopScope.organizationId)) proof.singleLoopFits++;
+					}
+				}
+				assertEqual(
+					enumeration.legalAnchorRows,
+					slots.legalCount,
+					"impossible case exhausts every legal anchor",
+				);
+				assertAtLeast(
+					enumeration.validMovePlans,
+					1,
+					"impossible group still has geometry-valid moves",
+				);
+				assertEqual(
+					enumeration.eligibleMovePlans,
+					0,
+					"impossible group has no single-Loop fit at any legal anchor",
+				);
+				for (const proof of enumeration.loops) {
+					assertAtLeast(
+						proof.eligibleAnchorRows,
+						1,
+						`impossible Loop ${proof.id} has legal anchor rows`,
+					);
+					assertEqual(
+						proof.checkedAnchorRows,
+						proof.eligibleAnchorRows,
+						`impossible Loop ${proof.id} exhaustive scoped anchors`,
+					);
+					assertEqual(
+						proof.singleLoopFits,
+						0,
+						`impossible Loop ${proof.id} cannot contain the complete rigid group`,
+					);
+				}
+			}
+			const projectName = `Synthetic STK ${name} recovery`;
+			const manifest = project.createOpenFabProjectManifest(
+				`openfab-stk-group-loop-${name}-acceptance`,
+				projectName,
+				"2024-01-01T00:00:00.000Z",
+			);
+			const fixturePath = path.join(artifactRoot, `stk-group-loop-${name}.openfab`);
+			await writeFile(
+				fixturePath,
+				codec.serializeOpenFabProject(project.captureOpenFabProject(document, { manifest })),
+				"utf8",
+			);
+			const anchorPort = document.portEquipment.ports.find((port) => port.id === anchorPortId);
+			fixtures[name] = Object.freeze({
+				path: fixturePath,
+				projectName,
+				groupId: group.id,
+				anchorPortId,
+				loopId: 2,
+				anchor: pointForRow(slotIndex.rowForPort(anchorPort)),
+				sourceRows,
+				sourceEquipment: document.portEquipment,
+				none: pointForRow(noneRow),
+				target,
+				movedEquipment,
+				copiedEquipment,
+				copyTarget,
+				enumeration,
+			});
+		}
+		stkGroupLoopRecoveryFixtures = Object.freeze(fixtures);
+		return stkGroupLoopRecoveryFixtures;
+	} finally {
+		await vite.close();
+	}
+}
+
+async function openStkGroupRecoveryNativeProject(
+	page,
+	viewport,
+	fixturePath,
+	projectName,
+	checksum = null,
+) {
+	await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+	await waitForReady(page, { physicalPaths: 0 });
+	await page
+		.getByTestId("openfab-start-dialog")
+		.getByRole("button", { name: /BLANK CANVAS/ })
+		.click();
+	const chooserPromise = page.waitForEvent("filechooser");
+	if (viewport.width <= 760) {
+		await page.locator(".tilefab-project-trigger").click();
+		await page
+			.locator(".tilefab-project-menu-commands")
+			.getByRole("button", { name: "열기", exact: true })
+			.click();
+	} else {
+		await page.getByRole("button", { name: "프로젝트 열기" }).click();
+	}
+	await (await chooserPromise).setFiles(fixturePath);
+	const loaded = await waitForWorker(
+		page,
+		(metrics) =>
+			metrics.projectName === projectName &&
+			metrics.staticFabOrganizations === "3" &&
+			metrics.equipmentGroups === "1" &&
+			metrics.equipmentPorts === "2" &&
+			(checksum === null || metrics.modelChecksum === checksum),
+	);
+	assertEqual(loaded.workerChecksum, loaded.modelChecksum, `${projectName} native Worker parity`);
+	assertEqual(loaded.strongComponents, "1", `${projectName} connected directed rail`);
+	assertEqual(loaded.openTerminals, "0", `${projectName} complete closed rail`);
+	assertEqual(loaded.workerSimulationReady, "false", `${projectName} simulation remains gated`);
+	return loaded;
+}
+
+async function readStkGroupRecoveryEquipment(page) {
+	return page.evaluate(() => {
+		const equipment = window.__tileFab?.getEditorModel().document.portEquipment;
+		if (!equipment) throw new Error("Stocker recovery equipment is unavailable.");
+		return equipment;
+	});
+}
+
+async function assertStkGroupRecoveryRecords(page, expected, ownerIds, label) {
+	const actual = await readStkGroupRecoveryEquipment(page);
+	assertEqual(
+		isDeepStrictEqual(actual, expected),
+		true,
+		`${label} exact groups, Port shapes, barcodes and allocation cursors`,
+	);
+	const contract = await readPortEquipmentContract(page);
+	assertEqual(
+		JSON.stringify(contract.groups[0]?.portIds),
+		JSON.stringify(expected.equipmentGroups[0].portIds),
+		`${label} canonical group Port IDs`,
+	);
+	assertEqual(contract.groups[0]?.template, "FLEX", `${label} FLEX metadata`);
+	assertEqual(contract.ports.length, 2, `${label} exact two-Port contract`);
+	const ownership = await readDirectProcessLoopEquipmentEvidence(page, [
+		expected.equipmentGroups[0].id,
+	]);
+	assertEqual(
+		JSON.stringify(ownership[0].ownerIds),
+		JSON.stringify(ownerIds),
+		`${label} exact direct ownership`,
+	);
+	if (ownerIds.length > 0) {
+		assertEqual(ownership[0].ownerKind, "AISLE", `${label} owner is a Process Loop`);
+		assertEqual(
+			ownership[0].ports.every((port) => port.covered),
+			true,
+			`${label} owner directly covers every Port route`,
+		);
+	}
+	return ownership;
+}
+
+function assertStkGroupRecoveryAtomicStep(after, before, baseline, label) {
+	for (const key of ["modelSequence", "workerTargetSequence", "workerSequence"]) {
+		assertEqual(Number(after[key]), Number(before[key]) + 1, `${label} one atomic patch ${key}`);
+	}
+	assertEqual(after.modelChecksum, after.workerTargetChecksum, `${label} target checksum parity`);
+	assertEqual(after.modelChecksum, after.workerChecksum, `${label} acknowledged checksum parity`);
+	for (const key of [
+		"projectId",
+		"projectName",
+		"physicalPaths",
+		"authoredCells",
+		"authoredEdges",
+		"modelPhysicalFingerprint",
+		"modelTopologyFingerprint",
+		"modelNextAdvancedSwitchId",
+		"modelNextPortId",
+		"modelNextEquipmentGroupId",
+		"modelNextOrganizationId",
+		"equipmentGroups",
+		"equipmentPorts",
+		"staticFabOrganizations",
+		"strongComponents",
+		"openTerminals",
+		"workerPhysicalFingerprint",
+		"workerPhysicalPaths",
+	]) {
+		assertEqual(after[key], baseline[key], `${label} preserved ${key}`);
+	}
+	assertEqual(after.workerSimulationReady, "false", `${label} simulation remains gated`);
+}
+
+async function selectStkGroupRecoveryAnchor(page, fixture, label) {
+	await activateEditorActivity(page, "inspect");
+	await revealOrdinaryEquipmentSlot(page, fixture.anchor, `${label} canonical first Port`);
+	await clickWorld(page, fixture.anchor, false);
+	const inspector = page.getByTestId("port-equipment-inspector");
+	await page.waitForFunction(({ groupId, anchorPortId }) => {
+		const inspector = document.querySelector('[data-testid="port-equipment-inspector"]');
+		return (
+			inspector?.getAttribute("data-equipment-group-id") === String(groupId) &&
+			inspector.getAttribute("data-port-id") === String(anchorPortId)
+		);
+	}, fixture);
+	assertEqual(
+		await inspector.getAttribute("data-primary-process-loop-availability"),
+		"move",
+		`${label} primary recovery available`,
+	);
+	const move = inspector.getByTestId("move-port-equipment-group-primary");
+	await assertLocatorOwnsHitArea(move, `${label} whole-group Move`);
+	assertIncludes(await move.innerText(), "미리보기", `${label} recovery explains preview`);
+	assertIncludes(
+		await move.innerText(),
+		"Loop 소속 확인",
+		`${label} recovery explains membership eligibility`,
+	);
+	await move.click();
+	await page.getByTestId("port-equipment-group-transformbar").waitFor({ state: "visible" });
+	await page.waitForFunction(
+		() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+	);
+}
+
+async function hoverStkGroupRecoveryPreview(
+	page,
+	target,
+	eligibleIds,
+	label,
+	screenshotName,
+	mode = "move",
+) {
+	const point = await revealOrdinaryEquipmentSlot(page, target, label);
+	await page.mouse.move(point.x, point.y);
+	await page.waitForFunction(
+		({ x, z, ids }) => {
+			const bar = document.querySelector('[data-testid="port-equipment-group-transformbar"]');
+			const readout = document.querySelector('[data-testid="port-equipment-group-edit-readout"]');
+			return (
+				bar?.getAttribute("data-state") === "valid" &&
+				bar.getAttribute("data-eligible-process-loop-ids") === ids &&
+				readout?.textContent?.includes(`대상 X ${x}미터 · Z ${z}미터 · 배치 가능`)
+			);
+		},
+		{ x: target.routeX, z: target.routeZ, ids: eligibleIds.join(",") },
+	);
+	const bar = page.getByTestId("port-equipment-group-transformbar");
+	assertEqual(await bar.getAttribute("data-port-type"), "STK", `${label} Stocker transform`);
+	assertEqual(await bar.getAttribute("data-mode"), mode, `${label} whole-group ${mode} mode`);
+	const preview = bar.getByTestId("equipment-group-loop-preview");
+	assertEqual(
+		await preview.getAttribute("data-state"),
+		eligibleIds.length ? "eligible" : "none",
+		`${label} truthful Loop preview state`,
+	);
+	const message = eligibleIds.length
+		? `${mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능`
+		: "모든 Port를 포함하는 Loop 없음";
+	assertIncludes(await preview.innerText(), message, `${label} visible Loop guidance`);
+	assertIncludes(
+		await page.getByTestId("port-equipment-group-edit-readout").textContent(),
+		message,
+		`${label} accessible Loop guidance`,
+	);
+	const announcement = page.getByTestId("port-equipment-group-edit-announcement");
+	assertEqual(await announcement.getAttribute("role"), "status", `${label} status role`);
+	assertEqual(
+		await announcement.getAttribute("aria-live"),
+		"polite",
+		`${label} polite live announcement`,
+	);
+	await page.waitForFunction(
+		(message) =>
+			document
+				.querySelector('[data-testid="port-equipment-group-edit-announcement"]')
+				?.textContent?.includes(message),
+		message,
+	);
+	assertIncludes(
+		await preview.innerText(),
+		eligibleIds.length ? "소속은 배치 후 별도 지정" : "다른 위치 또는 Port 구성 확인",
+		`${label} concrete next action`,
+	);
+	await assertLocatorInsideViewport(page, bar);
+	await assertLocatorInsideViewport(page, preview);
+	const exit = bar.getByRole("button", { name: "ESC", exact: true });
+	await assertLocatorOwnsHitArea(exit, `${label} visible ESC cancel`);
+	const exitBounds = await exit.boundingBox();
+	assertAtLeast(exitBounds?.width ?? 0, 44, `${label} ESC target width`);
+	assertAtLeast(exitBounds?.height ?? 0, 44, `${label} ESC target height`);
+	assertEqual(
+		await bar.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+		true,
+		`${label} transform bar fits`,
+	);
+	assertEqual(
+		await bar.evaluate((element) => element.scrollHeight <= element.clientHeight + 1),
+		true,
+		`${label} placement and Loop guidance are not vertically clipped`,
+	);
+	assertEqual(
+		await page.getByTestId("editor-action-hints").count(),
+		0,
+		`${label} transform bar owns placement guidance without a duplicate row`,
+	);
+	await page.screenshot({ path: path.join(artifactRoot, screenshotName) });
+}
+
+async function checkStkGroupRecoveryZeroIssues(page, label, screenshotName) {
+	await openStaticFabNavigatorTab(page, "checks");
+	await page.waitForFunction(() =>
+		["ready", "issues", "error"].includes(
+			document
+				.querySelector('[data-testid="tilefab-app"]')
+				?.getAttribute("data-static-fab-check-status") ?? "",
+		),
+	);
+	const checked = await readMetrics(page);
+	assertEqual(checked.staticFabCheckStatus, "ready", `${label} Checks ready`);
+	assertEqual(checked.staticFabCheckIssues, "0", `${label} Checks zero issues`);
+	assertEqual(checked.workerChecksum, checked.modelChecksum, `${label} Checks Worker parity`);
+	assertEqual(checked.workerSimulationReady, "false", `${label} Checks preserve simulation gate`);
+	await page.screenshot({ path: path.join(artifactRoot, screenshotName) });
+	return checked;
+}
+
+async function exerciseStkGroupRecoveryCopy(page, fixture, dimensions, savedContract, owned) {
+	const label = `${dimensions} owned Stocker copy preview`;
+	await page.getByRole("button", { name: "정적 FAB 검사 패널 닫기", exact: true }).click();
+	await activateEditorActivity(page, "inspect");
+	await revealOrdinaryEquipmentSlot(page, fixture.target, `${label} source first Port`);
+	await clickWorld(page, fixture.target, false);
+	const inspector = page.getByTestId("port-equipment-inspector");
+	await page.waitForFunction(({ groupId, anchorPortId }) => {
+		const selected = document.querySelector('[data-testid="port-equipment-inspector"]');
+		return (
+			selected?.getAttribute("data-equipment-group-id") === String(groupId) &&
+			selected.getAttribute("data-port-id") === String(anchorPortId)
+		);
+	}, fixture);
+	assertEqual(
+		await inspector.getByTestId("equipment-process-loop-membership").getAttribute("data-owner-ids"),
+		String(fixture.loopId),
+		`${label} original source remains owned`,
+	);
+	const disclosure = inspector.getByTestId("compact-inspector-disclosure");
+	if (
+		(await disclosure.count()) > 0 &&
+		(await disclosure.getAttribute("aria-expanded")) !== "true"
+	) {
+		await disclosure.click();
+	}
+	await openPortEquipmentMoreActions(page);
+	const copy = inspector.getByTestId("copy-port-equipment-group");
+	await copy.scrollIntoViewIfNeeded();
+	await assertLocatorOwnsHitArea(copy, `${label} visible whole-group copy`);
+	const before = await readMetrics(page);
+	await copy.click();
+	await page.getByTestId("port-equipment-group-transformbar").waitFor({ state: "visible" });
+	await hoverStkGroupRecoveryPreview(
+		page,
+		fixture.anchor,
+		[],
+		`${label} transformed cross-Loop target`,
+		`stk-group-loop-copy-none-${dimensions}.png`,
+		"copy",
+	);
+	assertProjectUnchanged(await readMetrics(page), before, `${label} transient preview`);
+	assertExactStaticFabModelIdentity(
+		await readMetrics(page),
+		before,
+		`${label} transient preview allocation isolation`,
+	);
+	await assertStkGroupRecoveryRecords(
+		page,
+		fixture.movedEquipment,
+		[fixture.loopId],
+		`${label} preview preserves owned original`,
+	);
+	await hoverStkGroupRecoveryPreview(
+		page,
+		fixture.copyTarget,
+		[fixture.loopId],
+		`${label} transformed eligible Loop target`,
+		`stk-group-loop-copy-eligible-${dimensions}.png`,
+		"copy",
+	);
+	assertProjectUnchanged(await readMetrics(page), before, `${label} eligible preview isolation`);
+	await assertStkGroupRecoveryRecords(
+		page,
+		fixture.movedEquipment,
+		[fixture.loopId],
+		`${label} eligible preview preserves owned original`,
+	);
+	await clickWorld(page, fixture.copyTarget, false);
+	const copied = await waitForWorker(
+		page,
+		(metrics) =>
+			Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1 &&
+			metrics.equipmentGroups === "2" &&
+			metrics.equipmentPorts === "4",
+	);
+	assertSingleGuidedPortCommit(copied, before, `${label} copy commit`);
+	assertEqual(
+		isDeepStrictEqual(await readStkGroupRecoveryEquipment(page), fixture.copiedEquipment),
+		true,
+		`${label} exact fresh IDs, canonical order, shapes, barcodes and cursors`,
+	);
+	const copiedContract = await readPortEquipmentContract(page);
+	assertEqual(
+		isDeepStrictEqual(
+			{
+				groups: copiedContract.groups.filter((group) => group.id === fixture.groupId),
+				ports: copiedContract.ports.filter((port) => port.equipmentGroupId === fixture.groupId),
+			},
+			savedContract,
+		),
+		true,
+		`${label} original records remain exact`,
+	);
+	const copyGroupId = fixture.movedEquipment.nextEquipmentGroupId;
+	const copyOwner = await readDirectProcessLoopEquipmentEvidence(page, [
+		fixture.groupId,
+		copyGroupId,
+	]);
+	assertEqual(
+		isDeepStrictEqual(copyOwner[0], owned[0]),
+		true,
+		`${label} original direct ownership remains exact`,
+	);
+	assertEqual(
+		JSON.stringify(copyOwner[1].ownerIds),
+		"[]",
+		`${label} new copy remains explicitly unowned`,
+	);
+	assertEqual(
+		JSON.stringify(copyOwner[1].portIds),
+		JSON.stringify([fixture.movedEquipment.nextPortId, fixture.movedEquipment.nextPortId + 1]),
+		`${label} copy allocates two fresh Port IDs`,
+	);
+	await page.waitForFunction(
+		(id) =>
+			document
+				.querySelector('[data-testid="port-equipment-inspector"]')
+				?.getAttribute("data-equipment-group-id") === String(id),
+		copyGroupId,
+	);
+	const explicitCopyAttach = inspector.getByTestId("attach-equipment-process-loop-primary");
+	await explicitCopyAttach.waitFor({ state: "visible" });
+	assertEqual(
+		await explicitCopyAttach.getAttribute("data-process-loop-id"),
+		String(fixture.loopId),
+		`${label} eligible copy still requires a separate Loop attachment`,
+	);
+	assertEqual(
+		copied.modelPhysicalFingerprint,
+		before.modelPhysicalFingerprint,
+		`${label} unchanged physical rail`,
+	);
+	assertEqual(
+		copied.modelTopologyFingerprint,
+		before.modelTopologyFingerprint,
+		`${label} unchanged directed topology`,
+	);
+	assertEqual(copied.workerSimulationReady, "false", `${label} copy keeps simulation gated`);
+	await page.getByTestId("rail-canvas").press("ControlOrMeta+z");
+	const undone = await waitForWorker(
+		page,
+		(metrics) =>
+			Number(metrics.workerTargetSequence) === Number(copied.workerTargetSequence) + 1 &&
+			metrics.equipmentGroups === "1" &&
+			metrics.equipmentPorts === "2",
+	);
+	for (const key of ["modelSequence", "workerTargetSequence", "workerSequence"]) {
+		assertEqual(
+			Number(undone[key]),
+			Number(copied[key]) + 1,
+			`${label} Undo copy one atomic ${key}`,
+		);
+	}
+	assertEqual(undone.workerChecksum, undone.modelChecksum, `${label} Undo copy Worker parity`);
+	assertEqual(
+		isDeepStrictEqual(await readPortEquipmentContract(page), savedContract),
+		true,
+		`${label} Undo restores exact reopened group and Port contract`,
+	);
+	assertEqual(
+		isDeepStrictEqual(await readDirectProcessLoopEquipmentEvidence(page, [fixture.groupId]), owned),
+		true,
+		`${label} Undo restores exact reopened owner`,
+	);
+	// Allocation cursors remain monotonic after Undo; the copied IDs must never be reused.
+	await assertStkGroupRecoveryRecords(
+		page,
+		{
+			...fixture.movedEquipment,
+			nextPortId: fixture.copiedEquipment.nextPortId,
+			nextEquipmentGroupId: fixture.copiedEquipment.nextEquipmentGroupId,
+		},
+		[fixture.loopId],
+		`${label} Undo preserves original metadata and advanced allocation cursors`,
+	);
+	assertEqual(undone.historyCanUndo, "false", `${label} native session has no earlier Undo entry`);
+	assertEqual(undone.historyCanRedo, "true", `${label} copy is redoable`);
+	const checked = await checkStkGroupRecoveryZeroIssues(
+		page,
+		`${label} after Undo`,
+		`stk-group-loop-copy-undone-checks-${dimensions}.png`,
+	);
+	return {
+		sourceGroupId: fixture.groupId,
+		copyGroupId,
+		copiedPortIds: copyOwner[1].portIds,
+		sourceOwnerIds: copyOwner[0].ownerIds,
+		copyOwnerIds: copyOwner[1].ownerIds,
+		sequence: Number(copied.workerSequence),
+		undoneSequence: Number(undone.workerSequence),
+		checks: checked.staticFabCheckIssues,
+	};
+}
+
+async function exerciseStkGroupLoopRecovery(browserInstance) {
+	const fixtures = await createStkGroupLoopRecoveryFixtures();
+	const proofs = [];
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 1440, height: 900 },
+	]) {
+		const dimensions = `${viewport.width}x${viewport.height}`;
+		for (const name of ["impossible", "achievable"]) {
+			const fixture = fixtures[name];
+			const label = `${dimensions} ${name} whole-Stocker recovery`;
+			const context = await browserInstance.newContext({ viewport, acceptDownloads: true });
+			const page = await context.newPage();
+			page.on("console", (message) => {
+				if (message.type() === "error") result.consoleErrors.push(message.text());
+			});
+			page.on("pageerror", (error) => result.pageErrors.push(error.message));
+			try {
+				const source = await openStkGroupRecoveryNativeProject(
+					page,
+					viewport,
+					fixture.path,
+					fixture.projectName,
+				);
+				await assertStkGroupRecoveryRecords(page, fixture.sourceEquipment, [], `${label} source`);
+				assertEqual(
+					source.historyCanUndo,
+					"false",
+					`${label} native source starts with empty Undo history`,
+				);
+				assertEqual(
+					source.historyCanRedo,
+					"false",
+					`${label} native source starts with empty Redo history`,
+				);
+				await selectStkGroupRecoveryAnchor(page, fixture, label);
+				assertExactStaticFabModelIdentity(
+					await readMetrics(page),
+					source,
+					`${label} Move entry isolation`,
+				);
+				await hoverStkGroupRecoveryPreview(
+					page,
+					fixture.none,
+					[],
+					`${label} valid Bay target`,
+					`stk-group-loop-${name}-none-${dimensions}.png`,
+				);
+				const previewed = await readMetrics(page);
+				assertProjectUnchanged(previewed, source, `${label} valid no-Loop preview isolation`);
+				assertExactStaticFabModelIdentity(
+					previewed,
+					source,
+					`${label} preview allocation and geometry isolation`,
+				);
+				await assertStkGroupRecoveryRecords(
+					page,
+					fixture.sourceEquipment,
+					[],
+					`${label} no-Loop preview`,
+				);
+				if (name === "impossible") {
+					await page.getByTestId("rail-canvas").press("Escape");
+					await page.getByTestId("port-equipment-inspector").waitFor({ state: "visible" });
+					assertEqual(
+						await page.getByTestId("port-equipment-group-transformbar").count(),
+						0,
+						`${label} Escape clears preview`,
+					);
+					assertEqual(
+						await page.getByTestId("attach-equipment-process-loop-primary").count(),
+						0,
+						`${label} no automatic attach`,
+					);
+					assertEqual(
+						await page.getByTestId("port-equipment-inspector").getAttribute("data-port-id"),
+						String(fixture.anchorPortId),
+						`${label} Escape restores exact first Port selection`,
+					);
+					const cancelled = await readMetrics(page);
+					assertProjectUnchanged(
+						cancelled,
+						source,
+						`${label} Escape preserves project and history`,
+					);
+					assertExactStaticFabModelIdentity(
+						cancelled,
+						source,
+						`${label} Escape preserves exact authored and Worker identity`,
+					);
+					for (const key of ["documentCanUndo", "documentCanRedo"]) {
+						assertEqual(cancelled[key], source[key], `${label} Escape preserves ${key}`);
+					}
+					await assertStkGroupRecoveryRecords(page, fixture.sourceEquipment, [], `${label} Escape`);
+					proofs.push({
+						viewport: dimensions,
+						case: name,
+						enumeration: fixture.enumeration,
+						sourceChecksum: source.modelChecksum,
+						cancelledChecksum: cancelled.modelChecksum,
+					});
+					continue;
+				}
+				await hoverStkGroupRecoveryPreview(
+					page,
+					fixture.target,
+					[fixture.loopId],
+					`${label} eligible Loop target`,
+					`stk-group-loop-eligible-${dimensions}.png`,
+				);
+				const eligiblePreviewed = await readMetrics(page);
+				assertProjectUnchanged(
+					eligiblePreviewed,
+					source,
+					`${label} eligible preview remains transient`,
+				);
+				assertExactStaticFabModelIdentity(
+					eligiblePreviewed,
+					source,
+					`${label} eligible preview cursor isolation`,
+				);
+				await assertStkGroupRecoveryRecords(
+					page,
+					fixture.sourceEquipment,
+					[],
+					`${label} eligible preview`,
+				);
+				await clickWorld(page, fixture.target, false);
+				const moved = await waitForWorker(
+					page,
+					(metrics) =>
+						Number(metrics.workerTargetSequence) === Number(source.workerTargetSequence) + 1,
+				);
+				assertStkGroupRecoveryAtomicStep(moved, source, source, `${label} Move`);
+				assertEqual(moved.historyCanUndo, "true", `${label} Move is undoable`);
+				assertEqual(moved.historyCanRedo, "false", `${label} Move has no Redo entry`);
+				const movedOwnership = await assertStkGroupRecoveryRecords(
+					page,
+					fixture.movedEquipment,
+					[],
+					`${label} Move keeps ownership explicit`,
+				);
+				const inspector = page.getByTestId("port-equipment-inspector");
+				await inspector.waitFor({ state: "visible" });
+				assertEqual(
+					await inspector.getAttribute("data-equipment-group-id"),
+					String(fixture.groupId),
+					`${label} Move retains group selection`,
+				);
+				assertEqual(
+					await inspector.getAttribute("data-port-id"),
+					String(fixture.anchorPortId),
+					`${label} Move retains anchor Port selection`,
+				);
+				assertEqual(
+					await inspector
+						.getByTestId("equipment-process-loop-membership")
+						.getAttribute("data-owner-ids"),
+					"",
+					`${label} Move does not infer ownership`,
+				);
+				const attach = inspector.getByTestId("attach-equipment-process-loop-primary");
+				await attach.waitFor({ state: "visible" });
+				assertEqual(
+					await attach.getAttribute("data-process-loop-id"),
+					String(fixture.loopId),
+					`${label} separate explicit Loop A attach`,
+				);
+				await assertLocatorOwnsHitArea(attach, `${label} explicit attach`);
+				assertAtLeast(
+					(await attach.boundingBox())?.height ?? 0,
+					44,
+					`${label} explicit attach hit height`,
+				);
+				await attach.click();
+				const attached = await waitForWorker(
+					page,
+					(metrics) =>
+						Number(metrics.workerTargetSequence) === Number(moved.workerTargetSequence) + 1,
+				);
+				assertStkGroupRecoveryAtomicStep(attached, moved, source, `${label} attach`);
+				const owned = await assertStkGroupRecoveryRecords(
+					page,
+					fixture.movedEquipment,
+					[fixture.loopId],
+					`${label} attached`,
+				);
+				const phases = [
+					{
+						name: "Undo attach",
+						key: "ControlOrMeta+z",
+						checksum: moved.modelChecksum,
+						equipment: fixture.movedEquipment,
+						owners: [],
+						canUndo: "true",
+						canRedo: "true",
+					},
+					{
+						name: "Undo move",
+						key: "ControlOrMeta+z",
+						checksum: source.modelChecksum,
+						equipment: fixture.sourceEquipment,
+						owners: [],
+						canUndo: "false",
+						canRedo: "true",
+					},
+					{
+						name: "Redo move",
+						key: "ControlOrMeta+Shift+z",
+						checksum: moved.modelChecksum,
+						equipment: fixture.movedEquipment,
+						owners: [],
+						canUndo: "true",
+						canRedo: "true",
+					},
+					{
+						name: "Redo attach",
+						key: "ControlOrMeta+Shift+z",
+						checksum: attached.modelChecksum,
+						equipment: fixture.movedEquipment,
+						owners: [fixture.loopId],
+						canUndo: "true",
+						canRedo: "false",
+					},
+				];
+				let previous = attached;
+				const history = [];
+				for (const phase of phases) {
+					await page.getByTestId("rail-canvas").press(phase.key);
+					const restored = await waitForWorker(
+						page,
+						(metrics) =>
+							Number(metrics.workerTargetSequence) === Number(previous.workerTargetSequence) + 1 &&
+							metrics.modelChecksum === phase.checksum,
+					);
+					assertStkGroupRecoveryAtomicStep(restored, previous, source, `${label} ${phase.name}`);
+					assertEqual(restored.historyCanUndo, phase.canUndo, `${label} ${phase.name} Undo stack`);
+					assertEqual(restored.historyCanRedo, phase.canRedo, `${label} ${phase.name} Redo stack`);
+					assertEqual(
+						restored.documentCanUndo,
+						phase.canUndo,
+						`${label} ${phase.name} document Undo stack`,
+					);
+					assertEqual(
+						restored.documentCanRedo,
+						phase.canRedo,
+						`${label} ${phase.name} document Redo stack`,
+					);
+					await assertStkGroupRecoveryRecords(
+						page,
+						phase.equipment,
+						phase.owners,
+						`${label} ${phase.name}`,
+					);
+					history.push({
+						phase: phase.name,
+						sequence: Number(restored.workerSequence),
+						checksum: restored.modelChecksum,
+						ownerIds: phase.owners,
+					});
+					previous = restored;
+				}
+				const checked = await checkStkGroupRecoveryZeroIssues(
+					page,
+					label,
+					`stk-group-loop-checks-${dimensions}.png`,
+				);
+				const savedPath = await saveProjectFromCompactRoute(page);
+				const saved = await readMetrics(page);
+				const savedContract = await readPortEquipmentContract(page);
+				const savedEquipment = await readStkGroupRecoveryEquipment(page);
+				const reopenedContext = await browserInstance.newContext({
+					viewport,
+					acceptDownloads: true,
+				});
+				const reopenedPage = await reopenedContext.newPage();
+				reopenedPage.on("console", (message) => {
+					if (message.type() === "error") result.consoleErrors.push(message.text());
+				});
+				reopenedPage.on("pageerror", (error) => result.pageErrors.push(error.message));
+				let reopened;
+				let copyProof;
+				try {
+					reopened = await openStkGroupRecoveryNativeProject(
+						reopenedPage,
+						viewport,
+						savedPath,
+						fixture.projectName,
+						saved.modelChecksum,
+					);
+					assertStaticFabAuthoredContentIdentity(
+						reopened,
+						saved,
+						`${label} native reopen authored content and allocation cursors`,
+					);
+					assertEqual(
+						isDeepStrictEqual(await readPortEquipmentContract(reopenedPage), savedContract),
+						true,
+						`${label} native reopen Port contract`,
+					);
+					assertEqual(
+						isDeepStrictEqual(await readStkGroupRecoveryEquipment(reopenedPage), savedEquipment),
+						true,
+						`${label} native reopen exact metadata and barcodes`,
+					);
+					assertEqual(
+						isDeepStrictEqual(
+							await readDirectProcessLoopEquipmentEvidence(reopenedPage, [fixture.groupId]),
+							owned,
+						),
+						true,
+						`${label} native reopen exact direct owner`,
+					);
+					await checkStkGroupRecoveryZeroIssues(
+						reopenedPage,
+						`${label} reopened`,
+						`stk-group-loop-reopened-checks-${dimensions}.png`,
+					);
+					copyProof = await exerciseStkGroupRecoveryCopy(
+						reopenedPage,
+						fixture,
+						dimensions,
+						savedContract,
+						owned,
+					);
+				} catch (error) {
+					await reopenedPage
+						.screenshot({
+							path: path.join(artifactRoot, `stk-group-loop-reopened-failure-${dimensions}.png`),
+						})
+						.catch(() => undefined);
+					throw error;
+				} finally {
+					await closeBrowserResource(reopenedPage, `${label} reopened page`);
+					await closeBrowserResource(reopenedContext, `${label} reopened context`);
+				}
+				proofs.push({
+					viewport: dimensions,
+					case: name,
+					groupId: fixture.groupId,
+					anchorPortId: fixture.anchorPortId,
+					sourceRows: fixture.sourceRows,
+					target: fixture.target,
+					movedOwnerIds: movedOwnership[0].ownerIds,
+					attachedOwnerIds: owned[0].ownerIds,
+					history,
+					checks: checked.staticFabCheckIssues,
+					sourceChecksum: source.modelChecksum,
+					movedChecksum: moved.modelChecksum,
+					attachedChecksum: attached.modelChecksum,
+					reopenedChecksum: reopened.modelChecksum,
+					copy: copyProof,
+				});
+			} catch (error) {
+				await page
+					.screenshot({
+						path: path.join(artifactRoot, `stk-group-loop-${name}-failure-${dimensions}.png`),
+					})
+					.catch(() => undefined);
+				throw error;
+			} finally {
+				await closeBrowserResource(page, `${label} page`);
+				await closeBrowserResource(context, `${label} context`);
+			}
+		}
+	}
+	return Object.freeze({ proofs, impossibleFitEnumeration: fixtures.impossible.enumeration });
 }
 
 async function exerciseNoProcessLoopPortFeedback(browserInstance) {
@@ -7183,10 +8497,14 @@ async function assertOrdinaryPortProcessLoopFeedback(page, label, fragments) {
 	assertEqual(await feedback.getAttribute("role"), "note", `${label} visible feedback role`);
 	await page.waitForFunction(
 		(expected) => {
-			const announcement = document.querySelector('[data-testid="guided-port-keyboard-announcement"]');
-			return announcement?.getAttribute("role") === "status" &&
+			const announcement = document.querySelector(
+				'[data-testid="guided-port-keyboard-announcement"]',
+			);
+			return (
+				announcement?.getAttribute("role") === "status" &&
 				announcement.getAttribute("aria-live") === "polite" &&
-				expected.every((fragment) => announcement.textContent?.includes(fragment));
+				expected.every((fragment) => announcement.textContent?.includes(fragment))
+			);
 		},
 		fragments,
 		{ timeout: 10_000 },
@@ -37393,7 +38711,8 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			const canvas = document.querySelector('[data-testid="rail-canvas"]');
 			const inspector = document.querySelector('[data-testid="port-equipment-inspector"]');
 			const status = document.querySelector(".tilefab-statusbar [role='status']")?.textContent;
-			const needsGroupMove = inspector?.getAttribute("data-primary-process-loop-availability") === "move";
+			const needsGroupMove =
+				inspector?.getAttribute("data-primary-process-loop-availability") === "move";
 			const expectedStatus =
 				expectedType === "STK"
 					? needsGroupMove
@@ -37578,8 +38897,21 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		await assertLocatorOwnsHitArea(action, `ordinary ${portType} primary ${id} ${viewportLabel}`);
 		if (id === "move-port-equipment-group-primary") {
 			const actionCopy = await action.innerText();
-			assertIncludes(actionCopy, "전체 이동", `ordinary ${portType} recovery Move label ${viewportLabel}`);
-			assertIncludes(actionCopy, "Loop 지도", `ordinary ${portType} recovery map guidance ${viewportLabel}`);
+			assertIncludes(
+				actionCopy,
+				"전체 이동",
+				`ordinary ${portType} recovery Move label ${viewportLabel}`,
+			);
+			assertIncludes(
+				actionCopy,
+				"미리보기",
+				`ordinary ${portType} recovery preview guidance ${viewportLabel}`,
+			);
+			assertIncludes(
+				actionCopy,
+				"Loop 소속 확인",
+				`ordinary ${portType} recovery eligibility guidance ${viewportLabel}`,
+			);
 		} else {
 			assertEqual(
 				await action.evaluate((element) => {
@@ -43859,7 +45191,9 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 					await canvas.press(key);
 					await page.waitForFunction(
 						(previousRow) =>
-							document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-guided-port-keyboard-row") !== previousRow,
+							document
+								.querySelector('[data-testid="rail-canvas"]')
+								?.getAttribute("data-guided-port-keyboard-row") !== previousRow,
 						before,
 						{ timeout: 3_000 },
 					);
@@ -43868,21 +45202,42 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 			};
 			if (originalRow === null) throw new Error("SIX_PORT 390x600 has no current Port row.");
 			await moveCursor("ArrowRight", rightmostRow);
-			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-			await assertOrdinaryStrictStkSafeFrame(page, candidates, specification.label, "390x600 rightmost", rightmostRow);
-			assertEqual(await canvas.getAttribute("data-stk-draft-selected-rows"), selectedRows, "SIX_PORT cursor movement keeps selected Ports");
-			assertProjectUnchanged(await readMetrics(page), baseline, "SIX_PORT rightmost cursor framing is transient");
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
+			await assertOrdinaryStrictStkSafeFrame(
+				page,
+				candidates,
+				specification.label,
+				"390x600 rightmost",
+				rightmostRow,
+			);
+			assertEqual(
+				await canvas.getAttribute("data-stk-draft-selected-rows"),
+				selectedRows,
+				"SIX_PORT cursor movement keeps selected Ports",
+			);
+			assertProjectUnchanged(
+				await readMetrics(page),
+				baseline,
+				"SIX_PORT rightmost cursor framing is transient",
+			);
 			await page.screenshot({
 				path: path.join(artifactRoot, "ordinary-stk-strict-six_port-390x600-rightmost-cursor.png"),
 				fullPage: true,
 			});
 			await moveCursor("ArrowLeft", originalRow);
-			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+			await page.evaluate(
+				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+			);
 			await assertOrdinaryStrictStkSafeFrame(page, candidates, specification.label, viewport.label);
 		}
 		if (viewport.label === "390x600") {
 			await page.screenshot({
-				path: path.join(artifactRoot, `ordinary-stk-strict-${specification.template.toLowerCase()}-390x600-before-controls.png`),
+				path: path.join(
+					artifactRoot,
+					`ordinary-stk-strict-${specification.template.toLowerCase()}-390x600-before-controls.png`,
+				),
 				fullPage: true,
 			});
 		}
@@ -44019,7 +45374,13 @@ async function auditOrdinaryStrictStkSafeFrames(page, candidates, specification)
 	}
 }
 
-async function assertOrdinaryStrictStkSafeFrame(page, candidates, templateLabel, viewportLabel, cursorRow = null) {
+async function assertOrdinaryStrictStkSafeFrame(
+	page,
+	candidates,
+	templateLabel,
+	viewportLabel,
+	cursorRow = null,
+) {
 	const projectedRows = [];
 	for (const candidate of candidates) {
 		const point = await screenPointForWorld(page, candidate);
@@ -44198,7 +45559,8 @@ async function assertOrdinaryStrictStkSafeFrame(page, candidates, templateLabel,
 			obstructionRects,
 		};
 	});
-	const expectedCurrentRow = cursorRow ?? safeFrame?.selectedRows.split(",").filter(Boolean).at(-1) ?? "";
+	const expectedCurrentRow =
+		cursorRow ?? safeFrame?.selectedRows.split(",").filter(Boolean).at(-1) ?? "";
 	if (
 		!safeFrame ||
 		!projectedRows.some(({ row }) => String(row) === expectedCurrentRow) ||
@@ -44209,7 +45571,10 @@ async function assertOrdinaryStrictStkSafeFrame(page, candidates, templateLabel,
 		safeFrame.labelOverlap.length > 0
 	) {
 		await page.screenshot({
-			path: path.join(artifactRoot, `ordinary-stk-strict-${templateLabel}-${viewportLabel}-unsafe.png`),
+			path: path.join(
+				artifactRoot,
+				`ordinary-stk-strict-${templateLabel}-${viewportLabel}-unsafe.png`,
+			),
 			fullPage: true,
 		});
 		throw new Error(
@@ -52692,13 +54057,19 @@ async function exerciseEqClickEndpoints(page, label) {
 					const reason = feedback?.textContent ?? "";
 					// Hover selection and pointer release reject the same wrong-line endpoint at
 					// different input boundaries. Both retain the anchored EQ draft below.
-					return feedback?.getAttribute("data-state") === "blocked" &&
+					return (
+						feedback?.getAttribute("data-state") === "blocked" &&
 						(reason.includes("평행하거나 떨어진 레일은 하나의 EQ로 묶을 수 없습니다") ||
-							reason.includes("EQ 행을 시작한 연속 직선 레일에서 포인터를 놓으세요"));
+							reason.includes("EQ 행을 시작한 연속 직선 레일에서 포인터를 놓으세요"))
+					);
 				});
-				const rejectedEndpoint = page.locator(".tilefab-equipment-selection-readout[data-state='blocked']");
+				const rejectedEndpoint = page.locator(
+					".tilefab-equipment-selection-readout[data-state='blocked']",
+				);
 				await rejectedEndpoint.waitFor({ state: "visible" });
-				console.log(`EQ wrong-line recovery ${label}: ${(await rejectedEndpoint.innerText()).trim()}`);
+				console.log(
+					`EQ wrong-line recovery ${label}: ${(await rejectedEndpoint.innerText()).trim()}`,
+				);
 				await page.waitForFunction(
 					() =>
 						document

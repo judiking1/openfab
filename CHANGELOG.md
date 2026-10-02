@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-10-02
+
+- Show whether every proposed equipment Port belongs to one Process Loop during whole-group
+  Move or Copy. A valid placement with no eligible Loop now explains that geometry and Loop
+  membership are separate. Membership still requires an explicit action after placement.
+- Replace the Stocker recovery's Loop-map hint with the actual Move preview guidance, and
+  give compact screens a separate line for placement and Loop eligibility feedback.
+- Verify connected synthetic Stocker Move, explicit attachment, Undo/Redo, zero Checks,
+  native save/reopen and owned-source Copy at 390 and 1440 px. Exhaust every legal anchor
+  for a wider rigid group with no single-Loop fit, preserving project state on cancellation.
+
 ## [0.1.32] - 2026-09-29
 
 - Expose the existing whole-Stocker Move command in the primary Inspector row when an

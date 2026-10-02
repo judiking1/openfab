@@ -112,6 +112,7 @@ import {
 	resolvePortEquipmentSelection,
 } from "../compile/PortEquipmentEditPlanner";
 import {
+	capturePortEquipmentGroupEditSnapshot,
 	type PortEquipmentGroupEditMode,
 	type PortEquipmentGroupEditPlan,
 	type PortEquipmentGroupSlotIndex,
@@ -473,6 +474,7 @@ import {
 	planRenameStaticFabOrganization,
 	planUpdateStaticFabOrganizationDetails,
 	queryStaticFabProcessLoopEquipmentMembership,
+	queryStaticFabProcessLoopsSupportingPorts,
 	staticFabOrganizationAssignmentSourcesForSelection,
 	staticFabOrganizationMembershipFromSelection,
 } from "../core/StaticFabOrganizationPlan";
@@ -1292,10 +1294,12 @@ interface PortEquipmentGroupEditSession {
 	readonly portType: "EQ" | "STK";
 	readonly sourceEquipmentGroupId: number;
 	readonly sourceAnchorPortId: number;
+	readonly sourcePorts: readonly PortRecord[];
 	readonly baseRevision: number;
 	readonly basePatchSequence: number;
 	targetRow: number | null;
 	plan: PortEquipmentGroupEditPlan | null;
+	eligibleProcessLoopIds: readonly number[] | null;
 	feedbackKey: string;
 }
 
@@ -16353,11 +16357,21 @@ export default function TileFabApp(): React.ReactElement {
 	): void {
 		const row = session.targetRow;
 		const plan = session.plan;
-		const validityKey = row === null ? "empty" : plan?.valid ? "valid" : "invalid";
+		const validityKey =
+			row === null
+				? "empty"
+				: plan?.valid
+					? `valid:${session.eligibleProcessLoopIds?.join(",") ?? ""}`
+					: "invalid";
+		const loopSummary = plan?.valid
+			? session.eligibleProcessLoopIds?.length
+				? ` · ${session.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능 · 소속은 배치 후 별도로 지정하세요`
+				: " · 모든 Port를 포함하는 Loop 없음 · 다른 위치 또는 Port 구성을 확인하세요"
+			: "";
 		const summary =
 			row === null
 				? "기준 Port 슬롯을 선택하세요."
-				: `대상 X ${session.slots.routeXs[row]}미터 · Z ${session.slots.routeZs[row]}미터 · ${plan?.valid ? "배치 가능 · Enter로 적용" : `배치 불가 · ${portEquipmentReasonLabel(plan?.reason ?? "다른 슬롯을 선택하세요")}`}`;
+				: `대상 X ${session.slots.routeXs[row]}미터 · Z ${session.slots.routeZs[row]}미터 · ${plan?.valid ? `배치 가능 · Enter로 적용${loopSummary}` : `배치 불가 · ${portEquipmentReasonLabel(plan?.reason ?? "다른 슬롯을 선택하세요")}`}`;
 		setPortEquipmentGroupEditAccessibilitySummary(summary);
 		if (portEquipmentGroupEditReadoutRef.current) {
 			portEquipmentGroupEditReadoutRef.current.textContent = summary;
@@ -16445,6 +16459,20 @@ export default function TileFabApp(): React.ReactElement {
 						session.basePatchSequence,
 						"preview",
 					);
+		session.eligibleProcessLoopIds = null;
+		if (session.plan?.valid) {
+			const proposedPorts = session.plan.groupEdit.portTargets.map(
+				(target) =>
+					session.plan?.portMutations.find((mutation) => mutation.id === target.targetPortId)?.after ??
+					session.sourcePorts.find((port) => port.id === target.sourcePortId),
+			);
+			if (proposedPorts.every((port): port is PortRecord => port !== undefined && port !== null)) {
+				session.eligibleProcessLoopIds = queryStaticFabProcessLoopsSupportingPorts(
+					session.document.organizations,
+					proposedPorts,
+				);
+			}
+		}
 		if (previewReadoutRef.current) {
 			previewReadoutRef.current.textContent = session.plan
 				? session.plan.valid
@@ -21501,10 +21529,16 @@ export default function TileFabApp(): React.ReactElement {
 			portType,
 			sourceEquipmentGroupId: resolved.equipmentGroup.id,
 			sourceAnchorPortId: resolved.port.id,
+			sourcePorts: capturePortEquipmentGroupEditSnapshot(
+				model.document.portEquipment,
+				resolved.equipmentGroup.id,
+				resolved.port.id,
+			).ports,
 			baseRevision: model.map.getRevision(),
 			basePatchSequence: model.document.getPatchSequence(),
 			targetRow: null,
 			plan: null,
+			eligibleProcessLoopIds: null,
 			feedbackKey: "empty",
 		};
 		updatePortEquipmentGroupEditSession(session);
@@ -28308,7 +28342,7 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		if (selectedEquipmentGroupMoveRecoveryId === null) return;
 		const frame = window.requestAnimationFrame(() => {
-			setStatus(`STK-${selectedEquipmentGroupMoveRecoveryId} · 연결할 Loop 없음 · 이동 전에 FAB 조직의 Process Loop 지도에서 위치를 확인하세요`);
+			setStatus(`STK-${selectedEquipmentGroupMoveRecoveryId} · 연결할 Loop 없음 · 전체 이동 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요`);
 		});
 		return () => window.cancelAnimationFrame(frame);
 	}, [selectedEquipmentGroupMoveRecoveryId]);
@@ -37075,6 +37109,7 @@ export default function TileFabApp(): React.ReactElement {
 				!staticFabSemanticBayMutation &&
 				!staticFabBayFlowEdit &&
 				!ordinaryStaticFabIssueRecheck &&
+				!portEquipmentGroupEditSession &&
 				!resilientFabChecksHandoff &&
 				!connectedFabLoopHandoff &&
 				!connectedCopyTwinBayHandoff &&
@@ -38288,11 +38323,14 @@ export default function TileFabApp(): React.ReactElement {
 					</div>
 				) : !staticFabExclusiveCommandActive && portEquipmentGroupEditSession ? (
 					<div
-						className="tilefab-buildbar tilefab-equipment-transformbar"
+						className="tilefab-buildbar tilefab-equipment-transformbar tilefab-equipment-group-transformbar"
 						data-testid="port-equipment-group-transformbar"
 						data-port-type={portEquipmentGroupEditSession.portType}
 						data-mode={portEquipmentGroupEditSession.mode}
 						data-state={portEquipmentGroupEditState}
+						data-eligible-process-loop-ids={
+							portEquipmentGroupEditSession.eligibleProcessLoopIds?.join(",") ?? ""
+						}
 					>
 						<span className="tilefab-buildbar-title">
 							{portEquipmentGroupEditSession.mode === "move" ? (
@@ -38309,12 +38347,33 @@ export default function TileFabApp(): React.ReactElement {
 						</strong>
 						<span className="tilefab-equipment-transform-state">
 							{portEquipmentGroupEditState === "valid"
-								? "ENTER / LMB 배치"
+								? "ENTER / LMB 배치 · 방향키 / WASD"
 								: portEquipmentGroupEditState === "invalid"
 									? portEquipmentReasonLabel(
 											portEquipmentGroupEditSession.plan?.reason ?? "배치할 수 없습니다",
 										)
 									: "방향키 / WASD로 기준 슬롯 선택"}
+							{portEquipmentGroupEditSession.plan?.valid ? (
+								<small
+									className="tilefab-equipment-group-loop-preview"
+									data-testid="equipment-group-loop-preview"
+									data-state={
+										portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? "eligible" : "none"
+									}
+								>
+									{portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? (
+										<>
+											{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능
+											<br />소속은 배치 후 별도 지정
+										</>
+									) : (
+										<>
+											모든 Port를 포함하는 Loop 없음
+											<br />다른 위치 또는 Port 구성 확인
+										</>
+									)}
+								</small>
+							) : null}
 						</span>
 						<button
 							type="button"
@@ -40070,14 +40129,14 @@ export default function TileFabApp(): React.ReactElement {
 									ref={processLoopPrimaryActionRef}
 									type="button"
 									data-testid="move-port-equipment-group-primary"
-									aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 먼저 FAB 조직의 Process Loop 지도에서 위치를 확인한 뒤 장비 전체 이동을 시작하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
+									aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 장비 전체 이동을 시작하고 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
 									disabled={modelSyncPending || workerState.status !== "ready"}
 									onClick={() => startSelectedPortEquipmentGroupEdit("move")}
 								>
 									<Move className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
 									<span className="tilefab-equipment-process-loop-primary-copy">
 										<strong className="tilefab-equipment-process-loop-primary-title">연결할 Loop 없음 · 전체 이동</strong>
-										<small className="tilefab-equipment-process-loop-primary-name">먼저 FAB 조직 → Loop 지도 보기</small>
+										<small className="tilefab-equipment-process-loop-primary-name">이동 미리보기에서 Loop 소속 확인</small>
 									</span>
 								</button>
 							</div>
