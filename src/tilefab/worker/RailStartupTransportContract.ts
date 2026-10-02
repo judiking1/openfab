@@ -341,6 +341,7 @@ const EQUIPMENT_GROUP_VIEWS = {
 
 const ORGANIZATION_RECORD_VIEWS = {
 	kinds: Uint8Array,
+	declaredSemanticRoles: Uint8Array,
 	parentOrganizationOffsets: Uint32Array,
 	parentOrganizationIds: Int32Array,
 	colors: Uint8Array,

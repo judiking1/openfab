@@ -273,7 +273,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 			preview: { state: "READY" },
 		});
 		const objectDraftTransfers = objectWorker.requestTransferBatches[0] ?? [];
-		expect(objectDraftTransfers).toHaveLength(126);
+		expect(objectDraftTransfers).toHaveLength(127);
 		objectBridge.cancel();
 
 		const fixture = await snapshotReviewFixture();
@@ -299,7 +299,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 			expect(worker.requestTransferBatches).toHaveLength(1);
 			const snapshotDraftTransfers = worker.requestTransferBatches[0] ?? [];
 			expect(snapshotDraftTransfers).toHaveLength(objectDraftTransfers.length);
-			expect(snapshotDraftTransfers).toHaveLength(126);
+			expect(snapshotDraftTransfers).toHaveLength(127);
 			expect(new Set(snapshotDraftTransfers).size).toBe(snapshotDraftTransfers.length);
 			expect(worker.requestTransfersDetached).toEqual([true]);
 			expect(fixture.draftSnapshot.decisionRows.byteLength).toBe(0);
@@ -356,7 +356,7 @@ describe("OpenFabStationProposalReviewBridge", () => {
 				canApply: true,
 				preview: { state: "READY", includedPortCount: 1, equipmentGroupCount: 1 },
 			});
-			expect(worker.requestTransferBatches[0]).toHaveLength(126);
+			expect(worker.requestTransferBatches[0]).toHaveLength(127);
 			expect(session.readRowWindow(0, 1).items[0]).toMatchObject({
 				row: 0,
 				reviewGroupId: 1,

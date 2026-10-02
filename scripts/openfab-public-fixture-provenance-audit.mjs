@@ -73,7 +73,7 @@ for (const artifact of provenance.artifacts) {
 	if (payload.payloadKind !== "openfab-prepared-synthetic-fab-starter") {
 		failures.push(`synthetic artifact payload kind mismatch: ${artifact.path}`);
 	}
-	if (payload.certificationContract !== "independent-materialization-v7") {
+	if (payload.certificationContract !== "independent-materialization-v8") {
 		failures.push(`synthetic artifact certification contract mismatch: ${artifact.path}`);
 	}
 }
@@ -106,20 +106,26 @@ for (const fixture of provenance.historicalMigrationFixtures) {
 		if (createHash("sha256").update(bytes).digest("hex") !== fixture.sha256)
 			failures.push(`historical fixture checksum drift: ${fixture.path}`);
 		const payload = JSON.parse(bytes.toString("utf8"));
-		const records = fixture.kind === "USER_BLUEPRINT_LIBRARY_V1" ? payload.records : [payload];
+		const version = fixture.kind.endsWith("_V2") ? 2 : 1;
+		const records = fixture.kind.startsWith("USER_BLUEPRINT_LIBRARY_")
+			? payload.records
+			: [payload];
 		if (
-			payload.schemaVersion !== 1 ||
+			payload.schemaVersion !== version ||
 			!Array.isArray(records) ||
 			records.length !== 1 ||
 			records.some(
 				(record) =>
-					record.schemaVersion !== 1 ||
-					record.blueprint?.bundle?.version !== 1 ||
-					Object.hasOwn(record.blueprint.bundle, "relationships"),
+					record.schemaVersion !== version ||
+					record.blueprint?.bundle?.version !== version ||
+					Object.hasOwn(record.blueprint.bundle, "relationships") !== (version === 2) ||
+					record.blueprint.bundle.organizations.some((organization) =>
+						Object.hasOwn(organization, "declaredSemanticRole"),
+					),
 			)
 		) {
 			failures.push(
-				`historical fixture no longer contains the original V1 wire shape: ${fixture.path}`,
+				`historical fixture no longer contains the original V${version} wire shape: ${fixture.path}`,
 			);
 		}
 	} catch (error) {
@@ -218,7 +224,12 @@ function validateProvenance(candidate) {
 			!/^[a-f0-9]{64}$/.test(fixture.sha256) ||
 			typeof fixture.description !== "string" ||
 			!fixture.description ||
-			!["USER_BLUEPRINT_LIBRARY_V1", "USER_BLUEPRINT_RECORD_V1"].includes(fixture.kind) ||
+			![
+				"USER_BLUEPRINT_LIBRARY_V1",
+				"USER_BLUEPRINT_RECORD_V1",
+				"USER_BLUEPRINT_LIBRARY_V2",
+				"USER_BLUEPRINT_RECORD_V2",
+			].includes(fixture.kind) ||
 			paths.has(fixture.path)
 		) {
 			throw new Error(

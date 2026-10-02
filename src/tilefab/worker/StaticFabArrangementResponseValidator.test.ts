@@ -9,6 +9,7 @@ import { planRailConstruction } from "../core/paint";
 import { createRailAreaSelectionFromOwnerships } from "../core/RailAreaSelection";
 import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
 import { DIR_E, DIR_N } from "../core/railShape";
+import { staticFabArrangementPlanFingerprint } from "../core/StaticFabArrangementCertification";
 import { staticFabArrangementCommandFingerprint } from "../core/StaticFabArrangementCommand";
 import type { StaticFabArrangementPlan } from "../core/StaticFabArrangementPlan";
 import { emptyStaticFabOrganizationState } from "../core/StaticFabOrganization";
@@ -231,6 +232,25 @@ describe("StaticFabArrangementResponseValidator", () => {
 		if (!organizationAfter) throw new Error("Expected organization mutation.");
 		organizationAfter.name = "Changed Bay";
 		expectError(organizationName, "immutable metadata");
+	});
+
+	it("preserves a declared Loop role and rejects a role-only relocation change", () => {
+		const prepared = mutablePreparedArrangement();
+		const plan = requirePlan(prepared);
+		const fingerprintPlan = plan as unknown as StaticFabArrangementPlan;
+		const mutation = plan.organizationMutations[0];
+		if (!mutation?.before || !mutation.after) throw new Error("Expected organization relocation.");
+		mutation.before.kind = "AISLE";
+		mutation.after.kind = "AISLE";
+		mutation.before.declaredSemanticRole = null;
+		mutation.after.declaredSemanticRole = null;
+		const fingerprint = staticFabArrangementPlanFingerprint(fingerprintPlan);
+		mutation.after.declaredSemanticRole = "PROCESS_LOOP";
+		expect(staticFabArrangementPlanFingerprint(fingerprintPlan)).not.toBe(fingerprint);
+		expectError(prepared, "immutable metadata");
+		mutation.before.declaredSemanticRole = "PROCESS_LOOP";
+		requireTicket(prepared).planFingerprint = staticFabArrangementPlanFingerprint(fingerprintPlan);
+		expect(staticFabArrangementPreparedShapeError(prepared)).toBeNull();
 	});
 
 	it("requires moved records to use one declared root translation", () => {

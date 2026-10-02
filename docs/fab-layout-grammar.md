@@ -239,6 +239,15 @@ inbound long lane   <=====================
 - Attachment sites MUST define both outbound transfer and return merge behavior.
 - A Process Loop MUST NOT be labeled or presented as a Bay.
 
+The native organization record may explicitly declare `PROCESS_LOOP` on an `AISLE` without a
+parent. This authored intent is confirmed by a registration action; names and closed-looking
+geometry do not infer it. New registration must validate one fresh rail-only whole-module
+candidate, exact stored-membership overlap, authored/physical closure and clearance. Existing
+hierarchy overlap rules remain. Later edits may reopen the Loop: preserve the declaration and
+report geometry issues so the user can repair the draft. Intent alone is not topology or
+simulation readiness certification. Historical project/library records migrate to a null
+declaration; existing BAY-parent role derivation remains compatible.
+
 ### 5.4 Bay
 
 #### Definition

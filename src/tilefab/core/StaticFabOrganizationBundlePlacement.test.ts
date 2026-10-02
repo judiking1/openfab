@@ -435,6 +435,32 @@ describe("StaticFabOrganizationBundlePlacement", () => {
 			completeCooperativeSteps(staticFabOrganizationBundlePlacementFingerprintSteps(shallow)),
 		).toThrow("불변");
 	});
+	it("binds the materialized organization declaration independently of the portable bundle", () => {
+		const target = new RailDocument();
+		const plan = structuredClone(
+			planStaticFabOrganizationBundlePlacement(
+				target.map,
+				target.portEquipment,
+				17,
+				target.organizations,
+				target.relationships,
+				capturedOrganizationBundle(),
+				{ x: 120, y: 45 },
+				0,
+				null,
+			),
+		);
+		expect(plan.valid, plan.reason).toBe(true);
+		const record = plan.organizationMutations[0]?.after;
+		if (!record) throw new Error("Expected materialized organization.");
+		const mutable = record as { kind: string; declaredSemanticRole: string | null };
+		mutable.kind = "AISLE";
+		mutable.declaredSemanticRole = null;
+		const fingerprint = staticFabOrganizationBundlePlacementFingerprint(plan);
+		mutable.declaredSemanticRole = "PROCESS_LOOP";
+		expect(staticFabOrganizationBundlePlacementFingerprint(plan)).not.toBe(fingerprint);
+	});
+
 	it("preserves placement fingerprint bytes through all four quarter turns", () => {
 		const fingerprints = ([0, 1, 2, 3] as const).map((turns) => {
 			const target = new RailDocument();

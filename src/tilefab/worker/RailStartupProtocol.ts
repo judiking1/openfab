@@ -15,7 +15,7 @@ import type { CompiledPhysicalRailRenderArtifacts } from "../render/PhysicalRail
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
 
 /** Worker-to-main startup payload contract. Bump whenever a required wire field changes. */
-export const RAIL_STARTUP_SCHEMA_VERSION = 23;
+export const RAIL_STARTUP_SCHEMA_VERSION = 24;
 /** Public browser scale acceptance contract; intentionally independent from the wire schema. */
 export const RAIL_SCALE_ACCEPTANCE_VERSION = 18;
 export const RAIL_ASSEMBLY_CONNECTOR_SCALE_PROBE_CELLS = 100_001;
@@ -74,6 +74,8 @@ export interface RailSnapshotStartupSource {
 export interface RailProjectJsonStartupSource {
 	readonly kind: "project-json";
 	readonly json: string;
+	/** Recovery envelope identity, authenticated before a private candidate can be promoted. */
+	readonly expectedAuthoredChecksum?: string;
 }
 
 /** Internal fast path for a newly-created project whose authored snapshot is already certified. */
@@ -104,7 +106,22 @@ export type RailStartupPayloadSource =
 			readonly blueprints: OpenFabProjectBlueprintSection;
 			readonly operations: OperationalConfigurationState;
 			readonly schemaVersion: typeof OPENFAB_PROJECT_SCHEMA_VERSION;
-			readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | null;
+			readonly migratedFromVersion:
+				| 0
+				| 1
+				| 2
+				| 3
+				| 4
+				| 5
+				| 6
+				| 7
+				| 8
+				| 9
+				| 10
+				| 11
+				| 12
+				| 13
+				| null;
 			readonly sequence: number;
 			readonly revision: number;
 			readonly checksum: string;

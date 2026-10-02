@@ -63,9 +63,10 @@ export const RAIL_SEMANTIC_BAY_DELETE_SCALE_BUDGET = Object.freeze({
 	adoptionMilliseconds: 100,
 	transferBytes: 2 * MIB,
 	// Relationship SoA v1 adds 31 buffers, including nine one-entry Uint32 CSR offsets.
-	exactTransferBytes: 903_541,
-	exactTransferBufferCount: 74,
-	exactPositiveTransferBufferCount: 45,
+	// Organization snapshot v3 adds one Uint8 declared-role column for these two records.
+	exactTransferBytes: 903_543,
+	exactTransferBufferCount: 75,
+	exactPositiveTransferBufferCount: 46,
 	retainedHeapFloorBytes: 8 * MIB,
 	retainedEmbedderHeapFloorBytes: 2 * MIB,
 	retainedBackingStorageFloorBytes: 2 * MIB,

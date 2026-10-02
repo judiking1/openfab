@@ -19,7 +19,7 @@ import {
 	openFabFabProfilePlanFingerprint,
 } from "./OpenFabFabProfile";
 
-export const OPENFAB_FAB_PREPARED_PROJECT_VERSION = 2 as const;
+export const OPENFAB_FAB_PREPARED_PROJECT_VERSION = 3 as const;
 export const OPENFAB_FAB_PREPARED_PROJECT_KIND = "openfab-fab-prepared-project" as const;
 export const OPENFAB_FAB_PREPARED_PROJECT_IDENTITY_KIND =
 	"openfab-fab-prepared-project-identity" as const;

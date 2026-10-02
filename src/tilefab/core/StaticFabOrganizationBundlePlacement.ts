@@ -44,6 +44,7 @@ import {
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationStateError,
 } from "./StaticFabOrganization";
 import {
@@ -1510,6 +1511,7 @@ function instantiatePortableRecords(
 				id,
 				kind: portable.kind,
 				name: organizationNames[index] as string,
+				declaredSemanticRole: portable.declaredSemanticRole,
 				parentOrganizationIds: portable.parentOrganizationIndices.map((parentIndex) =>
 					requiredLocalId(organizationIds, parentIndex, "부모 조직"),
 				),
@@ -1800,6 +1802,7 @@ function* addStaticFabOrganizationBundleToChecksumSteps(
 		checksum.addStrings([
 			organization.kind,
 			organization.name,
+			organization.declaredSemanticRole ?? "",
 			organization.properties.description,
 			organization.properties.color,
 		]);
@@ -1981,6 +1984,8 @@ function* addOrganizationRecordToChecksumSteps(
 		record.properties?.description ?? "",
 		record.properties?.color ?? "",
 	]);
+	const declaredRole = staticFabOrganizationDeclaredSemanticRole(record);
+	if (declaredRole !== null) checksum.addStrings(["declaredSemanticRole", declaredRole]);
 	assertPlacementHashFrozen(record.membership, requireImmutable);
 	assertPlacementHashFrozen(record.membership.railEdges, requireImmutable);
 	yield* checksum.addNumberSequenceSteps(record.membership.railEdges.length * 4, (index) => {

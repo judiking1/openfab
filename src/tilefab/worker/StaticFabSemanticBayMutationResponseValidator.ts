@@ -676,7 +676,9 @@ function isOrganizationRecord(
 			value.kind as (typeof STATIC_FAB_ORGANIZATION_KINDS)[number],
 		) ||
 		!boundedNonEmptyText(value.name, 120) ||
-		!isRecord(value.membership)
+		!isRecord(value.membership) ||
+		(value.declaredSemanticRole != null &&
+			(value.declaredSemanticRole !== "PROCESS_LOOP" || value.kind !== "AISLE"))
 	) {
 		return false;
 	}

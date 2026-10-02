@@ -1248,7 +1248,7 @@ async function verifyNestedPortableRelationships(
 	expect(extremeCapture.valid, extremeCapture.reason).toBe(true);
 	if (extremeCapture.valid) expect(extremeCapture.bundle).toEqual(bundle);
 
-	expect(bundle.version).toBe(2);
+	expect(bundle.version).toBe(3);
 	expect(bundle.relationships.records.map((record) => record.id)).toEqual([1, 2, 3, 4]);
 	expect(bundle.relationships.nextRelationshipId).toBe(5);
 	const prepared = prepareStaticFabOrganizationBundle(JSON.parse(JSON.stringify(bundle)));

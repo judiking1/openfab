@@ -43427,7 +43427,7 @@ function checksumWithRelationshipCursor(checksum, cursor) {
 	)
 		throw new Error("Invalid relationship cursor expectation");
 	const fields = checksum.split(":");
-	assertEqual(fields[0], "00000002", "relationship-aware checksum version");
+	assertEqual(fields[0], "00000003", "declared-role-aware checksum version");
 	if (cursor < Number.parseInt(fields[9], 16))
 		throw new Error("Relationship cursor cannot roll back");
 	// Only the separately encoded high-water field changes; all counts and content hashes remain exact.

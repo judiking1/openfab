@@ -319,7 +319,7 @@ describe("StaticFabOrganizationBundlePlacementPreview", () => {
 });
 
 type MutableLineBundle = {
-	version: 2;
+	version: 3;
 	relationships: { nextRelationshipId: 1; records: [] };
 	captureMode: "DIRECT";
 	rootOrganizationIndices: number[];
@@ -347,6 +347,7 @@ type MutableLineBundle = {
 	organizations: Array<{
 		kind: "AREA";
 		name: string;
+		declaredSemanticRole: null;
 		parentOrganizationIndices: number[];
 		properties: { description: string; color: "TEAL" };
 		membership: {
@@ -359,7 +360,7 @@ type MutableLineBundle = {
 
 function lineBundle(edgeCount: number, withEquipment: boolean): MutableLineBundle {
 	return {
-		version: 2,
+		version: 3,
 		relationships: { nextRelationshipId: 1, records: [] },
 		captureMode: "DIRECT",
 		rootOrganizationIndices: [0],
@@ -395,6 +396,7 @@ function lineBundle(edgeCount: number, withEquipment: boolean): MutableLineBundl
 			{
 				kind: "AREA",
 				name: "Line Area",
+				declaredSemanticRole: null,
 				parentOrganizationIndices: [],
 				properties: { description: "", color: "TEAL" },
 				membership: {
@@ -430,7 +432,7 @@ function fiftyThousandCellMap(): TileMap {
 
 function dispersedStkBundle(): StaticFabOrganizationBundle {
 	return {
-		version: 2,
+		version: 3,
 		relationships: { nextRelationshipId: 1, records: [] },
 		captureMode: "DIRECT",
 		rootOrganizationIndices: [0],
@@ -473,6 +475,7 @@ function dispersedStkBundle(): StaticFabOrganizationBundle {
 			{
 				kind: "AREA",
 				name: "Dispersed STK",
+				declaredSemanticRole: null,
 				parentOrganizationIndices: [],
 				properties: { description: "", color: "TEAL" },
 				membership: {
@@ -506,7 +509,7 @@ function advancedSwitchPortBundle(): StaticFabOrganizationBundle {
 	}
 	const railEdges = [...edgesByKey.values()].sort(compareDirectedRailEdges);
 	return {
-		version: 2,
+		version: 3,
 		relationships: { nextRelationshipId: 1, records: [] },
 		captureMode: "DIRECT",
 		rootOrganizationIndices: [0],
@@ -546,6 +549,7 @@ function advancedSwitchPortBundle(): StaticFabOrganizationBundle {
 			{
 				kind: "AREA",
 				name: "Switch Area",
+				declaredSemanticRole: null,
 				parentOrganizationIndices: [],
 				properties: { description: "", color: "CYAN" },
 				membership: {

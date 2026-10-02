@@ -139,6 +139,7 @@ export interface BrowserProjectDatabasePort {
 	deleteRecoveriesIfSummariesUnchanged(
 		expected: readonly OpenFabRecoveryProjectSummary[],
 		authority?: OpenFabProjectMetadataMutationAuthority,
+		expectedPayload?: OpenFabRecoveryProject,
 	): Promise<"removed" | "conflict">;
 }
 
@@ -575,6 +576,18 @@ export class BrowserOpenFabProjectPersistence
 		assertMetadataMutationCurrent(authority);
 		if (!summary) return "removed";
 		return this.database.deleteRecoveriesIfSummariesUnchanged([summary], authority);
+	}
+
+	async removeRecoveryIfUnchanged(
+		expected: OpenFabRecoveryProject,
+		authority: OpenFabProjectMetadataMutationAuthority,
+	): Promise<"removed" | "conflict"> {
+		assertMetadataMutationCurrent(authority);
+		return this.database.deleteRecoveriesIfSummariesUnchanged(
+			[summarizeRecoveryProject(expected)],
+			authority,
+			copyRecoveryProject(expected),
+		);
 	}
 
 	async prepareRecoveryCleanup(
@@ -2027,12 +2040,19 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 	async deleteRecoveriesIfSummariesUnchanged(
 		expected: readonly OpenFabRecoveryProjectSummary[],
 		authority?: OpenFabProjectMetadataMutationAuthority,
+		expectedPayload?: OpenFabRecoveryProject,
 	): Promise<"removed" | "conflict"> {
 		assertMetadataMutationCurrent(authority);
 		if (expected.length === 0) return "removed";
 		const expectedById = new Map(expected.map((summary) => [summary.projectId, summary] as const));
 		if (expectedById.size !== expected.length) {
 			throw new TypeError("Recovery cleanup candidates must have unique project ids.");
+		}
+		if (
+			expectedPayload &&
+			(expected.length !== 1 || !expectedById.has(expectedPayload.projectId))
+		) {
+			throw new TypeError("Recovery payload must match the single cleanup candidate.");
 		}
 		const database = await this.open();
 		assertMetadataMutationCurrent(authority);
@@ -2067,25 +2087,51 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 					return;
 				}
 				if (matched !== expected.length) return;
-				for (const summary of expected) {
-					const deleteSummary = summaryStore.delete(summary.projectId);
-					deleteSummary.onsuccess = () => {
-						mutation.check();
-					};
-					deleteSummary.onerror = () => {
-						explicitError =
-							deleteSummary.error ?? new Error("IndexedDB recovery summary cleanup failed.");
-					};
-					const deletePayload = payloadStore.delete(summary.projectId);
-					deletePayload.onsuccess = () => {
-						mutation.check();
-					};
-					deletePayload.onerror = () => {
-						explicitError =
-							deletePayload.error ?? new Error("IndexedDB recovery payload cleanup failed.");
-					};
+				const removeMatched = (): void => {
+					if (!mutation.check()) return;
+					for (const summary of expected) {
+						const deleteSummary = summaryStore.delete(summary.projectId);
+						deleteSummary.onsuccess = () => {
+							mutation.check();
+						};
+						deleteSummary.onerror = () => {
+							explicitError =
+								deleteSummary.error ?? new Error("IndexedDB recovery summary cleanup failed.");
+						};
+						const deletePayload = payloadStore.delete(summary.projectId);
+						deletePayload.onsuccess = () => {
+							mutation.check();
+						};
+						deletePayload.onerror = () => {
+							explicitError =
+								deletePayload.error ?? new Error("IndexedDB recovery payload cleanup failed.");
+						};
+					}
+					status = "removed";
+				};
+				if (!expectedPayload) {
+					removeMatched();
+					return;
 				}
-				status = "removed";
+				const payloadRequest = payloadStore.get(expectedPayload.projectId);
+				payloadRequest.onsuccess = () => {
+					if (!mutation.check()) return;
+					const current = parseRecoveryProject(payloadRequest.result);
+					if (
+						!current ||
+						current.json !== expectedPayload.json ||
+						!recoveryProjectSummariesEqual(
+							summarizeRecoveryProject(current),
+							summarizeRecoveryProject(expectedPayload),
+						)
+					)
+						return;
+					removeMatched();
+				};
+				payloadRequest.onerror = () => {
+					explicitError =
+						payloadRequest.error ?? new Error("IndexedDB recovery payload verification failed.");
+				};
 			};
 			cursorRequest.onerror = () => {
 				explicitError = cursorRequest.error ?? new Error("IndexedDB recovery cleanup scan failed.");

@@ -12,6 +12,21 @@ import type { RailEditorStartupCandidate } from "./RailEditorStartup";
 import { RailStartupCancelledError } from "./RailStartupBridge";
 
 describe("OpenFabProjectLoader", () => {
+	it("forwards recovery checksum identity to Worker startup only when supplied", async () => {
+		const payload = projectPayload("project-a");
+		const port = new RecordingStartupPort(payload);
+		const loader = new OpenFabProjectLoader({
+			createStartupPort: () => port,
+			prepareCandidate: async () => candidateFor(payload, new DisposableMirror()),
+		});
+		await loader.prepare("recovery json", () => undefined, payload.authoredChecksum);
+		expect(port.source).toEqual({
+			kind: "project-json",
+			json: "recovery json",
+			expectedAuthoredChecksum: payload.authoredChecksum,
+		});
+		loader.dispose();
+	});
 	it("returns a private verified candidate with project metadata", async () => {
 		const payload = projectPayload("project-a");
 		const mirror = new DisposableMirror();

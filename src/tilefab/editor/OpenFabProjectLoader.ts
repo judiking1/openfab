@@ -56,8 +56,16 @@ export class OpenFabProjectLoader {
 	async prepare(
 		json: string,
 		onMirrorState: Parameters<typeof prepareRailEditorStartupCandidate>[3],
+		expectedAuthoredChecksum?: string,
 	): Promise<PreparedOpenFabProjectLoad> {
-		return this.prepareSource({ kind: "project-json", json }, onMirrorState);
+		return this.prepareSource(
+			{
+				kind: "project-json",
+				json,
+				...(expectedAuthoredChecksum === undefined ? {} : { expectedAuthoredChecksum }),
+			},
+			onMirrorState,
+		);
 	}
 
 	async prepareSnapshot(

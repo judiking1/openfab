@@ -2,6 +2,7 @@ import type { DirectedRailEdge } from "./RailModuleOwnership";
 import {
 	type StaticFabOrganizationMembership,
 	type StaticFabOrganizationRecord,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
 } from "./StaticFabOrganization";
@@ -148,6 +149,12 @@ function hashOrganizationMetadata(record: StaticFabOrganizationRecord, seed: num
 	const properties = staticFabOrganizationProperties(record);
 	hash = mixString(hash, properties.description);
 	hash = mixString(hash, properties.color);
+	const declaredRole = staticFabOrganizationDeclaredSemanticRole(record);
+	// Null retains the historical metadata contribution; only authored declarations add a tag.
+	if (declaredRole !== null) {
+		hash = mixString(hash, "declaredSemanticRole");
+		hash = mixString(hash, declaredRole);
+	}
 	return finalizeHash(hash);
 }
 

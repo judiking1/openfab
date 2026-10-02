@@ -122,3 +122,21 @@ test("cannot declare imported inputs or waive the no-company-data attestation", 
 		fixture.attestations.containsImportedFactoryCoordinates = true;
 	}, /attestations must explicitly remain false/);
 });
+
+for (const corruption of ["role injection", "missing relationship state"]) {
+	test(`rejects a rehashed historical V2 fixture with ${corruption}`, () => {
+		verifyCase((fixture, write) => {
+			const row = fixture.historicalMigrationFixtures.find(
+				(candidate) => candidate.kind === "USER_BLUEPRINT_RECORD_V2",
+			);
+			assert.ok(row);
+			const payload = JSON.parse(readFileSync(new URL(`../${row.path}`, import.meta.url), "utf8"));
+			if (corruption === "role injection")
+				payload.blueprint.bundle.organizations[0].declaredSemanticRole = null;
+			else delete payload.blueprint.bundle.relationships;
+			const bytes = JSON.stringify(payload);
+			row.sha256 = createHash("sha256").update(bytes).digest("hex");
+			write(row.path, bytes);
+		}, /original V2 wire shape/);
+	});
+}

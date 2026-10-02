@@ -38,6 +38,7 @@ import {
 import {
 	STATIC_FAB_ORGANIZATION_KINDS,
 	type StaticFabOrganizationRecord,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
 	staticFabOrganizationRecordShapeErrorSteps,
@@ -689,6 +690,8 @@ function* sameOrganizationIdentityAndMetadata(
 	return (
 		before.kind === after.kind &&
 		before.name === after.name &&
+		staticFabOrganizationDeclaredSemanticRole(before) ===
+			staticFabOrganizationDeclaredSemanticRole(after) &&
 		(yield* sameNumberArray(
 			staticFabOrganizationParentIds(before),
 			staticFabOrganizationParentIds(after),

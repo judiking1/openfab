@@ -13,6 +13,7 @@ import {
 	captureRailMirrorSnapshot,
 	checksumRailMap,
 	checksumRailMapCooperatively,
+	checksumRailMapLegacyVersionTwo,
 	checksumRailMirrorSnapshot,
 	checksumRailMirrorSnapshotDiagnostic,
 	checksumRailPatchResult,
@@ -562,33 +563,41 @@ describe("RailChecksumAccumulator organization hashing", () => {
 
 	it("preserves the fixed organization checksum contract across hash refactors", () => {
 		const checksum = new RailChecksumAccumulator();
-		checksum.addOrganization(
-			Object.freeze({
-				id: 7,
-				kind: "BAY",
-				name: "Legacy Digest Bay",
-				parentOrganizationIds: Object.freeze([2, 5]),
-				properties: Object.freeze({ description: "Checksum contract", color: "AMBER" }),
-				membership: Object.freeze({
-					railEdges: Object.freeze([
-						Object.freeze({
-							from: Object.freeze({ x: 0, y: 0 }),
-							to: Object.freeze({ x: 1, y: 0 }),
-						}),
-						Object.freeze({
-							from: Object.freeze({ x: 1, y: 0 }),
-							to: Object.freeze({ x: 1, y: 1 }),
-						}),
-					]),
-					advancedSwitchIds: Object.freeze([11, 19]),
-					equipmentGroupIds: Object.freeze([23, 29]),
-				}),
+		const record: StaticFabOrganizationRecord = Object.freeze({
+			id: 7,
+			kind: "BAY",
+			name: "Legacy Digest Bay",
+			parentOrganizationIds: Object.freeze([2, 5]),
+			properties: Object.freeze({ description: "Checksum contract", color: "AMBER" }),
+			membership: Object.freeze({
+				railEdges: Object.freeze([
+					Object.freeze({
+						from: Object.freeze({ x: 0, y: 0 }),
+						to: Object.freeze({ x: 1, y: 0 }),
+					}),
+					Object.freeze({
+						from: Object.freeze({ x: 1, y: 0 }),
+						to: Object.freeze({ x: 1, y: 1 }),
+					}),
+				]),
+				advancedSwitchIds: Object.freeze([11, 19]),
+				equipmentGroupIds: Object.freeze([23, 29]),
 			}),
-		);
+		});
+		checksum.addOrganization(record);
 		checksum.setOrganizationNextId(31);
+		const emptyDocument = new RailDocument();
+		expect(
+			checksumRailMapLegacyVersionTwo(emptyDocument.map, emptyDocument.portEquipment, {
+				records: [record],
+				nextOrganizationId: 31,
+			}),
+		).toBe(
+			"00000002:00000000:00000000:00000000:00000000:00000000:00000001:0000001f:00000000:00000001:55bf56a6:f5ae92b4",
+		);
 
 		expect(checksum.digest()).toBe(
-			"00000002:00000000:00000000:00000000:00000000:00000000:00000001:0000001f:00000000:00000001:55bf56a6:f5ae92b4",
+			"00000003:00000000:00000000:00000000:00000000:00000000:00000001:0000001f:00000000:00000001:55bf56a6:f5ae92b4",
 		);
 	});
 

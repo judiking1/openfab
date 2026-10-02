@@ -1045,6 +1045,46 @@ describe("StaticFabOrganization", () => {
 		expect(staticFabOrganizationStateError(document.map, document.portEquipment, state)).toBeNull();
 	});
 
+	it("preserves explicit Loop intent when assigning another whole module to an existing AISLE", () => {
+		const document = longBayDocument();
+		const ownership = buildRailModuleOwnershipIndex(document.map);
+		const first = ownership.modules[0];
+		const second = ownership.modules[1];
+		if (!first || !second) throw new Error("Expected two modules.");
+		const create = planCreateStaticFabOrganizationFromSelection(
+			document.map,
+			ownership,
+			document.portEquipment,
+			document.getPatchSequence(),
+			emptyStaticFabOrganizationState(),
+			selectionFromModules(document, [first]),
+			"Manual Loop",
+			"AISLE",
+		);
+		const record = create.organizationMutations[0]?.after;
+		if (!record) throw new Error("Expected AISLE.");
+		const state = copyStaticFabOrganizationState({
+			nextOrganizationId: 2,
+			records: [{ ...record, declaredSemanticRole: "PROCESS_LOOP" }],
+		});
+		const assign = planAssignStaticFabOrganizationFromSelection(
+			document.map,
+			ownership,
+			document.portEquipment,
+			document.getPatchSequence(),
+			state,
+			selectionFromModules(document, [second]),
+			{ kind: "AISLE", organizationId: 1, name: "ignored", sourceOwners: [] },
+		);
+		expect(assign.valid, assign.reason).toBe(true);
+		const after = applyStaticFabOrganizationMutations(state, assign.organizationMutations, 2);
+		expect(after.records[0]?.declaredSemanticRole).toBe("PROCESS_LOOP");
+		expect(deriveStaticFabOrganizationSemanticRoles(after).get(1)).toBe("PROCESS_LOOP");
+		expect(after.records[0]?.membership.railEdges).toHaveLength(
+			first.eraseEdges.length + second.eraseEdges.length,
+		);
+	});
+
 	it("merges a selection into an existing target and removes an emptied source record", () => {
 		const document = longBayDocument();
 		const ownership = buildRailModuleOwnershipIndex(document.map);

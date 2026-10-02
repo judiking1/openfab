@@ -103,6 +103,7 @@ export interface StaticFabOrganizationDiagnosticRecord {
 	readonly id: number;
 	readonly kind: string;
 	readonly name: string;
+	readonly declaredSemanticRole?: string | null;
 	readonly parentOrganizationIds: readonly number[];
 	readonly properties: Readonly<{ description: string; color: string }>;
 	readonly membership: StaticFabOrganizationMembership;
@@ -376,6 +377,13 @@ function collectRecordShapeIssues(
 	if (!isPositiveInt32(info.id))
 		invalid(`organization record ${info.index + 1} has invalid id`, "id");
 	if (!info.kind) invalid(`organization ${info.id} has an unknown kind`, "kind");
+	const declaredRole = record.declaredSemanticRole ?? null;
+	if (declaredRole !== null && (declaredRole !== "PROCESS_LOOP" || info.kind !== "AISLE")) {
+		metadataInvalid(
+			`organization ${info.id} has an invalid declared Process Loop role`,
+			"declaredSemanticRole",
+		);
+	}
 	if (!validOrganizationName(info.name)) {
 		metadataInvalid(
 			`organization ${info.id} name must be a trimmed portable 1-120 character label`,

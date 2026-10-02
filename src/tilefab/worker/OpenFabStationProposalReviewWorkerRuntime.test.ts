@@ -801,7 +801,7 @@ describe("OpenFabStationProposalReviewWorkerSession", () => {
 			checksum: request.snapshot.checksum,
 		});
 		const inputTransfers = collectEvaluateRequestTransfers(request);
-		expect(inputTransfers).toHaveLength(125);
+		expect(inputTransfers).toHaveLength(126);
 		expect(new Set(inputTransfers).size).toBe(inputTransfers.length);
 
 		const deliveredRequest = structuredClone(request, { transfer: inputTransfers });

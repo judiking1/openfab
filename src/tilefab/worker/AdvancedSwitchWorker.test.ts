@@ -102,7 +102,7 @@ describe("advanced switch worker mirror", () => {
 		const record = makeSwitch(17, -12, 34, "C");
 		const event = switchOnlyEvent({ id: record.id, before: null, after: record });
 		const encoded = encodeRailPatchEvent(event);
-		expect(encoded.transfer).toHaveLength(163);
+		expect(encoded.transfer).toHaveLength(165);
 		expect(encoded.patch.switchIds).toBeInstanceOf(Int32Array);
 		expect(encoded.patch.switchAfter.origins).toBeInstanceOf(Int32Array);
 		const delivered = structuredClone(encoded.patch, { transfer: encoded.transfer });

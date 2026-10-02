@@ -32,6 +32,7 @@ export const STATIC_FAB_ORGANIZATION_MAX_MEMBERSHIP_REFERENCES = 5_000_000;
 export type StaticFabOrganizationKind = (typeof STATIC_FAB_ORGANIZATION_KINDS)[number];
 export type StaticFabOrganizationColor = (typeof STATIC_FAB_ORGANIZATION_COLORS)[number];
 export type StaticFabOrganizationSemanticRole = "FAB" | "BAY_BANK" | "BAY" | "PROCESS_LOOP";
+export type StaticFabOrganizationDeclaredSemanticRole = "PROCESS_LOOP";
 
 export interface StaticFabOrganizationProperties {
 	readonly description: string;
@@ -48,6 +49,8 @@ export interface StaticFabOrganizationRecord {
 	readonly id: number;
 	readonly kind: StaticFabOrganizationKind;
 	readonly name: string;
+	/** Legacy inputs may omit this; canonical records always store an explicit nullable value. */
+	readonly declaredSemanticRole?: StaticFabOrganizationDeclaredSemanticRole | null;
 	/** Explicit user-authored organization DAG; inferred topology is never stored here. */
 	readonly parentOrganizationIds?: readonly number[];
 	readonly properties?: StaticFabOrganizationProperties;
@@ -85,6 +88,7 @@ export interface CanonicalStaticFabOrganizationRecordHeader {
 	readonly id: number;
 	readonly kind: StaticFabOrganizationKind;
 	readonly name: string;
+	readonly declaredSemanticRole: StaticFabOrganizationDeclaredSemanticRole | null;
 	readonly description: string;
 	readonly color: StaticFabOrganizationColor;
 }
@@ -199,6 +203,7 @@ export function createCanonicalStaticFabOrganizationStateBuilder(
 				id,
 				kind,
 				name,
+				declaredSemanticRole: header.declaredSemanticRole ?? null,
 				parentOrganizationIds: Object.freeze(parentOrganizationIds),
 				properties: Object.freeze({
 					description,
@@ -313,6 +318,7 @@ export function copyStaticFabOrganizationRecord(
 		id,
 		kind,
 		name,
+		declaredSemanticRole: staticFabOrganizationDeclaredSemanticRole(record),
 		parentOrganizationIds: Object.freeze(parentOrganizationIds),
 		properties: copyStaticFabOrganizationProperties(sourceProperties),
 		membership: copyStaticFabOrganizationMembership(sourceMembership),
@@ -347,6 +353,7 @@ export function* copyStaticFabOrganizationRecordSteps(
 		id: record.id,
 		kind: record.kind,
 		name: record.name,
+		declaredSemanticRole: staticFabOrganizationDeclaredSemanticRole(record),
 		description: properties.description,
 		color: properties.color,
 	});
@@ -371,6 +378,12 @@ export function staticFabOrganizationProperties(
 	record: StaticFabOrganizationRecord,
 ): StaticFabOrganizationProperties {
 	return record.properties ?? DEFAULT_STATIC_FAB_ORGANIZATION_PROPERTIES;
+}
+
+export function staticFabOrganizationDeclaredSemanticRole(
+	record: StaticFabOrganizationRecord,
+): StaticFabOrganizationDeclaredSemanticRole | null {
+	return record.declaredSemanticRole ?? null;
 }
 
 /**
@@ -407,6 +420,10 @@ export function* deriveStaticFabOrganizationSemanticRoleSteps(
 	for (const record of state.records) {
 		yield;
 		if (record.kind !== "AISLE") continue;
+		if (staticFabOrganizationDeclaredSemanticRole(record) === "PROCESS_LOOP") {
+			roles.set(record.id, "PROCESS_LOOP");
+			continue;
+		}
 		for (const parentId of staticFabOrganizationParentIds(record)) {
 			yield;
 			if (recordsById.get(parentId)?.kind === "BAY") {
@@ -555,6 +572,8 @@ export function staticFabOrganizationRecordEquals(
 		left.id === right.id &&
 		left.kind === right.kind &&
 		left.name === right.name &&
+		staticFabOrganizationDeclaredSemanticRole(left) ===
+			staticFabOrganizationDeclaredSemanticRole(right) &&
 		numberArrayEquals(
 			staticFabOrganizationParentIds(left),
 			staticFabOrganizationParentIds(right),
@@ -983,6 +1002,8 @@ function* canonicalOrganizationRecordEqualsSteps(
 		left.id !== right.id ||
 		left.kind !== right.kind ||
 		left.name !== right.name ||
+		staticFabOrganizationDeclaredSemanticRole(left) !==
+			staticFabOrganizationDeclaredSemanticRole(right) ||
 		!numberArrayEquals(
 			staticFabOrganizationParentIds(left),
 			staticFabOrganizationParentIds(right),
@@ -1070,6 +1091,7 @@ export function replaceStaticFabOrganizationRecordMembership(
 		id: record.id,
 		kind: record.kind,
 		name: record.name,
+		declaredSemanticRole: staticFabOrganizationDeclaredSemanticRole(record),
 		parentOrganizationIds,
 		properties,
 		membership,
@@ -1099,6 +1121,10 @@ function staticFabOrganizationRecordHeaderError(
 ): string | null {
 	if (!isPositiveInt32(record.id)) return "ID는 양의 32-bit 정수여야 합니다";
 	if (!STATIC_FAB_ORGANIZATION_KINDS.includes(record.kind)) return "알 수 없는 조직 종류입니다";
+	const declaredRole = staticFabOrganizationDeclaredSemanticRole(record);
+	if (declaredRole !== null && (declaredRole !== "PROCESS_LOOP" || record.kind !== "AISLE")) {
+		return "공정 루프 역할은 AISLE 조직에만 명시할 수 있습니다";
+	}
 	if (
 		record.name.length === 0 ||
 		record.name.length > 120 ||
@@ -1205,6 +1231,7 @@ function copyStaticFabOrganizationMetadata(
 		id: record.id,
 		kind: record.kind,
 		name: record.name,
+		declaredSemanticRole: staticFabOrganizationDeclaredSemanticRole(record),
 		parentOrganizationIds: Object.freeze([...staticFabOrganizationParentIds(record)]),
 		properties: copyStaticFabOrganizationProperties(staticFabOrganizationProperties(record)),
 		membership,

@@ -22,6 +22,7 @@ import { emptyStaticFabAssemblyRelationshipState } from "./StaticFabAssemblyRela
 import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
+	copyStaticFabOrganizationState,
 	deriveStaticFabOrganizationSemanticRoles,
 	emptyStaticFabOrganizationState,
 	type StaticFabOrganizationRecord,
@@ -124,6 +125,74 @@ describe("StaticFabAssemblyConnector", () => {
 		}
 		const bank = prospective.organizations.records.find((record) => record.id === bankId);
 		expect(bank?.membership.railEdges.length).toBeGreaterThan(0);
+	});
+
+	it("rejects a gateway overlapping a declared Loop and preserves its authored intent", () => {
+		const placed = placeProductionBays([
+			{ x: 0, y: 0 },
+			{ x: 100, y: 0 },
+		]);
+		const bays = placed.organizations.records.filter((record) => record.kind === "BAY");
+		const sourceBay = bays[0];
+		const targetBay = bays[1];
+		const aisle = placed.organizations.records.find(
+			(record) =>
+				record.kind === "AISLE" &&
+				staticFabOrganizationParentIds(record).includes(sourceBay?.id ?? -1),
+		);
+		if (!sourceBay || !targetBay || !aisle) throw new Error("Expected Bay and AISLE fixture.");
+		const organizations = copyStaticFabOrganizationState({
+			nextOrganizationId: placed.organizations.nextOrganizationId,
+			records: placed.organizations.records.map((record) =>
+				record.id === aisle.id
+					? {
+							...record,
+							declaredSemanticRole: "PROCESS_LOOP",
+							membership: sourceBay.membership,
+						}
+					: record,
+			),
+		});
+		expect(() =>
+			firstValidConnector({ ...placed, organizations }, sourceBay.id, targetBay.id),
+		).toThrow(/Process Loop/);
+		expect(
+			organizations.records.find((record) => record.id === aisle.id)?.declaredSemanticRole,
+		).toBe("PROCESS_LOOP");
+		expect(
+			placed.organizations.records.find((record) => record.id === aisle.id)?.declaredSemanticRole,
+		).toBeNull();
+	});
+
+	it("preserves explicit declarations through a valid Bay connector", () => {
+		const placed = placeProductionBays([
+			{ x: 0, y: 0 },
+			{ x: 100, y: 0 },
+		]);
+		const organizations = copyStaticFabOrganizationState({
+			nextOrganizationId: placed.organizations.nextOrganizationId,
+			records: placed.organizations.records.map((record) =>
+				record.kind === "AISLE"
+					? {
+							...record,
+							declaredSemanticRole: "PROCESS_LOOP",
+						}
+					: record,
+			),
+		});
+		const bays = organizations.records.filter((record) => record.kind === "BAY");
+		const result = firstValidConnector(
+			{ ...placed, organizations },
+			bays[0]?.id ?? -1,
+			bays[1]?.id ?? -1,
+		);
+		expect(result.plan.valid, result.plan.reason).toBe(true);
+		for (const record of organizations.records.filter((record) => record.kind === "AISLE")) {
+			expect(
+				result.prospectiveState?.organizations.records.find((after) => after.id === record.id)
+					?.declaredSemanticRole,
+			).toBe("PROCESS_LOOP");
+		}
 	});
 
 	it("connects two detached Bay Banks through one Fab-owned typed Interbay", () => {

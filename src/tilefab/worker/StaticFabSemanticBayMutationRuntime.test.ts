@@ -92,6 +92,24 @@ describe("StaticFabSemanticBayMutation disposable Worker certification", () => {
 		});
 	}, 120_000);
 
+	it("authenticates declared Loop roles and rejects invalid role-kind combinations", () => {
+		const prepared = structuredClone(requirePrepared(fixture.disconnectPrepared));
+		const record = prepared.plan.organizationMutations.find((mutation) => mutation.after)?.after;
+		if (!record) throw new Error("Expected retained organization mutation.");
+		const mutable = record as { kind: string; declaredSemanticRole: string | null };
+		mutable.kind = "AISLE";
+		mutable.declaredSemanticRole = null;
+		const fingerprint = staticFabSemanticBayMutationPlanFingerprint(prepared.plan);
+		mutable.declaredSemanticRole = "PROCESS_LOOP";
+		expect(staticFabSemanticBayMutationPlanFingerprint(prepared.plan)).not.toBe(fingerprint);
+		expect(staticFabSemanticBayMutationPreparedShapeError(prepared)).toBeNull();
+		mutable.declaredSemanticRole = "BAY";
+		expect(staticFabSemanticBayMutationPreparedShapeError(prepared)).not.toBeNull();
+		mutable.declaredSemanticRole = "PROCESS_LOOP";
+		mutable.kind = "AREA";
+		expect(staticFabSemanticBayMutationPreparedShapeError(prepared)).not.toBeNull();
+	});
+
 	it("certifies attached Disconnect/Delete with exact physical evidence and checksum parity", () => {
 		const disconnect = requirePrepared(fixture.disconnectPrepared);
 		const attachedDelete = requirePrepared(fixture.deletePrepared);

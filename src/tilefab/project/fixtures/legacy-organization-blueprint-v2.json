@@ -1,0 +1,140 @@
+{
+	"schemaVersion": 2,
+	"id": "library-static-fab-organization",
+	"folderPath": [],
+	"quickSlot": null,
+	"createdAt": "2026-08-02T00:00:00.000Z",
+	"updatedAt": "2026-08-02T00:00:00.000Z",
+	"blueprint": {
+		"id": "static-fab-organization-portable",
+		"kind": "STATIC_FAB_ORGANIZATION",
+		"name": "Portable organization FAB",
+		"folder": "",
+		"favorite": false,
+		"createdAt": "2026-08-02T00:00:00.000Z",
+		"updatedAt": "2026-08-02T00:00:00.000Z",
+		"sourceModuleCount": 1,
+		"widthMeters": 5,
+		"heightMeters": 0,
+		"edges": [[0, 0, 1, 0], [1, 0, 2, 0], [2, 0, 3, 0], [3, 0, 4, 0], [4, 0, 5, 0]],
+		"bundle": {
+			"version": 2,
+			"captureMode": "EFFECTIVE",
+			"relationships": {
+				"nextRelationshipId": 1,
+				"records": []
+			},
+			"rootOrganizationIndices": [0],
+			"sourceModuleCount": 1,
+			"sourceWidthMeters": 5,
+			"sourceHeightMeters": 0,
+			"railEdges": [
+				{
+					"from": {
+						"x": 0,
+						"y": 0
+					},
+					"to": {
+						"x": 1,
+						"y": 0
+					}
+				},
+				{
+					"from": {
+						"x": 1,
+						"y": 0
+					},
+					"to": {
+						"x": 2,
+						"y": 0
+					}
+				},
+				{
+					"from": {
+						"x": 2,
+						"y": 0
+					},
+					"to": {
+						"x": 3,
+						"y": 0
+					}
+				},
+				{
+					"from": {
+						"x": 3,
+						"y": 0
+					},
+					"to": {
+						"x": 4,
+						"y": 0
+					}
+				},
+				{
+					"from": {
+						"x": 4,
+						"y": 0
+					},
+					"to": {
+						"x": 5,
+						"y": 0
+					}
+				}
+			],
+			"advancedSwitches": [],
+			"ports": [
+				{
+					"equipmentGroupIndex": 0,
+					"route": {
+						"kind": "CARDINAL_CELL",
+						"x": 1,
+						"z": 0,
+						"from": 8,
+						"to": 2
+					},
+					"stationMillimeters": 500,
+					"side": "LEFT",
+					"lateralOffsetMillimeters": 700,
+					"direction": "WITH_TRAVEL",
+					"portType": "OHB"
+				}
+			],
+			"equipmentGroups": [
+				{
+					"kind": "OHB",
+					"template": "SINGLE",
+					"portIndices": [0]
+				}
+			],
+			"organizations": [
+				{
+					"kind": "AREA",
+					"name": "Portable Area",
+					"parentOrganizationIndices": [],
+					"properties": {
+						"description": "Reusable area",
+						"color": "CYAN"
+					},
+					"membership": {
+						"railEdgeIndices": [0, 1, 2, 3, 4],
+						"advancedSwitchIndices": [],
+						"equipmentGroupIndices": [0]
+					}
+				},
+				{
+					"kind": "BAY",
+					"name": "Portable Bay",
+					"parentOrganizationIndices": [0],
+					"properties": {
+						"description": "Reusable bay",
+						"color": "AMBER"
+					},
+					"membership": {
+						"railEdgeIndices": [0, 1, 2, 3, 4],
+						"advancedSwitchIndices": [],
+						"equipmentGroupIndices": [0]
+					}
+				}
+			]
+		}
+	}
+}

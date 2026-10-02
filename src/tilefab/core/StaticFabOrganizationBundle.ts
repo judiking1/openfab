@@ -62,10 +62,12 @@ import {
 	STATIC_FAB_ORGANIZATION_KINDS,
 	STATIC_FAB_ORGANIZATION_MAX_DESCRIPTION_LENGTH,
 	STATIC_FAB_ORGANIZATION_MAX_PARENTS,
+	type StaticFabOrganizationDeclaredSemanticRole,
 	type StaticFabOrganizationKind,
 	type StaticFabOrganizationProperties,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationEdgeKey,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
@@ -80,7 +82,7 @@ import {
 import type { StaticFabOrganizationSelectionMode } from "./StaticFabOrganizationSelection";
 import { type Cell, encodeRailCell, TileMap } from "./TileMap";
 
-export const STATIC_FAB_ORGANIZATION_BUNDLE_VERSION = 2 as const;
+export const STATIC_FAB_ORGANIZATION_BUNDLE_VERSION = 3 as const;
 export const STATIC_FAB_ORGANIZATION_BUNDLE_MAX_RAIL_EDGES = 65_536;
 export const STATIC_FAB_ORGANIZATION_BUNDLE_MAX_ADVANCED_SWITCHES = 1_024;
 export const STATIC_FAB_ORGANIZATION_BUNDLE_MAX_PORTS = 4_096;
@@ -137,6 +139,7 @@ const STK_GROUP_KEYS = Object.freeze(["kind", "template", "portIndices"] as cons
 const ORGANIZATION_KEYS = Object.freeze([
 	"kind",
 	"name",
+	"declaredSemanticRole",
 	"parentOrganizationIndices",
 	"properties",
 	"membership",
@@ -212,6 +215,7 @@ export interface StaticFabOrganizationBundleMembership {
 export interface StaticFabOrganizationBundleOrganization {
 	readonly kind: StaticFabOrganizationKind;
 	readonly name: string;
+	readonly declaredSemanticRole: StaticFabOrganizationDeclaredSemanticRole | null;
 	readonly parentOrganizationIndices: readonly number[];
 	readonly properties: StaticFabOrganizationProperties;
 	readonly membership: StaticFabOrganizationBundleMembership;
@@ -650,6 +654,7 @@ export function captureStaticFabOrganizationBundle(
 		return Object.freeze({
 			kind: record.kind,
 			name: record.name,
+			declaredSemanticRole: staticFabOrganizationDeclaredSemanticRole(record),
 			parentOrganizationIndices: Object.freeze(
 				staticFabOrganizationParentIds(record)
 					.filter((parentId) => includedIds.has(parentId))
@@ -892,6 +897,7 @@ function* canonicalBundleOrganizationSteps(
 			id: index + 1,
 			kind: organization.kind,
 			name: organization.name,
+			declaredSemanticRole: organization.declaredSemanticRole,
 			description: organization.properties.description,
 			color: organization.properties.color,
 		});
@@ -1422,6 +1428,7 @@ export function materializeStaticFabOrganizationBundle(
 			Object.freeze({
 				kind: organization.kind,
 				name: organization.name,
+				declaredSemanticRole: organization.declaredSemanticRole,
 				parentOrganizationIndices: Object.freeze([...organization.parentOrganizationIndices]),
 				properties: copyPortableOrganizationProperties(organization.properties),
 				membership: Object.freeze({
@@ -1494,6 +1501,7 @@ export function transformStaticFabOrganizationBundle(
 			Object.freeze({
 				kind: organization.kind,
 				name: organization.name,
+				declaredSemanticRole: organization.declaredSemanticRole,
 				parentOrganizationIndices: Object.freeze([...organization.parentOrganizationIndices]),
 				properties: copyPortableOrganizationProperties(organization.properties),
 				membership: Object.freeze({
@@ -1585,6 +1593,7 @@ function copyPreparedStaticFabOrganizationBundle(
 				Object.freeze({
 					kind: organization.kind,
 					name: organization.name,
+					declaredSemanticRole: organization.declaredSemanticRole,
 					parentOrganizationIndices: Object.freeze([...organization.parentOrganizationIndices]),
 					properties: copyPortableOrganizationProperties(organization.properties),
 					membership: Object.freeze({
@@ -1746,6 +1755,11 @@ function portableOrganizationMetadataError(
 ): string | null {
 	if (!STATIC_FAB_ORGANIZATION_KINDS.includes(organization.kind))
 		return "조직 종류가 유효하지 않습니다";
+	if (
+		organization.declaredSemanticRole !== null &&
+		(organization.declaredSemanticRole !== "PROCESS_LOOP" || organization.kind !== "AISLE")
+	)
+		return "공정 루프 선언은 AISLE 조직에만 허용됩니다";
 	if (
 		organization.name.length === 0 ||
 		organization.name.length > 120 ||

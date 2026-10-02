@@ -49,6 +49,7 @@ export function validPreparedArrangement(): PreparedStaticFabArrangement {
 	const beforeOrganization: StaticFabOrganizationRecord = {
 		id: 1,
 		kind: "BAY",
+		declaredSemanticRole: null,
 		name: "Bay One",
 		parentOrganizationIds: [],
 		properties: { description: "", color: "CYAN" },

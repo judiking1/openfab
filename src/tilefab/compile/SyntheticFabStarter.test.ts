@@ -1014,7 +1014,7 @@ describe("SyntheticFabStarter", () => {
 		expect(configurations).toBe(271);
 	}, 120_000);
 
-	it("captures ordinary schema-v13 project data without persisted starter provenance", () => {
+	it("captures ordinary schema-v14 project data without persisted starter provenance", () => {
 		const build = buildSyntheticFabStarter(defaultSyntheticFabStarterRequest("complete-fab"));
 		const project = captureOpenFabProject(build.document, {
 			manifest: createOpenFabProjectManifest(
@@ -1026,7 +1026,7 @@ describe("SyntheticFabStarter", () => {
 		});
 		const json = JSON.stringify(project);
 
-		expect(project.schemaVersion).toBe(13);
+		expect(project.schemaVersion).toBe(14);
 		expect(project.rail.cells).toHaveLength(build.summary.railCells);
 		expect(project.ports.records).toHaveLength(0);
 		expect(project.equipment.records).toHaveLength(0);

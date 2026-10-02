@@ -19,6 +19,7 @@ import {
 	STATIC_FAB_ORGANIZATION_MAX_PARENTS,
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationEdgeKey,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
@@ -158,6 +159,7 @@ const ORGANIZATION_RECORD_REQUIRED_KEYS = Object.freeze([
 ] as const);
 const ORGANIZATION_RECORD_ALLOWED_KEYS = Object.freeze([
 	...ORGANIZATION_RECORD_REQUIRED_KEYS,
+	"declaredSemanticRole",
 	"parentOrganizationIds",
 	"properties",
 ] as const);
@@ -734,6 +736,11 @@ function isOrganizationRecord(
 		return false;
 	}
 	if (
+		value.declaredSemanticRole != null &&
+		(value.declaredSemanticRole !== "PROCESS_LOOP" || value.kind !== "AISLE")
+	)
+		return false;
+	if (
 		value.parentOrganizationIds !== undefined &&
 		(!Array.isArray(value.parentOrganizationIds) ||
 			value.parentOrganizationIds.length > STATIC_FAB_ORGANIZATION_MAX_PARENTS ||
@@ -781,6 +788,8 @@ function sameOrganizationMetadata(
 		before.id === after.id &&
 		before.kind === after.kind &&
 		before.name === after.name &&
+		staticFabOrganizationDeclaredSemanticRole(before) ===
+			staticFabOrganizationDeclaredSemanticRole(after) &&
 		sameNumberArray(
 			staticFabOrganizationParentIds(before),
 			staticFabOrganizationParentIds(after),

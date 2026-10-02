@@ -99,6 +99,7 @@ const ORGANIZATION_KEYS = Object.freeze([
 ] as const);
 const ORGANIZATION_RECORD_KEYS = Object.freeze([
 	"kinds",
+	"declaredSemanticRoles",
 	"names",
 	"parentOrganizationOffsets",
 	"parentOrganizationIds",
@@ -417,10 +418,12 @@ function validateV1ColumnLengths(
 	const records = organizations.records;
 	const organizationCount = identity.counts.organizationRecords;
 	if (
-		organizations.schemaVersion !== 2 ||
+		organizations.schemaVersion !== 3 ||
 		organizations.nextOrganizationId !== organizationCount + 1 ||
 		organizations.organizationIds.length !== organizationCount ||
 		records.kinds.length !== organizationCount ||
+		records.declaredSemanticRoles.length !== organizationCount ||
+		records.declaredSemanticRoles.some((role) => role !== 0) ||
 		records.names.length !== organizationCount ||
 		records.descriptions.length !== organizationCount ||
 		records.colors.length !== organizationCount ||
@@ -522,6 +525,7 @@ function collectExpectedViews(snapshotValue: unknown): readonly ExpectedView[] {
 		view(groups.pitchMillimeters, Uint32Array, "equipment pitches"),
 		view(snapshot.organizations.organizationIds, Int32Array, "organization ids"),
 		view(organizations.kinds, Uint8Array, "organization kinds"),
+		view(organizations.declaredSemanticRoles, Uint8Array, "organization declared semantic roles"),
 		view(organizations.parentOrganizationOffsets, Uint32Array, "organization parent offsets"),
 		view(organizations.parentOrganizationIds, Int32Array, "organization parent ids"),
 		view(organizations.colors, Uint8Array, "organization colors"),

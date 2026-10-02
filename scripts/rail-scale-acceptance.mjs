@@ -9991,7 +9991,7 @@ function checksumWithMonotonicCursors(checksum, cursors) {
 	if (!/^(?:[0-9a-f]{8}:){11}[0-9a-f]{8}$/.test(checksum))
 		throw new Error("Invalid authored checksum");
 	const fields = checksum.split(":");
-	if (fields[0] !== "00000002") throw new Error("Unsupported checksum version");
+	if (fields[0] !== "00000003") throw new Error("Unsupported checksum version");
 	for (const [kind, cursor] of Object.entries(cursors)) {
 		const index = kind === "organization" ? 7 : kind === "relationship" ? 9 : -1;
 		if (

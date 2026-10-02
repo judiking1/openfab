@@ -10,6 +10,7 @@ import { OPENFAB_PROJECT_MAX_JSON_CHARACTERS } from "../project/OpenFabProjectCo
 import type {
 	OpenFabProjectMetadataMutationAuthority,
 	OpenFabRecentProject,
+	OpenFabRecoveryProject,
 	OpenFabRecoveryProjectSummary,
 } from "../project/OpenFabProjectPorts";
 import {
@@ -167,6 +168,82 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		await persistence.putRecent({ ...first, projectId: "second" });
 		await persistence.putRecent({ ...first, reference: null });
 		expect(await database.get("file-handles", reference.id)).not.toBeNull();
+	});
+
+	it.each([
+		"memory",
+		"indexeddb",
+	] as const)("deletes only the exact loaded recovery payload (%s)", async (backend) => {
+		vi.stubGlobal("indexedDB", new IDBFactory());
+		const persistence = new BrowserOpenFabProjectPersistence(
+			backend === "memory" ? new MemoryProjectDatabase() : undefined,
+		);
+		const original: OpenFabRecoveryProject = {
+			projectId: "loaded-recovery",
+			name: "Loaded",
+			updatedAt: "2026-10-03T00:00:00.000Z",
+			authoredChecksum: "same-rail-checksum",
+			json: "view-a",
+		};
+		await persistence.putRecovery(original);
+		const loaded = await persistence.loadRecovery(original.projectId);
+		if (!loaded) throw new Error("Missing recovery");
+		const replacement = { ...original, json: "view-b" };
+		await persistence.putRecovery(replacement);
+		const authority = { signal: new AbortController().signal, isCurrent: () => true };
+		expect(await persistence.removeRecoveryIfUnchanged(loaded, authority)).toBe("conflict");
+		expect(await persistence.loadRecovery(original.projectId)).toEqual(replacement);
+		expect((await persistence.listRecovery()).latest?.projectId).toBe(original.projectId);
+		expect(await persistence.removeRecoveryIfUnchanged(replacement, authority)).toBe("removed");
+		expect(await persistence.loadRecovery(original.projectId)).toBeNull();
+		expect((await persistence.listRecovery()).totalCount).toBe(0);
+	});
+
+	it.each([
+		"abort",
+		"owner",
+	] as const)("preserves both recovery stores when exact-payload cleanup loses authority during deletion (%s)", async (reason) => {
+		vi.stubGlobal("indexedDB", new IDBFactory());
+		const persistence = new BrowserOpenFabProjectPersistence();
+		const controller = new AbortController();
+		let current = true;
+		const original: OpenFabRecoveryProject = {
+			projectId: "loaded-atomic-recovery",
+			name: "Loaded",
+			updatedAt: "2026-10-03T00:00:00.000Z",
+			authoredChecksum: "same-rail-checksum",
+			json: "loaded payload",
+		};
+		await persistence.putRecovery(original);
+		const remove = FakeIDBObjectStore.prototype.delete;
+		const spy = vi.spyOn(FakeIDBObjectStore.prototype, "delete").mockImplementation(function (
+			this: IDBObjectStore,
+			key,
+		) {
+			const request = remove.call(this, key);
+			if (this.name === "recovery-project-summaries")
+				request.addEventListener(
+					"success",
+					() => {
+						if (reason === "abort") controller.abort();
+						else current = false;
+					},
+					{ once: true },
+				);
+			return request;
+		});
+		try {
+			await expect(
+				persistence.removeRecoveryIfUnchanged(original, {
+					signal: controller.signal,
+					isCurrent: () => current,
+				}),
+			).rejects.toMatchObject({ name: "AbortError" });
+			expect(await persistence.loadRecovery(original.projectId)).toEqual(original);
+			expect((await persistence.listRecovery()).latest?.projectId).toBe(original.projectId);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
 	it.each([
@@ -1407,7 +1484,7 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		database.close();
 		const persistence = new BrowserOpenFabProjectPersistence();
 		const normalized = parseOpenFabUserBlueprintRecord(legacyOrganizationRecord);
-		expect(normalized.schemaVersion).toBe(2);
+		expect(normalized.schemaVersion).toBe(3);
 		expect(await persistence.list()).toEqual([normalized]);
 		expect(await persistence.get(normalized.id)).toEqual(normalized);
 		const renamed = renameUserBlueprint(
@@ -2381,6 +2458,7 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 	async deleteRecoveriesIfSummariesUnchanged(
 		expected: readonly OpenFabRecoveryProjectSummary[],
 		authority?: OpenFabProjectMetadataMutationAuthority,
+		expectedPayload?: OpenFabRecoveryProject,
 	): Promise<"removed" | "conflict"> {
 		this.beforeRecoveryCleanup?.();
 		assertTestMetadataAuthority(authority);
@@ -2389,6 +2467,12 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 			const current = summaries.get(candidate.projectId);
 			if (JSON.stringify(current) !== JSON.stringify(candidate)) return "conflict";
 		}
+		if (
+			expectedPayload &&
+			JSON.stringify(this.store("recovery-projects").get(expectedPayload.projectId)) !==
+				JSON.stringify(expectedPayload)
+		)
+			return "conflict";
 		const snapshots = this.snapshotStores(["recovery-project-summaries", "recovery-projects"]);
 		try {
 			for (const candidate of expected) {

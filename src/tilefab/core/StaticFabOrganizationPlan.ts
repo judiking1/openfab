@@ -296,6 +296,7 @@ export function planAssignStaticFabOrganizationFromSelection(
 			id: existingTarget?.id ?? organizations.nextOrganizationId,
 			kind: target.kind,
 			name: existingTarget?.name ?? target.name,
+			declaredSemanticRole: existingTarget?.declaredSemanticRole ?? null,
 			parentOrganizationIds: existingTarget
 				? staticFabOrganizationParentIds(existingTarget)
 				: undefined,

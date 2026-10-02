@@ -1408,7 +1408,7 @@ describe("RailWorkerBridge", () => {
 			previousPhysicalFingerprint: before.physicalFingerprint,
 			migrationAvailable: false,
 		});
-		expect(port.typedPatchTransferCount).toBe(163);
+		expect(port.typedPatchTransferCount).toBe(165);
 		bridge.dispose();
 	});
 
@@ -1473,7 +1473,7 @@ describe("RailWorkerBridge", () => {
 			ports: 1,
 			equipmentGroups: 1,
 		});
-		expect(worker.typedPatchTransferCount).toBe(163);
+		expect(worker.typedPatchTransferCount).toBe(165);
 		expect(worker.syncCount).toBe(1);
 		expect(worker.mirror.captureSnapshot()).toEqual(
 			captureRailMirrorSnapshot(
@@ -1514,7 +1514,7 @@ describe("RailWorkerBridge", () => {
 			physicalFingerprint: baseline.physicalFingerprint,
 		});
 		expect(port.messageCount).toBe(baselineMessageCount + 1);
-		expect(port.typedPatchTransferCount).toBe(163);
+		expect(port.typedPatchTransferCount).toBe(165);
 		expect(port.syncCount).toBe(1);
 		expect(port.mirror.captureSnapshot()).toEqual(
 			captureRailMirrorSnapshot(
@@ -2267,7 +2267,7 @@ describe("RailWorkerBridge", () => {
 			sequence: 0,
 			revision: 0,
 		});
-		expect(port.typedSnapshotTransferCount).toBe(73);
+		expect(port.typedSnapshotTransferCount).toBe(74);
 
 		expect(
 			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
@@ -2296,7 +2296,7 @@ describe("RailWorkerBridge", () => {
 			migrationToSequence: 1,
 		});
 		expect(port.physicalLayout.revision).toBe(document.map.getRevision());
-		expect(port.typedPatchTransferCount).toBe(163);
+		expect(port.typedPatchTransferCount).toBe(165);
 		const stateCountBeforeDuplicate = states.length;
 		port.replayLastAcknowledgement();
 		await flushWorkerMessages();
@@ -2503,7 +2503,7 @@ describe("RailWorkerBridge", () => {
 			switches: 1,
 			physicalAdvancedSwitchCount: 1,
 		});
-		expect(port.typedPatchTransferCount).toBe(163);
+		expect(port.typedPatchTransferCount).toBe(165);
 		bridge.dispose();
 	});
 

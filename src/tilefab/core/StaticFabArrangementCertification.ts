@@ -33,6 +33,7 @@ import {
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 } from "./StaticFabOrganization";
 import type { TileMap } from "./TileMap";
 
@@ -739,6 +740,8 @@ function* addOrganizationRecord(
 		record.properties?.description ?? "",
 		record.properties?.color ?? "",
 	]);
+	const declaredRole = staticFabOrganizationDeclaredSemanticRole(record);
+	if (declaredRole !== null) checksum.addStrings(["declaredSemanticRole", declaredRole]);
 	const membership = record.membership;
 	const edgeScalars = membership.railEdges.length * 4;
 	yield* checksum.addNumberSequenceSteps(

@@ -132,7 +132,7 @@ describe("OpenFab project codec", () => {
 		}
 	});
 
-	it("round-trips reviewed non-geometric operational configuration in project v12", () => {
+	it("round-trips reviewed non-geometric operational configuration in the current project", () => {
 		const document = new RailDocument();
 		const sourceSnapshot = captureRailMirrorSnapshot(
 			document.map,
@@ -176,7 +176,7 @@ describe("OpenFab project codec", () => {
 		);
 		const parsed = parseOpenFabProjectJson(serialized);
 
-		expect(parsed.project.schemaVersion).toBe(13);
+		expect(parsed.project.schemaVersion).toBe(14);
 		expect(parsed.project.operations).toEqual(operations);
 		expect(Object.isFrozen(parsed.project.operations)).toBe(true);
 		expect(Object.isFrozen(parsed.project.operations.vehicleProfile)).toBe(true);
@@ -211,6 +211,7 @@ describe("OpenFab project codec", () => {
 	it("migrates a reviewed project v9 operational schema v1 without trusting a stale fingerprint", () => {
 		const legacy = mutableCopy(captureOpenFabProject(new RailDocument(), { manifest: MANIFEST }));
 		legacy.schemaVersion = 9;
+		legacy.areas = legacyOrganizationSectionV2(legacy.areas);
 		if (!legacy.blueprints) throw new Error("Legacy blueprint section missing");
 		legacy.blueprints.schemaVersion = 3;
 		delete legacy.relationships;
@@ -249,7 +250,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(9);
-		expect(migrated.project.schemaVersion).toBe(13);
+		expect(migrated.project.schemaVersion).toBe(14);
 		expect(migrated.project.operations).toMatchObject({
 			schemaVersion: 2,
 			nextResidentHomeSlotId: 1,
@@ -281,6 +282,7 @@ describe("OpenFab project codec", () => {
 	it("upgrades root v10 once with an explicit empty relationship section and no inference", () => {
 		const legacy = mutableCopy(captureOpenFabProject(new RailDocument(), { manifest: MANIFEST }));
 		legacy.schemaVersion = 10;
+		legacy.areas = legacyOrganizationSectionV2(legacy.areas);
 		if (!legacy.blueprints) throw new Error("Legacy blueprint section missing");
 		legacy.blueprints.schemaVersion = 3;
 		delete legacy.relationships;
@@ -288,7 +290,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(10);
-		expect(migrated.project.schemaVersion).toBe(13);
+		expect(migrated.project.schemaVersion).toBe(14);
 		expect(migrated.project.relationships).toEqual({
 			schemaVersion: 1,
 			nextRelationshipId: 1,
@@ -307,11 +309,12 @@ describe("OpenFab project codec", () => {
 		const legacy = {
 			...current,
 			schemaVersion: 11,
+			areas: legacyOrganizationSectionV2(current.areas),
 			blueprints: { schemaVersion: 3, records: [legacyOrganizationRecord.blueprint] },
 		};
 		const migrated = parseOpenFabProjectValue(legacy);
 		expect(migrated.migratedFromVersion).toBe(11);
-		expect(migrated.project.schemaVersion).toBe(13);
+		expect(migrated.project.schemaVersion).toBe(14);
 		expect(migrated.project.relationships).toEqual(current.relationships);
 		const blueprint = migrated.project.blueprints.records[0];
 		if (blueprint?.kind !== "STATIC_FAB_ORGANIZATION") throw new Error("Missing migrated bundle");
@@ -383,6 +386,7 @@ describe("OpenFab project codec", () => {
 	it("migrates schema v8 into an explicit unresolved operational draft", () => {
 		const legacy = mutableCopy(captureOpenFabProject(new RailDocument(), { manifest: MANIFEST }));
 		legacy.schemaVersion = 8;
+		legacy.areas = legacyOrganizationSectionV2(legacy.areas);
 		if (!legacy.blueprints) throw new Error("Legacy blueprint section missing");
 		legacy.blueprints.schemaVersion = 3;
 		delete legacy.operations;
@@ -391,14 +395,14 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(8);
-		expect(migrated.project.schemaVersion).toBe(13);
+		expect(migrated.project.schemaVersion).toBe(14);
 		expect(migrated.project.operations).toEqual(emptyOperationalConfigurationState());
 		expect(
 			parseOpenFabProjectJson(serializeOpenFabProject(migrated.project)).migratedFromVersion,
 		).toBeNull();
 	});
 
-	it("round-trips persistent AREA membership and metadata through project v12 and Worker startup", () => {
+	it("round-trips persistent AREA membership and metadata through the current project and Worker startup", () => {
 		const source = new RailDocument();
 		expect(source.commit(planRailConstruction(source.map, { x: 0, y: 0 }, { x: 5, y: 0 }))).toBe(
 			true,
@@ -426,16 +430,17 @@ describe("OpenFab project codec", () => {
 		const parsed = parseOpenFabProjectJson(serializeOpenFabProject(project));
 		const snapshot = createRailSnapshotFromOpenFabProject(parsed.project);
 
-		expect(project.schemaVersion).toBe(13);
+		expect(project.schemaVersion).toBe(14);
 		expect(parsed.migratedFromVersion).toBeNull();
 		expect(parsed.project.areas).toEqual({
-			schemaVersion: 2,
+			schemaVersion: 3,
 			nextOrganizationId: 2,
 			records: [
 				{
 					id: 1,
 					kind: "AREA",
 					name: "Lithography Area",
+					declaredSemanticRole: null,
 					parentOrganizationIds: [],
 					properties: { description: "", color: "TEAL" },
 					membership: {
@@ -566,7 +571,7 @@ describe("OpenFab project codec", () => {
 				railPresentation: "profiled",
 			},
 		});
-		const migrated = parseOpenFabProjectValue({ ...current, schemaVersion: 12 });
+		const migrated = parseOpenFabProjectValue(legacyProjectWithDeclaredRolesRemoved(current, 12));
 		expect(migrated.migratedFromVersion).toBe(12);
 		expect(migrated.project).toEqual(current);
 		const startupProject = captureOpenFabProject(new RailDocument(), {
@@ -575,11 +580,11 @@ describe("OpenFab project codec", () => {
 		});
 		const payload = compileRailStartup({
 			kind: "project-json",
-			json: JSON.stringify({ ...startupProject, schemaVersion: 12 }),
+			json: JSON.stringify(legacyProjectWithDeclaredRolesRemoved(startupProject, 12)),
 		});
 		expect(payload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 13,
+			schemaVersion: 14,
 			migratedFromVersion: 12,
 			view: current.view,
 		});
@@ -869,7 +874,7 @@ describe("OpenFab project codec", () => {
 		expect(loadedSnapshot.sequence).toBe(beforeSnapshot.sequence);
 		expect(loadedPayload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 13,
+			schemaVersion: 14,
 			migratedFromVersion: null,
 		});
 
@@ -932,7 +937,7 @@ describe("OpenFab project codec", () => {
 		});
 
 		expect(parsed.migratedFromVersion).toBe(2);
-		expect(parsed.project.schemaVersion).toBe(13);
+		expect(parsed.project.schemaVersion).toBe(14);
 		expect(parsed.project.equipment.records).toEqual([
 			{ id: 1, kind: "STK", template: "CUSTOM", portIds: [1, 2] },
 		]);
@@ -973,7 +978,7 @@ describe("OpenFab project codec", () => {
 		v3.areas = legacyReservedSection();
 		const v3Result = parseOpenFabProjectValue(v3);
 		expect(v3Result.migratedFromVersion).toBe(3);
-		expect(v3Result.project.blueprints).toEqual({ schemaVersion: 4, records: [] });
+		expect(v3Result.project.blueprints).toEqual({ schemaVersion: 5, records: [] });
 
 		const v1Base = mutableCopy(current);
 		delete v1Base.operations;
@@ -988,7 +993,7 @@ describe("OpenFab project codec", () => {
 		};
 		const v1Result = parseOpenFabProjectValue(v1);
 		expect(v1Result.migratedFromVersion).toBe(1);
-		expect(v1Result.project.schemaVersion).toBe(13);
+		expect(v1Result.project.schemaVersion).toBe(14);
 		expect(v1Result.project.ports).toEqual({ schemaVersion: 1, nextPortId: 1, records: [] });
 		expect(v1Result.project.equipment).toEqual({
 			schemaVersion: 1,
@@ -1012,7 +1017,7 @@ describe("OpenFab project codec", () => {
 
 		const result = parseOpenFabProjectValue(v0);
 		expect(result.migratedFromVersion).toBe(0);
-		expect(result.project.schemaVersion).toBe(13);
+		expect(result.project.schemaVersion).toBe(14);
 		expect(result.project.ports.records).toEqual([]);
 		expect(result.project.equipment.records).toEqual([]);
 		expect(result.project.areas.records).toEqual([]);
@@ -1067,8 +1072,8 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(4);
-		expect(migrated.project.schemaVersion).toBe(13);
-		expect(migrated.project.blueprints).toEqual({ schemaVersion: 4, records: [blueprint] });
+		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.blueprints).toEqual({ schemaVersion: 5, records: [blueprint] });
 	});
 
 	it("migrates the reserved v5 areas section into the current empty organization library", () => {
@@ -1087,9 +1092,9 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(5);
-		expect(migrated.project.schemaVersion).toBe(13);
+		expect(migrated.project.schemaVersion).toBe(14);
 		expect(migrated.project.areas).toEqual({
-			schemaVersion: 2,
+			schemaVersion: 3,
 			nextOrganizationId: 1,
 			records: [],
 		});
@@ -1143,8 +1148,8 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(6);
-		expect(migrated.project.schemaVersion).toBe(13);
-		expect(migrated.project.areas).toMatchObject({ schemaVersion: 2, nextOrganizationId: 2 });
+		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.areas).toMatchObject({ schemaVersion: 3, nextOrganizationId: 2 });
 		expect(migrated.project.areas.records[0]).toMatchObject({
 			kind: "BAY",
 			name: "Legacy Bay",
@@ -1242,8 +1247,8 @@ describe("OpenFab project codec", () => {
 		const serialized = serializeOpenFabProject(project);
 		const parsed = parseOpenFabProjectJson(serialized);
 
-		expect(parsed.project.schemaVersion).toBe(13);
-		expect(parsed.project.blueprints.schemaVersion).toBe(4);
+		expect(parsed.project.schemaVersion).toBe(14);
+		expect(parsed.project.blueprints.schemaVersion).toBe(5);
 		expect(parsed.project.blueprints.records).toEqual([blueprint]);
 		expect(parsed.project.blueprints.records[0]?.kind).toBe("STATIC_FAB_ORGANIZATION");
 		expect(Object.isFrozen(parsed.project.blueprints.records[0])).toBe(true);
@@ -1287,7 +1292,7 @@ describe("OpenFab project codec", () => {
 		expectProjectError(mismatchedProjection, "INVALID_ORGANIZATION", ".sourceModuleCount");
 	});
 
-	it("losslessly upgrades root v7 blueprint schema v2 projects to root v12 schema v4", () => {
+	it("losslessly upgrades root v7 blueprint schema v2 projects to current root v14 blueprint schema v5", () => {
 		const records = [
 			createOpenFabRailAreaBlueprint(CLOSED_AREA_TEMPLATE, {
 				id: "blueprint-v7-rail",
@@ -1310,6 +1315,7 @@ describe("OpenFab project codec", () => {
 			}),
 		);
 		legacy.schemaVersion = 7;
+		legacy.areas = legacyOrganizationSectionV2(legacy.areas);
 		delete legacy.operations;
 		delete legacy.relationships;
 		if (!legacy.blueprints) throw new Error("Expected a v7 blueprint fixture.");
@@ -1320,8 +1326,8 @@ describe("OpenFab project codec", () => {
 		const reparsed = parseOpenFabProjectJson(serialized);
 
 		expect(upgraded.migratedFromVersion).toBe(7);
-		expect(upgraded.project.schemaVersion).toBe(13);
-		expect(upgraded.project.blueprints.schemaVersion).toBe(4);
+		expect(upgraded.project.schemaVersion).toBe(14);
+		expect(upgraded.project.blueprints.schemaVersion).toBe(5);
 		expect(upgraded.project.blueprints.records).toEqual(records);
 		expect(reparsed.migratedFromVersion).toBeNull();
 		expect(reparsed.project.blueprints.records).toEqual(records);
@@ -2060,4 +2066,53 @@ function organizationBundleFixture(): StaticFabOrganizationBundle {
 
 function mutableCopy(project: OpenFabProject): MutableProject {
 	return JSON.parse(JSON.stringify(project)) as MutableProject;
+}
+
+function legacyOrganizationSectionV2(
+	section: Readonly<{
+		schemaVersion: number;
+		nextOrganizationId?: number;
+		records: readonly unknown[];
+	}>,
+): MutableProject["areas"] {
+	return {
+		...section,
+		schemaVersion: 2,
+		records: section.records.map((record) =>
+			Object.fromEntries(
+				Object.entries(record as Record<string, unknown>).filter(
+					([key]) => key !== "declaredSemanticRole",
+				),
+			),
+		),
+	};
+}
+function legacyProjectWithDeclaredRolesRemoved(
+	project: OpenFabProject,
+	schemaVersion: number,
+): MutableProject {
+	const raw = mutableCopy(project);
+	raw.schemaVersion = schemaVersion;
+	raw.areas = legacyOrganizationSectionV2(raw.areas);
+	if (!raw.blueprints) throw new Error("Missing blueprint section");
+	raw.blueprints.schemaVersion = 4;
+	raw.blueprints.records = raw.blueprints.records.map((value) => {
+		const record = value as Record<string, unknown>;
+		if (record.kind !== "STATIC_FAB_ORGANIZATION") return record;
+		const bundle = record.bundle as Record<string, unknown>;
+		return {
+			...record,
+			bundle: {
+				...bundle,
+				version: 2,
+				organizations: (bundle.organizations as Array<Record<string, unknown>>).map(
+					(organization) =>
+						Object.fromEntries(
+							Object.entries(organization).filter(([key]) => key !== "declaredSemanticRole"),
+						),
+				),
+			},
+		};
+	});
+	return raw;
 }

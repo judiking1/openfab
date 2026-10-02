@@ -21,6 +21,7 @@ import {
 	copyStaticFabOrganizationRecordSteps,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
 } from "./StaticFabOrganization";
@@ -688,6 +689,8 @@ function* addOrganizationRecord(
 					: (parents[index - 3] as number),
 	);
 	checksum.addStrings([record.kind, record.name, properties.description, properties.color]);
+	const declaredRole = staticFabOrganizationDeclaredSemanticRole(record);
+	if (declaredRole !== null) checksum.addStrings(["declaredSemanticRole", declaredRole]);
 	const edges = record.membership.railEdges,
 		switches = record.membership.advancedSwitchIds,
 		groups = record.membership.equipmentGroupIds;

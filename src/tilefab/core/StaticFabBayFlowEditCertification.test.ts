@@ -25,6 +25,31 @@ import type {
 import { TileMap } from "./TileMap";
 
 describe("StaticFabBayFlowEditCertification", () => {
+	it("rejects a role-only modification to a ticket-bound AISLE record", () => {
+		const proof = workerProof();
+		const plan = structuredClone(proof.plan);
+		const record = plan.organizationMutations[0]?.after;
+		if (!record) throw new Error("Expected organization mutation.");
+		const mutable = record as { kind: string; declaredSemanticRole: string | null };
+		mutable.kind = "AISLE";
+		mutable.declaredSemanticRole = null;
+		const ticket = { ...proof.ticket, planFingerprint: staticFabBayFlowEditPlanFingerprint(plan) };
+		mutable.declaredSemanticRole = "PROCESS_LOOP";
+		expect(() =>
+			adoptStaticFabBayFlowEditWorkerPlan(
+				proof.permit,
+				ticket,
+				plan,
+				ticket.prospectiveChecksum,
+				proof.fixture.map,
+				proof.fixture.portEquipment,
+				proof.fixture.patchSequence,
+				proof.fixture.organizations,
+				proof.fixture.intent,
+			),
+		).toThrow(/fingerprint diverged/i);
+	});
+
 	it("adopts an exact deep copy and consumes its document-bound certification once", () => {
 		const proof = workerProof();
 		const workerPlan = structuredClone(proof.plan);
@@ -412,6 +437,7 @@ function organizationRecord(
 	return Object.freeze({
 		id: 2,
 		kind: "AISLE",
+		declaredSemanticRole: null,
 		name: `Process Loop ${flow}`,
 		parentOrganizationIds: Object.freeze([1]),
 		properties: Object.freeze({ description: flow, color: "CYAN" }),

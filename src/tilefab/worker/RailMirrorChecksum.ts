@@ -28,6 +28,7 @@ import {
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 } from "../core/StaticFabOrganization";
 import type {
 	StaticFabOrganizationDiagnosticRecord,
@@ -149,7 +150,7 @@ export class RailChecksumAccumulator {
 		const fields = digest.split(":");
 		if (
 			fields.length !== 12 ||
-			fields[0] !== "00000002" ||
+			fields[0] !== "00000003" ||
 			fields.some((field) => !/^[0-9a-f]{8}$/.test(field))
 		) {
 			throw new Error(`Invalid rail checksum digest ${digest}.`);
@@ -524,7 +525,7 @@ export class RailChecksumAccumulator {
 
 	digest(): string {
 		return [
-			2,
+			3,
 			this.currentCells,
 			this.currentEdges,
 			this.currentSwitches,
@@ -919,6 +920,24 @@ export function checksumRailMap(
 	for (const record of relationships.records) checksum.addAssemblyRelationship(record);
 	checksum.setAssemblyRelationshipNextId(relationships.nextRelationshipId);
 	return checksum.digest();
+}
+
+/** Historical recovery authentication only; never used for current Worker authority. */
+export function checksumRailMapLegacyVersionTwo(
+	map: TileMap,
+	portEquipment: PortEquipmentState = emptyPortEquipmentState(),
+	organizations: StaticFabOrganizationState = emptyStaticFabOrganizationState(),
+	relationships: StaticFabAssemblyRelationshipStateV1 = emptyStaticFabAssemblyRelationshipState(),
+): string {
+	if (
+		organizations.records.some(
+			(record) => staticFabOrganizationDeclaredSemanticRole(record) !== null,
+		)
+	) {
+		throw new Error("Legacy checksum v2 cannot authenticate declared organization roles.");
+	}
+	// Null contributes the exact historical metadata hash, so only the digest marker differs.
+	return `00000002${checksumRailMap(map, portEquipment, organizations, relationships).slice(8)}`;
 }
 
 export async function checksumRailMapCooperatively(

@@ -28,6 +28,7 @@ import {
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationSemanticRole,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationEdgeKey,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
@@ -1562,6 +1563,7 @@ function organizationRecordAfter(
 		id: record.id,
 		kind: record.kind,
 		name: record.name,
+		declaredSemanticRole: staticFabOrganizationDeclaredSemanticRole(record),
 		parentOrganizationIds,
 		properties: staticFabOrganizationProperties(record),
 		membership,
@@ -1575,6 +1577,8 @@ function organizationRecordEquivalent(
 	return (
 		left.kind === right.kind &&
 		left.name === right.name &&
+		staticFabOrganizationDeclaredSemanticRole(left) ===
+			staticFabOrganizationDeclaredSemanticRole(right) &&
 		numberListEquals(staticFabOrganizationParentIds(left), staticFabOrganizationParentIds(right)) &&
 		staticFabOrganizationProperties(left).description ===
 			staticFabOrganizationProperties(right).description &&

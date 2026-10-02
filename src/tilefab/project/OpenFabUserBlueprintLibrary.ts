@@ -4,10 +4,11 @@ import {
 } from "./OpenFabBlueprintLibrary";
 import {
 	parseLegacyOpenFabProjectBlueprintValue,
+	parseLegacyOpenFabProjectBlueprintVersionTwo,
 	parseOpenFabProjectBlueprintValue,
 } from "./OpenFabProjectCodec";
 
-export const OPENFAB_USER_BLUEPRINT_SCHEMA_VERSION = 2 as const;
+export const OPENFAB_USER_BLUEPRINT_SCHEMA_VERSION = 3 as const;
 export const OPENFAB_USER_BLUEPRINT_MAX_RECORDS = 1_024;
 export const OPENFAB_USER_BLUEPRINT_MAX_TOTAL_EDGES = 250_000;
 export const OPENFAB_USER_BLUEPRINT_MAX_FOLDER_DEPTH = 4;
@@ -208,6 +209,7 @@ export function parseOpenFabUserBlueprintRecord(value: unknown): OpenFabUserBlue
 	);
 	if (
 		record.schemaVersion !== 1 &&
+		record.schemaVersion !== 2 &&
 		record.schemaVersion !== OPENFAB_USER_BLUEPRINT_SCHEMA_VERSION
 	) {
 		fail(
@@ -227,7 +229,9 @@ export function parseOpenFabUserBlueprintRecord(value: unknown): OpenFabUserBlue
 	const blueprint =
 		record.schemaVersion === 1
 			? parseLegacyOpenFabProjectBlueprintValue(record.blueprint)
-			: parseOpenFabProjectBlueprintValue(record.blueprint);
+			: record.schemaVersion === 2
+				? parseLegacyOpenFabProjectBlueprintVersionTwo(record.blueprint)
+				: parseOpenFabProjectBlueprintValue(record.blueprint);
 	return Object.freeze({
 		schemaVersion: OPENFAB_USER_BLUEPRINT_SCHEMA_VERSION,
 		id,
@@ -260,17 +264,27 @@ export function parseOpenFabUserBlueprintJson(source: string): OpenFabUserBluepr
 /** Only for authenticating a legacy backup before migration changes its canonical serialization. */
 export function serializeLegacyOpenFabUserBlueprintRecord(value: unknown): string {
 	const raw = expectRecord(value, "$", "INVALID_ROOT");
-	if (raw.schemaVersion !== 1)
-		fail("UNSUPPORTED_VERSION", "$.schemaVersion", "legacy record version must be 1");
+	if (raw.schemaVersion !== 1 && raw.schemaVersion !== 2)
+		fail("UNSUPPORTED_VERSION", "$.schemaVersion", "legacy record version must be 1 or 2");
 	const normalized = parseOpenFabUserBlueprintRecord(value);
 	let blueprint: unknown = normalized.blueprint;
 	if (normalized.blueprint.kind === "STATIC_FAB_ORGANIZATION") {
 		const { relationships, ...bundle } = normalized.blueprint.bundle;
-		if (relationships.records.length !== 0)
+		if (raw.schemaVersion === 1 && relationships.records.length !== 0)
 			throw new Error("Legacy blueprint cannot contain relationships");
-		blueprint = { ...normalized.blueprint, bundle: { ...bundle, version: 1 } };
+		const organizations = bundle.organizations.map(({ declaredSemanticRole, ...organization }) => {
+			if (declaredSemanticRole !== null) throw new Error("Legacy blueprint cannot declare roles");
+			return organization;
+		});
+		blueprint = {
+			...normalized.blueprint,
+			bundle:
+				raw.schemaVersion === 1
+					? { ...bundle, organizations, version: 1 }
+					: { ...bundle, organizations, version: 2, relationships },
+		};
 	}
-	const json = `${JSON.stringify(sortJsonObjectKeys({ ...normalized, schemaVersion: 1, blueprint }), null, "\t")}\n`;
+	const json = `${JSON.stringify(sortJsonObjectKeys({ ...normalized, schemaVersion: raw.schemaVersion, blueprint }), null, "\t")}\n`;
 	if (openFabUtf8ByteLength(json) > OPENFAB_USER_BLUEPRINT_MAX_JSON_BYTES) {
 		fail("LIMIT_EXCEEDED", "$", "legacy blueprint JSON exceeds the canonical record limit");
 	}

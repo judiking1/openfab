@@ -104,6 +104,36 @@ describe("StaticFabAssemblyConnectorRuntime", () => {
 		expect(fixture.snapshot.relationships.nextRelationshipId).toBe(1);
 	});
 
+	it("authenticates declared Loop roles and rejects malformed organization declarations", () => {
+		const original = prepareStaticFabAssemblyConnector(
+			connectorRequest(fixture, fixture.intent, 92),
+		);
+		const prepared = {
+			...original,
+			plan: original.plan
+				? {
+						...structuredClone(original.plan),
+						relationshipProduction: original.plan.relationshipProduction,
+					}
+				: null,
+		};
+		if (!prepared.plan) throw new Error("Expected connector plan.");
+		const record = prepared.plan.organizationMutations.find((mutation) => mutation.after)?.after;
+		if (!record) throw new Error("Expected organization mutation.");
+		const mutable = record as { kind: string; declaredSemanticRole: string | null };
+		mutable.kind = "AISLE";
+		mutable.declaredSemanticRole = null;
+		const fingerprint = staticFabAssemblyConnectorPlanFingerprint(prepared.plan);
+		mutable.declaredSemanticRole = "PROCESS_LOOP";
+		expect(staticFabAssemblyConnectorPlanFingerprint(prepared.plan)).not.toBe(fingerprint);
+		expect(staticFabAssemblyConnectorPreparedShapeError(prepared)).toBeNull();
+		mutable.declaredSemanticRole = "BAY";
+		expect(staticFabAssemblyConnectorPreparedShapeError(prepared)).not.toBeNull();
+		mutable.declaredSemanticRole = "PROCESS_LOOP";
+		mutable.kind = "AREA";
+		expect(staticFabAssemblyConnectorPreparedShapeError(prepared)).not.toBeNull();
+	});
+
 	it("rejects a connector that would make a currently supported source unopenable", () => {
 		const originalSlots = compilePortSlots(
 			compilePhysicalRail(fixture.map),

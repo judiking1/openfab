@@ -20007,6 +20007,7 @@ export default function TileFabApp(): React.ReactElement {
 		expectedIdentity?:
 			| SyntheticFabProjectActivationExpectation
 			| OpenFabFabProjectActivationExpectation,
+		expectedAuthoredChecksum?: string,
 	): Promise<void> => {
 		setProjectOperation(operation);
 		setStartupState((current) => ({
@@ -20020,7 +20021,7 @@ export default function TileFabApp(): React.ReactElement {
 		};
 		const prepared =
 			typeof source === "string"
-				? await projectLoader.prepare(source, onMirrorState)
+				? await projectLoader.prepare(source, onMirrorState, expectedAuthoredChecksum)
 				: await projectLoader.prepareSnapshot(source.snapshot, source.manifest, onMirrorState);
 		const activationMismatches = expectedIdentity
 			? isOpenFabFabProjectActivationExpectation(expectedIdentity)
@@ -20111,6 +20112,7 @@ export default function TileFabApp(): React.ReactElement {
 		operation: "opening" | "recovering",
 		controller: AbortController,
 		recoveryName?: string,
+		expectedAuthoredChecksum?: string,
 	): Promise<void> => {
 		await prepareAndPromoteProject(
 			read.json,
@@ -20120,6 +20122,8 @@ export default function TileFabApp(): React.ReactElement {
 				? `${recoveryName ?? "복구 프로젝트"}를 복구했습니다`
 				: `${read.reference.name}을 열었습니다`,
 			controller,
+			undefined,
+			expectedAuthoredChecksum,
 		);
 	};
 	const captureGuidedBuildProjectReopenExpectation = (): void => {
@@ -20871,6 +20875,9 @@ export default function TileFabApp(): React.ReactElement {
 		const controller = beginProjectOperation("recovering");
 		try {
 			const project = await projectPersistence.loadRecovery(summary.projectId);
+			if (controller.signal.aborted || projectOperationControllerRef.current !== controller) {
+				throw new RailStartupCancelledError();
+			}
 			if (!project) {
 				await refreshRecoveryInventory(recoveryInventory.offset);
 				throw new Error(`${summary.name} 복구본을 찾지 못했습니다`);
@@ -20892,9 +20899,29 @@ export default function TileFabApp(): React.ReactElement {
 				"recovering",
 				controller,
 				project.name,
+				project.authoredChecksum,
 			);
+			const promotedDocument = editorModelRef.current.document;
+			const promotedGeneration = projectGenerationRef.current;
+			const ownsRecoveredProject = (): boolean =>
+				!controller.signal.aborted &&
+				projectOperationControllerRef.current === controller &&
+				projectGenerationRef.current === promotedGeneration &&
+				editorModelRef.current.document === promotedDocument &&
+				projectSessionRef.current.manifest.id === project.projectId;
 			try {
-				await projectPersistence.removeRecovery(project.projectId);
+				const cleanup = await awaitOpenFabProjectSaveMetadata(
+					() => projectPersistence.removeRecoveryIfUnchanged(project, {
+						signal: controller.signal,
+						isCurrent: ownsRecoveredProject,
+					}),
+					controller.signal,
+				);
+				if (!ownsRecoveredProject()) return;
+				if (cleanup === "conflict") {
+					setStatus(`${project.name} 복구 완료 · 다른 창에서 변경된 복구본은 유지했습니다`);
+					return;
+				}
 				setRecoveryInventory((current) =>
 					withoutRecoveryProject(current, project.projectId),
 				);
@@ -20902,15 +20929,23 @@ export default function TileFabApp(): React.ReactElement {
 					current === project.projectId ? null : current,
 				);
 				try {
-					await refreshRecoveryInventory(recoveryInventory.offset);
+					const inventory = await awaitOpenFabProjectSaveMetadata(
+						() => projectPersistence.listRecovery({ offset: recoveryInventory.offset }),
+						controller.signal,
+					);
+					if (ownsRecoveredProject()) setRecoveryInventory(inventory);
 				} catch {
-					setStatus(`${project.name} 복구 완료 · 복구본 목록은 다음 실행 때 갱신됩니다`);
+					if (ownsRecoveredProject()) {
+						setStatus(`${project.name} 복구 완료 · 복구본 목록은 다음 실행 때 갱신됩니다`);
+					}
 				}
 			} catch {
-				setStatus(`${project.name} 복구 완료 · 로컬 복구 기록은 지우지 못했습니다`);
+				if (ownsRecoveredProject()) {
+					setStatus(`${project.name} 복구 완료 · 로컬 복구 기록은 지우지 못했습니다`);
+				}
 			}
 		} catch (error) {
-			finishFailedProjectOperation(error);
+			if (projectOperationControllerRef.current === controller) finishFailedProjectOperation(error);
 		} finally {
 			if (projectOperationControllerRef.current === controller) {
 				projectOperationControllerRef.current = null;

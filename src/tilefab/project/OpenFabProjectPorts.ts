@@ -114,6 +114,10 @@ export interface OpenFabProjectMetadataStore {
 		projectId: string,
 		authority: OpenFabProjectMetadataMutationAuthority,
 	): Promise<"removed" | "conflict">;
+	removeRecoveryIfUnchanged(
+		expected: OpenFabRecoveryProject,
+		authority: OpenFabProjectMetadataMutationAuthority,
+	): Promise<"removed" | "conflict">;
 	prepareRecoveryCleanup(
 		request: OpenFabRecoveryCleanupRequest,
 	): Promise<OpenFabRecoveryCleanupPlan>;

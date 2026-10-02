@@ -1184,6 +1184,7 @@ function largeAreaFixture(edgeCount: number): StaticFabOrganizationState {
 			{
 				id: 1,
 				kind: "AREA",
+				declaredSemanticRole: null,
 				name: "50k Edge Area",
 				parentOrganizationIds: [],
 				properties: { description: "", color: "TEAL" },
@@ -1213,6 +1214,7 @@ function exactAreaState(
 			{
 				id: 1,
 				kind: "AREA",
+				declaredSemanticRole: null,
 				name,
 				parentOrganizationIds: [],
 				properties: { description: "", color: "TEAL" },

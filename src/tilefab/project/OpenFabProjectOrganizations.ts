@@ -2,13 +2,15 @@ import {
 	copyStaticFabOrganizationState,
 	emptyStaticFabOrganizationState,
 	type StaticFabOrganizationColor,
+	type StaticFabOrganizationDeclaredSemanticRole,
 	type StaticFabOrganizationKind,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
 } from "../core/StaticFabOrganization";
 
-export const OPENFAB_ORGANIZATION_SECTION_SCHEMA_VERSION = 2 as const;
+export const OPENFAB_ORGANIZATION_SECTION_SCHEMA_VERSION = 3 as const;
 export const OPENFAB_PROJECT_MAX_ORGANIZATIONS = 100_000;
 export const OPENFAB_PROJECT_MAX_ORGANIZATION_EDGES = 5_000_000;
 
@@ -29,6 +31,7 @@ export interface OpenFabProjectOrganizationRecord {
 	readonly id: number;
 	readonly kind: StaticFabOrganizationKind;
 	readonly name: string;
+	readonly declaredSemanticRole: StaticFabOrganizationDeclaredSemanticRole | null;
 	readonly parentOrganizationIds: readonly number[];
 	readonly properties: OpenFabProjectOrganizationProperties;
 	readonly membership: OpenFabProjectOrganizationMembership;
@@ -66,6 +69,7 @@ export function captureOpenFabProjectOrganizationSection(
 					id: record.id,
 					kind: record.kind,
 					name: record.name,
+					declaredSemanticRole: staticFabOrganizationDeclaredSemanticRole(record),
 					parentOrganizationIds: Object.freeze([...staticFabOrganizationParentIds(record)]),
 					properties: Object.freeze({ ...staticFabOrganizationProperties(record) }),
 					membership: Object.freeze({
@@ -95,6 +99,7 @@ export function createStaticFabOrganizationStateFromOpenFabProjectSection(
 			id: record.id,
 			kind: record.kind,
 			name: record.name,
+			declaredSemanticRole: record.declaredSemanticRole,
 			parentOrganizationIds: record.parentOrganizationIds,
 			properties: record.properties,
 			membership: {

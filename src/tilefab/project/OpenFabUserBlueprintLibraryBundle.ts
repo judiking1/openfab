@@ -15,7 +15,7 @@ import {
 	updateOpenFabUserBlueprintRecord,
 } from "./OpenFabUserBlueprintLibrary";
 
-export const OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_SCHEMA_VERSION = 2 as const;
+export const OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_SCHEMA_VERSION = 3 as const;
 export const OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_KIND = "OPENFAB_USER_BLUEPRINT_LIBRARY" as const;
 export const OPENFAB_USER_BLUEPRINT_LIBRARY_FILE_EXTENSION = ".openfablib";
 export const OPENFAB_USER_BLUEPRINT_LIBRARY_MAX_JSON_BYTES = 128 * 1024 * 1024;
@@ -173,6 +173,7 @@ export function parseOpenFabUserBlueprintLibraryBundleValue(
 	);
 	if (
 		envelope.schemaVersion !== 1 &&
+		envelope.schemaVersion !== 2 &&
 		envelope.schemaVersion !== OPENFAB_USER_BLUEPRINT_LIBRARY_BUNDLE_SCHEMA_VERSION
 	) {
 		fail(
@@ -230,7 +231,7 @@ export function parseOpenFabUserBlueprintLibraryBundleValue(
 	}
 	const fingerprint = fingerprintNormalizedOpenFabUserBlueprintLibrary(records);
 	let sourceFingerprint = fingerprint;
-	if (envelope.schemaVersion === 1) {
+	if (envelope.schemaVersion === 1 || envelope.schemaVersion === 2) {
 		const rawById = new Map(
 			envelope.records.map((value, index) => {
 				const record = expectRecord(value, `$.records[${index}]`);
@@ -239,14 +240,14 @@ export function parseOpenFabUserBlueprintLibraryBundleValue(
 		);
 		const checksum = new OrderedTypedChecksum();
 		checksum.addStrings([
-			"openfab-user-blueprint-library-v1",
+			`openfab-user-blueprint-library-v${envelope.schemaVersion}`,
 			`${records.length}`,
 			`${actualEdgeCount}`,
 		]);
 		checksum.addStrings(
 			records.map((record) => serializeLegacyOpenFabUserBlueprintRecord(rawById.get(record.id))),
 		);
-		sourceFingerprint = `ofubl1-${checksum.digest()}`;
+		sourceFingerprint = `ofubl${envelope.schemaVersion}-${checksum.digest()}`;
 	}
 	if (envelope.fingerprint !== sourceFingerprint) {
 		fail("INVALID_FIELD", "$.fingerprint", "library fingerprint does not match records");
@@ -348,12 +349,12 @@ function fingerprintNormalizedOpenFabUserBlueprintLibrary(
 ): string {
 	const checksum = new OrderedTypedChecksum();
 	checksum.addStrings([
-		"openfab-user-blueprint-library-v2",
+		"openfab-user-blueprint-library-v3",
 		`${normalized.length}`,
 		`${aggregateEdges(normalized)}`,
 	]);
 	checksum.addStrings(normalized.map((record) => serializeOpenFabUserBlueprintRecord(record)));
-	return `ofubl2-${checksum.digest()}`;
+	return `ofubl3-${checksum.digest()}`;
 }
 
 export function createOpenFabUserBlueprintLibraryRestorePreflight(

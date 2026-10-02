@@ -6,6 +6,18 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-10-03
+
+- Preserve explicit standalone Process Loop intent across project, Worker, blueprint and library
+  formats. Older records migrate without inferring roles from rail shape or names.
+- Authenticate recovery input against the original project's checksum format before promotion.
+  Compare the loaded recovery's full JSON before cleanup so a changed recovery survives.
+- Bind organization declarations to move, connector, Bay edit/delete and blueprint-placement
+  authentication; relocation cannot change a Loop declaration.
+- Renew immutable certified synthetic preset artifacts for the updated data contract and retain
+  strict original-format migration fixtures. The visible standalone registration flow follows
+  in a separate authoring milestone.
+
 ## [0.1.37] - 2026-10-02
 
 - Cancelled save metadata can no longer overwrite a newer recent file or remove a newer recovery;

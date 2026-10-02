@@ -38,7 +38,7 @@ import {
 } from "./StaticFabOrganizationSoA";
 import { transferDataObject as object } from "./TransferColumnCapture";
 
-export const STATIC_FAB_ARRANGEMENT_TRANSPORT_VERSION = 1 as const;
+export const STATIC_FAB_ARRANGEMENT_TRANSPORT_VERSION = 2 as const;
 export type StaticFabArrangementTransport =
 	| Readonly<{
 			version: typeof STATIC_FAB_ARRANGEMENT_TRANSPORT_VERSION;

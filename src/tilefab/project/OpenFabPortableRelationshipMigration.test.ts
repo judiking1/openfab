@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import legacyRecord from "./fixtures/legacy-organization-blueprint-v1.json";
+import legacyRecordV2 from "./fixtures/legacy-organization-blueprint-v2.json";
 import legacyLibrary from "./fixtures/legacy-organization-library-v1.json";
+import legacyLibraryV2 from "./fixtures/legacy-organization-library-v2.json";
 import {
 	parseOpenFabUserBlueprintRecord,
 	serializeLegacyOpenFabUserBlueprintRecord,
@@ -15,17 +17,37 @@ import {
 // Fixed synthetic fixture produced by the original e8f8b94 envelope1/record1/bundle1 codec.
 // Its historical fingerprint was recorded before the migration implementation existed.
 describe("portable relationship legacy compatibility", () => {
+	it("authenticates independent v2 bytes from c550dd1493e95a28d57322dc9ee308cc783f3b82 before normalization", () => {
+		expect(legacyLibraryV2.fingerprint).toBe("ofubl2-ef0e5c7d:c17d0470");
+		expect(JSON.parse(serializeLegacyOpenFabUserBlueprintRecord(legacyRecordV2))).toEqual(
+			legacyRecordV2,
+		);
+		const migrated = parseOpenFabUserBlueprintLibraryBundleValue(legacyLibraryV2);
+		expect(migrated.schemaVersion).toBe(3);
+		const record = migrated.records[0];
+		if (record?.blueprint.kind !== "STATIC_FAB_ORGANIZATION")
+			throw new Error("Missing historical bundle");
+		expect(
+			record.blueprint.bundle.organizations.every(
+				(organization) => organization.declaredSemanticRole === null,
+			),
+		).toBe(true);
+		const tampered = structuredClone(legacyLibraryV2);
+		if (!tampered.records[0]) throw new Error("Missing historical record");
+		tampered.records[0].blueprint.name = "Tampered";
+		expect(() => parseOpenFabUserBlueprintLibraryBundleValue(tampered)).toThrow(/fingerprint/);
+	});
 	it("authenticates the historical fingerprint before emitting a current library", () => {
 		expect(legacyLibrary.fingerprint).toBe("ofubl1-741951fc:ceb23dd6");
 		const migrated = parseOpenFabUserBlueprintLibraryBundleValue(legacyLibrary);
-		expect(migrated.schemaVersion).toBe(2);
-		expect(migrated.fingerprint).toMatch(/^ofubl2-/);
+		expect(migrated.schemaVersion).toBe(3);
+		expect(migrated.fingerprint).toMatch(/^ofubl3-/);
 		expect(migrated.records).toHaveLength(1);
 		const record = migrated.records[0];
-		expect(record?.schemaVersion).toBe(2);
+		expect(record?.schemaVersion).toBe(3);
 		if (record?.blueprint.kind !== "STATIC_FAB_ORGANIZATION")
 			throw new Error("Organization fixture lost");
-		expect(record.blueprint.bundle.version).toBe(2);
+		expect(record.blueprint.bundle.version).toBe(3);
 		expect(record.blueprint.bundle.relationships).toEqual({ nextRelationshipId: 1, records: [] });
 		expect(record.blueprint.bundle.organizations).toHaveLength(2);
 		expect(record.blueprint.bundle.equipmentGroups).toHaveLength(1);
@@ -39,7 +61,7 @@ describe("portable relationship legacy compatibility", () => {
 
 	it("imports an old individual record and retains its canonical historical projection", () => {
 		const migrated = parseOpenFabUserBlueprintRecord(legacyRecord);
-		expect(migrated.schemaVersion).toBe(2);
+		expect(migrated.schemaVersion).toBe(3);
 		expect(JSON.parse(serializeLegacyOpenFabUserBlueprintRecord(legacyRecord))).toEqual(
 			legacyRecord,
 		);

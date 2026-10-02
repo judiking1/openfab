@@ -15,6 +15,7 @@ import {
 	type StaticFabOrganizationProperties,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationEdgeKey,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
@@ -27,8 +28,8 @@ import type {
 import { staticFabOrganizationFingerprint } from "./StaticFabOrganizationFingerprint";
 import { assertTransferableTypedArray as assertTypedArray } from "./TransferableTypedArray";
 
-export const STATIC_FAB_ORGANIZATION_SNAPSHOT_SCHEMA_VERSION = 2 as const;
-export const STATIC_FAB_ORGANIZATION_PATCH_SCHEMA_VERSION = 3 as const;
+export const STATIC_FAB_ORGANIZATION_SNAPSHOT_SCHEMA_VERSION = 3 as const;
+export const STATIC_FAB_ORGANIZATION_PATCH_SCHEMA_VERSION = 4 as const;
 
 export interface StaticFabOrganizationMembershipFieldsSoA {
 	readonly railEdgeOffsets: Uint32Array;
@@ -41,6 +42,7 @@ export interface StaticFabOrganizationMembershipFieldsSoA {
 
 export interface StaticFabOrganizationRecordFieldsSoA {
 	readonly kinds: Uint8Array;
+	readonly declaredSemanticRoles: Uint8Array;
 	readonly names: readonly string[];
 	readonly parentOrganizationOffsets: Uint32Array;
 	readonly parentOrganizationIds: Int32Array;
@@ -168,10 +170,13 @@ export function hydrateStaticFabOrganizationDiagnosticSnapshot(
 		const colorCode = fields.colors[index] as number;
 		const kind = STATIC_FAB_ORGANIZATION_KINDS[kindCode] ?? `INVALID_KIND_${kindCode}`;
 		const color = STATIC_FAB_ORGANIZATION_COLORS[colorCode] ?? `INVALID_COLOR_${colorCode}`;
+		const roleCode = fields.declaredSemanticRoles[index] as number;
 		records[index] = Object.freeze({
 			id: snapshot.organizationIds[index] as number,
 			kind,
 			name: fields.names[index] as string,
+			declaredSemanticRole:
+				roleCode === 0 ? null : roleCode === 1 ? "PROCESS_LOOP" : `INVALID_ROLE_${roleCode}`,
 			parentOrganizationIds: Object.freeze(
 				Array.from(
 					fields.parentOrganizationIds.slice(
@@ -254,6 +259,9 @@ export function createStaticFabOrganizationSnapshotHydrator(
 			id,
 			kind,
 			name,
+			declaredSemanticRole: declaredSemanticRoleFromCode(
+				fields.declaredSemanticRoles[recordIndex] as number,
+			),
 			description,
 			color,
 		});
@@ -441,6 +449,8 @@ export function encodeStaticFabOrganizationPatch(
 			mutation.before &&
 			mutation.after &&
 			mutation.before.kind === mutation.after.kind &&
+			staticFabOrganizationDeclaredSemanticRole(mutation.before) ===
+				staticFabOrganizationDeclaredSemanticRole(mutation.after) &&
 			mutation.before.membership === mutation.after.membership
 		) {
 			const metadataOnly = staticFabOrganizationCompactMetadataEquals(
@@ -1025,6 +1035,7 @@ function* createRecordFieldsSteps(
 
 	const fields: StaticFabOrganizationRecordFieldsSoA = {
 		kinds: new Uint8Array(records.length),
+		declaredSemanticRoles: new Uint8Array(records.length),
 		names: new Array<string>(records.length),
 		parentOrganizationOffsets: new Uint32Array(records.length + 1),
 		parentOrganizationIds: new Int32Array(parentCount),
@@ -1055,6 +1066,8 @@ function* createRecordFieldsSteps(
 			throw new Error("Prepared organization encoding requires canonical records.");
 		const record = canonicalOnly ? source : copyStaticFabOrganizationRecord(source);
 		fields.kinds[index] = STATIC_FAB_ORGANIZATION_KINDS.indexOf(record.kind);
+		fields.declaredSemanticRoles[index] =
+			staticFabOrganizationDeclaredSemanticRole(record) === null ? 0 : 1;
 		(fields.names as string[])[index] = record.name;
 		const properties = staticFabOrganizationProperties(record);
 		(fields.descriptions as string[])[index] = properties.description;
@@ -1246,6 +1259,8 @@ function staticFabOrganizationIdentityAndMetadataEquals(
 		left.id === right.id &&
 		left.kind === right.kind &&
 		left.name === right.name &&
+		staticFabOrganizationDeclaredSemanticRole(left) ===
+			staticFabOrganizationDeclaredSemanticRole(right) &&
 		staticFabOrganizationCompactMetadataEquals(left, right)
 	);
 }
@@ -1746,6 +1761,9 @@ function readRecord(
 		id,
 		kind,
 		name: fields.names[index] ?? "",
+		declaredSemanticRole: declaredSemanticRoleFromCode(
+			fields.declaredSemanticRoles[index] as number,
+		),
 		parentOrganizationIds: Array.from(
 			fields.parentOrganizationIds.slice(
 				fields.parentOrganizationOffsets[index] as number,
@@ -1857,6 +1875,7 @@ function validateRecordFieldStructure(
 		throw new Error(`${label} record fields must be an object.`);
 	}
 	assertTypedArray(fields.kinds, Uint8Array, `${label} kinds`);
+	assertTypedArray(fields.declaredSemanticRoles, Uint8Array, `${label} declared semantic roles`);
 	if (!Array.isArray(fields.names)) throw new Error(`${label} names must be an Array.`);
 	assertTypedArray(
 		fields.parentOrganizationOffsets,
@@ -1876,6 +1895,7 @@ function validateRecordFieldStructure(
 	assertTypedArray(fields.equipmentGroupIds, Int32Array, `${label} equipment group ids`);
 	if (
 		fields.kinds.length !== count ||
+		fields.declaredSemanticRoles.length !== count ||
 		fields.names.length !== count ||
 		fields.descriptions.length !== count ||
 		fields.colors.length !== count
@@ -1890,6 +1910,12 @@ function validateRecordFieldStructure(
 			throw new Error(`${label} description ${index} must be a string.`);
 		}
 		const kindCode = fields.kinds[index] as number;
+		if (validateEnumCodes) {
+			const role = declaredSemanticRoleFromCode(fields.declaredSemanticRoles[index] as number);
+			if (role !== null && STATIC_FAB_ORGANIZATION_KINDS[kindCode] !== "AISLE") {
+				throw new Error(`${label} declared semantic role ${index} requires AISLE kind.`);
+			}
+		}
 		if (validateEnumCodes && kindCode >= STATIC_FAB_ORGANIZATION_KINDS.length) {
 			throw new Error(`${label} kind ${index} has unknown code ${kindCode}.`);
 		}
@@ -2097,6 +2123,7 @@ function assertEmptyRecordRow(
 ): void {
 	if (
 		(fields.kinds[index] as number) !== 0 ||
+		(fields.declaredSemanticRoles[index] as number) !== 0 ||
 		(fields.names[index] ?? "") !== "" ||
 		(fields.parentOrganizationOffsets[index] as number) !==
 			(fields.parentOrganizationOffsets[index + 1] as number) ||
@@ -2120,6 +2147,7 @@ function readPresence(value: number, label: string): boolean {
 function recordFieldTransfers(fields: StaticFabOrganizationRecordFieldsSoA): ArrayBuffer[] {
 	return [
 		fields.kinds.buffer,
+		fields.declaredSemanticRoles.buffer,
 		fields.parentOrganizationOffsets.buffer,
 		...(fields.parentOrganizationIds.byteLength > 0 ? [fields.parentOrganizationIds.buffer] : []),
 		fields.colors.buffer,
@@ -2130,4 +2158,10 @@ function recordFieldTransfers(fields: StaticFabOrganizationRecordFieldsSoA): Arr
 		fields.equipmentGroupOffsets.buffer,
 		fields.equipmentGroupIds.buffer,
 	] as ArrayBuffer[];
+}
+
+function declaredSemanticRoleFromCode(code: number): "PROCESS_LOOP" | null {
+	if (code === 0) return null;
+	if (code === 1) return "PROCESS_LOOP";
+	throw new Error(`Unknown static FAB declared semantic role code ${code}.`);
 }

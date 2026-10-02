@@ -182,7 +182,7 @@ export class OpenFabProjectParseError extends Error {
 
 export interface OpenFabProjectParseResult {
 	readonly project: OpenFabProject;
-	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | null;
+	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | null;
 }
 
 export function parseOpenFabProjectJson(source: string): OpenFabProjectParseResult {
@@ -207,19 +207,25 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	const schemaVersion = expectInteger(root.schemaVersion, "$.schemaVersion");
 	if (schemaVersion === OPENFAB_PROJECT_SCHEMA_VERSION) {
-		return Object.freeze({ project: validateVersionThirteen(root), migratedFromVersion: null });
+		return Object.freeze({ project: validateVersionFourteen(root), migratedFromVersion: null });
 	}
-	if (schemaVersion === 12) {
+	if (schemaVersion === 13 || schemaVersion === 12) {
 		return Object.freeze({
-			project: validateVersionThirteen({ ...root, schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION }),
-			migratedFromVersion: 12,
+			project: validateVersionFourteen({
+				...root,
+				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+				areas: validateOrganizationSection(root.areas, true),
+				blueprints: migrateBlueprintSectionV4(root.blueprints),
+			}),
+			migratedFromVersion: schemaVersion,
 		});
 	}
 	if (schemaVersion === 11) {
 		return Object.freeze({
-			project: validateVersionThirteen({
+			project: validateVersionFourteen({
 				...root,
 				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+				areas: validateOrganizationSection(root.areas, true),
 				blueprints: migrateBlueprintSectionV3(root.blueprints),
 			}),
 			migratedFromVersion: 11,
@@ -305,7 +311,7 @@ export function serializeOpenFabProject(
 	) {
 		throw new Error("OpenFab project serialization limit is invalid.");
 	}
-	const normalized = validateVersionThirteen(expectRecord(project, "$", "INVALID_ROOT"));
+	const normalized = validateVersionFourteen(expectRecord(project, "$", "INVALID_ROOT"));
 	const sorted = sortJsonObjectKeys(normalized);
 	const characterLength = prettyJsonCharacterLength(sorted) + 1;
 	if (characterLength > maximumCharacters) {
@@ -361,7 +367,7 @@ function prettyJsonCharacterLength(value: unknown, depth = 0): number {
  * Cross-project stores and file codecs use this boundary instead of maintaining a second parser.
  */
 export function parseOpenFabProjectBlueprintValue(value: unknown): OpenFabProjectBlueprint {
-	const section = validateBlueprintSectionV4({
+	const section = validateBlueprintSectionV5({
 		schemaVersion: OPENFAB_BLUEPRINT_SECTION_SCHEMA_VERSION,
 		records: [value],
 	});
@@ -372,7 +378,7 @@ export function parseOpenFabProjectBlueprintValue(value: unknown): OpenFabProjec
 	return record;
 }
 
-function validateVersionThirteen(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function validateVersionFourteen(root: Readonly<Record<string, unknown>>): OpenFabProject {
 	expectExactKeys(
 		root,
 		[
@@ -405,7 +411,7 @@ function validateVersionThirteen(root: Readonly<Record<string, unknown>>): OpenF
 		ports,
 		equipment,
 		operations: validateOperationalConfigurationSection(root.operations),
-		blueprints: validateBlueprintSectionV4(root.blueprints),
+		blueprints: validateBlueprintSectionV5(root.blueprints),
 		areas: validateOrganizationSection(root.areas),
 		relationships: validateRelationshipSection(root.relationships),
 		scenarios: validateReservedSection(root.scenarios, "$.scenarios"),
@@ -419,7 +425,7 @@ function validateVersionThirteen(root: Readonly<Record<string, unknown>>): OpenF
 }
 
 function migrateVersionTen(project: OpenFabProjectVersionTen): OpenFabProject {
-	return validateVersionThirteen({
+	return validateVersionFourteen({
 		...project,
 		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 		relationships: createEmptyOpenFabProjectRelationshipSection(),
@@ -429,6 +435,7 @@ function migrateVersionTen(project: OpenFabProjectVersionTen): OpenFabProject {
 function validateVersionTen(root: Readonly<Record<string, unknown>>): OpenFabProjectVersionTen {
 	return validateNormalizedVersionTen({
 		...root,
+		areas: validateOrganizationSection(root.areas, true),
 		blueprints: migrateBlueprintSectionV3(root.blueprints),
 	});
 }
@@ -463,7 +470,7 @@ function validateNormalizedVersionTen(
 		ports: validatePortSection(root.ports),
 		equipment: validateEquipmentSection(root.equipment),
 		operations: validateOperationalConfigurationSection(root.operations),
-		blueprints: validateBlueprintSectionV4(root.blueprints),
+		blueprints: validateBlueprintSectionV5(root.blueprints),
 		areas: validateOrganizationSection(root.areas),
 		scenarios: validateReservedSection(root.scenarios, "$.scenarios"),
 		view: root.view === null ? null : validateView(root.view),
@@ -548,6 +555,7 @@ function migrateVersionSeven(root: Readonly<Record<string, unknown>>): OpenFabPr
 		schemaVersion: 10,
 		operations: emptyOperationalConfigurationState(),
 		blueprints: migrateBlueprintSectionV2(root.blueprints),
+		areas: validateOrganizationSection(root.areas, true),
 	});
 }
 
@@ -1802,6 +1810,28 @@ export function parseLegacyOpenFabProjectBlueprintValue(value: unknown): OpenFab
 	return section.records[0] as OpenFabProjectBlueprint;
 }
 
+/** Authenticate the previous relationship-aware portable format without inferring declarations. */
+export function parseLegacyOpenFabProjectBlueprintVersionTwo(
+	value: unknown,
+): OpenFabProjectBlueprint {
+	const section = migrateBlueprintSectionV4({ schemaVersion: 4, records: [value] });
+	return section.records[0] as OpenFabProjectBlueprint;
+}
+
+function migrateBlueprintSectionV4(value: unknown): OpenFabProjectBlueprintSection {
+	return validateBlueprintSection(value, 4, (value, path) => {
+		const record = expectRecord(value, path);
+		const kind = expectString(record.kind, `${path}.kind`);
+		if (kind === OPENFAB_BLUEPRINT_KIND_RAIL_AREA)
+			return validateRailAreaBlueprintRecord(record, path);
+		if (kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB)
+			return validateStaticFabBlueprintRecord(record, path);
+		if (kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION)
+			return validateStaticFabOrganizationBlueprintRecord(record, path, 2);
+		fail("INVALID_FIELD", `${path}.kind`, "unknown blueprint kind");
+	});
+}
+
 function migrateBlueprintSectionV3(value: unknown): OpenFabProjectBlueprintSection {
 	return validateBlueprintSection(value, 3, (value, path) => {
 		const record = expectRecord(value, path);
@@ -1811,13 +1841,13 @@ function migrateBlueprintSectionV3(value: unknown): OpenFabProjectBlueprintSecti
 		if (kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB)
 			return validateStaticFabBlueprintRecord(record, path);
 		if (kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION) {
-			return validateStaticFabOrganizationBlueprintRecord(record, path, true);
+			return validateStaticFabOrganizationBlueprintRecord(record, path, 1);
 		}
 		fail("INVALID_FIELD", `${path}.kind`, "unknown blueprint kind");
 	});
 }
 
-function validateBlueprintSectionV4(value: unknown): OpenFabProjectBlueprintSection {
+function validateBlueprintSectionV5(value: unknown): OpenFabProjectBlueprintSection {
 	return validateBlueprintSection(
 		value,
 		OPENFAB_BLUEPRINT_SECTION_SCHEMA_VERSION,
@@ -2062,10 +2092,46 @@ function migrateOrganizationBundleV1(value: unknown, path: string): unknown {
 	return { ...bundle, version: 2, relationships: emptyStaticFabAssemblyRelationshipState() };
 }
 
+function migrateOrganizationBundleV2(value: unknown, path: string): unknown {
+	const bundle = expectRecord(value, path);
+	expectExactKeys(
+		bundle,
+		[
+			"version",
+			"captureMode",
+			"rootOrganizationIndices",
+			"sourceModuleCount",
+			"sourceWidthMeters",
+			"sourceHeightMeters",
+			"railEdges",
+			"advancedSwitches",
+			"ports",
+			"equipmentGroups",
+			"organizations",
+			"relationships",
+		],
+		path,
+	);
+	expectLiteral(bundle.version, 2, `${path}.version`);
+	const organizations = expectArray(bundle.organizations, `${path}.organizations`).map(
+		(value, index) => {
+			const recordPath = `${path}.organizations[${index}]`;
+			const organization = expectRecord(value, recordPath);
+			expectExactKeys(
+				organization,
+				["kind", "name", "parentOrganizationIndices", "properties", "membership"],
+				recordPath,
+			);
+			return { ...organization, declaredSemanticRole: null };
+		},
+	);
+	return { ...bundle, version: 3, organizations };
+}
+
 function validateStaticFabOrganizationBlueprintRecord(
 	record: Readonly<Record<string, unknown>>,
 	path: string,
-	legacyBundle = false,
+	legacyBundleVersion: 1 | 2 | null = null,
 ): OpenFabStaticFabOrganizationBlueprint {
 	expectExactKeys(
 		record,
@@ -2097,9 +2163,15 @@ function validateStaticFabOrganizationBlueprintRecord(
 	if (updatedAt < createdAt) {
 		fail("INVALID_FIELD", `${path}.updatedAt`, "updatedAt cannot precede createdAt");
 	}
-	const bundleInput = legacyBundle
-		? migrateOrganizationBundleV1(record.bundle, `${path}.bundle`)
-		: record.bundle;
+	const bundleInput =
+		legacyBundleVersion === null
+			? record.bundle
+			: migrateOrganizationBundleV2(
+					legacyBundleVersion === 1
+						? migrateOrganizationBundleV1(record.bundle, `${path}.bundle`)
+						: record.bundle,
+					`${path}.bundle`,
+				);
 	const prepared = prepareStaticFabOrganizationBundle(bundleInput);
 	if (!prepared.valid) {
 		fail("INVALID_ORGANIZATION", `${path}.bundle`, prepared.reason);
@@ -2652,13 +2724,16 @@ function expectBlueprintFolder(value: unknown, path: string): string {
 	return folder;
 }
 
-function validateOrganizationSection(value: unknown): OpenFabProjectOrganizationSection {
+function validateOrganizationSection(
+	value: unknown,
+	legacyVersionTwo = false,
+): OpenFabProjectOrganizationSection {
 	const path = "$.areas";
 	const section = expectRecord(value, path);
 	expectExactKeys(section, ["schemaVersion", "nextOrganizationId", "records"], path);
 	expectLiteral(
 		section.schemaVersion,
-		OPENFAB_ORGANIZATION_SECTION_SCHEMA_VERSION,
+		legacyVersionTwo ? 2 : OPENFAB_ORGANIZATION_SECTION_SCHEMA_VERSION,
 		`${path}.schemaVersion`,
 	);
 	const nextOrganizationId = expectPositiveInt32(
@@ -2681,7 +2756,17 @@ function validateOrganizationSection(value: unknown): OpenFabProjectOrganization
 		const record = expectRecord(value, recordPath);
 		expectExactKeys(
 			record,
-			["id", "kind", "name", "parentOrganizationIds", "properties", "membership"],
+			legacyVersionTwo
+				? ["id", "kind", "name", "parentOrganizationIds", "properties", "membership"]
+				: [
+						"id",
+						"kind",
+						"name",
+						"declaredSemanticRole",
+						"parentOrganizationIds",
+						"properties",
+						"membership",
+					],
 			recordPath,
 		);
 		const id = expectPositiveInt32(record.id, `${recordPath}.id`);
@@ -2690,6 +2775,21 @@ function validateOrganizationSection(value: unknown): OpenFabProjectOrganization
 		maximumId = Math.max(maximumId, id);
 		const kind = expectEnum(record.kind, STATIC_FAB_ORGANIZATION_KINDS, `${recordPath}.kind`);
 		const name = expectString(record.name, `${recordPath}.name`);
+		const declaredSemanticRole =
+			legacyVersionTwo || record.declaredSemanticRole === null
+				? null
+				: expectEnum(
+						record.declaredSemanticRole,
+						["PROCESS_LOOP"] as const,
+						`${recordPath}.declaredSemanticRole`,
+					);
+		if (declaredSemanticRole !== null && kind !== "AISLE") {
+			fail(
+				"INVALID_ORGANIZATION",
+				`${recordPath}.declaredSemanticRole`,
+				"only AISLE may declare a Process Loop role",
+			);
+		}
 		if (
 			name.length === 0 ||
 			name.length > 120 ||
@@ -2816,6 +2916,7 @@ function validateOrganizationSection(value: unknown): OpenFabProjectOrganization
 			id,
 			kind,
 			name,
+			declaredSemanticRole,
 			parentOrganizationIds,
 			properties: Object.freeze({ description, color }),
 			membership: Object.freeze({
@@ -2851,6 +2952,7 @@ function migrateOrganizationSectionV1(value: unknown): OpenFabProjectOrganizatio
 		expectExactKeys(record, ["id", "kind", "name", "membership"], recordPath);
 		return {
 			...record,
+			declaredSemanticRole: null,
 			parentOrganizationIds: [],
 			properties: { description: "", color: "TEAL" },
 		};

@@ -36,6 +36,7 @@ import {
 	compilePhysicalRailRenderArtifacts,
 	physicalRailRenderArtifactsMatch,
 } from "../render/PhysicalRailRenderArtifacts";
+import { checksumLegacyOpenFabProject } from "./RailLegacyProjectChecksum";
 import { captureRailMirrorSnapshot, type RailMirrorSnapshot } from "./RailMirrorChecksum";
 import { hydrateRailMirrorSnapshotDocument } from "./RailMirrorSnapshotDocument";
 import {
@@ -267,10 +268,30 @@ function resolveSourceDocument(source: RailStartupSource): ResolvedRailStartupSo
 	}
 	if (source.kind === "project-json") {
 		const projectParse = parseOpenFabProjectJson(source.json);
+		const projectSnapshot = createRailSnapshotFromOpenFabProject(projectParse.project);
+		const document = hydrateRailMirrorSnapshotDocument(projectSnapshot);
+		if (source.expectedAuthoredChecksum !== undefined) {
+			const expected = source.expectedAuthoredChecksum;
+			const actual =
+				projectParse.migratedFromVersion !== null
+					? checksumLegacyOpenFabProject(
+							projectParse.migratedFromVersion,
+							document.map,
+							document.portEquipment,
+							document.organizations,
+							document.relationships,
+						)
+					: expected.startsWith("00000003:")
+						? projectSnapshot.checksum
+						: null;
+			if (actual === null || actual !== expected) {
+				throw new Error(
+					"복구 프로젝트 내용과 저장된 무결성 값이 다릅니다. 기존 프로젝트와 복구본을 유지합니다.",
+				);
+			}
+		}
 		return Object.freeze({
-			document: hydrateRailMirrorSnapshotDocument(
-				createRailSnapshotFromOpenFabProject(projectParse.project),
-			),
+			document,
 			projectParse,
 			projectManifest: null,
 		});

@@ -170,6 +170,7 @@ export function createStaticFabOrganizationBundlePlacementCapture(
 		organizationInput.records,
 		{
 			kinds: row(Uint8Array, organizationCount),
+			declaredSemanticRoles: row(Uint8Array, organizationCount),
 			names: { type: "text", count: organizationCount, length: 120 },
 			parentOrganizationOffsets: row(Uint32Array, organizationCount + 1),
 			parentOrganizationIds: {

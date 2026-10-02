@@ -24,6 +24,7 @@ import {
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
 	type StaticFabOrganizationState,
+	staticFabOrganizationDeclaredSemanticRole,
 	staticFabOrganizationParentIds,
 	staticFabOrganizationProperties,
 } from "./StaticFabOrganization";
@@ -729,6 +730,8 @@ function addOrganizationRecord(
 	const properties = staticFabOrganizationProperties(record);
 	checksum.addNumbers([1, record.id, parents.length, ...parents]);
 	checksum.addStrings([record.kind, record.name, properties.description, properties.color]);
+	const declaredRole = staticFabOrganizationDeclaredSemanticRole(record);
+	if (declaredRole !== null) checksum.addStrings(["declaredSemanticRole", declaredRole]);
 	checksum.addNumbers([record.membership.railEdges.length]);
 	for (const edge of record.membership.railEdges) {
 		checksum.addNumbers([edge.from.x, edge.from.y, edge.to.x, edge.to.y]);

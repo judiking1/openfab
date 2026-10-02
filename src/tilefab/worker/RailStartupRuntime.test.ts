@@ -142,8 +142,8 @@ describe("compileRailStartup", () => {
 			kind: "project",
 			manifest: { id: "direct-project-001", name: "Direct project" },
 			view: null,
-			blueprints: { schemaVersion: 4, records: [] },
-			schemaVersion: 13,
+			blueprints: { schemaVersion: 5, records: [] },
+			schemaVersion: 14,
 			migratedFromVersion: null,
 			checksum: snapshot.checksum,
 		});
@@ -206,9 +206,9 @@ describe("compileRailStartup", () => {
 			kind: "project",
 			manifest: { id: "worker-project-001", name: "Worker candidate" },
 			view: { center: [12, 0], quarterTurns: 0 },
-			schemaVersion: 13,
+			schemaVersion: 14,
 			migratedFromVersion: null,
-			blueprints: { schemaVersion: 4, records: [] },
+			blueprints: { schemaVersion: 5, records: [] },
 			operations,
 			sequence: document.getPatchSequence(),
 			revision: document.map.getRevision(),
@@ -259,9 +259,9 @@ describe("compileRailStartup", () => {
 		expect(payload.schemaVersion).toBe(RAIL_STARTUP_SCHEMA_VERSION);
 		expect(payload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 13,
+			schemaVersion: 14,
 			migratedFromVersion: 4,
-			blueprints: { schemaVersion: 4, records: [] },
+			blueprints: { schemaVersion: 5, records: [] },
 		});
 	});
 
@@ -276,11 +276,13 @@ describe("compileRailStartup", () => {
 		});
 		const legacy = JSON.parse(serializeOpenFabProject(project)) as {
 			schemaVersion: number;
+			areas: { schemaVersion: number };
 			blueprints: { schemaVersion: number };
 			operations?: unknown;
 			relationships?: unknown;
 		};
 		legacy.schemaVersion = 7;
+		legacy.areas.schemaVersion = 2;
 		delete legacy.operations;
 		delete legacy.relationships;
 		legacy.blueprints.schemaVersion = 2;
@@ -289,9 +291,9 @@ describe("compileRailStartup", () => {
 
 		expect(payload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 13,
+			schemaVersion: 14,
 			migratedFromVersion: 7,
-			blueprints: { schemaVersion: 4, records: [] },
+			blueprints: { schemaVersion: 5, records: [] },
 		});
 	});
 
