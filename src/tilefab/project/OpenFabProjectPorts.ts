@@ -10,22 +10,33 @@ export interface OpenFabProjectFileRead {
 	readonly json: string;
 }
 
+/** Ephemeral, single-use write authority; never serialized with the authored project. */
+export interface OpenFabProjectWriteCapability {
+	readonly name: string;
+	commit(json: string): Promise<OpenFabProjectFileReference>;
+}
+
+/** A fresh user action must choose a replacement for an unavailable write destination. */
+export class OpenFabProjectSaveAsRequiredError extends Error {
+	readonly code = "SAVE_AS_REQUIRED" as const;
+
+	constructor() {
+		super("기존 프로젝트 파일에 쓸 수 없습니다 · 다른 이름으로 저장을 다시 선택하세요");
+		this.name = "OpenFabProjectSaveAsRequiredError";
+	}
+}
+
 export interface OpenFabProjectFileGateway {
 	chooseOpen(signal?: AbortSignal): Promise<OpenFabProjectFileRead | null>;
 	openRecent(
 		reference: OpenFabProjectFileReference,
 		signal?: AbortSignal,
 	): Promise<OpenFabProjectFileRead | null>;
-	write(
-		reference: OpenFabProjectFileReference,
-		json: string,
-		signal?: AbortSignal,
-	): Promise<boolean>;
-	chooseSave(
+	acquireWrite(
+		reference: OpenFabProjectFileReference | null,
 		suggestedName: string,
-		json: string,
 		signal?: AbortSignal,
-	): Promise<OpenFabProjectFileReference | null>;
+	): Promise<OpenFabProjectWriteCapability | null>;
 }
 
 export interface OpenFabRecentProject {
@@ -87,7 +98,10 @@ export interface OpenFabRecoveryProjectInventoryRequest {
 
 export interface OpenFabProjectMetadataStore {
 	listRecent(): Promise<readonly OpenFabRecentProject[]>;
-	putRecent(project: OpenFabRecentProject): Promise<void>;
+	putRecent(
+		project: OpenFabRecentProject,
+		authority?: OpenFabProjectMetadataMutationAuthority,
+	): Promise<void>;
 	removeRecent(projectId: string): Promise<void>;
 	listRecovery(
 		request?: OpenFabRecoveryProjectInventoryRequest,
@@ -96,10 +110,20 @@ export interface OpenFabProjectMetadataStore {
 	loadRecovery(projectId: string): Promise<OpenFabRecoveryProject | null>;
 	putRecovery(project: OpenFabRecoveryProject): Promise<void>;
 	removeRecovery(projectId: string): Promise<void>;
+	removeRecoveryAfterSave(
+		projectId: string,
+		authority: OpenFabProjectMetadataMutationAuthority,
+	): Promise<"removed" | "conflict">;
 	prepareRecoveryCleanup(
 		request: OpenFabRecoveryCleanupRequest,
 	): Promise<OpenFabRecoveryCleanupPlan>;
 	applyRecoveryCleanup(plan: OpenFabRecoveryCleanupPlan): Promise<OpenFabRecoveryCleanupResult>;
+}
+
+/** Transient authority checked by the adapter before and during a metadata transaction. */
+export interface OpenFabProjectMetadataMutationAuthority {
+	readonly signal: AbortSignal;
+	isCurrent(): boolean;
 }
 
 export interface OpenFabProjectIdentityProvider {

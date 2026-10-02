@@ -6,6 +6,19 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-10-02
+
+- Cancelled save metadata can no longer overwrite a newer recent file or remove a newer recovery;
+  recent file/handle updates and conditional recovery cleanup use abortable atomic transactions.
+- Choose a native project save destination before preparing the Worker snapshot and serialized
+  file. Keep cancellation separate from permission and activation failures.
+- Preserve the actual written file receipt when the source changes during close, while keeping
+  current changes dirty and blocking automatic project replacement.
+- After saving for Open, retain the transition dialog and start the file chooser on a fresh
+  Continue click. Keep the current project and retry action when file selection is cancelled.
+- Offer an explicit Save As retry inside the transition dialog when an existing write handle
+  is unavailable, without starting a delayed replacement chooser.
+
 ## [0.1.36] - 2026-10-02
 
 - Keep an active Guided rail keyboard endpoint visible when the guide, dock or viewport

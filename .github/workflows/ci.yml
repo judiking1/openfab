@@ -35,6 +35,7 @@ jobs:
           sudo apt-get install --yes fonts-noto-cjk
           test -n "$(fc-list :lang=ko family)"
       - run: pnpm test:live-demo
+      - run: pnpm test:project-save-cancellation
       - run: pnpm lint
       - run: pnpm check:release-identity
       - run: pnpm check:dependency-licenses

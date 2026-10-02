@@ -1,4 +1,16 @@
-export type OpenFabProjectSaveOutcome = "saved" | "cancelled" | "failed";
+export type OpenFabProjectSaveOutcome =
+	| Readonly<{ status: "saved"; isCurrent: () => boolean }>
+	| Readonly<{ status: "cancelled" | "failed" | "save-as-required" }>
+	| Readonly<{ status: "saved-stale"; canReuseDestination: boolean }>;
+
+export function planOpenFabProjectSaveContinuation(
+	actionKind: string,
+	outcome: OpenFabProjectSaveOutcome,
+): "retry" | "save-as" | "open-confirmation" | "continue" {
+	if (outcome.status === "save-as-required") return "save-as";
+	if (outcome.status !== "saved" || !outcome.isCurrent()) return "retry";
+	return actionKind === "open" ? "open-confirmation" : "continue";
+}
 
 export type OpenFabProjectSaveCancellationContext = "direct" | "pending-transition";
 

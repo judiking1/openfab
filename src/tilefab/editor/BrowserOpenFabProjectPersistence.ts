@@ -5,7 +5,9 @@ import type {
 	OpenFabProjectFileRead,
 	OpenFabProjectFileReference,
 	OpenFabProjectIdentityProvider,
+	OpenFabProjectMetadataMutationAuthority,
 	OpenFabProjectMetadataStore,
+	OpenFabProjectWriteCapability,
 	OpenFabRecentProject,
 	OpenFabRecoveryCleanupPlan,
 	OpenFabRecoveryCleanupRequest,
@@ -15,6 +17,7 @@ import type {
 	OpenFabRecoveryProjectInventoryRequest,
 	OpenFabRecoveryProjectSummary,
 } from "../project/OpenFabProjectPorts";
+import { OpenFabProjectSaveAsRequiredError } from "../project/OpenFabProjectPorts";
 import {
 	planOpenFabRecoveryCleanup,
 	recoveryCleanupPlansEqual,
@@ -88,6 +91,11 @@ export class BrowserOpenFabProjectIdentityProvider implements OpenFabProjectIden
 }
 
 export interface BrowserProjectDatabasePort {
+	putRecentProject(
+		project: OpenFabRecentProject,
+		maximumRecords: number,
+		authority?: OpenFabProjectMetadataMutationAuthority,
+	): Promise<readonly string[]>;
 	get<Value>(storeName: string, key: IDBValidKey): Promise<Value | null>;
 	getAll<Value>(storeName: string, count?: number): Promise<Value[]>;
 	scan(
@@ -130,6 +138,7 @@ export interface BrowserProjectDatabasePort {
 	deleteMany(records: readonly BrowserProjectDatabaseStoreKey[]): Promise<void>;
 	deleteRecoveriesIfSummariesUnchanged(
 		expected: readonly OpenFabRecoveryProjectSummary[],
+		authority?: OpenFabProjectMetadataMutationAuthority,
 	): Promise<"removed" | "conflict">;
 }
 
@@ -272,45 +281,70 @@ export class BrowserOpenFabProjectPersistence
 		return this.readHandle(reference, handle, signal);
 	}
 
-	async write(
-		reference: OpenFabProjectFileReference,
-		json: string,
-		signal?: AbortSignal,
-	): Promise<boolean> {
-		throwIfAborted(signal);
-		if (!reference.writable) return false;
-		const handle = this.handles.get(reference.id) ?? (await this.loadStoredHandle(reference.id));
-		if (!handle || !(await ensurePermission(handle, "readwrite"))) return false;
-		await writeHandle(handle, json, signal);
-		return true;
-	}
-
-	async chooseSave(
+	async acquireWrite(
+		reference: OpenFabProjectFileReference | null,
 		suggestedName: string,
-		json: string,
 		signal?: AbortSignal,
-	): Promise<OpenFabProjectFileReference | null> {
+	): Promise<OpenFabProjectWriteCapability | null> {
 		throwIfAborted(signal);
+		if (reference?.writable) {
+			const cached = this.handles.get(reference.id);
+			let handle = cached;
+			if (cached) {
+				// Begin a possible permission prompt on the caller's user-action stack.
+				const permission = cached.requestPermission
+					? cached.requestPermission({ mode: "readwrite" })
+					: cached.queryPermission
+						? cached.queryPermission({ mode: "readwrite" })
+						: Promise.resolve("granted" as const);
+				const granted = await permission;
+				throwIfAborted(signal);
+				if (granted !== "granted") throw projectSaveAsRequiredError();
+			} else {
+				handle = (await this.loadStoredHandle(reference.id)) ?? undefined;
+				throwIfAborted(signal);
+				if (!handle) throw projectSaveAsRequiredError();
+				// A delayed database lookup cannot own a new permission prompt or picker.
+				const granted = handle.queryPermission
+					? await handle.queryPermission({ mode: "readwrite" })
+					: handle.requestPermission
+						? "prompt"
+						: "granted";
+				throwIfAborted(signal);
+				if (granted !== "granted") throw projectSaveAsRequiredError();
+			}
+			if (!handle) throw projectSaveAsRequiredError();
+			const destination = handle;
+			return createProjectWriteCapability(reference.name, signal, async (json) => {
+				await writeHandle(destination, json, signal);
+				return reference;
+			});
+		}
 		const safeName = normalizeSuggestedFileName(suggestedName);
 		const picker = this.forceFileInputFallback
 			? null
 			: browserFunction<BrowserSavePicker>("showSaveFilePicker");
 		if (!picker) {
-			downloadJsonFile(safeName, json);
-			return Object.freeze({
-				id: createRuntimeId(),
-				name: safeName,
-				writable: false,
-				reopenable: false,
+			return createProjectWriteCapability(safeName, signal, async (json) => {
+				downloadJsonFile(safeName, json);
+				return Object.freeze({
+					id: createRuntimeId(),
+					name: safeName,
+					writable: false,
+					reopenable: false,
+				});
 			});
 		}
 		try {
 			const handle = await picker({ suggestedName: safeName, types: PROJECT_FILE_TYPES });
 			throwIfAborted(signal);
-			await writeHandle(handle, json, signal);
-			return this.rememberHandle(handle);
+			return createProjectWriteCapability(handle.name, signal, async (json) => {
+				await writeHandle(handle, json, signal);
+				return this.rememberHandle(handle);
+			});
 		} catch (error) {
-			if (isUserCancellation(error) || signal?.aborted) return null;
+			throwIfAborted(signal);
+			if (isUserCancellation(error)) return null;
 			throw error;
 		}
 	}
@@ -454,18 +488,16 @@ export class BrowserOpenFabProjectPersistence
 		);
 	}
 
-	async putRecent(project: OpenFabRecentProject): Promise<void> {
-		const previous = await this.database.get<OpenFabRecentProject>(RECENT_STORE, project.projectId);
-		await this.database.put(RECENT_STORE, copyRecentProject(project));
-		if (previous?.reference && previous.reference.id !== project.reference?.id) {
-			this.handles.delete(previous.reference.id);
-			await this.database.delete(HANDLE_STORE, previous.reference.id);
-		}
-		const records = await this.database.getAll<OpenFabRecentProject>(RECENT_STORE);
-		records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-		await Promise.all(
-			records.slice(MAX_RECENT_PROJECTS).map((record) => this.removeRecent(record.projectId)),
+	async putRecent(
+		project: OpenFabRecentProject,
+		authority?: OpenFabProjectMetadataMutationAuthority,
+	): Promise<void> {
+		const removedHandleIds = await this.database.putRecentProject(
+			copyRecentProject(project),
+			MAX_RECENT_PROJECTS,
+			authority,
 		);
+		for (const id of removedHandleIds) this.handles.delete(id);
 	}
 
 	async removeRecent(projectId: string): Promise<void> {
@@ -532,6 +564,17 @@ export class BrowserOpenFabProjectPersistence
 			Object.freeze({ storeName: RECOVERY_STORE, key: projectId }),
 			Object.freeze({ storeName: RECOVERY_SUMMARY_STORE, key: projectId }),
 		]);
+	}
+
+	async removeRecoveryAfterSave(
+		projectId: string,
+		authority: OpenFabProjectMetadataMutationAuthority,
+	): Promise<"removed" | "conflict"> {
+		assertMetadataMutationCurrent(authority);
+		const summary = await this.loadRecoverySummary(projectId);
+		assertMetadataMutationCurrent(authority);
+		if (!summary) return "removed";
+		return this.database.deleteRecoveriesIfSummariesUnchanged([summary], authority);
 	}
 
 	async prepareRecoveryCleanup(
@@ -1355,10 +1398,111 @@ export class BrowserOpenFabProjectPersistence
 	}
 }
 
+function assertMetadataMutationCurrent(authority?: OpenFabProjectMetadataMutationAuthority): void {
+	if (!authority) return;
+	throwIfAborted(authority.signal);
+	if (!authority.isCurrent())
+		throw new DOMException("Project metadata operation is stale.", "AbortError");
+}
+
+function observeMetadataMutation(
+	transaction: IDBTransaction,
+	authority?: OpenFabProjectMetadataMutationAuthority,
+): { check(): boolean; cleanup(): void; error(): Error | null } {
+	let failure: Error | null = null;
+	const check = (): boolean => {
+		try {
+			assertMetadataMutationCurrent(authority);
+			return true;
+		} catch (error) {
+			failure = normalizeDatabaseError(error, "Project metadata operation is stale.");
+			try {
+				transaction.abort();
+			} catch {
+				// A completed transaction is already durable; it cannot be rolled back afterward.
+			}
+			return false;
+		}
+	};
+	const onAbort = (): void => {
+		check();
+	};
+	authority?.signal.addEventListener("abort", onAbort, { once: true });
+	return {
+		check,
+		cleanup: () => authority?.signal.removeEventListener("abort", onAbort),
+		error: () => failure,
+	};
+}
+
 class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 	private pending: Promise<IDBDatabase | null> | null = null;
 	private database: IDBDatabase | null = null;
 	private blockedAttemptActive = false;
+
+	async putRecentProject(
+		project: OpenFabRecentProject,
+		maximumRecords: number,
+		authority?: OpenFabProjectMetadataMutationAuthority,
+	): Promise<readonly string[]> {
+		assertMetadataMutationCurrent(authority);
+		const database = await this.open();
+		assertMetadataMutationCurrent(authority);
+		if (!database) throw new BrowserProjectDatabaseUnavailableError();
+		return new Promise((resolve, reject) => {
+			const transaction = database.transaction([RECENT_STORE, HANDLE_STORE], "readwrite");
+			const mutation = observeMetadataMutation(transaction, authority);
+			const recentStore = transaction.objectStore(RECENT_STORE);
+			const handleStore = transaction.objectStore(HANDLE_STORE);
+			const request = recentStore.getAll();
+			const removedHandleIds = new Set<string>();
+			request.onsuccess = () => {
+				if (!mutation.check()) return;
+				const previous = request.result as OpenFabRecentProject[];
+				const records = previous.filter((record) => record.projectId !== project.projectId);
+				records.push(project);
+				records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+				const retained = records.slice(0, maximumRecords);
+				const retainedIds = new Set(retained.map((record) => record.projectId));
+				const retainedHandles = new Set(
+					retained.flatMap((record) => (record.reference ? [record.reference.id] : [])),
+				);
+				for (const record of previous) {
+					if (!retainedIds.has(record.projectId)) {
+						recentStore.delete(record.projectId).onsuccess = () => {
+							mutation.check();
+						};
+					}
+					if (record.reference && !retainedHandles.has(record.reference.id)) {
+						removedHandleIds.add(record.reference.id);
+					}
+				}
+				if (retainedIds.has(project.projectId)) {
+					recentStore.put(project).onsuccess = () => {
+						mutation.check();
+					};
+				} else if (project.reference && !retainedHandles.has(project.reference.id)) {
+					removedHandleIds.add(project.reference.id);
+				}
+				for (const id of removedHandleIds) {
+					handleStore.delete(id).onsuccess = () => {
+						mutation.check();
+					};
+				}
+			};
+			transaction.oncomplete = () => {
+				mutation.cleanup();
+				resolve(Object.freeze([...removedHandleIds]));
+			};
+			const fail = (): void => {
+				mutation.cleanup();
+				reject(mutation.error() ?? transaction.error ?? new Error("Recent project update failed."));
+			};
+			transaction.onerror = fail;
+			transaction.onabort = fail;
+			mutation.check();
+		});
+	}
 
 	async get<Value>(storeName: string, key: IDBValidKey): Promise<Value | null> {
 		return this.request(storeName, "readonly", (store) => store.get(key));
@@ -1882,19 +2026,23 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 
 	async deleteRecoveriesIfSummariesUnchanged(
 		expected: readonly OpenFabRecoveryProjectSummary[],
+		authority?: OpenFabProjectMetadataMutationAuthority,
 	): Promise<"removed" | "conflict"> {
+		assertMetadataMutationCurrent(authority);
 		if (expected.length === 0) return "removed";
 		const expectedById = new Map(expected.map((summary) => [summary.projectId, summary] as const));
 		if (expectedById.size !== expected.length) {
 			throw new TypeError("Recovery cleanup candidates must have unique project ids.");
 		}
 		const database = await this.open();
+		assertMetadataMutationCurrent(authority);
 		if (!database) throw new BrowserProjectDatabaseUnavailableError();
 		return new Promise((resolve, reject) => {
 			const transaction = database.transaction(
 				[RECOVERY_SUMMARY_STORE, RECOVERY_STORE],
 				"readwrite",
 			);
+			const mutation = observeMetadataMutation(transaction, authority);
 			const summaryStore = transaction.objectStore(RECOVERY_SUMMARY_STORE);
 			const payloadStore = transaction.objectStore(RECOVERY_STORE);
 			const cursorRequest = summaryStore.openCursor();
@@ -1902,6 +2050,7 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 			let matched = 0;
 			let status: "removed" | "conflict" = "conflict";
 			cursorRequest.onsuccess = () => {
+				if (!mutation.check()) return;
 				const cursor = cursorRequest.result;
 				if (cursor) {
 					const projectId =
@@ -1920,11 +2069,17 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 				if (matched !== expected.length) return;
 				for (const summary of expected) {
 					const deleteSummary = summaryStore.delete(summary.projectId);
+					deleteSummary.onsuccess = () => {
+						mutation.check();
+					};
 					deleteSummary.onerror = () => {
 						explicitError =
 							deleteSummary.error ?? new Error("IndexedDB recovery summary cleanup failed.");
 					};
 					const deletePayload = payloadStore.delete(summary.projectId);
+					deletePayload.onsuccess = () => {
+						mutation.check();
+					};
 					deletePayload.onerror = () => {
 						explicitError =
 							deletePayload.error ?? new Error("IndexedDB recovery payload cleanup failed.");
@@ -1935,15 +2090,22 @@ class BrowserProjectDatabase implements BrowserProjectDatabasePort {
 			cursorRequest.onerror = () => {
 				explicitError = cursorRequest.error ?? new Error("IndexedDB recovery cleanup scan failed.");
 			};
-			transaction.oncomplete = () => resolve(status);
-			transaction.onerror = () =>
+			transaction.oncomplete = () => {
+				mutation.cleanup();
+				resolve(status);
+			};
+			const fail = (): void => {
+				mutation.cleanup();
 				reject(
-					explicitError ?? transaction.error ?? new Error("IndexedDB recovery cleanup failed."),
+					mutation.error() ??
+						explicitError ??
+						transaction.error ??
+						new Error("IndexedDB recovery cleanup failed."),
 				);
-			transaction.onabort = () =>
-				reject(
-					explicitError ?? transaction.error ?? new Error("IndexedDB recovery cleanup aborted."),
-				);
+			};
+			transaction.onerror = fail;
+			transaction.onabort = fail;
+			mutation.check();
 		});
 	}
 
@@ -2377,6 +2539,28 @@ async function chooseUserBlueprintLibraryOpenWithInput(
 		signal?.addEventListener("abort", abort, { once: true });
 		document.body.append(input);
 		input.click();
+	});
+}
+
+function projectSaveAsRequiredError(): OpenFabProjectSaveAsRequiredError {
+	return new OpenFabProjectSaveAsRequiredError();
+}
+
+function createProjectWriteCapability(
+	name: string,
+	signal: AbortSignal | undefined,
+	write: (json: string) => Promise<OpenFabProjectFileReference>,
+): OpenFabProjectWriteCapability {
+	let pending: typeof write | null = write;
+	return Object.freeze({
+		name,
+		async commit(json: string): Promise<OpenFabProjectFileReference> {
+			const commit = pending;
+			if (!commit) throw new Error("이 저장 대상은 이미 사용했습니다 · 저장을 다시 선택하세요");
+			pending = null;
+			throwIfAborted(signal);
+			return commit(json);
+		},
 	});
 }
 

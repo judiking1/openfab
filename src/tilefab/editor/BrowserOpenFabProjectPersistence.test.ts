@@ -1,4 +1,4 @@
-import { IDBFactory } from "fake-indexeddb";
+import { IDBObjectStore as FakeIDBObjectStore, IDBFactory } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RailAreaStampTemplate } from "../core/RailAreaStamp";
 import legacyOrganizationRecord from "../project/fixtures/legacy-organization-blueprint-v1.json";
@@ -7,7 +7,11 @@ import {
 	updateOpenFabProjectBlueprint,
 } from "../project/OpenFabBlueprintLibrary";
 import { OPENFAB_PROJECT_MAX_JSON_CHARACTERS } from "../project/OpenFabProjectCodec";
-import type { OpenFabRecoveryProjectSummary } from "../project/OpenFabProjectPorts";
+import type {
+	OpenFabProjectMetadataMutationAuthority,
+	OpenFabRecentProject,
+	OpenFabRecoveryProjectSummary,
+} from "../project/OpenFabProjectPorts";
 import {
 	createOpenFabUserBlueprintRecord,
 	OPENFAB_USER_BLUEPRINT_DIAGNOSTIC_FILE_EXTENSION,
@@ -41,6 +45,525 @@ import {
 describe("BrowserOpenFabProjectPersistence", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
+	it("starts the native picker immediately and remembers the handle only after commit", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Immediate.openfab");
+		const createStream = vi.spyOn(file.handle, "createWritable");
+		const picker = vi.fn(async () => file.handle);
+		vi.stubGlobal("window", { showSaveFilePicker: picker });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+
+		const acquisition = persistence.acquireWrite(null, "Immediate");
+
+		expect(picker).toHaveBeenCalledOnce();
+		expect(createStream).not.toHaveBeenCalled();
+		const destination = await acquisition;
+		if (!destination) throw new Error("expected a destination");
+		expect(destination.name).toBe("Immediate.openfab");
+		expect(await database.getAll("file-handles")).toEqual([]);
+		await destination.commit("prepared after selection");
+		expect(createStream).toHaveBeenCalledOnce();
+		expect(file.content()).toBe("prepared after selection");
+		expect(await database.getAll("file-handles")).toHaveLength(1);
+	});
+
+	it("does not let a delayed aborted save overwrite a newer recent destination or evict it", async () => {
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const controller = new AbortController();
+		const newer = {
+			projectId: "metadata-project",
+			name: "New destination",
+			updatedAt: "2026-10-02T00:01:00.000Z",
+			authoredChecksum: "new-checksum",
+			reference: { id: "new-handle", name: "New.openfab", writable: true, reopenable: true },
+		};
+		const older = { ...newer, updatedAt: "2026-10-02T00:00:00.000Z", reference: null };
+		let release = (): void => {};
+		const delayed = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const original = database.putRecentProject.bind(database);
+		vi.spyOn(database, "putRecentProject").mockImplementationOnce(async (...args) => {
+			await delayed;
+			return original(...args);
+		});
+		const oldSave = persistence.putRecent(older, {
+			signal: controller.signal,
+			isCurrent: () => true,
+		});
+		const rejection = expect(oldSave).rejects.toMatchObject({ name: "AbortError" });
+		controller.abort();
+		await database.put("file-handles", { id: "new-handle", handle: "new-file" });
+		await persistence.putRecent(newer);
+		release();
+		await rejection;
+		expect(await persistence.listRecent()).toEqual([newer]);
+		expect(await database.get("file-handles", "new-handle")).toEqual({
+			id: "new-handle",
+			handle: "new-file",
+		});
+	});
+
+	it("rolls back an in-flight IndexedDB recent update when the save is aborted", async () => {
+		vi.stubGlobal("indexedDB", new IDBFactory());
+		const persistence = new BrowserOpenFabProjectPersistence();
+		const controller = new AbortController();
+		const original = {
+			projectId: "atomic-recent",
+			name: "Original",
+			updatedAt: "2026-10-02T00:00:00.000Z",
+			authoredChecksum: "original",
+			reference: null,
+		};
+		await persistence.putRecent(original);
+		const put = FakeIDBObjectStore.prototype.put;
+		const spy = vi.spyOn(FakeIDBObjectStore.prototype, "put").mockImplementation(function (
+			this: IDBObjectStore,
+			value,
+			key,
+		) {
+			const request = put.call(this, value, key);
+			if (this.name === "recent-projects")
+				request.addEventListener("success", () => controller.abort(), { once: true });
+			return request;
+		});
+		try {
+			await expect(
+				persistence.putRecent(
+					{ ...original, name: "Aborted" },
+					{
+						signal: controller.signal,
+						isCurrent: () => true,
+					},
+				),
+			).rejects.toMatchObject({ name: "AbortError" });
+			expect(await persistence.listRecent()).toEqual([original]);
+		} finally {
+			spy.mockRestore();
+		}
+		await persistence.putRecent({ ...original, name: "Fresh Save As" });
+		expect((await persistence.listRecent())[0]?.name).toBe("Fresh Save As");
+	});
+
+	it("keeps a recent file handle shared by another retained project", async () => {
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const reference = {
+			id: "shared-file",
+			name: "Shared.openfab",
+			writable: true,
+			reopenable: true,
+		};
+		const first = {
+			projectId: "first",
+			name: "First",
+			updatedAt: "2026-10-02T00:00:00.000Z",
+			authoredChecksum: "first",
+			reference,
+		};
+		await database.put("file-handles", { id: reference.id, handle: "shared" });
+		await persistence.putRecent(first);
+		await persistence.putRecent({ ...first, projectId: "second" });
+		await persistence.putRecent({ ...first, reference: null });
+		expect(await database.get("file-handles", reference.id)).not.toBeNull();
+	});
+
+	it.each([
+		"changed-checksum",
+		"saved-checksum",
+	])("preserves a newer recovery after the saved cleanup captured a summary (%s)", async (checksum) => {
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const controller = new AbortController();
+		const original = {
+			projectId: "saved-project",
+			name: "Saved",
+			updatedAt: "2026-10-02T00:00:00.000Z",
+			authoredChecksum: "saved-checksum",
+			json: "old recovery",
+		};
+		const newer = {
+			...original,
+			updatedAt: "2026-10-02T00:01:00.000Z",
+			authoredChecksum: checksum,
+			json: "new recovery",
+		};
+		await persistence.putRecovery(original);
+		const cleanup = database.deleteRecoveriesIfSummariesUnchanged.bind(database);
+		vi.spyOn(database, "deleteRecoveriesIfSummariesUnchanged").mockImplementationOnce(
+			async (...args) => {
+				await persistence.putRecovery(newer);
+				return cleanup(...args);
+			},
+		);
+		expect(
+			await persistence.removeRecoveryAfterSave(original.projectId, {
+				signal: controller.signal,
+				isCurrent: () => true,
+			}),
+		).toBe("conflict");
+		expect(await persistence.loadRecovery(original.projectId)).toEqual(newer);
+		expect((await persistence.listRecovery()).latest?.updatedAt).toBe(newer.updatedAt);
+	});
+
+	it("keeps recovery when the source owner changes during cleanup preparation", async () => {
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const controller = new AbortController();
+		const original = {
+			projectId: "stale-owner",
+			name: "Original",
+			updatedAt: "2026-10-02T00:00:00.000Z",
+			authoredChecksum: "original",
+			json: "original recovery",
+		};
+		await persistence.putRecovery(original);
+		let current = true;
+		const load = database.get.bind(database);
+		vi.spyOn(database, "get").mockImplementationOnce(async (...args) => {
+			const result = await load(...args);
+			current = false;
+			return result;
+		});
+		await expect(
+			persistence.removeRecoveryAfterSave(original.projectId, {
+				signal: controller.signal,
+				isCurrent: () => current,
+			}),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(await persistence.loadRecovery(original.projectId)).toEqual(original);
+	});
+
+	it("rolls back both recovery stores when an in-flight saved cleanup is aborted", async () => {
+		vi.stubGlobal("indexedDB", new IDBFactory());
+		const persistence = new BrowserOpenFabProjectPersistence();
+		const controller = new AbortController();
+		const original = {
+			projectId: "atomic-recovery",
+			name: "Original",
+			updatedAt: "2026-10-02T00:00:00.000Z",
+			authoredChecksum: "original",
+			json: "original recovery",
+		};
+		await persistence.putRecovery(original);
+		const remove = FakeIDBObjectStore.prototype.delete;
+		const spy = vi.spyOn(FakeIDBObjectStore.prototype, "delete").mockImplementation(function (
+			this: IDBObjectStore,
+			key,
+		) {
+			const request = remove.call(this, key);
+			if (this.name === "recovery-project-summaries")
+				request.addEventListener("success", () => controller.abort(), { once: true });
+			return request;
+		});
+		try {
+			await expect(
+				persistence.removeRecoveryAfterSave(original.projectId, {
+					signal: controller.signal,
+					isCurrent: () => true,
+				}),
+			).rejects.toMatchObject({ name: "AbortError" });
+			expect(await persistence.loadRecovery(original.projectId)).toEqual(original);
+			expect((await persistence.listRecovery()).latest?.projectId).toBe(original.projectId);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("removes an older recovery atomically after a fresh save supersedes it", async () => {
+		vi.stubGlobal("indexedDB", new IDBFactory());
+		const persistence = new BrowserOpenFabProjectPersistence();
+		await persistence.putRecovery({
+			projectId: "superseded",
+			name: "Old",
+			updatedAt: "2026-10-02T00:00:00.000Z",
+			authoredChecksum: "older-checksum",
+			json: "older state",
+		});
+		expect(
+			await persistence.removeRecoveryAfterSave("superseded", {
+				signal: new AbortController().signal,
+				isCurrent: () => true,
+			}),
+		).toBe("removed");
+		expect(await persistence.loadRecovery("superseded")).toBeNull();
+		expect((await persistence.listRecovery()).totalCount).toBe(0);
+	});
+
+	it("consumes a destination before yielding so simultaneous commits cannot both write", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Once.openfab");
+		const createStream = vi.spyOn(file.handle, "createWritable");
+		vi.stubGlobal("window", { showSaveFilePicker: vi.fn(async () => file.handle) });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const destination = await persistence.acquireWrite(null, "Once");
+		if (!destination) throw new Error("expected a destination");
+
+		const first = destination.commit("first");
+		const second = destination.commit("second");
+
+		await expect(second).rejects.toThrow("이미 사용");
+		await first;
+		expect(createStream).toHaveBeenCalledOnce();
+		expect(file.content()).toBe("first");
+		expect(await database.getAll("file-handles")).toHaveLength(1);
+	});
+
+	it("keeps activation SecurityError distinct from native picker cancellation", async () => {
+		const database = new MemoryProjectDatabase();
+		const failure = new DOMException("missing user activation", "SecurityError");
+		vi.stubGlobal("window", {
+			showSaveFilePicker: vi.fn(async () => {
+				throw failure;
+			}),
+		});
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+
+		await expect(persistence.acquireWrite(null, "Rejected")).rejects.toBe(failure);
+		expect(await database.getAll("file-handles")).toEqual([]);
+		expect(await persistence.listRecent()).toEqual([]);
+	});
+
+	it("rejects an aborted acquisition instead of reporting user picker cancellation", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Aborted.openfab");
+		const controller = new AbortController();
+		vi.stubGlobal("window", {
+			showSaveFilePicker: vi.fn(async () => {
+				controller.abort();
+				return file.handle;
+			}),
+		});
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+
+		await expect(
+			persistence.acquireWrite(null, "Aborted", controller.signal),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(await database.getAll("file-handles")).toEqual([]);
+	});
+
+	it("does not start an application write when its acquired operation is aborted", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Cancelled-before-write.openfab");
+		const createStream = vi.spyOn(file.handle, "createWritable");
+		const controller = new AbortController();
+		vi.stubGlobal("window", { showSaveFilePicker: vi.fn(async () => file.handle) });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const destination = await persistence.acquireWrite(
+			null,
+			"Cancelled-before-write",
+			controller.signal,
+		);
+		if (!destination) throw new Error("expected a destination");
+		controller.abort();
+
+		await expect(destination.commit("stale payload")).rejects.toMatchObject({ name: "AbortError" });
+		expect(createStream).not.toHaveBeenCalled();
+		expect(await database.getAll("file-handles")).toEqual([]);
+	});
+
+	it("aborts the staged write and retains no handle when the owner aborts during writing", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Aborted-write.openfab");
+		const controller = new AbortController();
+		const stream = {
+			write: vi.fn(async () => {
+				controller.abort();
+			}),
+			close: vi.fn(async () => {}),
+			abort: vi.fn(async () => {}),
+		};
+		vi.spyOn(file.handle, "createWritable").mockResolvedValue(stream);
+		vi.stubGlobal("window", { showSaveFilePicker: vi.fn(async () => file.handle) });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const destination = await persistence.acquireWrite(null, "Aborted-write", controller.signal);
+		if (!destination) throw new Error("expected a destination");
+
+		await expect(destination.commit("stale payload")).rejects.toMatchObject({ name: "AbortError" });
+		expect(stream.write).toHaveBeenCalledWith("stale payload");
+		expect(stream.close).not.toHaveBeenCalled();
+		expect(stream.abort).toHaveBeenCalledOnce();
+		expect(await database.getAll("file-handles")).toEqual([]);
+	});
+
+	it("retains no handle when closing the staged application write fails", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Close-failure.openfab");
+		const failure = new Error("close failed");
+		const stream = {
+			write: vi.fn(async () => {}),
+			close: vi.fn(async () => {
+				throw failure;
+			}),
+			abort: vi.fn(async () => {}),
+		};
+		vi.spyOn(file.handle, "createWritable").mockResolvedValue(stream);
+		vi.stubGlobal("window", { showSaveFilePicker: vi.fn(async () => file.handle) });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const destination = await persistence.acquireWrite(null, "Close-failure");
+		if (!destination) throw new Error("expected a destination");
+
+		await expect(destination.commit("payload")).rejects.toBe(failure);
+		expect(stream.abort).toHaveBeenCalledWith(failure);
+		expect(await database.getAll("file-handles")).toEqual([]);
+		expect(await persistence.listRecent()).toEqual([]);
+	});
+
+	it("retains a written reference when an abort arrives during successful close", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Close-abort.openfab");
+		const controller = new AbortController();
+		let written = "";
+		const stream = {
+			write: vi.fn(async (json: string) => {
+				written = json;
+			}),
+			close: vi.fn(async () => {
+				controller.abort();
+			}),
+			abort: vi.fn(async () => {}),
+		};
+		vi.spyOn(file.handle, "createWritable").mockResolvedValue(stream);
+		vi.stubGlobal("window", { showSaveFilePicker: vi.fn(async () => file.handle) });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const destination = await persistence.acquireWrite(null, "Close-abort", controller.signal);
+		if (!destination) throw new Error("expected destination");
+		expect(await destination.commit("written-before-abort")).toMatchObject({
+			name: "Close-abort.openfab",
+			writable: true,
+		});
+		expect(written).toBe("written-before-abort");
+		expect(stream.close).toHaveBeenCalledOnce();
+		expect(stream.abort).not.toHaveBeenCalled();
+		expect(await database.getAll("file-handles")).toHaveLength(1);
+	});
+
+	it("uses a fresh picker immediately for a portable read-only reference", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Portable-copy.openfab");
+		const picker = vi.fn(async () => file.handle);
+		vi.stubGlobal("window", { showSaveFilePicker: picker });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const acquiring = persistence.acquireWrite(
+			{ id: "portable", name: "Portable.openfab", writable: false, reopenable: false },
+			"Portable",
+		);
+		expect(picker).toHaveBeenCalledOnce();
+		const destination = await acquiring;
+		if (!destination) throw new Error("expected destination");
+		expect(await destination.commit("copy")).toMatchObject({
+			name: "Portable-copy.openfab",
+			writable: true,
+		});
+	});
+
+	it("starts cached-handle write permission on the new user-action stack", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Permission.openfab");
+		const permission = vi.fn(async () => "granted" as const);
+		const handle = { ...file.handle, requestPermission: permission };
+		const picker = vi.fn(async () => handle);
+		vi.stubGlobal("window", { showSaveFilePicker: picker });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const initial = await persistence.acquireWrite(null, "Permission");
+		if (!initial) throw new Error("expected a destination");
+		const reference = await initial.commit("initial");
+
+		const acquisition = persistence.acquireWrite(reference, "Permission");
+
+		expect(permission).toHaveBeenCalledExactlyOnceWith({ mode: "readwrite" });
+		const destination = await acquisition;
+		if (!destination) throw new Error("expected a destination");
+		expect(await destination.commit("updated")).toBe(reference);
+		expect(file.content()).toBe("updated");
+		expect(picker).toHaveBeenCalledOnce();
+	});
+
+	it("requires a fresh Save As click when cached write permission is denied", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Denied.openfab");
+		const handle = { ...file.handle, requestPermission: vi.fn(async () => "denied" as const) };
+		const picker = vi.fn(async () => handle);
+		vi.stubGlobal("window", { showSaveFilePicker: picker });
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const initial = await persistence.acquireWrite(null, "Denied");
+		if (!initial) throw new Error("expected a destination");
+		const reference = await initial.commit("initial");
+
+		await expect(persistence.acquireWrite(reference, "Denied")).rejects.toThrow(
+			"다른 이름으로 저장",
+		);
+		expect(picker).toHaveBeenCalledOnce();
+		expect(file.content()).toBe("initial");
+	});
+
+	it("uses a restored handle only when its write permission is already granted", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Restored.openfab");
+		const request = vi.fn(async () => "granted" as const);
+		const handle = {
+			...file.handle,
+			queryPermission: vi.fn(async () => "granted" as const),
+			requestPermission: request,
+		};
+		const picker = vi.fn(async () => handle);
+		vi.stubGlobal("window", { showSaveFilePicker: picker });
+		const firstSession = new BrowserOpenFabProjectPersistence(database);
+		const initial = await firstSession.acquireWrite(null, "Restored");
+		if (!initial) throw new Error("expected a destination");
+		const reference = await initial.commit("initial");
+		const nextSession = new BrowserOpenFabProjectPersistence(database);
+
+		const destination = await nextSession.acquireWrite(reference, "Restored");
+		if (!destination) throw new Error("expected a granted destination");
+		expect(await destination.commit("restored")).toBe(reference);
+		expect(request).not.toHaveBeenCalled();
+		expect(picker).toHaveBeenCalledOnce();
+	});
+
+	it("does not prompt or open a late picker after finding a cold handle without write permission", async () => {
+		const database = new MemoryProjectDatabase();
+		const file = createFileHandle("Cold-prompt.openfab");
+		const request = vi.fn(async () => "granted" as const);
+		const handle = {
+			...file.handle,
+			queryPermission: vi.fn(async () => "prompt" as const),
+			requestPermission: request,
+		};
+		const picker = vi.fn(async () => handle);
+		vi.stubGlobal("window", { showSaveFilePicker: picker });
+		const firstSession = new BrowserOpenFabProjectPersistence(database);
+		const initial = await firstSession.acquireWrite(null, "Cold-prompt");
+		if (!initial) throw new Error("expected a destination");
+		const reference = await initial.commit("initial");
+		const nextSession = new BrowserOpenFabProjectPersistence(database);
+
+		await expect(nextSession.acquireWrite(reference, "Cold-prompt")).rejects.toThrow(
+			"다른 이름으로 저장",
+		);
+		expect(request).not.toHaveBeenCalled();
+		expect(picker).toHaveBeenCalledOnce();
+		expect(file.content()).toBe("initial");
+	});
+
+	it("requires an explicit retry when an existing writable reference has lost its handle", async () => {
+		const picker = vi.fn();
+		vi.stubGlobal("window", { showSaveFilePicker: picker });
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		const reference = {
+			id: "missing-handle",
+			name: "Missing.openfab",
+			writable: true,
+			reopenable: true,
+		};
+
+		await expect(persistence.acquireWrite(reference, "Missing")).rejects.toThrow(
+			"다른 이름으로 저장",
+		);
+		expect(picker).not.toHaveBeenCalled();
+	});
+
 	it("writes, remembers, reopens, and rewrites a File System Access handle", async () => {
 		const database = new MemoryProjectDatabase();
 		const file = createFileHandle("Main Bay.openfab");
@@ -49,7 +572,10 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		});
 		const persistence = new BrowserOpenFabProjectPersistence(database);
 
-		const reference = await persistence.chooseSave("Main Bay", '{"revision":1}');
+		const destination = await persistence.acquireWrite(null, "Main Bay");
+		if (!destination) throw new Error("expected a save destination");
+		expect(await database.getAll("file-handles")).toEqual([]);
+		const reference = await destination.commit('{"revision":1}');
 
 		expect(reference).toMatchObject({
 			name: "Main Bay.openfab",
@@ -58,7 +584,9 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		});
 		if (!reference) throw new Error("expected a saved file reference");
 		expect(file.content()).toBe('{"revision":1}');
-		expect(await persistence.write(reference, '{"revision":2}')).toBe(true);
+		const rewrite = await persistence.acquireWrite(reference, "Main Bay");
+		if (!rewrite) throw new Error("expected a writable destination");
+		expect(await rewrite.commit('{"revision":2}')).toBe(reference);
 		expect(file.content()).toBe('{"revision":2}');
 		expect(await persistence.openRecent(reference)).toMatchObject({
 			reference,
@@ -89,11 +617,15 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		});
 		const persistence = new BrowserOpenFabProjectPersistence(database);
 
-		const reference = await persistence.chooseSave("Fallback", "first");
+		const destination = await persistence.acquireWrite(null, "Fallback");
+		if (!destination) throw new Error("expected a save destination");
+		const reference = await destination.commit("first");
 
 		expect(reference).toMatchObject({ writable: true, reopenable: false });
 		if (!reference) throw new Error("expected a fallback file reference");
-		expect(await persistence.write(reference, "second")).toBe(true);
+		const rewrite = await persistence.acquireWrite(reference, "Fallback");
+		if (!rewrite) throw new Error("expected a writable destination");
+		expect(await rewrite.commit("second")).toBe(reference);
 		expect(file.content()).toBe("second");
 	});
 
@@ -422,7 +954,9 @@ describe("BrowserOpenFabProjectPersistence", () => {
 			forceFileInputFallback: true,
 		});
 
-		const reference = await persistence.chooseSave("Portable FAB", "{}");
+		const destination = await persistence.acquireWrite(null, "Portable FAB");
+		if (!destination) throw new Error("expected a download destination");
+		const reference = await destination.commit("{}");
 
 		expect(nativeSavePicker).not.toHaveBeenCalled();
 		expect(reference).toMatchObject({
@@ -439,7 +973,7 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		vi.stubGlobal("window", { showSaveFilePicker: savePicker });
 		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
 
-		await expect(persistence.chooseSave("Cancelled FAB", '{"revision":1}')).resolves.toBeNull();
+		await expect(persistence.acquireWrite(null, "Cancelled FAB")).resolves.toBeNull();
 		expect(savePicker).toHaveBeenCalledOnce();
 		await expect(persistence.listRecent()).resolves.toEqual([]);
 	});
@@ -1574,6 +2108,31 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 		this.beforeRecoveryCleanup = options.beforeRecoveryCleanup;
 	}
 
+	async putRecentProject(
+		project: OpenFabRecentProject,
+		maximumRecords: number,
+		authority?: OpenFabProjectMetadataMutationAuthority,
+	): Promise<readonly string[]> {
+		assertTestMetadataAuthority(authority);
+		const store = this.store("recent-projects");
+		const previous = [...store.values()] as OpenFabRecentProject[];
+		const records = previous.filter((record) => record.projectId !== project.projectId);
+		records.push(project);
+		records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+		const retained = records.slice(0, maximumRecords);
+		const handles = new Set(
+			retained.flatMap((record) => (record.reference ? [record.reference.id] : [])),
+		);
+		const removed = new Set<string>();
+		for (const record of [...previous, project]) {
+			if (record.reference && !handles.has(record.reference.id)) removed.add(record.reference.id);
+		}
+		store.clear();
+		for (const record of retained) store.set(record.projectId, record);
+		for (const id of removed) this.store("file-handles").delete(id);
+		return [...removed];
+	}
+
 	async get<Value>(storeName: string, key: IDBValidKey): Promise<Value | null> {
 		this.rejectUnavailableUserBlueprintOperation(storeName);
 		return (this.store(storeName).get(key) as Value | undefined) ?? null;
@@ -1821,8 +2380,10 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 
 	async deleteRecoveriesIfSummariesUnchanged(
 		expected: readonly OpenFabRecoveryProjectSummary[],
+		authority?: OpenFabProjectMetadataMutationAuthority,
 	): Promise<"removed" | "conflict"> {
 		this.beforeRecoveryCleanup?.();
+		assertTestMetadataAuthority(authority);
 		const summaries = this.store("recovery-project-summaries");
 		for (const candidate of expected) {
 			const current = summaries.get(candidate.projectId);
@@ -1874,6 +2435,12 @@ class MemoryProjectDatabase implements BrowserProjectDatabasePort {
 
 	private restoreStores(snapshots: ReadonlyMap<string, Map<IDBValidKey, unknown>>): void {
 		for (const [storeName, snapshot] of snapshots) this.stores.set(storeName, new Map(snapshot));
+	}
+}
+
+function assertTestMetadataAuthority(authority?: OpenFabProjectMetadataMutationAuthority): void {
+	if (authority && (authority.signal.aborted || !authority.isCurrent())) {
+		throw new DOMException("Metadata operation is stale.", "AbortError");
 	}
 }
 

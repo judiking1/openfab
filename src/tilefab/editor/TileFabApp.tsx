@@ -526,6 +526,7 @@ import {
 	type OpenFabProjectView,
 	updateOpenFabProjectManifest,
 } from "../project/OpenFabProject";
+import { OpenFabProjectSaveAsRequiredError } from "../project/OpenFabProjectPorts";
 import type {
 	OpenFabProjectFileRead,
 	OpenFabProjectFileReference,
@@ -978,6 +979,7 @@ import {
 import { nextProjectMenuIndex } from "./ProjectMenuNavigation";
 import {
 	describeOpenFabProjectSaveCancellation,
+	planOpenFabProjectSaveContinuation,
 	type OpenFabProjectSaveOutcome,
 } from "./OpenFabProjectSaveOutcome";
 import {
@@ -1008,6 +1010,8 @@ import {
 	contextualRailTemplates,
 } from "./RailTemplateSurfacePolicy";
 import { captureOpenFabProjectSnapshot } from "./OpenFabProjectSnapshotCapture";
+import { captureOpenFabProjectSaveSource } from "./OpenFabProjectSaveSource";
+import { awaitOpenFabProjectSaveMetadata, saveOpenFabProject } from "./OpenFabProjectSaveTransaction";
 import { RailStartupBridge, RailStartupCancelledError } from "./RailStartupBridge";
 import {
 	type ReadinessPathIdentityIndexBinding,
@@ -3196,7 +3200,7 @@ export default function TileFabApp(): React.ReactElement {
 		useState<StaticFabOrganizationColor>("TEAL");
 	const [organizationDetailsError, setOrganizationDetailsError] = useState<string | null>(null);
 	const [organizationDetailsStale, setOrganizationDetailsStale] = useState(false);
-	const [projectBlueprints, setProjectBlueprints] = useState<OpenFabProjectBlueprintSection>(
+	const [projectBlueprints, setProjectBlueprintsState] = useState<OpenFabProjectBlueprintSection>(
 		createEmptyOpenFabProjectBlueprintSection,
 	);
 	const [userBlueprints, setUserBlueprints] = useState<readonly OpenFabUserBlueprintRecord[]>(
@@ -3267,7 +3271,12 @@ export default function TileFabApp(): React.ReactElement {
 	const pendingUserBlueprintImportId = pendingUserBlueprintImport?.record.id ?? null;
 	const userBlueprintMetadataDraftId = userBlueprintMetadataDraft?.id ?? null;
 	const projectBlueprintsRef = useRef(projectBlueprints);
-	projectBlueprintsRef.current = projectBlueprints;
+ const projectBlueprintGenerationRef = useRef(0);
+	const setProjectBlueprints = useCallback((next: OpenFabProjectBlueprintSection): void => {
+		if (projectBlueprintsRef.current !== next) projectBlueprintGenerationRef.current += 1;
+		projectBlueprintsRef.current = next;
+		setProjectBlueprintsState(next);
+	}, []);
 	const [contextPalette, setContextPalette] = useState<ContextPaletteState | null>(null);
 	const [templateCategory, setTemplateCategory] = useState<RailTemplateCategory>("bay");
 	const [advancedSwitchProfile, setAdvancedSwitchProfile] =
@@ -3356,7 +3365,7 @@ export default function TileFabApp(): React.ReactElement {
 			activationReadyMilliseconds: null,
 		};
 	});
-	const [projectSession, setProjectSession] = useState<OpenFabProjectSessionState>(() => {
+	const [projectSession, setProjectSessionState] = useState<OpenFabProjectSessionState>(() => {
 		const createdAt = projectIdentity.now();
 		return {
 			manifest: createOpenFabProjectManifest(
@@ -3372,6 +3381,16 @@ export default function TileFabApp(): React.ReactElement {
 			needsSave: true,
 		};
 	});
+	const projectSessionRef = useRef(projectSession);
+	const projectGenerationRef = useRef(0);
+	const setProjectSession = useCallback(
+		(update: Parameters<typeof setProjectSessionState>[0]): void => {
+			const next = typeof update === "function" ? update(projectSessionRef.current) : update;
+			projectSessionRef.current = next;
+			setProjectSessionState(next);
+		},
+		[],
+	);
 	useEffect(() => {
 		const contextMatches =
 			ordinaryStaticFabIssueRecheckContext === null ||
@@ -3508,15 +3527,17 @@ export default function TileFabApp(): React.ReactElement {
 	const [recoveryCleanupBusy, setRecoveryCleanupBusy] = useState(false);
 	const recoveryProject = recoveryInventory.latest;
 	const refreshRecoveryInventory = useCallback(
-		async (requestedOffset = 0): Promise<OpenFabRecoveryProjectInventory> => {
+		async (requestedOffset = 0, canPublish = (): boolean => true): Promise<OpenFabRecoveryProjectInventory> => {
 			let next = await projectPersistence.listRecovery({ offset: requestedOffset });
 			if (next.records.length === 0 && next.totalCount > 0 && next.offset > 0) {
 				next = await projectPersistence.listRecovery({
 					offset: Math.max(0, next.offset - next.pageSize),
 				});
 			}
-			setRecoveryInventory(next);
-			if (next.totalCount === 0) setRecoveryInventoryOpen(false);
+			if (canPublish()) {
+				setRecoveryInventory(next);
+				if (next.totalCount === 0) setRecoveryInventoryOpen(false);
+			}
 			return next;
 		},
 		[projectPersistence],
@@ -5027,9 +5048,19 @@ export default function TileFabApp(): React.ReactElement {
 	const [starterDialogOperationError, setStarterDialogOperationError] = useState<string | null>(
 		null,
 	);
-	const [pendingProjectAction, setPendingProjectAction] = useState<PendingProjectAction | null>(
+	const [pendingProjectAction, setPendingProjectActionState] = useState<PendingProjectAction | null>(
 		null,
 	);
+	const pendingProjectActionRef = useRef(pendingProjectAction);
+	const setPendingProjectAction = useCallback((next: PendingProjectAction | null): void => {
+		pendingProjectActionRef.current = next;
+		setPendingProjectActionState(next);
+	}, []);
+	const [projectGuardSaveAsRequired, setProjectGuardSaveAsRequired] = useState(false);
+	const [projectGuardSavedOpen, setProjectGuardSavedOpen] = useState<Readonly<{
+		action: PendingProjectAction;
+		receipt: Extract<OpenFabProjectSaveOutcome, { status: "saved" }>;
+	}> | null>(null);
 	const openCommandHelp = useCallback(() => {
 		const activeElement =
 			document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -19918,6 +19949,7 @@ export default function TileFabApp(): React.ReactElement {
 			physicalFingerprint: prepared.payload.physical.fingerprint,
 			activationReadyMilliseconds: null,
 		});
+		projectGenerationRef.current += 1;
 		setProjectSession({
 			manifest: prepared.metadata.manifest,
 			fileReference,
@@ -20014,6 +20046,14 @@ export default function TileFabApp(): React.ReactElement {
 			operation,
 		);
 		if (fileReference) {
+			const promotedDocument = editorModelRef.current.document;
+			const promotedGeneration = projectGenerationRef.current;
+			const ownsPromotedProject = (): boolean =>
+				!controller.signal.aborted &&
+				projectOperationControllerRef.current === controller &&
+				projectGenerationRef.current === promotedGeneration &&
+				editorModelRef.current.document === promotedDocument &&
+				projectSessionRef.current.manifest.id === prepared.metadata.manifest.id;
 			const recent: OpenFabRecentProject = {
 				projectId: prepared.metadata.manifest.id,
 				name: prepared.metadata.manifest.name,
@@ -20022,10 +20062,20 @@ export default function TileFabApp(): React.ReactElement {
 				reference: fileReference,
 			};
 			try {
-				await projectPersistence.putRecent(recent);
-				setRecentProjects(await projectPersistence.listRecent());
+				await awaitOpenFabProjectSaveMetadata(
+					() => projectPersistence.putRecent(recent, {
+						signal: controller.signal,
+						isCurrent: ownsPromotedProject,
+					}),
+					controller.signal,
+				);
+				const records = await awaitOpenFabProjectSaveMetadata(
+					() => projectPersistence.listRecent(),
+					controller.signal,
+				);
+				if (ownsPromotedProject()) setRecentProjects(records);
 			} catch {
-				setStatus(`${message} · 최근 프로젝트 기록은 갱신하지 못했습니다`);
+				if (ownsPromotedProject()) setStatus(`${message} · 최근 프로젝트 기록은 갱신하지 못했습니다`);
 			}
 		}
 	};
@@ -20094,7 +20144,7 @@ export default function TileFabApp(): React.ReactElement {
 		);
 	};
 
-	const handleOpenProject = async (): Promise<void> => {
+	const handleOpenProject = async (): Promise<"opened" | "cancelled" | "failed"> => {
 		if (guidedBuildOpen) captureGuidedBuildProjectReopenExpectation();
 		const controller = beginProjectOperation("opening");
 		setProjectMenuOpen(false);
@@ -20103,11 +20153,13 @@ export default function TileFabApp(): React.ReactElement {
 			if (!read) {
 				setProjectOperation("idle");
 				setStatus("프로젝트 열기를 취소했습니다 · 현재 프로젝트를 유지합니다");
-				return;
+				return "cancelled";
 			}
 			await openProjectRead(read, "opening", controller);
+   return "opened";
 		} catch (error) {
-			finishFailedProjectOperation(error);
+   if (projectOperationControllerRef.current === controller) finishFailedProjectOperation(error);
+   return "failed";
 		} finally {
 			if (projectOperationControllerRef.current === controller) {
 				projectOperationControllerRef.current = null;
@@ -20347,7 +20399,7 @@ export default function TileFabApp(): React.ReactElement {
 		forceSaveAs = false,
 		focusOwner: "default" | "project-guard" | "checks" = "default",
 	): Promise<OpenFabProjectSaveOutcome> => {
-		if (startupState.status !== "ready" || modelSyncPendingRef.current) return "failed";
+		if (startupState.status !== "ready" || modelSyncPendingRef.current) return { status: "failed" };
 		const restoreSaveFocus = (): void => {
 			requestAnimationFrame(() => {
 				if (projectOperationControllerRef.current !== controller) return;
@@ -20362,9 +20414,7 @@ export default function TileFabApp(): React.ReactElement {
 				if (guidedBuildExperienceActive) {
 					const targetId = appRootRef.current?.dataset.guidedPrimaryTarget;
 					const target = targetId
-						? appRootRef.current?.querySelector<HTMLElement>(
-								`[data-guided-action-id="${targetId}"]`,
-							)
+						? appRootRef.current?.querySelector<HTMLElement>(`[data-guided-action-id="${targetId}"]`)
 						: null;
 					(target ?? canvasRef.current)?.focus({ preventScroll: true });
 					return;
@@ -20376,116 +20426,199 @@ export default function TileFabApp(): React.ReactElement {
 		setProjectMenuOpen(false);
 		restoreSaveFocus();
 		try {
-			setStatus("OpenFab 프로젝트 파일을 준비합니다");
+			const session = projectSessionRef.current;
 			const model = editorModelRef.current;
-			const manifest = updateOpenFabProjectManifest(projectSession.manifest, projectIdentity.now());
-			const view = captureProjectView(
-				canvasRef.current,
-				rendererRef.current,
-				cameraRef.current,
-				railPresentationModeRef.current,
-			);
 			const mirror = workerBridgeRef.current;
 			if (!mirror) throw new Error("프로젝트 저장을 위한 레일 동기화를 기다립니다");
-			const capture = await captureOpenFabProjectSnapshot(
+			const context = {
+				manifest: session.manifest,
+				blueprints: projectBlueprintsRef.current,
+				blueprintGeneration: projectBlueprintGenerationRef.current,
+				projectGeneration: projectGenerationRef.current,
+			};
+			const source = captureOpenFabProjectSaveSource(
 				model.document,
 				mirror,
-				controller.signal,
+				context,
+				() => ({
+					manifest: projectSessionRef.current.manifest,
+					blueprints: projectBlueprintsRef.current,
+					blueprintGeneration: projectBlueprintGenerationRef.current,
+					projectGeneration: projectGenerationRef.current,
+				}),
 				() =>
-					projectOperationControllerRef.current === controller &&
 					editorModelRef.current.document === model.document &&
 					workerBridgeDocumentRef.current === model.document &&
 					workerBridgeRef.current === mirror &&
 					!modelSyncPendingRef.current,
 			);
-			capture.assertCurrent();
-			const savedOperationalConfigurationFingerprint = checksumOperationalConfigurationState(
-				capture.operations,
-			);
-			const serialized = await projectSerializer.serialize(
-				capture.snapshot,
-				manifest,
-				view,
-				projectBlueprints,
-				capture.operations,
-			);
-			capture.assertCurrent();
-			setStatus("OpenFab 프로젝트 파일을 저장합니다");
-			let reference = forceSaveAs ? null : projectSession.fileReference;
-			let written = false;
-			if (reference) {
-				written = await projectPersistence.write(reference, serialized.json, controller.signal);
-			}
-			if (!written) {
-				reference = await projectPersistence.chooseSave(
-					manifest.name,
-					serialized.json,
-					controller.signal,
-				);
-				if (!reference) {
+			const ownsOperation = (): boolean => projectOperationControllerRef.current === controller;
+			const assertCurrent = (): void => {
+				if (
+					!ownsOperation() ||
+					controller.signal.aborted ||
+					!source.isCurrent() ||
+					!source.isMirrorCurrent()
+				)
+					throw new RailStartupCancelledError();
+			};
+			const transaction = await saveOpenFabProject({
+				// No asynchronous work precedes the picker or permission request on this click stack.
+				acquireWrite: () =>
+					projectPersistence.acquireWrite(
+						forceSaveAs ? null : session.fileReference,
+						session.manifest.name,
+						controller.signal,
+					),
+				assertCurrent,
+				prepare: async () => {
+					setStatus("OpenFab 프로젝트 파일을 준비합니다");
+					const manifest = updateOpenFabProjectManifest(context.manifest, projectIdentity.now());
+					const view = captureProjectView(
+						canvasRef.current,
+						rendererRef.current,
+						cameraRef.current,
+						railPresentationModeRef.current,
+					);
+					const capture = await captureOpenFabProjectSnapshot(
+						model.document,
+						mirror,
+						controller.signal,
+						() => ownsOperation() && source.isCurrent(),
+					);
+					capture.assertCurrent();
+					const savedOperationalConfigurationFingerprint = checksumOperationalConfigurationState(
+						capture.operations,
+					);
+					const serialized = await projectSerializer.serialize(
+						capture.snapshot,
+						manifest,
+						view,
+						context.blueprints,
+						capture.operations,
+					);
+					capture.assertCurrent();
+					setStatus("OpenFab 프로젝트 파일을 저장합니다");
+					return {
+						json: serialized.json,
+						serialized,
+						manifest,
+						savedOperationalConfigurationFingerprint,
+					};
+				},
+			});
+			if (transaction.status === "cancelled") {
+				if (ownsOperation()) {
 					setProjectOperation("idle");
 					setStatus(describeOpenFabProjectSaveCancellation("direct"));
-					return "cancelled";
 				}
+				return { status: "cancelled" };
 			}
-			if (!reference) throw new Error("저장할 프로젝트 파일이 선택되지 않았습니다");
-			setProjectSession({
-				manifest,
-				fileReference: reference,
-				savedChecksum: serialized.authoredChecksum,
-				savedOperationalConfigurationFingerprint,
-				operation: "saving",
-				migrated: false,
-				needsSave: false,
-			});
-			setGuidedBuildProjectReopenExpectation(
-				Object.freeze({
-					projectId: manifest.id,
-					authoredChecksum: serialized.authoredChecksum,
-					sequence: ++guidedBuildProjectFileSequenceRef.current,
-				}),
-			);
-			setStatus("최근 프로젝트 정보를 갱신합니다");
-			const recent: OpenFabRecentProject = {
-				projectId: manifest.id,
-				name: manifest.name,
-				updatedAt: manifest.updatedAt,
-				authoredChecksum: serialized.authoredChecksum,
+			const {
 				reference,
+				prepared: { manifest, serialized, savedOperationalConfigurationFingerprint },
+			} = transaction;
+			const isSavedSourceCurrent = (): boolean => source.isCurrent() && !controller.signal.aborted;
+			const publishSavedSession = (): void => {
+				if (!ownsOperation() || !source.isProjectCurrent()) return;
+				const clean = isSavedSourceCurrent();
+				setProjectSession({
+					manifest,
+					fileReference: reference,
+					savedChecksum: serialized.authoredChecksum,
+					savedOperationalConfigurationFingerprint,
+					operation: "saving",
+					migrated: false,
+					needsSave: !clean,
+				});
+				if (clean)
+					setGuidedBuildProjectReopenExpectation(
+						Object.freeze({
+							projectId: manifest.id,
+							authoredChecksum: serialized.authoredChecksum,
+							sequence: ++guidedBuildProjectFileSequenceRef.current,
+						}),
+					);
 			};
+			// A successful close is a real written receipt, even if the source changed during close.
+			publishSavedSession();
 			let metadataWarning = false;
 			try {
-				await projectPersistence.putRecent(recent);
-				setRecentProjects(await projectPersistence.listRecent());
+				await awaitOpenFabProjectSaveMetadata(
+					() => projectPersistence.putRecent(
+						{
+							projectId: manifest.id,
+							name: manifest.name,
+							updatedAt: manifest.updatedAt,
+							authoredChecksum: serialized.authoredChecksum,
+							reference,
+						},
+						{
+							signal: controller.signal,
+							isCurrent: () => ownsOperation() && source.isProjectCurrent(),
+						},
+					),
+					controller.signal,
+				);
+				const recent = await awaitOpenFabProjectSaveMetadata(
+					() => projectPersistence.listRecent(),
+					controller.signal,
+				);
+				if (ownsOperation() && source.isProjectCurrent()) setRecentProjects(recent);
 			} catch {
 				metadataWarning = true;
 			}
-			if (editorModelRef.current.authoredChecksum === serialized.authoredChecksum) {
+			if (ownsOperation() && isSavedSourceCurrent()) {
 				try {
-					await projectPersistence.removeRecovery(manifest.id);
-					setRecoveryInventory((current) =>
-						withoutRecoveryProject(current, manifest.id),
+					const removed = await awaitOpenFabProjectSaveMetadata(
+						() => projectPersistence.removeRecoveryAfterSave(manifest.id, {
+							signal: controller.signal,
+							isCurrent: () => ownsOperation() && isSavedSourceCurrent(),
+						}),
+						controller.signal,
 					);
-					if (projectSession.manifest.id === manifest.id) {
-						setProtectedRecoveryProjectId((current) =>
-							current === manifest.id ? null : current,
+					if (removed === "removed" && ownsOperation() && isSavedSourceCurrent()) {
+						setRecoveryInventory((current) => withoutRecoveryProject(current, manifest.id));
+						setProtectedRecoveryProjectId((current) => (current === manifest.id ? null : current));
+						await awaitOpenFabProjectSaveMetadata(
+							() => refreshRecoveryInventory(
+								recoveryInventory.offset,
+								() => ownsOperation() && isSavedSourceCurrent(),
+							),
+							controller.signal,
 						);
 					}
-					await refreshRecoveryInventory(recoveryInventory.offset);
 				} catch {
 					metadataWarning = true;
 				}
 			}
-			setStatus(
-				`${reference.name} 저장 완료 · ${(serialized.characterCount / 1024).toFixed(1)} KiB${metadataWarning ? " · 로컬 최근/복구 기록 경고" : ""}`,
-			);
-			setProjectOperation("idle");
-			return "saved";
-		} catch (error) {
-			if (projectOperationControllerRef.current === controller) {
-				finishFailedProjectOperation(error);
+			const current = ownsOperation() && isSavedSourceCurrent();
+			if (ownsOperation() && source.isProjectCurrent()) {
+				if (!current) setProjectSession((latest) => ({ ...latest, needsSave: true }));
+				setProjectOperation("idle");
+				setStatus(
+					current
+						? `${reference.name} 저장 완료 · ${(serialized.characterCount / 1024).toFixed(1)} KiB${metadataWarning ? " · 로컬 최근/복구 기록 경고" : ""}`
+						: `${reference.name} 파일 쓰기 완료 · 현재 변경 사항은 다시 저장하세요 · 프로젝트 전환을 유지합니다`,
+				);
 			}
-			return "failed";
+			return current
+				? {
+						status: "saved",
+						isCurrent: () =>
+							isSavedSourceCurrent() &&
+							projectOperationControllerRef.current === null &&
+							projectSessionRef.current.operation === "idle",
+					}
+				: {
+						status: "saved-stale",
+						canReuseDestination: ownsOperation() && source.isProjectCurrent(),
+					};
+		} catch (error) {
+			if (projectOperationControllerRef.current === controller) finishFailedProjectOperation(error);
+			return {
+				status: error instanceof OpenFabProjectSaveAsRequiredError ? "save-as-required" : "failed",
+			};
 		} finally {
 			if (projectOperationControllerRef.current === controller) {
 				projectOperationControllerRef.current = null;
@@ -20495,7 +20628,6 @@ export default function TileFabApp(): React.ReactElement {
 			}
 		}
 	};
-
 	const runProjectAction = async (action: PendingProjectAction): Promise<void> => {
 		if (action.kind === "new-profile-fab") {
 			await handleNewOpenFabFabProject(action.binding);
@@ -20561,6 +20693,8 @@ export default function TileFabApp(): React.ReactElement {
 
 	const requestProjectAction = (action: PendingProjectAction): void => {
 		setProjectMenuOpen(false);
+  setProjectGuardSavedOpen(null);
+  setProjectGuardSaveAsRequired(false);
 		if (modelSyncPendingRef.current) {
 			setStatus("현재 프로젝트 동기화가 끝난 뒤 프로젝트를 교체하세요");
 			if (action.kind === "new-profile-fab") {
@@ -20622,24 +20756,50 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handleSaveAndContinue = async (): Promise<void> => {
-		const action = pendingProjectAction;
+		const action = pendingProjectActionRef.current;
 		if (!action) return;
-		const outcome = await handleSaveProject(false, "project-guard");
-		if (outcome !== "saved") {
-			if (outcome === "cancelled") {
-				setStatus(describeOpenFabProjectSaveCancellation("pending-transition"));
+		if (projectGuardSavedOpen?.action === action) {
+			if (!projectGuardSavedOpen.receipt.isCurrent()) {
+				setProjectGuardSavedOpen(null);
+				setStatus("저장 후 프로젝트가 바뀌었습니다 · 현재 변경 사항을 다시 저장하세요");
+				return;
 			}
-			requestAnimationFrame(() =>
-				projectGuardSaveRef.current?.focus({ preventScroll: true }),
-			);
+			// The native Open chooser starts on this new Continue click, without another save.
+			const opened = await handleOpenProject();
+			if (pendingProjectActionRef.current !== action) return;
+			if (opened === "opened") {
+				pendingProjectActionReturnFocusRef.current = null;
+				setProjectGuardSavedOpen(null);
+				setPendingProjectAction(null);
+			} else requestAnimationFrame(() => projectGuardSaveRef.current?.focus({ preventScroll: true }));
+			return;
+		}
+		const outcome = await handleSaveProject(projectGuardSaveAsRequired, "project-guard");
+		if (pendingProjectActionRef.current !== action) return;
+		const continuation = planOpenFabProjectSaveContinuation(action.kind, outcome);
+		if (outcome.status === "saved-stale" && outcome.canReuseDestination)
+			setProjectGuardSaveAsRequired(false);
+		if (continuation === "save-as") setProjectGuardSaveAsRequired(true);
+		if (continuation === "retry" || continuation === "save-as") {
+			if (outcome.status === "cancelled")
+				setStatus(describeOpenFabProjectSaveCancellation("pending-transition"));
+			requestAnimationFrame(() => projectGuardSaveRef.current?.focus({ preventScroll: true }));
+			return;
+		}
+		setProjectGuardSaveAsRequired(false);
+		if (continuation === "open-confirmation" && outcome.status === "saved") {
+			setProjectGuardSavedOpen(Object.freeze({ action, receipt: outcome }));
+			setStatus("현재 프로젝트를 저장했습니다 · 계속 열기를 눌러 다른 프로젝트를 선택하세요");
+			requestAnimationFrame(() => projectGuardSaveRef.current?.focus({ preventScroll: true }));
 			return;
 		}
 		pendingProjectActionReturnFocusRef.current = null;
 		setPendingProjectAction(null);
 		await executeProjectAction(action);
 	};
-
 	const handleDiscardAndContinue = async (): Promise<void> => {
+  setProjectGuardSavedOpen(null);
+  setProjectGuardSaveAsRequired(false);
 		const action = pendingProjectAction;
 		if (!action) return;
 		const discardedProjectId = projectSession.manifest.id;
@@ -20668,6 +20828,8 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handleCancelPendingProjectAction = (): void => {
+  setProjectGuardSavedOpen(null);
+  setProjectGuardSaveAsRequired(false);
 		const action = pendingProjectAction;
 		const restoreGuidedPracticeTrigger =
 			action?.kind === "new" && action.guidedPracticeGraduation
@@ -33894,7 +34056,7 @@ export default function TileFabApp(): React.ReactElement {
 								</span>
 								<div className="tilefab-blueprint-save-destination-options">
 									<strong id="tilefab-project-guard-title">
-										{pendingRecoveryProject
+										{projectGuardSavedOpen ? "저장 완료 · 다른 프로젝트 열기" : pendingRecoveryProject
 											? "현재 프로젝트를 저장한 뒤 복구할까요?"
 											: pendingGuidedPracticeTransition
 												? pendingGuidedPracticeTransition.title
@@ -33911,14 +34073,14 @@ export default function TileFabApp(): React.ReactElement {
 							</header>
 							<div className="tilefab-project-guard-operation" aria-busy={projectBusy}>
 								<p id="tilefab-project-guard-description">
-									{pendingRecoveryProject
+									{projectGuardSavedOpen ? "현재 프로젝트 파일을 저장했습니다. 계속 열기를 눌러 다른 파일을 선택하세요. 선택을 취소하면 이 프로젝트와 열기 선택을 유지합니다." : pendingRecoveryProject
 										? `복구하면 현재 '${projectSession.manifest.name}' 프로젝트를 '${pendingRecoveryProject.name}' 복구본으로 교체합니다. 현재 편집 내용을 먼저 저장할 수 있습니다.`
 										: pendingGuidedPracticeTransition
 											? pendingGuidedPracticeTransition.explanation
 											: "현재 레일 편집 내용을 저장한 뒤 프로젝트를 전환하시겠습니까?"}
 								</p>
 								<span className="tilefab-project-guard-progress" aria-hidden="true">
-									{projectBusy ? "프로젝트 파일을 저장하고 있습니다…" : ""}
+									{projectBusy ? projectSession.operation === "opening" ? "프로젝트 파일을 열고 있습니다…" : "프로젝트 파일을 저장하고 있습니다…" : ""}
 								</span>
 								<footer>
 									<button
@@ -33929,7 +34091,7 @@ export default function TileFabApp(): React.ReactElement {
 									>
 										<X size={14} /> 취소
 									</button>
-									<button
+									{!projectGuardSavedOpen ? <button
 										type="button"
 										className="tilefab-project-guard-discard"
 										disabled={projectBusy}
@@ -33941,7 +34103,7 @@ export default function TileFabApp(): React.ReactElement {
 											: pendingGuidedPracticeTransition
 												? pendingGuidedPracticeTransition.discardLabel
 												: "저장하지 않고 계속"}
-									</button>
+									</button> : null}
 									<button
 										type="button"
 										ref={projectGuardSaveRef}
@@ -33950,7 +34112,7 @@ export default function TileFabApp(): React.ReactElement {
 										onClick={() => void handleSaveAndContinue()}
 									>
 										<Save size={14} />{" "}
-										{pendingRecoveryProject
+										{projectGuardSavedOpen ? "계속 열기" : projectGuardSaveAsRequired ? "다른 이름으로 저장 후 계속" : pendingRecoveryProject
 											? "현재 프로젝트 저장 후 복구"
 											: pendingGuidedPracticeTransition
 												? pendingGuidedPracticeTransition.saveLabel
@@ -33964,7 +34126,7 @@ export default function TileFabApp(): React.ReactElement {
 								aria-live="polite"
 								aria-atomic="true"
 							>
-								{projectBusy ? "프로젝트 파일을 저장하고 있습니다…" : ""}
+								{projectBusy ? projectSession.operation === "opening" ? "프로젝트 파일을 열고 있습니다…" : "프로젝트 파일을 저장하고 있습니다…" : ""}
 							</span>
 						</section>
 					</div>

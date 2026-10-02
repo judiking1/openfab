@@ -26,6 +26,7 @@ const result = {
 	selectionShortcuts: [],
 	compactSave: [],
 	projectHeaderWidths: [],
+	nativeSaveContinuations: [],
 };
 
 try {
@@ -161,6 +162,13 @@ try {
 	]) {
 		result.compactSave.push(await exerciseCompactDirectSave(browser, viewport));
 	}
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 760, height: 900 },
+		{ width: 1440, height: 900 },
+	]) {
+		result.nativeSaveContinuations.push(await exerciseNativeSaveContinuation(browser, viewport));
+	}
 	result.status = "PASS";
 	console.log(
 		`PASS project save cancellation | ${result.pickerCalls} cancelled pickers | compact direct Save at 390/760px`,
@@ -188,19 +196,328 @@ async function chooseBlankCanvasForFirstRun(activePage) {
 	await dialog.waitFor({ state: "hidden" });
 }
 
-async function buildFiveMeterRail(activePage) {
+async function buildFiveMeterRail(activePage, verticalOffset = 0, expectedPaths = 5) {
 	const canvas = activePage.getByTestId("rail-canvas");
 	const bounds = await canvas.boundingBox();
 	if (!bounds) throw new Error("Rail canvas has no visible bounds.");
 	const start = {
 		x: bounds.x + (bounds.width <= 450 ? Math.max(190, bounds.width * 0.53) : bounds.width * 0.38),
-		y: bounds.y + bounds.height * 0.45,
+		y: bounds.y + bounds.height * 0.45 + verticalOffset,
 	};
 	await activePage.mouse.move(start.x, start.y);
 	await activePage.mouse.down();
 	await activePage.mouse.move(start.x + 4 * 38, start.y, { steps: 8 });
 	await activePage.mouse.up();
-	await waitForReady(activePage, 5);
+	await waitForReady(activePage, expectedPaths);
+}
+
+async function exerciseNativeSaveContinuation(activeBrowser, viewport) {
+	const label = `${viewport.width}x${viewport.height}`;
+	const context = await activeBrowser.newContext({ viewport });
+	await context.addInitScript(() => {
+		const state = {
+			trace: [],
+			saved: "",
+			saveCalls: 0,
+			openCalls: 0,
+			permission: "granted",
+			cancelSave: false,
+			openFile: false,
+			streamCalls: 0,
+			closeCalls: 0,
+		};
+		window.__openFabNativeSaveAudit = state;
+		const postMessage = Worker.prototype.postMessage;
+		Worker.prototype.postMessage = function (message, ...args) {
+			if (
+				message?.type === "CAPTURE_RAIL_SNAPSHOT" ||
+				message?.type === "SERIALIZE_OPENFAB_PROJECT"
+			)
+				state.trace.push(message.type);
+			return postMessage.call(this, message, ...args);
+		};
+		const handle = {
+			kind: "file",
+			name: "Native-continuation.openfab",
+			getFile: async () =>
+				new File([state.saved], "Native-continuation.openfab", { type: "application/json" }),
+			requestPermission: async () => {
+				state.trace.push("permission");
+				return state.permission;
+			},
+			queryPermission: async () => state.permission,
+			createWritable: async () => {
+				state.streamCalls += 1;
+				let pending = "";
+				return {
+					write: async (json) => {
+						pending = String(json);
+					},
+					close: async () => {
+						state.saved = pending;
+						state.closeCalls += 1;
+					},
+					abort: async () => {},
+				};
+			},
+		};
+		Object.defineProperty(window, "showSaveFilePicker", {
+			configurable: true,
+			value: async () => {
+				state.saveCalls += 1;
+				state.trace.push("save-picker");
+				if (!navigator.userActivation.isActive)
+					throw new DOMException("Save needs a current user click", "SecurityError");
+				if (state.cancelSave) throw new DOMException("User cancelled Save As", "AbortError");
+				return handle;
+			},
+		});
+		Object.defineProperty(window, "showOpenFilePicker", {
+			configurable: true,
+			value: async () => {
+				state.openCalls += 1;
+				state.trace.push("open-picker");
+				if (!navigator.userActivation.isActive)
+					throw new DOMException("Open needs a current user click", "SecurityError");
+				if (!state.openFile) throw new DOMException("User cancelled Open", "AbortError");
+				return [handle];
+			},
+		});
+	});
+	const activePage = await context.newPage();
+	const errors = [];
+	activePage.on("pageerror", (error) => errors.push(error.message));
+	activePage.on("console", (message) => {
+		if (message.type() === "error") errors.push(message.text());
+	});
+	try {
+		await activePage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(activePage, 0);
+		await chooseBlankCanvasForFirstRun(activePage);
+		await buildFiveMeterRail(activePage);
+		const before = await readCancellationInvariants(activePage);
+		await requestNativeGuardOpen(activePage);
+		let guard = activePage.getByRole("dialog", { name: "저장되지 않은 변경 사항", exact: true });
+		await guard.waitFor({ state: "visible" });
+		await activePage.evaluate(() => {
+			window.__openFabNativeSaveAudit.trace = [];
+		});
+		await guard.getByRole("button", { name: "저장 후 계속", exact: true }).click();
+		guard = activePage.getByRole("dialog", { name: "저장 완료 · 다른 프로젝트 열기", exact: true });
+		await guard.waitFor({ state: "visible" });
+		const firstSave = await activePage.evaluate(() => ({ ...window.__openFabNativeSaveAudit }));
+		assertEqual(firstSave.trace[0], "save-picker", `${label} native picker precedes preparation`);
+		assertEqual(
+			firstSave.trace.includes("CAPTURE_RAIL_SNAPSHOT"),
+			true,
+			`${label} saves a Worker snapshot`,
+		);
+		assertEqual(
+			firstSave.trace.includes("SERIALIZE_OPENFAB_PROJECT"),
+			true,
+			`${label} serializes after choosing`,
+		);
+		assertEqual(firstSave.saveCalls, 1, `${label} first native save chooser count`);
+		assertEqual(firstSave.openCalls, 0, `${label} does not open a chooser after asynchronous Save`);
+		assertEqual(firstSave.closeCalls, 1, `${label} commits exactly one file write`);
+		const written = JSON.parse(firstSave.saved);
+		assertEqual(
+			written.manifest.id,
+			before.projectId,
+			`${label} file contains the original project`,
+		);
+		const saved = await readCancellationInvariants(activePage);
+		assertEqual(saved.projectId, before.projectId, `${label} saving preserves source identity`);
+		assertEqual(
+			saved.modelChecksum,
+			before.modelChecksum,
+			`${label} saving preserves authored source`,
+		);
+		assertEqual(
+			saved.modelSequence,
+			before.modelSequence,
+			`${label} saving preserves authored history`,
+		);
+		assertEqual(saved.projectDirty, "false", `${label} current source is saved`);
+		assertEqual(saved.pendingProjectAction, "open", `${label} retains the Open decision`);
+		assertEqual(
+			await guard.getByRole("button", { name: "저장하지 않고 계속", exact: true }).count(),
+			0,
+			`${label} saved Open has no misleading Discard command`,
+		);
+		const continued = guard.getByRole("button", { name: "계속 열기", exact: true });
+		await assertVisibleNativeGuardAction(continued, label);
+		await activePage.screenshot({
+			path: path.join(artifactRoot, `native-save-${label}-continue.png`),
+			fullPage: true,
+		});
+		await continued.click();
+		await activePage
+			.getByText("프로젝트 열기를 취소했습니다 · 현재 프로젝트를 유지합니다", { exact: true })
+			.waitFor({ state: "visible" });
+		await continued.waitFor({ state: "visible" });
+		assertInvariantEquality(
+			await readCancellationInvariants(activePage),
+			saved,
+			`${label} native Open cancellation`,
+		);
+		const cancelled = await activePage.evaluate(() => ({ ...window.__openFabNativeSaveAudit }));
+		assertEqual(cancelled.openCalls, 1, `${label} fresh Continue starts one native Open`);
+		assertEqual(cancelled.saveCalls, 1, `${label} cancellation does not save again`);
+		assertEqual(
+			await guard.isVisible(),
+			true,
+			`${label} Open cancellation retains the saved guard`,
+		);
+		await activePage.evaluate(() => {
+			window.__openFabNativeSaveAudit.openFile = true;
+		});
+		await continued.click();
+		await guard.waitFor({ state: "hidden" });
+		await waitForReady(activePage, 5);
+		const reopened = await readCancellationInvariants(activePage);
+		assertEqual(reopened.projectId, before.projectId, `${label} opens the exact saved project`);
+		assertEqual(
+			reopened.modelChecksum,
+			before.modelChecksum,
+			`${label} native reopen restores exact authored data`,
+		);
+		assertEqual(reopened.pendingProjectAction, "", `${label} successful Open clears the guard`);
+		const finalOpen = await activePage.evaluate(() => ({ ...window.__openFabNativeSaveAudit }));
+		assertEqual(finalOpen.openCalls, 2, `${label} native Open retry count`);
+		assertEqual(finalOpen.saveCalls, 1, `${label} native Open retry does not write again`);
+
+		// Reopened projects have fresh history. Author another parallel rail before revoking permission.
+		await buildFiveMeterRail(activePage, -2 * 38, 10);
+		const dirty = await readCancellationInvariants(activePage);
+		assertEqual(dirty.projectDirty, "true", `${label} another rail creates an unsaved source`);
+		await activePage.evaluate(() => {
+			const state = window.__openFabNativeSaveAudit;
+			state.permission = "denied";
+			state.trace = [];
+		});
+		await requestNativeGuardOpen(activePage);
+		guard = activePage.getByRole("dialog", { name: "저장되지 않은 변경 사항", exact: true });
+		await guard.waitFor({ state: "visible" });
+		await guard.getByRole("button", { name: "저장 후 계속", exact: true }).click();
+		const saveAs = guard.getByRole("button", { name: "다른 이름으로 저장 후 계속", exact: true });
+		await saveAs.waitFor({ state: "visible" });
+		const denied = await activePage.evaluate(() => ({ ...window.__openFabNativeSaveAudit }));
+		assertEqual(
+			denied.trace.join(","),
+			"permission",
+			`${label} permission denial performs no snapshot/serialization/late picker`,
+		);
+		assertEqual(
+			denied.saveCalls,
+			1,
+			`${label} permission denial does not choose a replacement automatically`,
+		);
+		assertInvariantEquality(
+			await readCancellationInvariants(activePage),
+			dirty,
+			`${label} denied write authority`,
+		);
+		await assertVisibleNativeGuardAction(saveAs, label);
+		await activePage.evaluate(() => {
+			window.__openFabNativeSaveAudit.cancelSave = true;
+		});
+		await saveAs.click();
+		await activePage
+			.getByText("저장이 취소되었습니다 · 현재 프로젝트와 전환 선택을 유지합니다", { exact: true })
+			.waitFor({ state: "visible" });
+		assertEqual(await guard.isVisible(), true, `${label} Save As cancellation retains guard`);
+		assertInvariantEquality(
+			await readCancellationInvariants(activePage),
+			dirty,
+			`${label} Save As cancellation`,
+		);
+		await activePage.evaluate(() => {
+			const state = window.__openFabNativeSaveAudit;
+			state.cancelSave = false;
+			state.permission = "granted";
+		});
+		await saveAs.click();
+		guard = activePage.getByRole("dialog", { name: "저장 완료 · 다른 프로젝트 열기", exact: true });
+		await guard.waitFor({ state: "visible" });
+		const retried = await activePage.evaluate(() => ({ ...window.__openFabNativeSaveAudit }));
+		assertEqual(retried.saveCalls, 3, `${label} Save As cancel then retry uses two fresh clicks`);
+		assertEqual(retried.openCalls, 2, `${label} Save As completion does not open another chooser`);
+		assertEqual(retried.closeCalls, 2, `${label} successful Save As is the second committed write`);
+		await guard.getByRole("button", { name: "취소", exact: true }).click();
+		await guard.waitFor({ state: "hidden" });
+		assertEqual(
+			(await readCancellationInvariants(activePage)).pendingProjectAction,
+			"",
+			`${label} cancels the saved Open transition`,
+		);
+		assertEqual(errors.length, 0, `${label} browser errors: ${errors.join(" | ")}`);
+		const proof = {
+			viewport,
+			before,
+			firstTrace: firstSave.trace,
+			saved,
+			reopened,
+			deniedTrace: denied.trace,
+			saveCalls: retried.saveCalls,
+			openCalls: retried.openCalls,
+			closeCalls: retried.closeCalls,
+			errors,
+		};
+		await writeFile(
+			path.join(artifactRoot, `native-save-${label}.json`),
+			`${JSON.stringify(proof, null, 2)}\n`,
+		);
+		return proof;
+	} finally {
+		await activePage
+			.screenshot({
+				path: path.join(artifactRoot, `native-save-${label}-final.png`),
+				fullPage: true,
+			})
+			.catch(() => undefined);
+		await closeBrowserResource(context, `${label} native-save context`);
+	}
+}
+
+async function requestNativeGuardOpen(activePage) {
+	const direct = activePage.getByRole("button", { name: "프로젝트 열기", exact: true });
+	if (await direct.isVisible().catch(() => false)) return direct.click();
+	await activePage.getByRole("button", { name: /^프로젝트 메뉴 ·/ }).click();
+	await activePage
+		.locator(".tilefab-project-menu")
+		.getByRole("button", { name: "열기", exact: true })
+		.click();
+}
+
+async function assertVisibleNativeGuardAction(action, label) {
+	const proof = await action.evaluate((element) => {
+		const rect = element.getBoundingClientRect();
+		return {
+			text: element.textContent?.trim() ?? "",
+			width: rect.width,
+			height: rect.height,
+			visible:
+				rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight,
+			hittable:
+				document
+					.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+					?.closest("button") === element,
+		};
+	});
+	await writeFile(
+		path.join(
+			artifactRoot,
+			`native-save-${label}-target-${proof.text.replace(/[^a-zA-Z0-9가-힣]+/g, "-")}.json`,
+		),
+		`${JSON.stringify(proof, null, 2)}\n`,
+	);
+	assertEqual(proof.height >= 44, true, `${label} native-save guard button target size`);
+	assertEqual(
+		proof.visible && proof.hittable,
+		true,
+		`${label} native-save guard button is reachable`,
+	);
 }
 
 async function exerciseCompactDirectSave(activeBrowser, viewport) {
