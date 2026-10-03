@@ -286,6 +286,8 @@ export class StandaloneProcessLoopAuthoringController {
 			const repair = document.canReplayStaticFabProcessLoopRepair(direction);
 			if (!repair && !document.canReplayStaticFabProcessLoopRegistration(direction))
 				throw new Error("현재 Undo/Redo 대상이 Loop 편집이 아닙니다");
+			// Publish the pending UI and allow cancellation before even a small replay prepares truth.
+			await operation.checkpoint();
 			const commit = repair
 				? await document.replayStaticFabProcessLoopRepairCooperatively(
 						direction,

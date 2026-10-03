@@ -437,10 +437,68 @@
 	}
 }
 
+@media (max-width: 1024px) and (max-height: 700px) {
+	.tilefab-workspace .tilefab-guided-build-panel {
+		/* The full guide also needs a scroller between consecutive equipment tools. */
+		max-height: min(380px, calc(100% - 28px));
+		overflow: auto;
+		overscroll-behavior: contain;
+	}
+	.tilefab-app[data-guided-build-active="true"]
+		.tilefab-buildbar.tilefab-port-buildbar.tilefab-equipment-workspace[data-port-type="EQ"],
+	.tilefab-app[data-guided-build-active="true"]
+		.tilefab-buildbar.tilefab-port-buildbar.tilefab-equipment-workspace[data-port-type="STK"] {
+		/* Keep the real Port input surface between the guide and the pinned completion controls. */
+		height: min(270px, 52%);
+		max-height: min(270px, 52%);
+	}
+	.tilefab-app[data-guided-build-active="true"]
+		.tilefab-buildbar.tilefab-port-buildbar.tilefab-equipment-workspace[data-port-type="STK"] {
+		grid-template-rows: auto minmax(0, 1fr) auto;
+		align-items: stretch;
+		gap: 8px;
+		overflow: hidden;
+	}
+	.tilefab-app[data-guided-build-active="true"]
+		.tilefab-equipment-workspace[data-port-type="STK"]
+		.tilefab-equipment-scroll-content {
+		gap: 4px;
+		overflow: auto;
+		overscroll-behavior: contain;
+		scrollbar-width: thin;
+		scroll-padding-block: 6px;
+	}
+	.tilefab-app[data-guided-build-active="true"]
+		.tilefab-equipment-workspace[data-port-type="STK"]
+		.tilefab-equipment-actions {
+		position: static;
+		margin: 0 -8px -8px;
+		padding: 2px 8px;
+		border-top: 1px solid #354143;
+		background: rgb(18 24 25 / 98%);
+	}
+	.tilefab-workspace .tilefab-guided-build-panel[data-equipment-workspace="true"] {
+		/* The dock already presents the placement instruction; keep the map available for input. */
+		max-height: min(132px, max(112px, 25%));
+		overflow: auto;
+		overscroll-behavior: contain;
+	}
+	.tilefab-guided-build-panel[data-equipment-workspace="true"] .tilefab-guided-build-progress,
+	.tilefab-guided-build-panel[data-equipment-workspace="true"] .tilefab-guided-build-mission > p,
+	.tilefab-guided-build-panel[data-equipment-workspace="true"]
+		.tilefab-guided-build-mission
+		> small {
+		display: none;
+	}
+	.tilefab-guided-build-panel[data-equipment-workspace="true"] .tilefab-guided-build-mission {
+		gap: 4px;
+		padding: 4px 8px;
+	}
+}
+
 .tilefab-workspace:has(.tilefab-equipment-workspace) .tilefab-recovery[data-guided-build="true"] {
-	top: auto;
-	bottom: var(--tilefab-port-dock-clearance, 280px);
-	height: auto;
+	/* Recovery management returns after the guide; this read-only badge must not cover Ports. */
+	display: none;
 }
 @media (max-width: 760px) {
 	.tilefab-workspace:has(.tilefab-equipment-workspace) .tilefab-recovery {

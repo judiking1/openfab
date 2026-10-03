@@ -67,6 +67,62 @@ describe("standalone Loop editor command lifetime", () => {
 	it.each([
 		"registration",
 		"repair",
+	] as const)("yields before a fast %s replay and rejects cancelled or replaced preparation", async (kind) => {
+		for (const action of ["cancel", "dispose", "replace"] as const) {
+			const f = fixture(30, 20, () => 0);
+			try {
+				expect((await f.controller.register("User Loop", () => true)).commit.committed).toBe(true);
+				f.refresh();
+				if (kind === "repair") {
+					expect((await f.repair()).commit.committed).toBe(true);
+					f.refresh();
+				}
+				const sequence = f.document.getPatchSequence();
+				const source = f.document.map;
+				const organizations = f.document.organizations;
+				const events = f.events.length;
+				const replacement: { promise: Promise<StandaloneProcessLoopAuthoringResult> | null } = {
+					promise: null,
+				};
+				let checkpoints = 0;
+				f.setCheckpointHook(() => {
+					checkpoints++;
+					f.setCheckpointHook(() => undefined);
+					expect(f.controller.busy).toBe(true);
+					expect(f.document.map).toBe(source);
+					expect(f.document.organizations).toBe(organizations);
+					expect(f.document.getPatchSequence()).toBe(sequence);
+					expect(f.events).toHaveLength(events);
+					if (action === "dispose") f.controller.dispose();
+					else f.controller.cancel();
+					if (action === "replace") replacement.promise = f.controller.replay("undo", () => true);
+				});
+				await expect(f.controller.replay("undo", () => true)).rejects.toThrow();
+				expect(checkpoints).toBe(1);
+				if (replacement.promise) {
+					expect((await replacement.promise).commit.committed).toBe(true);
+					expect(f.document.getPatchSequence()).toBe(sequence + 1);
+					expect(f.events).toHaveLength(events + 1);
+				} else {
+					expect(f.document.map).toBe(source);
+					expect(f.document.organizations).toBe(organizations);
+					expect(f.document.getPatchSequence()).toBe(sequence);
+					expect(f.events).toHaveLength(events);
+					expect(
+						kind === "repair"
+							? f.document.canReplayStaticFabProcessLoopRepair("undo")
+							: f.document.canReplayStaticFabProcessLoopRegistration("undo"),
+					).toBe(true);
+				}
+			} finally {
+				f.controller.dispose();
+			}
+		}
+	});
+
+	it.each([
+		"registration",
+		"repair",
 	] as const)("refuses cancel, dispose and replacement during the final %s replay lease", async (kind) => {
 		for (const action of ["cancel", "dispose", "replace"] as const) {
 			const f = fixture();
@@ -278,7 +334,7 @@ class InlineTopology implements StaticFabProcessLoopTopologyWorkerPort {
 	}
 }
 
-function fixture(width = 30, height = 20) {
+function fixture(width = 30, height = 20, now?: () => number) {
 	const map = new TileMap();
 	const corners = [
 		{ x: 0, y: 0 },
@@ -395,7 +451,7 @@ function fixture(width = 30, height = 20) {
 		createCheckpoint: () => async () => {
 			checkpointHook?.();
 		},
-		now: () => (time += 5),
+		now: now ?? (() => (time += 5)),
 		topology: new StaticFabProcessLoopTopologyBridge(() => new InlineTopology()),
 	});
 	return {

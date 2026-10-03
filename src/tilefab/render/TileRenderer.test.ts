@@ -1100,6 +1100,111 @@ describe("port slot rendering", () => {
 		expect(renderer.getGuidedCanvasActionMarkers()).toHaveLength(portType === "EQ" ? 2 : 1);
 	});
 
+	it.each([
+		"OHB",
+		"EQ",
+	] as const)("keeps the current %s guide row through camera handoff without a fallback target", (portType) => {
+		const document = new RailDocument();
+		for (const [from, to] of [
+			[
+				{ x: 0, y: 0 },
+				{ x: 18, y: 0 },
+			],
+			[
+				{ x: 18, y: 0 },
+				{ x: 18, y: 18 },
+			],
+			[
+				{ x: 18, y: 18 },
+				{ x: 0, y: 18 },
+			],
+			[
+				{ x: 0, y: 18 },
+				{ x: 0, y: 0 },
+			],
+		] as const)
+			expect(document.commit(planRailConstruction(document.map, from, to))).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const prepared = compilePortSlotPreparedArtifacts(physical, portType);
+		const renderer = new TileRenderer();
+		const context = createRecordingContext().context;
+		const input: Parameters<TileRenderer["render"]>[2] = {
+			map: document.map,
+			physicalPaths: physical.paths,
+			portSlots: prepared.slots,
+			portSlotSpatialIndex: prepared.spatialIndex,
+			portSlotAvailability: createPreparedPortSlotAvailabilityIndex(
+				physical,
+				prepared,
+				document.portEquipment,
+			),
+			showPortSlots: true,
+			interactionFocus: "ports",
+			ghost: null,
+			camera: { offsetX: 100, offsetY: 180, zoom: 18, rotation: 0 },
+			width: 900,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		};
+		const guidance = {
+			label: portType,
+			instruction: "표시된 슬롯 선택",
+			gesture: portType === "EQ" ? ("row" as const) : ("single" as const),
+			recommendedPortCount: 3,
+		};
+		const sequence = document.getPatchSequence();
+		renderer.render(context, context, { ...input, guidedPortPlacement: guidance });
+		const firstRow = renderer.getGuidedCanvasActionMarkers()[0]?.portSlotRow;
+		expect(firstRow).toBeDefined();
+		const moved = { ...input, camera: { ...input.camera, offsetX: 350 } };
+		renderer.render(context, context, { ...moved, guidedPortPlacement: guidance });
+		const otherRow = renderer.getGuidedCanvasActionMarkers()[0]?.portSlotRow;
+		expect(otherRow).toBeDefined();
+		expect(otherRow).not.toBe(firstRow);
+		renderer.render(context, context, {
+			...moved,
+			guidedPortPlacement: { ...guidance, fixedStartRow: firstRow },
+		});
+		const fixed = renderer.getGuidedCanvasActionMarkers();
+		expect(fixed[0]?.portSlotRow).toBe(firstRow);
+		if (portType === "EQ") {
+			const start = fixed[0]?.portSlotRow as number;
+			const end = fixed[1]?.portSlotRow as number;
+			expect(fixed).toHaveLength(2);
+			expect(prepared.slots.routeFromDirections[end]).toBe(
+				prepared.slots.routeFromDirections[start],
+			);
+			expect(prepared.slots.routeToDirections[end]).toBe(prepared.slots.routeToDirections[start]);
+			expect(prepared.slots.sides[end]).toBe(prepared.slots.sides[start]);
+			expect(
+				Math.abs(
+					(prepared.slots.routeXs[end] as number) - (prepared.slots.routeXs[start] as number),
+				) +
+					Math.abs(
+						(prepared.slots.routeZs[end] as number) - (prepared.slots.routeZs[start] as number),
+					),
+			).toBe(2);
+		}
+		// A cursor replacement must invalidate cached paint even with an unchanged camera/source.
+		renderer.render(context, context, {
+			...moved,
+			guidedPortPlacement: { ...guidance, fixedStartRow: otherRow },
+		});
+		expect(renderer.getGuidedCanvasActionMarkers()[0]?.portSlotRow).toBe(otherRow);
+		for (const obstruction of [{ reservedTopPixels: 640 }, { scopeIncludesRow: () => false }]) {
+			renderer.render(context, context, {
+				...moved,
+				guidedPortPlacement: { ...guidance, fixedStartRow: firstRow, ...obstruction },
+			});
+			expect(renderer.getGuidedCanvasActionMarkers()).toHaveLength(0);
+		}
+		expect(document.getPatchSequence()).toBe(sequence);
+	});
+
 	it("projects a visible three-slot Guided EQ drag span with start and end markers", () => {
 		const document = new RailDocument();
 		expect(

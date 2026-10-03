@@ -404,6 +404,8 @@ export interface TileRenderInput {
 		readonly reservedBottomPixels?: number;
 		readonly gesture?: "single" | "row";
 		readonly recommendedPortCount?: number;
+		/** The adapter's current source-bound OHB cursor or EQ start; camera motion cannot replace it. */
+		readonly fixedStartRow?: number;
 		readonly acceptsRow?: (row: number) => boolean;
 		/** Cheap authored scope filter, also applied to every EQ row candidate. */
 		readonly scopeIncludesRow?: (row: number) => boolean;
@@ -1474,6 +1476,7 @@ export class TileRenderer {
 			String(input.guidedPortPlacement?.reservedBottomPixels ?? 0),
 			input.guidedPortPlacement?.gesture ?? "single",
 			String(input.guidedPortPlacement?.recommendedPortCount ?? 1),
+			String(input.guidedPortPlacement?.fixedStartRow ?? "unbound"),
 			input.guidedRailSelection?.label ?? "no-rail-guide",
 			input.guidedRailSelection?.instruction ?? "",
 			String(input.guidedRailSelection?.reservedLeftPixels ?? 0),
@@ -1952,6 +1955,9 @@ export class TileRenderer {
 			);
 		});
 		if (guidance.gesture !== "row") {
+			if (guidance.fixedStartRow !== undefined) {
+				return candidates.includes(guidance.fixedStartRow) ? [guidance.fixedStartRow] : [];
+			}
 			if (guidance.acceptsRow) {
 				const distance = (row: number): number => {
 					const port = this.portSlotScreenPoint(input, slots, row);
@@ -2005,6 +2011,7 @@ export class TileRenderer {
 			});
 			for (let start = 0; start + targetCount <= straightRows.length; start++) {
 				const rows = straightRows.slice(start, start + targetCount);
+				if (guidance.fixedStartRow !== undefined && rows[0] !== guidance.fixedStartRow) continue;
 				let consecutive = true;
 				for (let index = 1; index < rows.length; index++) {
 					const previous = rows[index - 1] as number;

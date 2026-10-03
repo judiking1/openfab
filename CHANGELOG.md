@@ -6,6 +6,26 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-10-03
+
+Prepared as the 0.1.40 release candidate. Full local and exact public verification remain
+separate from this version entry.
+
+- Keep Guided OHB/EQ targets bound to the current Port source through camera movement.
+  Start each new equipment guide at a usable Port scale and reserve the actual visible panels.
+- Leave a real map input area above short-screen Guided EQ and Stocker docks while keeping Stocker
+  completion controls outside the scrolling content. Label the EQ recommendation separately
+  from a keyboard-selected endpoint and provide current-Port zoom recovery in every guide.
+  Recover recommendations explicitly after panning, preserving selected Stocker Ports.
+- Keep equipment Help readable and scrollable on short landscape screens, and leave
+  selected Ports clear of the recovery reminder during the equipment guide.
+- Block Checks repair/navigation, project replacement and saving before they change UI state
+  while cooperative Loop or editing-history work is pending. Preserve existing explicit
+  Connector/Arrangement project-transition cancellation.
+- Publish a cancellable pending turn before even a small Loop Undo/Redo prepares its
+  source, while preserving one atomic history command and one typed Worker patch.
+- Correct assembly gateway instructions to the existing twelve-metre minimum.
+
 ## [0.1.39] - 2026-10-03
 
 Prepared as the 0.1.39 release candidate. Deployment is verified separately through exact-source

@@ -414,6 +414,7 @@ import type { StaticFabArrangementPlan } from "../core/StaticFabArrangementPlan"
 import {
 	discoverStaticFabAssemblyGateways,
 	discoverStaticFabOuterCirculationGateways,
+	STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS,
 	type StaticFabAssemblyConnectorHierarchyRole,
 	type StaticFabAssemblyConnectorPlan,
 	type StaticFabAssemblyGatewayCandidate,
@@ -6860,9 +6861,19 @@ export default function TileFabApp(): React.ReactElement {
 		setContextPalette(next);
 	};
 	const closeContextPalette = (): void => updateContextPalette(null);
+	const blockPendingLoopOrHistoryCommand = (): boolean => {
+		const reason = processLoopOperationRef.current
+			? "작업 루프 준비를 기다리거나 Esc로 취소하세요"
+			: staticFabMutationHistoryRef.current
+				? "편집 이력 처리를 기다리거나 Esc로 취소하세요"
+				: null;
+		if (!reason) return false;
+		setStatus(reason);
+		scheduleRender();
+		return true;
+	};
 	const blockStaticFabExclusiveCommand = (): boolean => {
-		if (processLoopOperationRef.current) { setStatus("작업 루프 준비를 기다리거나 Esc로 취소하세요"); return true; }
-		if (staticFabMutationHistoryRef.current) { setStatus("편집 이력 처리를 기다리거나 Esc로 취소하세요"); return true; }
+		if (blockPendingLoopOrHistoryCommand()) return true;
 		if (operationalConfigurationOpen) {
 			setStatus("운영 설정 편집기를 적용하거나 되돌린 뒤 닫으세요");
 			scheduleRender();
@@ -11092,6 +11103,7 @@ export default function TileFabApp(): React.ReactElement {
 		const current = guidedPortKeyboardSessionRef.current;
 		if (
 			current &&
+			current.scope === "guided" &&
 			current.portType === portType &&
 			guidedPortKeyboardSessionIsCurrent(current, binding)
 		) {
@@ -11099,7 +11111,24 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const session = createGuidedPortKeyboardSession(portType, row, binding);
 		presentGuidedPortKeyboardSession(session);
-		requestAnimationFrame(() => equipmentWorkspaceFrameRef.current());
+		requestAnimationFrame(() => {
+			const canvas = canvasRef.current;
+			if (!canvas || guidedPortKeyboardSessionRef.current !== session ||
+				!guidedPortKeyboardSessionCurrent(session) ||
+				projectOperationControllerRef.current !== null ||
+				projectSessionRef.current.operation !== "idle" || editorViewModeRef.current !== "2d") return;
+			// A whole-FAB overview cannot distinguish adjacent one-metre Port targets.
+			cameraRef.current.zoom = Math.max(cameraRef.current.zoom, INITIAL_ZOOM);
+			centerCameraOnWorldPoint(
+				session.binding.slots.worldPositions[row * 2] as number,
+				session.binding.slots.worldPositions[row * 2 + 1] as number,
+				canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas),
+			);
+			cameraFitScopeRef.current = null;
+			cameraReadyRef.current = true;
+			rendererRef.current.invalidateStatic();
+			scheduleRender();
+		});
 		setStatus(`키보드 ${portType} · 방향키 또는 WASD로 슬롯 이동 · Enter로 선택`);
 		if (guidedPortKeyboardFocusRequestRef.current === portType) {
 			guidedPortKeyboardFocusRequestRef.current = null;
@@ -13301,7 +13330,14 @@ export default function TileFabApp(): React.ReactElement {
 					: undefined;
 			if (!stkCandidateFilter) stkCandidateFilterRef.current.clear();
 			const railCoachInsets = guidedBuildRailSelectionCoach ? fitMapInsets(canvas) : null;
-			const portCoachInsets = guidedBuildPortPlacementCoach?.scopeIncludesRow ? fitMapInsets(canvas) : null;
+			const portCoachInsets = guidedBuildPortPlacementCoach ? fitMapInsets(canvas) : null;
+			const portCoachSession = guidedPortKeyboardSessionRef.current;
+			const portCoachFixedStartRow = guidedBuildPortPlacementCoach &&
+				portCoachSession?.scope === "guided" && portCoachSession.portType !== "STK" &&
+				portCoachSession.binding.slots === portSlotArtifactsRef.current?.slots &&
+				guidedPortKeyboardSessionCurrent(portCoachSession)
+					? portCoachSession.anchorRow ?? portCoachSession.currentRow
+					: undefined;
 			const ordinaryPortScopeHasNoSlots =
 				(toolRef.current === "ohb" || toolRef.current === "eq" || toolRef.current === "stk") &&
 				!guidedBuildExperienceActive &&
@@ -13325,6 +13361,8 @@ export default function TileFabApp(): React.ReactElement {
 					: null,
 				guidedPortPlacement: guidedBuildPortPlacementCoach
 					? { ...guidedBuildPortPlacementCoach, acceptsRow: stkCandidateFilter,
+						fixedStartRow: portCoachFixedStartRow,
+						reservedLeftPixels: Math.max(guidedBuildPortPlacementCoach.reservedLeftPixels, portCoachInsets?.left ?? 0),
 						reservedRightPixels: portCoachInsets?.right,
 						reservedTopPixels: portCoachInsets?.top,
 						reservedBottomPixels: portCoachInsets?.bottom }
@@ -16025,10 +16063,10 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			presentLaunchStatus(
 				purpose === "FAB_LOOP"
-					? "두 Bank의 하위 Bay에서 8 m 이상의 외곽 gateway가 필요합니다"
+					? `두 Bank의 하위 Bay에서 ${STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS} m 이상의 외곽 gateway가 필요합니다`
 					: hierarchyRole === "BANK_TO_FAB"
-					? "두 Bank 모두에서 8 m 이상의 직접 소유 Interbay gateway가 필요합니다"
-					: "두 Bay 모두에서 8 m 이상의 단방향 외곽 직선 gateway가 필요합니다",
+					? `두 Bank 모두에서 ${STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS} m 이상의 직접 소유 Interbay gateway가 필요합니다`
+					: `두 Bay 모두에서 ${STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS} m 이상의 단방향 외곽 직선 gateway가 필요합니다`,
 			);
 			return;
 		}
@@ -19641,6 +19679,24 @@ export default function TileFabApp(): React.ReactElement {
 		scheduleRender();
 		restoreCanvasFocusAfterAction();
 	};
+	const reframeGuidedPortRecommendations = (): void => {
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = guidedBuildInputBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		if (!guidedBuildPortPlacementCoach) return;
+		const session = guidedPortKeyboardSessionRef.current;
+		if (session && session.scope !== "guided") return;
+		guidedPortKeyboardResumeRef.current = null;
+		guidedPortKeyboardFocusRequestRef.current = portTypeForTool(toolRef.current);
+		clearGuidedPortKeyboardAccessibility();
+		guidedPortKeyboardSessionRef.current = null;
+		setGuidedPortKeyboard(null);
+		if (portRowDragRef.current?.pointerId === -1) portRowDragRef.current = null;
+		fitMapRef.current();
+		setStatus(toolRef.current === "stk" && (stkDraftSessionRef.current?.selection.rows.length ?? 0) > 0
+			? "선택한 Stocker Port를 유지하고 다음 추천 위치를 다시 찾습니다"
+			: "현재 행 선택을 취소하고 추천 Port 위치를 다시 찾습니다");
+	};
 
 	const fitStkSelection = (): boolean => {
 		const canvas = canvasRef.current;
@@ -19772,6 +19828,8 @@ export default function TileFabApp(): React.ReactElement {
 			guidedPortKeyboardSessionCurrent(portKeyboardSession);
 		const fitInsets = protectCurrentPortTarget
 			? addCanvasFrameMargin(baseInsets, PORT_KEYBOARD_TARGET_SAFE_MARGIN)
+			: guidedBuildPortPlacementCoach
+				? addCanvasFrameMargin(baseInsets, PORT_KEYBOARD_TARGET_SAFE_MARGIN)
 			: baseInsets;
 		const bounds = fitCameraToMap(
 			editorModelRef.current.map,
@@ -20464,6 +20522,7 @@ export default function TileFabApp(): React.ReactElement {
 		forceSaveAs = false,
 		focusOwner: "default" | "project-guard" | "checks" = "default",
 	): Promise<OpenFabProjectSaveOutcome> => {
+		if (blockPendingLoopOrHistoryCommand()) return { status: "failed" };
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return { status: "failed" };
 		const restoreSaveFocus = (): void => {
 			requestAnimationFrame(() => {
@@ -20757,12 +20816,25 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const requestProjectAction = (action: PendingProjectAction): void => {
+		if (blockPendingLoopOrHistoryCommand()) {
+			if (action.kind === "new-profile-fab") {
+				const { prepared, evidence } = action.binding.evidence;
+				discardOpenFabFabPreparedProject(prepared, evidence);
+				settlePendingNewFabProjectCompletion(
+					action,
+					new Error("작업 루프와 편집 이력 처리를 마친 뒤 FAB 프로젝트를 생성하세요"),
+				);
+			}
+			return;
+		}
 		setProjectMenuOpen(false);
   setProjectGuardSavedOpen(null);
   setProjectGuardSaveAsRequired(false);
 		if (modelSyncPendingRef.current) {
 			setStatus("현재 프로젝트 동기화가 끝난 뒤 프로젝트를 교체하세요");
 			if (action.kind === "new-profile-fab") {
+				const { prepared, evidence } = action.binding.evidence;
+				discardOpenFabFabPreparedProject(prepared, evidence);
 				settlePendingNewFabProjectCompletion(
 					action,
 					new Error("현재 프로젝트 동기화가 끝난 뒤 FAB 프로젝트를 생성하세요"),
@@ -20821,6 +20893,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handleSaveAndContinue = async (): Promise<void> => {
+		if (blockPendingLoopOrHistoryCommand()) return;
 		const action = pendingProjectActionRef.current;
 		if (!action) return;
 		if (projectGuardSavedOpen?.action === action) {
@@ -20863,6 +20936,7 @@ export default function TileFabApp(): React.ReactElement {
 		await executeProjectAction(action);
 	};
 	const handleDiscardAndContinue = async (): Promise<void> => {
+		if (blockPendingLoopOrHistoryCommand()) return;
   setProjectGuardSavedOpen(null);
   setProjectGuardSaveAsRequired(false);
 		const action = pendingProjectAction;
@@ -21392,6 +21466,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const openStaticFabProjectIssueInspector = (): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		const checks = currentStaticFabProjectChecks;
 		const issue = checks?.issues.find(
 			(candidate) => candidate.id === staticFabProjectIssueRef.current?.id,
@@ -21459,6 +21534,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const openOrdinaryStaticFabIssueRecheck = (): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		const context = ordinaryStaticFabIssueRecheckContextRef.current;
 		const model = editorModelRef.current;
 		const bridge =
@@ -21516,6 +21592,7 @@ export default function TileFabApp(): React.ReactElement {
 	cancelOrdinaryStaticFabIssueRecheckRef.current = cancelOrdinaryStaticFabIssueRecheck;
 
 	const navigateStaticFabProjectIssueLocation = (delta: -1 | 1): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		const checks = currentStaticFabProjectChecks;
 		const issue = checks?.issues.find(
 			(candidate) => candidate.id === staticFabProjectIssueRef.current?.id,
@@ -21528,6 +21605,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const navigateReadinessLocation = (delta: -1 | 1): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		const issue = readinessIssueRef.current;
 		if (!issue) return;
 		const locationCount = railReadinessIssueLocationCount(readiness, issue);
@@ -21537,6 +21615,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const activateReadinessRepair = (issue: RailProjectReadinessIssue): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		const guide = railReadinessIssueGuide(readiness, issue);
 		let repairLocationIndex = readinessIssueLocationRef.current;
 		let focus = railReadinessIssueLocationAt(readiness, issue, repairLocationIndex);
@@ -21606,6 +21685,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const inspectBlockedOneWayRepair = (issue: RailProjectReadinessIssue, reason: string): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		const corridor = railReadinessIssueCorridorAt(
 			readiness,
 			issue,
@@ -21631,6 +21711,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const navigateStaticFabCheck = (delta: -1 | 1): void => {
+		if (blockStaticFabExclusiveCommand()) return;
 		const checks = currentStaticFabProjectChecks;
 		const projectIssues = checks?.issues ?? [];
 		const ordered = [
@@ -24995,10 +25076,10 @@ export default function TileFabApp(): React.ReactElement {
 				state: "blocked" as const,
 				reason:
 					assemblyConnectorPurpose === "FAB_LOOP"
-						? "각 Bank의 하위 Bay에 8 m 이상의 외곽 gateway가 필요합니다"
+						? `각 Bank의 하위 Bay에 ${STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS} m 이상의 외곽 gateway가 필요합니다`
 						: assemblyConnectorHierarchyRole === "BANK_TO_FAB"
-						? "각 Bank에 8 m 이상의 직접 소유 Interbay gateway가 필요합니다"
-						: "각 Bay에 8 m 이상의 단방향 외곽 직선 gateway가 필요합니다",
+						? `각 Bank에 ${STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS} m 이상의 직접 소유 Interbay gateway가 필요합니다`
+						: `각 Bay에 ${STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS} m 이상의 단방향 외곽 직선 gateway가 필요합니다`,
 			});
 		}
 		if (organizationEditorDirty || organizationDetailsStale) {
@@ -29445,6 +29526,7 @@ export default function TileFabApp(): React.ReactElement {
 				? "사본 있음"
 				: null;
 	const projectBusy = projectSession.operation !== "idle";
+	const projectSourceOperationPending = processLoopOperation !== null || staticFabMutationHistory !== null;
 	useEffect(() => {
 		if (
 			guidedBuildPendingTwinBayProjectId === null ||
@@ -31923,6 +32005,16 @@ export default function TileFabApp(): React.ReactElement {
 			: guidedBuildEvaluation.currentMissionId === "interbay"
 				? "복제 BAY BANK"
 				: "복제 TWIN BAY";
+	// Reframe a newly opened equipment coach before choosing its first visible marker.
+	// Existing source-bound drafts retain their cursor and camera instead.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the coach transition owns cadence; frame callbacks read live camera and document refs.
+	useLayoutEffect(() => {
+		if (!guidedBuildPortPlacementCoach || guidedBuildInputBlockedReason()) return;
+		const session = guidedPortKeyboardSessionRef.current;
+		if (session?.scope === "guided" && guidedPortKeyboardSessionCurrent(session)) return;
+		fitMapRef.current();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [guidedBuildPortPlacementCoach, guidedBuildCommandsActionable]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: marker/tool transitions intentionally own cadence; callbacks read live document/slot refs and would restart the transient session every render.
 	useEffect(() => {
 		const portType: GuidedPortKeyboardType | null =
@@ -32711,9 +32803,10 @@ export default function TileFabApp(): React.ReactElement {
 								</button>
 								<button
 									type="button"
-									disabled={projectBusy || modelSyncPending}
+									disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
 									onClick={() => {
-										starterDialogReturnFocusRef.current = projectMenuTriggerRef.current;
+										if (blockPendingLoopOrHistoryCommand()) return;
+							starterDialogReturnFocusRef.current = projectMenuTriggerRef.current;
 										setProjectMenuOpen(false);
 										setStarterDialogOpen(true);
 									}}
@@ -32722,21 +32815,21 @@ export default function TileFabApp(): React.ReactElement {
 								</button>
 								<button
 									type="button"
-									disabled={projectBusy || modelSyncPending}
+									disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
 									onClick={() => requestProjectAction({ kind: "open" })}
 								>
 									<FolderOpen size={14} /> 열기
 								</button>
 								<button
 									type="button"
-									disabled={!startupReady || projectBusy || modelSyncPending}
+									disabled={!startupReady || projectBusy || modelSyncPending || projectSourceOperationPending}
 									onClick={() => void handleSaveProject(false)}
 								>
 									<Save size={14} /> 프로젝트 파일 저장 (.openfab)
 								</button>
 								<button
 									type="button"
-									disabled={!startupReady || projectBusy || modelSyncPending}
+									disabled={!startupReady || projectBusy || modelSyncPending || projectSourceOperationPending}
 									onClick={() => void handleSaveProject(true)}
 								>
 									<SaveAll size={14} /> 다른 이름으로 파일 저장
@@ -32754,7 +32847,7 @@ export default function TileFabApp(): React.ReactElement {
 										type="button"
 										key={recent.projectId}
 											disabled={
-												!recent.reference?.reopenable || projectBusy || modelSyncPending
+												!recent.reference?.reopenable || projectBusy || modelSyncPending || projectSourceOperationPending
 											}
 										onClick={() => requestProjectAction({ kind: "recent", project: recent })}
 									>
@@ -32841,8 +32934,9 @@ export default function TileFabApp(): React.ReactElement {
 					<IconButton
 						label="새 프로젝트"
 						exclusiveCommandScope="project"
-						disabled={projectBusy || modelSyncPending}
+						disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
 						onClick={(event) => {
+							if (blockPendingLoopOrHistoryCommand()) return;
 							starterDialogReturnFocusRef.current = event.currentTarget;
 							setStarterDialogOpen(true);
 						}}
@@ -32869,8 +32963,9 @@ export default function TileFabApp(): React.ReactElement {
 					<IconButton
 						label="FAB 프리셋"
 						exclusiveCommandScope="project"
-						disabled={viewMode === "3d" || projectBusy}
+						disabled={viewMode === "3d" || projectBusy || modelSyncPending || projectSourceOperationPending}
 						onClick={(event) => {
+							if (blockPendingLoopOrHistoryCommand()) return;
 							fabPresetDialogReturnFocusRef.current = event.currentTarget;
 							setFabPresetDialogOpen(true);
 						}}
@@ -32880,7 +32975,7 @@ export default function TileFabApp(): React.ReactElement {
 					<IconButton
 						label="프로젝트 열기"
 						exclusiveCommandScope="project"
-						disabled={projectBusy || modelSyncPending}
+						disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
 						onClick={() => requestProjectAction({ kind: "open" })}
 					>
 						<FolderOpen size={16} />
@@ -32889,7 +32984,7 @@ export default function TileFabApp(): React.ReactElement {
 						label="프로젝트 저장"
 						tooltip="전체 프로젝트를 .openfab 파일로 저장"
 						exclusiveCommandScope="project"
-						disabled={!startupReady || projectBusy || modelSyncPending}
+						disabled={!startupReady || projectBusy || modelSyncPending || projectSourceOperationPending}
 						onClick={() => void handleSaveProject(false)}
 					>
 						<Save size={16} />
@@ -32898,7 +32993,7 @@ export default function TileFabApp(): React.ReactElement {
 						label="다른 이름으로 저장"
 						tooltip="전체 프로젝트를 다른 이름의 .openfab 파일로 저장"
 						exclusiveCommandScope="project"
-						disabled={!startupReady || projectBusy || modelSyncPending}
+						disabled={!startupReady || projectBusy || modelSyncPending || projectSourceOperationPending}
 						onClick={() => void handleSaveProject(true)}
 					>
 						<SaveAll size={16} />
@@ -33653,9 +33748,9 @@ export default function TileFabApp(): React.ReactElement {
 					data-testid="guided-port-row-end"
 					data-port-slot-row={guidedPortRowEndMarker?.portSlotRow ?? ""}
 					role="note"
-					aria-label="EQ Port 행 끝점"
+					aria-label="EQ Port 행 추천 끝점"
 				>
-					<span>2 끝</span>
+					<span>2 추천 끝</span>
 				</div>
 				<button
 					type="button"
@@ -33811,7 +33906,7 @@ export default function TileFabApp(): React.ReactElement {
 							<button
 								ref={recoveryRestoreButtonRef}
 								type="button"
-								disabled={projectBusy || modelSyncPending}
+								disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
 								onClick={() =>
 									requestProjectAction({ kind: "recover", project: recoveryProject })
 								}
@@ -33882,7 +33977,7 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												className="tilefab-recovery-delete"
-												disabled={projectBusy || modelSyncPending}
+												disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
 													aria-label={`${project.name} 복구`}
 													onClick={() =>
 														requestProjectAction({ kind: "recover", project })
@@ -34434,7 +34529,7 @@ export default function TileFabApp(): React.ReactElement {
 									{!projectGuardSavedOpen ? <button
 										type="button"
 										className="tilefab-project-guard-discard"
-										disabled={projectBusy}
+										disabled={projectBusy || projectSourceOperationPending}
 										onClick={() => void handleDiscardAndContinue()}
 									>
 										<Trash2 size={14} />{" "}
@@ -34448,7 +34543,7 @@ export default function TileFabApp(): React.ReactElement {
 										type="button"
 										ref={projectGuardSaveRef}
 										className="tilefab-project-guard-save"
-										disabled={projectBusy || modelSyncPending}
+										disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
 										onClick={() => void handleSaveAndContinue()}
 									>
 										<Save size={14} />{" "}
@@ -34935,6 +35030,7 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												aria-label="이전 문제 위치"
+												disabled={staticFabExclusiveCommandActive}
 												onClick={() => navigateReadinessLocation(-1)}
 											>
 												<ChevronUp size={13} />
@@ -34955,6 +35051,7 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												aria-label="다음 문제 위치"
+												disabled={staticFabExclusiveCommandActive}
 												onClick={() => navigateReadinessLocation(1)}
 											>
 												<ChevronDown size={13} />
@@ -34965,6 +35062,7 @@ export default function TileFabApp(): React.ReactElement {
 										<button
 											type="button"
 											className="tilefab-readiness-repair"
+											disabled={staticFabExclusiveCommandActive}
 											onClick={() =>
 												activeOneWayRepairBlocked
 													? inspectBlockedOneWayRepair(
@@ -35020,6 +35118,7 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												aria-label="이전 정적 FAB 문제 위치"
+												disabled={staticFabExclusiveCommandActive}
 												onClick={() => navigateStaticFabProjectIssueLocation(-1)}
 											>
 												<ChevronUp size={13} />
@@ -35050,6 +35149,7 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												aria-label="다음 정적 FAB 문제 위치"
+												disabled={staticFabExclusiveCommandActive}
 												onClick={() => navigateStaticFabProjectIssueLocation(1)}
 											>
 												<ChevronDown size={13} />
@@ -35060,6 +35160,7 @@ export default function TileFabApp(): React.ReactElement {
 												type="button"
 												className="tilefab-readiness-repair"
 												data-testid="open-static-fab-issue-inspector"
+												disabled={staticFabExclusiveCommandActive}
 												onClick={openStaticFabProjectIssueInspector}
 											>
 												<MousePointer2 size={13} />
@@ -35102,7 +35203,7 @@ export default function TileFabApp(): React.ReactElement {
 									<button
 										type="button"
 										aria-label="이전 문제"
-										disabled={readiness.issues.length + staticFabProjectDisplayIssues.length === 0}
+										disabled={staticFabExclusiveCommandActive || readiness.issues.length + staticFabProjectDisplayIssues.length === 0}
 										onClick={() => navigateStaticFabCheck(-1)}
 									>
 										<ChevronUp size={14} />
@@ -35110,7 +35211,7 @@ export default function TileFabApp(): React.ReactElement {
 									<button
 										type="button"
 										aria-label="다음 문제"
-										disabled={readiness.issues.length + staticFabProjectDisplayIssues.length === 0}
+										disabled={staticFabExclusiveCommandActive || readiness.issues.length + staticFabProjectDisplayIssues.length === 0}
 										onClick={() => navigateStaticFabCheck(1)}
 									>
 										<ChevronDown size={14} />
@@ -35129,7 +35230,7 @@ export default function TileFabApp(): React.ReactElement {
 											type="button"
 											className="tilefab-readiness-save"
 											data-testid="static-fab-checks-save-project"
-											disabled={!startupReady || projectBusy || modelSyncPending}
+											disabled={!startupReady || projectBusy || modelSyncPending || projectSourceOperationPending}
 											onClick={() => void handleSaveProject(false, "checks")}
 										>
 											<Check size={16} aria-hidden="true" />
@@ -35175,7 +35276,11 @@ export default function TileFabApp(): React.ReactElement {
 											aria-current={issue.id === readinessIssueId ? "true" : undefined}
 											aria-controls="rail-readiness-guide"
 											aria-expanded={issue.id === readinessIssueId}
-											onClick={() => focusReadinessIssue(issue)}
+											disabled={staticFabExclusiveCommandActive}
+											onClick={() => {
+												if (blockStaticFabExclusiveCommand()) return;
+												focusReadinessIssue(issue);
+											}}
 										>
 											<AlertTriangle size={13} />
 											<span>
@@ -35215,7 +35320,11 @@ export default function TileFabApp(): React.ReactElement {
 													aria-current={issue.id === staticFabProjectIssueId ? "true" : undefined}
 													aria-controls="static-fab-project-check-guide"
 													aria-expanded={issue.id === staticFabProjectIssueId}
-													onClick={() => focusStaticFabProjectIssue(issue)}
+													disabled={staticFabExclusiveCommandActive}
+													onClick={() => {
+														if (blockStaticFabExclusiveCommand()) return;
+														focusStaticFabProjectIssue(issue);
+													}}
 												>
 													<AlertTriangle size={13} />
 													<span>
@@ -37459,6 +37568,7 @@ export default function TileFabApp(): React.ReactElement {
 								blueprintCount={projectBlueprints.records.length + userBlueprints.length}
 								productionBayTriggerRef={productionBayLauncherRef}
 								onNewFab={() => {
+									if (blockPendingLoopOrHistoryCommand()) return;
 									newFabProfileWizardReturnFocusRef.current =
 										document.activeElement instanceof HTMLElement
 											? document.activeElement
@@ -39168,12 +39278,17 @@ export default function TileFabApp(): React.ReactElement {
 										) : null}
 									</span>
 									<span className="tilefab-equipment-view-actions">
+									{guidedBuildPortPlacementCoach ? (
+										<button type="button" className="tilefab-equipment-fit-selection" data-testid="guided-port-recommendations-reset" disabled={!guidedBuildCommandsActionable} onClick={reframeGuidedPortRecommendations}>
+											<Search size={14} aria-hidden="true" /> {tool === "eq" && guidedPortKeyboard?.phase === "choose-end" ? "행 선택 취소 · 추천 보기" : "추천 위치 다시 보기"}
+										</button>
+									) : null}
 									{!guidedBuildExperienceActive && tool === "stk" && (stkDraftSelection?.rows.length ?? 0) > 0 ? (
 										<button type="button" className="tilefab-equipment-fit-selection" data-testid="stk-fit-selection" onClick={showStkSelection}>
 											<Search size={14} aria-hidden="true" /> 선택 범위 보기
 										</button>
 									) : null}
-									{guidedPortKeyboard && (!guidedBuildExperienceActive || guidedBuildEvaluation.currentMissionId === "fab-equipment") ? (
+									{guidedPortKeyboard ? (
 										<button
 											ref={portTargetZoomButtonRef}
 											type="button"
