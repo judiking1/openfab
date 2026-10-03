@@ -1,3 +1,4 @@
+import { stableSortSteps, synchronousSortSteps } from "./CooperativeSort";
 import type { PortEquipmentState } from "./EquipmentGroup";
 import { buildRailModuleOwnershipIndex, type DirectedRailEdge } from "./RailModuleOwnership";
 import type { RailModuleSide } from "./RailModulePlanner";
@@ -23,6 +24,7 @@ import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
 	deriveStaticFabOrganizationSemanticRoles,
+	isCanonicalStaticFabOrganizationState,
 	type StaticFabOrganizationMembership,
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationRecord,
@@ -38,6 +40,11 @@ import {
 	StaticFabOrganizationImpactIndex,
 	staticFabOrganizationImpactsForPatch,
 } from "./StaticFabOrganizationImpactIndex";
+import {
+	assertStaticFabOrganizationMetadataLookupCurrent,
+	completeStaticFabOrganizationMetadataLookup,
+	type StaticFabOrganizationMetadataLookup,
+} from "./StaticFabOrganizationMetadataLookup";
 import { staticFabBankPairHasResilientCirculation } from "./StaticFabOuterCirculation";
 import { type Cell, cellKey, decodeRailCell, type TileMap } from "./TileMap";
 
@@ -218,18 +225,20 @@ export function discoverStaticFabAssemblyGateways(
 	organizationId: number,
 	limit = STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT,
 ): readonly StaticFabAssemblyGatewayCandidate[] {
-	if (!Number.isSafeInteger(limit) || limit <= 0 || limit > STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT) {
-		throw new RangeError(
-			`Assembly gateway limit must be a 1-${STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT} integer.`,
-		);
-	}
+	validateGatewayLimit(limit);
 	const organization = organizations.records.find((record) => record.id === organizationId);
 	if (!organization) return Object.freeze([]);
 	const role = deriveStaticFabOrganizationSemanticRoles(organizations).get(organizationId);
-	if (role !== "BAY" && role !== "BAY_BANK") {
-		return Object.freeze([]);
-	}
-	return discoverGatewaysFromEdges(map, organizationId, organization.membership.railEdges, limit);
+	if (role !== "BAY" && role !== "BAY_BANK") return Object.freeze([]);
+	return drainGatewaySteps(
+		discoverGatewaysFromEdgeProducerSteps(
+			map,
+			organizationId,
+			(sink) => directGatewayEdgesSteps(organization.membership.railEdges, sink),
+			limit,
+			false,
+		),
+	);
 }
 
 /**
@@ -243,74 +252,237 @@ export function discoverStaticFabOuterCirculationGateways(
 	bankOrganizationId: number,
 	limit = STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT,
 ): readonly StaticFabAssemblyGatewayCandidate[] {
+	validateGatewayLimit(limit);
+	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
+	if (roles.get(bankOrganizationId) !== "BAY_BANK") return Object.freeze([]);
+	const bays = semanticBayDescendants(organizations, roles, bankOrganizationId);
+	return drainGatewaySteps(
+		discoverGatewaysFromEdgeProducerSteps(
+			map,
+			bankOrganizationId,
+			(sink) =>
+				directGatewayEdgesSteps(
+					bays.flatMap((bay) => bay.membership.railEdges),
+					sink,
+				),
+			limit,
+			false,
+		),
+	);
+}
+
+/** Canonical direct Bay/Bank gateway discovery for the cooperative Checks launch path. */
+export function discoverStaticFabAssemblyGatewaysSteps(
+	map: TileMap,
+	organizations: StaticFabOrganizationState,
+	lookup: StaticFabOrganizationMetadataLookup,
+	organizationId: number,
+	limit = STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT,
+): Generator<void, readonly StaticFabAssemblyGatewayCandidate[]> {
+	validateGatewayLimit(limit);
+	return discoverCanonicalOrganizationGatewaySteps(
+		map,
+		organizations,
+		lookup,
+		organizationId,
+		false,
+		limit,
+	);
+}
+
+/** Canonical Bank-to-Fab gateway discovery without flattening descendant edges. */
+export function discoverStaticFabOuterCirculationGatewaysSteps(
+	map: TileMap,
+	organizations: StaticFabOrganizationState,
+	lookup: StaticFabOrganizationMetadataLookup,
+	bankOrganizationId: number,
+	limit = STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT,
+): Generator<void, readonly StaticFabAssemblyGatewayCandidate[]> {
+	validateGatewayLimit(limit);
+	return discoverCanonicalOrganizationGatewaySteps(
+		map,
+		organizations,
+		lookup,
+		bankOrganizationId,
+		true,
+		limit,
+	);
+}
+
+function* discoverCanonicalOrganizationGatewaySteps(
+	map: TileMap,
+	organizations: StaticFabOrganizationState,
+	lookup: StaticFabOrganizationMetadataLookup,
+	organizationId: number,
+	outerCirculation: boolean,
+	limit: number,
+): Generator<void, readonly StaticFabAssemblyGatewayCandidate[]> {
+	const role = lookup.semanticRole(organizationId);
+	if (
+		(!outerCirculation && role !== "BAY" && role !== "BAY_BANK") ||
+		(outerCirculation && role !== "BAY_BANK")
+	)
+		return Object.freeze([]);
+	const produceEdges = outerCirculation
+		? (sink: GatewayEdgeSink) => outerGatewayEdgesSteps(organizations, lookup, organizationId, sink)
+		: (sink: GatewayEdgeSink) =>
+				directGatewayEdgesSteps(lookup.record(organizationId)?.membership.railEdges ?? [], sink);
+	return yield* discoverGatewaysFromEdgeProducerSteps(
+		map,
+		organizationId,
+		produceEdges,
+		limit,
+		true,
+	);
+}
+
+type GatewayEdgeSink = (edge: DirectedRailEdge) => void;
+
+function* directGatewayEdgesSteps(
+	edges: readonly DirectedRailEdge[],
+	sink: GatewayEdgeSink,
+): Generator<void, void> {
+	for (const edge of edges) {
+		sink(edge);
+		yield;
+	}
+}
+
+function* outerGatewayEdgesSteps(
+	organizations: StaticFabOrganizationState,
+	lookup: StaticFabOrganizationMetadataLookup,
+	rootId: number,
+	sink: GatewayEdgeSink,
+): Generator<void, void> {
+	const childrenByParentId = new Map<number, StaticFabOrganizationRecord[]>();
+	for (const record of organizations.records) {
+		yield;
+		for (const parentId of staticFabOrganizationParentIds(record)) {
+			yield;
+			const children = childrenByParentId.get(parentId);
+			if (children) children.push(record);
+			else childrenByParentId.set(parentId, [record]);
+		}
+	}
+	const pending = [rootId];
+	const visited = new Set<number>();
+	const bays: StaticFabOrganizationRecord[] = [];
+	while (pending.length > 0) {
+		yield;
+		const id = pending.pop();
+		if (id === undefined || visited.has(id)) continue;
+		visited.add(id);
+		for (const child of childrenByParentId.get(id) ?? []) {
+			yield;
+			if (lookup.semanticRole(child.id) === "BAY") bays.push(child);
+			pending.push(child.id);
+		}
+	}
+	yield* stableSortSteps(bays, (left, right) => left.id - right.id);
+	for (const bay of bays) yield* directGatewayEdgesSteps(bay.membership.railEdges, sink);
+}
+
+function* discoverGatewaysFromEdgeProducerSteps(
+	map: TileMap,
+	organizationId: number,
+	produceEdges: (sink: GatewayEdgeSink) => Generator<void, void>,
+	limit: number,
+	cooperative: boolean,
+): Generator<void, readonly StaticFabAssemblyGatewayCandidate[]> {
+	const runsByKey = new Map<string, DirectedRunAccumulator>();
+	const edgeSteps = produceEdges((edge) => appendGatewayEdge(runsByKey, edge));
+	try {
+		while (true) {
+			const next = edgeSteps.next();
+			if (next.done) break;
+			yield;
+		}
+	} finally {
+		edgeSteps.return();
+	}
+	const candidates: StaticFabAssemblyGatewayCandidate[] = [];
+	for (const run of runsByKey.values()) {
+		yield;
+		if (cooperative) yield* stableSortSteps(run.unitCoordinates, (left, right) => left - right);
+		else yield* synchronousSortSteps(run.unitCoordinates, (left, right) => left - right);
+		let uniqueLength = 0;
+		for (let index = 0; index < run.unitCoordinates.length; index++) {
+			yield;
+			const unit = run.unitCoordinates[index] as number;
+			if (uniqueLength === 0 || run.unitCoordinates[uniqueLength - 1] !== unit) {
+				run.unitCoordinates[uniqueLength++] = unit;
+			}
+		}
+		run.unitCoordinates.length = uniqueLength;
+		for (let startIndex = 0; startIndex < uniqueLength; ) {
+			yield;
+			let endIndex = startIndex;
+			while (
+				endIndex + 1 < uniqueLength &&
+				run.unitCoordinates[endIndex + 1] === run.unitCoordinates[endIndex] + 1
+			) {
+				yield;
+				endIndex++;
+			}
+			const minimum = run.unitCoordinates[startIndex] as number;
+			const maximum = run.unitCoordinates[endIndex] as number;
+			if (maximum - minimum + 1 >= STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS) {
+				const descriptor = gatewayCandidate(organizationId, run, minimum, maximum);
+				if (map.hasRail(descriptor.anchor.x, descriptor.anchor.y)) {
+					insertGatewayCandidateBounded(candidates, descriptor, limit);
+				}
+			}
+			startIndex = endIndex + 1;
+		}
+	}
+	return Object.freeze([...candidates]);
+}
+
+function appendGatewayEdge(
+	runsByKey: Map<string, DirectedRunAccumulator>,
+	edge: DirectedRailEdge,
+): void {
+	const forward = directionBetween(edge.from, edge.to);
+	if (forward === null) return;
+	const horizontal = edge.from.y === edge.to.y;
+	const axis = horizontal ? "x" : "y";
+	const fixedCoordinate = horizontal ? edge.from.y : edge.from.x;
+	const unitCoordinate = horizontal
+		? Math.min(edge.from.x, edge.to.x)
+		: Math.min(edge.from.y, edge.to.y);
+	const key = `${forward}:${axis}:${fixedCoordinate}`;
+	const run = runsByKey.get(key);
+	if (run) run.unitCoordinates.push(unitCoordinate);
+	else runsByKey.set(key, { forward, axis, fixedCoordinate, unitCoordinates: [unitCoordinate] });
+}
+
+function insertGatewayCandidateBounded(
+	candidates: StaticFabAssemblyGatewayCandidate[],
+	candidate: StaticFabAssemblyGatewayCandidate,
+	limit: number,
+): void {
+	let index = 0;
+	while (
+		index < candidates.length &&
+		compareGatewayCandidates(candidates[index] as StaticFabAssemblyGatewayCandidate, candidate) <= 0
+	)
+		index++;
+	candidates.splice(index, 0, candidate);
+	if (candidates.length > limit) candidates.pop();
+}
+
+function validateGatewayLimit(limit: number): void {
 	if (!Number.isSafeInteger(limit) || limit <= 0 || limit > STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT) {
 		throw new RangeError(
 			`Assembly gateway limit must be a 1-${STATIC_FAB_ASSEMBLY_GATEWAY_LIMIT} integer.`,
 		);
 	}
-	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
-	if (roles.get(bankOrganizationId) !== "BAY_BANK") return Object.freeze([]);
-	const bays = semanticBayDescendants(organizations, roles, bankOrganizationId);
-	return discoverGatewaysFromEdges(
-		map,
-		bankOrganizationId,
-		bays.flatMap((bay) => bay.membership.railEdges),
-		limit,
-	);
 }
 
-function discoverGatewaysFromEdges(
-	map: TileMap,
-	organizationId: number,
-	railEdges: readonly DirectedRailEdge[],
-	limit: number,
-): readonly StaticFabAssemblyGatewayCandidate[] {
-	const runsByKey = new Map<string, DirectedRunAccumulator>();
-	for (const edge of railEdges) {
-		const forward = directionBetween(edge.from, edge.to);
-		if (forward === null) continue;
-		const horizontal = edge.from.y === edge.to.y;
-		const axis = horizontal ? "x" : "y";
-		const fixedCoordinate = horizontal ? edge.from.y : edge.from.x;
-		const unitCoordinate = horizontal
-			? Math.min(edge.from.x, edge.to.x)
-			: Math.min(edge.from.y, edge.to.y);
-		const key = `${forward}:${axis}:${fixedCoordinate}`;
-		const run = runsByKey.get(key);
-		if (run) run.unitCoordinates.push(unitCoordinate);
-		else {
-			runsByKey.set(key, {
-				forward,
-				axis,
-				fixedCoordinate,
-				unitCoordinates: [unitCoordinate],
-			});
-		}
-	}
-
-	const candidates: StaticFabAssemblyGatewayCandidate[] = [];
-	for (const run of runsByKey.values()) {
-		const units = [...new Set(run.unitCoordinates)].sort((left, right) => left - right);
-		let startIndex = 0;
-		while (startIndex < units.length) {
-			let endIndex = startIndex;
-			while (
-				endIndex + 1 < units.length &&
-				(units[endIndex + 1] as number) === (units[endIndex] as number) + 1
-			) {
-				endIndex++;
-			}
-			const minimum = units[startIndex] as number;
-			const maximum = units[endIndex] as number;
-			const runLengthMeters = maximum - minimum + 1;
-			if (runLengthMeters >= STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS) {
-				const descriptor = gatewayCandidate(organizationId, run, minimum, maximum);
-				if (map.hasRail(descriptor.anchor.x, descriptor.anchor.y)) candidates.push(descriptor);
-			}
-			startIndex = endIndex + 1;
-		}
-	}
-	return Object.freeze(candidates.sort(compareGatewayCandidates).slice(0, limit));
+function drainGatewaySteps<T>(steps: Generator<void, T>): T {
+	let next = steps.next();
+	while (!next.done) next = steps.next();
+	return next.value;
 }
 
 /**
@@ -329,6 +501,29 @@ export function staticFabAssemblyConnectorSelectionBounds(
 	for (const organization of organizations.records) {
 		if (!selectedIds.has(organization.id)) continue;
 		for (const edge of organization.membership.railEdges) {
+			minX = Math.min(minX, edge.from.x, edge.to.x);
+			minY = Math.min(minY, edge.from.y, edge.to.y);
+			maxX = Math.max(maxX, edge.from.x, edge.to.x);
+			maxY = Math.max(maxY, edge.from.y, edge.to.y);
+		}
+	}
+	return Number.isFinite(minX) ? Object.freeze({ minX, minY, maxX, maxY }) : null;
+}
+
+/** Cooperative exact-pair bounds; it does not build a selected-ID Set or scan other ownership indexes. */
+export function* staticFabAssemblyConnectorSelectionBoundsSteps(
+	organizations: StaticFabOrganizationState,
+	organizationIds: readonly [number, number],
+): Generator<void, StaticFabAssemblyConnectorSelectionBounds | null> {
+	let minX = Number.POSITIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	for (const organization of organizations.records) {
+		yield;
+		if (organization.id !== organizationIds[0] && organization.id !== organizationIds[1]) continue;
+		for (const edge of organization.membership.railEdges) {
+			yield;
 			minX = Math.min(minX, edge.from.x, edge.to.x);
 			minY = Math.min(minY, edge.from.y, edge.to.y);
 			maxX = Math.max(maxX, edge.from.x, edge.to.x);
@@ -358,6 +553,38 @@ export function staticFabAssemblyInterbayConnectorHierarchyEligibility(
 ): StaticFabAssemblyConnectorHierarchyEligibility {
 	return hierarchyEligibility(
 		organizations,
+		sourceOrganizationId,
+		targetOrganizationId,
+		"BAY_BANK",
+	);
+}
+
+/** Advisory indexed entry; accepts only an issued current lookup for this exact source. */
+export function staticFabAssemblyConnectorHierarchyEligibilityFromLookup(
+	organizations: StaticFabOrganizationState,
+	lookup: StaticFabOrganizationMetadataLookup,
+	sourceOrganizationId: number,
+	targetOrganizationId: number,
+): StaticFabAssemblyConnectorHierarchyEligibility {
+	return hierarchyEligibilityFromIssuedLookup(
+		organizations,
+		lookup,
+		sourceOrganizationId,
+		targetOrganizationId,
+		"BAY",
+	);
+}
+
+/** Same canonical Bank/Fab parent and purpose rules, without a Map rebuild or re-derivation. */
+export function staticFabAssemblyInterbayConnectorHierarchyEligibilityFromLookup(
+	organizations: StaticFabOrganizationState,
+	lookup: StaticFabOrganizationMetadataLookup,
+	sourceOrganizationId: number,
+	targetOrganizationId: number,
+): StaticFabAssemblyConnectorHierarchyEligibility {
+	return hierarchyEligibilityFromIssuedLookup(
+		organizations,
+		lookup,
 		sourceOrganizationId,
 		targetOrganizationId,
 		"BAY_BANK",
@@ -410,15 +637,77 @@ export function staticFabAssemblyConnectorNetworkEligibility(
 	});
 }
 
+interface StaticFabAssemblyOrganizationMetadataAccess {
+	record(id: number): StaticFabOrganizationRecord | undefined;
+	semanticRole(id: number): StaticFabOrganizationSemanticRole | undefined;
+}
+
 function hierarchyEligibility(
 	organizations: StaticFabOrganizationState,
 	sourceOrganizationId: number,
 	targetOrganizationId: number,
 	expectedRole: "BAY" | "BAY_BANK",
 ): StaticFabAssemblyConnectorHierarchyEligibility {
+	if (isCanonicalStaticFabOrganizationState(organizations)) {
+		// Legacy synchronous API only. The new Checks path passes its already-issued lookup.
+		const lookup = completeStaticFabOrganizationMetadataLookup(organizations);
+		try {
+			return hierarchyEligibilityFromIssuedLookup(
+				organizations,
+				lookup,
+				sourceOrganizationId,
+				targetOrganizationId,
+				expectedRole,
+			);
+		} finally {
+			lookup.revoke();
+		}
+	}
+	// Preserve legacy advisory behavior for raw metadata inputs. This private adapter does
+	// not issue a canonical lookup or grant mutation authority to arbitrary caller functions.
 	const recordsById = new Map(organizations.records.map((record) => [record.id, record]));
-	const source = recordsById.get(sourceOrganizationId);
-	const target = recordsById.get(targetOrganizationId);
+	let roles: ReadonlyMap<number, StaticFabOrganizationSemanticRole> | null = null;
+	return hierarchyEligibilityFromAccess(
+		{
+			record: (id) => recordsById.get(id),
+			semanticRole: (id) => {
+				// Preserve legacy MISSING/SAME short-circuit priority before semantic derivation.
+				roles ??= deriveStaticFabOrganizationSemanticRoles(organizations);
+				return roles.get(id);
+			},
+		},
+		sourceOrganizationId,
+		targetOrganizationId,
+		expectedRole,
+	);
+}
+
+function hierarchyEligibilityFromIssuedLookup(
+	organizations: StaticFabOrganizationState,
+	lookup: StaticFabOrganizationMetadataLookup,
+	sourceOrganizationId: number,
+	targetOrganizationId: number,
+	expectedRole: "BAY" | "BAY_BANK",
+): StaticFabAssemblyConnectorHierarchyEligibility {
+	assertStaticFabOrganizationMetadataLookupCurrent(lookup, organizations);
+	const result = hierarchyEligibilityFromAccess(
+		lookup,
+		sourceOrganizationId,
+		targetOrganizationId,
+		expectedRole,
+	);
+	assertStaticFabOrganizationMetadataLookupCurrent(lookup, organizations);
+	return result;
+}
+
+function hierarchyEligibilityFromAccess(
+	access: StaticFabAssemblyOrganizationMetadataAccess,
+	sourceOrganizationId: number,
+	targetOrganizationId: number,
+	expectedRole: "BAY" | "BAY_BANK",
+): StaticFabAssemblyConnectorHierarchyEligibility {
+	const source = access.record(sourceOrganizationId);
+	const target = access.record(targetOrganizationId);
 	if (!source || !target) {
 		return Object.freeze({
 			valid: false,
@@ -433,8 +722,10 @@ function hierarchyEligibility(
 			reason: "서로 다른 두 Production Bay를 선택하세요",
 		});
 	}
-	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
-	if (roles.get(source.id) !== expectedRole || roles.get(target.id) !== expectedRole) {
+	if (
+		access.semanticRole(source.id) !== expectedRole ||
+		access.semanticRole(target.id) !== expectedRole
+	) {
 		return Object.freeze({
 			valid: false,
 			issueCode: "UNSUPPORTED_ORGANIZATION" as const,
@@ -444,7 +735,7 @@ function hierarchyEligibility(
 					: "현재 Interbay Connector는 Bay Bank 두 개를 연결합니다",
 		});
 	}
-	const parent = resolveAssemblyParent(organizations, roles, source, target, expectedRole);
+	const parent = resolveAssemblyParent(access, source, target, expectedRole);
 	return parent.valid
 		? Object.freeze({
 				valid: true,
@@ -660,8 +951,7 @@ export function planStaticFabAssemblyConnectorWithProspectiveState(
 	}
 
 	const parentResolution = resolveAssemblyParent(
-		organizations,
-		roles,
+		{ record: (id) => recordsById.get(id), semanticRole: (id) => roles.get(id) },
 		source,
 		target,
 		hierarchyRole === "BAY_TO_BANK" ? "BAY" : "BAY_BANK",
@@ -1208,8 +1498,7 @@ interface StaticFabAssemblyParentRejection {
 }
 
 function resolveAssemblyParent(
-	organizations: StaticFabOrganizationState,
-	roles: ReadonlyMap<number, StaticFabOrganizationSemanticRole>,
+	access: StaticFabAssemblyOrganizationMetadataAccess,
 	source: StaticFabOrganizationRecord,
 	target: StaticFabOrganizationRecord,
 	childRole: "BAY" | "BAY_BANK",
@@ -1219,19 +1508,18 @@ function resolveAssemblyParent(
 	const parentLabel = parentRole === "BAY_BANK" ? "Bay Bank" : "Fab";
 	const differentIssueCode =
 		parentRole === "BAY_BANK" ? ("DIFFERENT_BANKS" as const) : ("DIFFERENT_FABS" as const);
-	const recordsById = new Map(organizations.records.map((record) => [record.id, record]));
 	const parents = (record: StaticFabOrganizationRecord): readonly StaticFabOrganizationRecord[] =>
 		staticFabOrganizationParentIds(record)
-			.map((id) => recordsById.get(id))
+			.map((id) => access.record(id))
 			.filter(
 				(candidate): candidate is StaticFabOrganizationRecord =>
-					candidate !== undefined && roles.get(candidate.id) === parentRole,
+					candidate !== undefined && access.semanticRole(candidate.id) === parentRole,
 			);
 	const sourceParents = parents(source);
 	const targetParents = parents(target);
 	const nonSemanticParents = (record: StaticFabOrganizationRecord): readonly number[] =>
 		Object.freeze(
-			staticFabOrganizationParentIds(record).filter((id) => roles.get(id) !== parentRole),
+			staticFabOrganizationParentIds(record).filter((id) => access.semanticRole(id) !== parentRole),
 		);
 	if (sourceParents.length === 0 && targetParents.length === 0) {
 		const sourceOtherParents = nonSemanticParents(source);

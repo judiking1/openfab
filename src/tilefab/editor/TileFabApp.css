@@ -13897,3 +13897,125 @@ button.tilefab-action-hint[data-guided-target="true"] {
 		flex: 1;
 	}
 }
+
+/* Compact camera actions keep their top row while Loop repair uses its own row. */
+.tilefab-app[data-view-mode="2d"][data-pending-project-action=""] .tilefab-workspace {
+	/* Canvas navigation belongs to the camera. Only the panels scroll. */
+	overflow: clip;
+}
+
+@media (max-width: 520px) {
+	.tilefab-app[data-guided-build-active="false"]
+		.tilefab-workspace:has(.tilefab-camera-controls)
+		.tilefab-process-loop-contextbar {
+		top: 70px;
+	}
+}
+
+/* Short screens use one Checks scroller so the focused guide cannot pin the
+   issue list into a strip smaller than its controls. The header stays sticky. */
+@media (min-width: 761px) and (max-width: 860px) and (max-height: 700px) {
+	.tilefab-app[data-view-mode="2d"] .tilefab-readiness {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.tilefab-readiness > header {
+		position: sticky;
+		z-index: 2;
+		top: 0;
+		min-height: 52px;
+		flex: 0 0 auto;
+		background: rgb(17 22 23 / 99%);
+	}
+
+	.tilefab-readiness > .tilefab-navigator-overview {
+		flex: 0 0 auto;
+		grid-template-rows: 44px;
+	}
+
+	.tilefab-readiness > .tilefab-navigator-overview .tilefab-navigator-body {
+		display: none;
+	}
+
+	.tilefab-readiness > .tilefab-navigator-tabpanel--checks {
+		min-height: auto;
+		flex: 0 0 auto;
+		overflow: visible;
+	}
+
+	.tilefab-readiness-issues {
+		display: block;
+		min-height: 0;
+		flex: 0 0 auto;
+	}
+
+	.tilefab-readiness-list {
+		overflow: visible;
+	}
+}
+
+@media (max-width: 860px) and (max-height: 700px) {
+	.tilefab-readiness[data-focused="true"] .tilefab-readiness-guide,
+	.tilefab-readiness[data-focused="true"] .tilefab-readiness-issues {
+		position: static;
+		height: auto;
+		max-height: none;
+		overflow: visible;
+	}
+
+	.tilefab-readiness[data-focused="true"] .tilefab-readiness-guide {
+		min-height: 0;
+	}
+
+	.tilefab-readiness[data-focused="true"] .tilefab-readiness-list {
+		overflow: visible;
+	}
+}
+
+/* Side Inspectors reserve the existing selection action strip on small laptops. */
+@media (min-width: 761px) and (max-width: 980px) {
+	.tilefab-workspace:has(.tilefab-tools[data-tool-density="expanded"])
+		.tilefab-action-hints[data-context="build"][data-raised="true"] {
+		right: 60px;
+		left: 192px;
+		width: auto;
+		max-width: none;
+		transform: none;
+	}
+
+	.tilefab-app[data-view-mode="2d"]
+		.tilefab-workspace:has(.tilefab-action-hints[data-context="selection"][data-raised="false"])
+		.tilefab-inspector {
+		max-height: calc(100% - 78px);
+	}
+}
+
+/* Keep the camera column outside expanded menus on compact side-panel layouts. */
+@media (min-width: 761px) and (max-width: 860px) {
+	.tilefab-app[data-guided-build-active="false"]:is(
+			[data-editor-activity="build"],
+			[data-editor-activity="assemble"],
+			[data-editor-activity="inspect"]
+		)
+		.tilefab-workspace:has(.tilefab-tools[data-tool-density="expanded"])
+		.tilefab-camera-controls {
+		top: 10px;
+		right: auto;
+		bottom: auto;
+		left: 192px;
+		flex-direction: column;
+	}
+
+	.tilefab-app[data-guided-build-active="false"]
+		.tilefab-workspace:has(.tilefab-tools[data-tool-density="expanded"])
+		.tilefab-process-loop-contextbar {
+		left: 252px;
+		width: min(620px, calc(100% - 262px));
+	}
+
+	.tilefab-workspace:has(.tilefab-tools[data-tool-density="expanded"])
+		.tilefab-action-hints[data-context="build"][data-raised="true"] {
+		left: 252px;
+	}
+}

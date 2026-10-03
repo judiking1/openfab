@@ -1027,6 +1027,28 @@ import {
 } from "./StaticFabAssembleMenu";
 import { StaticFabAuthoredStructurePanel } from "./StaticFabAuthoredStructurePanel";
 import {
+	assertStaticFabAssemblyConnectorLaunchResultCurrent,
+	createStaticFabAssemblyConnectorLaunchPreparation,
+} from "../core/StaticFabAssemblyConnectorLaunch";
+import { StaticFabCheckRepairChooser } from "./StaticFabCheckRepairChooser";
+import {
+	StaticFabCheckRepairChooserController,
+	type StaticFabCheckRepairChooserKind,
+	type StaticFabCheckRepairChooserLaunch,
+	type StaticFabCheckRepairChooserView,
+} from "./StaticFabCheckRepairChooserController";
+import {
+	captureStaticFabCheckRepairContinuation,
+	staticFabCheckRepairDomainIsExact,
+	type StaticFabCheckRepairCurrent,
+	type StaticFabCheckRepairDomainCurrent,
+	type StaticFabCheckRepairSource,
+} from "./StaticFabCheckRepairContinuation";
+import {
+	staticFabCheckRepairReturnMatchesProject,
+	type StaticFabCheckRepairReturnOrigin,
+} from "./StaticFabCheckRepairReturnOrigin";
+import {
 	StaticFabAssemblyConnectorBridge,
 	type ValidatedStaticFabAssemblyConnector,
 } from "./StaticFabAssemblyConnectorBridge";
@@ -1150,6 +1172,7 @@ import {
 	UserBlueprintLibraryCrossTabRefreshController,
 } from "./UserBlueprintLibraryCrossTabRefreshController";
 import "./TileFabApp.css";
+import "./StaticFabCheckRepairChooser.css";
 import { EquipmentAuthoringWorkspace } from "./EquipmentAuthoringWorkspace";
 import {
 	compileOrdinaryPortProcessLoopScope,
@@ -2367,6 +2390,20 @@ export default function TileFabApp(): React.ReactElement {
 	const processLoopAuthoringControllerRef = useRef<StandaloneProcessLoopAuthoringController | null>(null);
 	const processLoopOperationRef = useRef<{ readonly document: RailDocument } | null>(null);
 	const processLoopRailEditRef = useRef<{ readonly document: RailDocument; readonly organizationId: number } | null>(null);
+	const staticFabCheckRepairChooserRef = useRef<StaticFabCheckRepairChooserController | null>(null);
+	const [staticFabCheckRepairChooser, setStaticFabCheckRepairChooser] = useState<StaticFabCheckRepairChooserView | null>(null);
+	const [staticFabCheckRepairSearch, setStaticFabCheckRepairSearch] = useState("");
+	const staticFabCheckRepairChecksOpenRef = useRef(false);
+	const staticFabCheckRepairAdmissionRef = useRef<StaticFabCheckRepairChooserLaunch | null>(null);
+	const staticFabCheckRepairReturnRef = useRef<Readonly<{
+		origin: StaticFabCheckRepairReturnOrigin;
+		backend: NonNullable<typeof processLoopRailEditRef.current> | StaticFabAssemblyConnectorBridge;
+		kind: "loop" | "connector";
+	}> | null>(null);
+	const pendingStaticFabCheckRepairReturnRef = useRef<StaticFabCheckRepairReturnOrigin | null>(null);
+	const [staticFabCheckRepairReturnPending, setStaticFabCheckRepairReturnPending] = useState(false);
+	const staticFabCheckRepairHeadingRef = useRef<HTMLHeadingElement | null>(null);
+	const staticFabCheckRepairFocusGenerationRef = useRef(0);
 	const processLoopNameDraftRef = useRef("작업 루프 1");
 	const staticFabMutationHistoryRef = useRef<AbortController | null>(null);
 	const [staticFabMutationHistory, setStaticFabMutationHistory] = useState<"undo" | "redo" | null>(null);
@@ -3157,16 +3194,42 @@ export default function TileFabApp(): React.ReactElement {
 			? staticFabProjectChecks
 			: null;
 	const setOrganizationLibraryOpen = useCallback((open: boolean): void => {
+		if (open) {
+			staticFabCheckRepairChecksOpenRef.current = false;
+			if (!staticFabCheckRepairAdmissionRef.current && staticFabCheckRepairChooserRef.current?.view) {
+				staticFabCheckRepairFocusGenerationRef.current++;
+				staticFabCheckRepairChooserRef.current.close();
+			}
+		}
 		setNavigatorTab((current) =>
 			open ? "organizations" : current === "organizations" ? null : current,
 		);
 	}, []);
 	const setNavigatorMapOpen = useCallback((open: boolean): void => {
+		if (open) {
+			staticFabCheckRepairChecksOpenRef.current = false;
+			if (!staticFabCheckRepairAdmissionRef.current && staticFabCheckRepairChooserRef.current?.view) {
+				staticFabCheckRepairFocusGenerationRef.current++;
+				staticFabCheckRepairChooserRef.current.close();
+			}
+		}
 		setNavigatorTab((current) => (open ? "map" : current === "map" ? null : current));
 	}, []);
 	const setReadinessOpen = useCallback((open: boolean): void => {
+		staticFabCheckRepairChecksOpenRef.current = open;
+		if (!open && !staticFabCheckRepairAdmissionRef.current && staticFabCheckRepairChooserRef.current?.view) {
+			staticFabCheckRepairFocusGenerationRef.current++;
+			staticFabCheckRepairChooserRef.current.close();
+		}
 		setNavigatorTab((current) => (open ? "checks" : current === "checks" ? null : current));
 	}, []);
+	useLayoutEffect(() => {
+		staticFabCheckRepairChecksOpenRef.current = readinessOpen;
+		if (!readinessOpen && !staticFabCheckRepairAdmissionRef.current && staticFabCheckRepairChooserRef.current?.view) {
+			staticFabCheckRepairFocusGenerationRef.current++;
+			staticFabCheckRepairChooserRef.current.close();
+		}
+	}, [readinessOpen]);
 	const [organizationSearch, setOrganizationSearch] = useState("");
 	const [organizationParentSearch, setOrganizationParentSearch] = useState("");
 	const [processLoopOperation, setProcessLoopOperation] = useState<string | null>(null);
@@ -5646,6 +5709,10 @@ export default function TileFabApp(): React.ReactElement {
 						new Error("OpenFab Fab project creation was cancelled during editor shutdown."),
 					);
 				}
+				staticFabCheckRepairReturnRef.current = null;
+				pendingStaticFabCheckRepairReturnRef.current = null;
+				staticFabCheckRepairChooserRef.current?.dispose();
+				staticFabCheckRepairChooserRef.current = null;
 				processLoopAuthoringControllerRef.current?.dispose();
 				processLoopAuthoringControllerRef.current = null;
 				processLoopOperationRef.current = null;
@@ -9590,6 +9657,7 @@ export default function TileFabApp(): React.ReactElement {
 			| "preserve-port" = "clear",
 	): void => {
 		if (blockStaticFabExclusiveCommand()) return;
+		discardPendingStaticFabCheckRepairReturn();
 		if (next !== "build" && next !== "erase") { processLoopRailEditRef.current = null; setProcessLoopRailEdit(null); setProcessLoopRailEditFeedback(null); }
 		setOrdinaryPortProcessLoopFeedback(null);
 		if (next !== "inspect") setEquipmentDeletionRecovery(null);
@@ -12857,6 +12925,7 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		keyboardActionsRef.current = {
 			cancel: () => {
+				if (staticFabCheckRepairChooserRef.current?.view) { closeStaticFabCheckRepairChooser(); return; }
 				if (processLoopOperationRef.current) { cancelProcessLoopOperation(); return; }
 				if (processLoopRailEditRef.current && !guidedRailKeyboardSessionRef.current && !inspectAreaKeyboardSessionRef.current) { exitProcessLoopRailEdit(); return; }
 				if (staticFabMutationHistoryRef.current) { staticFabMutationHistoryRef.current.abort(); setStatus("편집 이력 처리를 취소하고 있습니다"); return; }
@@ -12907,14 +12976,14 @@ export default function TileFabApp(): React.ReactElement {
 				}
 				const activeConnector = staticFabAssemblyConnectorUiRef.current;
 				if (activeConnector) {
-					cancelStaticFabAssemblyConnector(
+					cancelStaticFabAssemblyConnectorAndRestoreFocus(
 						staticFabAssemblyConnectorCancelledStatus(
 							activeConnector.session.binding.hierarchyRole,
 							activeConnector.session.binding.purpose,
 							staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current,
 						),
 					);
-					restoreStaticFabAssemblyConnectorReturnFocus();
+
 					return;
 				}
 				if (staticFabArrangementUiRef.current) {
@@ -15636,7 +15705,14 @@ export default function TileFabApp(): React.ReactElement {
 		});
 	};
 	const cancelStaticFabAssemblyConnectorAndRestoreFocus = (message: string): void => {
+		const backend = staticFabAssemblyConnectorBridgeRef.current;
 		cancelStaticFabAssemblyConnector(message);
+		if (requestStaticFabCheckRepairReturn("connector", backend)) {
+			staticFabAssemblyConnectorReturnFocusRef.current = null;
+			staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current = false;
+			return;
+		}
+
 		restoreStaticFabAssemblyConnectorReturnFocus();
 	};
 
@@ -15978,17 +16054,18 @@ export default function TileFabApp(): React.ReactElement {
 	const startStaticFabAssemblyConnectorForOrganizations = (
 		explicitOrganizationIds: readonly [number, number] | null,
 		returnFocusTarget: HTMLElement | null = null,
-	): void => {
+		checksLaunch: Extract<StaticFabCheckRepairChooserLaunch, { kind: "connector" }> | null = null,
+	): boolean => {
 		const returnsToConnectedFabHandoff =
 			returnFocusTarget !== null && returnFocusTarget === connectedFabLoopHandoffRef.current;
 		const presentLaunchStatus = (message: string): void => {
 			if (returnsToConnectedFabHandoff) publishConnectedFabHandoffStatusOverride(message);
 			setStatus(message);
 		};
-		if (blockStaticFabExclusiveCommand()) return;
+		if (blockStaticFabExclusiveCommand()) return false;
 		if (staticFabOrganizationOverlapSelectionRef.current) {
 			presentLaunchStatus("겹친 조직 후보를 선택하거나 Esc로 닫은 뒤 계층을 연결하세요");
-			return;
+			return false;
 		}
 		const connectorCommandStartedAt = performance.now();
 		if (
@@ -15997,11 +16074,11 @@ export default function TileFabApp(): React.ReactElement {
 			projectSession.operation !== "idle"
 		) {
 			presentLaunchStatus("프로젝트와 Worker가 준비된 뒤 계층을 연결할 수 있습니다");
-			return;
+			return false;
 		}
 		if (organizationEditorDirtyRef.current || organizationDetailsStale) {
 			presentLaunchStatus("조직 속성 편집을 저장하거나 취소한 뒤 계층을 연결하세요");
-			return;
+			return false;
 		}
 		const model = editorModelRef.current;
 		const mirrorBridge = workerBridgeRef.current;
@@ -16011,24 +16088,36 @@ export default function TileFabApp(): React.ReactElement {
 			mirrorBridge.getState().status !== "ready"
 		) {
 			presentLaunchStatus("현재 문서의 Rail mirror Worker가 준비된 뒤 계층을 연결하세요");
-			return;
+			return false;
 		}
-		const selectedIds =
+		const selectedIds = checksLaunch?.organizationIds ??
 			explicitOrganizationIds ?? organizationMultiSelectionRef.current.selectedOrganizationIds;
-		const roles = deriveStaticFabOrganizationSemanticRoles(model.document.organizations);
+		if (checksLaunch) {
+			try {
+				if (!checksLaunch.isCurrent() || checksLaunch.prepared.map !== model.map ||
+					checksLaunch.prepared.organizations !== model.document.organizations ||
+					checksLaunch.continuation.source.document !== model.document) return false;
+				assertStaticFabAssemblyConnectorLaunchResultCurrent(checksLaunch.prepared, checksLaunch.preparationInput);
+			} catch (error) {
+				presentLaunchStatus(error instanceof Error ? error.message : "연결 준비가 오래되었습니다 · 다시 검사하세요");
+				return false;
+			}
+		}
+		const roles = checksLaunch ? null : deriveStaticFabOrganizationSemanticRoles(model.document.organizations);
 		const hierarchyRole: StaticFabAssemblyConnectorHierarchyRole | null =
-			selectedIds.length === 2 && selectedIds.every((id) => roles.get(id) === "BAY")
+			checksLaunch ? checksLaunch.prepared.hierarchyRole :
+			selectedIds.length === 2 && selectedIds.every((id) => roles?.get(id) === "BAY")
 				? "BAY_TO_BANK"
-				: selectedIds.length === 2 && selectedIds.every((id) => roles.get(id) === "BAY_BANK")
+				: selectedIds.length === 2 && selectedIds.every((id) => roles?.get(id) === "BAY_BANK")
 					? "BANK_TO_FAB"
 					: null;
 		if (hierarchyRole === null) {
 			presentLaunchStatus(
 				"FAB 조직에서 같은 계층의 Production Bay 두 개 또는 Bay Bank 두 개를 선택하세요",
 			);
-			return;
+			return false;
 		}
-		const hierarchyEligibility =
+		const hierarchyEligibility = checksLaunch?.prepared.eligibility ?? (
 			hierarchyRole === "BANK_TO_FAB"
 				? staticFabAssemblyInterbayConnectorHierarchyEligibility(
 						model.document.organizations,
@@ -16039,10 +16128,10 @@ export default function TileFabApp(): React.ReactElement {
 						model.document.organizations,
 						selectedIds[0] as number,
 						selectedIds[1] as number,
-					);
+					));
 		if (!hierarchyEligibility.valid) {
 			presentLaunchStatus(hierarchyEligibility.reason);
-			return;
+			return false;
 		}
 		const purpose = hierarchyEligibility.purpose;
 		const organizationIds = Object.freeze(
@@ -16052,7 +16141,7 @@ export default function TileFabApp(): React.ReactElement {
 			purpose === "FAB_LOOP"
 				? discoverStaticFabOuterCirculationGateways
 				: discoverStaticFabAssemblyGateways;
-		const gateways = Object.freeze(
+		const gateways = checksLaunch?.prepared.gateways ?? Object.freeze(
 			organizationIds.flatMap((organizationId) =>
 				discoverGateways(model.map, model.document.organizations, organizationId),
 			),
@@ -16068,8 +16157,11 @@ export default function TileFabApp(): React.ReactElement {
 					? `두 Bank 모두에서 ${STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS} m 이상의 직접 소유 Interbay gateway가 필요합니다`
 					: `두 Bay 모두에서 ${STATIC_FAB_ASSEMBLY_GATEWAY_MINIMUM_RUN_METERS} m 이상의 단방향 외곽 직선 gateway가 필요합니다`,
 			);
-			return;
+			return false;
 		}
+		const connectorBounds = checksLaunch ? checksLaunch.prepared.selectionBounds :
+			staticFabAssemblyConnectorSelectionBounds(model.document.organizations, organizationIds);
+		if (checksLaunch && !checksLaunch.isCurrent()) return false;
 		if (returnsToConnectedFabHandoff) connectedFabHandoffStatusOverrideRef.current = null;
 		closeContextPalette();
 		staticFabAssemblyConnectorReturnFocusRef.current =
@@ -16110,10 +16202,7 @@ export default function TileFabApp(): React.ReactElement {
 			organizationIds,
 			gateways,
 		});
-		const connectorBounds = staticFabAssemblyConnectorSelectionBounds(
-			model.document.organizations,
-			organizationIds,
-		);
+
 		assemblyReviewBoundsRef.current = connectorBounds;
 		assemblyReviewClosedFrameRef.current = null;
 		cameraFitScopeRef.current = "assembly-review";
@@ -16194,10 +16283,13 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(
 			`${staticFabAssemblyConnectorGatewayPrompt(hierarchyRole, purpose, false)} · Worker 준비 중`,
 		);
+		return staticFabAssemblyConnectorBridgeRef.current === bridge &&
+			staticFabAssemblyConnectorUiRef.current?.session === session;
 	};
 
-	const startStaticFabAssemblyConnector = (): void =>
+	const startStaticFabAssemblyConnector = (): void => {
 		startStaticFabAssemblyConnectorForOrganizations(null);
+	};
 
 	const selectStaticFabAssemblyConnectorGateway = (
 		gateway: StaticFabAssemblyGatewayCandidate,
@@ -16307,6 +16399,11 @@ export default function TileFabApp(): React.ReactElement {
 			session: reduceStaticFabAssemblyConnectorSession(current.session, { type: "APPLY" }),
 			plan: current.plan,
 		};
+		// Publishing the committed model retires the live Connector bridge. Retain the
+		// accepted identity across that publication so only its exact receipt can return.
+		const checksReturnBackend = staticFabAssemblyConnectorBridgeRef.current;
+		const checksOrigin = staticFabCheckRepairReturnRef.current?.kind === "connector" &&
+			staticFabCheckRepairReturnRef.current.backend === checksReturnBackend;
 		publishStaticFabAssemblyConnector(applying);
 		const ownsRequest = () => staticFabAssemblyConnectorUiRef.current === applying;
 		let patchIsCurrent: (() => boolean) | null = null;
@@ -16427,6 +16524,13 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 		pendingConnectedFabHandoffFocusRef.current = appliedFabOutcomeCurrent;
 		pendingResilientFabChecksHandoffFocusRef.current = appliedFabLoopOutcomeCurrent;
+		if (checksOrigin) {
+			pendingConnectedBayBankSelectionRef.current = null;
+			pendingConnectedFabSelectionRef.current = null;
+			pendingResilientFabLoopSelectionRef.current = null;
+			pendingConnectedFabHandoffFocusRef.current = false;
+			pendingResilientFabChecksHandoffFocusRef.current = false;
+		}
 		const appliedStatus = staticFabAssemblyConnectorAppliedStatus(
 			current.session.binding.hierarchyRole,
 			current.session.binding.purpose,
@@ -16442,7 +16546,8 @@ export default function TileFabApp(): React.ReactElement {
 		staticFabAssemblyConnectorReturnFocusRef.current = null;
 		staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current = false;
 		syncModelUi(appliedStatus);
-		if (!appliedFabOutcomeCurrent && !appliedFabLoopOutcomeCurrent) {
+		const returnsToChecks = requestStaticFabCheckRepairReturn("connector", checksReturnBackend);
+		if (!returnsToChecks && !appliedFabOutcomeCurrent && !appliedFabLoopOutcomeCurrent) {
 			requestAnimationFrame(() => canvasRef.current?.focus());
 		}
 	};
@@ -19108,14 +19213,14 @@ export default function TileFabApp(): React.ReactElement {
 			} else if (pan.button === 2 && !pan.moved) {
 				const activeConnector = staticFabAssemblyConnectorUiRef.current;
 				if (activeConnector) {
-					cancelStaticFabAssemblyConnector(
+					cancelStaticFabAssemblyConnectorAndRestoreFocus(
 							staticFabAssemblyConnectorCancelledStatus(
 								activeConnector.session.binding.hierarchyRole,
 								activeConnector.session.binding.purpose,
 								staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current,
 							),
 					);
-					restoreStaticFabAssemblyConnectorReturnFocus();
+
 				} else if (staticFabArrangementUiRef.current) {
 					cancelStaticFabArrangement("FAB 배치 정리를 취소했습니다 · 선택은 유지됩니다");
 					requestAnimationFrame(() => canvasRef.current?.focus());
@@ -19871,6 +19976,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const beginProjectOperation = (operation: ProjectOperation): AbortController => {
+		invalidateStaticFabCheckRepairNavigation();
 		setProjectSaveFocusOwner(null);
 		cancelStationProposalReview();
 		cancelBlueprintPlacement();
@@ -21442,6 +21548,240 @@ export default function TileFabApp(): React.ReactElement {
 		return !organizationSelectionBlocked && !projectSelectionBlocked;
 	};
 
+	function readStaticFabCheckRepairSource(): StaticFabCheckRepairSource | null {
+		const model = editorModelRef.current;
+		const doc = model.document;
+		const mirror = workerBridgeRef.current;
+		if (!mirror || workerBridgeDocumentRef.current !== doc) return null;
+		// Production Bridge.getState is a pure read. Capture actual live references after it;
+		// the controller then checks exact ready parity and rereads this coherent O(1) receipt.
+		const mirrorState = mirror.getState();
+		if (editorModelRef.current !== model || workerBridgeRef.current !== mirror ||
+			workerBridgeDocumentRef.current !== doc) return null;
+		const sourceKey = [model.map.getRevision(), model.authoredChecksum, doc.getPatchSequence(),
+			model.map.getAdvancedSwitchIdCursor(), model.portEquipment.nextPortId,
+			model.portEquipment.nextEquipmentGroupId, model.organizations.nextOrganizationId,
+			model.readiness.fingerprint].join(":");
+		return Object.freeze({ document: doc, model, map: model.map, portEquipment: model.portEquipment,
+			organizations: model.organizations, relationships: model.relationships,
+			operationalConfiguration: model.operationalConfiguration, mirror, mirrorEpoch: mirrorState.epoch,
+			projectId: projectSessionRef.current.manifest.id, projectGeneration: projectGenerationRef.current,
+			modelGeneration: model.generation, revision: model.map.getRevision(),
+			mutationGeneration: model.map.getMutationGeneration(), sequence: doc.getPatchSequence(),
+			authoredChecksum: model.authoredChecksum, sourceKey, readinessFingerprint: model.readiness.fingerprint });
+	}
+
+	function readStaticFabCheckRepairDomainCurrent(): StaticFabCheckRepairDomainCurrent | null {
+		const source = readStaticFabCheckRepairSource();
+		return source ? { source, projectIdle: projectOperationControllerRef.current === null &&
+			projectSessionRef.current.operation === "idle", modelSyncPending: modelSyncPendingRef.current } : null;
+	}
+
+	function readStaticFabCheckRepairCurrent(): StaticFabCheckRepairCurrent | null {
+		const domain = readStaticFabCheckRepairDomainCurrent();
+		const issue = readinessIssueRef.current ?? staticFabProjectIssueRef.current;
+		if (!domain || !issue || !staticFabCheckRepairChecksOpenRef.current) return null;
+		const source = domain.source as StaticFabCheckRepairSource;
+		const checks = staticFabProjectChecksRef.current;
+		const checksCurrent = staticFabInspectionSourceKeyRef.current === source.sourceKey &&
+			checks?.sourceRevision === source.revision && checks.sourceSequence === source.sequence &&
+			checks.sourceChecksum === source.authoredChecksum &&
+			checks.sourceNextAdvancedSwitchId === source.map.getAdvancedSwitchIdCursor() &&
+			checks.sourceNextPortId === source.portEquipment.nextPortId &&
+			checks.sourceNextEquipmentGroupId === source.portEquipment.nextEquipmentGroupId &&
+			checks.sourceNextOrganizationId === source.organizations.nextOrganizationId &&
+			checks.railReadinessFingerprint === source.readinessFingerprint;
+		return { source, issueId: issue.id, issueCode: issue.code,
+			locationIndex: readinessIssueRef.current ? readinessIssueLocationRef.current : staticFabProjectIssueLocationRef.current,
+			projectIdle: domain.projectIdle && !processLoopOperationRef.current && !processLoopRailEditRef.current &&
+				!staticFabMutationHistoryRef.current && !staticFabArrangementUiRef.current &&
+				!staticFabAssemblyConnectorUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
+				!staticFabBayFlowEditUiRef.current && !stationProposalReviewUiRef.current,
+			modelSyncPending: domain.modelSyncPending, checksCurrent };
+	}
+
+	function discardPendingStaticFabCheckRepairReturn(): void {
+		// Every external tool/tab intent supersedes an already queued focus return,
+		// even after its pending source receipt has been consumed.
+		if (!staticFabCheckRepairAdmissionRef.current) staticFabCheckRepairFocusGenerationRef.current++;
+		if (!pendingStaticFabCheckRepairReturnRef.current) return;
+		pendingStaticFabCheckRepairReturnRef.current = null;
+		setStaticFabCheckRepairReturnPending(false);
+	}
+
+	function invalidateStaticFabCheckRepairNavigation(): void {
+		staticFabCheckRepairFocusGenerationRef.current++;
+		staticFabCheckRepairReturnRef.current = null;
+		pendingStaticFabCheckRepairReturnRef.current = null;
+		setStaticFabCheckRepairReturnPending(false);
+		staticFabCheckRepairChooserRef.current?.close();
+	}
+
+	function tryCompleteStaticFabCheckRepairReturn(): boolean {
+		const origin = pendingStaticFabCheckRepairReturnRef.current;
+		if (!origin) return false;
+		const model = editorModelRef.current;
+		if (!staticFabCheckRepairReturnMatchesProject(origin, { document: model.document,
+			projectId: projectSessionRef.current.manifest.id, projectGeneration: projectGenerationRef.current })) {
+			pendingStaticFabCheckRepairReturnRef.current = null;
+			setStaticFabCheckRepairReturnPending(false);
+			return false;
+		}
+		const current = readStaticFabCheckRepairDomainCurrent();
+		if (!current || processLoopOperationRef.current || staticFabMutationHistoryRef.current ||
+			staticFabArrangementUiRef.current || staticFabAssemblyConnectorUiRef.current ||
+			staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current || stationProposalReviewUiRef.current) return false;
+		// A repair may have authored changes. Verify today's exact domain/mirror, then run fresh
+		// Checks; the original issue ID is a navigation origin, never a cached diagnosis or Apply proof.
+		const currentContinuation = captureStaticFabCheckRepairContinuation(current.source as StaticFabCheckRepairSource,
+			origin.issueId, origin.issueCode, origin.locationIndex);
+		if (!staticFabCheckRepairDomainIsExact(currentContinuation, current)) return false;
+		if (pendingStaticFabCheckRepairReturnRef.current !== origin) return false;
+		// Keep the return receipt until the rendered navigator can admit the transition.
+		// The live mirror can acknowledge readiness before React publishes that state.
+		if (editorActivityTransitionBlockedReason()) return false;
+		pendingStaticFabCheckRepairReturnRef.current = null;
+		setStaticFabCheckRepairReturnPending(false);
+		staticFabInspectionSourceKeyRef.current = null;
+		staticFabProjectChecksRef.current = null;
+		setStaticFabProjectChecks(null);
+		staticFabOrganizationOverviewBridge.cancel();
+		setStaticFabInspectionError(null);
+		readinessIssueRef.current = null;
+		readinessIssueLocationRef.current = 0;
+		setReadinessIssueId(null);
+		setReadinessIssueLocation(0);
+		staticFabProjectIssueRef.current = null;
+		staticFabProjectIssueLocationRef.current = 0;
+		setStaticFabProjectIssueId(null);
+		setStaticFabProjectIssueLocation(0);
+		chooseStaticFabNavigatorTab("checks", canvasRef.current);
+		const focusGeneration = ++staticFabCheckRepairFocusGenerationRef.current;
+		setStatus("편집을 마쳤습니다 · 현재 FAB을 새로 검사합니다 · 레일·장비·구조 결과를 확인하세요");
+		requestAnimationFrame(() => { if (staticFabCheckRepairFocusGenerationRef.current === focusGeneration && staticFabCheckRepairChecksOpenRef.current &&
+			editorModelRef.current.document === origin.document && projectGenerationRef.current === origin.projectGeneration)
+			staticFabChecksPanelRef.current?.focus({ preventScroll: true }); });
+		return true;
+	}
+
+	function requestStaticFabCheckRepairReturn(kind: "loop" | "connector", backend: object | null): boolean {
+		const receipt = staticFabCheckRepairReturnRef.current;
+		if (!receipt || receipt.kind !== kind || receipt.backend !== backend) return false;
+		staticFabCheckRepairReturnRef.current = null;
+		if (!staticFabCheckRepairReturnMatchesProject(receipt.origin, { document: editorModelRef.current.document,
+			projectId: projectSessionRef.current.manifest.id, projectGeneration: projectGenerationRef.current })) return false;
+		pendingStaticFabCheckRepairReturnRef.current = receipt.origin;
+		setStaticFabCheckRepairReturnPending(true);
+		if (!tryCompleteStaticFabCheckRepairReturn())
+			setStatus("편집을 마쳤습니다 · 현재 Worker 동기화가 완료되면 FAB 검사로 돌아갑니다");
+		return true;
+	}
+
+	// Recheck the current refs after every publication while a return waits for the mirror.
+	useEffect(() => {
+		if (staticFabCheckRepairReturnPending && pendingStaticFabCheckRepairReturnRef.current) tryCompleteStaticFabCheckRepairReturn();
+	});
+
+	function getStaticFabCheckRepairChooser(): StaticFabCheckRepairChooserController {
+		if (!staticFabCheckRepairChooserRef.current) {
+			staticFabCheckRepairChooserRef.current = new StaticFabCheckRepairChooserController({
+				readCurrent: readStaticFabCheckRepairCurrent,
+				readDomainCurrent: readStaticFabCheckRepairDomainCurrent,
+				now: performanceNow, createCheckpoint: createStaticFabArrangementCheckpoint,
+				publish: setStaticFabCheckRepairChooser,
+				prepareConnector: createStaticFabAssemblyConnectorLaunchPreparation,
+				launch: (request) => {
+					if (!request.isCurrent()) return false;
+					staticFabCheckRepairAdmissionRef.current = request;
+					try {
+						const beforeLoop = processLoopRailEditRef.current;
+						const beforeConnector = staticFabAssemblyConnectorBridgeRef.current;
+						let accepted = false;
+						try {
+							accepted = request.kind === "loop" ? startProcessLoopRailEdit(request.organizationId, request) :
+								startStaticFabAssemblyConnectorForOrganizations(request.organizationIds, null, request);
+						} finally {
+							const loop = processLoopRailEditRef.current;
+							const connector = staticFabAssemblyConnectorBridgeRef.current;
+							const session = staticFabAssemblyConnectorUiRef.current?.session;
+							const ownsNewBackend = request.kind === "loop" ? loop && loop !== beforeLoop : connector && connector !== beforeConnector;
+							if (ownsNewBackend) {
+								const origin = request.returnOrigin;
+								const kind = request.kind;
+								request.registerRollback(() => {
+									if (!staticFabCheckRepairReturnMatchesProject(origin, { document: editorModelRef.current.document,
+										projectId: projectSessionRef.current.manifest.id, projectGeneration: projectGenerationRef.current })) return;
+									const backend = kind === "loop" ? loop : connector;
+									if (kind === "loop") {
+										if (processLoopRailEditRef.current !== loop) return;
+										processLoopRailEditRef.current = null;
+										setProcessLoopRailEdit(null);
+										setProcessLoopRailEditFeedback(null);
+										clearTransientConstruction();
+									} else {
+										if (staticFabAssemblyConnectorBridgeRef.current !== connector || staticFabAssemblyConnectorUiRef.current?.session !== session) return;
+										cancelStaticFabAssemblyConnector();
+										staticFabAssemblyConnectorReturnFocusRef.current = null;
+										staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current = false;
+									}
+									if (staticFabCheckRepairReturnRef.current?.backend === backend) staticFabCheckRepairReturnRef.current = null;
+									scheduleRender();
+								});
+							}
+						}
+						if (!accepted) return false;
+						const backend = request.kind === "loop" ? processLoopRailEditRef.current : staticFabAssemblyConnectorBridgeRef.current;
+						if (!backend || !staticFabCheckRepairDomainIsExact(request.continuation, readStaticFabCheckRepairDomainCurrent())) return false;
+						// Bind exact accepted context before returning true; advisory lookup expires on consumption.
+						staticFabCheckRepairReturnRef.current = Object.freeze({ origin: request.returnOrigin, backend, kind: request.kind });
+						return true;
+					} finally { if (staticFabCheckRepairAdmissionRef.current === request) staticFabCheckRepairAdmissionRef.current = null; }
+				},
+			});
+		}
+		return staticFabCheckRepairChooserRef.current;
+	}
+
+	function openStaticFabCheckRepairChooser(kind: StaticFabCheckRepairChooserKind): void {
+		if (blockStaticFabExclusiveCommand()) return;
+		const current = readStaticFabCheckRepairCurrent();
+		if (!current?.checksCurrent || !current.projectIdle || current.modelSyncPending) {
+			setStatus("현재 프로젝트 검사와 Worker 동기화가 완료된 뒤 수정 대상을 선택하세요");
+			return;
+		}
+		invalidateStaticFabCheckRepairNavigation();
+		staticFabCheckRepairChooserRef.current?.dispose();
+		staticFabCheckRepairChooserRef.current = null;
+		setStaticFabCheckRepairSearch("");
+		const controller = getStaticFabCheckRepairChooser();
+		const focusGeneration = ++staticFabCheckRepairFocusGenerationRef.current;
+		const continuation = captureStaticFabCheckRepairContinuation(current.source, current.issueId, current.issueCode, current.locationIndex);
+		void controller.open(continuation, kind).catch((error: unknown) => {
+			if (staticFabCheckRepairFocusGenerationRef.current !== focusGeneration || staticFabCheckRepairChooserRef.current !== controller || controller.view) return;
+			setStatus(error instanceof Error ? error.message : "수정 대상 준비를 완료하지 못했습니다 · 다시 검사하세요");
+		});
+		requestAnimationFrame(() => { if (staticFabCheckRepairFocusGenerationRef.current === focusGeneration && controller.view && staticFabCheckRepairChooserRef.current === controller)
+			staticFabCheckRepairHeadingRef.current?.focus({ preventScroll: true }); });
+	}
+
+	function updateStaticFabCheckRepairQuery(query: Parameters<StaticFabCheckRepairChooserController["updateQuery"]>[0]): void {
+		const controller = staticFabCheckRepairChooserRef.current;
+		if (!controller?.view) return;
+		const focusGeneration = staticFabCheckRepairFocusGenerationRef.current;
+		void controller.updateQuery(query).catch((error: unknown) => {
+			if (staticFabCheckRepairFocusGenerationRef.current !== focusGeneration || staticFabCheckRepairChooserRef.current !== controller) return;
+			setStatus(error instanceof Error ? error.message : "선택한 대상을 다시 확인하세요");
+		});
+	}
+
+	function closeStaticFabCheckRepairChooser(): void {
+		const focusGeneration = ++staticFabCheckRepairFocusGenerationRef.current;
+		staticFabCheckRepairChooserRef.current?.close();
+		setStatus("수정 대상 선택을 닫았습니다 · 현재 레일과 장비는 유지됩니다");
+		requestAnimationFrame(() => { if (staticFabCheckRepairFocusGenerationRef.current === focusGeneration && !staticFabCheckRepairChooserRef.current?.view && staticFabCheckRepairChecksOpenRef.current)
+			staticFabChecksPanelRef.current?.focus({ preventScroll: true }); });
+	}
+
 	const closeReadiness = (): void => {
 		setStatus((current) =>
 			current === STATIC_FAB_CHECKS_PENDING_STATUS
@@ -21616,6 +21956,7 @@ export default function TileFabApp(): React.ReactElement {
 
 	const activateReadinessRepair = (issue: RailProjectReadinessIssue): void => {
 		if (blockStaticFabExclusiveCommand()) return;
+		invalidateStaticFabCheckRepairNavigation();
 		const guide = railReadinessIssueGuide(readiness, issue);
 		let repairLocationIndex = readinessIssueLocationRef.current;
 		let focus = railReadinessIssueLocationAt(readiness, issue, repairLocationIndex);
@@ -23752,6 +24093,7 @@ export default function TileFabApp(): React.ReactElement {
 				returnFocusTarget ??
 				(activeElement instanceof HTMLElement ? activeElement : canvasRef.current);
 		}
+		discardPendingStaticFabCheckRepairReturn();
 		setTemplatePaletteOpen(false);
 		assemblePaletteReturnFocusRef.current = null;
 		if (tab !== "organizations") closeBlueprintLibrary(false);
@@ -23787,6 +24129,7 @@ export default function TileFabApp(): React.ReactElement {
 			? organizationLibraryReturnFocusRef.current
 			: null;
 		const returnTarget = staticFabNavigatorReturnFocusRef.current ?? organizationReturnTarget;
+		invalidateStaticFabCheckRepairNavigation();
 		if (organizationLibraryOpen && !closeOrganizationLibrary(false)) return;
 		else closeReadiness();
 		if (guidedBuildPrimaryTarget?.kind === "navigator-close") {
@@ -23957,12 +24300,14 @@ export default function TileFabApp(): React.ReactElement {
 	}
 
 	function exitProcessLoopRailEdit(): void {
+		const backend = processLoopRailEditRef.current;
 		cancelProcessLoopOperation();
 		processLoopRailEditRef.current = null;
 		setProcessLoopRailEdit(null);
 		setProcessLoopRailEditFeedback(null);
 		clearTransientConstruction();
 		setStatus("작업 루프 레일 편집을 종료했습니다 · 확정한 편집은 유지됩니다");
+		requestStaticFabCheckRepairReturn("loop", backend);
 		scheduleRender();
 	}
 
@@ -23990,15 +24335,17 @@ export default function TileFabApp(): React.ReactElement {
 			staticFabOrganizationParentIds(owner).length === 0 ? owner : null;
 	}
 
-	function startProcessLoopRailEdit(organizationId: number): void {
-		if (blockStaticFabExclusiveCommand() || editorMutationWaitBlockedReason()) return;
+	function startProcessLoopRailEdit(organizationId: number, checksLaunch: Extract<StaticFabCheckRepairChooserLaunch, { kind: "loop" }> | null = null): boolean {
+		if (blockStaticFabExclusiveCommand() || editorMutationWaitBlockedReason()) return false;
 		const document = editorModelRef.current.document;
-		const owner = document.organizations.records.find((record) => record.id === organizationId);
+		const owner = checksLaunch ? checksLaunch.metadataLookup.record(organizationId) : document.organizations.records.find((record) => record.id === organizationId);
+		if (checksLaunch && (!checksLaunch.isCurrent() || checksLaunch.continuation.source.document !== document)) return false;
 		if (owner?.kind !== "AISLE" || owner.declaredSemanticRole !== "PROCESS_LOOP" || staticFabOrganizationParentIds(owner).length > 0) {
 			setStatus("직접 등록한 독립 작업 루프에서 레일 편집을 열어 주세요");
-			return;
+			return false;
 		}
-		if (!closeOrganizationLibrary(false)) return;
+		if (!closeOrganizationLibrary(false)) return false;
+		if (checksLaunch) setReadinessOpen(false);
 		chooseTool("build");
 		chooseBuildMode("route");
 		clearAreaSelection();
@@ -24011,7 +24358,11 @@ export default function TileFabApp(): React.ReactElement {
 		processLoopRailEditRef.current = context;
 		setProcessLoopRailEdit(context);
 		setStatus(`${owner.name} 레일 편집 · 그리기·지우기·Delete · Esc로 종료`);
-		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+		requestAnimationFrame(() => {
+			if (processLoopRailEditRef.current === context && editorModelRef.current.document === document)
+				canvasRef.current?.focus({ preventScroll: true });
+		});
+		return processLoopRailEditRef.current === context;
 	}
 
 	async function registerSelectedProcessLoop(): Promise<void> {
@@ -29781,7 +30132,8 @@ export default function TileFabApp(): React.ReactElement {
 		buildMode === "route";
 	const firstPortHandoff = ordinaryFirstPortHandoff({
 		railAuthoringActive:
-			editorActivity === "build" && tool === "build" && buildMode === "route",
+			editorActivity === "build" && tool === "build" && buildMode === "route" &&
+			processLoopRailEdit?.document !== railDocument,
 		guidedBuildActive: guidedBuildExperienceActive,
 		equipmentGroupCount: activePortEquipment.equipmentGroups.length,
 		portCount: activePortEquipment.ports.length,
@@ -29807,7 +30159,8 @@ export default function TileFabApp(): React.ReactElement {
 		surface:
 			editorActivity === "equip" && tool === "ohb"
 				? ("ohb-authoring" as const)
-				: editorActivity === "build" && tool === "build" && buildMode === "route"
+				: editorActivity === "build" && tool === "build" && buildMode === "route" &&
+					processLoopRailEdit?.document !== railDocument
 					? ("build-return" as const)
 					: null,
 		guidedBuildActive: guidedBuildExperienceActive,
@@ -30851,6 +31204,7 @@ export default function TileFabApp(): React.ReactElement {
 			scheduleRender();
 			return false;
 		}
+		if (!staticFabCheckRepairAdmissionRef.current) discardPendingStaticFabCheckRepairReturn();
 		if (staticFabNavigatorOpen) {
 			if (organizationLibraryOpen && !closeOrganizationLibrary(false)) return false;
 			closeReadiness();
@@ -33297,14 +33651,14 @@ export default function TileFabApp(): React.ReactElement {
 					onSide={setStaticFabAssemblyConnectorSide}
 					onApply={applyStaticFabAssemblyConnector}
 					onCancel={() => {
-						cancelStaticFabAssemblyConnector(
+						cancelStaticFabAssemblyConnectorAndRestoreFocus(
 							staticFabAssemblyConnectorCancelledStatus(
 								assemblyConnectorHierarchyRolePresentation,
 								assemblyConnectorPurposePresentation,
 								staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current,
 							),
 						);
-						restoreStaticFabAssemblyConnectorReturnFocus();
+
 					}}
 				/>
 				{staticFabAssemblyConnector ? (
@@ -34147,7 +34501,7 @@ export default function TileFabApp(): React.ReactElement {
 					</div>
 				) : null}
 
-				{guidedBuildOpen && startupReady && viewMode === "2d" ? (
+				{guidedBuildOpen && startupReady && viewMode === "2d" && !staticFabCheckRepairChooser ? (
 					<DeferredGuidedBuildPanel
 						key={guidedBuildEvaluation.currentMissionId ?? "complete"}
 						evaluation={guidedBuildEvaluation}
@@ -34658,6 +35012,7 @@ export default function TileFabApp(): React.ReactElement {
 						id="tilefab-fab-navigator"
 						className="tilefab-readiness"
 						data-testid="rail-readiness-panel"
+						data-check-repair-chooser={staticFabCheckRepairChooser !== null}
 						data-status={staticFabCheckStatus}
 						data-focused={
 							activeReadinessIssue !== null ||
@@ -34673,6 +35028,34 @@ export default function TileFabApp(): React.ReactElement {
 						aria-label="정적 FAB 프로젝트 검사"
 						tabIndex={-1}
 					>
+						{staticFabCheckRepairChooser ? (
+							<StaticFabCheckRepairChooser
+								view={staticFabCheckRepairChooser}
+								input={{ searchText: staticFabCheckRepairSearch, role: staticFabCheckRepairChooser.query.role ?? "ALL" }}
+								selectedSlots={staticFabCheckRepairChooser.selectedSlots}
+								headingRef={staticFabCheckRepairHeadingRef}
+								onSearchTextChange={(text) => { setStaticFabCheckRepairSearch(text); updateStaticFabCheckRepairQuery({ searchText: text }); }}
+								onSubmitSearch={() => updateStaticFabCheckRepairQuery({ searchText: staticFabCheckRepairSearch })}
+								onRoleFilterChange={(role) => updateStaticFabCheckRepairQuery({ role })}
+								onSelectOrganizationId={(id) => {
+									const view = staticFabCheckRepairChooserRef.current?.view;
+									if (!view) return;
+									const ids = view.query.selectedOrganizationIds ?? [];
+									if (ids.includes(id)) return;
+									updateStaticFabCheckRepairQuery({ selectedOrganizationIds: view.kind === "loop" ? [id] : [...ids, id].slice(0, 2) });
+								}}
+								onRemoveOrganizationId={({ slotIndex, organizationId }) => {
+									const ids = staticFabCheckRepairChooserRef.current?.view?.query.selectedOrganizationIds;
+									if (!ids || ids[slotIndex] !== organizationId) return;
+									updateStaticFabCheckRepairQuery({ selectedOrganizationIds: ids.filter((_, index) => index !== slotIndex) });
+								}}
+								onLaunch={() => { void staticFabCheckRepairChooserRef.current?.launch(); }}
+								onCancel={closeStaticFabCheckRepairChooser}
+								onClose={closeStaticFabCheckRepairChooser}
+							/>
+						) : (
+						<>
+
 						<header>
 							<span>
 								<small>FAB 검사</small>
@@ -35058,6 +35441,21 @@ export default function TileFabApp(): React.ReactElement {
 											</button>
 										</div>
 									) : null}
+									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" &&
+										["OPEN_TERMINAL", "DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) ? (
+										<button type="button" className="tilefab-readiness-repair" data-testid="checks-choose-process-loop"
+											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending}
+											onClick={() => openStaticFabCheckRepairChooser("loop")}>
+											작업 루프를 골라 수정
+										</button>
+									) : null}
+									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" && ["DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) && readiness.summary.weakComponents > 1 ? (
+										<button type="button" className="tilefab-readiness-repair" data-testid="checks-choose-connector"
+											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending}
+											onClick={() => openStaticFabCheckRepairChooser("connector")}>
+											베이·뱅크를 골라 연결
+										</button>
+									) : null}
 									{activeReadinessGuide.repairTool && activeReadinessGuide.repairLabel ? (
 										<button
 											type="button"
@@ -35346,6 +35744,8 @@ export default function TileFabApp(): React.ReactElement {
 							</div>
 						</section>
 						</div>
+						</>
+						)}
 					</aside>
 				) : null}
 
@@ -38056,7 +38456,7 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 
 				<StandaloneProcessLoopAuthoringBar ownerName={processLoopRailEdit?.document === railDocument ? activeOrganizations.records.find((record) => record.id === processLoopRailEdit.organizationId)?.name ?? null : null}
-					pendingLabel={processLoopOperation} feedback={processLoopRailEditFeedback} onSelectRail={selectProcessLoopRailForRepair} onExit={exitProcessLoopRailEdit} onCancel={() => cancelProcessLoopOperation()} />
+					pendingLabel={processLoopOperation} feedback={processLoopRailEditFeedback} onSelectRail={selectProcessLoopRailForRepair} onExit={exitProcessLoopRailEdit} onCancel={() => cancelProcessLoopOperation()} returnToChecks={staticFabCheckRepairReturnRef.current?.kind === "loop" && staticFabCheckRepairReturnRef.current.backend === processLoopRailEditRef.current} />
 				{staticFabMutationHistory ? (
 					<section className="tilefab-arrangement-historybar" data-testid="static-fab-arrangement-history" aria-label={`${staticFabHistoryLabel} 이력 처리`} aria-busy="true">
 						<p className="tilefab-arrangement-history-copy" role="status">{staticFabHistoryLabel} {staticFabMutationHistory === "undo" ? "실행 취소" : "다시 실행"} 준비 중</p>

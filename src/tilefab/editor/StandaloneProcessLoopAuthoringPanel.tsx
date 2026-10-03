@@ -71,6 +71,7 @@ export interface StandaloneProcessLoopAuthoringBarProps {
 	readonly onExit: () => void;
 	readonly onSelectRail: () => void;
 	readonly onCancel: () => void;
+	readonly returnToChecks?: boolean;
 }
 
 export function StandaloneProcessLoopAuthoringBar({
@@ -80,6 +81,7 @@ export function StandaloneProcessLoopAuthoringBar({
 	onExit,
 	onCancel,
 	onSelectRail,
+	returnToChecks = false,
 }: StandaloneProcessLoopAuthoringBarProps) {
 	if (!ownerName && !pendingLabel) return null;
 	return (
@@ -109,9 +111,12 @@ export function StandaloneProcessLoopAuthoringBar({
 				type="button"
 				className="tilefab-arrangement-history-cancel tilefab-process-loop-context-action"
 				data-testid={pendingLabel ? "cancel-process-loop-operation" : "exit-process-loop-edit"}
+				aria-label={
+					!pendingLabel && returnToChecks ? "편집 종료 후 현재 FAB을 다시 검사" : undefined
+				}
 				onClick={pendingLabel ? onCancel : onExit}
 			>
-				{pendingLabel ? "취소" : "편집 종료"} <kbd>ESC</kbd>
+				{pendingLabel ? "취소" : returnToChecks ? "종료·검사" : "편집 종료"} <kbd>ESC</kbd>
 			</button>
 		</section>
 	);

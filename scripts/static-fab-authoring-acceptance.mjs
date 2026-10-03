@@ -96,6 +96,9 @@ const PROJECT_STARTER_RETRY_ONLY_COMPLETE = new Error("Project starter retry com
 const STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE = new Error(
 	"Static FAB issue Inspector recheck acceptance completed.",
 );
+const STATIC_FAB_CHECK_REPAIR_CHOOSER_ONLY_COMPLETE = new Error(
+	"Explicit Checks repair chooser acceptance completed.",
+);
 const browserEmergencyKillers = new WeakMap();
 let contextualSaveResponsiveVerified = false;
 const execFileAsync = promisify(execFile);
@@ -145,6 +148,14 @@ try {
 	await waitForServer(`${baseUrl}/`);
 	browser = await launchBrowserWithRetry();
 	recordStep("browser-text-line-measurement", await verifyWrappedTextLineCount(browser));
+	if (process.env.OPENFAB_CHECK_REPAIR_CHOOSER_ACCEPTANCE_ONLY === "1") {
+		recordStep("checks-explicit-repair-chooser", await exerciseStaticFabCheckRepairChooserAcceptance(browser));
+		assertEqual(result.consoleErrors.length, 0, "Checks chooser console errors");
+		assertEqual(result.pageErrors.length, 0, "Checks chooser page errors");
+		result.status = "PASS";
+		console.log("PASS explicit Checks repair chooser acceptance");
+		throw STATIC_FAB_CHECK_REPAIR_CHOOSER_ONLY_COMPLETE;
+	}
 	if (process.env.OPENFAB_GUIDED_BAY_PORT_CLICK_ACCEPTANCE_ONLY === "1") {
 		recordStep("guided-bay-port-clicks", await exerciseGuidedBayPortClicks(browser));
 		assertEqual(result.consoleErrors.length, 0, "Guided Bay click console errors");
@@ -896,6 +907,7 @@ try {
 	await assertFittedMapVisible(desktopPage);
 	await exerciseStaticFabNavigator(desktopPage);
 	recordStep("static-fab-navigator", await readMetrics(desktopPage));
+	recordStep("checks-explicit-repair-chooser", await exerciseStaticFabCheckRepairChooserAcceptance(browser));
 	const largeFabCanvas = desktopPage.getByTestId("rail-canvas");
 	await largeFabCanvas.press("Control+a");
 	const authoredStructure = desktopPage.getByTestId("static-fab-authored-structure");
@@ -2926,7 +2938,8 @@ try {
 		error === UNSCOPED_OHB_OWNERSHIP_ONLY_COMPLETE ||
 		error === PRESET_RECOVERY_ONLY_COMPLETE ||
 		error === PROJECT_STARTER_RETRY_ONLY_COMPLETE ||
-		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE
+		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE ||
+		error === STATIC_FAB_CHECK_REPAIR_CHOOSER_ONLY_COMPLETE
 	) {
 		// The opt-in focused run intentionally skips the whole-editor acceptance sequence.
 	} else {
@@ -9735,8 +9748,10 @@ async function exercisePendingLoopHistoryCommands(page, before, repaired, source
 			assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} ${action} preserves every authored contract`);
 			attempted.push(action);
 		};
+		assertEqual(await guide.locator(".tilefab-readiness-repair").count(), 2, `${label} both supported repair entries remain present`);
 		for (const [control, action] of [
-			[guide.locator(".tilefab-readiness-repair"), "repair CTA"],
+			[guide.getByTestId("checks-choose-process-loop"), "explicit Loop repair chooser"],
+			[guide.getByRole("button", { name: "레일 이어 만들기", exact: true }), "rail continuation repair CTA"],
 			[guide.getByRole("button", { name: "다음 문제 위치", exact: true }), "next issue location"],
 			[checks.getByRole("button", { name: "다음 문제", exact: true }), "next issue"],
 			[issue, "issue selection"],
@@ -10006,6 +10021,949 @@ async function exerciseStandaloneLoopIdentityReset(page, savedPath, saved, loopI
 	await page.screenshot({ path: path.join(artifactRoot, `${label}-new-project-editable.png`) });
 	return { repair, port, openDraw, newDraw, replacementProjectId: fresh.projectId };
 }
+
+async function exerciseStaticFabCheckRepairChooserAcceptance(browserInstance) {
+	if (!browserInstance) throw new Error("Checks chooser browser is unavailable.");
+	const proofs = [];
+	for (const viewport of [
+		{ width: 390, height: 600 },
+		{ width: 844, height: 390 },
+		{ width: 1440, height: 900 },
+	]) {
+		const label = `checks-chooser-${viewport.width}x${viewport.height}`;
+		reportAcceptanceProgress(`${label} standalone Loop`);
+		const loop = await checkRepairExerciseLoopContext(browserInstance, viewport, label);
+		reportAcceptanceProgress(`${label} managed Bay pair`);
+		const connector = await checkRepairExerciseConnectorContext(browserInstance, viewport, label);
+		proofs.push({ viewport, loop, connector });
+	}
+	return { input: "actual-existing-ui", directProjectMutation: false, proofs };
+}
+
+async function checkRepairCreatePage(browserInstance, viewport, label) {
+	const context = await browserInstance.newContext({ viewport, acceptDownloads: true });
+	let page;
+	try {
+		page = await context.newPage();
+		page.on("console", (message) => {
+			if (message.type() === "error") result.consoleErrors.push(`[${label}] ${message.text()}`);
+		});
+		page.on("pageerror", (error) => result.pageErrors.push(`[${label}] ${error.message}`));
+		const workers = [];
+		const onWorker = (worker) => workers.push({ url: worker.url(), at: performance.now() });
+		page.on("worker", onWorker);
+		await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(page, { physicalPaths: 0 });
+		const start = page.getByTestId("openfab-start-dialog");
+		await start.waitFor({ state: "visible" });
+		await start.getByRole("button", { name: /BLANK CANVAS/ }).click();
+		await start.waitFor({ state: "hidden" });
+		const empty = await waitForWorker(page, (metrics) => metrics.authoredCells === "0" && metrics.staticFabOrganizations === "0");
+		assertEqual(empty.workerSimulationReady, "false", `${label} blank simulation gate`);
+		return { context, page, workers, onWorker };
+	} catch (error) {
+		await closeBrowserResource(page, `${label} failed page setup`);
+		await closeBrowserResource(context, `${label} failed context setup`);
+		throw error;
+	}
+}
+
+async function checkRepairClosePage(owner, label) {
+	owner.page.off("worker", owner.onWorker);
+	await closeBrowserResource(owner.page, `${label} page`);
+	await closeBrowserResource(owner.context, `${label} context`);
+}
+
+async function checkRepairNoMutation(page, before, source, label) {
+	const current = await waitForWorker(page, () => true);
+	assertProjectUnchanged(current, before, label);
+	assertExactStaticFabModelIdentity(current, before, label);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} exact five authored contracts`);
+	assertEqual(current.modelNextRelationshipId, before.modelNextRelationshipId, `${label} relationship cursor`);
+	assertEqual(current.modelRelationships, before.modelRelationships, `${label} relationship count`);
+	assertEqual(current.workerSimulationReady, "false", `${label} simulation gate`);
+	return current;
+}
+
+async function checkRepairAssertControl(page, locator, label) {
+	await locator.waitFor({ state: "visible" });
+	try {
+		await assertLocatorInsideViewport(page, locator);
+	} catch (error) {
+		const diagnostic = await locator.evaluate((element) => {
+			const ancestors = [];
+			for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+				const style = getComputedStyle(parent);
+				const bounds = parent.getBoundingClientRect();
+				ancestors.push({ className: parent.className, scrollTop: parent.scrollTop, scrollLeft: parent.scrollLeft,
+					scrollHeight: parent.scrollHeight, clientHeight: parent.clientHeight, top: bounds.top, bottom: bounds.bottom,
+					overflowX: style.overflowX, overflowY: style.overflowY });
+			}
+			return { activeElement: document.activeElement?.outerHTML, ancestors };
+		});
+		await writeFile(path.join(artifactRoot, `${label.replace(/[^a-z0-9-]/gi, "-")}-clipping.json`), JSON.stringify(diagnostic, null, 2));
+		throw error;
+	}
+	await assertLocatorOwnsHitArea(locator, label);
+	const bounds = await locator.boundingBox();
+	if (!bounds) throw new Error(`${label} has no bounds.`);
+	assertAtLeast(bounds.width, 44, `${label} target width`);
+	assertAtLeast(bounds.height, 44, `${label} target height`);
+	return bounds;
+}
+
+async function checkRepairSettleFrames(page) {
+	await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+async function checkRepairNeutralBodyPoint(page, body, label) {
+	const point = await body.evaluate((element) => {
+		const bounds = element.getBoundingClientRect();
+		for (const x of [bounds.left + 2, bounds.right - 18, bounds.left + bounds.width / 2]) {
+			for (const ratio of [0.5, 0.25, 0.75, 0.1, 0.9]) {
+				const y = bounds.top + bounds.height * ratio;
+				const target = document.elementFromPoint(x, y);
+				if (target && element.contains(target) && !target.closest('button, select, input, textarea, [role="button"]'))
+					return { x, y, target: { tag: target.tagName, className: target.className } };
+			}
+		}
+		return null;
+	});
+	if (!point) throw new Error(`${label} has no neutral unobscured chooser body surface.`);
+	await page.mouse.move(point.x, point.y);
+	await checkRepairSettleFrames(page);
+	assertEqual(await body.evaluate((element, point) => {
+		const target = document.elementFromPoint(point.x, point.y);
+		return Boolean(target && element.contains(target) && !target.closest('button, select, input, textarea, [role="button"]'));
+	}, point), true, `${label} current neutral body ownership after pointer movement`);
+	return point;
+}
+
+async function checkRepairWheelMovement(page, body, delta, label, end = null) {
+	const point = await checkRepairNeutralBodyPoint(page, body, label);
+	const previous = await body.evaluate((element) => element.scrollTop);
+	await page.mouse.wheel(0, delta);
+	await body.evaluate((element, input) => new Promise((resolve, reject) => {
+		const deadline = performance.now() + 5_000;
+		const poll = () => {
+			const movement = element.scrollTop - input.previous;
+			const moved = input.delta > 0 ? movement > 0.5 : movement < -0.5;
+			const atEnd = input.end === null || (input.end
+				? element.scrollHeight - element.clientHeight - element.scrollTop <= 1
+				: element.scrollTop <= 1);
+			if (moved && atEnd) { resolve(); return; }
+			if (performance.now() > deadline) {
+				reject(new Error(`Chooser wheel failed directional movement/end: ${JSON.stringify({ previous: input.previous, delta: input.delta, scrollTop: element.scrollTop, range: element.scrollHeight - element.clientHeight, end: input.end })}`));
+				return;
+			}
+			requestAnimationFrame(poll);
+		};
+		poll();
+	}), { previous, delta, end });
+	await checkRepairSettleFrames(page);
+	return { point, previous, next: await body.evaluate((element) => element.scrollTop), delta, end };
+}
+
+async function checkRepairRevealBodyControl(page, chooser, locator, label) {
+	const body = chooser.locator(".tilefab-check-repair-chooser__body");
+	for (let attempt = 0; attempt < 12; attempt++) {
+		await checkRepairSettleFrames(page);
+		const target = await locator.boundingBox();
+		const area = await body.boundingBox();
+		if (!target || !area) throw new Error(`${label} target/body is unavailable.`);
+		const top = area.y + 2;
+		const bottom = area.y + area.height - 2;
+		if (target.y >= top - 1 && target.y + target.height <= bottom + 1) {
+			await checkRepairAssertControl(page, locator, label);
+			return;
+		}
+		const delta = target.y < top
+			? -Math.max(44, top - target.y)
+			: Math.max(44, target.y + target.height - bottom);
+		await checkRepairWheelMovement(page, body, delta, `${label} reveal ${attempt + 1}`);
+	}
+	throw new Error(`${label} was not revealed by twelve actual wheel inputs.`);
+}
+
+async function checkRepairChooserLayout(page, chooser, before, source, label) {
+	const body = chooser.locator(".tilefab-check-repair-chooser__body");
+	const header = chooser.locator(".tilefab-check-repair-chooser__header");
+	const actions = chooser.locator(".tilefab-check-repair-chooser__actions");
+	const measure = () => chooser.evaluate((element) => {
+		const body = element.querySelector(".tilefab-check-repair-chooser__body");
+		const header = element.querySelector(".tilefab-check-repair-chooser__header");
+		const actions = element.querySelector(".tilefab-check-repair-chooser__actions");
+		const panel = element.closest('[data-testid="rail-readiness-panel"]');
+		if (!body || !header || !actions || !panel) return null;
+		const rect = (node) => {
+			const box = node.getBoundingClientRect();
+			return { top: box.top, bottom: box.bottom, left: box.left, right: box.right };
+		};
+		return {
+			panel: rect(panel), chooser: rect(element), body: rect(body), header: rect(header), actions: rect(actions),
+			panelOverflow: getComputedStyle(panel).overflowY, bodyOverflow: getComputedStyle(body).overflowY,
+			panelScrollTop: panel.scrollTop, panelScrollHeight: panel.scrollHeight, panelClientHeight: panel.clientHeight,
+			scrollTop: body.scrollTop, scrollHeight: body.scrollHeight, clientHeight: body.clientHeight,
+			documentHorizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+			bodyHorizontalOverflow: body.scrollWidth - body.clientWidth,
+		};
+	});
+	const initial = await measure();
+	if (!initial) throw new Error(`${label} layout nodes are absent.`);
+	await assertLocatorInsideViewport(page, chooser);
+	await assertLocatorInsideViewport(page, header);
+	await assertLocatorInsideViewport(page, actions);
+	assertAtMost(initial.documentHorizontalOverflow, 0, `${label} document horizontal overflow`);
+	assertAtMost(initial.bodyHorizontalOverflow, 1, `${label} body horizontal overflow`);
+	assertEqual(initial.panelOverflow, "hidden", `${label} outer panel does not own scrolling`);
+	assertEqual(["auto", "scroll"].includes(initial.bodyOverflow), true, `${label} bounded body owns scrolling`);
+	assertEqual(initial.panelScrollTop, 0, `${label} initial outer panel remains stationary`);
+	assertAtMost(initial.header.bottom, initial.body.top + 1, `${label} header does not cover body`);
+	assertAtMost(initial.body.bottom, initial.actions.top + 1, `${label} footer does not cover body`);
+	await checkRepairAssertControl(page, header.getByRole("button"), `${label} visible fixed close`);
+	for (const button of await actions.getByRole("button").all())
+		await checkRepairAssertControl(page, button, `${label} visible fixed ${await button.textContent()}`);
+	const range = initial.scrollHeight - initial.clientHeight;
+	if (range <= 1) {
+		await checkRepairNoMutation(page, before, source, `${label} fitting body layout`);
+		return { initial, range, wheelExercised: false, reason: "body currently fits without overflow" };
+	}
+
+	const key = "openfabCheckRepairChooserWheelEvidence";
+	await body.evaluate((element, key) => {
+		if (Reflect.has(element, key)) throw new Error("Chooser wheel observer key is already owned.");
+		const events = [], scrolls = [];
+		const listener = (event) => {
+			if (events.length >= 20) return;
+			const target = event.target;
+			const item = {
+				deltaY: event.deltaY, isTrusted: event.isTrusted, ctrlKey: event.ctrlKey,
+				metaKey: event.metaKey, shiftKey: event.shiftKey, clientX: event.clientX, clientY: event.clientY,
+				bodyContainsTarget: target instanceof Node && element.contains(target),
+				interactiveTarget: target instanceof Element && target.closest('button, select, input, textarea, [role="button"]') !== null,
+				defaultPrevented: event.defaultPrevented, scrollTop: element.scrollTop,
+			};
+			events.push(item);
+			requestAnimationFrame(() => { item.defaultPrevented = event.defaultPrevented; });
+		};
+		const scrollListener = () => {
+			if (scrolls.length < 128) scrolls.push({ scrollTop: element.scrollTop, at: performance.now() });
+		};
+		document.addEventListener("wheel", listener, { capture: true, passive: true });
+		element.addEventListener("scroll", scrollListener, { passive: true });
+		Reflect.set(element, key, { events, scrolls, listener, scrollListener });
+	}, key);
+	const moves = [];
+	let trace;
+	try {
+		if (initial.scrollTop > 1) moves.push(await checkRepairWheelMovement(page, body, -2000, `${label} initial up`, false));
+		for (const [delta, end, name] of [[2000, true, "down"], [-2000, false, "up"], [2000, true, "down again"], [-2000, false, "up again"]]) {
+			moves.push(await checkRepairWheelMovement(page, body, delta, `${label} ${name}`, end));
+			const current = await measure();
+			if (!current) throw new Error(`${label} chooser vanished during wheel input.`);
+			assertEqual(current.panelScrollTop, 0, `${label} outer panel stationary after ${name}`);
+			for (const node of ["panel", "chooser", "header", "body", "actions"])
+				for (const edge of ["top", "bottom", "left", "right"])
+					assertAtMost(Math.abs(current[node][edge] - initial[node][edge]), 1, `${label} ${node}.${edge} fixed after ${name}`);
+		}
+	} catch (error) {
+		await writeFile(path.join(artifactRoot, `${label}-wheel-failure.json`), JSON.stringify({ initial, moves, current: await measure() }, null, 2));
+		throw error;
+	} finally {
+		trace = await body.evaluate((element, key) => {
+			const state = Reflect.get(element, key);
+			if (!state) throw new Error("Chooser wheel observer disappeared before cleanup.");
+			document.removeEventListener("wheel", state.listener, true);
+			element.removeEventListener("scroll", state.scrollListener);
+			Reflect.deleteProperty(element, key);
+			return { events: state.events, scrolls: state.scrolls };
+		}, key);
+	}
+	assertEqual(JSON.stringify(trace.events.map((event) => event.deltaY)), JSON.stringify(moves.map((move) => move.delta)), `${label} every real wheel input delivered`);
+	assertEqual(trace.events.every((event) => event.isTrusted && event.bodyContainsTarget && !event.interactiveTarget && !event.defaultPrevented && !event.ctrlKey && !event.metaKey && !event.shiftKey), true, `${label} trusted unmodified uncanceled body wheel`);
+	await checkRepairNoMutation(page, before, source, `${label} wheel preserves source`);
+	const final = await measure();
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-wheel-layout.png`) });
+	await writeFile(path.join(artifactRoot, `${label}-wheel.json`), JSON.stringify({ initial, moves, final, trace }, null, 2));
+	return { initial, range, final, moves, trace, wheelExercised: true };
+}
+
+async function checkRepairCurrentChecks(page, label, expected = null) {
+	const metrics = await waitForWorker(page, () => true);
+	if (expected) assertExactStaticFabModelIdentity(metrics, expected, `${label} unchanged source before Checks`);
+	const panel = page.getByTestId("rail-readiness-panel");
+	await panel.waitFor({ state: "visible" });
+	await page.waitForFunction((source) => {
+		const panel = document.querySelector('[data-testid="rail-readiness-panel"]');
+		return panel && ["ready", "issues"].includes(panel.dataset.status) &&
+			panel.dataset.sourceSequence === source.sequence && panel.dataset.sourceRevision === source.revision &&
+			panel.dataset.sourceChecksum === source.checksum && panel.dataset.checkRepairChooser === "false";
+	}, { sequence: metrics.modelSequence, revision: metrics.modelRevision, checksum: metrics.modelChecksum }, { timeout: 30_000 });
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-navigator-tab"), "checks", `${label} Checks owns navigator`);
+	assertEqual(await page.getByTestId("rail-readiness-panel").count(), 1, `${label} one Checks panel`);
+	assertEqual(await page.locator(".tilefab-check-repair-chooser").count(), 0, `${label} chooser absent`);
+	return { metrics, panel, status: await panel.getAttribute("data-status"), fingerprint: await panel.getAttribute("data-fingerprint") };
+}
+
+async function checkRepairChooseIssue(page, code, label) {
+	try {
+		if ((await page.getByTestId("tilefab-app").getAttribute("data-editor-activity")) !== "inspect")
+			await checkRepairAssertControl(page, page.getByTestId("editor-activity-inspect"), `${label} inspect activity entry`);
+		await openStaticFabNavigatorTab(page, "checks");
+	} catch (error) {
+		const diagnostic = await page.evaluate(() => ({
+			activeElement: document.activeElement?.outerHTML,
+			panels: [...document.querySelectorAll(".tilefab-workspace, #tilefab-fab-navigator, .tilefab-navigator-overview, .tilefab-navigator-tabpanel--checks, .tilefab-readiness-checks, .tilefab-readiness-issues")].map((element) => {
+				const style = getComputedStyle(element), bounds = element.getBoundingClientRect();
+				return { className: element.className, id: element.id, top: bounds.top, height: bounds.height,
+					scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight,
+					display: style.display, position: style.position, overflowY: style.overflowY, flex: style.flex,
+					maxHeight: style.maxHeight, minHeight: style.minHeight, order: style.order, html: element.outerHTML };
+			}),
+		}));
+		await writeFile(path.join(artifactRoot, `${label}-checks-open-failure.json`), JSON.stringify(diagnostic, null, 2));
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-checks-open-failure.png`) });
+		throw error;
+	}
+	const checked = await checkRepairCurrentChecks(page, label);
+	assertEqual(checked.status, "issues", `${label} known fixture issue status`);
+	const issue = checked.panel.locator(`[data-testid^="rail-readiness-issue-"][data-code="${code}"]`).first();
+	await issue.waitFor({ state: "visible" });
+	await issue.scrollIntoViewIfNeeded();
+	await checkRepairAssertControl(page, issue, `${label} actual ${code} issue`);
+	await issue.click();
+	const guide = page.getByTestId("rail-readiness-guide");
+	await guide.waitFor({ state: "visible" });
+	assertEqual(await guide.getAttribute("data-code"), code, `${label} exact issue guide`);
+	assertEqual(await issue.getAttribute("data-active"), "true", `${label} actual issue is selected`);
+	return checked;
+}
+
+async function checkRepairOpenChooser(page, kind, label) {
+	const entry = page.getByTestId(kind === "loop" ? "checks-choose-process-loop" : "checks-choose-connector");
+	await entry.scrollIntoViewIfNeeded();
+	await checkRepairAssertControl(page, entry, `${label} visible explicit chooser entry`);
+	assertEqual(await entry.isEnabled(), true, `${label} explicit entry enabled`);
+	await entry.click();
+	const chooser = page.locator(`.tilefab-check-repair-chooser[data-kind="${kind}"]`);
+	await chooser.waitFor({ state: "visible" });
+	await page.waitForFunction((kind) => document.querySelector(`.tilefab-check-repair-chooser[data-kind="${kind}"]`)?.dataset.phase === "ready", kind, { timeout: 30_000 });
+	assertEqual(await page.getByTestId("rail-readiness-panel").getAttribute("data-check-repair-chooser"), "true", `${label} Checks chooser owns aside`);
+	assertEqual(await chooser.locator(".tilefab-check-repair-chooser__slot").count(), kind === "loop" ? 1 : 2, `${label} explicit slot count`);
+	assertEqual(JSON.stringify(await checkRepairSelectedIds(chooser)), "[]", `${label} no inferred/default target`);
+	assertEqual(await chooser.locator(".tilefab-check-repair-chooser__launch").isDisabled(), true, `${label} no auto-launch`);
+	return chooser;
+}
+
+async function checkRepairSelectedIds(chooser) {
+	return chooser.locator(".tilefab-check-repair-chooser__slot").evaluateAll((slots) => slots.flatMap((slot) => {
+		const text = slot.querySelector(".tilefab-check-repair-chooser__identity")?.textContent ?? "";
+		const match = text.match(/#(\d+)/);
+		return match ? [Number(match[1])] : [];
+	}));
+}
+
+async function checkRepairSearchId(page, chooser, id, label, missing = false) {
+	const input = chooser.getByLabel("이름 또는 #ID", { exact: true });
+	await checkRepairRevealBodyControl(page, chooser, input, `${label} actual search input`);
+	await input.fill(`#${id}`);
+	await page.waitForFunction(({ kind, id, missing }) => {
+		const chooser = document.querySelector(`.tilefab-check-repair-chooser[data-kind="${kind}"]`);
+		if (!chooser || chooser.dataset.phase !== "ready") return false;
+		const input = chooser.querySelector("input");
+		const candidates = [...chooser.querySelectorAll(".tilefab-check-repair-chooser__candidate")];
+		const reason = chooser.querySelector(".tilefab-check-repair-chooser__feedback")?.textContent ?? "";
+		return input?.value === `#${id}` && (missing
+			? candidates.length === 0 && reason.includes("현재 프로젝트에서 해당 조직 ID를 찾을 수 없습니다")
+			: candidates.length === 1 && new RegExp(`#${id}(?:\\s|선택|$)`).test(candidates[0].textContent ?? ""));
+	}, { kind: await chooser.getAttribute("data-kind"), id, missing }, { timeout: 30_000 });
+}
+
+async function checkRepairSelectId(page, chooser, id, label) {
+	await checkRepairSearchId(page, chooser, id, label);
+	const candidate = chooser.locator(".tilefab-check-repair-chooser__candidate");
+	assertEqual(await candidate.count(), 1, `${label} exact #ID result`);
+	await checkRepairRevealBodyControl(page, chooser, candidate, `${label} actual candidate`);
+	await candidate.click();
+	await page.waitForFunction(({ kind, id }) => {
+		const chooser = document.querySelector(`.tilefab-check-repair-chooser[data-kind="${kind}"]`);
+		return chooser?.dataset.phase === "ready" && [...chooser.querySelectorAll(".tilefab-check-repair-chooser__slot .tilefab-check-repair-chooser__identity")]
+			.some((identity) => identity.textContent?.match(/#(\d+)/)?.[1] === String(id));
+	}, { kind: await chooser.getAttribute("data-kind"), id }, { timeout: 30_000 });
+}
+
+async function checkRepairCloseChooser(page, chooser, before, source, code, label) {
+	const close = chooser.locator(".tilefab-check-repair-chooser__header").getByRole("button");
+	await checkRepairAssertControl(page, close, `${label} actual header close`);
+	await close.click();
+	await chooser.waitFor({ state: "hidden" });
+	const checked = await checkRepairCurrentChecks(page, label, before);
+	assertEqual(await checked.panel.locator(`[data-testid^="rail-readiness-issue-"][data-code="${code}"][data-active="true"]`).count(), 1, `${label} canceled chooser keeps origin issue`);
+	await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-readiness-panel").catch(async (error) => {
+		recordStep("checks-chooser-close-focus-failure", {
+			label,
+			diagnostic: await page.evaluate(() => ({
+				active: document.activeElement?.outerHTML.slice(0, 2000),
+				panel: document.querySelector('[data-testid="rail-readiness-panel"]')?.outerHTML.slice(0, 2000),
+			})),
+		});
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-close-focus-failure.png`) });
+		throw error;
+	});
+	await checkRepairNoMutation(page, before, source, `${label} close preserves source/history`);
+}
+
+async function checkRepairFreshReturn(page, workers, action, before, source, label) {
+	const countBefore = workers.filter((entry) => entry.url.includes("staticFabOrganizationOverviewWorker")).length;
+	// Install before actual input. The handled promise also avoids unhandled rejection if input throws.
+	const freshWorkerPromise = page.waitForEvent("worker", {
+		predicate: (worker) => worker.url().includes("staticFabOrganizationOverviewWorker"), timeout: 30_000,
+	}).then((worker) => ({ url: worker.url() }), (error) => ({ error }));
+	await action();
+	const fresh = await freshWorkerPromise;
+	if (fresh.error) throw fresh.error;
+	const checked = await checkRepairCurrentChecks(page, label, before);
+	const countAfter = workers.filter((entry) => entry.url.includes("staticFabOrganizationOverviewWorker")).length;
+	assertAtLeast(countAfter, countBefore + 1, `${label} fresh real overview Worker after actual exit`);
+	assertEqual(await page.getByTestId("static-fab-assembly-connector-panel").count(), 0, `${label} connector backend closed`);
+	assertEqual(await page.getByTestId("process-loop-edit-context").count(), 0, `${label} Loop backend closed`);
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), "", `${label} owner context cleared`);
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-operation"), "", `${label} no Loop operation pending`);
+	assertEqual(await checked.panel.getAttribute("data-focused"), "false", `${label} old issue selection discarded`);
+	assertEqual(await page.getByTestId("rail-readiness-guide").count(), 0, `${label} old rail guide discarded`);
+	await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-readiness-panel");
+	await checkRepairNoMutation(page, before, source, `${label} returned source/history`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-fresh-checks.png`) });
+	return { countBefore, countAfter, freshWorkerUrl: fresh.url, status: checked.status, fingerprint: checked.fingerprint,
+		sequence: checked.metrics.modelSequence, revision: checked.metrics.modelRevision, checksum: checked.metrics.modelChecksum };
+}
+
+async function checkRepairExerciseLoopContext(browserInstance, viewport, label) {
+	const owner = await checkRepairCreatePage(browserInstance, viewport, `${label}-loop`);
+	const { page, workers } = owner;
+	try {
+		const registered = await exerciseManualStandaloneLoopRegistration(page, `${label}-loop`);
+		const closed = await readMetrics(page);
+		const closedSource = await readStandaloneLoopAuthoringContract(page);
+		assertEqual(closed.equipmentGroups, "0", `${label} gear-free ordinary Loop fixture`);
+		assertEqual(closed.staticFabOrganizations, "1", `${label} one explicit Loop owner`);
+		// Pure read-only discovery, derived from the existing whole-module target snippet.
+		const target = await page.evaluate(() => {
+			const model = window.__tileFab.getEditorModel();
+			for (const module of model.ownership.modules) {
+				if (module.kind !== "straight" || module.eraseEdges.length === 0) continue;
+				const cell = module.primaryCells.find((cell) => model.ownership.candidates(cell).length === 1);
+				if (!cell) continue;
+				const first = module.eraseEdges.find((edge) => !module.eraseEdges.some((other) => other.to.x === edge.from.x && other.to.y === edge.from.y));
+				const last = module.eraseEdges.find((edge) => !module.eraseEdges.some((other) => other.from.x === edge.to.x && other.from.y === edge.to.y));
+				if (!first || !last) continue;
+				return { key: module.key, x: cell.x + 0.5, y: cell.y + 0.5, edgeCount: module.eraseEdges.length,
+					from: { x: first.from.x, y: first.from.y }, to: { x: last.to.x, y: last.to.y } };
+			}
+			return null;
+		});
+		if (!target) throw new Error(`${label} manually registered rectangle has no unambiguous straight module.`);
+		await openStandaloneLoopRailEdit(page, registered.organizationId, `${label}-fixture`);
+		const workspaceScroll = await page.getByTestId("rail-canvas").evaluate((canvas) => {
+			const workspace = canvas.closest(".tilefab-workspace");
+			return { top: workspace?.scrollTop, left: workspace?.scrollLeft };
+		});
+		assertEqual(workspaceScroll.top, 0, `${label} ordinary Loop entry preserves workspace vertical origin`);
+		assertEqual(workspaceScroll.left, 0, `${label} ordinary Loop entry preserves workspace horizontal origin`);
+		const select = page.getByTestId("select-process-loop-rail");
+		await checkRepairAssertControl(page, select, `${label} ordinary Loop rail selection`);
+		await select.click();
+		await revealOrdinaryEquipmentSlot(page, target, `${label} whole-module gap target`);
+		await clickWorld(page, target, false);
+		await page.waitForFunction((key) => document.querySelector('[data-testid="rail-canvas"]')?.dataset.selectedModuleId === key, target.key);
+		await page.getByTestId("rail-canvas").press("Delete");
+		const opened = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(closed.workerTargetSequence) + 1);
+		assertSingleGuidedPortCommit(opened, closed, `${label} real whole-module Delete`);
+		assertEqual(Number(opened.authoredEdges), Number(closed.authoredEdges) - target.edgeCount, `${label} exact gap edge removal`);
+		assertAtLeast(Number(opened.openTerminals), 1, `${label} actual open terminal fixture`);
+		const openedSource = await readStandaloneLoopAuthoringContract(page);
+		const beforeOwner = closedSource.organizations.records.find((record) => record.id === registered.organizationId);
+		const afterOwner = openedSource.organizations.records.find((record) => record.id === registered.organizationId);
+		if (!beforeOwner || !afterOwner) throw new Error(`${label} original explicit Loop owner is absent.`);
+		for (const field of ["id", "kind", "name", "declaredSemanticRole", "parentOrganizationIds", "properties"])
+			assertEqual(isDeepStrictEqual(afterOwner[field], beforeOwner[field]), true, `${label} gap keeps original owner ${field}`);
+		assertEqual(isDeepStrictEqual(afterOwner.membership.equipmentGroupIds, beforeOwner.membership.equipmentGroupIds), true, `${label} gap keeps equipment membership`);
+		for (const field of ["equipment", "relationships", "operations"])
+			assertEqual(isDeepStrictEqual(openedSource[field], closedSource[field]), true, `${label} gap preserves ${field}`);
+		const fixtureExit = page.getByTestId("exit-process-loop-edit");
+		await checkRepairAssertControl(page, fixtureExit, `${label} ordinary fixture editor exit`);
+		await fixtureExit.click();
+		assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), "", `${label} fixture editor exited before Checks admission`);
+
+		await checkRepairChooseIssue(page, "OPEN_TERMINAL", `${label}-loop`);
+		const before = await readMetrics(page);
+		const source = await readStandaloneLoopAuthoringContract(page);
+		let chooser = await checkRepairOpenChooser(page, "loop", `${label}-loop`);
+		const layout = await checkRepairChooserLayout(page, chooser, before, source, `${label}-loop-chooser`);
+		const missingId = Math.max(...source.organizations.records.map((record) => record.id)) + 10_000;
+		await checkRepairSearchId(page, chooser, missingId, `${label} missing Loop #ID`, true);
+		assertEqual(await chooser.locator(".tilefab-check-repair-chooser__launch").isDisabled(), true, `${label} missing ID grants no launch`);
+		assertEqual(JSON.stringify(await checkRepairSelectedIds(chooser)), "[]", `${label} missing ID infers no owner`);
+		await checkRepairSelectId(page, chooser, registered.organizationId, `${label} explicit registered Loop`);
+		assertEqual(JSON.stringify(await checkRepairSelectedIds(chooser)), JSON.stringify([registered.organizationId]), `${label} exact selected Loop ID`);
+		assertIncludes(await chooser.locator(".tilefab-check-repair-chooser__slot").innerText(), registered.name, `${label} selected original Loop name`);
+		assertEqual(await chooser.locator(".tilefab-check-repair-chooser__launch").isEnabled(), true, `${label} explicit Loop launch available`);
+		// A search that has no result must retain the independent explicit slot.
+		await checkRepairSearchId(page, chooser, missingId, `${label} retained Loop selection while filtering`, true);
+		assertEqual(JSON.stringify(await checkRepairSelectedIds(chooser)), JSON.stringify([registered.organizationId]), `${label} filtering preserves explicit Loop`);
+		const role = chooser.getByLabel("역할", { exact: true });
+		await checkRepairRevealBodyControl(page, chooser, role, `${label} Loop role control`);
+		await role.selectOption("PROCESS_LOOP");
+		assertEqual(JSON.stringify(await checkRepairSelectedIds(chooser)), JSON.stringify([registered.organizationId]), `${label} Loop role filter preserves explicit slot`);
+		await checkRepairNoMutation(page, before, source, `${label} Loop chooser search/filter/selection`);
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-loop-chosen.png`) });
+		await checkRepairCloseChooser(page, chooser, before, source, "OPEN_TERMINAL", `${label} Loop chooser close`);
+		chooser = await checkRepairOpenChooser(page, "loop", `${label} Loop chooser reopened`);
+		await checkRepairSelectId(page, chooser, registered.organizationId, `${label} Loop explicitly reselected`);
+		const launch = chooser.getByRole("button", { name: "레일 편집 시작", exact: true });
+		await checkRepairAssertControl(page, launch, `${label} actual Loop backend launch`);
+		await launch.click();
+		await page.getByTestId("process-loop-edit-context").waitFor({ state: "visible" });
+		await chooser.waitFor({ state: "hidden" });
+		assertEqual(await page.getByTestId("rail-readiness-panel").count(), 0, `${label} admitted Loop editor owns workspace`);
+		assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), String(registered.organizationId), `${label} exact chosen owner reaches real Loop backend`);
+		await checkRepairNoMutation(page, before, source, `${label} Loop navigation has no publication`);
+		const backendLayout = await checkRepairLoopBackendLayout(page, `${label} Loop backend`);
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-loop-backend.png`) });
+		const exit = page.getByTestId("exit-process-loop-edit");
+		assertEqual(await exit.getAttribute("aria-label"), "편집 종료 후 현재 FAB을 다시 검사", `${label} explicit exit promises fresh Checks`);
+		await checkRepairAssertControl(page, exit, `${label} actual Loop return control`);
+		const returned = await checkRepairFreshReturn(page, workers, () => exit.click(), before, source, `${label}-loop-exit`);
+		assertEqual(await page.getByTestId("rail-readiness-panel").locator('[data-testid^="rail-readiness-issue-"][data-code="OPEN_TERMINAL"]').count() > 0, true, `${label} fresh Checks independently retains unresolved terminal`);
+		// The source-preserving exit proves navigation; now complete the actual repair from
+		// a second explicit Checks choice, using the existing keyboard backend.
+		await checkRepairChooseIssue(page, "OPEN_TERMINAL", `${label}-loop-repair-origin`);
+		chooser = await checkRepairOpenChooser(page, "loop", `${label}-loop-repair-choice`);
+		await checkRepairSelectId(page, chooser, registered.organizationId, `${label} actual repair owner`);
+		const repairLaunch = chooser.getByRole("button", { name: "레일 편집 시작", exact: true });
+		await checkRepairAssertControl(page, repairLaunch, `${label} actual repair launcher`);
+		await repairLaunch.click();
+		await page.getByTestId("process-loop-edit-context").waitFor({ state: "visible" });
+		assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), String(registered.organizationId), `${label} chosen repair owner remains exact`);
+		const redraw = await prepareStandaloneDetachedKeyboardDraft(page, source, `${label}-checks-redraw`, { from: target.from, to: target.to });
+		await redraw.canvas.press("Enter");
+		const repaired = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1 && metrics.modelChecksum === closed.modelChecksum, { timeout: 30_000 });
+		assertSingleGuidedPortCommit(repaired, before, `${label} actual Checks Loop redraw one patch`);
+		assertEqual(repaired.authoredCells, closed.authoredCells, `${label} actual repair restores every rail cell`);
+		assertEqual(repaired.authoredEdges, closed.authoredEdges, `${label} actual repair restores every directed edge`);
+		assertEqual(repaired.strongComponents, "1", `${label} actual repair closes directed Loop`);
+		assertEqual(repaired.openTerminals, "0", `${label} actual repair closes both endpoints`);
+		const repairedSource = await readStandaloneLoopAuthoringContract(page);
+		assertEqual(isDeepStrictEqual(repairedSource, closedSource), true, `${label} actual Checks redraw restores exact five closed contracts`);
+		// Escape once exits only the ongoing keyboard leg; the explicit Loop editor remains.
+		await redraw.canvas.press("Escape");
+		assertEqual(await redraw.canvas.getAttribute("data-rail-keyboard-scope"), "", `${label} completed repair keyboard draft exits`);
+		assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-process-loop-edit-owner"), String(registered.organizationId), `${label} keyboard exit retains owner context`);
+		const repairedExit = page.getByTestId("exit-process-loop-edit");
+		await checkRepairAssertControl(page, repairedExit, `${label} repaired Loop explicit return`);
+		const appliedReturn = await checkRepairFreshReturn(page, workers, () => repairedExit.click(), repaired, repairedSource, `${label}-loop-repaired-exit`);
+		assertEqual(await page.getByTestId("rail-readiness-panel").locator('[data-testid^="rail-readiness-issue-"][data-code="OPEN_TERMINAL"]').count(), 0, `${label} final fresh Checks removes repaired terminal diagnosis`);
+		assertEqual(appliedReturn.status, "ready", `${label} repaired standalone Loop passes fresh static Checks`);
+		const history = await checkRepairHistoryRoundTrip(page, before, source, repaired, repairedSource, "OPEN_TERMINAL", `${label}-loop-repair-history`);
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-loop-repaired-redone.png`) });
+		return { registered, target, gapSequence: opened.modelSequence, layout, backendLayout, returned,
+			repair: { sequence: repaired.modelSequence, checksum: repaired.modelChecksum, appliedReturn, history }, workers: [...workers] };
+	} finally {
+		await checkRepairClosePage(owner, `${label}-loop`);
+	}
+}
+
+async function checkRepairLoopBackendLayout(page, label) {
+	const context = page.getByTestId("process-loop-edit-context");
+	await assertLocatorInsideViewport(page, context);
+	for (const text of [context.locator("strong"), context.getByTestId("process-loop-edit-feedback")]) {
+		await assertLocatorInsideViewport(page, text);
+		await assertLocatorOwnsHitArea(text, `${label} complete Loop owner/instructions`);
+		assertEqual(await text.evaluate((element) => element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1), true, `${label} unclipped Loop text`);
+	}
+	const camera = page.getByRole("navigation", { name: "2D 화면 배율", includeHidden: true });
+	assertEqual(await camera.count(), 1, `${label} one responsive camera navigation`);
+	const cameraVisible = await camera.isVisible();
+	assertEqual(cameraVisible, page.viewportSize().width <= 860, `${label} camera navigation follows compact viewport scope`);
+	if (cameraVisible) {
+		assertEqual(await locatorsOverlap(context, camera), false, `${label} Loop context and camera controls have separate bounds`);
+		const controls = await camera.getByRole("button").all();
+		assertEqual(controls.length, 3, `${label} all compact camera actions`);
+		for (const control of controls) await checkRepairAssertControl(page, control, `${label} complete camera action`);
+	}
+	const start = page.getByTestId("ordinary-rail-keyboard-start");
+	await checkRepairAssertControl(page, start, `${label} available rail repair keyboard entry`);
+	assertEqual(await start.isEnabled(), true, `${label} rail repair keyboard available`);
+	assertEqual(await page.getByTestId("ordinary-first-port-handoff").count(), 0, `${label} Loop repair does not offer first equipment instead`);
+	return { context: await context.boundingBox(), camera: cameraVisible ? await camera.boundingBox() : null, keyboard: await start.boundingBox() };
+}
+
+async function checkRepairPlaceTwoBays(page, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	await page.getByTestId("editor-activity-assemble").click();
+	await page.getByTestId("production-bay-module-browser").click();
+	const settings = page.getByTestId("production-bay-module-panel");
+	await settings.waitFor({ state: "visible" });
+	const place = settings.getByRole("button", { name: "배치 위치 선택", exact: true });
+	await place.scrollIntoViewIfNeeded();
+	await checkRepairAssertControl(page, place, `${label} actual synthetic Bay placement entry`);
+	await place.click();
+	await settings.waitFor({ state: "hidden" });
+	await canvas.focus();
+	await page.waitForFunction(() => document.querySelector('[data-testid="rail-canvas"]')?.dataset.organizationBundlePreviewState === "candidate");
+	const origin = parseIntegerTuple((await readMetrics(page)).organizationBundlePreviewAnchor, 2, `${label} initial Bay anchor`);
+	const ids = [];
+	for (let ordinal = 0; ordinal < 2; ordinal++) {
+		const target = [origin[0] + ordinal * 100, origin[1]];
+		for (let step = 0; step < 400; step++) {
+			const anchor = parseIntegerTuple((await readMetrics(page)).organizationBundlePreviewAnchor, 2, `${label} actual keyboard Bay anchor`);
+			if (anchor[0] === target[0] && anchor[1] === target[1]) break;
+			await canvas.press(anchor[0] < target[0] ? "ArrowRight" : anchor[0] > target[0] ? "ArrowLeft" : anchor[1] < target[1] ? "ArrowDown" : "ArrowUp");
+			await page.waitForFunction((previous) => document.querySelector('[data-testid="rail-canvas"]')?.dataset.organizationBundlePreviewAnchor !== previous, anchor.join(","));
+		}
+		const before = await readMetrics(page);
+		assertEqual(before.organizationBundlePreviewAnchor, target.join(","), `${label} exact actual Bay target ${ordinal + 1}`);
+		assertEqual(before.organizationBundlePreviewState, "candidate", `${label} Bay candidate ${ordinal + 1}`);
+		await canvas.press("Enter");
+		const placed = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1 && Number(metrics.staticFabOrganizations) === Number(before.staticFabOrganizations) + 3, { timeout: 30_000 });
+		assertSingleGuidedPortCommit(placed, before, `${label} actual Bay command ${ordinal + 1}`);
+		const id = Number(placed.lastPlacedOrganizationRootId);
+		if (!Number.isSafeInteger(id) || id <= 0 || ids.includes(id)) throw new Error(`${label} Bay placement ${ordinal + 1} has no fresh explicit root ID.`);
+		ids.push(id);
+	}
+	await canvas.press("Escape");
+	await page.waitForFunction(() => document.querySelector('[data-testid="tilefab-app"]')?.dataset.organizationBundleActive === "false");
+	const metrics = await waitForWorker(page, () => true);
+	assertEqual(metrics.staticFabOrganizations, "6", `${label} exact two synthetic Bay structures`);
+	assertEqual(metrics.strongComponents, "2", `${label} two disconnected closed directed networks`);
+	assertEqual(metrics.openTerminals, "0", `${label} connector fixture has no terminal gap`);
+	const roots = await page.evaluate((ids) => {
+		const records = window.__tileFab.getEditorModel().document.organizations.records;
+		return ids.map((id) => {
+			const root = records.find((record) => record.id === id);
+			if (!root || root.kind !== "BAY") throw new Error(`Authored Bay root #${id} is absent.`);
+			const members = new Set([id]);
+			for (let pass = 0; pass < records.length; pass++) {
+				let added = false;
+				for (const record of records) if (!members.has(record.id) && record.parentOrganizationIds.some((parent) => members.has(parent))) {
+					members.add(record.id); added = true;
+				}
+				if (!added) break;
+			}
+			const cells = records.filter((record) => members.has(record.id)).flatMap((record) => record.membership.railEdges.flatMap((edge) => [edge.from, edge.to]));
+			if (cells.length === 0) throw new Error(`Authored Bay #${id} has no descendant rail bounds.`);
+			return { id, name: root.name, bounds: {
+				minX: Math.min(...cells.map((cell) => cell.x)), maxX: Math.max(...cells.map((cell) => cell.x)),
+				minY: Math.min(...cells.map((cell) => cell.y)), maxY: Math.max(...cells.map((cell) => cell.y)),
+			} };
+		});
+	}, ids);
+	return { ids, roots, metrics };
+}
+
+async function checkRepairSelectBayPair(page, chooser, roots, label) {
+	await checkRepairSelectId(page, chooser, roots[0].id, `${label} first explicit Bay`);
+	assertEqual(JSON.stringify(await checkRepairSelectedIds(chooser)), JSON.stringify([roots[0].id]), `${label} exactly one explicit Bay`);
+	assertEqual(await chooser.locator(".tilefab-check-repair-chooser__launch").isDisabled(), true, `${label} one Bay cannot launch`);
+	await checkRepairSelectId(page, chooser, roots[1].id, `${label} second explicit Bay`);
+	assertEqual(JSON.stringify(await checkRepairSelectedIds(chooser)), JSON.stringify(roots.map((root) => root.id)), `${label} exact distinct Bay slots`);
+	await page.waitForFunction(() => {
+		const launch = document.querySelector('.tilefab-check-repair-chooser[data-kind="connector"] .tilefab-check-repair-chooser__launch');
+		return launch instanceof HTMLButtonElement && !launch.disabled;
+	});
+}
+
+async function checkRepairLaunchConnector(page, chooser, roots, before, source, workers, label) {
+	const launch = chooser.getByRole("button", { name: "연결 편집 시작", exact: true });
+	await checkRepairAssertControl(page, launch, `${label} actual connector launch`);
+	assertEqual(await launch.isEnabled(), true, `${label} explicit pair launch enabled`);
+	const backendWorkerCount = workers.filter((entry) => entry.url.includes("staticFabAssemblyConnectorWorker")).length;
+	await launch.click();
+	const panel = page.getByTestId("static-fab-assembly-connector-panel");
+	await panel.waitFor({ state: "visible" });
+	await chooser.waitFor({ state: "hidden" });
+	await page.waitForFunction(() => {
+		const app = document.querySelector('[data-testid="tilefab-app"]');
+		const panel = document.querySelector('[data-testid="static-fab-assembly-connector-panel"]');
+		const apply = panel?.querySelector(".tilefab-assembly-connector-apply");
+		return app?.dataset.assemblyConnectorPhase === "ready" && app.dataset.assemblyConnectorSnapshotStatus === "hydrated" &&
+			app.dataset.assemblyConnectorRecommendationStatus === "ready" && panel?.dataset.hierarchyRole === "BAY_TO_BANK" &&
+			panel.dataset.purpose === "HIERARCHY_LINK" && apply instanceof HTMLButtonElement && !apply.disabled;
+	}, undefined, { timeout: 30_000 });
+	const ready = await checkRepairNoMutation(page, before, source, `${label} real backend ready before Apply`);
+	assertAtLeast(workers.filter((entry) => entry.url.includes("staticFabAssemblyConnectorWorker")).length, backendWorkerCount + 1, `${label} real typed connector Worker launched`);
+	assertEqual(ready.assemblyConnectorSnapshotStatus, "hydrated", `${label} source snapshot hydrated`);
+	assertEqual(ready.assemblyConnectorRecommendationStatus, "ready", `${label} canonical recommendation ready`);
+	const attempts = requiredPositiveIntegerAttribute(ready.assemblyConnectorRecommendationAttempts, `${label} recommendation attempts`);
+	assertAtMost(attempts, 8, `${label} bounded existing recommendation attempts`);
+	assertEqual(await page.getByTestId("rail-readiness-panel").count(), 0, `${label} backend owns workspace`);
+	const sortedRoots = [...roots].sort((a, b) => a.id - b.id);
+	const gateways = [];
+	for (const [index, kind] of ["source", "target"].entries()) {
+		const gateway = panel.locator(`[data-gateway="${kind}"]`);
+		assertEqual((await gateway.locator(".tilefab-assembly-connector-gateway-label strong").textContent())?.trim(), sortedRoots[index].name, `${label} exact ${kind} Bay name`);
+		const detail = (await gateway.locator(".tilefab-assembly-connector-gateway-detail").textContent()) ?? "";
+		const coordinates = detail.match(/X\s*(-?\d+)\s*·\s*Z\s*(-?\d+)/);
+		if (!coordinates) throw new Error(`${label} ${kind} canonical gateway has no visible anchor.`);
+		const x = Number(coordinates[1]), y = Number(coordinates[2]);
+		const bounds = sortedRoots[index].bounds;
+		assertAtLeast(x, bounds.minX, `${label} ${kind} gateway belongs to chosen root X minimum`);
+		assertAtMost(x, bounds.maxX, `${label} ${kind} gateway belongs to chosen root X maximum`);
+		assertAtLeast(y, bounds.minY, `${label} ${kind} gateway belongs to chosen root Z minimum`);
+		assertAtMost(y, bounds.maxY, `${label} ${kind} gateway belongs to chosen root Z maximum`);
+		gateways.push({ kind, rootId: sortedRoots[index].id, name: sortedRoots[index].name, x, y, detail });
+	}
+	const cancel = panel.locator(".tilefab-assembly-connector-cancel");
+	await checkRepairAssertControl(page, cancel, `${label} actual backend cancel`);
+	await checkRepairAssertControl(page, panel.locator(".tilefab-assembly-connector-apply"), `${label} real ready Apply remains untouched`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-backend-ready.png`) });
+	return { panel, cancel, attempts, gateways, backendWorkerCount };
+}
+
+async function checkRepairCanvasRightClick(page, label) {
+	const point = await page.evaluate(() => {
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		if (!(canvas instanceof HTMLCanvasElement)) return null;
+		const bounds = canvas.getBoundingClientRect();
+		for (const yRatio of [0.3, 0.15, 0.5, 0.7, 0.9]) for (const xRatio of [0.5, 0.2, 0.8]) {
+			const x = bounds.left + bounds.width * xRatio, y = bounds.top + bounds.height * yRatio;
+			if ([-12, 0, 12].every((dx) => [-12, 0, 12].every((dy) => document.elementFromPoint(x + dx, y + dy) === canvas)))
+				return { x, y };
+		}
+		return null;
+	});
+	if (!point) throw new Error(`${label} has no unobscured Canvas right-click surface.`);
+	await page.mouse.move(point.x, point.y);
+	await checkRepairSettleFrames(page);
+	assertEqual(await page.evaluate((point) => {
+		const canvas = document.querySelector('[data-testid="rail-canvas"]');
+		return [-12, 0, 12].every((dx) => [-12, 0, 12].every((dy) => document.elementFromPoint(point.x + dx, point.y + dy) === canvas));
+	}, point), true, `${label} current nine-point Canvas right-click ownership`);
+	// Down/up at one point. A right drag would pan and must not count as cancellation.
+	await page.mouse.click(point.x, point.y, { button: "right" });
+	return point;
+}
+
+async function checkRepairExerciseConnectorContext(browserInstance, viewport, label) {
+	const owner = await checkRepairCreatePage(browserInstance, viewport, `${label}-connector`);
+	const { page, workers } = owner;
+	try {
+		const fixture = await checkRepairPlaceTwoBays(page, `${label}-connector`);
+		await checkRepairChooseIssue(page, "DISCONNECTED_NETWORK", `${label}-connector`);
+		const before = await readMetrics(page);
+		const source = await readStandaloneLoopAuthoringContract(page);
+		let chooser = await checkRepairOpenChooser(page, "connector", `${label}-connector`);
+		const layout = await checkRepairChooserLayout(page, chooser, before, source, `${label}-connector-chooser`);
+		const missingId = Math.max(...source.organizations.records.map((record) => record.id)) + 10_000;
+		await checkRepairSearchId(page, chooser, missingId, `${label} missing connector #ID`, true);
+		assertEqual(await chooser.locator(".tilefab-check-repair-chooser__launch").isDisabled(), true, `${label} missing connector ID grants no launch`);
+		await checkRepairSelectBayPair(page, chooser, fixture.roots, `${label} explicit Bay pair`);
+		const role = chooser.getByLabel("역할", { exact: true });
+		await checkRepairRevealBodyControl(page, chooser, role, `${label} actual different-role filter`);
+		await role.selectOption("BAY_BANK");
+		await page.waitForFunction(() => {
+			const chooser = document.querySelector('.tilefab-check-repair-chooser[data-kind="connector"]');
+			return chooser?.dataset.phase === "ready" && chooser.querySelector("select")?.value === "BAY_BANK" && chooser.querySelectorAll(".tilefab-check-repair-chooser__candidate").length === 0;
+		});
+		assertEqual(JSON.stringify(await checkRepairSelectedIds(chooser)), JSON.stringify(fixture.ids), `${label} opposite role filter retains explicit Bay pair`);
+		assertEqual(await chooser.locator(".tilefab-check-repair-chooser__launch").isEnabled(), true, `${label} independent explicit slots retain eligibility`);
+		await role.selectOption("ALL");
+		await page.waitForFunction((ids) => {
+			const chooser = document.querySelector('.tilefab-check-repair-chooser[data-kind="connector"]');
+			if (chooser?.dataset.phase !== "ready" || chooser.querySelector("select")?.value !== "ALL") return false;
+			const selected = [...chooser.querySelectorAll(".tilefab-check-repair-chooser__slot .tilefab-check-repair-chooser__identity")]
+				.flatMap((identity) => { const match = identity.textContent?.match(/#(\d+)/); return match ? [Number(match[1])] : []; });
+			return JSON.stringify(selected) === JSON.stringify(ids);
+		}, fixture.ids);
+		await checkRepairNoMutation(page, before, source, `${label} connector search/filter/selection`);
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-connector-chosen.png`) });
+		await checkRepairCloseChooser(page, chooser, before, source, "DISCONNECTED_NETWORK", `${label} connector chooser close`);
+
+		const exits = [];
+		for (const input of ["cancel-button", "escape", "right-click"]) {
+			// Every fresh returned report requires a new explicit two-ID selection.
+			await checkRepairChooseIssue(page, "DISCONNECTED_NETWORK", `${label}-${input}-origin`);
+			chooser = await checkRepairOpenChooser(page, "connector", `${label}-${input}-chooser`);
+			await checkRepairSelectBayPair(page, chooser, fixture.roots, `${label}-${input}-pair`);
+			await checkRepairNoMutation(page, before, source, `${label}-${input} chooser no-op`);
+			const backend = await checkRepairLaunchConnector(page, chooser, fixture.roots, before, source, workers, `${label}-${input}`);
+			let rightClickPoint = null;
+			const action = input === "cancel-button"
+				? () => backend.cancel.click()
+				: input === "escape"
+					? async () => { await backend.cancel.focus(); await page.keyboard.press("Escape"); }
+					: async () => { rightClickPoint = await checkRepairCanvasRightClick(page, `${label}-${input}`); };
+			const returned = await checkRepairFreshReturn(page, workers, action, before, source, `${label}-connector-${input}`);
+			assertEqual(await page.getByTestId("rail-readiness-panel").locator('[data-testid^="rail-readiness-issue-"][data-code="DISCONNECTED_NETWORK"]').count() > 0, true, `${label}-${input} fresh Checks independently retains unresolved disconnection`);
+			exits.push({ input, attempts: backend.attempts, gateways: backend.gateways, rightClickPoint, returned });
+		}
+		// Cancellation alone is not repair completion: explicitly select the pair once more,
+		// apply the existing typed connector, and validate its real publication and replay.
+		await checkRepairChooseIssue(page, "DISCONNECTED_NETWORK", `${label}-apply-origin`);
+		chooser = await checkRepairOpenChooser(page, "connector", `${label}-apply-choice`);
+		await checkRepairSelectBayPair(page, chooser, fixture.roots, `${label}-apply-pair`);
+		const applyingBackend = await checkRepairLaunchConnector(page, chooser, fixture.roots, before, source, workers, `${label}-apply`);
+		const apply = applyingBackend.panel.locator(".tilefab-assembly-connector-apply");
+		await checkRepairAssertControl(page, apply, `${label} actual final typed connector Apply`);
+		const appliedReturn = await checkRepairFreshApplyReturn(page, workers, () => apply.click(), before, `${label}-connector-apply`);
+		const applied = appliedReturn.metrics;
+		const appliedSource = await readStandaloneLoopAuthoringContract(page);
+		const relationship = checkRepairAssertConnectorPublication(before, source, applied, appliedSource, fixture.ids, `${label} real typed connector publication`);
+		assertEqual(appliedReturn.status, "ready", `${label} connected Bays pass fresh static Checks`);
+		assertEqual(await page.getByTestId("rail-readiness-panel").locator('[data-testid^="rail-readiness-issue-"][data-code="DISCONNECTED_NETWORK"]').count(), 0, `${label} final fresh Checks removes disconnection diagnosis`);
+		const history = await checkRepairHistoryRoundTrip(page, before, source, applied, appliedSource, "DISCONNECTED_NETWORK", `${label}-connector-history`);
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-connector-applied-redone.png`) });
+		return { fixture: { ids: fixture.ids, roots: fixture.roots, sequence: fixture.metrics.modelSequence }, layout, exits,
+			apply: { sequence: applied.modelSequence, checksum: applied.modelChecksum, relationship, appliedReturn, history }, workers: [...workers] };
+	} finally {
+		await checkRepairClosePage(owner, `${label}-connector`);
+	}
+}
+
+async function checkRepairFreshApplyReturn(page, workers, action, before, label) {
+	const countBefore = workers.filter((entry) => entry.url.includes("staticFabOrganizationOverviewWorker")).length;
+	const freshWorkerPromise = page.waitForEvent("worker", {
+		predicate: (worker) => worker.url().includes("staticFabOrganizationOverviewWorker"), timeout: 30_000,
+	}).then((worker) => ({ url: worker.url() }), (error) => ({ error }));
+	await action();
+	const applied = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1, { timeout: 30_000 });
+	assertSingleGuidedPortCommit(applied, before, `${label} one authored publication`);
+	const fresh = await freshWorkerPromise;
+	if (fresh.error) {
+		recordStep("checks-connector-apply-return-failure", {
+			label, before, applied, current: await readMetrics(page),
+			workers: [...workers],
+			diagnostic: await page.evaluate(() => ({
+				active: document.activeElement?.outerHTML.slice(0, 2000),
+				status: document.querySelector(".tilefab-statusbar")?.textContent,
+				checks: document.querySelector('[data-testid="rail-readiness-panel"]')?.outerHTML.slice(0, 1500),
+				connector: document.querySelector('[data-testid="static-fab-assembly-connector-panel"]')?.outerHTML.slice(0, 1500),
+			})),
+		});
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-return-failure.png`) });
+		throw fresh.error;
+	}
+	const checked = await checkRepairCurrentChecks(page, label, applied);
+	const countAfter = workers.filter((entry) => entry.url.includes("staticFabOrganizationOverviewWorker")).length;
+	assertAtLeast(countAfter, countBefore + 1, `${label} new real overview Worker for published source`);
+	assertEqual(await page.getByTestId("static-fab-assembly-connector-panel").count(), 0, `${label} applied backend closes`);
+	assertEqual(await checked.panel.getAttribute("data-focused"), "false", `${label} old issue focus discarded after Apply`);
+	assertEqual(await page.getByTestId("rail-readiness-guide").count(), 0, `${label} stale rail guide absent after Apply`);
+	await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-readiness-panel");
+	assertEqual(checked.metrics.workerSimulationReady, "false", `${label} simulation remains gated`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-fresh-checks.png`) });
+	return { countBefore, countAfter, freshWorkerUrl: fresh.url, status: checked.status, fingerprint: checked.fingerprint,
+		metrics: checked.metrics, sequence: checked.metrics.modelSequence, revision: checked.metrics.modelRevision, checksum: checked.metrics.modelChecksum };
+}
+
+function checkRepairAssertConnectorPublication(before, beforeSource, applied, appliedSource, bayIds, label) {
+	assertSingleGuidedPortCommit(applied, before, `${label} one typed rail/organization/relationship patch`);
+	assertEqual(applied.workerChecksum, applied.modelChecksum, `${label} exact model/Worker checksum`);
+	assertEqual(applied.workerPhysicalFingerprint, applied.modelPhysicalFingerprint, `${label} exact physical mirror`);
+	assertEqual(applied.workerSimulationReady, "false", `${label} simulation gate`);
+	assertEqual(Number(applied.staticFabOrganizations), Number(before.staticFabOrganizations) + 1, `${label} creates one Bay Bank`);
+	assertEqual(Number(applied.modelNextOrganizationId), Number(before.modelNextOrganizationId) + 1, `${label} one organization allocation`);
+	assertEqual(Number(applied.modelRelationships), Number(before.modelRelationships) + 1, `${label} one relationship publication`);
+	assertEqual(Number(applied.modelNextRelationshipId), Number(before.modelNextRelationshipId) + 1, `${label} one relationship allocation`);
+	assertAtLeast(Number(applied.authoredEdges), Number(before.authoredEdges) + 1, `${label} connector actually adds directed rail`);
+	assertEqual(applied.strongComponents, "1", `${label} selected Bays become one directed network`);
+	assertEqual(applied.openTerminals, "0", `${label} published connector has no terminal gap`);
+	for (const field of ["equipment", "operations"])
+		assertEqual(isDeepStrictEqual(appliedSource[field], beforeSource[field]), true, `${label} preserves ${field}`);
+	const oldIds = new Set(beforeSource.organizations.records.map((record) => record.id));
+	const added = appliedSource.organizations.records.filter((record) => !oldIds.has(record.id));
+	assertEqual(added.length, 1, `${label} one exact new owner record`);
+	const bank = added[0];
+	assertEqual(bank.id, Number(before.modelNextOrganizationId), `${label} allocated Bank identity`);
+	assertEqual(bank.kind, "AREA", `${label} Bay Bank uses existing AREA contract`);
+	assertEqual(JSON.stringify(bank.parentOrganizationIds), "[]", `${label} new Bank remains parentless`);
+	assertAtLeast(bank.membership.railEdges.length, 1, `${label} Bank owns actual connector rail`);
+	const pair = [...bayIds].sort((a, b) => a - b);
+	for (const original of beforeSource.organizations.records) {
+		const current = appliedSource.organizations.records.find((record) => record.id === original.id);
+		if (!current) throw new Error(`${label} original organization #${original.id} disappeared.`);
+		for (const field of ["id", "kind", "name", "declaredSemanticRole", "properties"])
+			assertEqual(isDeepStrictEqual(current[field], original[field]), true, `${label} preserves organization #${original.id} ${field}`);
+		assertEqual(JSON.stringify(current.parentOrganizationIds), JSON.stringify(pair.includes(original.id) ? [bank.id] : original.parentOrganizationIds), `${label} changes only chosen Bay parent #${original.id}`);
+		assertEqual(isDeepStrictEqual(current.membership.equipmentGroupIds, original.membership.equipmentGroupIds), true, `${label} equipment ownership #${original.id}`);
+		assertEqual(isDeepStrictEqual(current.membership.advancedSwitchIds, original.membership.advancedSwitchIds), true, `${label} switch ownership #${original.id}`);
+		// The canonical backend may expand membership to an entire newly compiled module.
+		// Every old directed ownership edge must survive; no ownership stripping is accepted.
+		const edgeKey = (edge) => `${edge.from.x},${edge.from.y}>${edge.to.x},${edge.to.y}`;
+		const ownedAfter = new Set(current.membership.railEdges.map(edgeKey));
+		assertEqual(original.membership.railEdges.every((edge) => ownedAfter.has(edgeKey(edge))), true, `${label} retains every original directed ownership edge #${original.id}`);
+	}
+	const cellsAfter = new Set(appliedSource.cells.map(([x, y]) => `${x},${y}`));
+	assertEqual(beforeSource.cells.every(([x, y]) => cellsAfter.has(`${x},${y}`)), true, `${label} retains all original authored rail coordinates`);
+	const oldRelationshipIds = new Set(beforeSource.relationships.records.map((record) => record.id));
+	const newRelationships = appliedSource.relationships.records.filter((record) => !oldRelationshipIds.has(record.id));
+	assertEqual(newRelationships.length, 1, `${label} one exact new relationship record`);
+	for (const original of beforeSource.relationships.records)
+		assertEqual(isDeepStrictEqual(appliedSource.relationships.records.find((record) => record.id === original.id), original), true, `${label} existing relationship #${original.id}`);
+	const relationship = newRelationships[0];
+	assertEqual(relationship.id, Number(before.modelNextRelationshipId), `${label} relationship identity`);
+	assertEqual(relationship.hierarchyRole, "BAY_TO_BANK", `${label} typed relationship role`);
+	assertEqual(relationship.purpose, "HIERARCHY_LINK", `${label} typed relationship purpose`);
+	assertEqual(relationship.parentOrganizationId, bank.id, `${label} typed relationship exact Bank parent`);
+	assertEqual(JSON.stringify([...relationship.participantOrganizationIds].sort((a, b) => a - b)), JSON.stringify(pair), `${label} exact chosen participant pair`);
+	assertEqual(JSON.stringify(relationship.managedChildOrganizationIds), JSON.stringify(pair), `${label} exact managed Bay children`);
+	assertAtLeast(relationship.connectionGroups.length, 1, `${label} explicit connection groups published`);
+	return { bankId: bank.id, relationshipId: relationship.id, hierarchyRole: relationship.hierarchyRole,
+		purpose: relationship.purpose, participantOrganizationIds: [...relationship.participantOrganizationIds],
+		managedChildOrganizationIds: [...relationship.managedChildOrganizationIds], connectionGroupCount: relationship.connectionGroups.length };
+}
+
+async function checkRepairHistoryRoundTrip(page, before, beforeSource, after, afterSource, issueCode, label) {
+	const canvas = page.getByTestId("rail-canvas");
+	const cursorKeys = ["modelNextAdvancedSwitchId", "modelNextPortId", "modelNextEquipmentGroupId", "modelNextOrganizationId", "modelNextRelationshipId"];
+	// Authored allocator cursors are high-water marks. Restore exact old records/cells while
+	// retaining the post-command cursors; requiring the old checksum would be a false oracle
+	// when the typed connector allocated a new Bank and relationship.
+	const expectedUndoSource = {
+		...beforeSource,
+		organizations: { ...beforeSource.organizations, nextOrganizationId: afterSource.organizations.nextOrganizationId },
+		relationships: { ...beforeSource.relationships, nextRelationshipId: afterSource.relationships.nextRelationshipId },
+		equipment: { ...beforeSource.equipment, nextPortId: afterSource.equipment.nextPortId,
+			nextEquipmentGroupId: afterSource.equipment.nextEquipmentGroupId },
+	};
+	await canvas.focus();
+	await canvas.press("ControlOrMeta+z");
+	const undone = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(after.workerTargetSequence) + 1 && metrics.historyCanRedo === "true", { timeout: 30_000 });
+	for (const key of ["modelSequence", "workerTargetSequence", "workerSequence"])
+		assertEqual(Number(undone[key]), Number(after[key]) + 1, `${label} actual Undo atomic ${key}`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), expectedUndoSource), true, `${label} Undo exact five contracts with allocator high-water`);
+	for (const key of cursorKeys) assertEqual(undone[key], after[key], `${label} Undo retains ${key}`);
+	for (const key of ["authoredCells", "authoredEdges", "physicalPaths", "strongComponents", "openTerminals", "modelTopologyFingerprint", "equipmentGroups", "equipmentPorts", "staticFabOrganizations", "modelRelationships"])
+		assertEqual(undone[key], before[key], `${label} Undo restores original ${key}`);
+	assertEqual(undone.workerChecksum, undone.modelChecksum, `${label} Undo exact mirror checksum`);
+	assertEqual(undone.workerPhysicalFingerprint, undone.modelPhysicalFingerprint, `${label} Undo physical mirror parity`);
+	assertEqual(undone.workerSimulationReady, "false", `${label} Undo simulation gate`);
+	await openStaticFabNavigatorTab(page, "checks");
+	const undoChecks = await checkRepairCurrentChecks(page, `${label} Undo current Checks`, undone);
+	assertEqual(await undoChecks.panel.locator(`[data-testid^="rail-readiness-issue-"][data-code="${issueCode}"]`).count() > 0, true, `${label} Undo current diagnosis restores ${issueCode}`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-undone.png`) });
+
+	await canvas.focus();
+	await canvas.press("ControlOrMeta+Shift+z");
+	const redone = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(undone.workerTargetSequence) + 1 && metrics.modelChecksum === after.modelChecksum && metrics.historyCanRedo === "false", { timeout: 30_000 });
+	for (const key of ["modelSequence", "workerTargetSequence", "workerSequence"])
+		assertEqual(Number(redone[key]), Number(undone[key]) + 1, `${label} actual Redo atomic ${key}`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), afterSource), true, `${label} Redo exact five authored contracts`);
+	for (const key of cursorKeys) assertEqual(redone[key], after[key], `${label} Redo retains ${key}`);
+	for (const key of ["authoredCells", "authoredEdges", "physicalPaths", "strongComponents", "openTerminals", "modelTopologyFingerprint", "equipmentGroups", "equipmentPorts", "staticFabOrganizations", "modelRelationships"])
+		assertEqual(redone[key], after[key], `${label} Redo restores applied ${key}`);
+	assertEqual(redone.workerChecksum, redone.modelChecksum, `${label} Redo exact mirror checksum`);
+	assertEqual(redone.workerPhysicalFingerprint, redone.modelPhysicalFingerprint, `${label} Redo physical mirror parity`);
+	assertEqual(redone.workerSimulationReady, "false", `${label} Redo simulation gate`);
+	assertEqual(redone.historyCanUndo, "true", `${label} Redo remains undoable`);
+	await openStaticFabNavigatorTab(page, "checks");
+	const redoChecks = await checkRepairCurrentChecks(page, `${label} Redo current Checks`, redone);
+	assertEqual(await redoChecks.panel.locator(`[data-testid^="rail-readiness-issue-"][data-code="${issueCode}"]`).count(), 0, `${label} Redo current diagnosis removes repaired ${issueCode}`);
+	assertEqual(redoChecks.status, "ready", `${label} Redo repaired state passes fresh static Checks`);
+	return { undo: { sequence: undone.modelSequence, checksum: undone.modelChecksum, checksStatus: undoChecks.status },
+		redo: { sequence: redone.modelSequence, checksum: redone.modelChecksum, checksStatus: redoChecks.status }, allocatorHighWater: Object.fromEntries(cursorKeys.map((key) => [key, redone[key]])) };
+}
+
 
 async function exerciseManualStandaloneLoopRegistration(page, label) {
 	const canvas = page.getByTestId("rail-canvas");
@@ -17098,6 +18056,35 @@ async function exerciseGuidedPortHandoffRegression(
 			"Guided practice transition forward Tab wraps to Cancel",
 		);
 		const practiceTransitionBaseline = await readMetrics(page);
+		const practiceGuardBoundaries = [];
+		const assertPracticeGuardViewport = async (label) => {
+			const workspaceOverflow = await page.locator(".tilefab-workspace").evaluate((element) => {
+				const style = getComputedStyle(element);
+				return { x: style.overflowX, y: style.overflowY };
+			});
+			assertEqual(workspaceOverflow.x, "visible", `${label} modal workspace overflow X`);
+			assertEqual(workspaceOverflow.y, "visible", `${label} modal workspace overflow Y`);
+			await assertLocatorInsideViewport(page, practiceTransition);
+			await assertLocatorOwnsHitArea(practiceTransition, `${label} full-screen guard`);
+			const bounds = await practiceTransition.boundingBox();
+			const viewport = page.viewportSize();
+			assertEqual(bounds?.x, 0, `${label} guard viewport origin X`);
+			assertEqual(bounds?.y, 0, `${label} guard viewport origin Y`);
+			assertEqual(bounds?.width, viewport?.width, `${label} guard viewport width`);
+			assertEqual(bounds?.height, viewport?.height, `${label} guard viewport height`);
+			practiceGuardBoundaries.push({ label, workspaceOverflow, bounds, fiveHitPointsOwned: true });
+		};
+		const assertPracticeGuardClosed = async (label) => {
+			const workspace = await page.locator(".tilefab-workspace").evaluate((element) => {
+				const style = getComputedStyle(element);
+				return { x: style.overflowX, y: style.overflowY, scrollLeft: element.scrollLeft, scrollTop: element.scrollTop };
+			});
+			assertEqual(workspace.x, "clip", `${label} ordinary workspace overflow X`);
+			assertEqual(workspace.y, "clip", `${label} ordinary workspace overflow Y`);
+			assertEqual(workspace.scrollLeft, 0, `${label} workspace scrollLeft`);
+			assertEqual(workspace.scrollTop, 0, `${label} workspace scrollTop`);
+			practiceGuardBoundaries.push({ label, workspace });
+		};
 		const assertPracticeGuardOwnsCoveredTarget = async (target, label, requireBackdrop = false) => {
 			const bounds = await target.boundingBox();
 			if (!bounds) throw new Error(`Project guard target is hidden: ${label}.`);
@@ -17156,6 +18143,7 @@ async function exerciseGuidedPortHandoffRegression(
 				`Guided practice guard blocks ${label} mutation`,
 			);
 		};
+		await assertPracticeGuardViewport("Guided practice transition 390x844");
 		for (const [target, label, requireBackdrop] of [
 			[page.locator(".tilefab-project-trigger"), "Project at 390x844"],
 			[page.getByTestId("rail-readiness-toggle"), "Checks at 390x844"],
@@ -17177,7 +18165,7 @@ async function exerciseGuidedPortHandoffRegression(
 			await page.evaluate(
 				() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
 			);
-			await assertLocatorInsideViewport(page, practiceTransition);
+			await assertPracticeGuardViewport(`Guided practice transition ${viewport.label}`);
 			for (const [target, label, requireBackdrop] of [
 				[page.locator(".tilefab-project-trigger"), `Project at ${viewport.label}`],
 				[page.getByTestId("rail-readiness-toggle"), `Checks at ${viewport.label}`],
@@ -17196,6 +18184,7 @@ async function exerciseGuidedPortHandoffRegression(
 					exact: true,
 				});
 				await assertLocatorInsideViewport(page, action);
+				await assertLocatorOwnsHitArea(action, `Guided practice transition ${actionName} ${viewport.label}`);
 				const actionMetrics = await action.evaluate((element) => {
 					const bounds = element.getBoundingClientRect();
 					return {
@@ -17250,6 +18239,7 @@ async function exerciseGuidedPortHandoffRegression(
 			duplicated,
 			"Guided practice transition Escape",
 		);
+		await assertPracticeGuardClosed("Guided practice transition Escape");
 		await startFab.press("Enter");
 		await practiceTransition.waitFor({ state: "visible", timeout: 10_000 });
 		const cancelPracticeTransition = practiceTransition.getByRole("button", {
@@ -17273,6 +18263,7 @@ async function exerciseGuidedPortHandoffRegression(
 			duplicated,
 			"Guided practice transition cancel",
 		);
+		await assertPracticeGuardClosed("Guided practice transition Cancel");
 		await startFab.focus();
 		await startFab.press("Enter");
 		await practiceTransition.waitFor({ state: "visible", timeout: 10_000 });
@@ -22677,6 +23668,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		return Object.freeze({
 			practiceTransitionMode,
+			practiceGuardBoundaries,
 			loopRepair,
 			equipmentGroups: stkPlaced.equipmentGroups,
 			equipmentPorts: stkPlaced.equipmentPorts,

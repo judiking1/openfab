@@ -102,9 +102,13 @@ export function StaticFabNavigator({
 			if (active instanceof HTMLElement && active.matches('[data-guided-target="true"]')) {
 				return;
 			}
-			document
-				.querySelector<HTMLButtonElement>(`[data-testid="static-fab-navigator-tab-${tab}"]`)
-				?.focus();
+			const selectedTab = document.querySelector<HTMLButtonElement>(
+				`[data-testid="static-fab-navigator-tab-${tab}"]`,
+			);
+			// A parent navigation can intentionally focus the owning panel on remount.
+			// Preserve that target regardless of which animation-frame callback runs first.
+			if (active === selectedTab?.closest("aside")) return;
+			selectedTab?.focus();
 		});
 		return () => cancelAnimationFrame(frame);
 	}, [tab]);

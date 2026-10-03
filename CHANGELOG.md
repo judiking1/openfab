@@ -6,6 +6,27 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-10-03
+
+Prepared as the 0.1.41 release candidate. Local acceptance and exact public release remain
+separate gates; this entry does not establish deployment or V1 completion.
+
+- Choose an explicit registered Process Loop or compatible Bay/Bank pair from Checks, with
+  bounded search, exact organization IDs and persistent selection across filters.
+- Prepare hierarchy, gateway and bounds cooperatively before entering the existing typed
+  rail/connector editor. Do not infer ownership from diagnosis coordinates.
+- Return to a fresh inspection after Loop exit or Connector cancellation/application,
+  preserving authored data and cancelling obsolete navigation on project or tool changes.
+- Keep rail repair controls available before equipment exists and separate compact Loop
+  instructions from camera controls. Preserve the Checks panel's keyboard focus on return.
+- Use one Checks scroll area on short screens so the focused instructions and issue list
+  remain reachable without clipping their controls.
+- Reserve selection hints below small side Inspectors and keep the canvas workspace fixed
+  when panel focus or scrolling changes, preserving reachable rail repair actions.
+- Keep camera controls beside expanded compact menus and reserve their space in Loop
+  instructions and rail action hints, so the whole Inspect target remains usable.
+
+
 ## [0.1.40] - 2026-10-03
 
 Prepared as the 0.1.40 release candidate. Full local and exact public verification remain
