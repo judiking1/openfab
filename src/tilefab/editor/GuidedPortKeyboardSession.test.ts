@@ -94,7 +94,7 @@ describe("GuidedPortKeyboardSession", () => {
 				selectedPortCount: 1,
 			}).summary,
 		).toBe(
-			"키보드 STK 슬롯 · X 1미터 · Z 4미터 · 현재 1개 선택 · 배치 불가 · 이미 사용 중 · Enter로 추가·제거 · Shift+Enter로 그룹 확정 · Esc로 1개 선택 초기화",
+			"키보드 Stocker 슬롯 · X 1미터 · Z 4미터 · 현재 1개 선택 · 배치 불가 · 이미 사용 중 · Enter로 추가·제거 · Shift+Enter로 그룹 확정 · Esc로 1개 선택 초기화",
 		);
 	});
 

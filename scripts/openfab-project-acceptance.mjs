@@ -118,7 +118,7 @@ try {
 	assertEqual(recovered.projectDirty, "true", "recovered project remains unsaved");
 
 	const firstDownloadPromise = page.waitForEvent("download");
-	await page.getByRole("button", { name: "프로젝트 저장" }).click();
+	await page.getByRole("button", { name: "프로젝트 저장", exact: true }).click();
 	const firstDownload = await firstDownloadPromise;
 	const firstPath = await firstDownload.path();
 	if (!firstPath) throw new Error("First OpenFab download has no readable path.");
@@ -139,7 +139,7 @@ try {
 	assertEqual(loaded.projectDirty, "false", "loaded project dirty state");
 
 	const secondDownloadPromise = page.waitForEvent("download");
-	await page.getByRole("button", { name: "프로젝트 저장" }).click();
+	await page.getByRole("button", { name: "프로젝트 저장", exact: true }).click();
 	const secondDownload = await secondDownloadPromise;
 	const secondPath = await secondDownload.path();
 	if (!secondPath) throw new Error("Second OpenFab download has no readable path.");

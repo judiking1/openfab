@@ -2527,6 +2527,15 @@
 	grid-template-rows: 52px auto minmax(120px, 1fr);
 }
 
+@media (min-width: 861px) {
+	.tilefab-workspace:has(
+			.tilefab-buildbar[data-organization-bundle]:not([data-organization-bundle=""])
+		)
+		.tilefab-readiness {
+		max-height: calc(100% - var(--tilefab-placement-hints-bottom, 86px) - 14px);
+	}
+}
+
 .tilefab-navigator-panel {
 	position: absolute;
 	z-index: 6;

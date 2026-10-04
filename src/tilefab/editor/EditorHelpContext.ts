@@ -19,6 +19,10 @@ export interface EditorHelpContextInput {
 	readonly organizationOpen: boolean;
 	readonly organizationSelectionCount: number;
 	readonly ordinaryRailKeyboardPhase?: GuidedRailKeyboardPhase | null;
+	readonly equipmentEdit?:
+		| Readonly<{ equipmentType: "OHB" | "EQ" | "STK"; mode: "move" | "copy" }>
+		| Readonly<{ equipmentType: "EQ" | "STK"; mode: "ports" }>
+		| null;
 }
 
 const ORDINARY_RAIL_KEYBOARD_HELP_CONTEXTS = Object.freeze({
@@ -117,6 +121,9 @@ export function deriveEditorHelpContext(input: EditorHelpContextInput): EditorHe
 	if (input.ordinaryRailKeyboardPhase) {
 		return ORDINARY_RAIL_KEYBOARD_HELP_CONTEXTS[input.ordinaryRailKeyboardPhase];
 	}
+	if (input.activity === "equip" && input.equipmentEdit) {
+		return equipmentEditHelpContext(input.equipmentEdit);
+	}
 	if (!input.organizationOpen) return ACTIVITY_HELP_CONTEXTS[input.activity];
 	const selectedCount = Math.max(0, Math.floor(input.organizationSelectionCount));
 	const summary =
@@ -144,6 +151,47 @@ export function deriveEditorHelpContext(input: EditorHelpContextInput): EditorHe
 			],
 		],
 		"FAB 조직으로 돌아가기",
+	);
+}
+
+function equipmentEditHelpContext(
+	edit: NonNullable<EditorHelpContextInput["equipmentEdit"]>,
+): EditorHelpContext {
+	const name = edit.equipmentType === "STK" ? "Stocker" : edit.equipmentType;
+	if (edit.mode === "ports") {
+		return helpContext(
+			`장비 · ${name} · 포트 구성`,
+			`${name}의 포트 구성 바꾸기`,
+			"기존 장비의 포트를 편집하는 단계입니다. 완료하기 전에는 원본 장비가 유지됩니다.",
+			[
+				[
+					"1 · 포트 선택",
+					edit.equipmentType === "EQ"
+						? "방향키로 끝점을 옮깁니다. Q/E로 시작 쪽과 끝 쪽을 바꾸어 EQ의 범위를 조정합니다."
+						: "방향키로 대상 슬롯을 옮기고 Space 또는 클릭으로 포트를 추가·제거합니다.",
+				],
+				["2 · 확인", "기존·변경 개수와 추가·제거할 포트, 오류를 확인합니다."],
+				[
+					"3 · 완료·취소",
+					"유효한 구성이면 Enter 또는 완료를 누릅니다. Esc는 편집을 취소하고 원본 장비를 유지합니다.",
+				],
+			],
+			"포트 구성 편집으로 돌아가기",
+		);
+	}
+	const action = edit.mode === "move" ? "이동" : "복제";
+	return helpContext(
+		`장비 · ${name} · ${action}`,
+		`${name} ${action} 위치 고르기`,
+		edit.equipmentType === "OHB"
+			? `선택한 OHB를 ${action}하는 단계입니다. 확정하기 전에는 원본 장비가 유지됩니다.`
+			: `선택한 ${name} 그룹의 모든 포트를 함께 ${action}합니다. 기준 포트를 놓을 위치를 고르세요.`,
+		[
+			["1 · 위치", "방향키/WASD로 대상 슬롯을 옮기거나 레일 위 슬롯을 가리킵니다."],
+			["2 · 확인", "미리보기와 오류를 확인합니다. 유효한 위치에서 Enter 또는 클릭으로 확정합니다."],
+			["3 · 취소", "Esc는 미확정 작업을 취소하고 원본 장비와 선택을 유지합니다."],
+		],
+		`${name} ${action}으로 돌아가기`,
 	);
 }
 

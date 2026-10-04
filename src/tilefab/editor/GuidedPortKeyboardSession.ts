@@ -202,8 +202,8 @@ export function guidedPortKeyboardOperationInstruction(
 	}
 	if (portType === "STK" && scope === "ordinary") {
 		return selectedPortCount > 0
-			? `방향키 또는 WASD로 STK 슬롯을 고르고 Enter로 포트를 추가·제거하세요. Shift+Enter는 선택한 포트로 그룹을 확정하고 Esc는 현재 ${selectedPortCount}개 선택을 초기화합니다.`
-			: "방향키 또는 WASD로 STK 슬롯을 고르고 Enter로 포트를 추가하세요. Esc는 Port 배치를 종료합니다.";
+			? `방향키 또는 WASD로 Stocker 슬롯을 고르고 Enter로 포트를 추가·제거하세요. Shift+Enter는 선택한 포트로 그룹을 확정하고 Esc는 현재 ${selectedPortCount}개 선택을 초기화합니다.`
+			: "방향키 또는 WASD로 Stocker 슬롯을 고르고 Enter로 포트를 추가하세요. Esc는 Port 배치를 종료합니다.";
 	}
 	if (portType === "STK") {
 		return "강조된 슬롯에서 Enter로 Port를 선택하세요. 선택을 확인한 뒤 Stocker 생성 또는 Shift+Enter로 생성합니다. Esc는 선택을 초기화합니다.";
@@ -250,7 +250,7 @@ export function guidedPortKeyboardAccessiblePresentation(
 		? `1 시작 · ${anchorCoordinate} · 고정 · 2 끝 · ${coordinate}`
 		: coordinate;
 	return Object.freeze({
-		summary: `키보드 ${session.portType} ${phase} · ${positionSummary}${selectedSummary} · ${legality} · ${applyInstruction}`,
+		summary: `키보드 ${session.portType === "STK" ? "Stocker" : session.portType} ${phase} · ${positionSummary}${selectedSummary} · ${legality} · ${applyInstruction}`,
 		validityKey: `${session.portType}:${session.phase}:${input.legal ? "legal" : input.reason}:${selected}`,
 	});
 }

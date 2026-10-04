@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -99,6 +100,12 @@ const STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE = new Error(
 const STATIC_FAB_CHECK_REPAIR_CHOOSER_ONLY_COMPLETE = new Error(
 	"Explicit Checks repair chooser acceptance completed.",
 );
+const ASSEMBLE_CONNECTOR_HELD_ONLY_COMPLETE = new Error(
+	"Connector held Assemble admission acceptance completed.",
+);
+const ASSEMBLE_LOOP_HELD_ONLY_COMPLETE = new Error(
+	"Combined registered Loop held Assemble admission acceptance completed.",
+);
 const browserEmergencyKillers = new WeakMap();
 let contextualSaveResponsiveVerified = false;
 const execFileAsync = promisify(execFile);
@@ -148,6 +155,23 @@ try {
 	await waitForServer(`${baseUrl}/`);
 	browser = await launchBrowserWithRetry();
 	recordStep("browser-text-line-measurement", await verifyWrappedTextLineCount(browser));
+	if (process.env.OPENFAB_ASSEMBLE_CONNECTOR_HELD_ACCEPTANCE_ONLY === "1") {
+		const proof = await exerciseAssembleConnectorHeldAdmission(browser, { includeArrangement: process.env.OPENFAB_ASSEMBLE_ARRANGEMENT_HELD_EXTENSION === "1" });
+		result.final = proof.finalMetrics;
+		result.workerStarts = proof.workerStarts;
+		result.status = "PASS";
+		console.log(proof.arrangement ? "PASS held Assemble admission: Connector9 and Arrangement9" : "PASS Connector Undo held Assemble admission: 3 viewports, 9 cases");
+		throw ASSEMBLE_CONNECTOR_HELD_ONLY_COMPLETE;
+	}
+	if (process.env.OPENFAB_ASSEMBLE_LOOP_HELD_ACCEPTANCE_ONLY === "1") {
+		const proof = await exerciseAssembleLoopHeldAdmission(browser);
+		result.final = proof.finalMetrics;
+		result.workerStarts = proof.workerStarts;
+		result.status = "PASS";
+		console.log("PASS registered Loop repair Undo held Assemble: 3 viewports, 9 cases");
+		throw ASSEMBLE_LOOP_HELD_ONLY_COMPLETE;
+	}
+
 	if (process.env.OPENFAB_CHECK_REPAIR_CHOOSER_ACCEPTANCE_ONLY === "1") {
 		recordStep("checks-explicit-repair-chooser", await exerciseStaticFabCheckRepairChooserAcceptance(browser));
 		assertEqual(result.consoleErrors.length, 0, "Checks chooser console errors");
@@ -498,6 +522,8 @@ try {
 		await exerciseUnscopedOhbProcessLoopOwnership(browser),
 	);
 	recordStep("declared-bay-disconnection", await exerciseDeclaredBayDisconnection(browser));
+	await exerciseAssembleConnectorHeldAdmission(browser);
+	await exerciseAssembleLoopHeldAdmission(browser);
 	const factoryPortOverview = await exerciseFactoryScaleOrdinaryPortOverview(browser);
 	recordStep("factory-scale-ordinary-port-overview", factoryPortOverview);
 	const context = await browser.newContext({
@@ -2939,6 +2965,8 @@ try {
 		error === PRESET_RECOVERY_ONLY_COMPLETE ||
 		error === PROJECT_STARTER_RETRY_ONLY_COMPLETE ||
 		error === STATIC_FAB_ISSUE_RECHECK_ONLY_COMPLETE ||
+		error === ASSEMBLE_CONNECTOR_HELD_ONLY_COMPLETE ||
+		error === ASSEMBLE_LOOP_HELD_ONLY_COMPLETE ||
 		error === STATIC_FAB_CHECK_REPAIR_CHOOSER_ONLY_COMPLETE
 	) {
 		// The opt-in focused run intentionally skips the whole-editor acceptance sequence.
@@ -2963,7 +2991,7 @@ try {
 	}
 	await writeFile(
 		path.join(artifactRoot, "result.json"),
-		`${JSON.stringify(result, null, 2)}\n`,
+		`${JSON.stringify(result, successfulGraphReplacer(result.status), 2)}\n`,
 	).catch(() => undefined);
 	await closeBrowserResource(desktopPage, "authoring page");
 	desktopPage = undefined;
@@ -2979,6 +3007,31 @@ process.exit(result.status === "PASS" ? 0 : 1);
 
 function recordStep(name, metrics) {
 	result.steps.push({ name, ...metrics });
+}
+
+// Exact graph assertions run on the original objects. Only successful output is compacted;
+// failures retain full source/physical graphs and their partial diagnostic checkpoints.
+function successfulGraphReplacer(status) {
+	if (status !== "PASS") return undefined;
+	const graphKeys = new Set([
+		"baselinePhysical", "baselineSource", "expectedUndoSource", "preSecondSource",
+		"preMoveSource", "registeredSource", "closedSource", "openedSource", "afterSource",
+		"beforeMembership", "afterMembership",
+	]);
+	const summaries = new WeakMap();
+	return (key, value) => {
+		if (!graphKeys.has(key) || value === null || typeof value !== "object") return value;
+		if (summaries.has(value)) return summaries.get(value);
+		const json = JSON.stringify(value);
+		const summary = {
+			format: "sha256-summary",
+			sha256: createHash("sha256").update(json).digest("hex"),
+			bytes: Buffer.byteLength(json),
+			revision: value.revision ?? null,
+		};
+		summaries.set(value, summary);
+		return summary;
+	};
 }
 
 function reportAcceptanceProgress(stage) {
@@ -5493,6 +5546,22 @@ async function exerciseProcessLoopEquipmentMembership(browserInstance) {
 		);
 		assertEqual(detached.equipmentGroups, equipmentReady.equipmentGroups, "detach preserves OHB");
 		assertEqual(detached.equipmentPorts, equipmentReady.equipmentPorts, "detach preserves Port");
+		for (const [mode, action] of [["move", "이동"], ["copy", "복제"]]) {
+			await inspector.getByTestId(`${mode}-ohb-port`).click();
+			const canvas = page.getByTestId("rail-canvas");
+			await canvas.press("F1");
+			const help = page.getByTestId("editor-command-help");
+			await help.waitFor({ state: "visible" });
+			assertEqual(await help.getByTestId("editor-help-context").getByText(`OHB ${action} 위치 고르기`, { exact: true }).count(), 1, `OHB ${mode} Help uses the actual intent`);
+			assertIncludes(await help.getByTestId("editor-help-context").innerText(), "원본 장비와 선택을 유지", `OHB ${mode} Help explains cancellation`);
+			await page.keyboard.press("Escape");
+			await help.waitFor({ state: "hidden" });
+			await canvas.press("Escape");
+			await inspector.waitFor({ state: "visible" });
+			assertExactStaticFabModelIdentity(await readMetrics(page), detached, `OHB ${mode} Help and Cancel preserve the exact source`);
+			await openPortEquipmentMoreActions(page);
+		}
+		if ((await membership.getAttribute("open")) === null) await summary.click();
 		await undoAndRedo(page, beforeDetach, detached, null, true);
 		const reattach = membership.locator(
 			`[data-testid="attach-equipment-process-loop"][data-process-loop-id="${loopSlots.loopId}"]`,
@@ -10849,7 +10918,26 @@ async function checkRepairFreshApplyReturn(page, workers, action, before, label)
 	assertEqual(await page.getByTestId("static-fab-assembly-connector-panel").count(), 0, `${label} applied backend closes`);
 	assertEqual(await checked.panel.getAttribute("data-focused"), "false", `${label} old issue focus discarded after Apply`);
 	assertEqual(await page.getByTestId("rail-readiness-guide").count(), 0, `${label} stale rail guide absent after Apply`);
-	await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-readiness-panel");
+	try {
+		await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-readiness-panel");
+	} catch (error) {
+		recordStep("checks-connector-apply-focus-failure", {
+			label, before, applied, checked: { status: checked.status, fingerprint: checked.fingerprint, metrics: checked.metrics },
+			current: await readMetrics(page).catch((failure) => ({ readFailure: String(failure) })), workers: [...workers],
+			source: await readStandaloneLoopAuthoringContract(page).catch((failure) => ({ readFailure: String(failure) })),
+			diagnostic: await page.evaluate(() => ({
+				active: document.activeElement?.outerHTML.slice(0, 2000),
+				app: { ...document.querySelector('[data-testid="tilefab-app"]')?.dataset },
+				history: { canUndo: window.__tileFab?.getDocument?.().canUndo, canRedo: window.__tileFab?.getDocument?.().canRedo },
+				status: document.querySelector(".tilefab-statusbar")?.textContent,
+				checks: document.querySelector('[data-testid="rail-readiness-panel"]')?.outerHTML.slice(0, 2000),
+				connector: document.querySelector('[data-testid="static-fab-assembly-connector-panel"]')?.outerHTML.slice(0, 1500),
+			})).catch((failure) => ({ readFailure: String(failure) })),
+		});
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-focus-failure.png`) }).catch((failure) =>
+			recordStep("checks-connector-apply-focus-screenshot-failure", { label, failure: String(failure) }));
+		throw error;
+	}
 	assertEqual(checked.metrics.workerSimulationReady, "false", `${label} simulation remains gated`);
 	await page.screenshot({ path: path.join(artifactRoot, `${label}-fresh-checks.png`) });
 	return { countBefore, countAfter, freshWorkerUrl: fresh.url, status: checked.status, fingerprint: checked.fingerprint,
@@ -31296,7 +31384,7 @@ async function assertCompactSmartLinkLayout(page, steps) {
 
 async function saveProject(page) {
 	await waitForProjectOperation(page, "idle");
-	const saveButton = page.getByRole("button", { name: "프로젝트 저장" });
+	const saveButton = page.getByRole("button", { name: "프로젝트 저장", exact: true });
 	await saveButton.waitFor({ state: "visible" });
 	if (await saveButton.isDisabled()) {
 		throw new Error(
@@ -34218,6 +34306,61 @@ self.postMessage = (message, ...rest) => {
 		await page.unroute(routePattern, holdWorker);
 		await page.evaluate(() => globalThis.__openfabRestoreSemanticRetryObserver());
 	}
+}
+
+async function exerciseAssembleConnectorHeldAdmission(browserInstance, { includeArrangement = true } = {}) {
+	const { exerciseAssembleConnectorHeldIntegration } = await import(
+		"./assemble-connector-held-acceptance.mjs"
+	);
+	const proof = await exerciseAssembleConnectorHeldIntegration(browserInstance, {
+		baseUrl, artifactRoot, includeArrangement,
+		onConsoleError: (message) => result.consoleErrors.push(message),
+		onPageError: (message) => result.pageErrors.push(message),
+	}, {
+		readMetrics, readStandaloneLoopAuthoringContract, assertProjectUnchanged,
+		assertSingleGuidedPortCommit, waitForWorker, waitForReady,
+		assertLocatorInsideViewport, assertLocatorOwnsHitArea,
+		checkRepairSettleFrames, checkRepairNeutralBodyPoint, checkRepairWheelMovement,
+		parseIntegerTuple, selectOrganizationsThroughAssemble,
+		selectOrganizationIdThroughBrowser, openStaticFabAssembleMenu,
+		closeBrowserResource, recordStep,
+		readOrganizationMembershipContract, assertOrganizationArrangementContract,
+		organizationRailTranslation, readCertifiedStarterHierarchy,
+	});
+	recordStep("assemble-connector-held-matrix", { proof });
+	assertEqual(proof.status, "PASS", "held matrix status");
+	assertEqual(proof.cases.length, 9, "held matrix exact 3 by 3 count");
+	if (includeArrangement) {
+		assertEqual(proof.arrangement?.status, "PASS", "whole Arrangement held status");
+		assertEqual(proof.arrangement.cases.length, 9, "whole Arrangement exact 3 by 3 count");
+	}
+	assertEqual(result.consoleErrors.length, 0, "held matrix console errors");
+	assertEqual(result.pageErrors.length, 0, "held matrix page errors");
+	return proof;
+}
+
+async function exerciseAssembleLoopHeldAdmission(browserInstance) {
+	const { exerciseCombinedRegisteredLoopHeldMatrix } = await import("./assemble-loop-held-acceptance.mjs");
+	const proof = await exerciseCombinedRegisteredLoopHeldMatrix(browserInstance, {
+		baseUrl, artifactRoot,
+		onConsoleError: (message) => result.consoleErrors.push(message),
+		onPageError: (message) => result.pageErrors.push(message),
+	}, {
+		readMetrics, readStandaloneLoopAuthoringContract, assertProjectUnchanged,
+		assertSingleGuidedPortCommit, waitForWorker, waitForReady,
+		assertLocatorInsideViewport, assertLocatorOwnsHitArea,
+		checkRepairSettleFrames, checkRepairNeutralBodyPoint, checkRepairWheelMovement,
+		parseIntegerTuple, selectOrganizationsThroughAssemble,
+		selectOrganizationIdThroughBrowser, openStaticFabAssembleMenu,
+		openStaticFabNavigatorTab, revealOrdinaryEquipmentSlot, clickWorld,
+		exerciseManualStandaloneLoopRegistration, closeBrowserResource, recordStep,
+	});
+	recordStep("assemble-registered-loop-held-matrix", { proof });
+	assertEqual(proof.status, "PASS", "combined Loop held status");
+	assertEqual(proof.cases.length, 9, "combined Loop exact 3 by 3 count");
+	assertEqual(result.consoleErrors.length, 0, "combined Loop console errors");
+	assertEqual(result.pageErrors.length, 0, "combined Loop page errors");
+	return proof;
 }
 
 async function exerciseDeclaredBayDisconnection(browserInstance) {
@@ -54613,6 +54756,30 @@ async function exercisePresetPlacementLifecycle(activeBrowser) {
 			"FAB preset one-shot Undo keeps placement closed",
 		);
 
+		await openStaticFabNavigatorTab(page, "checks");
+		const repeatChecks = page.getByTestId("rail-readiness-panel");
+		const repeatChecksSources = [];
+		const waitForRepeatChecks = async (metrics) => {
+			await page.waitForFunction(
+				({ sequence, checksum }) => {
+					const app = document.querySelector('[data-testid="tilefab-app"]');
+					const panel = document.querySelector('[data-testid="rail-readiness-panel"]');
+					return (
+						app?.getAttribute("data-navigator-tab") === "checks" &&
+						["ready", "issues"].includes(app?.getAttribute("data-static-fab-check-status")) &&
+						panel?.getAttribute("data-source-sequence") === sequence &&
+						panel?.getAttribute("data-source-checksum") === checksum
+					);
+				},
+				{ sequence: metrics.workerTargetSequence, checksum: metrics.modelChecksum },
+				{ timeout: 30_000 },
+			);
+			await repeatChecks.waitFor({ state: "visible" });
+			repeatChecksSources.push({
+				sequence: await repeatChecks.getAttribute("data-source-sequence"),
+				checksum: await repeatChecks.getAttribute("data-source-checksum"),
+			});
+		};
 		await openPreparedSyntheticFabPreset(page);
 		const repeatAction = await startSyntheticFabPresetAction(page, "place-synthetic-fab-preset");
 		await dialog.waitFor({ state: "hidden" });
@@ -54638,6 +54805,7 @@ async function exercisePresetPlacementLifecycle(activeBrowser) {
 		);
 		assertEqual(repeated.organizationBundlePlacementMode, "repeat", "FAB preset repeat mode");
 		assertEqual(repeated.organizationBundleCommittedCount, "1", "FAB preset repeat count");
+		await waitForRepeatChecks(repeated);
 		const repeatStatus = page.getByTestId("organization-bundle-status");
 		assertIncludes(
 			(await repeatStatus.innerText()).toUpperCase(),
@@ -54665,6 +54833,27 @@ async function exercisePresetPlacementLifecycle(activeBrowser) {
 			path: path.join(artifactRoot, "fab-preset-repeat-placement.png"),
 			fullPage: true,
 		});
+		await moveOrganizationBundleGhostToCandidate(page, [
+			{ x: firstPointer.x + 4_000, y: firstPointer.y + 2_000 },
+			{ x: firstPointer.x - 4_000, y: firstPointer.y - 2_000 },
+		]);
+		const beforeSecondRepeat = await readMetrics(page);
+		await canvas.focus();
+		await page.keyboard.press("Shift+Enter");
+		const secondRepeated = await waitForWorker(
+			page,
+			(metrics) =>
+				Number(metrics.workerTargetSequence) === Number(beforeSecondRepeat.workerTargetSequence) + 1 &&
+				Number(metrics.authoredCells) > Number(beforeSecondRepeat.authoredCells) &&
+				metrics.organizationBundleActive === "true",
+			{ timeout: PRESET_FACTORY_PLACEMENT_BUDGET_MILLISECONDS },
+		);
+		assertEqual(secondRepeated.organizationBundleCommittedCount, "2", "FAB preset second repeat count");
+		await waitForRepeatChecks(secondRepeated);
+		await assertLocatorOwnsHitArea(
+			page.getByTestId("organization-bundle-exit"),
+			"Checks-open repeated FAB placement exit",
+		);
 		const committed = await readMetrics(page);
 		await page.getByTestId("organization-bundle-exit").click();
 		await page.waitForFunction(
@@ -54688,15 +54877,19 @@ async function exercisePresetPlacementLifecycle(activeBrowser) {
 			"FAB preset post-commit exit status",
 		);
 
-		await canvas.press("Control+z");
-		await waitForWorker(
-			page,
-			(metrics) =>
-				Number(metrics.workerTargetSequence) === Number(exited.workerTargetSequence) + 1 &&
-				metrics.authoredCells === oneShotUndone.authoredCells &&
-				metrics.staticFabOrganizations === oneShotUndone.staticFabOrganizations,
-			{ timeout: PRESET_FACTORY_PLACEMENT_BUDGET_MILLISECONDS },
-		);
+		for (const expected of [repeated, oneShotUndone]) {
+			const beforeUndo = await readMetrics(page);
+			await canvas.press("Control+z");
+			const undone = await waitForWorker(
+				page,
+				(metrics) =>
+					Number(metrics.workerTargetSequence) === Number(beforeUndo.workerTargetSequence) + 1 &&
+					metrics.authoredCells === expected.authoredCells &&
+					metrics.staticFabOrganizations === expected.staticFabOrganizations,
+				{ timeout: PRESET_FACTORY_PLACEMENT_BUDGET_MILLISECONDS },
+			);
+			await waitForRepeatChecks(undone);
+		}
 		return Object.freeze({
 			cancelTransition: cancelAction.transitionState,
 			oneShotTransition: oneShotAction.transitionState,
@@ -54704,6 +54897,7 @@ async function exercisePresetPlacementLifecycle(activeBrowser) {
 			responsiveProof,
 			oneShotPlacedCells: Number(oneShotPlaced.authoredCells) - Number(beforeOneShot.authoredCells),
 			repeatPlacedCells: Number(repeated.authoredCells) - Number(beforeRepeat.authoredCells),
+			repeatChecksSources,
 		});
 	} finally {
 		await context.close();
@@ -55021,6 +55215,17 @@ async function exerciseCompactHelpScrollSignpostAcceptance(activeBrowser) {
 			await helpButton.click();
 			await dialog.waitFor({ state: "visible" });
 			const intro = dialog.getByRole("region", { name: "현재 작업 도움말", exact: true });
+			assertEqual(await dialog.evaluate((element) => element === document.activeElement), true, `${label} Help initially focuses its context`);
+			await page.keyboard.press("Shift+Tab");
+			assertEqual(await dialog.getByRole("button", { name: "전체 명령·단축키 보기", exact: true }).evaluate((element) => element === document.activeElement), true, `${label} initial reverse Tab stays in Help`);
+			await page.keyboard.press("Tab");
+			const close = dialog.getByRole("button", { name: "도움말·가이드 닫기", exact: true });
+			assertEqual(await close.evaluate((element) => element === document.activeElement), true, `${label} forward Tab wraps to Help close`);
+			await page.keyboard.press("Shift+Tab");
+			assertEqual(await dialog.getByRole("button", { name: "전체 명령·단축키 보기", exact: true }).evaluate((element) => element === document.activeElement), true, `${label} first control reverse Tab wraps`);
+			await dialog.focus();
+			await page.keyboard.press("Tab");
+			assertEqual(await close.evaluate((element) => element === document.activeElement), true, `${label} initial forward Tab stays in Help`);
 			const cue = dialog.getByTestId("editor-help-scroll-cue");
 			const initial = await intro.evaluate((element) => ({
 				clientHeight: element.clientHeight,

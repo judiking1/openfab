@@ -332,7 +332,7 @@ describe("GuidedBuildMission", () => {
 			suggestedAction: "ohb",
 			progressCue: {
 				label: "Port-first 진행",
-				value: "OHB 0/1 · EQ 0/2 · STK 0/2",
+				value: "OHB 0/1 · EQ 0/2 · Stocker 0/2",
 				instruction:
 					"왼쪽의 강조된 OHB · 단일 Port를 선택하세요. 캔버스 포커스에서 방향키로 슬롯을 고르고 Enter로 배치하거나, 점선 고리가 있는 청록 슬롯을 클릭하세요.",
 			},
@@ -491,7 +491,7 @@ describe("GuidedBuildMission", () => {
 			afterOhb.missions.find((mission) => mission.definition.id === "ports")?.prompt.progressCue,
 		).toEqual({
 			label: "Port-first 진행",
-			value: "OHB 1/1 · EQ 0/2 · STK 0/2",
+			value: "OHB 1/1 · EQ 0/2 · Stocker 0/2",
 			instruction:
 				"강조된 EQ · Port를 선택하세요. 청록색 1 시작과 2 끝을 차례로 클릭하거나 드래그하세요. 키보드는 시작과 끝에서 Enter를 사용합니다.",
 		});
@@ -503,7 +503,7 @@ describe("GuidedBuildMission", () => {
 			afterEq.missions.find((mission) => mission.definition.id === "ports")?.prompt.progressCue,
 		).toEqual({
 			label: "Port-first 진행",
-			value: "OHB 1/1 · EQ 2/2 · STK 0/2",
+			value: "OHB 1/1 · EQ 2/2 · Stocker 0/2",
 			instruction:
 				"왼쪽의 강조된 Stocker · 입출고 포트를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 Stocker 생성을 누르세요.",
 		});
@@ -541,7 +541,7 @@ describe("GuidedBuildMission", () => {
 			splitStk.missions.find((mission) => mission.definition.id === "ports")?.prompt,
 		).toMatchObject({
 			suggestedAction: "stk",
-			progressCue: { value: "OHB 1/1 · EQ 2/2 · STK 1/2" },
+			progressCue: { value: "OHB 1/1 · EQ 2/2 · Stocker 1/2" },
 		});
 		expect(completeStk.currentMissionId).toBe("reuse-loop");
 	});
@@ -666,7 +666,7 @@ describe("GuidedBuildMission", () => {
 			select.missions.find((mission) => mission.definition.id === "reuse-loop")?.prompt,
 		).toMatchObject({
 			title: "Port 포함 Loop 선택",
-			objective: "원본 Loop의 레일이나 OHB·EQ·STK 하나를 먼저 탭하세요.",
+			objective: "원본 Loop의 레일이나 OHB·EQ·Stocker 하나를 먼저 탭하세요.",
 			rationale:
 				"이 미션은 Port까지 보존하는 닫힌 Loop 전체 복제를 연습합니다. 일반 편집에서는 드래그 상자에 닿은 일부 레일 모듈도 닫히지 않아도 그대로 복제할 수 있습니다.",
 			primaryCommandId: "selection.inspect-target",
@@ -677,7 +677,7 @@ describe("GuidedBuildMission", () => {
 			selectConnected.missions.find((mission) => mission.definition.id === "reuse-loop")?.prompt,
 		).toMatchObject({
 			title: "Port 포함 Loop 전체 선택",
-			objective: "현재 선택이 속한 Loop의 레일과 OHB·EQ·STK 전체를 선택하세요.",
+			objective: "현재 선택이 속한 Loop의 레일과 OHB·EQ·Stocker 전체를 선택하세요.",
 			primaryCommandId: "selection.connected",
 			suggestedAction: "select-connected",
 			suggestedActionLabel: "SELECT · Port 포함 Loop 전체",
@@ -686,7 +686,7 @@ describe("GuidedBuildMission", () => {
 			copy.missions.find((mission) => mission.definition.id === "reuse-loop")?.prompt,
 		).toMatchObject({
 			title: "Port 포함 Loop 복제",
-			objective: "선택한 레일과 OHB·EQ·STK를 함께 복사해 1회 배치 미리보기를 시작하세요.",
+			objective: "선택한 레일과 OHB·EQ·Stocker를 함께 복사해 1회 배치 미리보기를 시작하세요.",
 			primaryCommandId: "selection.copy",
 			suggestedAction: "copy-selection",
 			suggestedActionLabel: "COPY · Port 포함 Loop 복제",
@@ -696,7 +696,7 @@ describe("GuidedBuildMission", () => {
 		).toMatchObject({
 			title: "Port 포함 Loop 배치",
 			objective:
-				"공간이 부족하면 −로 축소한 뒤, 기존 Loop와 겹치지 않는 정렬된 위치에 레일과 OHB·EQ·STK 복제 미리보기를 한 번 배치하세요.",
+				"공간이 부족하면 −로 축소한 뒤, 기존 Loop와 겹치지 않는 정렬된 위치에 레일과 OHB·EQ·Stocker 복제 미리보기를 한 번 배치하세요.",
 			primaryCommandId: "canvas.primary-click",
 			suggestedAction: null,
 		});

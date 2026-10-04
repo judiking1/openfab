@@ -99,4 +99,52 @@ describe("deriveEditorHelpContext", () => {
 		expect(context.summary).toContain("3개를 선택");
 		expect(context.steps[2]?.description).toContain("ARRANGE/CONNECT");
 	});
+
+	it.each([
+		"OHB",
+		"EQ",
+		"STK",
+	] as const)("describes %s edit intent instead of creation", (equipmentType) => {
+		for (const mode of ["move", "copy"] as const) {
+			const context = deriveEditorHelpContext({
+				activity: "equip",
+				organizationOpen: false,
+				organizationSelectionCount: 0,
+				equipmentEdit: { equipmentType, mode },
+			});
+			const name = equipmentType === "STK" ? "Stocker" : equipmentType;
+			const action = mode === "move" ? "이동" : "복제";
+			expect(context.title).toBe(`${name} ${action} 위치 고르기`);
+			expect(context.steps[1]?.description).toContain("Enter 또는 클릭");
+			expect(context.steps[2]?.description).toContain("원본 장비와 선택을 유지");
+			expect(context.steps.some((step) => step.description.includes("생성"))).toBe(false);
+			expect(context.summary).toContain(equipmentType === "OHB" ? "선택한 OHB" : "모든 포트");
+		}
+	});
+
+	it.each([
+		"EQ",
+		"STK",
+	] as const)("keeps %s Port editing separate from creation", (equipmentType) => {
+		const context = deriveEditorHelpContext({
+			activity: "equip",
+			organizationOpen: false,
+			organizationSelectionCount: 0,
+			equipmentEdit: { equipmentType, mode: "ports" },
+		});
+		expect(context.title).toContain("포트 구성 바꾸기");
+		expect(context.steps[0]?.description).toContain(equipmentType === "EQ" ? "Q/E" : "Space");
+		expect(context.steps[2]?.description).toContain("Enter 또는 완료");
+		expect(context.steps[2]?.description).toContain("원본 장비를 유지");
+	});
+
+	it("does not use an inactive equipment intent for another activity", () => {
+		const context = deriveEditorHelpContext({
+			activity: "inspect",
+			organizationOpen: false,
+			organizationSelectionCount: 0,
+			equipmentEdit: { equipmentType: "OHB", mode: "move" },
+		});
+		expect(context.eyebrow).toBe("검사 · SELECT");
+	});
 });

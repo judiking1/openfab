@@ -9,6 +9,7 @@ import { collectTransferableBuffers } from "../worker/TransferableBuffers";
 export interface RailStartupWorkerPort {
 	onmessage: ((event: MessageEvent<RailStartupToMainMessage>) => void) | null;
 	onerror: ((event: ErrorEvent) => void) | null;
+	onmessageerror: ((event: MessageEvent<unknown>) => void) | null;
 	postMessage(message: MainToRailStartupMessage, transfer?: Transferable[]): void;
 	terminate(): void;
 }
@@ -29,14 +30,21 @@ export class RailStartupBridge {
 	private resolve: ((payload: RailStartupPayload) => void) | null = null;
 	private reject: ((error: Error) => void) | null = null;
 	private disposed = false;
+	private responseTimeout: ReturnType<typeof setTimeout> | null = null;
+	private readonly timeoutMilliseconds: number;
 
 	constructor(
 		createWorker: () => RailStartupWorkerPort = () =>
 			new Worker(new URL("../worker/railStartupWorker.ts", import.meta.url), {
 				type: "module",
 			}) as RailStartupWorkerPort,
+		timeoutMilliseconds = 40_000,
 	) {
+		if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1) {
+			throw new RangeError("Rail startup response timeout must be a positive safe integer.");
+		}
 		this.createWorker = createWorker;
+		this.timeoutMilliseconds = timeoutMilliseconds;
 	}
 
 	load(source: RailStartupSource): Promise<RailStartupPayload> {
@@ -52,13 +60,34 @@ export class RailStartupBridge {
 			);
 		}
 		this.worker = worker;
-		worker.onmessage = (event) => this.handleMessage(event.data);
-		worker.onerror = (event) => this.fail(new Error(event.message));
 		const requestId = this.nextRequestId++;
 		this.activeRequestId = requestId;
 		return new Promise((resolve, reject) => {
 			this.resolve = resolve;
 			this.reject = reject;
+			const isCurrent = (): boolean =>
+				!this.disposed &&
+				this.worker === worker &&
+				this.activeRequestId === requestId &&
+				this.resolve !== null;
+			this.responseTimeout = setTimeout(() => {
+				if (isCurrent())
+					this.fail(
+						new Error(
+							`Rail startup Worker response timed out after ${this.timeoutMilliseconds} ms.`,
+						),
+					);
+			}, this.timeoutMilliseconds);
+			worker.onmessage = (event) => {
+				if (isCurrent()) this.handleMessage(event.data);
+			};
+			worker.onerror = (event) => {
+				if (isCurrent()) this.fail(new Error(event.message));
+			};
+			worker.onmessageerror = () => {
+				if (isCurrent())
+					this.fail(new Error("Rail startup Worker returned an unreadable response."));
+			};
 			try {
 				const message: MainToRailStartupMessage = {
 					type: "LOAD_RAIL_STARTUP",
@@ -72,7 +101,8 @@ export class RailStartupBridge {
 						: [],
 				);
 			} catch (error) {
-				this.fail(error instanceof Error ? error : new Error("Rail startup post failed."));
+				if (isCurrent())
+					this.fail(error instanceof Error ? error : new Error("Rail startup post failed."));
 			}
 		});
 	}
@@ -115,10 +145,13 @@ export class RailStartupBridge {
 		this.worker = null;
 		worker.onmessage = null;
 		worker.onerror = null;
+		worker.onmessageerror = null;
 		worker.terminate();
 	}
 
 	private clearRequest(): void {
+		if (this.responseTimeout !== null) clearTimeout(this.responseTimeout);
+		this.responseTimeout = null;
 		this.activeRequestId = 0;
 		this.resolve = null;
 		this.reject = null;

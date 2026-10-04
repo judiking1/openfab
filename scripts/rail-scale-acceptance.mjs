@@ -4591,13 +4591,16 @@ async function runSemanticBayDeleteScaleScenario(activeBrowser) {
 			1,
 			"Semantic Bay disposable Worker terminations",
 		);
+		const commandSnapshotCaptures = instrumentation.railSnapshotCaptureRequests.filter(
+			(request) => request.at >= commandProbe.startedAt,
+		);
 		assertEqual(
 			result.failures,
-			instrumentation.railSnapshotCaptureRequests.length,
+			commandSnapshotCaptures.length,
 			1,
-			"Semantic Bay Rail mirror snapshot captures",
+			"Semantic Bay command Rail mirror snapshot captures",
 		);
-		const snapshotCapture = instrumentation.railSnapshotCaptureRequests[0];
+		const snapshotCapture = commandSnapshotCaptures[0];
 		if (snapshotCapture) {
 			assertEqual(
 				result.failures,
@@ -4970,13 +4973,26 @@ async function runSemanticBayDeleteScaleScenario(activeBrowser) {
 			1,
 			"Semantic Bay final Worker terminations",
 		);
+		const finalCommandSnapshotCaptures =
+			finalDiagnostics.instrumentation.railSnapshotCaptureRequests.filter(
+				(request) => request.at >= commandProbe.startedAt,
+			);
 		assertEqual(
 			result.failures,
-			finalDiagnostics.instrumentation.railSnapshotCaptureRequests.length,
+			finalCommandSnapshotCaptures.length,
 			2,
-			"Semantic Bay final mirror snapshot captures",
+			"Semantic Bay final command mirror snapshot captures",
 		);
-		const resultSnapshotCapture = finalDiagnostics.instrumentation.railSnapshotCaptureRequests[1];
+		const resultSnapshotCaptures = finalCommandSnapshotCaptures.filter(
+			(request) => request.at >= applyProbe.startedAt,
+		);
+		assertEqual(
+			result.failures,
+			resultSnapshotCaptures.length,
+			1,
+			"Semantic Bay post-commit mirror snapshot captures",
+		);
+		const resultSnapshotCapture = resultSnapshotCaptures[0];
 		if (resultSnapshotCapture) {
 			assertEqual(
 				result.failures,

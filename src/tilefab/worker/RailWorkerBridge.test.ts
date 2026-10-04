@@ -2569,6 +2569,288 @@ describe("RailWorkerBridge", () => {
 		bridge.dispose();
 	});
 
+	it.each([
+		"snapshot",
+		"authored",
+		"physical",
+	] as const)("settles a silent %s readiness wait at its deadline and recovers the mirror", async (mode) => {
+		const document = new RailDocument();
+		const workers: InProcessRailWorker[] = [];
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => {
+				const worker = new InProcessRailWorker();
+				workers.push(worker);
+				return worker;
+			},
+		);
+		await bridge.waitUntilReady(readyExpectation(document));
+		const silent = workers[0] as InProcessRailWorker;
+		silent.dropNextAcknowledgement = true;
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 12, y: 0 })),
+		).toBe(true);
+		const map = document.map;
+		const expected = readyExpectation(document);
+		const controller = new AbortController();
+		const removed = vi.spyOn(controller.signal, "removeEventListener");
+		vi.useFakeTimers();
+		try {
+			const pending =
+				mode === "snapshot"
+					? bridge.waitUntilSnapshotReady(expected, controller.signal)
+					: mode === "authored"
+						? bridge.waitUntilAuthoredReady(expected, controller.signal)
+						: bridge.waitUntilReady(expected, controller.signal);
+			const outcome = pending.then(
+				() => null,
+				(error: unknown) => error,
+			);
+			await vi.advanceTimersByTimeAsync(39_999);
+			expect(workers).toHaveLength(1);
+			expect(silent.terminated).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(await outcome).toMatchObject({
+				message: `Rail worker ${mode} readiness timed out after 40000 ms.`,
+			});
+			expect(removed).toHaveBeenCalledWith("abort", expect.any(Function));
+			expect(silent.terminated).toBe(true);
+			expect(silent.onmessageerror).toBeNull();
+			expect(workers).toHaveLength(2);
+			await expect(bridge.waitUntilReady(expected)).resolves.toMatchObject({
+				epoch: 2,
+				sequence: expected.sequence,
+				checksum: expected.checksum,
+				simulationReady: false,
+			});
+			expect(document.map).toBe(map);
+			expect(readyExpectation(document)).toEqual(expected);
+			expect(vi.getTimerCount()).toBe(0);
+			expect(document.undo()).toBe(true);
+			await bridge.waitUntilReady(readyExpectation(document));
+			expect(document.redo()).toBe(true);
+			const redone = await bridge.waitUntilReady(readyExpectation(document));
+			expect(redone.checksum).toBe(expected.checksum);
+			expect((workers[1] as InProcessRailWorker).syncCount).toBe(1);
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			bridge.dispose();
+			removed.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	it.each([
+		"cancel",
+		"dispose",
+	] as const)("releases readiness timers and listeners on %s", async (action) => {
+		const document = new RailDocument();
+		const worker = new InProcessRailWorker();
+		worker.dropNextAcknowledgement = true;
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => worker,
+		);
+		const controller = new AbortController();
+		const removed = vi.spyOn(controller.signal, "removeEventListener");
+		vi.useFakeTimers();
+		try {
+			const expected = readyExpectation(document);
+			const outcomes = [
+				bridge.waitUntilSnapshotReady(expected, controller.signal),
+				bridge.waitUntilAuthoredReady(expected, controller.signal),
+				bridge.waitUntilReady(expected, controller.signal),
+			].map((pending) =>
+				pending.then(
+					() => null,
+					(error: unknown) => error,
+				),
+			);
+			await flushWorkerMessages();
+			expect(vi.getTimerCount()).toBe(3);
+			if (action === "cancel") controller.abort();
+			else bridge.dispose();
+			for (const outcome of await Promise.all(outcomes)) {
+				expect(outcome).toMatchObject(
+					action === "cancel"
+						? { name: "AbortError" }
+						: { message: expect.stringMatching(/disposed/i) },
+				);
+			}
+			expect(removed).toHaveBeenCalledTimes(3);
+			expect(vi.getTimerCount()).toBe(0);
+			if (action === "cancel") {
+				worker.replayLastAcknowledgement();
+				await bridge.waitUntilReady(expected);
+				await vi.advanceTimersByTimeAsync(40_000);
+				expect(worker.terminated).toBe(false);
+				expect(worker.syncCount).toBe(1);
+			} else expect(worker.onmessageerror).toBeNull();
+		} finally {
+			bridge.dispose();
+			removed.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	it("clears readiness timers while preserving editable snapshot versus physical admission", async () => {
+		const document = new RailDocument();
+		const worker = new InProcessRailWorker();
+		worker.reportPhysicalInvalid = true;
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => worker,
+		);
+		const controller = new AbortController();
+		const removed = vi.spyOn(controller.signal, "removeEventListener");
+		vi.useFakeTimers();
+		try {
+			const expected = readyExpectation(document);
+			const snapshot = bridge.waitUntilSnapshotReady(expected, controller.signal);
+			const authored = bridge.waitUntilAuthoredReady(expected, controller.signal);
+			const physical = bridge.waitUntilReady(expected, controller.signal);
+			const authoredRejected = expect(authored).rejects.toThrow(/authored identity/);
+			const physicalRejected = expect(physical).rejects.toThrow(/physical identity/);
+			await expect(snapshot).resolves.toMatchObject({ status: "ready", physicalValid: false });
+			await authoredRejected;
+			await physicalRejected;
+			expect(removed).toHaveBeenCalledTimes(3);
+			expect(vi.getTimerCount()).toBe(0);
+			await vi.advanceTimersByTimeAsync(40_000);
+			expect(worker.terminated).toBe(false);
+		} finally {
+			bridge.dispose();
+			removed.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	it("settles unreadable readiness and ignores saved callbacks from the replaced Worker", async () => {
+		const document = new RailDocument();
+		const workers: InProcessRailWorker[] = [];
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => {
+				const worker = new InProcessRailWorker();
+				worker.dropNextAcknowledgement = workers.length === 0;
+				workers.push(worker);
+				return worker;
+			},
+		);
+		const worker = workers[0] as InProcessRailWorker;
+		const controller = new AbortController();
+		const removed = vi.spyOn(controller.signal, "removeEventListener");
+		vi.useFakeTimers();
+		const timers = vi.spyOn(globalThis, "setTimeout");
+		try {
+			const expected = readyExpectation(document);
+			const outcomes = [
+				bridge.waitUntilSnapshotReady(expected, controller.signal),
+				bridge.waitUntilAuthoredReady(expected, controller.signal),
+				bridge.waitUntilReady(expected, controller.signal),
+			].map((pending) =>
+				pending.then(
+					() => null,
+					(error: unknown) => error,
+				),
+			);
+			const old = {
+				message: worker.onmessage,
+				error: worker.onerror,
+				messageerror: worker.onmessageerror,
+			};
+			const oldDeadline = timers.mock.calls[0]?.[0];
+			if (typeof oldDeadline !== "function") throw new Error("Expected readiness deadline");
+			worker.onmessageerror?.({ data: null } as MessageEvent<unknown>);
+			for (const outcome of await Promise.all(outcomes)) {
+				expect(outcome).toMatchObject({ message: expect.stringMatching(/unreadable response/) });
+			}
+			const ready = await bridge.waitUntilReady(expected);
+			expect(ready).toMatchObject({ status: "ready", epoch: 2, simulationReady: false });
+			expect(removed).toHaveBeenCalledTimes(3);
+			expect(vi.getTimerCount()).toBe(0);
+			expect(worker.onmessage).toBeNull();
+			expect(worker.onerror).toBeNull();
+			expect(worker.onmessageerror).toBeNull();
+			old.message?.({
+				data: {
+					type: "RAIL_MIRROR_ERROR",
+					epoch: ready.epoch,
+					sequence: ready.sequence,
+					revision: ready.revision,
+					message: "Queued obsolete mirror failure",
+				},
+			} as MessageEvent<RailMirrorToMainMessage>);
+			old.error?.({ message: "Queued obsolete execution failure" } as ErrorEvent);
+			old.messageerror?.({ data: null } as MessageEvent<unknown>);
+			oldDeadline();
+			(workers[1] as InProcessRailWorker).replayLastAcknowledgement();
+			await flushWorkerMessages();
+			expect(bridge.getState()).toBe(ready);
+			expect(workers).toHaveLength(2);
+			expect(readyExpectation(document)).toEqual(expected);
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			bridge.dispose();
+			removed.mockRestore();
+			timers.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	it("settles pending snapshot and outline captures when a mirror reply is unreadable", async () => {
+		const document = new RailDocument();
+		const workers: InProcessRailWorker[] = [];
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => {
+				const worker = new InProcessRailWorker();
+				workers.push(worker);
+				return worker;
+			},
+		);
+		await bridge.waitUntilReady(readyExpectation(document));
+		const worker = workers[0] as InProcessRailWorker;
+		worker.dropNextSnapshotCapture = true;
+		worker.dropNextOrganizationOutlineResponse = true;
+		const controller = new AbortController();
+		const removed = vi.spyOn(controller.signal, "removeEventListener");
+		vi.useFakeTimers();
+		try {
+			const expected = readyExpectation(document);
+			const outcomes = [
+				bridge.captureCurrentSnapshot(controller.signal),
+				bridge.captureCurrentOrganizationOutline(controller.signal),
+			].map((pending) =>
+				pending.then(
+					() => null,
+					(error: unknown) => error,
+				),
+			);
+			await flushWorkerMessages();
+			expect(vi.getTimerCount()).toBe(2);
+			worker.onmessageerror?.({ data: null } as MessageEvent<unknown>);
+			for (const outcome of await Promise.all(outcomes)) {
+				expect(outcome).toMatchObject({ message: expect.stringMatching(/unreadable response/) });
+			}
+			expect(removed).toHaveBeenCalledTimes(2);
+			await bridge.waitUntilReady(expected);
+			expect(workers).toHaveLength(2);
+			expect(worker.terminated).toBe(true);
+			expect(readyExpectation(document)).toEqual(expected);
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			bridge.dispose();
+			removed.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
 	it("rejects the activation gate when mirror snapshot delivery fails", async () => {
 		const document = new RailDocument();
 		const port = new FailingRailWorker();
@@ -3121,8 +3403,10 @@ async function createAdoptedStartupTransportFixture(cellCount: number) {
 class InProcessRailWorker implements RailWorkerPort {
 	onmessage: ((event: MessageEvent<RailMirrorToMainMessage>) => void) | null = null;
 	onerror: ((event: ErrorEvent) => void) | null = null;
+	onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
 	readonly mirror = new RailPatchMirror();
 	reportPhysicalInvalid = false;
+	dropNextAcknowledgement = false;
 	desyncNextPatch = false;
 	executionErrorAfterDesyncNextPatch = false;
 	corruptAuthoredRevisionNextPatch = false;
@@ -3516,6 +3800,10 @@ class InProcessRailWorker implements RailWorkerPort {
 	private emit(message: RailMirrorToMainMessage): void {
 		if (message.type === "RAIL_SYNCED" || message.type === "RAIL_PATCH_APPLIED") {
 			this.lastAcknowledgement = message;
+			if (this.dropNextAcknowledgement) {
+				this.dropNextAcknowledgement = false;
+				return;
+			}
 		}
 		this.onmessage?.(new MessageEvent("message", { data: message }));
 	}

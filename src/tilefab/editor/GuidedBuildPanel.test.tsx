@@ -567,10 +567,10 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).not.toContain("MISSION 4 · PORTS · 2/3");
 		expect(markup).toContain("장비 · EQ 열기");
 		expect(markup).toContain("LMB</strong>");
-		expect(markup).toContain("OHB 1/1 · EQ 0/2 · STK 0/2");
+		expect(markup).toContain("OHB 1/1 · EQ 0/2 · Stocker 0/2");
 		expect(markup).toContain("청록색 1 시작과 2 끝");
 		expect(activeMarkup).not.toContain("장비 · EQ 열기");
-		expect(activeMarkup).toContain("OHB 1/1 · EQ 0/2 · STK 0/2");
+		expect(activeMarkup).toContain("OHB 1/1 · EQ 0/2 · Stocker 0/2");
 		expect(activeMarkup).toContain("EQ 도구가 준비됐습니다");
 		expect(activeMarkup).toContain("시작점과 끝점을 차례로 클릭");
 		expect(activeMarkup).toContain("각 위치에서 Enter");
@@ -637,7 +637,7 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).toContain("레일 기본기를 익혔습니다");
 		expect(markup).toContain("다음 과정 · 장비 배치");
 		expect(markup).toContain("잠시 접고 편집");
-		expect(markup).not.toContain("OHB, EQ, STK의 대표 Port");
+		expect(markup).not.toContain("OHB, EQ, Stocker의 대표 Port");
 		expect(markup).not.toContain("조건 충족 시 자동 진행");
 	});
 
@@ -686,7 +686,7 @@ describe("GuidedBuildPanel", () => {
 
 		expect(markup).toContain('data-current-mission="reuse-loop"');
 		expect(markup).toContain("Port 포함 Loop 복제");
-		expect(markup).toContain("선택한 레일과 OHB·EQ·STK를 함께 복사");
+		expect(markup).toContain("선택한 레일과 OHB·EQ·Stocker를 함께 복사");
 		expect(markup).toContain("COPY · Port 포함 Loop 복제");
 		expect(markup).toContain("⌘ / CTRL + C");
 		expect(placementMarkup).toContain("공간이 부족하면 −로 축소한 뒤");

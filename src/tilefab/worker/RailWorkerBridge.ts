@@ -129,12 +129,15 @@ export const INITIAL_RAIL_WORKER_STATE: RailWorkerBridgeState = {
 export interface RailWorkerPort {
 	onmessage: ((event: MessageEvent<RailMirrorToMainMessage>) => void) | null;
 	onerror: ((event: ErrorEvent) => void) | null;
+	onmessageerror?: ((event: MessageEvent<unknown>) => void) | null;
 	postMessage(message: MainToRailMirrorMessage, transfer?: Transferable[]): void;
 	terminate(): void;
 }
 
 const MAX_AUTOMATIC_RESYNCS = 2;
 const MAX_PENDING_RAIL_ACKNOWLEDGEMENTS = 2_048;
+// Preserve the existing 100k startup allowance; capture and acceptance budgets stay unchanged.
+const RAIL_READY_TIMEOUT_MILLISECONDS = 40_000;
 const MAX_PENDING_SNAPSHOT_CAPTURES = 4;
 const RAIL_SNAPSHOT_CAPTURE_TIMEOUT_MILLISECONDS = 30_000;
 const MAX_PENDING_ORGANIZATION_OUTLINE_CAPTURES = 2;
@@ -233,6 +236,7 @@ interface RailWorkerReadyWaiter {
 	readonly reject: (error: Error) => void;
 	readonly signal?: AbortSignal;
 	readonly abortListener?: () => void;
+	readonly timeout: ReturnType<typeof setTimeout>;
 }
 
 interface RailWorkerSnapshotCaptureWaiter {
@@ -447,6 +451,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			this.unsubscribe();
 			this.worker.onmessage = null;
 			this.worker.onerror = null;
+			this.worker.onmessageerror = null;
 			try {
 				this.worker.terminate();
 			} catch {
@@ -906,6 +911,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		this.unsubscribe();
 		this.worker.onmessage = null;
 		this.worker.onerror = null;
+		this.worker.onmessageerror = null;
 		this.worker.terminate();
 		this.rejectSnapshotCaptures(
 			new Error("Rail worker bridge was disposed before snapshot capture."),
@@ -958,10 +964,17 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		return new Promise((resolve, reject) => {
 			const abortListener = signal
 				? () => {
-						this.readyWaiters.delete(waiter);
+						if (!this.releaseReadyWaiter(waiter)) return;
 						reject(new DOMException("Aborted", "AbortError"));
 					}
 				: undefined;
+			const timeout = setTimeout(() => {
+				if (!this.readyWaiters.has(waiter)) return;
+				const message = `Rail worker ${mode} readiness timed out after ${RAIL_READY_TIMEOUT_MILLISECONDS} ms.`;
+				// Settle the callers before resync so the same wait cannot survive its deadline.
+				this.rejectReadyWaiters(new Error(message));
+				this.recover(message, true);
+			}, RAIL_READY_TIMEOUT_MILLISECONDS);
 			const waiter: RailWorkerReadyWaiter = {
 				expectation,
 				mode,
@@ -969,6 +982,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				reject,
 				signal,
 				abortListener,
+				timeout,
 			};
 			this.readyWaiters.add(waiter);
 			signal?.addEventListener("abort", abortListener as EventListener, {
@@ -1619,11 +1633,18 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 	}
 
 	private bindWorker(worker: RailWorkerPort): void {
+		const isCurrent = (): boolean => !this.disposed && this.worker === worker;
 		worker.onmessage = (event: MessageEvent<RailMirrorToMainMessage>) => {
-			this.handleMessage(event.data);
+			if (isCurrent()) this.handleMessage(event.data);
 		};
 		worker.onerror = (event) => {
-			this.recover(event.message || "Rail worker execution failed.", true);
+			if (isCurrent()) this.recover(event.message || "Rail worker execution failed.", true);
+		};
+		worker.onmessageerror = () => {
+			if (!isCurrent()) return;
+			const message = "Rail mirror Worker returned an unreadable response.";
+			this.rejectReadyWaiters(new Error(message));
+			this.recover(message, true);
 		};
 	}
 
@@ -1631,6 +1652,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		const previous = this.worker;
 		previous.onmessage = null;
 		previous.onerror = null;
+		previous.onmessageerror = null;
 		previous.terminate();
 		const replacement = this.createWorker();
 		this.worker = replacement;
@@ -1663,10 +1685,16 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		}
 	}
 
+	private releaseReadyWaiter(waiter: RailWorkerReadyWaiter): boolean {
+		if (!this.readyWaiters.delete(waiter)) return false;
+		clearTimeout(waiter.timeout);
+		waiter.signal?.removeEventListener("abort", waiter.abortListener as EventListener);
+		return true;
+	}
+
 	private resolveReadyWaiters(state: RailWorkerBridgeState): void {
 		for (const waiter of this.readyWaiters) {
-			this.readyWaiters.delete(waiter);
-			waiter.signal?.removeEventListener("abort", waiter.abortListener as EventListener);
+			this.releaseReadyWaiter(waiter);
 			const error = readinessExpectationError(state, waiter.expectation, waiter.mode);
 			if (error) waiter.reject(new Error(error));
 			else waiter.resolve(state);
@@ -1675,8 +1703,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 
 	private rejectReadyWaiters(error: Error): void {
 		for (const waiter of this.readyWaiters) {
-			this.readyWaiters.delete(waiter);
-			waiter.signal?.removeEventListener("abort", waiter.abortListener as EventListener);
+			this.releaseReadyWaiter(waiter);
 			waiter.reject(error);
 		}
 	}

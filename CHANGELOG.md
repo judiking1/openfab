@@ -6,6 +6,69 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.46] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is recorded
+separately; this entry does not establish V1 completion.
+
+- Match equipment Help to OHB, EQ and Stocker move/copy and Port configuration editing,
+  with the current confirmation and cancellation controls.
+- Keep initial forward and reverse keyboard navigation inside the Help dialog.
+- Extract the unchanged action-hint resolver and shared editor tool type from the main App.
+
+## [0.1.45] - 2026-10-03
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Extract Station Review request and state ownership from the main App into an editor
+  controller, retaining synchronous command locking and the original source admission.
+- Keep Canvas tools, focus and measurements in App adapters and retain the existing atomic
+  Apply, typed mirror patch and Undo/Redo path.
+- Suppress late evaluation and Apply feedback after cancellation or terminal editor disposal,
+  while preserving an already accepted commit and normal completion feedback.
+
+## [0.1.44] - 2026-10-03
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Prepare Checks and Map inspection snapshots asynchronously through the existing mirror
+  capture, preserving exact source identity, cancellation and invalid-layout diagnostics.
+- Retry inspection after mirror generation recovery and validate the capture at publication.
+- Reserve the desktop placement controls beneath an open Checks panel so repeated FAB
+  placement can be ended with the visible button.
+- End silent mirror readiness waits, recover unreadable responses and ignore retired Worker
+  callbacks while preserving authored data and the existing automatic-resync limit.
+
+## [0.1.43] - 2026-10-03
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Make the existing Checks save action visible before detailed results, with an explicit
+  “프로젝트 저장 (.openfab)” label. Extract the unchanged current-result summary presentation.
+- Use Stocker consistently in Guide progress, keyboard instructions and equipment commands;
+  preserve serialized STK kinds, identifiers and user equipment names.
+- Extract blueprint menus and miniature presentation without changing their implementation.
+- Bound startup Worker response waits and recover from unreadable responses. Ignore callbacks
+  from replaced Workers and release response timers on success, failure and cancellation.
+- Keep full failure diagnostics while hashing repeated source/physical graphs in successful
+  acceptance receipts to reduce generated data.
+
+## [0.1.42] - 2026-10-03
+
+Local validation passes for this development candidate. Exact public export and deployment
+are deferred until the next accumulated release; this entry does not establish V1 completion.
+
+- Block Bay flow, disconnection and deletion before side effects while cooperative Loop or
+  editing-history work is pending. Show the same current wait/cancel reason on all Bay actions.
+- Preserve the original pending operation until explicit cancellation or completion, then
+  restore the existing atomic Undo/Redo and typed mirror publication path.
+- Deliver repair-return keyboard focus after the owning Checks panel mounts, with project
+  and navigation guards. Keep fresh inspection and focus requirements separate in acceptance.
+
+
 ## [0.1.41] - 2026-10-03
 
 Prepared as the 0.1.41 release candidate. Local acceptance and exact public release remain

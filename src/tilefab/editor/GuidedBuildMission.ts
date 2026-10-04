@@ -789,8 +789,8 @@ function guidedBuildMissionPrompt(
 					? "Port 포함 Loop 전체 선택"
 					: "Port 포함 Loop 선택",
 				objective: evidence.reuseGuidance.selectionAnchorReady
-					? "선택한 원본 Loop의 연결 구조 전체를 선택해 OHB, EQ, STK까지 함께 복제하세요."
-					: "OHB, EQ, STK가 붙은 원본 Loop의 레일 하나를 먼저 탭하세요.",
+					? "선택한 원본 Loop의 연결 구조 전체를 선택해 OHB, EQ, Stocker까지 함께 복제하세요."
+					: "OHB, EQ, Stocker가 붙은 원본 Loop의 레일 하나를 먼저 탭하세요.",
 				rationale: definition.rationale,
 				primaryCommandId: evidence.reuseGuidance.selectionAnchorReady
 					? "selection.connected"
@@ -808,7 +808,7 @@ function guidedBuildMissionPrompt(
 				eyebrow: "MISSION 5 · REUSE LOOP · 3/3",
 				title: "Port 포함 Loop 배치",
 				objective:
-					"공간이 부족하면 −로 축소한 뒤, 기존 Loop와 겹치지 않는 정렬된 위치에 레일과 OHB·EQ·STK 복제 미리보기를 한 번 배치하세요.",
+					"공간이 부족하면 −로 축소한 뒤, 기존 Loop와 겹치지 않는 정렬된 위치에 레일과 OHB·EQ·Stocker 복제 미리보기를 한 번 배치하세요.",
 				rationale: definition.rationale,
 				primaryCommandId: "canvas.primary-click",
 				suggestedAction: null,
@@ -819,7 +819,7 @@ function guidedBuildMissionPrompt(
 			return Object.freeze({
 				eyebrow: "MISSION 5 · REUSE LOOP · 2/3",
 				title: "Port 포함 Loop 복제",
-				objective: "선택한 레일과 OHB·EQ·STK를 함께 복사해 1회 배치 미리보기를 시작하세요.",
+				objective: "선택한 레일과 OHB·EQ·Stocker를 함께 복사해 1회 배치 미리보기를 시작하세요.",
 				rationale: definition.rationale,
 				primaryCommandId: "selection.copy",
 				suggestedAction: "copy-selection",
@@ -832,8 +832,8 @@ function guidedBuildMissionPrompt(
 				? "Port 포함 Loop 전체 선택"
 				: "Port 포함 Loop 선택",
 			objective: evidence.reuseGuidance.selectionAnchorReady
-				? "현재 선택이 속한 Loop의 레일과 OHB·EQ·STK 전체를 선택하세요."
-				: "원본 Loop의 레일이나 OHB·EQ·STK 하나를 먼저 탭하세요.",
+				? "현재 선택이 속한 Loop의 레일과 OHB·EQ·Stocker 전체를 선택하세요."
+				: "원본 Loop의 레일이나 OHB·EQ·Stocker 하나를 먼저 탭하세요.",
 			rationale: definition.rationale,
 			primaryCommandId: evidence.reuseGuidance.selectionAnchorReady
 				? "selection.connected"
@@ -929,7 +929,7 @@ function guidedBuildPortProgressCue(
 		evidence.groupCount > 0 ? Math.min(evidence.largestGroupPortCount, kind === "OHB" ? 1 : 2) : 0;
 	return Object.freeze({
 		label: "Port-first 진행",
-		value: `OHB ${completedPortCount("OHB", equipment.OHB)}/1 · EQ ${completedPortCount("EQ", equipment.EQ)}/2 · STK ${completedPortCount("STK", equipment.STK)}/2`,
+		value: `OHB ${completedPortCount("OHB", equipment.OHB)}/1 · EQ ${completedPortCount("EQ", equipment.EQ)}/2 · Stocker ${completedPortCount("STK", equipment.STK)}/2`,
 		instruction,
 	});
 }

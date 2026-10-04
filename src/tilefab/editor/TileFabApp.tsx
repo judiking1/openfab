@@ -42,7 +42,6 @@ import {
 	PackagePlus,
 	PanelLeftClose,
 	PanelLeftOpen,
-	Pencil,
 	Plus,
 	Redo2,
 	RefreshCcw,
@@ -94,7 +93,6 @@ import {
 	portRowDragTargetBounds,
 	selectOhbRowDrag,
 } from "../compile/OhbRowDragSelector";
-import type { HydratedOpenFabStationProposalArtifact } from "../compile/OpenFabStationProposalArtifact";
 import { openFabStationProposalReviewAttachmentFromSlot } from "../compile/OpenFabStationProposalReviewAttachment";
 import type { Int32CsrIndexSnapshot } from "../compile/PhysicalPathLookup";
 import {
@@ -283,7 +281,7 @@ import { prepareRailAreaCut, prepareRailModuleCut } from "../core/RailCut";
 import {
 	RailDocument,
 	STATIC_FAB_ORGANIZATION_BUNDLE_PREPARATION_OPERATION_BUDGET,
-	type RailPatchEvent,
+	type MeasuredRailDocumentReviewedPortEquipmentCommit,
 	railPatchInvalidatedPorts,
 } from "../core/RailDocument";
 import {
@@ -514,7 +512,6 @@ import {
 	OPENFAB_BLUEPRINT_SECTION_SCHEMA_VERSION,
 	type OpenFabProjectBlueprint,
 	type OpenFabProjectBlueprintSection,
-	type OpenFabStaticFabBlueprintPort,
 	railAreaStampTemplateFromOpenFabBlueprint,
 	staticFabBlueprintTemplateFromOpenFabBlueprint,
 	updateOpenFabProjectBlueprint,
@@ -559,10 +556,7 @@ import {
 	type OpenFabUserBlueprintLibraryRestorePreflight,
 	serializeOpenFabUserBlueprintLibraryBundle,
 } from "../project/OpenFabUserBlueprintLibraryBundle";
-import {
-	type RailTemplatePhysicalPreview,
-	tryCompileRailTemplatePhysicalPreview,
-} from "../render/RailTemplatePhysicalPreview";
+import { tryCompileRailTemplatePhysicalPreview } from "../render/RailTemplatePhysicalPreview";
 import {
 	type RenderInteractionCategory,
 	RenderPerformanceTelemetry,
@@ -624,11 +618,15 @@ import {
 	type BlueprintRecordCommandId,
 	type BlueprintRecordContextScope,
 	type BlueprintRecordContextState,
-	blueprintRecordCommands,
 	nextBlueprintRecordMenuIndex,
 	planUserBlueprintOrganization,
 	type UserBlueprintOrganizationTarget,
 } from "./BlueprintRecordContext";
+import {
+	BlueprintRecordContextTray,
+	RailBlueprintMiniature,
+	RailTemplateMiniature,
+} from "./BlueprintRecordPresentation";
 import {
 	BrowserOpenFabProjectIdentityProvider,
 	BrowserOpenFabProjectPersistence,
@@ -744,9 +742,10 @@ import {
 	type EditorCommandContext,
 	type EditorCommandId,
 	editorCommandAriaKeyShortcuts,
-	editorCommandHintBinding,
 	editorCommandMatchesKeyboard,
 } from "./EditorCommandRegistry";
+import { deriveEditorActionHints, editorActionHint } from "./EditorActionHintPresentation";
+import type { EditorTool } from "./EditorTool";
 import { EditorInputCue } from "./EditorInputCue";
 import {
 	createInspectAreaKeyboardSession,
@@ -895,22 +894,11 @@ import { OpenFabProjectLoader, type PreparedOpenFabProjectLoad } from "./OpenFab
 import { OpenFabStartDialog } from "./OpenFabStartDialog";
 import { OpenFabProjectSerializationBridge } from "./OpenFabProjectSerializationBridge";
 import {
-	OpenFabStationProposalBridge,
-	OpenFabStationProposalCancelledError,
-} from "./OpenFabStationProposalBridge";
-import {
-	OpenFabStationProposalReviewBridge,
-	OpenFabStationProposalReviewCancelledError,
-	type OpenFabStationProposalReviewBridgeEvaluation,
-} from "./OpenFabStationProposalReviewBridge";
-import {
-	OpenFabStationProposalReviewPanel,
-	type OpenFabStationProposalReviewUiPhase,
-} from "./OpenFabStationProposalReviewPanel";
-import {
-	createOpenFabStationProposalReviewSession,
-	type OpenFabStationProposalReviewSession,
-} from "./OpenFabStationProposalReviewSession";
+	OpenFabStationProposalEditorController,
+	type OpenFabStationProposalReviewUiState,
+} from "./OpenFabStationProposalEditorController";
+import type { PreparedOpenFabStationProposalReviewApply } from "./OpenFabStationProposalReviewBridge";
+import { OpenFabStationProposalReviewPanel } from "./OpenFabStationProposalReviewPanel";
 import {
 	classifyOpenFabStationProposalSourcePosition,
 	type OpenFabStationProposalReviewAttachmentRequest,
@@ -1096,6 +1084,7 @@ import {
 	type StaticFabBayFlowEditSession,
 } from "./StaticFabBayFlowEditSession";
 import { staticFabCheckEntryPresentation } from "./StaticFabCheckEntryPresentation";
+import { StaticFabChecksSummary } from "./StaticFabChecksSummary";
 import type { StaticFabInspection3DCommand } from "./StaticFabInspection3DViewport";
 import {
 	DEFAULT_STATIC_FAB_INSPECTION_3D_VISIBILITY,
@@ -1188,7 +1177,6 @@ const StaticFabInspection3DView = OPENFAB_RELEASE_CAPABILITIES.derived3D
 	? lazy(() => import("./StaticFabInspection3DView"))
 	: null;
 
-type EditorTool = "build" | "ohb" | "eq" | "stk" | "inspect" | "erase" | "reshape";
 type EditorViewMode = "2d" | "3d";
 type ReshapeKind = "corner" | "endpoint" | "straight";
 type RailBuildMode = RailConstructionCatalogId;
@@ -1819,22 +1807,6 @@ interface StaticFabAssemblyConnectorRecommendationRun {
 
 const STATIC_FAB_ASSEMBLY_CONNECTOR_RECOMMENDATION_MAXIMUM_SOURCE_CELLS = 20_000;
 
-interface OpenFabStationProposalReviewUiState {
-	readonly sourceName: string;
-	readonly proposal: HydratedOpenFabStationProposalArtifact;
-	readonly session: OpenFabStationProposalReviewSession;
-	readonly phase: OpenFabStationProposalReviewUiPhase;
-	readonly evaluation: OpenFabStationProposalReviewBridgeEvaluation | null;
-	readonly attachmentRequest: OpenFabStationProposalReviewAttachmentRequest | null;
-	readonly attachmentSelection: OpenFabStationProposalReviewAttachmentSelection | null;
-	readonly error: string | null;
-	readonly generation: number;
-	readonly modelGeneration: number;
-	readonly document: RailDocument;
-	readonly sourceRevision: number;
-	readonly sourcePatchSequence: number;
-}
-
 interface PendingStaticFabArrangementSelection {
 	readonly document: RailDocument;
 	readonly patchSequence: number;
@@ -1969,15 +1941,6 @@ type RailClipboard =
 interface RailClipboardHistoryEntry {
 	readonly id: number;
 	readonly clipboard: RailClipboard;
-}
-
-interface EditorActionHint {
-	readonly id: string;
-	readonly commandIds: readonly EditorCommandId[];
-	readonly inputs: readonly string[];
-	readonly action: string;
-	readonly pointer?: boolean;
-	readonly inputJoin?: "plus" | "or";
 }
 
 type BlueprintLibraryTab = "saved" | "user" | "recent";
@@ -2404,6 +2367,10 @@ export default function TileFabApp(): React.ReactElement {
 	const [staticFabCheckRepairReturnPending, setStaticFabCheckRepairReturnPending] = useState(false);
 	const staticFabCheckRepairHeadingRef = useRef<HTMLHeadingElement | null>(null);
 	const staticFabCheckRepairFocusGenerationRef = useRef(0);
+	const [staticFabCheckRepairPanelFocus, setStaticFabCheckRepairPanelFocus] = useState<Readonly<{
+		origin: StaticFabCheckRepairReturnOrigin;
+		generation: number;
+	}> | null>(null);
 	const processLoopNameDraftRef = useRef("작업 루프 1");
 	const staticFabMutationHistoryRef = useRef<AbortController | null>(null);
 	const [staticFabMutationHistory, setStaticFabMutationHistory] = useState<"undo" | "redo" | null>(null);
@@ -2837,9 +2804,6 @@ export default function TileFabApp(): React.ReactElement {
 	const wheelActionRef = useRef<(event: WheelEvent) => void>(() => undefined);
 	const stationProposalReviewUiRef =
 		useRef<OpenFabStationProposalReviewUiState | null>(null);
-	const stationProposalReviewReadControllerRef = useRef<AbortController | null>(null);
-	const stationProposalReviewBridgeRef = useRef<OpenFabStationProposalReviewBridge | null>(null);
-	const stationProposalReviewGenerationRef = useRef(0);
 	const stationProposalReviewLauncherRef = useRef<HTMLButtonElement | null>(null);
 	const cancelStationProposalReviewRef = useRef<(message?: string) => void>(() => undefined);
 	const [stationProposalFileGateway] = useState(
@@ -2848,7 +2812,9 @@ export default function TileFabApp(): React.ReactElement {
 				forceFileInputFallback: import.meta.env.VITE_OPENFAB_FILE_FALLBACK === "1",
 			}),
 	);
-	const [stationProposalBridge] = useState(() => new OpenFabStationProposalBridge());
+	const [stationProposalController] = useState(
+		() => new OpenFabStationProposalEditorController(stationProposalReviewUiRef),
+	);
 	const [userBlueprintLibraryChanges] = useState(
 		() => new BrowserOpenFabUserBlueprintLibraryChangePort(),
 	);
@@ -4806,7 +4772,7 @@ export default function TileFabApp(): React.ReactElement {
 						: tool === "stk"
 							? Object.freeze({
 									scopeIncludesRow: guidedBuildFabPortScopeFilter,
-									label: "STK · 입고와 출고 Port",
+									label: "Stocker · 입고와 출고 Port",
 									instruction: "강조된 슬롯 두 개를 차례로 클릭하세요",
 									reservedLeftPixels: compactNavigatorViewport ? 64 : 180,
 									gesture: "single" as const,
@@ -5692,12 +5658,7 @@ export default function TileFabApp(): React.ReactElement {
 			const effectGeneration = ++lifetimeGeneration.current;
 			return () => {
 				const dispose = (): void => {
-				stationProposalReviewGenerationRef.current += 1;
-				stationProposalReviewReadControllerRef.current?.abort();
-				stationProposalReviewReadControllerRef.current = null;
-				stationProposalReviewBridgeRef.current?.dispose();
-				stationProposalReviewBridgeRef.current = null;
-				stationProposalBridge.dispose();
+				stationProposalController.dispose();
 				projectOperationControllerRef.current?.abort();
 				newFabPreparedProjectBridge.dispose();
 				const pendingNewFabCompletion = pendingNewFabProjectCompletionRef.current;
@@ -5794,7 +5755,7 @@ export default function TileFabApp(): React.ReactElement {
 			newFabPreparedProjectBridge,
 			projectLoader,
 			projectSerializer,
-			stationProposalBridge,
+			stationProposalController,
 			userBlueprintLibraryChanges,
 			userBlueprintLibraryRestoreInspector,
 		],
@@ -7738,61 +7699,6 @@ export default function TileFabApp(): React.ReactElement {
 		return syncModelUiNow(message, closedMessage, resolveMessage);
 	};
 
-	const publishStationProposalReview = (
-		next: OpenFabStationProposalReviewUiState | null,
-	): void => {
-		stationProposalReviewUiRef.current = next;
-		setStationProposalReviewState(next);
-	};
-	const stationProposalReviewBindingIsCurrent = (
-		binding: OpenFabStationProposalReviewUiState,
-	): boolean => {
-		const current = stationProposalReviewUiRef.current;
-		const model = editorModelRef.current;
-		return (
-			current !== null &&
-			current.generation === binding.generation &&
-			current.session === binding.session &&
-			model.generation === binding.modelGeneration &&
-			model.document === binding.document &&
-			model.map === binding.document.map &&
-			binding.document.map.getRevision() === binding.sourceRevision &&
-			binding.document.getPatchSequence() === binding.sourcePatchSequence
-		);
-	};
-	const updateStationProposalReview = (
-		binding: OpenFabStationProposalReviewUiState,
-		patch: Partial<OpenFabStationProposalReviewUiState>,
-	): OpenFabStationProposalReviewUiState | null => {
-		if (!stationProposalReviewBindingIsCurrent(binding)) return null;
-		const current = stationProposalReviewUiRef.current;
-		if (!current) return null;
-		const next = Object.freeze({ ...current, ...patch });
-		publishStationProposalReview(next);
-		return next;
-	};
-	const cancelStationProposalReview = (message?: string): void => {
-		const hadReview = stationProposalReviewUiRef.current !== null;
-		stationProposalReviewGenerationRef.current += 1;
-		stationProposalReviewReadControllerRef.current?.abort();
-		stationProposalReviewReadControllerRef.current = null;
-		stationProposalBridge.cancel();
-		stationProposalReviewBridgeRef.current?.dispose();
-		stationProposalReviewBridgeRef.current = null;
-		publishStationProposalReview(null);
-		hoverPortSlotRef.current = null;
-		if (message) setStatus(message);
-		if (hadReview) {
-			rendererRef.current.invalidateStatic();
-			scheduleRender();
-			requestAnimationFrame(() => {
-				const launcher = stationProposalReviewLauncherRef.current;
-				(launcher?.isConnected ? launcher : canvasRef.current)?.focus();
-			});
-		}
-	};
-	cancelStationProposalReviewRef.current = cancelStationProposalReview;
-
 	const activateStationProposalReviewPortTool = (
 		request: OpenFabStationProposalReviewAttachmentRequest,
 	): void => {
@@ -7819,119 +7725,107 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => canvasRef.current?.focus());
 	};
 
-	const openStationProposalReview = async (launcher: HTMLButtonElement): Promise<void> => {
-		if (blockStaticFabExclusiveCommand()) return;
-		if (
-			startupState.status !== "ready" ||
-			modelSyncPendingRef.current ||
-			projectSession.operation !== "idle" ||
-			projectOperationControllerRef.current !== null
-		) {
-			setStatus("프로젝트와 Rail mirror가 준비된 뒤 Station proposal을 열 수 있습니다");
-			return;
-		}
-		stationProposalReviewLauncherRef.current = launcher;
-		stationProposalReviewReadControllerRef.current?.abort();
-		const controller = new AbortController();
-		stationProposalReviewReadControllerRef.current = controller;
-		const generation = Math.max(1, stationProposalReviewGenerationRef.current + 1);
-		stationProposalReviewGenerationRef.current = generation;
-		setStatus("OpenFab station proposal 파일을 선택하세요");
-		try {
-			const source = await stationProposalFileGateway.chooseOpen(controller.signal);
-			if (!source || controller.signal.aborted || generation !== stationProposalReviewGenerationRef.current) {
-				return;
-			}
-			setStatus(`${source.displayName} · 전용 Worker에서 스키마와 행을 검사합니다`);
-			const result = await stationProposalBridge.read(source.bytes, generation, controller.signal);
-			if (controller.signal.aborted || generation !== stationProposalReviewGenerationRef.current) return;
-			if (!result.ok) {
-				setStatus(
-					`Station proposal을 열지 못했습니다 · ${result.failure.code} · accepted ${result.failure.acceptedRowCount.toLocaleString()}`,
-				);
-				return;
-			}
-			const model = editorModelRef.current;
-			if (
-				startupState.status !== "ready" ||
-				modelSyncPendingRef.current ||
-				projectSession.operation !== "idle"
-			) {
-				setStatus("파일을 읽는 동안 프로젝트 상태가 바뀌어 Station review를 시작하지 않았습니다");
-				return;
-			}
+	const {
+		stationProposalReviewBindingIsCurrent,
+		updateStationProposalReview,
+		cancelStationProposalReview,
+		openStationProposalReview,
+		requestStationProposalAttachment,
+		clearStationProposalAttachment,
+		evaluateStationProposalReview,
+		applyStationProposalReview,
+	} = stationProposalController.bind({
+		editorModelRef,
+		modelSyncPendingRef,
+		projectOperationControllerRef,
+		workerBridgeRef,
+		workerBridgeDocumentRef,
+		startupState,
+		projectSession,
+		stationProposalFileGateway,
+		blockStaticFabExclusiveCommand,
+		setStationProposalReviewState,
+		setStatus,
+		rememberLauncher: (launcher) => {
+			stationProposalReviewLauncherRef.current = launcher;
+		},
+		prepareReviewUi: () => {
 			clearTransientConstruction();
 			closeContextPalette();
 			setTemplatePaletteOpen(false);
 			closeBlueprintLibrary(false);
 			setNavigatorTab(null);
-			const session = createOpenFabStationProposalReviewSession(result.artifact);
-			const review = Object.freeze({
-				sourceName: source.displayName.slice(0, 240),
-				proposal: result.artifact,
-				session,
-				phase: "reviewing" as const,
-				evaluation: null,
-				attachmentRequest: null,
-				attachmentSelection: null,
-				error: null,
-				generation,
-				modelGeneration: model.generation,
-				document: model.document,
-				sourceRevision: model.document.map.getRevision(),
-				sourcePatchSequence: model.document.getPatchSequence(),
-			}) satisfies OpenFabStationProposalReviewUiState;
-			publishStationProposalReview(review);
-			updateEditorActivity("equip");
-			setStatus(
-				`Station proposal ${result.artifact.rowCount.toLocaleString()}행 · 각 행의 실제 슬롯, 방향, 그룹을 명시적으로 검토하세요`,
-			);
-			scheduleRender();
-		} catch (openError) {
-			if (
-				controller.signal.aborted ||
-				openError instanceof OpenFabStationProposalCancelledError ||
-				(openError instanceof DOMException && openError.name === "AbortError")
-			) {
-				return;
+		},
+		onCancel: (hadReview, message) => {
+			hoverPortSlotRef.current = null;
+			if (message) setStatus(message);
+			if (hadReview) {
+				rendererRef.current.invalidateStatic();
+				scheduleRender();
+				requestAnimationFrame(() => {
+					const launcher = stationProposalReviewLauncherRef.current;
+					(launcher?.isConnected ? launcher : canvasRef.current)?.focus();
+				});
 			}
-			setStatus(
-				openError instanceof Error
-					? openError.message
-					: "Station proposal 파일을 열지 못했습니다",
-			);
-		} finally {
-			if (stationProposalReviewReadControllerRef.current === controller) {
-				stationProposalReviewReadControllerRef.current = null;
+		},
+		activateStationProposalReviewPortTool,
+		updateEditorActivity: (activity) => updateEditorActivity(activity),
+		scheduleRender,
+		checkpoint: () => new Promise<void>((resolve) => { window.setTimeout(resolve, 0); }),
+		performanceNow,
+		recordApplied: (
+			prepared: PreparedOpenFabStationProposalReviewApply,
+			commitResult: MeasuredRailDocumentReviewedPortEquipmentCommit,
+			commitMilliseconds: number,
+			applyStartedAt: number,
+		) => {
+			if (canvasRef.current) {
+				canvasRef.current.dataset.stationReviewApplyWorkerMs =
+					prepared.workerRoundTripMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyAdoptionMs =
+					prepared.adoptionMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyMaterializationMs =
+					prepared.materialization.totalMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyAuthorityMs =
+					prepared.materialization.authorityValidationMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyReconstructionMs =
+					prepared.materialization.mutationReconstructionMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyPlanValidationMs =
+					prepared.materialization.planValidationMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyProspectiveStateMs =
+					prepared.materialization.prospectiveStateMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyLayoutMs =
+					prepared.materialization.layoutValidationMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyChecksumMs =
+					prepared.materialization.checksumValidationMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyIssuanceMs =
+					prepared.materialization.applyIssuanceMilliseconds.toFixed(3);
+				canvasRef.current.dataset.stationReviewApplyCommitMs = commitMilliseconds.toFixed(3);
+				if (commitResult.timings) {
+					canvasRef.current.dataset.stationReviewCommitAuthorityMs =
+						commitResult.timings.authorityConsumptionMilliseconds.toFixed(3);
+					canvasRef.current.dataset.stationReviewCommitValidationMs =
+						commitResult.timings.commandValidationMilliseconds.toFixed(3);
+					canvasRef.current.dataset.stationReviewCommitHistoryMs =
+						commitResult.timings.historyCreationMilliseconds.toFixed(3);
+					canvasRef.current.dataset.stationReviewCommitStateMs =
+						commitResult.timings.stateApplicationMilliseconds.toFixed(3);
+					canvasRef.current.dataset.stationReviewCommitPatchPreparationMs =
+						commitResult.timings.patchPreparationMilliseconds.toFixed(3);
+					canvasRef.current.dataset.stationReviewCommitUndoMs =
+						commitResult.timings.historyPublicationMilliseconds?.toFixed(3) ?? "";
+					canvasRef.current.dataset.stationReviewCommitPatchMs =
+						commitResult.timings.patchPublicationMilliseconds.toFixed(3);
+				}
+				canvasRef.current.dataset.stationReviewApplyTotalMs = (
+					performanceNow() - applyStartedAt
+				).toFixed(3);
 			}
-		}
-	};
+		},
+		syncModelUi,
+	});
+	cancelStationProposalReviewRef.current = cancelStationProposalReview;
 
-	const requestStationProposalAttachment = (
-		request: OpenFabStationProposalReviewAttachmentRequest,
-	): void => {
-		const current = stationProposalReviewUiRef.current;
-		if (!current || current.phase !== "reviewing") return;
-		if (!stationProposalReviewBindingIsCurrent(current)) {
-			cancelStationProposalReview("프로젝트가 변경되어 Station review를 다시 열어야 합니다");
-			return;
-		}
-		const next = updateStationProposalReview(current, {
-			attachmentRequest: Object.freeze({ ...request }),
-			attachmentSelection: null,
-			error: null,
-		});
-		if (next) activateStationProposalReviewPortTool(request);
-	};
-	const clearStationProposalAttachment = (): void => {
-		const current = stationProposalReviewUiRef.current;
-		if (!current || (!current.attachmentRequest && !current.attachmentSelection)) return;
-		updateStationProposalReview(current, {
-			attachmentRequest: null,
-			attachmentSelection: null,
-			error: null,
-		});
-	};
 	const selectStationProposalAttachmentFromCanvas = (slotRow: number | null): void => {
 		const current = stationProposalReviewUiRef.current;
 		const request = current?.attachmentRequest ?? null;
@@ -8003,242 +7897,6 @@ export default function TileFabApp(): React.ReactElement {
 			updateStationProposalReview(current, { error: message });
 			setStatus(message);
 		}
-	};
-
-	const evaluateStationProposalReview = (): void => {
-		const current = stationProposalReviewUiRef.current;
-		if (!current || current.phase !== "reviewing") return;
-		if (!current.session.getSummary().captureReady) {
-			setStatus("모든 행, 그룹, 정책을 완료한 뒤 Worker 평가를 시작하세요");
-			return;
-		}
-		if (!stationProposalReviewBindingIsCurrent(current)) {
-			cancelStationProposalReview("프로젝트가 변경되어 Station review를 다시 열어야 합니다");
-			return;
-		}
-		const mirrorBridge = workerBridgeRef.current;
-		if (
-			!mirrorBridge ||
-			workerBridgeDocumentRef.current !== current.document ||
-			mirrorBridge.getState().status !== "ready"
-		) {
-			setStatus("현재 문서의 Rail mirror가 준비된 뒤 Station review를 평가하세요");
-			return;
-		}
-		stationProposalReviewReadControllerRef.current?.abort();
-		const controller = new AbortController();
-		stationProposalReviewReadControllerRef.current = controller;
-		stationProposalReviewBridgeRef.current?.dispose();
-		const bridge = new OpenFabStationProposalReviewBridge();
-		stationProposalReviewBridgeRef.current = bridge;
-		updateStationProposalReview(current, {
-			phase: "evaluating",
-			evaluation: null,
-			attachmentRequest: null,
-			attachmentSelection: null,
-			error: null,
-		});
-		setStatus("현재 Rail mirror snapshot을 Station review Worker로 넘기고 있습니다");
-		void mirrorBridge
-			.captureCurrentSnapshot(controller.signal)
-			.then((snapshot) =>
-				bridge.evaluate(
-					{
-						document: current.document,
-						proposal: current.proposal,
-						snapshot,
-						generation: current.generation,
-						getGeneration: () =>
-							stationProposalReviewBindingIsCurrent(current) ? current.generation : 0,
-						draftSession: current.session,
-					},
-					controller.signal,
-				),
-			)
-			.then((evaluation) => {
-				if (!stationProposalReviewBindingIsCurrent(current)) return;
-				updateStationProposalReview(current, {
-					phase: evaluation.canApply ? "ready" : "reviewing",
-					evaluation,
-					error: evaluation.canApply
-						? null
-						: "Worker evaluation found blocking review or prospective-layout issues.",
-				});
-				setStatus(
-					evaluation.canApply
-						? `Station review READY · ${evaluation.preview.includedPortCount.toLocaleString()} ports · 명시적 APPLY가 필요합니다`
-						: "Station review가 차단되었습니다 · FINAL 탭의 Worker issue를 수정하세요",
-				);
-			})
-			.catch((evaluationError: unknown) => {
-				if (
-					controller.signal.aborted ||
-					evaluationError instanceof OpenFabStationProposalReviewCancelledError ||
-					(evaluationError instanceof DOMException && evaluationError.name === "AbortError")
-				) {
-					return;
-				}
-				if (!stationProposalReviewBindingIsCurrent(current)) return;
-				const message =
-					evaluationError instanceof Error
-						? evaluationError.message
-						: "Station review Worker evaluation failed.";
-				updateStationProposalReview(current, {
-					phase: "reviewing",
-					evaluation: null,
-					error: message,
-				});
-				setStatus(message);
-			})
-			.finally(() => {
-				if (stationProposalReviewReadControllerRef.current === controller) {
-					stationProposalReviewReadControllerRef.current = null;
-				}
-			});
-	};
-
-	const applyStationProposalReview = (): void => {
-		const current = stationProposalReviewUiRef.current;
-		const bridge = stationProposalReviewBridgeRef.current;
-		if (!current || current.phase !== "ready" || !current.evaluation?.canApply || !bridge) {
-			setStatus("Worker가 READY로 인증한 Station review만 한 번 적용할 수 있습니다");
-			return;
-		}
-		if (!stationProposalReviewBindingIsCurrent(current)) {
-			cancelStationProposalReview("프로젝트가 변경되어 Station Apply 권한을 폐기했습니다");
-			return;
-		}
-		const controller = new AbortController();
-		stationProposalReviewReadControllerRef.current = controller;
-		const railWorkerBridge =
-			workerBridgeDocumentRef.current === current.document ? workerBridgeRef.current : null;
-		const prepareRailWorkerPatch =
-			railWorkerBridge?.prepareReviewedPortEquipmentPatchCooperatively?.bind(railWorkerBridge) ??
-			null;
-		const applyStartedAt = performanceNow();
-		updateStationProposalReview(current, { phase: "applying", error: null });
-		setStatus("Station review plan을 materialize하고 exact prospective layout을 검증합니다");
-		void bridge
-			.apply(current.evaluation, controller.signal)
-			.then(async (prepared) => {
-				if (!stationProposalReviewBindingIsCurrent(current)) {
-					throw new OpenFabStationProposalReviewCancelledError();
-				}
-				const commitStartedAt = performanceNow();
-				const commitResult = await current.document.commitReviewedPortEquipmentCooperatively(
-					prepared.apply,
-					{
-						checkpoint: () =>
-							new Promise<void>((resolve) => {
-								window.setTimeout(resolve, 0);
-							}),
-						now: performanceNow,
-						sliceMilliseconds: 4,
-						checkCancelled: () => {
-							if (
-								controller.signal.aborted ||
-								!stationProposalReviewBindingIsCurrent(current) ||
-								(railWorkerBridge !== null && workerBridgeRef.current !== railWorkerBridge)
-							) {
-								throw new OpenFabStationProposalReviewCancelledError();
-							}
-						},
-						...(prepareRailWorkerPatch
-							? {
-									preparePatch: (event: RailPatchEvent, checkpoint: () => Promise<void>) =>
-										prepareRailWorkerPatch(event, checkpoint),
-								}
-							: {}),
-					},
-				);
-				const commitMilliseconds =
-					commitResult.timings?.totalMilliseconds ?? performanceNow() - commitStartedAt;
-				if (!commitResult.committed) {
-					throw new Error("Station review Apply authority was rejected at commit.");
-				}
-				if (canvasRef.current) {
-					canvasRef.current.dataset.stationReviewApplyWorkerMs =
-						prepared.workerRoundTripMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyAdoptionMs =
-						prepared.adoptionMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyMaterializationMs =
-						prepared.materialization.totalMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyAuthorityMs =
-						prepared.materialization.authorityValidationMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyReconstructionMs =
-						prepared.materialization.mutationReconstructionMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyPlanValidationMs =
-						prepared.materialization.planValidationMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyProspectiveStateMs =
-						prepared.materialization.prospectiveStateMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyLayoutMs =
-						prepared.materialization.layoutValidationMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyChecksumMs =
-						prepared.materialization.checksumValidationMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyIssuanceMs =
-						prepared.materialization.applyIssuanceMilliseconds.toFixed(3);
-					canvasRef.current.dataset.stationReviewApplyCommitMs = commitMilliseconds.toFixed(3);
-					if (commitResult.timings) {
-						canvasRef.current.dataset.stationReviewCommitAuthorityMs =
-							commitResult.timings.authorityConsumptionMilliseconds.toFixed(3);
-						canvasRef.current.dataset.stationReviewCommitValidationMs =
-							commitResult.timings.commandValidationMilliseconds.toFixed(3);
-						canvasRef.current.dataset.stationReviewCommitHistoryMs =
-							commitResult.timings.historyCreationMilliseconds.toFixed(3);
-						canvasRef.current.dataset.stationReviewCommitStateMs =
-							commitResult.timings.stateApplicationMilliseconds.toFixed(3);
-						canvasRef.current.dataset.stationReviewCommitPatchPreparationMs =
-							commitResult.timings.patchPreparationMilliseconds.toFixed(3);
-						canvasRef.current.dataset.stationReviewCommitUndoMs =
-							commitResult.timings.historyPublicationMilliseconds?.toFixed(3) ?? "";
-						canvasRef.current.dataset.stationReviewCommitPatchMs =
-							commitResult.timings.patchPublicationMilliseconds.toFixed(3);
-					}
-					canvasRef.current.dataset.stationReviewApplyTotalMs = (
-						performanceNow() - applyStartedAt
-					).toFixed(3);
-				}
-				const portCount = prepared.apply.portCount;
-				const groupCount = prepared.apply.equipmentGroupCount;
-				cancelStationProposalReview();
-				syncModelUi(
-					`Station proposal 적용 완료 · ${portCount.toLocaleString()} ports · ${groupCount.toLocaleString()} equipment groups · 한 번의 실행 취소 가능한 명령`,
-				);
-			})
-			.catch((applyError: unknown) => {
-				if (
-					controller.signal.aborted ||
-					applyError instanceof OpenFabStationProposalReviewCancelledError ||
-					(applyError instanceof DOMException && applyError.name === "AbortError")
-				) {
-					return;
-				}
-				const message =
-					applyError instanceof Error ? applyError.message : "Station review Apply failed.";
-				const activeReview = stationProposalReviewUiRef.current;
-				if (
-					activeReview?.generation !== current.generation ||
-					activeReview.session !== current.session
-				) {
-					return;
-				}
-				if (!stationProposalReviewBindingIsCurrent(current)) {
-					cancelStationProposalReview(`Station Apply 원본이 변경되어 검토를 닫았습니다 · ${message}`);
-					syncModelUi("Station Apply 중 변경된 프로젝트를 다시 동기화했습니다");
-					return;
-				}
-				updateStationProposalReview(current, {
-					phase: "reviewing",
-					evaluation: null,
-					error: message,
-				});
-				setStatus(message);
-			})
-			.finally(() => {
-				if (stationProposalReviewReadControllerRef.current === controller) {
-					stationProposalReviewReadControllerRef.current = null;
-				}
-			});
 	};
 
 	const cancelBlueprintPlacement = (): void => {
@@ -9697,8 +9355,8 @@ export default function TileFabApp(): React.ReactElement {
 							: "EQ 포트 행을 배치할 연속 직선 레일을 먼저 건설하세요"
 						: next === "stk"
 							? portSlotsRef.current?.legalCount
-								? `STK CENTER 후보 슬롯 ${portSlotsRef.current.legalCount.toLocaleString()}개`
-								: "STK 포트를 배치할 직선 레일을 먼저 건설하세요"
+								? `Stocker CENTER 후보 슬롯 ${portSlotsRef.current.legalCount.toLocaleString()}개`
+								: "Stocker 포트를 배치할 직선 레일을 먼저 건설하세요"
 							: next === "erase"
 								? "철거할 모듈 구간을 드래그하세요"
 								: "탭/클릭은 한 항목 · 드래그는 닿은 일부 레일 선택",
@@ -9759,7 +9417,7 @@ export default function TileFabApp(): React.ReactElement {
 		stkTemplateRef.current = next;
 		setStkTemplateState(next);
 		const presentation = stkTemplatePresentation(next);
-		setStatus(`${presentation.label} STK · ${presentation.requirement} · 첫 Port부터 다시 선택`);
+		setStatus(`${presentation.label} Stocker · ${presentation.requirement} · 첫 Port부터 다시 선택`);
 		if (keyboardSession?.portType === "STK") {
 			presentGuidedPortKeyboardSession(keyboardSession);
 		}
@@ -11829,7 +11487,7 @@ export default function TileFabApp(): React.ReactElement {
 			} else {
 				presentGuidedPortKeyboardSession(session, {
 					legal: draft?.selection.valid === true && draft.selection.rejectedRow === null,
-					reason: draft ? stkDraftReasonLabel(draft.selection.reason) : "STK 선택을 준비 중입니다",
+					reason: draft ? stkDraftReasonLabel(draft.selection.reason) : "Stocker 선택을 준비 중입니다",
 				});
 				const selectedCount = draft?.selection.rows.length ?? 0;
 				if (session.scope === "ordinary") {
@@ -13041,7 +12699,7 @@ export default function TileFabApp(): React.ReactElement {
 											: stampSessionRef.current
 												? moduleStampExitStatus(stampSessionRef.current)
 								: stkDraftSessionRef.current
-									? "STK 포트 선택을 취소했습니다"
+									? "Stocker 포트 선택을 취소했습니다"
 								: portRowDragRef.current
 									? `${portRowDragRef.current.portType} 행 배치를 취소했습니다`
 									: "건설을 취소했습니다",
@@ -21603,7 +21261,10 @@ export default function TileFabApp(): React.ReactElement {
 	function discardPendingStaticFabCheckRepairReturn(): void {
 		// Every external tool/tab intent supersedes an already queued focus return,
 		// even after its pending source receipt has been consumed.
-		if (!staticFabCheckRepairAdmissionRef.current) staticFabCheckRepairFocusGenerationRef.current++;
+		if (!staticFabCheckRepairAdmissionRef.current) {
+			staticFabCheckRepairFocusGenerationRef.current++;
+			setStaticFabCheckRepairPanelFocus(null);
+		}
 		if (!pendingStaticFabCheckRepairReturnRef.current) return;
 		pendingStaticFabCheckRepairReturnRef.current = null;
 		setStaticFabCheckRepairReturnPending(false);
@@ -21611,6 +21272,7 @@ export default function TileFabApp(): React.ReactElement {
 
 	function invalidateStaticFabCheckRepairNavigation(): void {
 		staticFabCheckRepairFocusGenerationRef.current++;
+		setStaticFabCheckRepairPanelFocus(null);
 		staticFabCheckRepairReturnRef.current = null;
 		pendingStaticFabCheckRepairReturnRef.current = null;
 		setStaticFabCheckRepairReturnPending(false);
@@ -21658,11 +21320,27 @@ export default function TileFabApp(): React.ReactElement {
 		chooseStaticFabNavigatorTab("checks", canvasRef.current);
 		const focusGeneration = ++staticFabCheckRepairFocusGenerationRef.current;
 		setStatus("편집을 마쳤습니다 · 현재 FAB을 새로 검사합니다 · 레일·장비·구조 결과를 확인하세요");
-		requestAnimationFrame(() => { if (staticFabCheckRepairFocusGenerationRef.current === focusGeneration && staticFabCheckRepairChecksOpenRef.current &&
-			editorModelRef.current.document === origin.document && projectGenerationRef.current === origin.projectGeneration)
-			staticFabChecksPanelRef.current?.focus({ preventScroll: true }); });
+		setStaticFabCheckRepairPanelFocus(Object.freeze({ origin, generation: focusGeneration }));
 		return true;
 	}
+
+	// Focus belongs to the committed owning panel, rather than a frame that may run
+	// before the panel mounts. Later user navigation invalidates this exact receipt.
+	useLayoutEffect(() => {
+		const receipt = staticFabCheckRepairPanelFocus;
+		if (!receipt) return;
+		const clearOwnReceipt = (): void => setStaticFabCheckRepairPanelFocus((current) => current === receipt ? null : current);
+		if (staticFabCheckRepairFocusGenerationRef.current !== receipt.generation ||
+			!staticFabCheckRepairReturnMatchesProject(receipt.origin, { document: editorModelRef.current.document,
+				projectId: projectSessionRef.current.manifest.id, projectGeneration: projectGenerationRef.current })) {
+			clearOwnReceipt();
+			return;
+		}
+		const panel = staticFabChecksPanelRef.current;
+		if (startupState.status !== "ready" || !readinessOpen || !staticFabCheckRepairChecksOpenRef.current || !panel?.isConnected) return;
+		panel.focus({ preventScroll: true });
+		if (panel.ownerDocument.activeElement === panel) clearOwnReceipt();
+	}, [staticFabCheckRepairPanelFocus, startupState.status, readinessOpen]);
 
 	function requestStaticFabCheckRepairReturn(kind: "loop" | "connector", backend: object | null): boolean {
 		const receipt = staticFabCheckRepairReturnRef.current;
@@ -22313,7 +21991,7 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus(
 				selectedPort
 					? "무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요"
-					: "EQ 또는 STK 그룹의 포트를 먼저 선택하세요",
+					: "EQ 또는 Stocker 그룹의 포트를 먼저 선택하세요",
 			);
 			return;
 		}
@@ -22382,13 +22060,13 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus(
 				selectedPort
 					? "무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요"
-					: "EQ 또는 STK 그룹의 포트를 먼저 선택하세요",
+					: "EQ 또는 Stocker 그룹의 포트를 먼저 선택하세요",
 			);
 			return;
 		}
 		if (blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
 		if (resolved.equipmentGroup.kind === "STK" && resolved.equipmentGroup.template === "CUSTOM") {
-			setStatus("기존 CUSTOM STK는 읽기 전용입니다 · FLEX STK로 다시 배치하세요");
+			setStatus("기존 CUSTOM Stocker는 읽기 전용입니다 · FLEX Stocker로 다시 배치하세요");
 			return;
 		}
 		const portType = resolved.equipmentGroup.kind;
@@ -25532,6 +25210,13 @@ export default function TileFabApp(): React.ReactElement {
 	const resolveStaticFabSemanticBayMutationAvailability = (
 		action: StaticFabSemanticBayMutationAction,
 	): Readonly<{ state: "ready" | "blocked"; reason: string }> => {
+		const pendingReason =
+			processLoopOperationRef.current || staticFabMutationHistoryRef.current
+				? editorMutationWaitBlockedReason()
+				: null;
+		if (pendingReason) {
+			return Object.freeze({ state: "blocked" as const, reason: pendingReason });
+		}
 		const bay = selectedSemanticBayOrganization;
 		if (!bay) {
 			return Object.freeze({
@@ -25640,6 +25325,13 @@ export default function TileFabApp(): React.ReactElement {
 		state: "ready" | "blocked";
 		reason: string;
 	}> => {
+		const pendingReason =
+			processLoopOperationRef.current || staticFabMutationHistoryRef.current
+				? editorMutationWaitBlockedReason()
+				: null;
+		if (pendingReason) {
+			return Object.freeze({ state: "blocked" as const, reason: pendingReason });
+		}
 		const bay = selectedSemanticBayOrganization;
 		if (!bay) {
 			return Object.freeze({
@@ -25998,6 +25690,7 @@ export default function TileFabApp(): React.ReactElement {
 		action: StaticFabSemanticBayMutationAction,
 		launcher?: HTMLElement,
 	): void => {
+		if (blockPendingLoopOrHistoryCommand()) return;
 		const availability = resolveStaticFabSemanticBayMutationAvailability(action);
 		if (availability.state !== "ready" || !selectedSemanticBayOrganization) {
 			setStatus(availability.reason);
@@ -26343,6 +26036,7 @@ export default function TileFabApp(): React.ReactElement {
 		targetInternalFlowPattern: ProductionBayInternalFlowPattern,
 		launcher?: HTMLElement,
 	): void => {
+		if (blockPendingLoopOrHistoryCommand()) return;
 		const availability = resolveStaticFabBayFlowEditAvailability();
 		if (availability.state !== "ready" || !selectedSemanticBayOrganization) {
 			setStatus(availability.reason);
@@ -30833,51 +30527,62 @@ export default function TileFabApp(): React.ReactElement {
 		});
 		staticFabInspectionSourceKeyRef.current = staticFabCurrentSourceKey;
 		const sourceGeneration = editorModel.generation;
-		let snapshot: ReturnType<typeof captureRailMirrorSnapshot>["snapshot"];
-		try {
-			snapshot = captureRailMirrorSnapshot(
-				activeMap,
-				navigatorSourceSequence,
-				activePortEquipment,
-				activeOrganizations,
-				editorModel.relationships,
-			).snapshot;
-		} catch (error) {
-			setStaticFabOrganizationOverview(null);
-			staticFabProjectChecksRef.current = null;
-			setStaticFabProjectChecks(null);
-			setStaticFabInspectionError(
-				error instanceof Error ? error.message : "정적 FAB 검사 원본을 캡처하지 못했습니다",
-			);
-			setStaticFabOrganizationOverviewPending(false);
-			return;
-		}
-		if (snapshot.checksum !== source.checksum) {
-			setStaticFabOrganizationOverview(null);
-			staticFabProjectChecksRef.current = null;
-			setStaticFabProjectChecks(null);
-			setStaticFabInspectionError("정적 FAB 검사 원본 체크섬이 현재 프로젝트와 다릅니다");
-			setStaticFabOrganizationOverviewPending(false);
-			return;
-		}
+		const sourceEpoch = workerState.epoch;
+		const mirror =
+			workerBridgeDocumentRef.current === railDocument ? workerBridgeRef.current : null;
 
 		const controller = new AbortController();
 		let current = true;
+		const sourceIsCurrent = (): boolean => {
+			const latestModel = editorModelRef.current;
+			return (
+				current &&
+				!controller.signal.aborted &&
+				!modelSyncPendingRef.current &&
+				latestModel.generation === sourceGeneration &&
+				latestModel.document === railDocument &&
+				latestModel.map === activeMap &&
+				railDocument.map === activeMap &&
+				activeMap.getRevision() === source.revision &&
+				railDocument.getPatchSequence() === source.sequence &&
+				latestModel.authoredChecksum === source.checksum
+			);
+		};
+		const isCurrent = (): boolean =>
+			sourceIsCurrent() &&
+			workerBridgeDocumentRef.current === railDocument &&
+			workerBridgeRef.current === mirror &&
+			mirror?.getState().epoch === sourceEpoch;
 		setStaticFabOrganizationOverview(null);
 		staticFabProjectChecksRef.current = null;
 		setStaticFabProjectChecks(null);
 		setStaticFabInspectionError(null);
 		setStaticFabOverviewError(null);
 		setStaticFabOrganizationOverviewPending(true);
-		void staticFabOrganizationOverviewBridge
-			.prepareInspection({
-				snapshot,
+		void (async () => {
+			if (!mirror)
+				throw new Error("레일 동기화를 준비하지 못했습니다 · 검사를 다시 시도하세요");
+			const capture = await captureOpenFabProjectSnapshot(
+				railDocument,
+				mirror,
+				controller.signal,
+				isCurrent,
+			);
+			capture.assertCurrent();
+			if (capture.snapshot.checksum !== source.checksum) {
+				throw new Error("정적 FAB 검사 원본 체크섬이 현재 프로젝트와 다릅니다");
+			}
+			const inspection = await staticFabOrganizationOverviewBridge.prepareInspection({
+				snapshot: capture.snapshot,
 				source,
 				expectedRailReadinessFingerprint: readiness.fingerprint,
 				signal: controller.signal,
-			})
-			.then((inspection) => {
-				if (!current) return;
+			});
+			capture.assertCurrent();
+			return { inspection, assertCurrent: capture.assertCurrent };
+		})()
+			.then(({ inspection, assertCurrent }) => {
+				assertCurrent();
 				const latestModel = editorModelRef.current;
 				const latestDocument = latestModel.document;
 				if (
@@ -30911,7 +30616,8 @@ export default function TileFabApp(): React.ReactElement {
 				}
 			})
 			.catch((error: unknown) => {
-				if (!current || (error instanceof DOMException && error.name === "AbortError")) return;
+				if (!sourceIsCurrent() || (error instanceof DOMException && error.name === "AbortError"))
+					return;
 				if (pendingOrdinaryStaticFabIssueRecheckRef.current) {
 					pendingOrdinaryStaticFabIssueRecheckRef.current = null;
 					setOrdinaryStaticFabIssueRecheckPending(false);
@@ -30920,7 +30626,11 @@ export default function TileFabApp(): React.ReactElement {
 				setStaticFabProjectChecks(null);
 				setStaticFabOrganizationOverview(null);
 				setStaticFabInspectionError(
-					error instanceof Error ? error.message : "정적 FAB 검사를 완료하지 못했습니다",
+					error instanceof RailStartupCancelledError
+						? "레일 동기화 세대가 변경되었습니다 · 검사를 다시 시도하세요"
+						: error instanceof Error
+							? error.message
+							: "정적 FAB 검사를 완료하지 못했습니다",
 				);
 			})
 			.finally(() => {
@@ -30932,12 +30642,9 @@ export default function TileFabApp(): React.ReactElement {
 		};
 	}, [
 		activeMap,
-		activeOrganizations,
-		activePortEquipment,
 		currentStaticFabProjectChecks,
 		editorModel.authoredChecksum,
 		editorModel.generation,
-		editorModel.relationships,
 		modelSyncPending,
 		navigatorSourceSequence,
 		railDocument,
@@ -30946,6 +30653,7 @@ export default function TileFabApp(): React.ReactElement {
 		staticFabOrganizationOverviewBridge,
 		staticFabCurrentSourceKey,
 		staticFabInspectionMatchesCurrentSource,
+		workerState.epoch,
 	]);
 	useEffect(() => {
 		if (!readinessOpen) return;
@@ -32268,7 +31976,7 @@ export default function TileFabApp(): React.ReactElement {
 			setCompactPortToolDescriptionsExpanded((current) => !current);
 			setStatus(
 				compactPortToolDescriptionsExpanded
-					? "현재 Port 도구 설명을 접었습니다 · OHB/EQ/STK/IMPORT 표시는 유지됩니다"
+					? "현재 Port 도구 설명을 접었습니다 · OHB/EQ/Stocker/IMPORT 표시는 유지됩니다"
 					: "현재 Port 도구 설명을 펼쳤습니다 · Port 작업을 끝내면 이전 메뉴 설정으로 돌아갑니다",
 			);
 			return;
@@ -32292,6 +32000,13 @@ export default function TileFabApp(): React.ReactElement {
 		organizationSelectionCount: organizationMultiSelection.selectedOrganizationIds.length,
 		ordinaryRailKeyboardPhase:
 			guidedRailKeyboard?.scope === "ordinary" ? guidedRailKeyboard.phase : null,
+		equipmentEdit: portEquipmentMembershipEditSession
+			? { equipmentType: portEquipmentMembershipEditSession.portType, mode: "ports" }
+			: portEquipmentGroupEditSession
+				? { equipmentType: portEquipmentGroupEditSession.portType, mode: portEquipmentGroupEditSession.mode }
+				: ohbPlacementIntent
+					? { equipmentType: "OHB", mode: ohbPlacementIntent.kind }
+					: null,
 	});
 	const returnToEditorHelpContext = (): void => {
 		setCommandHelpOpen(false);
@@ -33801,7 +33516,7 @@ export default function TileFabApp(): React.ReactElement {
 									? `${stampSession.origin === "recent" ? "최근 청사진 " : ""}${stampSession.template.grammar} 모듈 복제 배치입니다. `
 									: `${areaStampSession ? areaStampAccessibleIdentity(areaStampSession) : "청사진"} 배치입니다. `}
 							{areaStampSession?.origin === "selection-copy"
-								? "방향키 또는 WASD로 고스트를 1미터씩 옮기고 Enter 또는 Space로 배치합니다. 연결된 OHB, EQ, STK 복제를 완료하면 Tab으로 별도의 새 Twin Bay 배치 버튼에 이동할 수 있습니다. 이미 복제한 구조는 Bay로 자동 승격되지 않습니다. Escape로 반복 배치를 종료하세요."
+								? "방향키 또는 WASD로 고스트를 1미터씩 옮기고 Enter 또는 Space로 배치합니다. 연결된 OHB, EQ, Stocker 복제를 완료하면 Tab으로 별도의 새 Twin Bay 배치 버튼에 이동할 수 있습니다. 이미 복제한 구조는 Bay로 자동 승격되지 않습니다. Escape로 반복 배치를 종료하세요."
 								: organizationBundlePlacementSession
 									? duplicatedBayBankConnectorHandoff
 										? "Bay Bank 전체 계층 복제를 완료했습니다. Tab으로 원본과 복제본 사이 Interbay 연결 검토를 여는 버튼으로 이동할 수 있습니다. Apply 전에는 프로젝트가 변경되지 않습니다. Escape로 반복 배치를 종료할 수도 있습니다."
@@ -35013,6 +34728,7 @@ export default function TileFabApp(): React.ReactElement {
 						className="tilefab-readiness"
 						data-testid="rail-readiness-panel"
 						data-check-repair-chooser={staticFabCheckRepairChooser !== null}
+						data-check-repair-return-focus-pending={staticFabCheckRepairPanelFocus !== null}
 						data-status={staticFabCheckStatus}
 						data-focused={
 							activeReadinessIssue !== null ||
@@ -35158,140 +34874,32 @@ export default function TileFabApp(): React.ReactElement {
 									</span>
 								</div>
 							) : null}
-						<dl className="tilefab-readiness-checks">
-							<ReadinessCheck
-								label="레일 흐름"
-								passed={readiness.ready}
-								value={
-									readiness.ready
-										? "통과"
-										: readiness.status === "empty"
-											? "레일 없음"
-											: readinessActionCount > 0
-												? `수정 ${readinessActionCount}건`
-												: `문제 ${readiness.issues.length}건`
-								}
-							/>
-							<ReadinessCheck
-								label="레일 간격"
-								passed={readiness.summary.clearanceIssues === 0}
-								value={
-									readiness.summary.clearanceIssues === 0
-										? "통과"
-										: `${readiness.summary.clearanceIssues}건 확인`
-								}
-							/>
-							<ReadinessCheck
-								label="분기·합류"
-								state={
-									!currentStaticFabProjectChecks
-										? "pending"
-										: currentStaticFabProjectChecks.summary.switchIssueCount === 0
-											? "pass"
-											: "fail"
-								}
-								value={
-									!currentStaticFabProjectChecks
-										? staticFabPendingCheckLabel
-										: currentStaticFabProjectChecks.summary.switchIssueCount === 0
-											? `${currentStaticFabProjectChecks.summary.advancedSwitchCount}개 통과`
-											: `${currentStaticFabProjectChecks.summary.switchIssueCount}건 확인`
-								}
-							/>
-							<ReadinessCheck
-								label="포트 연결"
-								state={
-									!currentStaticFabProjectChecks?.summary.portChecksComplete
-										? "pending"
-										: currentStaticFabProjectChecks.summary.portIssueCount === 0
-											? "pass"
-											: "fail"
-								}
-								value={
-									!currentStaticFabProjectChecks
-										? staticFabPendingCheckLabel
-										: !currentStaticFabProjectChecks.summary.portChecksComplete
-											? "데이터 오류 먼저 수정"
-											: currentStaticFabProjectChecks.summary.portIssueCount === 0
-												? `${currentStaticFabProjectChecks.summary.portCount}개 통과`
-												: `${currentStaticFabProjectChecks.summary.portIssueCount}건 확인`
-								}
-							/>
-							<ReadinessCheck
-								label="장비"
-								state={
-									!currentStaticFabProjectChecks?.summary.equipmentChecksComplete
-										? "pending"
-										: currentStaticFabProjectChecks.summary.equipmentIssueCount === 0
-											? "pass"
-											: "fail"
-								}
-								value={
-									!currentStaticFabProjectChecks
-										? staticFabPendingCheckLabel
-										: !currentStaticFabProjectChecks.summary.equipmentChecksComplete
-											? "데이터 오류 먼저 수정"
-											: currentStaticFabProjectChecks.summary.equipmentIssueCount === 0
-												? `${currentStaticFabProjectChecks.summary.equipmentGroupCount}개 통과`
-												: `${currentStaticFabProjectChecks.summary.equipmentIssueCount}건 확인`
-								}
-							/>
-							<ReadinessCheck
-								label="구조 소속"
-								state={
-									!currentStaticFabProjectChecks?.summary.organizationChecksComplete
-										? "pending"
-										: currentStaticFabProjectChecks.summary.organizationIssueCount === 0
-											? "pass"
-											: "fail"
-								}
-								value={
-									!currentStaticFabProjectChecks
-										? staticFabPendingCheckLabel
-										: !currentStaticFabProjectChecks.summary.organizationChecksComplete
-											? "장비 오류 먼저 수정"
-											: currentStaticFabProjectChecks.summary.organizationIssueCount === 0
-												? `${currentStaticFabProjectChecks.summary.organizationCount}개 통과`
-												: `${currentStaticFabProjectChecks.summary.organizationIssueCount}건 확인`
-								}
-							/>
-							<ReadinessCheck
-								label="계층"
-								state={
-									!currentStaticFabProjectChecks
-										? "pending"
-										: currentStaticFabProjectChecks.summary.hierarchyIssueCount === 0
-											? "pass"
-											: "fail"
-								}
-								value={
-									!currentStaticFabProjectChecks
-										? staticFabPendingCheckLabel
-										: currentStaticFabProjectChecks.summary.hierarchyIssueCount === 0
-											? "확인 완료"
-											: `${currentStaticFabProjectChecks.summary.hierarchyIssueCount}건 확인`
-								}
-							/>
-							<ReadinessCheck
-								label="검사 기준"
-								state={
-									currentStaticFabInspectionError
-										? "fail"
-										: currentStaticFabProjectChecks
-											? "pass"
-											: "pending"
-								}
-								value={
-									currentStaticFabInspectionError
-										? "검사 실패"
-										: currentStaticFabProjectChecks
-											? "현재 프로젝트"
-											: staticFabCheckStatus === "unchecked"
-												? "검사 필요"
-												: "검사 중"
-								}
-							/>
-						</dl>
+						{staticFabCheckIssueCount === 0 && currentStaticFabProjectChecks ? (
+							<div className="tilefab-readiness-clear tilefab-readiness-clear--save">
+								<button
+									type="button"
+									className="tilefab-readiness-save"
+									data-testid="static-fab-checks-save-project"
+									disabled={!startupReady || projectBusy || modelSyncPending || projectSourceOperationPending}
+									onClick={() => void handleSaveProject(false, "checks")}
+								>
+									<Check size={16} aria-hidden="true" />
+									<span className="tilefab-readiness-save-copy">
+										<strong>프로젝트 저장 (.openfab)</strong>
+										<small>모든 정적 FAB 검사 통과</small>
+									</span>
+									<Save size={16} aria-hidden="true" />
+								</button>
+							</div>
+						) : null}
+						<StaticFabChecksSummary
+							readiness={readiness}
+							readinessActionCount={readinessActionCount}
+							projectSummary={currentStaticFabProjectChecks?.summary ?? null}
+							inspectionError={currentStaticFabInspectionError}
+							checkStatus={staticFabCheckStatus}
+							pendingLabel={staticFabPendingCheckLabel}
+						/>
 						{staticFabCheckStatus === "ready" && staticFabCheckIssueCount === 0 ? (
 							<p className="tilefab-readiness-checks-scroll-hint">
 								검사 목록을 스크롤해 장비·구조 결과도 확인하세요
@@ -35622,23 +35230,7 @@ export default function TileFabApp(): React.ReactElement {
 										<RefreshCcw size={16} />
 										<span>현재 프로젝트를 검사하고 있습니다</span>
 									</div>
-								) : staticFabCheckIssueCount === 0 && currentStaticFabProjectChecks ? (
-									<div className="tilefab-readiness-clear tilefab-readiness-clear--save">
-										<button
-											type="button"
-											className="tilefab-readiness-save"
-											data-testid="static-fab-checks-save-project"
-											disabled={!startupReady || projectBusy || modelSyncPending || projectSourceOperationPending}
-											onClick={() => void handleSaveProject(false, "checks")}
-										>
-											<Check size={16} aria-hidden="true" />
-											<span className="tilefab-readiness-save-copy">
-												<strong>모든 정적 FAB 검사 통과</strong>
-												<small>프로젝트 파일 저장 (.openfab)</small>
-											</span>
-											<Save size={16} aria-hidden="true" />
-										</button>
-									</div>
+
 								) : null}
 								{currentStaticFabInspectionError ? (
 									<>
@@ -36782,6 +36374,7 @@ export default function TileFabApp(): React.ReactElement {
 													recordName={record.name}
 													favorite={record.favorite}
 													quickSlot={null}
+													quickSlots={USER_BLUEPRINT_QUICK_SLOTS}
 													quickSlotOwners={userBlueprintQuickSlotOwners}
 													busy={projectBusy || userBlueprintLibraryBusy !== null}
 													deleteConfirmation={false}
@@ -37500,6 +37093,7 @@ export default function TileFabApp(): React.ReactElement {
 																	recordName={record.name}
 																	favorite={record.favorite}
 																	quickSlot={entry.quickSlot}
+																	quickSlots={USER_BLUEPRINT_QUICK_SLOTS}
 																	quickSlotOwners={userBlueprintQuickSlotOwners}
 																	busy={projectBusy || userBlueprintLibraryBusy !== null}
 																	deleteConfirmation={pendingUserBlueprintDeleteId === entry.id}
@@ -39797,7 +39391,7 @@ export default function TileFabApp(): React.ReactElement {
 						}
 						actions={
 							tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
-								<fieldset className="tilefab-segmented tilefab-stk-actions" aria-label="STK 드래프트 작업">
+								<fieldset className="tilefab-segmented tilefab-stk-actions" aria-label="Stocker 포트 선택 작업">
 									<button
 										type="button"
 										data-testid="stk-remove-last"
@@ -42212,332 +41806,6 @@ export default function TileFabApp(): React.ReactElement {
 	);
 }
 
-function editorActionHint(
-	id: string,
-	commandId: EditorCommandId,
-	action: string,
-	options: Readonly<{
-		bindingIndex?: number;
-		includeAllBindings?: boolean;
-	}> = {},
-): EditorActionHint {
-	const binding = editorCommandHintBinding(commandId, options);
-	return Object.freeze({
-		id,
-		commandIds: Object.freeze([commandId]),
-		inputs: binding.inputs,
-		action,
-		pointer: binding.pointer,
-		inputJoin: binding.inputJoin,
-	});
-}
-
-function editorActionHintAlternatives(
-	id: string,
-	commandIds: readonly EditorCommandId[],
-	action: string,
-): EditorActionHint {
-	const bindings = commandIds.map((commandId) => editorCommandHintBinding(commandId));
-	return Object.freeze({
-		id,
-		commandIds: Object.freeze([...commandIds]),
-		inputs: Object.freeze(bindings.map((binding) => binding.inputs.join(" + "))),
-		action,
-		pointer: bindings.some((binding) => binding.pointer),
-		inputJoin: "or",
-	});
-}
-
-function deriveEditorActionHints(context: {
-	readonly tool: EditorTool;
-	readonly ohbPlacementIntentActive: boolean;
-	readonly equipmentGroupEditActive: boolean;
-	readonly equipmentMembershipEditType: "EQ" | "STK" | null;
-	readonly hasAreaSelection: boolean;
-	readonly hasEquipmentSelection: boolean;
-	readonly hasPortEquipmentSelection: boolean;
-	readonly hasAuthoredEquipment: boolean;
-	readonly hasAuthoredRails: boolean;
-	readonly areaSelectionCopyable: boolean;
-	readonly hasSingleSelection: boolean;
-	readonly hasCloneableSelection: boolean;
-	readonly areaStampActive: boolean;
-	readonly placementExitIsCancellation: boolean;
-	readonly placementPrimaryIsSingleCommit: boolean;
-	readonly organizationBundleActive: boolean;
-	readonly moduleStampActive: boolean;
-	readonly templateActive: boolean;
-	readonly stkDraftActive: boolean;
-	readonly stkKeyboardActive: boolean;
-	readonly eqKeyboardActive: boolean;
-	readonly eqKeyboardDraftActive: boolean;
-}): readonly EditorActionHint[] {
-	if (context.ohbPlacementIntentActive) {
-		return Object.freeze([
-			editorActionHint("navigate-ohb-transform", "equipment.navigate", "대상 슬롯 이동"),
-			editorActionHint("apply-ohb-transform", "command.apply", "이동·복제 확정"),
-			editorActionHint("click-ohb-transform", "canvas.primary-click", "가리킨 슬롯 확정"),
-			editorActionHint("cancel-ohb-transform", "command.cancel", "이동·복제 취소"),
-			editorActionHint("pan-ohb-transform", "camera.pan-pointer", "화면 이동"),
-		]);
-	}
-	if (context.equipmentGroupEditActive) {
-		return Object.freeze([
-			editorActionHint("place-equipment-group", "canvas.primary-click", "그룹 전체 배치"),
-			editorActionHint("cancel-equipment-group", "command.cancel", "그룹 편집 취소", {
-				includeAllBindings: true,
-			}),
-			editorActionHint("pan-equipment-group", "camera.pan-pointer", "화면 이동"),
-		]);
-	}
-	if (context.equipmentMembershipEditType) {
-		return Object.freeze([
-			editorActionHint(
-				"edit-equipment-membership",
-				context.equipmentMembershipEditType === "EQ"
-					? "canvas.primary-drag"
-					: "canvas.primary-click",
-				context.equipmentMembershipEditType === "EQ" ? "끝점 늘이기·줄이기" : "포트 추가·제거",
-			),
-			editorActionHint(
-				"navigate-equipment-membership",
-				"equipment.navigate",
-				context.equipmentMembershipEditType === "EQ" ? "끝점 이동" : "커서 이동",
-			),
-			...(context.equipmentMembershipEditType === "EQ"
-				? [editorActionHint("switch-equipment-endpoint", "equipment.switch-endpoint", "반대 끝점")]
-				: [
-						editorActionHint(
-							"toggle-equipment-membership",
-							"equipment.toggle-slot",
-							"포트 추가·제거",
-						),
-					]),
-			editorActionHint("complete-equipment-membership", "command.apply", "변경 완료"),
-			editorActionHint("cancel-equipment-membership", "command.cancel", "변경 취소"),
-			editorActionHint("pan-equipment-membership", "camera.pan-pointer", "화면 이동"),
-		]);
-	}
-	if (context.areaStampActive || context.organizationBundleActive || context.moduleStampActive) {
-		const repeatPlacementActive =
-			context.areaStampActive || context.organizationBundleActive || context.moduleStampActive;
-		return Object.freeze([
-			context.areaStampActive ||
-			context.organizationBundleActive ||
-			context.moduleStampActive
-				? editorActionHintAlternatives(
-						"place-blueprint",
-						["canvas.primary-click", "placement.apply"],
-						context.placementPrimaryIsSingleCommit ? "여기에 1회 배치" : "여기에 배치",
-					)
-				: editorActionHint(
-						"place-blueprint",
-						"canvas.primary-click",
-						repeatPlacementActive ? "여기에 배치" : "청사진 배치",
-					),
-			editorActionHint(
-				"cancel-blueprint",
-				"command.cancel",
-				repeatPlacementActive && !context.placementExitIsCancellation
-					? "배치 종료"
-					: "배치 취소",
-				{ includeAllBindings: true },
-			),
-			editorActionHint("rotate-blueprint", "placement.rotate-clockwise", "회전"),
-			...(context.areaStampActive
-				? [editorActionHint("reverse-blueprint", "placement.reverse-flow", "진행 방향 반전")]
-				: []),
-			...(repeatPlacementActive
-				? [editorActionHint("save-project-during-placement", "project.save-context", "프로젝트 저장")]
-				: []),
-			editorActionHint("recall-blueprint", "blueprint.paste-recent", "최근 청사진"),
-			editorActionHint("cycle-blueprint", "blueprint.cycle-recent", "최근 기록 전환"),
-		]);
-	}
-	if (context.templateActive) {
-		return Object.freeze([
-			editorActionHint("place-template", "canvas.primary-click", "패턴 배치"),
-			editorActionHint("rotate-template", "placement.rotate-clockwise", "회전"),
-			editorActionHintAlternatives(
-				"resize-template",
-				["template.resize-decrease", "template.resize-increase"],
-				"치수",
-			),
-			editorActionHint("open-blueprints", "blueprint.open-library", "청사진 라이브러리"),
-			editorActionHint("cancel-template", "command.cancel", "배치 취소"),
-		]);
-	}
-	if (context.hasAreaSelection) {
-		return Object.freeze([
-			editorActionHint("toggle-selection-item", "selection.toggle-pointer", "항목 추가·제거"),
-			editorActionHint("add-selection", "selection.add-area", "선택 추가"),
-			editorActionHint("subtract-selection", "selection.subtract-area", "선택 제외"),
-			editorActionHint("connected-selection", "selection.connected", "연결 구조 전체"),
-			context.areaSelectionCopyable
-				? editorActionHint(
-						"clone-selection",
-						"selection.copy",
-						context.hasEquipmentSelection ? "정적 FAB 복제" : "선택 레일 복제",
-					)
-				: editorActionHint("selection-actions", "selection.clone-hovered", "편집 명령"),
-			editorActionHint(
-				"cut-selection",
-				"selection.cut",
-				context.hasEquipmentSelection ? "정적 FAB 잘라내기" : "선택 레일 잘라내기",
-			),
-			editorActionHint(
-				"save-project",
-				"project.save-context",
-				"프로젝트 저장",
-			),
-			editorActionHint(
-				"delete-selection",
-				"selection.delete",
-				context.hasEquipmentSelection ? "장비 포함 철거" : "철거",
-			),
-		]);
-	}
-	if (context.hasPortEquipmentSelection) {
-		return Object.freeze([
-			editorActionHint("connected-selection", "selection.connected", "연결 구조 전체"),
-			editorActionHint("select-next-equipment", "canvas.primary-click", "다른 장비·Port로 전환"),
-			editorActionHint("clear-equipment-selection", "command.cancel", "선택 닫기"),
-			editorActionHint("pan-equipment-selection", "camera.pan-pointer", "화면 이동"),
-		]);
-	}
-	if (context.hasSingleSelection) {
-		if (!context.hasCloneableSelection) {
-			return Object.freeze([
-				editorActionHint("clear-readonly-selection", "command.cancel", "읽기 전용 선택 해제"),
-			]);
-		}
-		return Object.freeze([
-			editorActionHint("toggle-selection-item", "selection.toggle-pointer", "항목 추가·제거"),
-			editorActionHint("extend-selection", "selection.add-area", "영역 선택"),
-			editorActionHint("connected-selection", "selection.connected", "연결 구조 전체"),
-			editorActionHint("clone-module", "selection.copy", "선택 복제"),
-			editorActionHint("cut-module", "selection.cut", "잘라내기"),
-			editorActionHint("delete-module", "selection.delete", "철거"),
-			editorActionHint("clear-module", "command.cancel", "선택 해제"),
-		]);
-	}
-	if (context.tool === "stk") {
-		if (context.stkKeyboardActive) {
-			return Object.freeze([
-				editorActionHint("navigate-stk-port", "equipment.navigate", "다음 Port 슬롯 이동"),
-				editorActionHint("choose-stk-port", "command.apply", "Port 추가·제거"),
-				editorActionHint(
-					"complete-stk",
-					"equipment.complete-stk",
-					context.stkDraftActive ? "Stocker 생성" : "Port 선택 후 Stocker 생성",
-				),
-				editorActionHint(
-					"cancel-stk",
-					"command.cancel",
-					context.stkDraftActive ? "선택 취소" : "배치 종료",
-				),
-			]);
-		}
-		return Object.freeze([
-			editorActionHint("choose-stk-port", "canvas.primary-click", "포트 추가·제거"),
-			{
-				id: "complete-stk",
-				commandIds: Object.freeze([]),
-				inputs: ["Stocker 생성"],
-				action: context.stkDraftActive ? "Stocker 생성" : "Port 선택 후 Stocker 생성",
-			},
-			editorActionHint(
-				"cancel-stk",
-				"command.cancel",
-				context.stkDraftActive ? "선택 취소" : "배치 종료",
-			),
-			editorActionHint("pan-stk", "camera.pan-pointer", "화면 이동"),
-		]);
-	}
-	if (context.tool === "ohb") {
-		return Object.freeze([
-			editorActionHint("place-ohb", "canvas.primary-click", "OHB 1개"),
-			editorActionHint("place-ohb-row", "canvas.primary-drag", "OHB 행 배치"),
-			editorActionHint("cancel-port", "command.cancel", "배치 종료"),
-			editorActionHint("pan-port", "camera.pan-pointer", "화면 이동"),
-		]);
-	}
-	if (context.tool === "eq") {
-		if (context.eqKeyboardActive) {
-			return Object.freeze([
-				editorActionHint(
-					"navigate-eq-port",
-					"equipment.navigate",
-					context.eqKeyboardDraftActive ? "2번 끝점 이동" : "CENTER 이동",
-				),
-				editorActionHint(
-					"apply-eq-port",
-					"command.apply",
-					context.eqKeyboardDraftActive ? "EQ 행 확정" : "1번 시작 선택",
-				),
-				editorActionHint(
-					"cancel-port",
-					"command.cancel",
-					context.eqKeyboardDraftActive ? "행 선택 취소" : "배치 종료",
-				),
-				editorActionHint("pan-port", "camera.pan-pointer", "화면 이동"),
-			]);
-		}
-		return Object.freeze([
-			editorActionHint("place-eq-row", "canvas.primary-drag", "한 기기의 포트 행"),
-			editorActionHint("select-anywhere", "selection.add-area", "레일 선택"),
-			editorActionHint(
-				"cancel-port",
-				"command.cancel",
-				context.eqKeyboardDraftActive ? "행 선택 취소" : "배치 종료",
-			),
-			editorActionHint("pan-port", "camera.pan-pointer", "화면 이동"),
-		]);
-	}
-	if (context.tool === "erase") {
-		return Object.freeze([
-			editorActionHint("erase-route", "canvas.primary-drag", "정확한 철거"),
-			editorActionHint("select-while-erase", "selection.add-area", "영역 선택"),
-			editorActionHint("pan-erase", "camera.pan-pointer", "화면 이동"),
-			editorActionHint("cancel-erase", "command.cancel", "취소"),
-		]);
-	}
-	if (context.tool === "inspect") {
-		return Object.freeze([
-			editorActionHint(
-				"select-module",
-				"canvas.primary-click",
-				context.hasAuthoredEquipment ? "레일·장비·Port 선택" : "레일 선택",
-			),
-			editorActionHint("select-partial-area", "canvas.primary-drag", "부분 영역 선택"),
-			editorActionHint("select-connected", "selection.connected", "호버 연결 전체"),
-			editorActionHint("clone-hovered", "selection.clone-hovered", "호버 항목 복제"),
-			editorActionHint("open-blueprints", "blueprint.open-library", "청사진 라이브러리"),
-			editorActionHint("pan-inspect", "camera.pan-pointer", "화면 이동"),
-		]);
-	}
-	return Object.freeze([
-		editorActionHintAlternatives(
-			"build-track",
-			["canvas.primary-drag", "command.apply"],
-			"레일 건설",
-		),
-		editorActionHintAlternatives(
-			"rotate-build",
-			["construction.rotate-left", "construction.rotate-right"],
-			"방향·코너",
-		),
-		...(context.hasAuthoredRails
-			? [
-					editorActionHint("select-while-building", "selection.add-area", "영역 선택"),
-					editorActionHint("clone-hovered", "selection.clone-hovered", "호버 항목 복제"),
-				]
-			: []),
-		editorActionHint("open-blueprints", "blueprint.open-library", "청사진 라이브러리"),
-		editorActionHint("pan-build", "camera.pan-pointer", "화면 이동"),
-	]);
-}
-
 function IconButton({
 	label,
 	disabled = false,
@@ -42675,35 +41943,6 @@ function ToolButton({
 				</span>
 			) : null}
 		</button>
-	);
-}
-
-function ReadinessCheck({
-	label,
-	passed,
-	state,
-	value,
-}: {
-	label: string;
-	passed?: boolean;
-	state?: "pass" | "fail" | "pending";
-	value: string;
-}): React.ReactElement {
-	const resolvedState = state ?? (passed ? "pass" : "fail");
-	return (
-		<div data-state={resolvedState}>
-			<dt>
-				{resolvedState === "pass" ? (
-					<Check size={12} aria-hidden="true" />
-				) : resolvedState === "pending" ? (
-					<RefreshCcw size={12} aria-hidden="true" />
-				) : (
-					<AlertTriangle size={12} aria-hidden="true" />
-				)}
-				{label}
-			</dt>
-			<dd>{value}</dd>
-		</div>
 	);
 }
 
@@ -43222,7 +42461,7 @@ function portSlotStatusMessage(
 	if (status === PORT_SLOT_STATUS.EQUIPMENT_BODY_CONFLICT) {
 		return conflictingEquipmentGroupId > 0
 			? `STK-${conflictingEquipmentGroupId}이 점유한 레일 구간입니다`
-			: "기존 STK가 점유한 레일 구간입니다";
+			: "기존 Stocker가 점유한 레일 구간입니다";
 	}
 	if (status === PORT_SLOT_STATUS.RAIL_CLEARANCE_CONFLICT) {
 		return "인접 레일의 설치 여유 공간과 충돌합니다";
@@ -43513,417 +42752,8 @@ function StaticFabOrganizationKindIcon({
 	return <MapPinned size={size} />;
 }
 
-const BLUEPRINT_MINIATURE_MAX_EDGES = 2_048;
-const BLUEPRINT_MINIATURE_MAX_PORTS = 256;
-
-interface BlueprintRecordContextTrayProps {
-	readonly state: BlueprintRecordContextState;
-	readonly recordName: string;
-	readonly favorite: boolean;
-	readonly quickSlot: number | null;
-	readonly quickSlotOwners: ReadonlyMap<number, string>;
-	readonly busy: boolean;
-	readonly deleteConfirmation: boolean;
-	readonly contextRef: React.RefObject<HTMLDivElement | null>;
-	readonly onCommand: (commandId: BlueprintRecordCommandId) => void;
-	readonly onQuickSlot: (quickSlot: number | null) => void;
-	readonly onBack: () => void;
-	readonly onClose: () => void;
-	readonly onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void;
-}
-
-function BlueprintRecordContextTray({
-	state,
-	recordName,
-	favorite,
-	quickSlot,
-	quickSlotOwners,
-	busy,
-	deleteConfirmation,
-	contextRef,
-	onCommand,
-	onQuickSlot,
-	onBack,
-	onClose,
-	onKeyDown,
-}: BlueprintRecordContextTrayProps): React.ReactElement {
-	const contextId = `tilefab-blueprint-context-${state.scope}-${state.recordId}`;
-	const commands = blueprintRecordCommands({
-		scope: state.scope,
-		favorite,
-		quickSlot,
-		deleteConfirmation,
-	});
-	return (
-		<div
-			ref={contextRef}
-			className="tilefab-blueprint-record-context"
-			data-testid="blueprint-record-context"
-			data-scope={state.scope}
-			data-view={state.view}
-		>
-			<header>
-				<span>
-					<small>{state.scope === "project" ? "PROJECT" : "MY LIBRARY"}</small>
-					<strong>{recordName}</strong>
-				</span>
-				<button
-					type="button"
-					aria-label={`${recordName} 메뉴 닫기`}
-					onClick={onClose}
-					onKeyDown={onKeyDown}
-				>
-					<X size={15} />
-				</button>
-			</header>
-			{state.view === "commands" ? (
-				<div
-					id={contextId}
-					role="menu"
-					aria-label={`${recordName} 청사진 명령`}
-					onKeyDown={onKeyDown}
-				>
-					{commands.map((command, index) => (
-						<button
-							type="button"
-							role="menuitem"
-							key={command.id}
-							data-command={command.id}
-							data-tone={command.tone}
-							disabled={busy}
-							tabIndex={index === 0 ? 0 : -1}
-							aria-label={blueprintRecordCommandAriaLabel(
-								command.id,
-								recordName,
-								favorite,
-								deleteConfirmation,
-							)}
-							onClick={() => onCommand(command.id)}
-						>
-							{blueprintRecordCommandIcon(command.id, favorite)}
-							<span>{command.label}</span>
-							{command.id === "choose-quick-slot" ? <ChevronRight size={14} /> : null}
-						</button>
-					))}
-				</div>
-			) : (
-				<div
-					id={contextId}
-					className="tilefab-blueprint-record-slot-menu"
-					role="menu"
-					aria-label={`${recordName} Quick Slot 지정`}
-					onKeyDown={onKeyDown}
-				>
-					<button type="button" role="menuitem" tabIndex={0} onClick={onBack}>
-						<ArrowLeft size={15} />
-						<span>BACK</span>
-					</button>
-					<button
-						type="button"
-						role="menuitemradio"
-						tabIndex={-1}
-						aria-checked={quickSlot === null}
-						data-active={quickSlot === null}
-						disabled={busy}
-						onClick={() => onQuickSlot(null)}
-					>
-						<X size={14} />
-						<span>NONE</span>
-					</button>
-					{USER_BLUEPRINT_QUICK_SLOTS.map((slot) => {
-						const owner = quickSlotOwners.get(slot) ?? null;
-						const occupiedByOther = owner !== null && owner !== state.recordId;
-						return (
-							<button
-								type="button"
-								role="menuitemradio"
-								tabIndex={-1}
-								key={slot}
-								aria-checked={quickSlot === slot}
-								aria-label={
-									occupiedByOther
-										? `Quick Slot ${slot} 사용 중`
-										: `${recordName} Quick Slot ${slot} 지정`
-								}
-								data-active={quickSlot === slot}
-								data-occupied={occupiedByOther}
-								disabled={busy || occupiedByOther}
-								onClick={() => onQuickSlot(slot)}
-							>
-								<kbd>{slot}</kbd>
-								<span>{occupiedByOther ? "USED" : quickSlot === slot ? "ACTIVE" : "ASSIGN"}</span>
-							</button>
-						);
-					})}
-				</div>
-			)}
-		</div>
-	);
-}
-
 function blueprintRecordContextKey(scope: BlueprintRecordContextScope, recordId: string): string {
 	return `${scope}:${recordId}`;
-}
-
-function blueprintRecordCommandIcon(
-	commandId: BlueprintRecordCommandId,
-	favorite: boolean,
-): React.ReactElement {
-	if (commandId === "save-to-user-library" || commandId === "save-to-project") {
-		return <PackagePlus size={16} />;
-	}
-	if (commandId === "toggle-favorite") {
-		return <Star size={16} fill={favorite ? "currentColor" : "none"} />;
-	}
-	if (commandId === "edit-metadata") return <Pencil size={16} />;
-	if (commandId === "choose-quick-slot") return <Grid3X3 size={16} />;
-	if (commandId === "export-user-blueprint") return <Download size={16} />;
-	return <Trash2 size={16} />;
-}
-
-function blueprintRecordCommandAriaLabel(
-	commandId: BlueprintRecordCommandId,
-	recordName: string,
-	favorite: boolean,
-	deleteConfirmation: boolean,
-): string {
-	if (commandId === "save-to-user-library") return `${recordName} 내 라이브러리에 저장`;
-	if (commandId === "toggle-favorite") {
-		return `${recordName} 즐겨찾기 ${favorite ? "해제" : "추가"}`;
-	}
-	if (commandId === "delete-project") return `${recordName} 삭제`;
-	if (commandId === "edit-metadata") return `${recordName} 이름과 폴더 편집`;
-	if (commandId === "choose-quick-slot") return `${recordName} quick slot 편집`;
-	if (commandId === "export-user-blueprint") return `${recordName} .openfabbp 내보내기`;
-	if (commandId === "save-to-project") return `${recordName} 현재 프로젝트에 추가`;
-	return deleteConfirmation ? `${recordName} 삭제 확인` : `${recordName} 내 라이브러리에서 삭제`;
-}
-
-function RailBlueprintMiniature({
-	record,
-}: Readonly<{ record: OpenFabProjectBlueprint }>): React.ReactElement {
-	const padding = Math.max(1, Math.min(record.widthMeters, record.heightMeters) * 0.08);
-	const miniature = useMemo(() => {
-		const displayStep = Math.max(1, Math.ceil(record.edges.length / BLUEPRINT_MINIATURE_MAX_EDGES));
-		const displayEdges = record.edges.filter((_, index) => index % displayStep === 0);
-		const markerStep = Math.max(1, Math.ceil(displayEdges.length / 18));
-		return Object.freeze({
-			path: displayEdges.map((edge) => `M ${edge[0]} ${edge[1]} L ${edge[2]} ${edge[3]}`).join(" "),
-			flowMarkers: Object.freeze(displayEdges.filter((_, index) => index % markerStep === 0)),
-			ports:
-				record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
-					? Object.freeze(
-							record.ports.filter(
-								(_, index) =>
-									index %
-										Math.max(1, Math.ceil(record.ports.length / BLUEPRINT_MINIATURE_MAX_PORTS)) ===
-									0,
-							),
-						)
-					: Object.freeze([]),
-		});
-	}, [record]);
-	const portMarkerRadius = Math.max(
-		0.12,
-		Math.min(0.34, Math.min(record.widthMeters, record.heightMeters) * 0.018),
-	);
-	return (
-		<svg
-			className="tilefab-blueprint-miniature"
-			viewBox={`${-padding} ${-padding} ${record.widthMeters + padding * 2} ${record.heightMeters + padding * 2}`}
-			preserveAspectRatio="xMidYMid meet"
-			aria-hidden="true"
-		>
-			<path className="tilefab-blueprint-miniature-bed" d={miniature.path} />
-			<path className="tilefab-blueprint-miniature-rail" d={miniature.path} />
-			{miniature.flowMarkers.map((edge) => (
-				<circle
-					key={`${record.id}-flow-${edge.join("-")}`}
-					className="tilefab-blueprint-miniature-flow"
-					cx={edge[2]}
-					cy={edge[3]}
-					r={0.09}
-				/>
-			))}
-			{record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
-				? miniature.ports.map((port) => {
-						const position = openFabBlueprintPortPosition(port);
-						return (
-							<circle
-								key={`${record.id}-port-${port.equipmentGroupIndex}-${port.route.cell.join("-")}-${port.route.from}-${port.route.to}-${port.stationMillimeters}-${port.side}-${port.direction}`}
-								className="tilefab-blueprint-miniature-port"
-								data-port-type={port.portType}
-								cx={position.x}
-								cy={position.z}
-								r={portMarkerRadius}
-							/>
-						);
-					})
-				: null}
-		</svg>
-	);
-}
-
-function openFabBlueprintPortPosition(
-	port: OpenFabStaticFabBlueprintPort,
-): Readonly<{ x: number; z: number }> {
-	const tangent =
-		port.route.to === "N"
-			? { x: 0, z: -1 }
-			: port.route.to === "E"
-				? { x: 1, z: 0 }
-				: port.route.to === "S"
-					? { x: 0, z: 1 }
-					: { x: -1, z: 0 };
-	const normal = { x: -tangent.z, z: tangent.x };
-	const stationOffset = port.stationMillimeters / 1_000 - 0.5;
-	const sideSign = port.side === "LEFT" ? 1 : port.side === "RIGHT" ? -1 : 0;
-	const lateralOffset = (port.lateralOffsetMillimeters / 1_000) * sideSign;
-	return Object.freeze({
-		x: port.route.cell[0] + 0.5 + tangent.x * stationOffset + normal.x * lateralOffset,
-		z: port.route.cell[1] + 0.5 + tangent.z * stationOffset + normal.z * lateralOffset,
-	});
-}
-
-function RailTemplateMiniature({
-	item,
-	parameters = defaultRailTemplateParameters(item.id),
-	pose = initialRailTemplatePose(),
-}: {
-	readonly item: RailTemplateCatalogItem;
-	readonly parameters?: RailTemplateParameters;
-	readonly pose?: RailTemplatePose;
-}): React.ReactElement {
-	const preview = tryCompileRailTemplatePhysicalPreview(item.id, parameters, pose);
-	const geometry = useMemo(
-		() => (preview ? railTemplatePreviewSvgGeometry(preview) : null),
-		[preview],
-	);
-	if (!preview || !geometry) {
-		return (
-			<svg
-				className="tilefab-pattern-miniature"
-				viewBox="0 0 100 40"
-				preserveAspectRatio="xMidYMid meet"
-				role="img"
-				aria-label={`${item.label} 물리 미리보기를 생성할 수 없음`}
-				data-preview-source="unavailable"
-			>
-				<title>{item.label} 물리 미리보기를 생성할 수 없습니다</title>
-				<path className="tilefab-pattern-preview-unavailable" d="M 12 20 L 88 20 M 50 8 L 50 32" />
-			</svg>
-		);
-	}
-	const bounds = preview.bounds;
-	const width = Math.max(1, bounds.maxX - bounds.minX);
-	const height = Math.max(1, bounds.maxY - bounds.minY);
-	return (
-		<svg
-			className="tilefab-pattern-miniature"
-			viewBox={`${bounds.minX} ${bounds.minY} ${width} ${height}`}
-			preserveAspectRatio="xMidYMid meet"
-			aria-hidden="true"
-			data-preview-source="physical-paths"
-			data-path-count={preview.presentation.source.pathCount}
-		>
-			<g className="tilefab-pattern-physical-rails">
-				{geometry.paths.map((path) => (
-					<g key={`${item.id}-physical-${path.index}`}>
-						<path className="tilefab-pattern-rail-shadow" d={path.d} />
-						<path className="tilefab-pattern-rail-bed" d={path.d} />
-						<path className="tilefab-pattern-rail-slot" d={path.d} />
-					</g>
-				))}
-			</g>
-			{geometry.connectors.map((connector) => (
-				<g
-					className="tilefab-pattern-connector"
-					key={`${item.id}-connector-${connector.x1}:${connector.y1}:${connector.x2}:${connector.y2}`}
-				>
-					<line x1={connector.x1} y1={connector.y1} x2={connector.x2} y2={connector.y2} />
-					<circle cx={connector.x1} cy={connector.y1} r={geometry.handleRadius} />
-					<circle cx={connector.x2} cy={connector.y2} r={geometry.handleRadius} />
-				</g>
-			))}
-			{geometry.flowMarkers.map((marker) => (
-				<path
-					key={`${item.id}-physical-flow-${marker.x}:${marker.y}:${marker.angleDegrees}`}
-					className="tilefab-pattern-flow"
-					d="M -0.9 -0.55 L 0.95 0 L -0.9 0.55 Z"
-					transform={`translate(${marker.x} ${marker.y}) rotate(${marker.angleDegrees}) scale(${geometry.markerScale})`}
-				/>
-			))}
-		</svg>
-	);
-}
-
-interface RailTemplatePreviewSvgGeometry {
-	readonly paths: readonly { readonly index: number; readonly d: string }[];
-	readonly flowMarkers: readonly {
-		readonly x: number;
-		readonly y: number;
-		readonly angleDegrees: number;
-	}[];
-	readonly connectors: readonly {
-		readonly x1: number;
-		readonly y1: number;
-		readonly x2: number;
-		readonly y2: number;
-	}[];
-	readonly markerScale: number;
-	readonly handleRadius: number;
-}
-
-function railTemplatePreviewSvgGeometry(
-	preview: RailTemplatePhysicalPreview,
-): RailTemplatePreviewSvgGeometry {
-	const presentation = preview.presentation;
-	const source = presentation.source;
-	const runs = presentation.runs;
-	const paths = Array.from({ length: runs.count }, (_, index) => {
-		let d = "";
-		const runStart = runs.offsets[index] as number;
-		const runEnd = runs.offsets[index + 1] as number;
-		for (let memberIndex = runStart; memberIndex < runEnd; memberIndex++) {
-			const pathIndex = runs.pathIndices[memberIndex] as number;
-			const pointStart = source.offsets[pathIndex] as number;
-			const pointEnd = source.offsets[pathIndex + 1] as number;
-			for (let pointIndex = pointStart; pointIndex < pointEnd; pointIndex++) {
-				const offset = pointIndex * 2;
-				d += `${d.length === 0 ? "M" : " L"} ${source.positions[offset]} ${source.positions[offset + 1]}`;
-			}
-		}
-		return Object.freeze({ index, d });
-	});
-	const flowMarkers = Object.freeze(
-		preview.flowMarkers.map((marker) =>
-			Object.freeze({
-				x: marker.x,
-				y: marker.y,
-				angleDegrees: (Math.atan2(marker.tangentY, marker.tangentX) * 180) / Math.PI,
-			}),
-		),
-	);
-	const extent = Math.max(
-		preview.bounds.maxX - preview.bounds.minX,
-		preview.bounds.maxY - preview.bounds.minY,
-	);
-	return Object.freeze({
-		paths: Object.freeze(paths),
-		flowMarkers,
-		connectors: Object.freeze(
-			preview.connectors.map((connector) =>
-				Object.freeze({
-					x1: connector.start.x + 0.5,
-					y1: connector.start.y + 0.5,
-					x2: connector.end.x + 0.5,
-					y2: connector.end.y + 0.5,
-				}),
-			),
-		),
-		markerScale: Math.max(0.5, Math.min(1.45, extent * 0.03)),
-		handleRadius: Math.max(0.22, Math.min(0.75, extent * 0.016)),
-	});
 }
 
 function stkAuthoringTemplateLabel(template: StkEquipmentTemplate): string {
