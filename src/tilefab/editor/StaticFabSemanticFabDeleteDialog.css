@@ -1,0 +1,205 @@
+.tilefab-assemble-semantic-fab {
+	display: grid;
+	gap: 6px;
+	padding-top: 8px;
+	border-top: 1px solid #293436;
+	color: #a8bfbb;
+	font-size: 11px;
+}
+
+.tilefab-assemble-semantic-fab p {
+	margin: 0;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-assemble-fab-delete,
+.tilefab-fab-delete-dialog button {
+	display: flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 8px 12px;
+	border: 1px solid #536c68;
+	border-radius: 5px;
+	color: #d5e7e1;
+	background: #1a2926;
+	cursor: pointer;
+	font: inherit;
+	font-weight: 700;
+}
+
+.tilefab-assemble-fab-delete:disabled,
+.tilefab-fab-delete-dialog button:disabled {
+	color: #7e8c89;
+	background: #15201e;
+	cursor: not-allowed;
+}
+
+.tilefab-fab-delete-backdrop {
+	position: fixed;
+	z-index: 90;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 16px;
+	background: #040a0ccc;
+}
+
+.tilefab-fab-delete-dialog {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr) auto;
+	width: min(720px, 100%);
+	max-height: calc(100dvh - 32px);
+	border: 1px solid #45605b;
+	border-radius: 10px;
+	color: #d0ded9;
+	background: #101918;
+	box-shadow: 0 24px 80px #0009;
+	font-size: 13px;
+	line-height: 1.55;
+}
+
+.tilefab-fab-delete-dialog header,
+.tilefab-fab-delete-dialog footer {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 18px;
+}
+
+.tilefab-fab-delete-dialog header {
+	border-bottom: 1px solid #30423d;
+	color: #e6f4ef;
+	font-size: 17px;
+}
+
+.tilefab-fab-delete-dialog footer {
+	justify-content: flex-end;
+	border-top: 1px solid #30423d;
+}
+
+.tilefab-fab-delete-dialog footer button:first-child {
+	margin-right: auto;
+}
+
+.tilefab-fab-delete-dialog footer button:last-child:not(:disabled) {
+	border-color: #f0b7ac;
+	color: #321613;
+	background: #efb2a7;
+}
+
+.tilefab-fab-delete-workspace {
+	min-height: 0;
+	overflow: auto;
+	overscroll-behavior: contain;
+	padding: 4px 18px 18px;
+}
+
+.tilefab-fab-delete-workspace p,
+.tilefab-fab-delete-dialog small {
+	overflow-wrap: anywhere;
+}
+
+.tilefab-fab-delete-impact {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 12px;
+}
+
+.tilefab-fab-delete-impact-column,
+.tilefab-fab-delete-evidence {
+	min-width: 0;
+	padding: 12px;
+	border: 1px solid #304a41;
+	border-radius: 6px;
+	background: #13201c;
+}
+
+.tilefab-fab-delete-impact-column:last-child {
+	border-color: #825349;
+	background: #291b17;
+}
+
+.tilefab-fab-delete-dialog h3,
+.tilefab-fab-delete-dialog h4 {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0 0 10px;
+	font-size: 13px;
+}
+
+.tilefab-fab-delete-dialog dl {
+	display: grid;
+	gap: 8px;
+	margin: 0;
+}
+
+.tilefab-fab-delete-dialog dl > div {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 8px;
+}
+
+.tilefab-fab-delete-dialog dd {
+	margin: 0;
+	text-align: right;
+}
+
+.tilefab-fab-delete-dialog small {
+	display: block;
+	color: #9eb4ac;
+	font-size: 11px;
+}
+
+.tilefab-fab-delete-status {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 12px 0;
+}
+
+.tilefab-fab-delete-status svg {
+	flex-shrink: 0;
+	margin-top: 2px;
+}
+
+.tilefab-fab-delete-dialog[data-phase="rejected"] .tilefab-fab-delete-status {
+	color: #f5c895;
+}
+
+.tilefab-fab-delete-evidence summary {
+	min-height: 44px;
+	padding: 10px 0;
+	cursor: pointer;
+}
+
+.tilefab-fab-delete-dialog :focus-visible,
+.tilefab-assemble-fab-delete:focus-visible {
+	outline: 2px solid #b0e4cb;
+	outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+	.tilefab-fab-delete-backdrop {
+		align-items: end;
+		padding: 8px;
+	}
+
+	.tilefab-fab-delete-dialog {
+		max-height: calc(100dvh - 16px);
+	}
+
+	.tilefab-fab-delete-impact {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.tilefab-fab-delete-dialog header,
+	.tilefab-fab-delete-dialog footer,
+	.tilefab-fab-delete-workspace {
+		padding-right: 12px;
+		padding-left: 12px;
+	}
+}

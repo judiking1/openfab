@@ -20,6 +20,7 @@ import type {
 import "./StaticFabSemanticBayMutationDialog.css";
 import "./StaticFabSemanticBankDetachDialog.css";
 import "./StaticFabSemanticBankDeleteDialog.css";
+import "./StaticFabSemanticFabDeleteDialog.css";
 
 export const STATIC_FAB_ASSEMBLE_DUPLICATE_CAPTURE_MODE = "EFFECTIVE" as const;
 
@@ -27,6 +28,11 @@ export interface StaticFabAssembleMenuProps {
 	readonly selectionCount: number;
 	readonly selectedBayCount: number;
 	readonly selectedBankCount: number;
+	readonly selectedFabCount?: number;
+	readonly fabDelete?: Readonly<{
+		availability: StaticFabAssembleActionAvailability;
+		onDelete: (launcher: HTMLButtonElement) => void;
+	}>;
 	readonly bankDetach?: Readonly<{
 		availability: StaticFabAssembleActionAvailability;
 		onDetach: (launcher: HTMLButtonElement) => void;
@@ -71,6 +77,8 @@ export function StaticFabAssembleMenu({
 	selectionCount,
 	selectedBayCount,
 	selectedBankCount,
+	selectedFabCount = 0,
+	fabDelete,
 	bankDetach,
 	bankDelete,
 	connectorHierarchyRole,
@@ -240,6 +248,25 @@ export function StaticFabAssembleMenu({
 						{connectorAvailability.reason}
 					</p>
 				</div>
+				{selectionCount === 1 && selectedFabCount === 1 && fabDelete ? (
+					<section className="tilefab-assemble-semantic-fab" aria-label="선택한 FAB 명령">
+						<strong>선택한 FAB</strong>
+						<button
+							type="button"
+							className="tilefab-assemble-fab-delete"
+							data-testid="assemble-delete-selected-fab"
+							aria-describedby="tilefab-assemble-fab-delete-status"
+							disabled={fabDelete.availability.state !== "ready"}
+							title={fabDelete.availability.reason}
+							onClick={(event) => fabDelete.onDelete(event.currentTarget)}
+						>
+							<Trash2 size={15} /> FAB 삭제…
+						</button>
+						<p id="tilefab-assemble-fab-delete-status" data-testid="assemble-fab-delete-status">
+							{fabDelete.availability.reason}
+						</p>
+					</section>
+				) : null}
 				{selectionCount === 1 && selectedBankCount === 1 && (bankDetach || bankDelete) ? (
 					<section className="tilefab-assemble-semantic-bank" aria-label="선택한 Bank 명령">
 						<strong>선택한 Bank</strong>

@@ -97,6 +97,10 @@ import {
 	STATIC_FAB_SEMANTIC_BAY_DELETE_KIND,
 	STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND,
 } from "../core/StaticFabSemanticBayMutation";
+import {
+	assertStaticFabSemanticFabDeletePatchSource,
+	STATIC_FAB_SEMANTIC_FAB_DELETE_KIND,
+} from "../core/StaticFabSemanticFabDelete";
 import { cellKey, decodeRailCell, TileMap } from "../core/TileMap";
 import {
 	readAdvancedSwitchRecord,
@@ -442,6 +446,17 @@ export class RailPatchMirror {
 		}
 		if (historyOriginKind === STATIC_FAB_SEMANTIC_BANK_DELETE_KIND && patch.kind !== "undo") {
 			assertStaticFabSemanticBankDeletePatchSource(
+				this.mirroredMap,
+				this.mirroredPortEquipment,
+				this.currentSequence,
+				this.mirroredOrganizations,
+				this.mirroredRelationships,
+				this.mirroredOperationalConfiguration,
+				patch,
+			);
+		}
+		if (historyOriginKind === STATIC_FAB_SEMANTIC_FAB_DELETE_KIND && patch.kind !== "undo") {
+			assertStaticFabSemanticFabDeletePatchSource(
 				this.mirroredMap,
 				this.mirroredPortEquipment,
 				this.currentSequence,

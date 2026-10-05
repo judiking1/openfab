@@ -93,6 +93,7 @@ const RAIL_HISTORY_ORIGIN_KINDS = Object.freeze({
 	"delete-static-fab-bay": true,
 	"detach-static-fab-bank": true,
 	"delete-static-fab-bank": true,
+	"delete-static-fab": true,
 	"edit-static-fab-bay-flow": true,
 	"place-static-fab-organization-bundle": true,
 	"erase-static-fab-selection": true,

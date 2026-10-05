@@ -9,7 +9,6 @@ import {
 } from "./OperationalConfiguration";
 import { assertPortEquipmentLayout } from "./PortEquipmentLayoutValidator";
 import { copyPortRecord } from "./PortRecord";
-import { type RailMutation, railMutationTopologyError } from "./paint";
 import { buildRailModuleOwnershipIndex } from "./RailModuleOwnership";
 import { type RailPatchTransition, railPatchTransitionFingerprint } from "./RailPatchHistory";
 import {
@@ -27,13 +26,9 @@ import {
 	type StaticFabOrganizationState,
 	staticFabOrganizationEdgeKey,
 	staticFabOrganizationMembershipSupportsPortRoute,
-	staticFabOrganizationParentIds,
 	staticFabOrganizationStateError,
 } from "./StaticFabOrganization";
-import {
-	planStaticFabSemanticBankDetach,
-	type StaticFabSemanticBankDetachProspectiveState,
-} from "./StaticFabSemanticBankDetach";
+import type { StaticFabSemanticBankDetachProspectiveState } from "./StaticFabSemanticBankDetach";
 import {
 	exactDeletedAdvancedSwitchBoundaryEdges,
 	exactStaticFabOrganizationImpactAuthorizations,
@@ -47,52 +42,48 @@ import {
 	createStaticFabSemanticDeleteImpact as impact,
 	staticFabSemanticDeleteErrorMessage as message,
 	relationshipOrganizationIds,
-	type StaticFabSemanticDeleteImpact as StaticFabSemanticBankDeleteImpact,
+	type StaticFabSemanticDeleteImpact as StaticFabSemanticFabDeleteImpact,
 } from "./StaticFabSemanticDeleteSupport";
 import {
 	reviewStaticFabSemanticHierarchyRecovery,
 	type StaticFabSemanticHierarchyRecoveryIntent,
 	staticFabSemanticHierarchyRecoveryIntentError,
 } from "./StaticFabSemanticHierarchyRecovery";
-import { cellKey, TileMap } from "./TileMap";
+import { TileMap } from "./TileMap";
 
-export const STATIC_FAB_SEMANTIC_BANK_DELETE_KIND = "delete-static-fab-bank" as const;
-export const STATIC_FAB_SEMANTIC_BANK_DELETE_MAX_ITEMS = 100_000;
-export const STATIC_FAB_SEMANTIC_BANK_DELETE_ID_SAMPLE_LIMIT = 8;
-export interface StaticFabSemanticBankDeleteIntent
-	extends StaticFabSemanticHierarchyRecoveryIntent {
+export const STATIC_FAB_SEMANTIC_FAB_DELETE_KIND = "delete-static-fab" as const;
+export const STATIC_FAB_SEMANTIC_FAB_DELETE_MAX_ITEMS = 100_000;
+export const STATIC_FAB_SEMANTIC_FAB_DELETE_ID_SAMPLE_LIMIT = 8;
+export interface StaticFabSemanticFabDeleteIntent extends StaticFabSemanticHierarchyRecoveryIntent {
 	readonly action: "DELETE";
-	readonly targetRole: "BAY_BANK";
+	readonly targetRole: "FAB";
+	readonly expectedParentOrganizationId: null;
 }
 export type {
-	StaticFabSemanticDeleteImpact as StaticFabSemanticBankDeleteImpact,
-	StaticFabSemanticDeleteImpactSample as StaticFabSemanticBankDeleteImpactSample,
+	StaticFabSemanticDeleteImpact as StaticFabSemanticFabDeleteImpact,
+	StaticFabSemanticDeleteImpactSample as StaticFabSemanticFabDeleteImpactSample,
 } from "./StaticFabSemanticDeleteSupport";
-export { STATIC_FAB_SEMANTIC_DELETE_IMPACT_KEYS as STATIC_FAB_SEMANTIC_BANK_DELETE_IMPACT_KEYS } from "./StaticFabSemanticDeleteSupport";
-export interface StaticFabSemanticBankDeleteReview {
+export { STATIC_FAB_SEMANTIC_DELETE_IMPACT_KEYS as STATIC_FAB_SEMANTIC_FAB_DELETE_IMPACT_KEYS } from "./StaticFabSemanticDeleteSupport";
+export interface StaticFabSemanticFabDeleteReview {
 	readonly version: 1;
-	readonly bankOrganizationId: number;
-	readonly bankName: string;
-	readonly parentFabOrganizationId: number | null;
-	readonly parentFabName: string | null;
-	readonly includesDetach: boolean;
-	readonly removed: StaticFabSemanticBankDeleteImpact;
-	readonly preserved: StaticFabSemanticBankDeleteImpact;
+	readonly fabOrganizationId: number;
+	readonly fabName: string;
+	readonly removed: StaticFabSemanticFabDeleteImpact;
+	readonly preserved: StaticFabSemanticFabDeleteImpact;
 }
-export interface StaticFabSemanticBankDeletePlan {
-	readonly kind: typeof STATIC_FAB_SEMANTIC_BANK_DELETE_KIND;
+export interface StaticFabSemanticFabDeletePlan {
+	readonly kind: typeof STATIC_FAB_SEMANTIC_FAB_DELETE_KIND;
 	readonly baseRevision: number;
 	readonly basePatchSequence: number;
-	readonly intent: StaticFabSemanticBankDeleteIntent;
-	readonly review: StaticFabSemanticBankDeleteReview;
+	readonly intent: StaticFabSemanticFabDeleteIntent;
+	readonly review: StaticFabSemanticFabDeleteReview;
 	readonly transition: RailPatchTransition;
 }
-export type StaticFabSemanticBankDeletePlanningResult =
+export type StaticFabSemanticFabDeletePlanningResult =
 	| Readonly<{
 			valid: true;
-			plan: StaticFabSemanticBankDeletePlan;
+			plan: StaticFabSemanticFabDeletePlan;
 			prospectiveState: StaticFabSemanticBankDetachProspectiveState;
-			detachedState: StaticFabSemanticBankDetachProspectiveState;
 			deletedMap: TileMap;
 			issueCode: null;
 			reason: string;
@@ -101,22 +92,23 @@ export type StaticFabSemanticBankDeletePlanningResult =
 			valid: false;
 			plan: null;
 			prospectiveState: null;
-			detachedState: null;
 			deletedMap: null;
 			issueCode: string;
 			reason: string;
 	  }>;
 
-export function staticFabSemanticBankDeleteIntentError(value: unknown): string | null {
+export function staticFabSemanticFabDeleteIntentError(value: unknown): string | null {
 	const error = staticFabSemanticHierarchyRecoveryIntentError(value);
 	if (error) return error;
 	const intent = value as StaticFabSemanticHierarchyRecoveryIntent;
-	return intent.action === "DELETE" && intent.targetRole === "BAY_BANK"
+	return intent.action === "DELETE" &&
+		intent.targetRole === "FAB" &&
+		intent.expectedParentOrganizationId === null
 		? null
-		: "Bank 삭제는 DELETE / BAY_BANK intent만 지원합니다";
+		: "Fab 삭제는 DELETE / root FAB intent만 지원합니다";
 }
 
-export function planStaticFabSemanticBankDelete(
+export function planStaticFabSemanticFabDelete(
 	map: TileMap,
 	portEquipment: PortEquipmentState,
 	patchSequence: number,
@@ -124,19 +116,19 @@ export function planStaticFabSemanticBankDelete(
 	relationships: StaticFabAssemblyRelationshipStateV1,
 	operations: OperationalConfigurationState,
 	intentValue: unknown,
-): StaticFabSemanticBankDeletePlanningResult {
+): StaticFabSemanticFabDeletePlanningResult {
 	try {
-		const intentError = staticFabSemanticBankDeleteIntentError(intentValue);
+		const intentError = staticFabSemanticFabDeleteIntentError(intentValue);
 		if (intentError) fail("INVALID_INTENT", intentError);
-		const intent = Object.freeze({ ...(intentValue as StaticFabSemanticBankDeleteIntent) });
+		const intent = Object.freeze({ ...(intentValue as StaticFabSemanticFabDeleteIntent) });
 		if (!Number.isSafeInteger(patchSequence) || patchSequence < 0)
 			fail("INVALID_SOURCE", "문서 순서가 유효하지 않습니다");
 		if (
-			map.size > STATIC_FAB_SEMANTIC_BANK_DELETE_MAX_ITEMS ||
-			portEquipment.ports.length > STATIC_FAB_SEMANTIC_BANK_DELETE_MAX_ITEMS ||
+			map.size > STATIC_FAB_SEMANTIC_FAB_DELETE_MAX_ITEMS ||
+			portEquipment.ports.length > STATIC_FAB_SEMANTIC_FAB_DELETE_MAX_ITEMS ||
 			organizations.records.length > 4_096
 		)
-			fail("BUDGET_EXCEEDED", "Bank 삭제 원본의 rail/Port/조직 검토 한도를 초과했습니다");
+			fail("BUDGET_EXCEEDED", "Fab 삭제 원본의 rail/Port/조직 검토 한도를 초과했습니다");
 		const hierarchy = reviewStaticFabSemanticHierarchyRecovery(organizations, intent);
 		if (!hierarchy.accepted) fail("HIERARCHY_REJECTED", hierarchy.reason);
 		// Explain unsupported authored equipment before expensive whole-source geometry checks.
@@ -144,7 +136,7 @@ export function planStaticFabSemanticBankDelete(
 			organizations,
 			intent.targetOrganizationId,
 		)?.effective;
-		if (!equipmentScope) fail("HIERARCHY_REJECTED", "Bank의 장비 소유 범위를 찾을 수 없습니다");
+		if (!equipmentScope) fail("HIERARCHY_REJECTED", "Fab의 장비 소유 범위를 찾을 수 없습니다");
 		const scopedGroupIds = new Set(equipmentScope.equipmentGroupIds);
 		const scopedEdges = new Set(equipmentScope.railEdges.map(staticFabOrganizationEdgeKey));
 		const scopedSwitches = new Set(equipmentScope.advancedSwitchIds);
@@ -152,7 +144,7 @@ export function planStaticFabSemanticBankDelete(
 			if (scopedGroupIds.has(group.id) && group.kind === "STK" && group.template === "CUSTOM")
 				fail(
 					"CUSTOM_EQUIPMENT",
-					`legacy CUSTOM STK ${group.id}는 Bank 일괄 삭제를 지원하지 않습니다`,
+					`legacy CUSTOM STK ${group.id}는 Fab 일괄 삭제를 지원하지 않습니다`,
 				);
 		}
 		for (const port of portEquipment.ports) {
@@ -162,7 +154,7 @@ export function planStaticFabSemanticBankDelete(
 			)
 				fail(
 					"PARTIAL_EQUIPMENT",
-					`장비 ${port.equipmentGroupId}의 PORT-${port.id}가 Bank 밖 레일을 참조합니다`,
+					`장비 ${port.equipmentGroupId}의 PORT-${port.id}가 Fab 밖 레일을 참조합니다`,
 				);
 		}
 		const error =
@@ -171,25 +163,11 @@ export function planStaticFabSemanticBankDelete(
 			operationalConfigurationStateError(operations);
 		if (error) fail("INVALID_SOURCE", error);
 		assertPortEquipmentLayout(map, portEquipment);
-		const source = { map, portEquipment, organizations, relationships };
-		const detach =
-			intent.expectedParentOrganizationId === null
-				? null
-				: planStaticFabSemanticBankDetach(
-						map,
-						portEquipment,
-						patchSequence,
-						organizations,
-						relationships,
-						{ ...intent, action: "DETACH" },
-					);
-		if (detach && !detach.valid) fail("DETACH_REJECTED", detach.reason);
-		const intermediate = detach?.valid ? detach.prospectiveState : source;
 		const coverage = resolveStaticFabOrganizationCoverage(
-			intermediate.organizations,
+			organizations,
 			intent.targetOrganizationId,
 		);
-		if (!coverage) fail("HIERARCHY_REJECTED", "Bank의 전체 하위 소유권을 찾을 수 없습니다");
+		if (!coverage) fail("HIERARCHY_REJECTED", "Fab의 전체 하위 소유권을 찾을 수 없습니다");
 		const selectedIds = new Set([
 			intent.targetOrganizationId,
 			...coverage.descendantOrganizationIds,
@@ -197,7 +175,7 @@ export function planStaticFabSemanticBankDelete(
 		const edges = new Set(coverage.effective.railEdges.map(staticFabOrganizationEdgeKey));
 		const switches = new Set(coverage.effective.advancedSwitchIds);
 		const groups = new Set(coverage.effective.equipmentGroupIds);
-		for (const row of intermediate.organizations.records) {
+		for (const row of organizations.records) {
 			if (selectedIds.has(row.id)) continue;
 			if (
 				row.membership.railEdges.some((edge) => edges.has(staticFabOrganizationEdgeKey(edge))) ||
@@ -206,12 +184,12 @@ export function planStaticFabSemanticBankDelete(
 			)
 				fail(
 					"SHARED_OWNERSHIP",
-					`유지할 조직 ${row.id} '${row.name}'이 삭제 Bank의 레일·스위치·장비를 공유합니다`,
+					`유지할 조직 ${row.id} '${row.name}'이 삭제 Fab의 레일·스위치·장비를 공유합니다`,
 				);
 		}
-		const ownership = buildRailModuleOwnershipIndex(intermediate.map);
-		if (ownership.modules.length > STATIC_FAB_SEMANTIC_BANK_DELETE_MAX_ITEMS)
-			fail("BUDGET_EXCEEDED", "Bank 삭제 모듈 검토 한도를 초과했습니다");
+		const ownership = buildRailModuleOwnershipIndex(map);
+		if (ownership.modules.length > STATIC_FAB_SEMANTIC_FAB_DELETE_MAX_ITEMS)
+			fail("BUDGET_EXCEEDED", "Fab 삭제 모듈 검토 한도를 초과했습니다");
 		const modules = ownership.modules.filter(
 			(module) =>
 				module.eraseEdges.some((edge) => edges.has(staticFabOrganizationEdgeKey(edge))) ||
@@ -233,7 +211,7 @@ export function planStaticFabSemanticBankDelete(
 			resolvedEdges.size !== edges.size ||
 			resolvedSwitches.size !== switches.size
 		)
-			fail("PARTIAL_MODULE", "Bank 소유권이 정확한 전체 모듈 집합이 아닙니다");
+			fail("PARTIAL_MODULE", "Fab 소유권이 정확한 전체 모듈 집합이 아닙니다");
 		const deletedGroups = portEquipment.equipmentGroups.filter((group) => groups.has(group.id));
 		const deletedPorts = portEquipment.ports.filter((port) => groups.has(port.equipmentGroupId));
 		const portIds = new Set(deletedPorts.map((port) => port.id));
@@ -241,7 +219,7 @@ export function planStaticFabSemanticBankDelete(
 			if (group.kind === "STK" && group.template === "CUSTOM")
 				fail(
 					"CUSTOM_EQUIPMENT",
-					`legacy CUSTOM STK ${group.id}는 Bank 일괄 삭제를 지원하지 않습니다`,
+					`legacy CUSTOM STK ${group.id}는 Fab 일괄 삭제를 지원하지 않습니다`,
 				);
 			if (group.portIds.some((id) => !portIds.has(id)))
 				fail("PARTIAL_EQUIPMENT", `장비 ${group.id}의 모든 Port가 삭제 범위에 없습니다`);
@@ -250,32 +228,32 @@ export function planStaticFabSemanticBankDelete(
 			if (!staticFabOrganizationMembershipSupportsPortRoute(port.route, edges, switches))
 				fail(
 					"PARTIAL_EQUIPMENT",
-					`장비 ${port.equipmentGroupId}의 PORT-${port.id}가 Bank 밖 레일을 참조합니다`,
+					`장비 ${port.equipmentGroupId}의 PORT-${port.id}가 Fab 밖 레일을 참조합니다`,
 				);
-		assertNoOperationalReferences(operations, groups, portIds);
+		assertNoOperationalReferences(operations, groups, portIds, "Fab");
 		const selectedKeys = new Set(modules.map((module) => module.key));
 		const indices = ownership.modules.flatMap((module, index) =>
 			selectedKeys.has(module.key) ? [index] : [],
 		);
 		const boundaryEdges = exactDeletedAdvancedSwitchBoundaryEdges(
-			intermediate.map,
+			map,
 			ownership,
 			indices,
 			[...switches],
 			[],
 		);
 		const railDelete = planDirectedEdgeRemoval(
-			intermediate.map,
+			map,
 			[...modules.flatMap((module) => module.eraseEdges), ...boundaryEdges],
 			[...switches],
 		);
-		// An isolated whole Bank can have no surviving rail bit at a deleted cell.
+		// An isolated whole root Fab can have no surviving rail bit at a deleted cell.
 		if (railDelete.mutations.some((change) => change.after !== 0))
 			fail(
 				"EXTERNAL_RAIL_REFERENCE",
-				"Bank의 레일 접점이 외부 또는 무소속 레일과 연결되어 있습니다",
+				"Fab의 레일 접점이 외부 또는 무소속 레일과 연결되어 있습니다",
 			);
-		const nextMap = intermediate.map.clone();
+		const nextMap = map.clone();
 		nextMap.applyAtomicMutations(railDelete.mutations, railDelete.switchMutations);
 		const deletedHydrator = TileMap.createHydrator();
 		for (const change of railDelete.mutations)
@@ -303,20 +281,17 @@ export function planStaticFabSemanticBankDelete(
 		} catch (error) {
 			fail("EXTERNAL_PORT_REFERENCE", `보존할 Port가 삭제 레일을 참조합니다 · ${message(error)}`);
 		}
-		const removedRelationships = intermediate.relationships.records.filter((row) => {
+		const removedRelationships = relationships.records.filter((row) => {
 			const ids = relationshipOrganizationIds(row);
 			if (!ids.some((id) => selectedIds.has(id))) return false;
 			if (ids.some((id) => !selectedIds.has(id)))
 				fail(
 					"EXTERNAL_RELATIONSHIP",
-					`관계 ${row.id}가 삭제 Bank 밖 조직·support·witness를 참조합니다`,
+					`관계 ${row.id}가 삭제 Fab 밖 조직·support·witness를 참조합니다`,
 				);
 			return true;
 		});
-		const allRemovedRelationshipIds = new Set([
-			...(detach?.valid ? detach.plan.review.removedRelationshipIds : []),
-			...removedRelationships.map((row) => row.id),
-		]);
+		const allRemovedRelationshipIds = new Set([...removedRelationships.map((row) => row.id)]);
 		const relationshipChanges = Object.freeze(
 			relationships.records
 				.filter((row) => allRemovedRelationshipIds.has(row.id))
@@ -338,10 +313,7 @@ export function planStaticFabSemanticBankDelete(
 							after: null,
 						}),
 					];
-				const change = detach?.valid
-					? detach.plan.transition.organizationChanges.find((change) => change.id === row.id)
-					: undefined;
-				return change ? [change] : [];
+				return [];
 			}),
 		);
 		const nextOrganizations = applyStaticFabOrganizationMutations(
@@ -363,28 +335,8 @@ export function planStaticFabSemanticBankDelete(
 				"EXTERNAL_REFERENCE",
 				`삭제 후 외부 소유권·관계가 유효하지 않습니다 · ${prospectiveError}`,
 			);
-		const merged = new Map<string, RailMutation>();
-		for (const change of [
-			...(detach?.valid ? detach.plan.transition.changes : []),
-			...railDelete.mutations,
-		]) {
-			const key = cellKey(change.x, change.y);
-			const previous = merged.get(key);
-			if (previous && previous.after !== change.before)
-				fail("INVALID_TRANSITION", "분리와 삭제의 중간 레일 세대가 다릅니다");
-			merged.set(key, { ...change, before: previous?.before ?? change.before });
-		}
-		const changes = Object.freeze(
-			[...merged.values()]
-				.filter((change) => change.before !== change.after)
-				.sort((a, b) => a.y - b.y || a.x - b.x)
-				.map((change) => Object.freeze(change)),
-		);
-		const topologyError = railMutationTopologyError(map, changes, railDelete.switchMutations);
-		if (topologyError) fail("INVALID_TRANSITION", topologyError);
-		// Materialize the combined command once, so its revision matches one atomic patch.
-		const finalMap = map.clone();
-		finalMap.applyAtomicMutations(changes, railDelete.switchMutations);
+		const changes = railDelete.mutations;
+		const finalMap = nextMap;
 		const forward = exactStaticFabOrganizationImpactAuthorizations(
 			organizations,
 			organizationChanges,
@@ -416,8 +368,8 @@ export function planStaticFabSemanticBankDelete(
 		const authorizations = Object.freeze(
 			[...new Set([...forward, ...reverse])].sort((a, b) => a - b),
 		);
-		if (authorizations.some((id) => selectedIds.has(id)))
-			fail("INVALID_TRANSITION", "삭제 조직에는 보존 접점 권한을 부여할 수 없습니다");
+		if (authorizations.length > 0)
+			fail("INVALID_TRANSITION", "EXCLUSIVE root Fab 삭제가 보존할 조직의 레일 접점을 침범합니다");
 		const transition: RailPatchTransition = Object.freeze({
 			changes,
 			switchChanges: railDelete.switchMutations,
@@ -434,41 +386,16 @@ export function planStaticFabSemanticBankDelete(
 		});
 		const removedRows = organizations.records.filter((row) => selectedIds.has(row.id));
 		const nextOwnership = buildRailModuleOwnershipIndex(finalMap);
-		const sourceOwnership = buildRailModuleOwnershipIndex(map);
-		const cutKeys = new Set(
-			detach?.valid
-				? (detach.plan.transition.relationshipChanges?.flatMap(
-						(change) =>
-							change.before?.connectionGroups.flatMap((group) =>
-								group.legs.flatMap((leg) =>
-									leg.exclusiveCutEdges.map((edge) => staticFabOrganizationEdgeKey(edge.edge)),
-								),
-							) ?? [],
-					) ?? [])
-				: [],
-		);
-		const removedModuleKeys = new Set(modules.map((module) => module.key));
-		// Detach's cut modules are certified separately from the isolated subtree.
-		if (detach?.valid)
-			for (const module of sourceOwnership.modules)
-				if (module.eraseEdges.some((edge) => cutKeys.has(staticFabOrganizationEdgeKey(edge))))
-					removedModuleKeys.add(module.key);
-		const bank = organizations.records.find((row) => row.id === intent.targetOrganizationId);
-		if (!bank) fail("HIERARCHY_REJECTED", "삭제할 Bank 원본이 없습니다");
-		const parent = organizations.records.find(
-			(row) => row.id === intent.expectedParentOrganizationId,
-		);
-		const review: StaticFabSemanticBankDeleteReview = Object.freeze({
+		const fab = organizations.records.find((row) => row.id === intent.targetOrganizationId);
+		if (!fab) fail("HIERARCHY_REJECTED", "삭제할 root Fab 원본이 없습니다");
+		const review: StaticFabSemanticFabDeleteReview = Object.freeze({
 			version: 1,
-			bankOrganizationId: bank.id,
-			bankName: bank.name,
-			parentFabOrganizationId: intent.expectedParentOrganizationId,
-			parentFabName: parent?.name ?? null,
-			includesDetach: detach !== null,
+			fabOrganizationId: fab.id,
+			fabName: fab.name,
 			removed: impact(
 				organizations,
 				removedRows,
-				[...removedModuleKeys],
+				modules.map((module) => module.key),
 				railDelete.switchMutations.map((row) => row.id),
 				deletedGroups.map((row) => row.id),
 				deletedPorts.map((row) => row.id),
@@ -491,7 +418,7 @@ export function planStaticFabSemanticBankDelete(
 			),
 		});
 		const plan = Object.freeze({
-			kind: STATIC_FAB_SEMANTIC_BANK_DELETE_KIND,
+			kind: STATIC_FAB_SEMANTIC_FAB_DELETE_KIND,
 			baseRevision: map.getRevision(),
 			basePatchSequence: patchSequence,
 			intent,
@@ -507,17 +434,15 @@ export function planStaticFabSemanticBankDelete(
 				organizations: nextOrganizations,
 				relationships: nextRelationships,
 			}),
-			detachedState: intermediate,
 			deletedMap,
 			issueCode: null,
-			reason: `Bank '${bank.name}'의 독점 소유 하위 조직·레일·장비·Port를 하나의 명령으로 삭제합니다`,
+			reason: `Fab '${fab.name}'의 독점 소유 하위 조직·레일·장비·Port를 하나의 명령으로 삭제합니다`,
 		});
 	} catch (error) {
 		return Object.freeze({
 			valid: false,
 			plan: null,
 			prospectiveState: null,
-			detachedState: null,
 			deletedMap: null,
 			issueCode: error instanceof DeleteFailure ? error.code : "INVALID_SOURCE",
 			reason: message(error),
@@ -525,7 +450,7 @@ export function planStaticFabSemanticBankDelete(
 	}
 }
 
-export function assertStaticFabSemanticBankDeletePatchSource(
+export function assertStaticFabSemanticFabDeletePatchSource(
 	map: TileMap,
 	equipment: PortEquipmentState,
 	sequence: number,
@@ -536,12 +461,12 @@ export function assertStaticFabSemanticBankDeletePatchSource(
 ): void {
 	const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
 	const targets = patch.organizationChanges.filter(
-		(change) => change.after === null && roles.get(change.id) === "BAY_BANK",
+		(change) => change.after === null && roles.get(change.id) === "FAB",
 	);
 	if (targets.length !== 1 || !targets[0]?.before)
-		throw new Error("Bank 삭제 patch에는 정확히 하나의 Bank 제거가 필요합니다");
+		throw new Error("Fab 삭제 patch에는 정확히 하나의 root Fab 제거가 필요합니다");
 	const target = targets[0].before;
-	const planned = planStaticFabSemanticBankDelete(
+	const planned = planStaticFabSemanticFabDelete(
 		map,
 		equipment,
 		sequence,
@@ -551,9 +476,9 @@ export function assertStaticFabSemanticBankDeletePatchSource(
 		{
 			version: 1,
 			action: "DELETE",
-			targetRole: "BAY_BANK",
+			targetRole: "FAB",
 			targetOrganizationId: target.id,
-			expectedParentOrganizationId: staticFabOrganizationParentIds(target)[0] ?? null,
+			expectedParentOrganizationId: null,
 		},
 	);
 	if (!planned.valid) throw new Error(planned.reason);
@@ -561,5 +486,5 @@ export function assertStaticFabSemanticBankDeletePatchSource(
 		railPatchTransitionFingerprint(patch) !==
 		railPatchTransitionFingerprint(planned.plan.transition)
 	)
-		throw new Error("Bank 삭제 patch가 원본의 정확한 독점 삭제 범위와 다릅니다");
+		throw new Error("Fab 삭제 patch가 원본의 정확한 독점 삭제 범위와 다릅니다");
 }

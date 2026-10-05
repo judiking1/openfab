@@ -221,6 +221,14 @@ import {
 	isIssuedStaticFabSemanticBayMutationPlan,
 	isStaticFabSemanticBayMutationPlanIssuedFor,
 } from "./StaticFabSemanticBayMutationCertification";
+import {
+	STATIC_FAB_SEMANTIC_FAB_DELETE_KIND,
+	type StaticFabSemanticFabDeletePlan,
+} from "./StaticFabSemanticFabDelete";
+import {
+	consumeStaticFabSemanticFabDeletePlan,
+	type StaticFabSemanticFabDeleteScope,
+} from "./StaticFabSemanticFabDeleteCertification";
 import { decodeRailCell, TileMap } from "./TileMap";
 
 export type RailPatchKind =
@@ -234,6 +242,7 @@ export type RailPatchKind =
 	| typeof STATIC_FAB_SEMANTIC_BAY_DELETE_KIND
 	| typeof STATIC_FAB_SEMANTIC_BANK_DETACH_KIND
 	| typeof STATIC_FAB_SEMANTIC_BANK_DELETE_KIND
+	| typeof STATIC_FAB_SEMANTIC_FAB_DELETE_KIND
 	| typeof STATIC_FAB_BAY_FLOW_EDIT_KIND
 	| typeof STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_KIND
 	| "erase-static-fab-selection"
@@ -637,6 +646,7 @@ export class RailDocument {
 			isStaticFabSemanticBayMutationKind(plan.kind) ||
 			(plan as { readonly kind: string }).kind === STATIC_FAB_SEMANTIC_BANK_DETACH_KIND ||
 			(plan as { readonly kind: string }).kind === STATIC_FAB_SEMANTIC_BANK_DELETE_KIND ||
+			(plan as { readonly kind: string }).kind === STATIC_FAB_SEMANTIC_FAB_DELETE_KIND ||
 			(plan as { readonly kind: string }).kind === STATIC_FAB_BAY_FLOW_EDIT_KIND
 		) {
 			return this.rejectCommand(
@@ -2052,6 +2062,74 @@ export class RailDocument {
 			);
 		} catch (error) {
 			return this.rejectCommand(error, "Bank 삭제를 원자적으로 적용할 수 없습니다");
+		}
+		this.pushUndoEntry(entry);
+		this.emit(
+			plan.kind,
+			plan.baseRevision,
+			entry.changes,
+			entry.switchChanges,
+			entry.portChanges,
+			entry.equipmentGroupChanges,
+			entry.organizationChanges,
+			entry.organizationNextIdBefore,
+			entry.organizationNextIdAfter,
+			entry.organizationImpactAuthorizations,
+			undefined,
+			null,
+			entry.relationshipChanges,
+			entry.relationshipNextIdBefore,
+			entry.relationshipNextIdAfter,
+		);
+		return true;
+	}
+
+	/** Delete one exclusive root Fab subtree in one certified history entry. */
+	commitStaticFabSemanticFabDelete(
+		plan: StaticFabSemanticFabDeletePlan,
+		scope: StaticFabSemanticFabDeleteScope,
+	): boolean {
+		this.lastCommandError = null;
+		const authorityError = consumeStaticFabSemanticFabDeletePlan(plan, this, scope);
+		if (authorityError) return this.rejectCommand(authorityError, "Fab 삭제를 거부했습니다");
+		const patch = plan.transition;
+		const entry = createHistoryEntry(
+			plan.kind,
+			patch.changes,
+			patch.switchChanges,
+			patch.portChanges,
+			patch.equipmentGroupChanges,
+			patch.organizationChanges,
+			patch.organizationNextIdBefore,
+			patch.organizationNextIdAfter,
+			patch.organizationImpactAuthorizations ?? [],
+			null,
+			null,
+			null,
+			patch.relationshipChanges ?? [],
+			patch.relationshipNextIdBefore,
+			patch.relationshipNextIdAfter,
+		);
+		try {
+			this.applyChanges(
+				entry.changes,
+				entry.switchChanges,
+				entry.portChanges,
+				entry.equipmentGroupChanges,
+				entry.organizationChanges,
+				entry.organizationNextIdBefore,
+				entry.organizationNextIdAfter,
+				false,
+				entry.organizationImpactAuthorizations,
+				null,
+				null,
+				null,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
+			);
+		} catch (error) {
+			return this.rejectCommand(error, "Fab 삭제를 원자적으로 적용할 수 없습니다");
 		}
 		this.pushUndoEntry(entry);
 		this.emit(

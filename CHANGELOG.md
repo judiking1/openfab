@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.62] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Review and delete one root Fab's exclusive organization, rail, equipment and Port subtree in
+  one atomic action with exact Undo/Redo. Show removed and preserved counts with bounded samples,
+  including when the deletion leaves an empty canvas.
+- Preserve other roots, unowned content and ID cursors. Reject shared or external references,
+  partial equipment, legacy CUSTOM Stockers and operational references to removed objects.
+  Fab deletion uses its own source-bound Worker authority, separate from Bank deletion and detach.
+
 ## [0.1.61] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

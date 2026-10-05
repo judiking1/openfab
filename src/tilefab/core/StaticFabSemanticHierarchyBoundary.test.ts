@@ -21,6 +21,8 @@ import { staticFabSemanticBankDeletePreparedShapeError } from "../worker/StaticF
 import { prepareStaticFabSemanticBankDelete } from "../worker/StaticFabSemanticBankDeleteRuntime";
 import { staticFabSemanticBankDetachPreparedShapeError } from "../worker/StaticFabSemanticBankDetachResponseValidator";
 import { prepareStaticFabSemanticBankDetach } from "../worker/StaticFabSemanticBankDetachRuntime";
+import { staticFabSemanticFabDeletePreparedShapeError } from "../worker/StaticFabSemanticFabDeleteResponseValidator";
+import { prepareStaticFabSemanticFabDelete } from "../worker/StaticFabSemanticFabDeleteRuntime";
 import {
 	copyPortEquipmentState,
 	emptyPortEquipmentState,
@@ -85,6 +87,17 @@ import {
 	staticFabSemanticBankDetachSourceIdentity,
 } from "./StaticFabSemanticBankDetachCertification";
 import {
+	planStaticFabSemanticFabDelete,
+	type StaticFabSemanticFabDeleteIntent,
+} from "./StaticFabSemanticFabDelete";
+import {
+	adoptStaticFabSemanticFabDeleteWorkerPlan,
+	issueStaticFabSemanticFabDeletePermit,
+	revokeStaticFabSemanticFabDeletePermit,
+	staticFabSemanticFabDeleteIntentFingerprint,
+	staticFabSemanticFabDeleteSourceIdentity,
+} from "./StaticFabSemanticFabDeleteCertification";
+import {
 	inventoryStaticFabSemanticHierarchyBoundary,
 	STATIC_FAB_SEMANTIC_HIERARCHY_BOUNDARY_MAX_PORTS,
 } from "./StaticFabSemanticHierarchyBoundary";
@@ -103,53 +116,433 @@ interface FixtureState extends StaticFabOrganizationBundlePlacementProspectiveSt
 	readonly patchSequence: number;
 }
 
+describe("Declared semantic root Fab delete", () => {
+	let source: FixtureState;
+	beforeAll(() => {
+		source = rootFabDeleteFixture();
+	});
+	const intent = (): StaticFabSemanticFabDeleteIntent => ({
+		version: 1,
+		action: "DELETE",
+		targetRole: "FAB",
+		targetOrganizationId: 16,
+		expectedParentOrganizationId: null,
+	});
+	const makeDocument = (fixture = source, operations = emptyOperationalConfigurationState()) =>
+		RailDocument.fromLoadedMap(
+			fixture.map.clone(),
+			fixture.patchSequence,
+			fixture.portEquipment,
+			fixture.organizations,
+			operations,
+			fixture.relationships,
+		);
+	const prepare = (document: RailDocument) => {
+		const scope = { projectId: "root-fab-delete-synthetic", projectGeneration: 1 };
+		const snapshot = captureRailMirrorSnapshot(
+			document.map,
+			document.getPatchSequence(),
+			document.portEquipment,
+			document.organizations,
+			document.relationships,
+		).snapshot;
+		const permit = issueStaticFabSemanticFabDeletePermit(
+			document,
+			scope,
+			intent(),
+			snapshot.checksum,
+		);
+		const request = {
+			type: "PREPARE_STATIC_FAB_SEMANTIC_FAB_DELETE" as const,
+			version: 1 as const,
+			requestId: 1,
+			ticketId: permit.ticketId,
+			snapshot,
+			operationalConfiguration: document.operationalConfiguration,
+			expectedSource: staticFabSemanticFabDeleteSourceIdentity(document, snapshot.checksum),
+			intent: intent(),
+			expectedIntentFingerprint: staticFabSemanticFabDeleteIntentFingerprint(intent()),
+		};
+		return {
+			scope,
+			snapshot,
+			permit,
+			request,
+			prepared: structuredClone(prepareStaticFabSemanticFabDelete(request)),
+		};
+	};
+	it("deletes one complete root while preserving another Fab and unowned content with exact Mirror Undo/Redo", () => {
+		const operations = copyOperationalConfigurationState({
+			...emptyOperationalConfigurationState(),
+			stationCapabilities: [{ portId: 4, transferCapability: "BIDIRECTIONAL" }],
+		});
+		const document = makeDocument(source, operations);
+		const { scope, snapshot, permit, prepared } = prepare(document);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		expect(staticFabSemanticFabDeletePreparedShapeError(prepared)).toBeNull();
+		if (!prepared.plan || !prepared.ticket || !prepared.evidence) throw new Error(prepared.reason);
+		expect(prepared.evidence.authoredComponentDelta).toBe(
+			-prepared.evidence.deletedFabTopology.authoredComponentCount,
+		);
+		const plan = adoptStaticFabSemanticFabDeleteWorkerPlan(
+			permit,
+			prepared.ticket,
+			prepared.plan,
+			document,
+			scope,
+			intent(),
+			checksumRailPatchResult(snapshot.checksum, prepared.plan.transition),
+		);
+		const mirror = new RailPatchMirror();
+		mirror.sync(snapshot, undefined, operations);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		expect(
+			document.commitStaticFabSemanticFabDelete(plan, scope),
+			document.getLastCommandError() ?? "",
+		).toBe(true);
+		expect(events).toHaveLength(1);
+		expect(document.organizations.records).toEqual(
+			source.organizations.records.filter((row) => row.id >= 17),
+		);
+		expect(document.portEquipment.ports).toEqual(
+			source.portEquipment.ports.filter((port) => port.id >= 3),
+		);
+		expect(document.portEquipment.equipmentGroups).toEqual(
+			source.portEquipment.equipmentGroups.filter((group) => group.id >= 3),
+		);
+		expect(document.operationalConfiguration).toEqual(operations);
+		expect(
+			plan.transition.changes.every(
+				(change) => change.x < 1000 && change.y < 1000 && change.after === 0,
+			),
+		).toBe(true);
+		expect(plan.transition.organizationImpactAuthorizations).toHaveLength(0);
+		expect(plan.review.removed).toMatchObject({
+			organizations: { count: 16 },
+			fabs: { count: 1 },
+			banks: { count: 3 },
+			bays: { count: 6 },
+			loops: { count: 6 },
+			ports: { count: 2, idSample: [1, 2] },
+		});
+		expect(plan.review.preserved.ports.idSample).toEqual([3, 4]);
+		const apply = () => {
+			const event = events.at(-1);
+			if (!event) throw new Error("Expected atomic event");
+			return mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		};
+		expect(apply().checksum).toBe(prepared.ticket.prospective.checksum);
+		expect(document.undo(), document.getLastCommandError() ?? "").toBe(true);
+		expect(() =>
+			mirror.applyPatch({ ...(events.at(-1) as RailPatchEvent), kind: "erase" }),
+		).toThrow();
+		expect(apply().checksum).toBe(snapshot.checksum);
+		expect(document.organizations).toEqual(source.organizations);
+		expect(document.portEquipment).toEqual(source.portEquipment);
+		expect(document.relationships).toEqual(source.relationships);
+		expect(document.redo(), document.getLastCommandError() ?? "").toBe(true);
+		expect(apply().checksum).toBe(prepared.ticket.prospective.checksum);
+		expect(document.commitStaticFabSemanticFabDelete(plan, scope)).toBe(false);
+	});
+	it("allows removal of the sole exclusive root into an empty document without recycling cursors", () => {
+		const fixture = threeBankFabFixture(true);
+		const document = makeDocument(fixture);
+		const { scope, snapshot, permit, prepared } = prepare(document);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		if (!prepared.plan || !prepared.ticket) throw new Error(prepared.reason);
+		const plan = adoptStaticFabSemanticFabDeleteWorkerPlan(
+			permit,
+			prepared.ticket,
+			prepared.plan,
+			document,
+			scope,
+			intent(),
+			checksumRailPatchResult(snapshot.checksum, prepared.plan.transition),
+		);
+		expect(
+			document.commitStaticFabSemanticFabDelete(plan, scope),
+			document.getLastCommandError() ?? "",
+		).toBe(true);
+		expect(document.map.size).toBe(0);
+		expect(document.map.advancedSwitchCount).toBe(0);
+		expect(document.organizations.records).toHaveLength(0);
+		expect(document.relationships.records).toHaveLength(0);
+		expect(document.organizations.nextOrganizationId).toBe(
+			fixture.organizations.nextOrganizationId,
+		);
+		expect(document.relationships.nextRelationshipId).toBe(
+			fixture.relationships.nextRelationshipId,
+		);
+		expect(document.undo()).toBe(true);
+		expect(
+			checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(snapshot.checksum);
+		expect(document.redo()).toBe(true);
+		expect(document.map.size).toBe(0);
+	});
+	it.each([
+		"shared",
+		"unowned-port",
+		"custom",
+		"partial-group",
+		"external-parent",
+		"operational",
+	] as const)("rejects %s references without source mutation", (condition) => {
+		let organizations = source.organizations;
+		let equipment = source.portEquipment;
+		let operations = emptyOperationalConfigurationState();
+		const bank = organizations.records.find((row) => row.id === 15);
+		if (!bank) throw new Error("Expected synthetic Bank");
+		if (condition === "shared")
+			organizations = copyStaticFabOrganizationState({
+				nextOrganizationId: organizations.nextOrganizationId + 1,
+				records: [
+					...organizations.records,
+					{
+						...bank,
+						id: organizations.nextOrganizationId,
+						kind: "AREA",
+						name: "External shared owner",
+						parentOrganizationIds: [],
+						membership: { railEdges: [], advancedSwitchIds: [], equipmentGroupIds: [1] },
+					},
+				],
+			});
+		if (condition === "external-parent") {
+			const bay = organizations.records.find((row) => row.id === 9);
+			if (!bay) throw new Error("Expected Bay");
+			organizations = replaceOrganization(organizations, {
+				...bay,
+				parentOrganizationIds: [15, 29],
+			});
+		}
+		if (condition === "unowned-port")
+			organizations = replaceOrganization(organizations, {
+				...bank,
+				membership: { ...bank.membership, equipmentGroupIds: [] },
+			});
+		if (condition === "custom")
+			equipment = copyPortEquipmentState({
+				...equipment,
+				ports: equipment.ports.map((port) => (port.id === 1 ? { ...port, portType: "STK" } : port)),
+				equipmentGroups: equipment.equipmentGroups.map((group) =>
+					group.id === 1 ? { ...group, kind: "STK", template: "CUSTOM" } : group,
+				),
+			});
+		if (condition === "partial-group")
+			equipment = copyPortEquipmentState({
+				...equipment,
+				nextPortId: 6,
+				ports: [
+					...equipment.ports.map((port) =>
+						port.id === 1 ? { ...port, portType: "STK" as const } : port,
+					),
+					{
+						...equipment.ports[3],
+						id: 5,
+						equipmentGroupId: 1,
+						portType: "STK",
+						barcode: "CROSS-FAB-PORT",
+					},
+				],
+				equipmentGroups: equipment.equipmentGroups.map((group) =>
+					group.id === 1 ? { ...group, kind: "STK", template: "FLEX", portIds: [1, 5] } : group,
+				),
+			});
+		if (condition === "operational")
+			operations = copyOperationalConfigurationState({
+				...operations,
+				stationCapabilities: [{ portId: 1, transferCapability: "BIDIRECTIONAL" }],
+			});
+		const before = checksumRailMap(source.map, equipment, organizations, source.relationships);
+		const result = planStaticFabSemanticFabDelete(
+			source.map,
+			equipment,
+			source.patchSequence,
+			organizations,
+			source.relationships,
+			operations,
+			intent(),
+		);
+		expect(result.valid, result.reason).toBe(false);
+		const codes = {
+			shared: "INVALID_SOURCE",
+			"unowned-port": "EXTERNAL_PORT_REFERENCE",
+			custom: "CUSTOM_EQUIPMENT",
+			"partial-group": "PARTIAL_EQUIPMENT",
+			"external-parent": "HIERARCHY_REJECTED",
+			operational: "EXTERNAL_OPERATIONAL_REFERENCE",
+		};
+		expect(result.issueCode, result.reason).toBe(codes[condition]);
+		if (condition === "shared") expect(result.reason).toMatch(/멤버십을 함께 소유/);
+		expect(result.plan).toBeNull();
+		expect(result.prospectiveState).toBeNull();
+		expect(result.deletedMap).toBeNull();
+		expect(checksumRailMap(source.map, equipment, organizations, source.relationships)).toBe(
+			before,
+		);
+	});
+	it("consumes stale, cancelled and foreign authorities without allowing Fab deletion", () => {
+		const document = makeDocument();
+		const { scope, snapshot, permit, prepared } = prepare(document);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		if (!prepared.plan || !prepared.ticket) throw new Error(prepared.reason);
+		const { plan: workerPlan, ticket } = prepared;
+		const checksum = checksumRailPatchResult(snapshot.checksum, workerPlan.transition);
+		const issue = () =>
+			issueStaticFabSemanticFabDeletePermit(document, scope, intent(), snapshot.checksum);
+		const adopt = (candidate = permit, currentScope = scope, currentDocument = document) =>
+			adoptStaticFabSemanticFabDeleteWorkerPlan(
+				candidate,
+				{ ...ticket, ticketId: candidate.ticketId },
+				workerPlan,
+				currentDocument,
+				currentScope,
+				intent(),
+				checksum,
+			);
+		expect(() => adopt(permit, { ...scope, projectGeneration: 2 })).toThrow(/permit/);
+		expect(() => adopt()).toThrow(/permit/);
+		expect(() => adopt(issue(), scope, makeDocument())).toThrow(/permit/);
+		const cancelled = issue();
+		revokeStaticFabSemanticFabDeletePermit(cancelled);
+		expect(() => adopt(cancelled)).toThrow(/permit/);
+		const cancelledAfterAdoption = issue();
+		const cancelledPlan = adopt(cancelledAfterAdoption);
+		revokeStaticFabSemanticFabDeletePermit(cancelledAfterAdoption);
+		expect(document.commitStaticFabSemanticFabDelete(cancelledPlan, scope)).toBe(false);
+		const bankIntent: StaticFabSemanticBankDeleteIntent = {
+			version: 1,
+			action: "DELETE",
+			targetRole: "BAY_BANK",
+			targetOrganizationId: 15,
+			expectedParentOrganizationId: 16,
+		};
+		const bankPermit = issueStaticFabSemanticBankDeletePermit(
+			document,
+			scope,
+			bankIntent,
+			snapshot.checksum,
+		);
+		expect(() => adopt(bankPermit)).toThrow(/permit/);
+		const detachPermit = issueStaticFabSemanticBankDetachPermit(
+			document,
+			scope,
+			{ ...bankIntent, action: "DETACH", expectedParentOrganizationId: 16 },
+			snapshot.checksum,
+		);
+		expect(() => adopt(detachPermit)).toThrow(/permit/);
+		const alteredTicket = issue();
+		expect(() =>
+			adoptStaticFabSemanticFabDeleteWorkerPlan(
+				alteredTicket,
+				{
+					...ticket,
+					ticketId: alteredTicket.ticketId,
+					source: { ...ticket.source, operationalConfigurationFingerprint: "changed" },
+				},
+				workerPlan,
+				document,
+				scope,
+				intent(),
+				checksum,
+			),
+		).toThrow(/원본/);
+		const valid = issue();
+		const plan = adopt(valid);
+		expect(() => adopt(valid)).toThrow(/permit/);
+		expect(
+			document.commitStaticFabSemanticFabDelete(plan, { ...scope, projectId: "different" }),
+		).toBe(false);
+		expect(document.commitStaticFabSemanticFabDelete(plan, scope)).toBe(false);
+		expect(document.canUndo).toBe(false);
+		expect(
+			checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(snapshot.checksum);
+		const staleOperations = issue();
+		const operationPlan = document.planOperationalConfigurationReplacement(
+			copyOperationalConfigurationState({
+				...emptyOperationalConfigurationState(),
+				stationCapabilities: [{ portId: 4, transferCapability: "BIDIRECTIONAL" }],
+			}),
+		);
+		if (!operationPlan) throw new Error("Expected operational edit");
+		expect(document.commitOperationalConfiguration(operationPlan)).toBe(true);
+		expect(() => adopt(staleOperations)).toThrow(/permit/);
+		expect(document.organizations.records).toEqual(source.organizations.records);
+	});
+	it("independently rejects altered source identity and malformed Worker evidence", () => {
+		const document = makeDocument();
+		const { request, prepared } = prepare(document);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		if (!prepared.plan || !prepared.ticket || !prepared.evidence) throw new Error(prepared.reason);
+		expect(
+			prepareStaticFabSemanticFabDelete({
+				...request,
+				expectedSource: {
+					...request.expectedSource,
+					revision: request.expectedSource.revision + 1,
+				},
+			}).failureCode,
+		).toBe("STALE_SOURCE");
+		expect(
+			prepareStaticFabSemanticFabDelete({
+				...request,
+				operationalConfiguration: copyOperationalConfigurationState({
+					...request.operationalConfiguration,
+					stationCapabilities: [{ portId: 4, transferCapability: "BIDIRECTIONAL" }],
+				}),
+			}).failureCode,
+		).toBe("STALE_SOURCE");
+		expect(
+			staticFabSemanticFabDeletePreparedShapeError({ ...prepared, unexpected: true }),
+		).not.toBeNull();
+		expect(
+			staticFabSemanticFabDeletePreparedShapeError({
+				...prepared,
+				evidence: {
+					...prepared.evidence,
+					deletedFabTopology: {
+						...prepared.evidence.deletedFabTopology,
+						authoredComponentsClosed: false,
+					},
+				},
+			}),
+		).not.toBeNull();
+		expect(
+			staticFabSemanticFabDeletePreparedShapeError({
+				...prepared,
+				ticket: {
+					...prepared.ticket,
+					prospective: { ...prepared.ticket.prospective, nextOrganizationId: 1 },
+				},
+			}),
+		).not.toBeNull();
+		expect(
+			document.commitStaticFabSemanticFabDelete(prepared.plan, {
+				projectId: "root-fab-delete-synthetic",
+				projectGeneration: 1,
+			}),
+		).toBe(false);
+		expect(document.canUndo).toBe(false);
+	});
+});
+
 describe("Declared semantic Bank delete", () => {
 	let source: FixtureState;
 	beforeAll(() => {
-		source = threeBankFabFixture(true);
-		source = threeBankFabFixture(true, source, 1000);
-		const unowned = placeProductionBays([{ x: 2200, y: 2200 }], source);
-		source = { ...source, map: unowned.map, patchSequence: unowned.patchSequence };
-		const bank = source.organizations.records.find((row) => row.id === 15);
-		const retained = source.organizations.records.find((row) => row.id === 13);
-		if (!bank || !retained) throw new Error("Expected synthetic Banks.");
-		source = {
-			...source,
-			portEquipment: twoOhbPortEquipment(
-				regularCardinalRouteForMembership(source.map, bank.membership.railEdges),
-				regularCardinalRouteForMembership(source.map, retained.membership.railEdges),
-			),
-			organizations: attachEquipmentGroup(attachEquipmentGroup(source.organizations, 15, 1), 13, 2),
-		};
-
-		const unownedLoop = unowned.organizations.records.find(
-			(row) => row.id >= source.organizations.nextOrganizationId && row.kind === "AISLE",
-		);
-		const port = source.portEquipment.ports[0];
-		if (!unownedLoop || !port)
-			throw new Error("Expected synthetic unowned Loop and Port template.");
-		source = {
-			...source,
-			portEquipment: copyPortEquipmentState({
-				...source.portEquipment,
-				nextPortId: 4,
-				nextEquipmentGroupId: 4,
-				ports: [
-					...source.portEquipment.ports,
-					{
-						...port,
-						id: 3,
-						equipmentGroupId: 3,
-						barcode: "UNOWNED-OHB",
-						route: regularCardinalRouteForMembership(source.map, unownedLoop.membership.railEdges),
-					},
-				],
-				equipmentGroups: [
-					...source.portEquipment.equipmentGroups,
-					{ id: 3, kind: "OHB", template: "SINGLE", portIds: [3] },
-				],
-			}),
-		};
+		source = twoFabDeleteFixture();
 	});
 	const intent = (attached = true): StaticFabSemanticBankDeleteIntent => ({
 		version: 1,
@@ -2371,4 +2764,81 @@ function mergeMembership(
 			[...new Set([...left.equipmentGroupIds, ...right.equipmentGroupIds])].sort((a, b) => a - b),
 		),
 	});
+}
+
+function twoFabDeleteFixture(): FixtureState {
+	let source = threeBankFabFixture(true);
+	source = threeBankFabFixture(true, source, 1000);
+	const unowned = placeProductionBays([{ x: 2200, y: 2200 }], source);
+	source = { ...source, map: unowned.map, patchSequence: unowned.patchSequence };
+	const bank = source.organizations.records.find((row) => row.id === 15);
+	const retained = source.organizations.records.find((row) => row.id === 13);
+	if (!bank || !retained) throw new Error("Expected synthetic Banks.");
+	source = {
+		...source,
+		portEquipment: twoOhbPortEquipment(
+			regularCardinalRouteForMembership(source.map, bank.membership.railEdges),
+			regularCardinalRouteForMembership(source.map, retained.membership.railEdges),
+		),
+		organizations: attachEquipmentGroup(attachEquipmentGroup(source.organizations, 15, 1), 13, 2),
+	};
+
+	const unownedLoop = unowned.organizations.records.find(
+		(row) => row.id >= source.organizations.nextOrganizationId && row.kind === "AISLE",
+	);
+	const port = source.portEquipment.ports[0];
+	if (!unownedLoop || !port) throw new Error("Expected synthetic unowned Loop and Port template.");
+	source = {
+		...source,
+		portEquipment: copyPortEquipmentState({
+			...source.portEquipment,
+			nextPortId: 4,
+			nextEquipmentGroupId: 4,
+			ports: [
+				...source.portEquipment.ports,
+				{
+					...port,
+					id: 3,
+					equipmentGroupId: 3,
+					barcode: "UNOWNED-OHB",
+					route: regularCardinalRouteForMembership(source.map, unownedLoop.membership.railEdges),
+				},
+			],
+			equipmentGroups: [
+				...source.portEquipment.equipmentGroups,
+				{ id: 3, kind: "OHB", template: "SINGLE", portIds: [3] },
+			],
+		}),
+	};
+	return source;
+}
+
+function rootFabDeleteFixture(): FixtureState {
+	const source = twoFabDeleteFixture();
+	const otherBank = source.organizations.records.find((row) => row.id === 31);
+	const port = source.portEquipment.ports[0];
+	if (!otherBank || !port) throw new Error("Expected second synthetic Fab and Port.");
+	return {
+		...source,
+		organizations: attachEquipmentGroup(source.organizations, 31, 4),
+		portEquipment: copyPortEquipmentState({
+			...source.portEquipment,
+			nextPortId: 5,
+			nextEquipmentGroupId: 5,
+			ports: [
+				...source.portEquipment.ports,
+				{
+					...port,
+					id: 4,
+					equipmentGroupId: 4,
+					barcode: "OTHER-FAB-OHB",
+					route: regularCardinalRouteForMembership(source.map, otherBank.membership.railEdges),
+				},
+			],
+			equipmentGroups: [
+				...source.portEquipment.equipmentGroups,
+				{ id: 4, kind: "OHB", template: "SINGLE", portIds: [4] },
+			],
+		}),
+	};
 }

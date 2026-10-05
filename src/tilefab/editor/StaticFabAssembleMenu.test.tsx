@@ -40,6 +40,44 @@ function props(overrides: Partial<StaticFabAssembleMenuProps> = {}): StaticFabAs
 }
 
 describe("StaticFabAssembleMenu", () => {
+	it("shows the separate Fab Delete review entry only for one Fab", () => {
+		const fabDelete: NonNullable<StaticFabAssembleMenuProps["fabDelete"]> = {
+			availability: { state: "ready", reason: "최상위 FAB의 독점 삭제 범위를 검토합니다." },
+			onDelete: vi.fn(),
+		};
+		const markup = renderToStaticMarkup(
+			<StaticFabAssembleMenu {...props({ selectionCount: 1, selectedFabCount: 1, fabDelete })} />,
+		);
+		expect(markup).toContain("FAB 삭제…");
+		expect(markup).not.toMatch(/data-testid="assemble-delete-selected-fab"[^>]*disabled/);
+		expect(markup).not.toContain('data-testid="assemble-delete-selected-bank"');
+		for (const selection of [
+			{ selectionCount: 0, selectedFabCount: 0 },
+			{ selectionCount: 2, selectedFabCount: 1 },
+			{ selectionCount: 1, selectedFabCount: 0, selectedBankCount: 1 },
+		]) {
+			expect(
+				renderToStaticMarkup(<StaticFabAssembleMenu {...props({ ...selection, fabDelete })} />),
+			).not.toContain('data-testid="assemble-delete-selected-fab"');
+		}
+	});
+	it("keeps the Fab deletion refusal visible beside its disabled entry", () => {
+		const reason = "최상위 FAB만 삭제할 수 있습니다.";
+		const markup = renderToStaticMarkup(
+			<StaticFabAssembleMenu
+				{...props({
+					selectionCount: 1,
+					selectedFabCount: 1,
+					fabDelete: { availability: { state: "blocked", reason }, onDelete: vi.fn() },
+				})}
+			/>,
+		);
+		expect(markup).toContain(reason);
+		expect(markup).toMatch(
+			/data-testid="assemble-delete-selected-fab"[^>]*aria-describedby="tilefab-assemble-fab-delete-status"[^>]*disabled/,
+		);
+	});
+
 	it("leads with task-level FAB commands and keeps motifs in Advanced", () => {
 		const markup = renderToStaticMarkup(<StaticFabAssembleMenu {...props()} />);
 		expect(markup).toContain("새 FAB 만들기");
