@@ -17,6 +17,8 @@ import {
 } from "../worker/RailMirrorChecksum";
 import { RailPatchMirror } from "../worker/RailPatchMirror";
 import { decodeRailPatchSoA, encodeRailPatchEvent } from "../worker/railMirrorProtocol";
+import { staticFabSemanticBankDeletePreparedShapeError } from "../worker/StaticFabSemanticBankDeleteResponseValidator";
+import { prepareStaticFabSemanticBankDelete } from "../worker/StaticFabSemanticBankDeleteRuntime";
 import { staticFabSemanticBankDetachPreparedShapeError } from "../worker/StaticFabSemanticBankDetachResponseValidator";
 import { prepareStaticFabSemanticBankDetach } from "../worker/StaticFabSemanticBankDetachRuntime";
 import {
@@ -24,6 +26,10 @@ import {
 	emptyPortEquipmentState,
 	type PortEquipmentState,
 } from "./EquipmentGroup";
+import {
+	copyOperationalConfigurationState,
+	emptyOperationalConfigurationState,
+} from "./OperationalConfiguration";
 import type { CardinalPortRoute, PortRecord } from "./PortRecord";
 import { planRailPath } from "./paint";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
@@ -57,6 +63,17 @@ import {
 	type StaticFabOrganizationBundlePlacementProspectiveState,
 } from "./StaticFabOrganizationBundlePlacement";
 import {
+	planStaticFabSemanticBankDelete,
+	type StaticFabSemanticBankDeleteIntent,
+} from "./StaticFabSemanticBankDelete";
+import {
+	adoptStaticFabSemanticBankDeleteWorkerPlan,
+	issueStaticFabSemanticBankDeletePermit,
+	revokeStaticFabSemanticBankDeletePermit,
+	staticFabSemanticBankDeleteIntentFingerprint,
+	staticFabSemanticBankDeleteSourceIdentity,
+} from "./StaticFabSemanticBankDeleteCertification";
+import {
 	planStaticFabSemanticBankDetach,
 	type StaticFabSemanticBankDetachIntent,
 } from "./StaticFabSemanticBankDetach";
@@ -85,6 +102,347 @@ import { TileMap } from "./TileMap";
 interface FixtureState extends StaticFabOrganizationBundlePlacementProspectiveState {
 	readonly patchSequence: number;
 }
+
+describe("Declared semantic Bank delete", () => {
+	let source: FixtureState;
+	beforeAll(() => {
+		source = threeBankFabFixture(true);
+		source = threeBankFabFixture(true, source, 1000);
+		const unowned = placeProductionBays([{ x: 2200, y: 2200 }], source);
+		source = { ...source, map: unowned.map, patchSequence: unowned.patchSequence };
+		const bank = source.organizations.records.find((row) => row.id === 15);
+		const retained = source.organizations.records.find((row) => row.id === 13);
+		if (!bank || !retained) throw new Error("Expected synthetic Banks.");
+		source = {
+			...source,
+			portEquipment: twoOhbPortEquipment(
+				regularCardinalRouteForMembership(source.map, bank.membership.railEdges),
+				regularCardinalRouteForMembership(source.map, retained.membership.railEdges),
+			),
+			organizations: attachEquipmentGroup(attachEquipmentGroup(source.organizations, 15, 1), 13, 2),
+		};
+
+		const unownedLoop = unowned.organizations.records.find(
+			(row) => row.id >= source.organizations.nextOrganizationId && row.kind === "AISLE",
+		);
+		const port = source.portEquipment.ports[0];
+		if (!unownedLoop || !port)
+			throw new Error("Expected synthetic unowned Loop and Port template.");
+		source = {
+			...source,
+			portEquipment: copyPortEquipmentState({
+				...source.portEquipment,
+				nextPortId: 4,
+				nextEquipmentGroupId: 4,
+				ports: [
+					...source.portEquipment.ports,
+					{
+						...port,
+						id: 3,
+						equipmentGroupId: 3,
+						barcode: "UNOWNED-OHB",
+						route: regularCardinalRouteForMembership(source.map, unownedLoop.membership.railEdges),
+					},
+				],
+				equipmentGroups: [
+					...source.portEquipment.equipmentGroups,
+					{ id: 3, kind: "OHB", template: "SINGLE", portIds: [3] },
+				],
+			}),
+		};
+	});
+	const intent = (attached = true): StaticFabSemanticBankDeleteIntent => ({
+		version: 1,
+		action: "DELETE",
+		targetRole: "BAY_BANK",
+		targetOrganizationId: 15,
+		expectedParentOrganizationId: attached ? 16 : null,
+	});
+	const makeDocument = (fixture = source, operations = emptyOperationalConfigurationState()) =>
+		RailDocument.fromLoadedMap(
+			fixture.map.clone(),
+			fixture.patchSequence,
+			fixture.portEquipment,
+			fixture.organizations,
+			operations,
+			fixture.relationships,
+		);
+	const prepare = (document: RailDocument, deleteIntent: StaticFabSemanticBankDeleteIntent) => {
+		const scope = { projectId: "bank-delete-synthetic", projectGeneration: 1 };
+		const snapshot = captureRailMirrorSnapshot(
+			document.map,
+			document.getPatchSequence(),
+			document.portEquipment,
+			document.organizations,
+			document.relationships,
+		).snapshot;
+		const permit = issueStaticFabSemanticBankDeletePermit(
+			document,
+			scope,
+			deleteIntent,
+			snapshot.checksum,
+		);
+		const prepared = prepareStaticFabSemanticBankDelete({
+			type: "PREPARE_STATIC_FAB_SEMANTIC_BANK_DELETE",
+			version: 1,
+			requestId: 1,
+			ticketId: permit.ticketId,
+			snapshot,
+			operationalConfiguration: document.operationalConfiguration,
+			expectedSource: staticFabSemanticBankDeleteSourceIdentity(document, snapshot.checksum),
+			intent: deleteIntent,
+			expectedIntentFingerprint: staticFabSemanticBankDeleteIntentFingerprint(deleteIntent),
+		});
+		return { scope, snapshot, permit, prepared: structuredClone(prepared) };
+	};
+	it.each([
+		true,
+		false,
+	])("deletes attached=%s Bank C once and exactly restores source and Mirror through Undo/Redo", (attached) => {
+		let fixture = source;
+		if (!attached) {
+			const detached = planStaticFabSemanticBankDetach(
+				source.map,
+				source.portEquipment,
+				source.patchSequence,
+				source.organizations,
+				source.relationships,
+				{ ...intent(), action: "DETACH" },
+			);
+			if (!detached.valid) throw new Error(detached.reason);
+			fixture = { ...detached.prospectiveState, patchSequence: source.patchSequence + 1 };
+		}
+		const document = makeDocument(fixture);
+		const deleteIntent = intent(attached);
+		const { scope, snapshot, permit, prepared } = prepare(document, deleteIntent);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		expect(staticFabSemanticBankDeletePreparedShapeError(prepared)).toBeNull();
+		if (!prepared.plan || !prepared.ticket) throw new Error(prepared.reason);
+		const plan = adoptStaticFabSemanticBankDeleteWorkerPlan(
+			permit,
+			prepared.ticket,
+			prepared.plan,
+			document,
+			scope,
+			deleteIntent,
+			checksumRailPatchResult(snapshot.checksum, prepared.plan.transition),
+		);
+		const mirror = new RailPatchMirror();
+		mirror.sync(snapshot);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		expect(
+			document.commitStaticFabSemanticBankDelete(plan, scope),
+			document.getLastCommandError() ?? "",
+		).toBe(true);
+		expect(events).toHaveLength(1);
+		expect(document.organizations.records).toHaveLength(fixture.organizations.records.length - 5);
+		expect(document.portEquipment.ports.map((port) => port.id)).toEqual([2, 3]);
+		expect(document.portEquipment.equipmentGroups.map((group) => group.id)).toEqual([2, 3]);
+		expect(document.organizations.records.filter((row) => row.id >= 17)).toEqual(
+			fixture.organizations.records.filter((row) => row.id >= 17),
+		);
+		expect(plan.transition.changes.every((change) => change.x < 1000 && change.y < 1000)).toBe(
+			true,
+		);
+		expect(plan.review.removed.organizations.count).toBe(5);
+		expect(plan.review.removed.ports.idSample).toEqual([1]);
+		expect(plan.review.removed.relationships.count).toBe(attached ? 2 : 1);
+		const apply = () => {
+			const event = events.at(-1);
+			if (!event) throw new Error("Expected atomic event.");
+			return mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		};
+		expect(apply().checksum).toBe(prepared.ticket.prospective.checksum);
+		expect(document.undo(), document.getLastCommandError() ?? "").toBe(true);
+		if (attached) {
+			expect(() =>
+				mirror.applyPatch({
+					...(events.at(-1) as RailPatchEvent),
+					organizationImpactAuthorizations: [],
+				}),
+			).toThrow();
+			expect(mirror.state.checksum).toBe(prepared.ticket.prospective.checksum);
+		}
+		expect(apply().checksum).toBe(snapshot.checksum);
+		expect(document.redo(), document.getLastCommandError() ?? "").toBe(true);
+		expect(apply().checksum).toBe(prepared.ticket.prospective.checksum);
+		expect(document.commitStaticFabSemanticBankDelete(plan, scope)).toBe(false);
+	});
+	it.each([
+		"shared",
+		"unowned-port",
+		"custom",
+		"partial-group",
+		"external-parent",
+	] as const)("rejects %s dependencies without source mutation", (condition) => {
+		let organizations = source.organizations;
+		let equipment = source.portEquipment;
+		const bank = organizations.records.find((row) => row.id === 15);
+		if (!bank) throw new Error("Expected synthetic Bank.");
+		if (condition === "shared")
+			organizations = copyStaticFabOrganizationState({
+				nextOrganizationId: organizations.nextOrganizationId + 1,
+				records: [
+					...organizations.records,
+					{
+						...bank,
+						id: organizations.nextOrganizationId,
+						kind: "AREA",
+						name: "External shared owner",
+						parentOrganizationIds: [],
+						membership: firstWholeModuleMembership(source, bank),
+					},
+				],
+			});
+		if (condition === "external-parent") {
+			const bay = organizations.records.find((row) => row.id === 9);
+			if (!bay) throw new Error("Expected synthetic Bay.");
+			organizations = replaceOrganization(organizations, {
+				...bay,
+				parentOrganizationIds: [13, 15],
+			});
+		}
+		if (condition === "unowned-port")
+			organizations = replaceOrganization(organizations, {
+				...bank,
+				membership: { ...bank.membership, equipmentGroupIds: [] },
+			});
+		if (condition === "custom")
+			equipment = copyPortEquipmentState({
+				...equipment,
+				ports: equipment.ports.map((port) => (port.id === 1 ? { ...port, portType: "STK" } : port)),
+				equipmentGroups: equipment.equipmentGroups.map((group) =>
+					group.id === 1 ? { ...group, kind: "STK", template: "CUSTOM" } : group,
+				),
+			});
+		if (condition === "partial-group")
+			equipment = copyPortEquipmentState({
+				...equipment,
+				nextPortId: 5,
+				ports: [
+					...equipment.ports.map((port) =>
+						port.id === 1 ? { ...port, portType: "STK" as const } : port,
+					),
+					{
+						...equipment.ports[1],
+						id: 4,
+						equipmentGroupId: 1,
+						portType: "STK",
+						barcode: "CROSS-BANK-PORT",
+					},
+				],
+				equipmentGroups: equipment.equipmentGroups.map((group) =>
+					group.id === 1 ? { ...group, kind: "STK", template: "FLEX", portIds: [1, 4] } : group,
+				),
+			});
+		const result = planStaticFabSemanticBankDelete(
+			source.map,
+			equipment,
+			source.patchSequence,
+			organizations,
+			source.relationships,
+			emptyOperationalConfigurationState(),
+			intent(),
+		);
+		expect(result.valid, result.reason).toBe(false);
+		if (condition === "custom") expect(result.issueCode).toBe("CUSTOM_EQUIPMENT");
+		if (condition === "partial-group") expect(result.issueCode).toBe("PARTIAL_EQUIPMENT");
+		if (condition === "unowned-port") expect(result.issueCode).toBe("EXTERNAL_PORT_REFERENCE");
+		expect(result.reason.length).toBeGreaterThan(10);
+		expect(source.organizations.records.some((row) => row.id === 15)).toBe(true);
+	});
+	it("rejects stale scope, cancelled adoption, detach authority and a second adoption", () => {
+		const document = makeDocument();
+		const deleteIntent = intent();
+		const { scope, snapshot, permit, prepared } = prepare(document, deleteIntent);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		if (!prepared.plan || !prepared.ticket) throw new Error(prepared.reason);
+		const checksum = checksumRailPatchResult(snapshot.checksum, prepared.plan.transition);
+		const { plan: workerPlan, ticket } = prepared;
+		const adopt = (candidate = permit, current = scope) =>
+			adoptStaticFabSemanticBankDeleteWorkerPlan(
+				candidate,
+				{ ...ticket, ticketId: candidate.ticketId },
+				workerPlan,
+				document,
+				current,
+				deleteIntent,
+				checksum,
+			);
+		expect(() => adopt(permit, { ...scope, projectGeneration: 2 })).toThrow(/permit/);
+		expect(() => adopt()).toThrow(/permit/);
+		const staleOperations = issueStaticFabSemanticBankDeletePermit(
+			document,
+			scope,
+			deleteIntent,
+			snapshot.checksum,
+		);
+		expect(() =>
+			adoptStaticFabSemanticBankDeleteWorkerPlan(
+				staleOperations,
+				{
+					...ticket,
+					ticketId: staleOperations.ticketId,
+					source: { ...ticket.source, operationalConfigurationFingerprint: "changed" },
+				},
+				workerPlan,
+				document,
+				scope,
+				deleteIntent,
+				checksum,
+			),
+		).toThrow(/원본/);
+		const cancel = issueStaticFabSemanticBankDeletePermit(
+			document,
+			scope,
+			deleteIntent,
+			snapshot.checksum,
+		);
+		const cancelledPlan = adopt(cancel);
+		revokeStaticFabSemanticBankDeletePermit(cancel);
+		expect(document.commitStaticFabSemanticBankDelete(cancelledPlan, scope)).toBe(false);
+		const detachPermit = issueStaticFabSemanticBankDetachPermit(
+			document,
+			scope,
+			{ ...deleteIntent, action: "DETACH", expectedParentOrganizationId: 16 },
+			snapshot.checksum,
+		);
+		expect(() => adopt(detachPermit)).toThrow(/permit/);
+		const valid = issueStaticFabSemanticBankDeletePermit(
+			document,
+			scope,
+			deleteIntent,
+			snapshot.checksum,
+		);
+		const plan = adopt(valid);
+		expect(() => adopt(valid)).toThrow(/permit/);
+		expect(
+			document.commitStaticFabSemanticBankDelete(plan, { ...scope, projectId: "different" }),
+		).toBe(false);
+		expect(document.commitStaticFabSemanticBankDelete(plan, scope)).toBe(false);
+		expect(document.canUndo).toBe(false);
+		expect(
+			checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(snapshot.checksum);
+	});
+	it("rejects a Port operational reference without deleting source", () => {
+		const operations = copyOperationalConfigurationState({
+			...emptyOperationalConfigurationState(),
+			stationCapabilities: [{ portId: 1, transferCapability: "BIDIRECTIONAL" }],
+		});
+		const document = makeDocument(source, operations);
+		const result = prepare(document, intent()).prepared;
+		expect(result.valid).toBe(false);
+		expect(result.reason).toMatch(/PORT-1.*운영/);
+		expect(document.canUndo).toBe(false);
+	});
+});
 
 describe("Declared semantic Bank detach", () => {
 	let source: FixtureState;
@@ -1651,16 +2009,26 @@ function reopenedThreeBankFabFixture(): FixtureState {
 	};
 }
 
-function threeBankFabFixture(persistRelationships = false): FixtureState {
-	const placed = placeProductionBays([
-		{ x: 0, y: 0 },
-		{ x: 100, y: 0 },
-		{ x: 200, y: 0 },
-		{ x: 300, y: 0 },
-		{ x: 0, y: 120 },
-		{ x: 100, y: 120 },
-	]);
-	const bays = placed.organizations.records.filter((record) => record.kind === "BAY");
+function threeBankFabFixture(
+	persistRelationships = false,
+	initial: FixtureState | null = null,
+	offset = 0,
+): FixtureState {
+	const firstNewId = initial?.organizations.nextOrganizationId ?? 1;
+	const placed = placeProductionBays(
+		[
+			{ x: 0, y: 0 },
+			{ x: 100, y: 0 },
+			{ x: 200, y: 0 },
+			{ x: 300, y: 0 },
+			{ x: 0, y: 120 },
+			{ x: 100, y: 120 },
+		].map((cell) => ({ x: cell.x + offset, y: cell.y + offset })),
+		initial,
+	);
+	const bays = placed.organizations.records.filter(
+		(record) => record.kind === "BAY" && record.id >= firstNewId,
+	);
 	let fixture = placed;
 	for (let index = 0; index < 3; index += 1) {
 		const connection = firstValidConnector(
@@ -1682,7 +2050,9 @@ function threeBankFabFixture(persistRelationships = false): FixtureState {
 		};
 	}
 	let roles = deriveStaticFabOrganizationSemanticRoles(fixture.organizations);
-	let banks = fixture.organizations.records.filter((record) => roles.get(record.id) === "BAY_BANK");
+	let banks = fixture.organizations.records.filter(
+		(record) => roles.get(record.id) === "BAY_BANK" && record.id >= firstNewId,
+	);
 	for (const [sourceIndex, targetIndex] of [
 		[0, 1],
 		[0, 1],
@@ -1706,7 +2076,9 @@ function threeBankFabFixture(persistRelationships = false): FixtureState {
 			patchSequence: fixture.patchSequence + 1,
 		};
 		roles = deriveStaticFabOrganizationSemanticRoles(fixture.organizations);
-		banks = fixture.organizations.records.filter((record) => roles.get(record.id) === "BAY_BANK");
+		banks = fixture.organizations.records.filter(
+			(record) => roles.get(record.id) === "BAY_BANK" && record.id >= firstNewId,
+		);
 	}
 	return fixture;
 }
@@ -1765,11 +2137,14 @@ function detachedBanksFixture(): FixtureState {
 	};
 }
 
-function placeProductionBays(anchors: readonly Readonly<{ x: number; y: number }>[]): FixtureState {
+function placeProductionBays(
+	anchors: readonly Readonly<{ x: number; y: number }>[],
+	initial: FixtureState | null = null,
+): FixtureState {
 	const artifact = certifyProductionBayModuleCatalogRequest(
 		defaultProductionBayModuleCatalogRequest("single-production-bay"),
 	);
-	let fixture: FixtureState = {
+	let fixture: FixtureState = initial ?? {
 		relationships: emptyStaticFabAssemblyRelationshipState(),
 		map: new TileMap(),
 		portEquipment: emptyPortEquipmentState(),

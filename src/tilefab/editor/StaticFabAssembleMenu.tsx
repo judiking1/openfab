@@ -19,6 +19,7 @@ import type {
 } from "../core/StaticFabAssemblyConnector";
 import "./StaticFabSemanticBayMutationDialog.css";
 import "./StaticFabSemanticBankDetachDialog.css";
+import "./StaticFabSemanticBankDeleteDialog.css";
 
 export const STATIC_FAB_ASSEMBLE_DUPLICATE_CAPTURE_MODE = "EFFECTIVE" as const;
 
@@ -29,6 +30,10 @@ export interface StaticFabAssembleMenuProps {
 	readonly bankDetach?: Readonly<{
 		availability: StaticFabAssembleActionAvailability;
 		onDetach: (launcher: HTMLButtonElement) => void;
+	}>;
+	readonly bankDelete?: Readonly<{
+		availability: StaticFabAssembleActionAvailability;
+		onDelete: (launcher: HTMLButtonElement) => void;
 	}>;
 	readonly connectorHierarchyRole: StaticFabAssemblyConnectorHierarchyRole | null;
 	readonly connectorPurpose: StaticFabAssemblyConnectorPurpose | null;
@@ -67,6 +72,7 @@ export function StaticFabAssembleMenu({
 	selectedBayCount,
 	selectedBankCount,
 	bankDetach,
+	bankDelete,
 	connectorHierarchyRole,
 	connectorPurpose,
 	duplicateAvailability,
@@ -234,22 +240,50 @@ export function StaticFabAssembleMenu({
 						{connectorAvailability.reason}
 					</p>
 				</div>
-				{selectionCount === 1 && selectedBankCount === 1 && bankDetach ? (
+				{selectionCount === 1 && selectedBankCount === 1 && (bankDetach || bankDelete) ? (
 					<section className="tilefab-assemble-semantic-bank" aria-label="선택한 Bank 명령">
 						<strong>선택한 Bank</strong>
-						<button
-							type="button"
-							data-testid="assemble-detach-selected-bank"
-							aria-describedby="tilefab-assemble-bank-detach-status"
-							disabled={bankDetach.availability.state !== "ready"}
-							title={bankDetach.availability.reason}
-							onClick={(event) => bankDetach.onDetach(event.currentTarget)}
-						>
-							<Unlink size={15} /> Bank 분리…
-						</button>
-						<p id="tilefab-assemble-bank-detach-status" data-testid="assemble-bank-detach-status">
-							{bankDetach.availability.reason}
-						</p>
+						{bankDetach ? (
+							<>
+								<button
+									type="button"
+									data-testid="assemble-detach-selected-bank"
+									aria-describedby="tilefab-assemble-bank-detach-status"
+									disabled={bankDetach.availability.state !== "ready"}
+									title={bankDetach.availability.reason}
+									onClick={(event) => bankDetach.onDetach(event.currentTarget)}
+								>
+									<Unlink size={15} /> Bank 분리…
+								</button>
+								<p
+									id="tilefab-assemble-bank-detach-status"
+									data-testid="assemble-bank-detach-status"
+								>
+									{bankDetach.availability.reason}
+								</p>
+							</>
+						) : null}
+						{bankDelete ? (
+							<>
+								<button
+									type="button"
+									className="tilefab-assemble-bank-delete"
+									data-testid="assemble-delete-selected-bank"
+									aria-describedby="tilefab-assemble-bank-delete-status"
+									disabled={bankDelete.availability.state !== "ready"}
+									title={bankDelete.availability.reason}
+									onClick={(event) => bankDelete.onDelete(event.currentTarget)}
+								>
+									<Trash2 size={15} /> Bank 삭제…
+								</button>
+								<p
+									id="tilefab-assemble-bank-delete-status"
+									data-testid="assemble-bank-delete-status"
+								>
+									{bankDelete.availability.reason}
+								</p>
+							</>
+						) : null}
 					</section>
 				) : null}
 				{selectionCount === 1 && selectedBayCount === 1 ? (

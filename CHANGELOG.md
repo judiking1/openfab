@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.61] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Delete a standalone Bank's exclusive subtree, or remove a supported terminal Bank's Fab
+  connection and subtree in one reviewed action with one-step Undo/Redo. Show exact removed and
+  preserved organization, rail, equipment and Port counts with bounded samples before applying.
+- Preserve siblings, other Fab roots, unowned content and ID cursors. Reject shared ownership,
+  partial equipment groups, legacy CUSTOM Stockers and operational references to deleted objects.
+  Delete uses its own source-bound Worker certification; root Fab deletion remains unavailable.
+
 ## [0.1.60] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

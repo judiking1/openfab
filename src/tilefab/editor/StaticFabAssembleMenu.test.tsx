@@ -102,6 +102,43 @@ describe("StaticFabAssembleMenu", () => {
 		);
 		expect(markup).not.toContain('data-testid="assemble-detach-selected-bank"');
 	});
+	it("offers a separate Bank delete review with its own refusal reason", () => {
+		const markup = renderToStaticMarkup(
+			<StaticFabAssembleMenu
+				{...props({
+					selectionCount: 1,
+					selectedBankCount: 1,
+					bankDetach: { availability: { state: "ready", reason: "분리 검토" }, onDetach: vi.fn() },
+					bankDelete: {
+						availability: {
+							state: "blocked",
+							reason: "삭제 범위 밖의 Port를 포함하는 장비입니다.",
+						},
+						onDelete: vi.fn(),
+					},
+				})}
+			/>,
+		);
+		expect(markup).toContain("Bank 분리…");
+		expect(markup).toContain("Bank 삭제…");
+		expect(markup).toContain("삭제 범위 밖의 Port를 포함하는 장비입니다.");
+		expect(markup).toMatch(/data-testid="assemble-delete-selected-bank"[^>]*disabled/);
+		expect(markup).not.toMatch(/data-testid="assemble-detach-selected-bank"[^>]*disabled/);
+	});
+	it("shows Bank delete only for one Bank, including a standalone Bank", () => {
+		const bankDelete: NonNullable<StaticFabAssembleMenuProps["bankDelete"]> = {
+			availability: { state: "ready", reason: "독립 Bank 삭제 검토" },
+			onDelete: vi.fn(),
+		};
+		const render = (selectionCount: number, selectedBankCount: number) =>
+			renderToStaticMarkup(
+				<StaticFabAssembleMenu {...props({ selectionCount, selectedBankCount, bankDelete })} />,
+			);
+		expect(render(1, 1)).toContain('data-testid="assemble-delete-selected-bank"');
+		expect(render(1, 1)).not.toContain('data-testid="assemble-detach-selected-bank"');
+		expect(render(1, 0)).not.toContain('data-testid="assemble-delete-selected-bank"');
+		expect(render(2, 2)).not.toContain('data-testid="assemble-delete-selected-bank"');
+	});
 
 	it("shows one selected-Bay row with independent semantic command availability", () => {
 		const markup = renderToStaticMarkup(

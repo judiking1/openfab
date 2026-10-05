@@ -1513,7 +1513,7 @@ function moduleSwitchIds(
  * Connector edges already cut during Disconnect remain separately authorized and are never added
  * here a second time.
  */
-function exactDeletedAdvancedSwitchBoundaryEdges(
+export function exactDeletedAdvancedSwitchBoundaryEdges(
 	map: TileMap,
 	ownership: RailModuleOwnershipIndex,
 	deleteModuleIndices: readonly number[],
@@ -1894,7 +1894,7 @@ function assertNoSharedBayContentOwnership(
 	}
 }
 
-function planDirectedEdgeRemoval(
+export function planDirectedEdgeRemoval(
 	map: TileMap,
 	edges: readonly DirectedRailEdge[],
 	switchIds: readonly number[],

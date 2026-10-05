@@ -86,6 +86,10 @@ import {
 import { assertStaticFabProcessLoopRepairSourceSteps } from "../core/StaticFabProcessLoopRepair";
 import { STATIC_FAB_PROCESS_LOOP_REPAIR_KIND } from "../core/StaticFabProcessLoopRepairContract";
 import {
+	assertStaticFabSemanticBankDeletePatchSource,
+	STATIC_FAB_SEMANTIC_BANK_DELETE_KIND,
+} from "../core/StaticFabSemanticBankDelete";
+import {
 	assertStaticFabSemanticBankDetachPatchSource,
 	STATIC_FAB_SEMANTIC_BANK_DETACH_KIND,
 } from "../core/StaticFabSemanticBankDetach";
@@ -436,6 +440,17 @@ export class RailPatchMirror {
 				patch,
 			);
 		}
+		if (historyOriginKind === STATIC_FAB_SEMANTIC_BANK_DELETE_KIND && patch.kind !== "undo") {
+			assertStaticFabSemanticBankDeletePatchSource(
+				this.mirroredMap,
+				this.mirroredPortEquipment,
+				this.currentSequence,
+				this.mirroredOrganizations,
+				this.mirroredRelationships,
+				this.mirroredOperationalConfiguration,
+				patch,
+			);
+		}
 		validateStaticFabBayFlowEditPatch(patch, this.mirroredOrganizations, historyOriginKind);
 		if (patch.sequence !== expectedSequence) {
 			throw new Error(
@@ -609,7 +624,11 @@ export class RailPatchMirror {
 				affectedOrganizations.map((owner) => owner.organizationId),
 			);
 			for (const organizationId of organizationImpactAuthorizations) {
-				if (!affectedOrganizationIds.has(organizationId)) {
+				// Undo has already matched the exact forward ledger; a removed connector may have no surviving owner contact.
+				if (
+					!affectedOrganizationIds.has(organizationId) &&
+					!(patch.kind === "undo" && historyOriginKind === STATIC_FAB_SEMANTIC_BANK_DELETE_KIND)
+				) {
 					throw new Error(
 						`Organization relocation authorization ${organizationId} does not match this patch.`,
 					);
@@ -913,7 +932,8 @@ function validateOrganizationImpactAuthorizations(
 		kind !== STATIC_FAB_BAY_FLOW_EDIT_KIND &&
 		kind !== STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND &&
 		kind !== STATIC_FAB_SEMANTIC_BAY_DELETE_KIND &&
-		kind !== STATIC_FAB_SEMANTIC_BANK_DETACH_KIND
+		kind !== STATIC_FAB_SEMANTIC_BANK_DETACH_KIND &&
+		kind !== STATIC_FAB_SEMANTIC_BANK_DELETE_KIND
 	) {
 		throw new Error(`Rail patch kind '${kind}' cannot carry organization relocation authority.`);
 	}

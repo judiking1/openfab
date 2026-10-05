@@ -694,6 +694,16 @@ function buildEvaluatedOrganizations(
 	});
 }
 
+/** Shared read-only topology/Port evidence; callers separately prove their action and region. */
+export function reviewStaticFabSemanticRailTopology(
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+): StaticFabSemanticBankDetachTopologyEvidence {
+	const layout = compilePhysicalRail(map);
+	assertPortAttachments(map, layout, portEquipment);
+	return evaluateTopology(map, layout).evidence;
+}
+
 function evaluateTopology(map: TileMap, layout: CompiledPhysicalLayout): EvaluatedTopology {
 	const authored = analyzeRailNetwork(map);
 	const authoredComponents = buildAuthoredComponents(map);

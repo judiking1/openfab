@@ -196,6 +196,14 @@ import {
 import { STATIC_FAB_PROCESS_LOOP_REPAIR_KIND } from "./StaticFabProcessLoopRepairContract";
 import type { StaticFabSelectionErasePlan } from "./StaticFabSelection";
 import {
+	STATIC_FAB_SEMANTIC_BANK_DELETE_KIND,
+	type StaticFabSemanticBankDeletePlan,
+} from "./StaticFabSemanticBankDelete";
+import {
+	consumeStaticFabSemanticBankDeletePlan,
+	type StaticFabSemanticBankDeleteScope,
+} from "./StaticFabSemanticBankDeleteCertification";
+import {
 	STATIC_FAB_SEMANTIC_BANK_DETACH_KIND,
 	type StaticFabSemanticBankDetachPlan,
 } from "./StaticFabSemanticBankDetach";
@@ -225,6 +233,7 @@ export type RailPatchKind =
 	| typeof STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND
 	| typeof STATIC_FAB_SEMANTIC_BAY_DELETE_KIND
 	| typeof STATIC_FAB_SEMANTIC_BANK_DETACH_KIND
+	| typeof STATIC_FAB_SEMANTIC_BANK_DELETE_KIND
 	| typeof STATIC_FAB_BAY_FLOW_EDIT_KIND
 	| typeof STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_KIND
 	| "erase-static-fab-selection"
@@ -627,6 +636,7 @@ export class RailDocument {
 			"assemblyConnector" in plan ||
 			isStaticFabSemanticBayMutationKind(plan.kind) ||
 			(plan as { readonly kind: string }).kind === STATIC_FAB_SEMANTIC_BANK_DETACH_KIND ||
+			(plan as { readonly kind: string }).kind === STATIC_FAB_SEMANTIC_BANK_DELETE_KIND ||
 			(plan as { readonly kind: string }).kind === STATIC_FAB_BAY_FLOW_EDIT_KIND
 		) {
 			return this.rejectCommand(
@@ -1974,6 +1984,74 @@ export class RailDocument {
 			);
 		} catch (error) {
 			return this.rejectCommand(error, "Bank 분리를 원자적으로 적용할 수 없습니다");
+		}
+		this.pushUndoEntry(entry);
+		this.emit(
+			plan.kind,
+			plan.baseRevision,
+			entry.changes,
+			entry.switchChanges,
+			entry.portChanges,
+			entry.equipmentGroupChanges,
+			entry.organizationChanges,
+			entry.organizationNextIdBefore,
+			entry.organizationNextIdAfter,
+			entry.organizationImpactAuthorizations,
+			undefined,
+			null,
+			entry.relationshipChanges,
+			entry.relationshipNextIdBefore,
+			entry.relationshipNextIdAfter,
+		);
+		return true;
+	}
+
+	/** Delete one exclusive Bank subtree and its certified connection in one history entry. */
+	commitStaticFabSemanticBankDelete(
+		plan: StaticFabSemanticBankDeletePlan,
+		scope: StaticFabSemanticBankDeleteScope,
+	): boolean {
+		this.lastCommandError = null;
+		const authorityError = consumeStaticFabSemanticBankDeletePlan(plan, this, scope);
+		if (authorityError) return this.rejectCommand(authorityError, "Bank 삭제를 거부했습니다");
+		const patch = plan.transition;
+		const entry = createHistoryEntry(
+			plan.kind,
+			patch.changes,
+			patch.switchChanges,
+			patch.portChanges,
+			patch.equipmentGroupChanges,
+			patch.organizationChanges,
+			patch.organizationNextIdBefore,
+			patch.organizationNextIdAfter,
+			patch.organizationImpactAuthorizations ?? [],
+			null,
+			null,
+			null,
+			patch.relationshipChanges ?? [],
+			patch.relationshipNextIdBefore,
+			patch.relationshipNextIdAfter,
+		);
+		try {
+			this.applyChanges(
+				entry.changes,
+				entry.switchChanges,
+				entry.portChanges,
+				entry.equipmentGroupChanges,
+				entry.organizationChanges,
+				entry.organizationNextIdBefore,
+				entry.organizationNextIdAfter,
+				false,
+				entry.organizationImpactAuthorizations,
+				null,
+				null,
+				null,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
+			);
+		} catch (error) {
+			return this.rejectCommand(error, "Bank 삭제를 원자적으로 적용할 수 없습니다");
 		}
 		this.pushUndoEntry(entry);
 		this.emit(
@@ -3653,6 +3731,7 @@ export class RailDocument {
 				entry.relationshipChanges,
 				entry.relationshipNextIdBefore,
 				entry.relationshipNextIdAfter,
+				entry.kind === STATIC_FAB_SEMANTIC_BANK_DELETE_KIND,
 			);
 		} catch (error) {
 			return this.rejectCommand(error, "마지막 편집을 되돌릴 수 없습니다");
@@ -3877,6 +3956,7 @@ export class RailDocument {
 		relationshipChanges: readonly StaticFabAssemblyRelationshipMutationV1[] = [],
 		relationshipNextIdBefore = this.currentRelationships.nextRelationshipId,
 		relationshipNextIdAfter = relationshipNextIdBefore,
+		certifiedBankDeleteUndo = false,
 	): void {
 		if (!canonicalPositiveInt32Ids(organizationImpactAuthorizations)) {
 			throw new Error("정적 FAB 조직 보호 인증 ID가 canonical하지 않습니다");
@@ -4035,7 +4115,9 @@ export class RailDocument {
 			affectedOrganizations.map((owner) => owner.organizationId),
 		);
 		for (const organizationId of organizationImpactAuthorizations) {
-			if (!affectedOrganizationIds.has(organizationId)) {
+			// A deleted connector can remove every Fab-owned endpoint touched by the forward patch.
+			// Its exact private Undo entry retains that certificate, although no surviving endpoint needs it.
+			if (!affectedOrganizationIds.has(organizationId) && !certifiedBankDeleteUndo) {
 				throw new Error(`정적 FAB 조직 ${organizationId}의 보호 인증 범위가 실제 변경과 다릅니다`);
 			}
 		}
