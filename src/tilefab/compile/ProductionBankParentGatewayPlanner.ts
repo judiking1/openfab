@@ -29,7 +29,7 @@ import type { Cell } from "../core/TileMap";
 export const PRODUCTION_BANK_PARENT_GATEWAY_PLAN_VERSION = 1 as const;
 export const PRODUCTION_BANK_PARENT_GATEWAY_TOPOLOGY_POLICY =
 	"primary-branch-secondary-return-two-stem-v1" as const;
-export const PRODUCTION_BANK_PARENT_GATEWAY_OWNER = "BANK" as const;
+export const PRODUCTION_BANK_PARENT_GATEWAY_OWNER = "FAB" as const;
 export const PRODUCTION_BANK_PARENT_GATEWAY_COLLECTOR_LANE_SPACING_METERS = 2 as const;
 export const PRODUCTION_BANK_PARENT_GATEWAY_PARENT_LANE_SPACING_METERS = 4 as const;
 export const PRODUCTION_BANK_PARENT_GATEWAY_COLLECTOR_SETBACK_METERS = 24 as const;
@@ -100,7 +100,7 @@ export interface ProductionBankParentGatewayConnection {
 	readonly mergeCell: Cell;
 	/** Full route submitted to planRailRouteBatch, including both existing support seams. */
 	readonly planningRoute: readonly Cell[];
-	/** Only these previously absent directed edges receive BANK ownership. */
+	/** Only these previously absent directed edges receive FAB ownership. */
 	readonly ownedEdgeRoute: readonly Cell[];
 	readonly ownedDirectedEdges: readonly ProductionBankParentGatewayDirectedEdge[];
 	readonly reusedSourceSupportRoute: readonly Cell[];
@@ -362,7 +362,7 @@ export function planProductionBankParentGateway(
 		geometryValid: true as const,
 		placementReady: false as const,
 		reason:
-			"Production Bank parent gateway geometry and BANK edge intent are complete; whole-composition topology, physical, clearance, and ownership certification remain required.",
+			"Production Bank parent gateway geometry and FAB edge intent are complete; whole-composition topology, physical, clearance, and ownership certification remain required.",
 		specification,
 		collector,
 		parentPerimeter,

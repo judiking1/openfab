@@ -9,7 +9,7 @@ import type { ProductionBayBuildStepOwner } from "../core/ProductionBayModulePla
 import type { DirectedRailEdge } from "../core/RailModuleOwnership";
 import { planRailRouteBatch } from "../core/RailTemplateCatalog";
 import { ALL_DIRECTIONS, bitCount, directionBetween, moveCell } from "../core/railShape";
-import { emptyStaticFabAssemblyRelationshipState } from "../core/StaticFabAssemblyRelationship";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
 	staticFabOrganizationEdgeKey,
@@ -29,6 +29,7 @@ import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/Ope
 import { captureOpenFabProjectOrganizationSection } from "../project/OpenFabProjectOrganizations";
 import {
 	captureRailMirrorSnapshot,
+	checksumRailMap,
 	checksumRailMirrorSnapshot,
 	type RailMirrorSnapshot,
 } from "../worker/RailMirrorChecksum";
@@ -48,6 +49,7 @@ import {
 	openFabFabOrganizationEdgeClaimFingerprint,
 } from "./OpenFabFabOrganizationCompiler";
 import type { OpenFabFabProfile } from "./OpenFabFabProfile";
+import { describeOpenFabFabRelationships } from "./OpenFabFabRelationships";
 import { analyzePhysicalPathTopology } from "./PhysicalPathTopology";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import type { ProductionBankParentGatewayPlan } from "./ProductionBankParentGatewayPlanner";
@@ -55,7 +57,7 @@ import type { ProductionBayParentGatewayPlan } from "./ProductionBayParentGatewa
 import { checksumRailProjectReadiness, createRailProjectReadiness } from "./RailProjectReadiness";
 import type { StaticFabOrganizationDirectedEdgeClaim } from "./StaticFabOrganizationSeedCompiler";
 
-export const OPENFAB_FAB_COMPOSER_VERSION = 1 as const;
+export const OPENFAB_FAB_COMPOSER_VERSION = 2 as const;
 const OPENFAB_FAB_COMPOSER_INTERNAL_PROJECT_CREATED_AT = "1970-01-01T00:00:00.000Z" as const;
 const OPENFAB_FAB_COMPOSER_INTERNAL_PROJECT_NAME =
 	"OpenFab Fab Composition Certification Template" as const;
@@ -156,6 +158,8 @@ export interface OpenFabFabRoundTrippedSnapshotIdentity {
 	readonly nextPortId: number;
 	readonly nextEquipmentGroupId: number;
 	readonly nextOrganizationId: number;
+	readonly nextRelationshipId: number;
+	readonly relationships: number;
 	readonly railCells: number;
 	readonly directedEdges: number;
 	readonly advancedSwitches: number;
@@ -353,7 +357,7 @@ export function composeOpenFabFab(input: unknown): CertifiedOpenFabFabCompositio
 				bank.parentGateway.buildSteps.map((step) => ({
 					id: `${bank.key}/parent-gateway/${step.id}`,
 					kind: "bank-parent-gateway" as const,
-					ownerKey: bank.organizationKey,
+					ownerKey: OPENFAB_FAB_ORGANIZATION_ROOT_KEY,
 					sourcePlanFingerprint: bank.parentGateway.fingerprint,
 					planningRoute: step.route,
 					ownedDirectedEdges: step.ownedDirectedEdges,
@@ -428,7 +432,13 @@ export function composeOpenFabFab(input: unknown): CertifiedOpenFabFabCompositio
 		);
 	}
 
-	const authoredChecksum = organizations.authoredChecksum;
+	const relationships = describeOpenFabFabRelationships(map, assemblyPlan, organizations);
+	const authoredChecksum = checksumRailMap(
+		map,
+		emptyPortEquipmentState(),
+		organizations.compilation.organizations,
+		relationships,
+	);
 	const readinessReport = createRailProjectReadiness(analysis, physicalLayout, authoredChecksum);
 	if (
 		!readinessReport.ready ||
@@ -447,7 +457,12 @@ export function composeOpenFabFab(input: unknown): CertifiedOpenFabFabCompositio
 	const physical = createPhysicalCertificate(physicalLayout, physicalTopology);
 	const readiness = createReadinessCertificate(readinessReport);
 
-	const persistence = createPersistenceEvidence(map, organizations);
+	const persistence = createPersistenceEvidence(
+		map,
+		organizations,
+		relationships,
+		authoredChecksum,
+	);
 	const actionCapacity = createActionCapacity(
 		map.edgeCount,
 		organizations.manifest.counts.organizationRecords,
@@ -921,6 +936,8 @@ function readinessCertificateFingerprint(
 function createPersistenceEvidence(
 	map: TileMap,
 	organizations: CertifiedOpenFabFabOrganizations,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+	authoredChecksum: string,
 ): Readonly<{
 	snapshot: RailMirrorSnapshot;
 	evidence: OpenFabFabPersistenceEvidence;
@@ -930,10 +947,10 @@ function createPersistenceEvidence(
 		0,
 		emptyPortEquipmentState(),
 		organizations.compilation.organizations,
-		emptyStaticFabAssemblyRelationshipState(),
+		relationships,
 	);
 	if (
-		sourceCapture.snapshot.checksum !== organizations.authoredChecksum ||
+		sourceCapture.snapshot.checksum !== authoredChecksum ||
 		checksumRailMirrorSnapshot(sourceCapture.snapshot) !== sourceCapture.snapshot.checksum
 	) {
 		throw new Error(
@@ -1017,6 +1034,8 @@ function createRoundTrippedSnapshotIdentity(
 		nextPortId: snapshot.portEquipment.nextPortId,
 		nextEquipmentGroupId: snapshot.portEquipment.nextEquipmentGroupId,
 		nextOrganizationId: snapshot.organizations.nextOrganizationId,
+		nextRelationshipId: snapshot.relationships.nextRelationshipId,
+		relationships: snapshot.relationships.relationshipIds.length,
 		railCells: snapshot.encoded.length,
 		directedEdges,
 		advancedSwitches: snapshot.switchIds.length,
@@ -1037,6 +1056,8 @@ function createRoundTrippedSnapshotIdentity(
 		withoutFingerprint.nextPortId,
 		withoutFingerprint.nextEquipmentGroupId,
 		withoutFingerprint.nextOrganizationId,
+		withoutFingerprint.nextRelationshipId,
+		withoutFingerprint.relationships,
 		withoutFingerprint.railCells,
 		withoutFingerprint.directedEdges,
 		withoutFingerprint.advancedSwitches,
@@ -1117,17 +1138,26 @@ function recertifyCompositionSnapshot(certificate: CertifiedOpenFabFabCompositio
 	if (!organizations.valid || organizations.fingerprint !== certificate.organizations.fingerprint) {
 		return "OpenFab Fab roundtripped snapshot does not reproduce organization certification.";
 	}
+	const relationships = describeOpenFabFabRelationships(
+		document.map,
+		certificate.assemblyPlan,
+		organizations,
+	);
+	if (JSON.stringify(relationships) !== JSON.stringify(document.relationships))
+		return "OpenFab Fab snapshot does not preserve declared Bank attachments.";
+	const authoredChecksum = checksumRailMap(
+		document.map,
+		document.portEquipment,
+		document.organizations,
+		relationships,
+	);
 	const analysis = analyzeRailNetwork(document.map);
 	try {
 		assertClosedAuthoredTopology(analysis);
 	} catch {
 		return "OpenFab Fab roundtripped snapshot does not reproduce closed authored topology.";
 	}
-	const authored = createAuthoredCertificate(
-		document.map,
-		analysis,
-		organizations.authoredChecksum,
-	);
+	const authored = createAuthoredCertificate(document.map, analysis, authoredChecksum);
 	if (JSON.stringify(authored) !== JSON.stringify(certificate.authored)) {
 		return "OpenFab Fab roundtripped snapshot does not reproduce authored certification.";
 	}
@@ -1149,11 +1179,7 @@ function recertifyCompositionSnapshot(certificate: CertifiedOpenFabFabCompositio
 	if (JSON.stringify(physical) !== JSON.stringify(certificate.physical)) {
 		return "OpenFab Fab roundtripped snapshot does not reproduce physical certification.";
 	}
-	const readinessReport = createRailProjectReadiness(
-		analysis,
-		physicalLayout,
-		organizations.authoredChecksum,
-	);
+	const readinessReport = createRailProjectReadiness(analysis, physicalLayout, authoredChecksum);
 	if (!readinessReport.ready || readinessReport.issues.length !== 0) {
 		return "OpenFab Fab roundtripped snapshot does not reproduce project readiness.";
 	}

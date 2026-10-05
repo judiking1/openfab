@@ -38,6 +38,7 @@ describe("saved project continuation", () => {
 		"cancelled",
 		"failed",
 		"saved-stale",
+		"download-requested",
 	] as const)("retains pending work after %s", (status) => {
 		expect(
 			planOpenFabProjectSaveContinuation(

@@ -19,8 +19,11 @@ export function checksumLegacyOpenFabProject(
 	organizations: StaticFabOrganizationState,
 	relationships: StaticFabAssemblyRelationshipStateV1,
 ): string {
-	if (!Number.isInteger(projectVersion) || projectVersion < 0 || projectVersion > 14)
+	if (!Number.isInteger(projectVersion) || projectVersion < 0 || projectVersion > 15)
 		throw new Error("Unsupported legacy project checksum version.");
+	// v15 introduced authored EQ dimensions and already used the current checksum contract.
+	if (projectVersion === 15)
+		return checksumRailMap(map, portEquipment, organizations, relationships);
 	if (
 		portEquipment.equipmentGroups.some(
 			(group) => group.kind === "EQ" && group.bodyDimensions !== undefined,

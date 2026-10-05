@@ -269,7 +269,9 @@ export function StaticFabAssembleMenu({
 				) : null}
 				{selectionCount === 1 && selectedBankCount === 1 && (bankDetach || bankDelete) ? (
 					<section className="tilefab-assemble-semantic-bank" aria-label="선택한 Bank 명령">
-						<strong>선택한 Bank</strong>
+						<strong data-testid="assemble-selected-bank-heading" tabIndex={-1}>
+							선택한 Bank
+						</strong>
 						{bankDetach ? (
 							<>
 								<button

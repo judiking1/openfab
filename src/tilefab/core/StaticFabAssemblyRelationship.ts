@@ -1309,6 +1309,11 @@ function* validateLegShapeSteps(
 		canonicalByteCount += 8 + scopedResult.canonicalByteCount;
 	}
 
+	const parentAttachment =
+		participantCount === 1 &&
+		leg.directionRole === "ATTACHMENT" &&
+		leg.exclusiveCutEdges.length > 0 &&
+		leg.exclusiveCutEdges.every((edge) => edge.scope.kind === "PARENT_DIRECT");
 	let previousSeam: StaticFabAssemblySeamContactV1 | null = null;
 	const resolvedSeams: Array<{
 		readonly seam: StaticFabAssemblySeamContactV1;
@@ -1327,6 +1332,7 @@ function* validateLegShapeSteps(
 			participantCount,
 			seenParticipantIndexes,
 			requireImmutable,
+			parentAttachment,
 		);
 		if (typeof seamResult === "string") return `seam ${index}: ${seamResult}`;
 		if (previousSeam && compareSeamContact(previousSeam, seam, leg.exclusiveCutEdges) >= 0) {
@@ -1373,6 +1379,20 @@ function* validateLegShapeSteps(
 				),
 		);
 		if (!start || !end) return "exclusive walk의 시작/끝 seam alias가 필요합니다";
+		if (parentAttachment) {
+			const parentOnly = (incidences: readonly ResolvedIncidence[]) =>
+				incidences.every((incidence) => incidence.scope.kind === "PARENT_DIRECT");
+			if (
+				resolvedSeams.length !== 2 ||
+				start.seam.role !== "BRANCH" ||
+				end.seam.role !== "MERGE" ||
+				!(
+					(seamIncludesParentAndParticipant(start.incidences, 0) && parentOnly(end.incidences)) ||
+					(parentOnly(start.incidences) && seamIncludesParentAndParticipant(end.incidences, 0))
+				)
+			)
+				return "단일 attachment는 parent 전용 seam과 participant 경계 seam을 잇는 branch-to-merge walk여야 합니다";
+		}
 		if (
 			participantCount === 2 &&
 			(leg.directionRole === "OUTBOUND" || leg.directionRole === "RETURN")
@@ -1494,6 +1514,7 @@ function validateSeamShape(
 	participantCount: number,
 	seenParticipantIndexes: Set<number>,
 	requireImmutable = false,
+	allowParentAttachment = false,
 ): SeamShapeResult | string {
 	if (requireImmutable && (!Object.isFrozen(seam) || !isFrozenRelationshipArray(seam?.incidences)))
 		return "seam contact는 불변이어야 합니다";
@@ -1604,7 +1625,17 @@ function validateSeamShape(
 	if (incoming !== expected.incoming || outgoing !== expected.outgoing) {
 		return `${seam.role} incidence 수가 완전하지 않습니다`;
 	}
-	if (!junction || regionIdentities.size < 2 || !includesParent || !includesParticipant) {
+	const parentAttachmentSeam =
+		allowParentAttachment &&
+		seam.role !== "CONTACT" &&
+		resolved.every((incidence) => incidence.scope.kind === "PARENT_DIRECT") &&
+		seam.incidences.some((incidence) => incidence.binding.kind === "EXCLUSIVE_CUT_EDGE") &&
+		seam.incidences.some((incidence) => incidence.binding.kind === "WITNESS");
+	if (
+		!junction ||
+		(!parentAttachmentSeam &&
+			(regionIdentities.size < 2 || !includesParent || !includesParticipant))
+	) {
 		return "seam은 서로 다른 parent/participant scope region을 함께 식별해야 합니다";
 	}
 	return {

@@ -9,6 +9,7 @@ import {
 	type RailModuleOwnershipIndex,
 } from "../core/RailModuleOwnership";
 import { ALL_DIRECTIONS, directionBetween, moveCell, oppositeDirection } from "../core/railShape";
+import type { StaticFabAssemblyRelationshipStateV1 } from "../core/StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationRecord,
@@ -21,15 +22,12 @@ import {
 	staticFabOrganizationParentIds,
 	staticFabOrganizationStateError,
 } from "../core/StaticFabOrganization";
+import { reviewStaticFabSemanticBankDetachCut } from "../core/StaticFabSemanticBankDetach";
 import { STATIC_FAB_SEMANTIC_HIERARCHY_BOUNDARY_MAX_MODULES } from "../core/StaticFabSemanticHierarchyBoundary";
-import {
-	reviewStaticFabSemanticHierarchyCut,
-	type StaticFabSemanticHierarchyCutIssueCode,
-} from "../core/StaticFabSemanticHierarchyCut";
-import {
-	reviewStaticFabSemanticHierarchyRecovery,
-	type StaticFabSemanticHierarchyRecoveryAction,
-	type StaticFabSemanticHierarchyRecoveryTargetRole,
+import type { StaticFabSemanticHierarchyCutIssueCode } from "../core/StaticFabSemanticHierarchyCut";
+import type {
+	StaticFabSemanticHierarchyRecoveryAction,
+	StaticFabSemanticHierarchyRecoveryTargetRole,
 } from "../core/StaticFabSemanticHierarchyRecovery";
 import { type Cell, cellKey, decodeRailCell, encodeRailCell, type TileMap } from "../core/TileMap";
 import { type CompiledPhysicalPaths, PATH_KIND } from "./PhysicalPathCompiler";
@@ -187,6 +185,7 @@ export function reviewStaticFabSemanticBankDetachProspective(
 	portEquipment: PortEquipmentState,
 	organizations: StaticFabOrganizationState,
 	intentValue: unknown,
+	relationships?: StaticFabAssemblyRelationshipStateV1,
 ): StaticFabSemanticBankDetachProspectiveReview {
 	const sourceRevision = map.getRevision();
 	const sourceMutationGeneration = map.getMutationGeneration();
@@ -214,13 +213,12 @@ export function reviewStaticFabSemanticBankDetachProspective(
 		cursorStatus: "NOT_EVALUATED",
 	};
 
-	const hierarchy = reviewStaticFabSemanticHierarchyRecovery(organizations, intentValue);
-	const cut = reviewStaticFabSemanticHierarchyCut(
+	const cut = reviewStaticFabSemanticBankDetachCut(
 		map,
 		portEquipment,
 		organizations,
 		intentValue,
-		hierarchy,
+		relationships,
 	);
 	snapshot.action = cut.action;
 	snapshot.targetRole = cut.targetRole;

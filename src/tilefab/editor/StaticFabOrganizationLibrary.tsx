@@ -59,6 +59,7 @@ interface StaticFabOrganizationLibraryProps {
 	) => void;
 	readonly chooseStaticFabOrganizationFilter: (kind: StaticFabOrganizationKind | "ALL") => void;
 	readonly closeStaticFabNavigator: () => void;
+	readonly openSelectedBankCommands: (organizationId: number) => void;
 	readonly copySelectionToRailClipboard: () => void;
 	readonly currentStaticFabInspectionPending: boolean;
 	readonly equipmentGroupCount: number;
@@ -184,6 +185,7 @@ export function StaticFabOrganizationLibrary({
 	chooseStaticFabNavigatorTab,
 	chooseStaticFabOrganizationFilter,
 	closeStaticFabNavigator,
+	openSelectedBankCommands,
 	copySelectionToRailClipboard,
 	currentStaticFabInspectionPending,
 	equipmentGroupCount,
@@ -692,6 +694,25 @@ export function StaticFabOrganizationLibrary({
 										<dd>조직 {selectedOrganizationDescendantCount + 1}개</dd>
 									</div>
 								</dl>
+								{organizationSelectionCount === 1 &&
+								organizationSemanticRoles.get(selectedStaticFabOrganization.id) === "BAY_BANK" ? (
+									<div className="tilefab-organization-editor-actions">
+										<button
+											type="button"
+											data-testid="organization-open-bank-commands"
+											disabled={
+												projectBusy ||
+												modelSyncPending ||
+												staticFabExclusiveCommandActive ||
+												organizationEditorDirty ||
+												organizationDetailsStale
+											}
+											onClick={() => openSelectedBankCommands(selectedStaticFabOrganization.id)}
+										>
+											Bank 분리·삭제 검토 <ChevronRight size={14} />
+										</button>
+									</div>
+								) : null}
 								<div className="tilefab-organization-editor-actions">
 									{selectedStaticFabOrganization.kind === "AISLE" &&
 									selectedStaticFabOrganization.declaredSemanticRole === "PROCESS_LOOP" &&

@@ -6,6 +6,24 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.63] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Save explicit Bank attachment relationships when creating a new FAB. Review supported Bank
+  detach or deletion through the existing separate, source-bound commands with atomic Undo/Redo.
+  Existing files keep their authored relationships; missing connections are never inferred.
+- Open Bank detach/delete commands directly from the selected Bank's structure details, retaining
+  the selection and focusing the command area. Unsaved organization edits must be resolved first.
+- Distinguish closed-rail practice from Process Loop registration and label equipment progress as
+  minimum Port goals. Exclude selected equipment from the selection in one step before explicit
+  Loop registration, preserving the authored equipment and its membership.
+- Offer explicit file-input opening and project downloads even when native pickers are available.
+  A download request keeps the current file reference, unsaved changes, recovery and pending
+  project transition; only confirmed file writes report saved. Preserve cancellation and failures.
+- Keep schema-15 recovery compatible with authored EQ dimensions after the schema-16 upgrade;
+  reject recovery content whose checksum was changed.
+
 ## [0.1.62] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

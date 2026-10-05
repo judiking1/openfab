@@ -255,18 +255,47 @@ export class BrowserOpenFabProjectPersistence
 		const picker = this.forceFileInputFallback
 			? null
 			: browserFunction<BrowserOpenPicker>("showOpenFilePicker");
-		if (!picker) return chooseOpenWithInput(signal);
+		if (!picker) return this.chooseOpenWithFileInput(signal);
+		let handles: readonly BrowserFileHandle[];
 		try {
-			const handles = await picker({ multiple: false, types: PROJECT_FILE_TYPES });
-			throwIfAborted(signal);
-			const handle = handles[0];
-			if (!handle) return null;
-			const reference = await this.rememberHandle(handle);
-			return this.readHandle(reference, handle, signal);
+			handles = await picker({ multiple: false, types: PROJECT_FILE_TYPES });
 		} catch (error) {
-			if (isUserCancellation(error) || signal?.aborted) return null;
+			throwIfAborted(signal);
+			if (isUserCancellation(error)) return null;
 			throw error;
 		}
+		throwIfAborted(signal);
+		const handle = handles[0];
+		if (!handle) return null;
+		const reference = await this.rememberHandle(handle);
+		return this.readHandle(reference, handle, signal);
+	}
+
+	async chooseOpenWithFileInput(signal?: AbortSignal): Promise<OpenFabProjectFileRead | null> {
+		throwIfAborted(signal);
+		return chooseOpenWithInput(signal);
+	}
+
+	async acquireDownload(
+		suggestedName: string,
+		signal?: AbortSignal,
+	): Promise<OpenFabProjectWriteCapability> {
+		throwIfAborted(signal);
+		const safeName = normalizeSuggestedFileName(suggestedName);
+		return createProjectWriteCapability(
+			safeName,
+			signal,
+			async (json) => {
+				downloadJsonFile(safeName, json);
+				return Object.freeze({
+					id: createRuntimeId(),
+					name: safeName,
+					writable: false,
+					reopenable: false,
+				});
+			},
+			"download",
+		);
 	}
 
 	async openRecent(
@@ -325,17 +354,7 @@ export class BrowserOpenFabProjectPersistence
 		const picker = this.forceFileInputFallback
 			? null
 			: browserFunction<BrowserSavePicker>("showSaveFilePicker");
-		if (!picker) {
-			return createProjectWriteCapability(safeName, signal, async (json) => {
-				downloadJsonFile(safeName, json);
-				return Object.freeze({
-					id: createRuntimeId(),
-					name: safeName,
-					writable: false,
-					reopenable: false,
-				});
-			});
-		}
+		if (!picker) return this.acquireDownload(suggestedName, signal);
 		try {
 			const handle = await picker({ suggestedName: safeName, types: PROJECT_FILE_TYPES });
 			throwIfAborted(signal);
@@ -2470,14 +2489,17 @@ async function chooseOpenWithInput(signal?: AbortSignal): Promise<OpenFabProject
 			resolve(result);
 		};
 		const cancel = (): void => finish(null);
-		const abort = (): void => finish(null);
+		const abort = (): void => {
+			cleanup();
+			reject(new DOMException("Project operation was aborted.", "AbortError"));
+		};
 		const change = async (): Promise<void> => {
 			try {
 				const file = input.files?.[0];
 				if (!file) return finish(null);
 				assertProjectFileSize(file.size);
 				const json = await file.text();
-				if (signal?.aborted) return finish(null);
+				throwIfAborted(signal);
 				finish({
 					reference: Object.freeze({
 						id: createRuntimeId(),
@@ -2501,8 +2523,13 @@ async function chooseOpenWithInput(signal?: AbortSignal): Promise<OpenFabProject
 		input.addEventListener("change", change);
 		input.addEventListener("cancel", cancel);
 		signal?.addEventListener("abort", abort, { once: true });
-		document.body.append(input);
-		input.click();
+		try {
+			document.body.append(input);
+			input.click();
+		} catch (error) {
+			cleanup();
+			reject(error);
+		}
 	});
 }
 
@@ -2596,10 +2623,12 @@ function createProjectWriteCapability(
 	name: string,
 	signal: AbortSignal | undefined,
 	write: (json: string) => Promise<OpenFabProjectFileReference>,
+	delivery: OpenFabProjectWriteCapability["delivery"] = "file",
 ): OpenFabProjectWriteCapability {
 	let pending: typeof write | null = write;
 	return Object.freeze({
 		name,
+		delivery,
 		async commit(json: string): Promise<OpenFabProjectFileReference> {
 			const commit = pending;
 			if (!commit) throw new Error("이 저장 대상은 이미 사용했습니다 · 저장을 다시 선택하세요");
@@ -2683,8 +2712,8 @@ function downloadJsonFile(name: string, json: string): void {
 		anchor.click();
 	} finally {
 		anchor.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 0);
 	}
-	setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function normalizeSuggestedFileName(value: string): string {

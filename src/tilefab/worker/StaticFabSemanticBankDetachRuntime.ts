@@ -67,6 +67,7 @@ export function prepareStaticFabSemanticBankDetach(
 			document.portEquipment,
 			document.organizations,
 			request.intent,
+			document.relationships,
 		);
 		if (
 			!evidence.prospectiveDetachProved ||

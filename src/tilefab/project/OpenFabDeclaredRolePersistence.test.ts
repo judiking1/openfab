@@ -60,7 +60,7 @@ describe("declared process-loop persistence boundaries", () => {
 	it("round-trips explicit intent through project JSON and typed Worker startup without requiring a closed loop", () => {
 		const document = documentWithDeclaredRole();
 		const project = captureOpenFabProject(document, { manifest });
-		expect(project.schemaVersion).toBe(15);
+		expect(project.schemaVersion).toBe(16);
 		expect(project.areas.records[0]?.declaredSemanticRole).toBe("PROCESS_LOOP");
 		const payload = compileRailStartup({
 			kind: "project-json",

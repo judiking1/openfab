@@ -1,11 +1,13 @@
 import type { PortEquipmentState } from "./EquipmentGroup";
+import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
 import { assertPortEquipmentLayout } from "./PortEquipmentLayoutValidator";
 import { type RailMutation, railMutationTopologyError } from "./paint";
 import { buildRailModuleOwnershipIndex, type DirectedRailEdge } from "./RailModuleOwnership";
 import { type RailPatchTransition, railPatchTransitionFingerprint } from "./RailPatchHistory";
-import { directionBetween, oppositeDirection } from "./railShape";
+import { ALL_DIRECTIONS, directionBetween, moveCell, oppositeDirection } from "./railShape";
 import {
 	applyStaticFabAssemblyRelationshipMutations,
+	checksumStaticFabAssemblyRelationshipState,
 	copyStaticFabAssemblyRelationshipRecord,
 	type StaticFabAssemblyRelationshipRecordV1,
 	type StaticFabAssemblyRelationshipStateV1,
@@ -16,11 +18,13 @@ import {
 	applyStaticFabOrganizationMutations,
 	copyStaticFabOrganizationRecord,
 	deriveStaticFabOrganizationSemanticRoles,
+	resolveStaticFabOrganizationCoverage,
 	resolveStaticFabOrganizationDescendantIds,
 	reverseStaticFabOrganizationMutations,
 	type StaticFabOrganizationMutation,
 	type StaticFabOrganizationState,
 	staticFabOrganizationEdgeKey,
+	staticFabOrganizationParentIds,
 	staticFabOrganizationStateError,
 } from "./StaticFabOrganization";
 import {
@@ -28,7 +32,14 @@ import {
 	staticFabOrganizationImpactsForPatch,
 	unhandledStaticFabOrganizationImpacts,
 } from "./StaticFabOrganizationImpactIndex";
-import { reviewStaticFabSemanticHierarchyCut } from "./StaticFabSemanticHierarchyCut";
+import {
+	STATIC_FAB_SEMANTIC_HIERARCHY_BOUNDARY_MAX_MODULES,
+	staticFabSemanticHierarchyBoundarySourceBudgetError,
+} from "./StaticFabSemanticHierarchyBoundary";
+import {
+	reviewStaticFabSemanticHierarchyCut,
+	type StaticFabSemanticHierarchyCutReview,
+} from "./StaticFabSemanticHierarchyCut";
 import {
 	reviewStaticFabSemanticHierarchyRecovery,
 	type StaticFabSemanticHierarchyRecoveryIntent,
@@ -213,12 +224,15 @@ export function planStaticFabSemanticBankDetach(
 		if (
 			relationship.parentOrganizationId !== intent.expectedParentOrganizationId ||
 			relationship.managedChildOrganizationIds.length !== 1 ||
-			relationship.participantOrganizationIds.length !== 2 ||
+			(relationship.participantOrganizationIds.length !== 1 &&
+				relationship.participantOrganizationIds.length !== 2) ||
 			!relationship.participantOrganizationIds.includes(intent.targetOrganizationId) ||
 			relationship.connectionGroups.length !== 1 ||
 			relationship.connectionGroups[0].legs.length !== 2 ||
-			!relationship.connectionGroups[0].legs.some((leg) => leg.directionRole === "OUTBOUND") ||
-			!relationship.connectionGroups[0].legs.some((leg) => leg.directionRole === "RETURN")
+			(relationship.participantOrganizationIds.length === 1
+				? relationship.connectionGroups[0].legs.some((leg) => leg.directionRole !== "ATTACHMENT")
+				: !relationship.connectionGroups[0].legs.some((leg) => leg.directionRole === "OUTBOUND") ||
+					!relationship.connectionGroups[0].legs.some((leg) => leg.directionRole === "RETURN"))
 		)
 			fail("SHARED_RELATIONSHIP", "다른 Bank의 소속도 관리하거나 지원 범위를 벗어난 연결입니다");
 		const cuts = relationship.connectionGroups[0].legs.flatMap((leg) => leg.exclusiveCutEdges);
@@ -268,12 +282,12 @@ export function planStaticFabSemanticBankDetach(
 					`관계 ${record.id}가 선택 Bank와 남은 Fab에 걸쳐 있습니다 · 함께 재작성하지 않습니다`,
 				);
 		}
-		const cut = reviewStaticFabSemanticHierarchyCut(
+		const cut = reviewStaticFabSemanticBankDetachCut(
 			map,
 			portEquipment,
 			organizations,
 			intent,
-			hierarchy,
+			relationships,
 		);
 		if (!cut.structuralCutProved || !cut.completeCutFingerprint) fail("CUT_MISMATCH", cut.reason);
 		const structuralKeys = new Set(cut.corridors.flatMap((corridor) => corridor.directedEdgeKeys));
@@ -512,6 +526,203 @@ export function planStaticFabSemanticBankDetach(
 			issueCode: error instanceof BankDetachFailure ? error.code : "INVALID_SOURCE",
 			reason: error instanceof Error ? error.message : "Bank 분리 원본을 검토할 수 없습니다",
 		});
+	}
+}
+
+export interface StaticFabSemanticBankDetachCutReview
+	extends Pick<
+		StaticFabSemanticHierarchyCutReview,
+		| "action"
+		| "targetRole"
+		| "targetOrganizationId"
+		| "parentFabOrganizationId"
+		| "retainedSiblingBankOrganizationCount"
+		| "corridorCount"
+		| "directedEdgeCount"
+		| "completeCutFingerprint"
+		| "structuralCutProved"
+		| "issueCode"
+		| "reason"
+	> {
+	readonly corridors: readonly Readonly<{
+		directedEdgeKeys: readonly string[];
+		fingerprint: string;
+	}>[];
+}
+
+/** Read the declared single-Bank attachment; retain the older pairwise structural review unchanged. */
+export function reviewStaticFabSemanticBankDetachCut(
+	map: TileMap,
+	portEquipment: PortEquipmentState,
+	organizations: StaticFabOrganizationState,
+	intentValue: unknown,
+	relationships?: StaticFabAssemblyRelationshipStateV1,
+): StaticFabSemanticBankDetachCutReview {
+	const hierarchy = reviewStaticFabSemanticHierarchyRecovery(organizations, intentValue);
+	const intent = intentValue as StaticFabSemanticBankDetachIntent;
+	const candidates =
+		relationships?.records.filter((row) =>
+			row.managedChildOrganizationIds.includes(intent?.targetOrganizationId),
+		) ?? [];
+	const relationship = candidates.length === 1 ? candidates[0] : undefined;
+	if (relationship?.participantOrganizationIds.length !== 1)
+		return reviewStaticFabSemanticHierarchyCut(
+			map,
+			portEquipment,
+			organizations,
+			intentValue,
+			hierarchy,
+		);
+	const rejected = (
+		reason: string,
+		issueCode: StaticFabSemanticHierarchyCutReview["issueCode"] = "INVALID_DIRECTED_SEAM",
+	): StaticFabSemanticBankDetachCutReview => ({
+		action: hierarchy.action,
+		targetRole: hierarchy.targetRole,
+		targetOrganizationId: hierarchy.targetOrganizationId,
+		parentFabOrganizationId: intent?.expectedParentOrganizationId ?? null,
+		retainedSiblingBankOrganizationCount: 0,
+		corridorCount: 0,
+		directedEdgeCount: 0,
+		completeCutFingerprint: null,
+		structuralCutProved: false,
+		issueCode,
+		reason,
+		corridors: [],
+	});
+	try {
+		if (!hierarchy.accepted) return rejected(hierarchy.reason);
+		const intentError = staticFabSemanticBankDetachIntentError(intentValue);
+		if (intentError) return rejected(intentError);
+		if (!relationships) return rejected("명시적 attachment 관계가 없습니다");
+		const sourceBudgetError = staticFabSemanticHierarchyBoundarySourceBudgetError(
+			map,
+			portEquipment,
+			organizations,
+		);
+		if (sourceBudgetError) return rejected(sourceBudgetError, "BOUNDARY_INVENTORY_REJECTED");
+		const sourceError = staticFabAssemblyRelationshipStateSourceError(
+			map,
+			organizations,
+			relationships,
+		);
+		if (sourceError) return rejected(sourceError);
+		const legs = relationship.connectionGroups[0]?.legs;
+		if (
+			relationship.hierarchyRole !== "BANK_TO_FAB" ||
+			relationship.purpose !== "HIERARCHY_LINK" ||
+			relationship.reviewPolicy !== "REVIEW_REQUIRED" ||
+			relationship.parentOrganizationId !== intent.expectedParentOrganizationId ||
+			relationship.participantOrganizationIds[0] !== intent.targetOrganizationId ||
+			relationship.managedChildOrganizationIds.length !== 1 ||
+			relationship.managedChildOrganizationIds[0] !== intent.targetOrganizationId ||
+			relationship.connectionGroups.length !== 1 ||
+			!legs ||
+			legs.length !== 2 ||
+			legs.some((leg) => leg.directionRole !== "ATTACHMENT" || leg.exclusiveCutEdges.length === 0)
+		)
+			return rejected("단일 Bank의 명시적 왕복 attachment만 분리할 수 있습니다");
+		const coverage = resolveStaticFabOrganizationCoverage(
+			organizations,
+			intent.targetOrganizationId,
+		);
+		if (!coverage) return rejected("Bank 소유 범위가 없습니다");
+		const selectedEdges = new Set(coverage.effective.railEdges.map(staticFabOrganizationEdgeKey));
+		const selectedVertices = new Set(
+			coverage.effective.railEdges.flatMap((edge) => [
+				cellKey(edge.from.x, edge.from.y),
+				cellKey(edge.to.x, edge.to.y),
+			]),
+		);
+		const cuts = legs.flatMap((leg) => leg.exclusiveCutEdges);
+		const cutKeys = new Set(cuts.map((cut) => staticFabOrganizationEdgeKey(cut.edge)));
+		if (
+			cuts.length > STATIC_FAB_SEMANTIC_BANK_DETACH_MAX_CUT_EDGES ||
+			cutKeys.size !== cuts.length ||
+			cuts.some((cut) => cut.scope.kind !== "PARENT_DIRECT")
+		)
+			return rejected("attachment 제거 범위가 중복되거나 Fab 전용 레일이 아닙니다");
+		const ownership = buildRailModuleOwnershipIndex(map);
+		if (ownership.modules.length > STATIC_FAB_SEMANTIC_HIERARCHY_BOUNDARY_MAX_MODULES)
+			return rejected("Rail module source 한도를 초과합니다", "BOUNDARY_INVENTORY_REJECTED");
+		const selectedSwitches = new Set(coverage.effective.advancedSwitchIds);
+		for (const module of ownership.modules) {
+			if (module.advancedSwitchId !== null && selectedSwitches.has(module.advancedSwitchId))
+				for (const cell of module.footprintCells) selectedVertices.add(cellKey(cell.x, cell.y));
+			if (
+				module.eraseEdges.some((edge) => cutKeys.has(staticFabOrganizationEdgeKey(edge))) &&
+				(module.advancedSwitchId !== null ||
+					module.eraseEdges.some((edge) => !cutKeys.has(staticFabOrganizationEdgeKey(edge))))
+			)
+				return rejected("attachment 제거 범위가 완전한 독점 모듈이 아닙니다");
+		}
+		const orientations = legs.map((leg) => {
+			const start = leg.exclusiveCutEdges[0]?.edge.from,
+				end = leg.exclusiveCutEdges.at(-1)?.edge.to;
+			if (!start || !end) return 0;
+			const fromSelected = selectedVertices.has(cellKey(start.x, start.y));
+			const toSelected = selectedVertices.has(cellKey(end.x, end.y));
+			return fromSelected === toSelected ? 0 : fromSelected ? 1 : -1;
+		});
+		if (!orientations.includes(1) || !orientations.includes(-1))
+			return rejected("attachment 왕복 경로가 Bank와 Fab 경계를 각각 한 번씩 연결하지 않습니다");
+		let uncovered = false;
+		map.forEachRail((x, y, rail) => {
+			for (const direction of ALL_DIRECTIONS) {
+				if (!(rail.outgoing & direction)) continue;
+				const edge = { from: { x, y }, to: moveCell({ x, y }, direction) };
+				const key = staticFabOrganizationEdgeKey(edge);
+				if (
+					(selectedVertices.has(cellKey(x, y)) ||
+						selectedVertices.has(cellKey(edge.to.x, edge.to.y))) &&
+					!selectedEdges.has(key) &&
+					!cutKeys.has(key)
+				)
+					uncovered = true;
+			}
+		});
+		if (uncovered) return rejected("저장된 attachment 밖의 레일이 Bank 경계를 공유합니다");
+		const roles = deriveStaticFabOrganizationSemanticRoles(organizations);
+		const retained = organizations.records.filter(
+			(row) =>
+				row.id !== intent.targetOrganizationId &&
+				roles.get(row.id) === "BAY_BANK" &&
+				staticFabOrganizationParentIds(row).includes(intent.expectedParentOrganizationId),
+		);
+		if (retained.length === 0) return rejected("남은 Fab의 Bank가 없어 분리할 수 없습니다");
+		const checksum = new OrderedTypedChecksum();
+		checksum.addStrings([
+			"declared-bank-parent-attachment-v1",
+			checksumStaticFabAssemblyRelationshipState(relationships),
+		]);
+		checksum.addNumbers([
+			map.getRevision(),
+			intent.targetOrganizationId,
+			intent.expectedParentOrganizationId,
+		]);
+		const corridors = legs.map((leg) => {
+			const keys = leg.exclusiveCutEdges.map((cut) => staticFabOrganizationEdgeKey(cut.edge));
+			const hash = new OrderedTypedChecksum();
+			hash.addStrings(keys);
+			checksum.addStrings([hash.digest()]);
+			return Object.freeze({ directedEdgeKeys: Object.freeze(keys), fingerprint: hash.digest() });
+		});
+		return Object.freeze({
+			action: intent.action,
+			targetRole: intent.targetRole,
+			targetOrganizationId: intent.targetOrganizationId,
+			parentFabOrganizationId: intent.expectedParentOrganizationId,
+			retainedSiblingBankOrganizationCount: retained.length,
+			corridorCount: corridors.length,
+			directedEdgeCount: cuts.length,
+			completeCutFingerprint: checksum.digest(),
+			structuralCutProved: true,
+			issueCode: null,
+			reason: "명시적 Bank attachment가 현재의 전체 독점 경계와 일치합니다",
+			corridors: Object.freeze(corridors),
+		});
+	} catch (error) {
+		return rejected(error instanceof Error ? error.message : "attachment 검토 실패");
 	}
 }
 

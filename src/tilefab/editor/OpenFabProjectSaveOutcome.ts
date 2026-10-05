@@ -1,6 +1,6 @@
 export type OpenFabProjectSaveOutcome =
 	| Readonly<{ status: "saved"; isCurrent: () => boolean }>
-	| Readonly<{ status: "cancelled" | "failed" | "save-as-required" }>
+	| Readonly<{ status: "cancelled" | "failed" | "save-as-required" | "download-requested" }>
 	| Readonly<{ status: "saved-stale"; canReuseDestination: boolean }>;
 
 export function planOpenFabProjectSaveContinuation(

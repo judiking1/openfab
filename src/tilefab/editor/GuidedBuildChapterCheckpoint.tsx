@@ -76,7 +76,7 @@ function guidedBuildChapterCompletionSummary(
 	chapterId: GuidedBuildChapterDefinition["id"],
 ): string {
 	if (chapterId === "quick-start") {
-		return "빈 곳에서 직선을 만들고 열린 끝이 없는 방향성 Process Loop까지 완성했습니다.";
+		return "빈 곳에서 직선을 만들고 닫힌 방향성 레일을 완성했습니다. Process Loop 소속 등록은 별도입니다.";
 	}
 	if (chapterId === "equip") {
 		return "레일에서 파생된 방향과 합법 슬롯으로 OHB·EQ·STK Port를 배치했습니다.";

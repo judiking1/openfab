@@ -143,7 +143,7 @@ describe("compileRailStartup", () => {
 			manifest: { id: "direct-project-001", name: "Direct project" },
 			view: null,
 			blueprints: { schemaVersion: 5, records: [] },
-			schemaVersion: 15,
+			schemaVersion: 16,
 			migratedFromVersion: null,
 			checksum: snapshot.checksum,
 		});
@@ -206,7 +206,7 @@ describe("compileRailStartup", () => {
 			kind: "project",
 			manifest: { id: "worker-project-001", name: "Worker candidate" },
 			view: { center: [12, 0], quarterTurns: 0 },
-			schemaVersion: 15,
+			schemaVersion: 16,
 			migratedFromVersion: null,
 			blueprints: { schemaVersion: 5, records: [] },
 			operations,
@@ -259,7 +259,7 @@ describe("compileRailStartup", () => {
 		expect(payload.schemaVersion).toBe(RAIL_STARTUP_SCHEMA_VERSION);
 		expect(payload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 15,
+			schemaVersion: 16,
 			migratedFromVersion: 4,
 			blueprints: { schemaVersion: 5, records: [] },
 		});
@@ -291,7 +291,7 @@ describe("compileRailStartup", () => {
 
 		expect(payload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 15,
+			schemaVersion: 16,
 			migratedFromVersion: 7,
 			blueprints: { schemaVersion: 5, records: [] },
 		});

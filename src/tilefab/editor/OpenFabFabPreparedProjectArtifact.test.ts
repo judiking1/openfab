@@ -69,10 +69,10 @@ beforeAll(() => {
 describe("OpenFabFabPreparedProjectArtifact", () => {
 	it("rebinds a manifest-neutral source while hiding its transferable snapshot", () => {
 		const fixture = transferableFixture();
-		expect(OPENFAB_FAB_PREPARED_PROJECT_VERSION).toBe(4);
+		expect(OPENFAB_FAB_PREPARED_PROJECT_VERSION).toBe(5);
 		expect(OPENFAB_FAB_PREPARED_PROJECT_PROTOCOL_VERSION).toBe(5);
-		expect(fixture.prepared.version).toBe(4);
-		expect(fixture.attestation.version).toBe(4);
+		expect(fixture.prepared.version).toBe(5);
+		expect(fixture.attestation.version).toBe(5);
 		expect(fixture.prepared.snapshot.portEquipment.schemaVersion).toBe(2);
 		expect(fixture.prepared.snapshot.portEquipment.equipmentGroups.bodyLengthMillimeters).toEqual(
 			new Uint32Array(0),
@@ -160,17 +160,17 @@ describe("OpenFabFabPreparedProjectArtifact", () => {
 		).toThrow(/profile/i);
 	});
 
-	it("rejects a relationship-producing prepared source before producer activation", () => {
+	it("rejects an altered declared relationship cursor", () => {
 		const fixture = transferableFixture();
 		(
 			fixture.prepared.snapshot.relationships as unknown as {
 				nextRelationshipId: number;
 			}
-		).nextRelationshipId = 2;
+		).nextRelationshipId = 3;
 
 		expect(() =>
 			rebindTransferableOpenFabFabPreparedProject(fixture.prepared, fixture.attestation, PROFILE),
-		).toThrow(/producer-free/i);
+		).toThrow(/attachment/i);
 	});
 
 	it.each([

@@ -1715,7 +1715,7 @@ type PendingProjectAction =
 			readonly kind: "new-profile-fab";
 			readonly binding: NewOpenFabFabProjectBinding;
 	  }
-	| { readonly kind: "open" }
+	| { readonly kind: "open"; readonly chooser?: "file-input" }
 	| { readonly kind: "recover"; readonly project: OpenFabRecoveryProjectSummary }
 	| { readonly kind: "recent"; readonly project: OpenFabRecentProject };
 
@@ -5137,6 +5137,7 @@ export default function TileFabApp(): React.ReactElement {
 	const assembleLauncherRef = useRef<HTMLButtonElement>(null);
 	const assembleBottomLauncherRef = useRef<HTMLButtonElement>(null);
 	const assemblePaletteRef = useRef<HTMLElement>(null);
+	const assembleBankCommandFocusRef = useRef<number | null>(null);
 	const assemblePaletteReturnFocusRef = useRef<HTMLButtonElement | null>(null);
 	const newFabProfileWizardReturnFocusRef = useRef<HTMLElement | null>(null);
 	const productionBayLauncherRef = useRef<HTMLButtonElement>(null);
@@ -20238,12 +20239,14 @@ export default function TileFabApp(): React.ReactElement {
 		);
 	};
 
-	const handleOpenProject = async (): Promise<"opened" | "cancelled" | "failed"> => {
+	const handleOpenProject = async (chooser?: "file-input"): Promise<"opened" | "cancelled" | "failed"> => {
 		if (guidedBuildOpen) captureGuidedBuildProjectReopenExpectation();
 		const controller = beginProjectOperation("opening");
 		setProjectMenuOpen(false);
 		try {
-			const read = await projectPersistence.chooseOpen(controller.signal);
+			const read = await (chooser === "file-input"
+				? projectPersistence.chooseOpenWithFileInput(controller.signal)
+				: projectPersistence.chooseOpen(controller.signal));
 			if (!read) {
 				setProjectOperation("idle");
 				setStatus("프로젝트 열기를 취소했습니다 · 현재 프로젝트를 유지합니다");
@@ -20492,6 +20495,7 @@ export default function TileFabApp(): React.ReactElement {
 	const handleSaveProject = async (
 		forceSaveAs = false,
 		focusOwner: "default" | "project-guard" | "checks" = "default",
+		delivery: "file" | "download" = "file",
 	): Promise<OpenFabProjectSaveOutcome> => {
 		if (blockPendingLoopOrHistoryCommand()) return { status: "failed" };
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return { status: "failed" };
@@ -20559,8 +20563,9 @@ export default function TileFabApp(): React.ReactElement {
 			};
 			const transaction = await saveOpenFabProject({
 				// No asynchronous work precedes the picker or permission request on this click stack.
-				acquireWrite: () =>
-					projectPersistence.acquireWrite(
+				acquireWrite: () => delivery === "download"
+					? projectPersistence.acquireDownload(session.manifest.name, controller.signal)
+					: projectPersistence.acquireWrite(
 						forceSaveAs ? null : session.fileReference,
 						session.manifest.name,
 						controller.signal,
@@ -20608,6 +20613,13 @@ export default function TileFabApp(): React.ReactElement {
 					setStatus(describeOpenFabProjectSaveCancellation("direct"));
 				}
 				return { status: "cancelled" };
+			}
+			if (transaction.status === "download-requested") {
+				if (ownsOperation()) {
+					setProjectOperation("idle");
+					setStatus("다운로드를 요청했습니다 · 다운로드한 파일을 확인하세요 · 현재 프로젝트와 변경 사항을 유지합니다");
+				}
+				return { status: "download-requested" };
 			}
 			const {
 				reference,
@@ -20747,7 +20759,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (action.kind === "open") {
-			await handleOpenProject();
+			await handleOpenProject(action.chooser);
 			return;
 		}
 		if (action.kind === "recover") {
@@ -20874,7 +20886,7 @@ export default function TileFabApp(): React.ReactElement {
 				return;
 			}
 			// The native Open chooser starts on this new Continue click, without another save.
-			const opened = await handleOpenProject();
+			const opened = await handleOpenProject(action.kind === "open" ? action.chooser : undefined);
 			if (pendingProjectActionRef.current !== action) return;
 			if (opened === "opened") {
 				pendingProjectActionReturnFocusRef.current = null;
@@ -24303,6 +24315,28 @@ export default function TileFabApp(): React.ReactElement {
 				canvasRef.current?.focus({ preventScroll: true });
 		});
 		return processLoopRailEditRef.current === context;
+	}
+
+	function selectProcessLoopRailOnly(): void {
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const model = editorModelRef.current;
+		const selection = staticFabSelectionRef.current;
+		if (!selection || selection.rail !== areaSelectionRef.current) return;
+		const staleReason = staticFabSelectionStaleReason(model.document.map, model.ownership,
+			model.document.portEquipment, model.document.getPatchSequence(), selection);
+		if (staleReason) { setStatus(staleReason); return; }
+		const railOnly = createStaticFabSelection(selection.rail, model.document.portEquipment,
+			model.document.getPatchSequence(), []);
+		updateStaticFabSelection(railOnly);
+		setStatus("레일만 선택했습니다 · 장비는 그대로 유지됩니다 · 이름을 입력하고 루프 등록을 확정하세요");
+		scheduleRender();
+		requestAnimationFrame(() => {
+			if (editorModelRef.current !== model || staticFabSelectionRef.current !== railOnly) return;
+			const input = document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
+			input?.scrollIntoView({ block: "nearest" }); input?.focus({ preventScroll: true });
+		});
 	}
 
 	async function registerSelectedProcessLoop(): Promise<void> {
@@ -31830,6 +31864,7 @@ export default function TileFabApp(): React.ReactElement {
 	const openStaticFabAssemblePalette = (
 		returnFocusTarget?: HTMLButtonElement | null,
 		preserveConstruction = editorActivityRef.current === "assemble",
+		focusBankOrganizationId: number | null = null,
 	): void => {
 		if (!prepareEditorActivityTransition("assemble")) return;
 		if (!preserveConstruction) chooseTool("build", "preserve-context");
@@ -31839,7 +31874,17 @@ export default function TileFabApp(): React.ReactElement {
 			(document.activeElement instanceof HTMLButtonElement
 				? document.activeElement
 				: assembleLauncherRef.current);
+		assembleBankCommandFocusRef.current = focusBankOrganizationId;
 		setTemplatePaletteOpen(true);
+	};
+	const openSelectedBankCommands = (organizationId: number): void => {
+		const selection = organizationMultiSelectionRef.current.selectedOrganizationIds;
+		if (selection.length !== 1 || selection[0] !== organizationId ||
+			selectedSemanticBankOrganization?.id !== organizationId) {
+			setStatus("편집할 Bank 하나를 다시 선택하세요");
+			return;
+		}
+		openStaticFabAssemblePalette(assembleLauncherRef.current, false, organizationId);
 	};
 	const startProductionBayPlacementFromContext = (showConfiguration = true): void => {
 		if (!prepareEditorActivityTransition("assemble")) return;
@@ -31906,11 +31951,17 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		if (!templatePaletteOpen) return;
 		const palette = assemblePaletteRef.current;
-		const target = templateSessionRef.current
+		const bankId = assembleBankCommandFocusRef.current;
+		assembleBankCommandFocusRef.current = null;
+		const selectedIds = organizationMultiSelectionRef.current.selectedOrganizationIds;
+		const bankHeading = bankId !== null && selectedIds.length === 1 && selectedIds[0] === bankId
+			? palette?.querySelector<HTMLElement>('[data-testid="assemble-selected-bank-heading"]') : null;
+		const target = bankHeading ?? (templateSessionRef.current
 			? palette?.querySelector<HTMLButtonElement>(
 					'[data-testid="pattern-configurator"] button, [data-testid="pattern-configurator"] input',
 				)
-			: palette?.querySelector<HTMLButtonElement>('[data-testid="fab-preset-browser"]');
+			: palette?.querySelector<HTMLButtonElement>('[data-testid="fab-preset-browser"]'));
+		if (bankHeading) bankHeading.scrollIntoView({ block: "nearest" });
 		target?.focus();
 	}, [templatePaletteOpen]);
 	const openActiveTemplateConfiguration = (returnFocusTarget?: HTMLButtonElement | null): void =>
@@ -33815,6 +33866,16 @@ export default function TileFabApp(): React.ReactElement {
 								>
 									<SaveAll size={14} /> 다른 이름으로 파일 저장
 								</button>
+								<button type="button" data-testid="project-open-file-input"
+									disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
+									onClick={() => requestProjectAction({ kind: "open", chooser: "file-input" })}>
+									<FolderOpen size={14} /> 파일 선택으로 열기 (.openfab)
+								</button>
+								<button type="button" data-testid="project-download"
+									disabled={!startupReady || projectBusy || modelSyncPending || projectSourceOperationPending}
+									onClick={() => void handleSaveProject(false, "default", "download")}>
+									<SaveAll size={14} /> 프로젝트 파일 다운로드 (.openfab)
+								</button>
 							</div>
 							<header>
 								<FolderClock size={13} />
@@ -35180,6 +35241,7 @@ export default function TileFabApp(): React.ReactElement {
 						}
 						currentEquipmentGroupCount={railDocument.portEquipment.equipmentGroups.length}
 						currentPortCount={railDocument.portEquipment.ports.length}
+						registeredProcessLoopCount={activeOrganizations.records.filter((record) => organizationSemanticRoles.get(record.id) === "PROCESS_LOOP").length}
 						suggestedActionActive={guidedBuildSuggestedActionActive}
 						suggestedActionGuidedActionId={guidedBuildPanelActionTargetId ?? undefined}
 						suggestedActionGuidedTarget={guidedBuildPanelActionOwnsNextStep}
@@ -38733,6 +38795,7 @@ export default function TileFabApp(): React.ReactElement {
 
 				{organizationLibraryOpen && !readinessOpen ? (
 					<StaticFabOrganizationLibrary
+						openSelectedBankCommands={openSelectedBankCommands}
 						assemblyConnectorAvailability={assemblyConnectorAvailability}
 						assemblyConnectorHierarchyRole={assemblyConnectorHierarchyRole}
 						assemblyConnectorPurpose={assemblyConnectorPurpose}
@@ -38892,7 +38955,7 @@ export default function TileFabApp(): React.ReactElement {
 								</button>
 							</div>
 						</header>
-						{areaSelectionProvenance === "ad-hoc" && staticFabEquipmentGroupCount === 0 && compactInspectorSheetActive && !compactInspectorExpanded ? (
+						{areaSelectionProvenance === "ad-hoc" && compactInspectorSheetActive && !compactInspectorExpanded ? (
 							<button type="button" className="tilefab-selection-loop-entry" data-testid="start-process-loop-registration"
 								onClick={() => { setCompactInspectorExpanded(true); requestAnimationFrame(() => {
 									const input = document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
@@ -38940,7 +39003,9 @@ export default function TileFabApp(): React.ReactElement {
 						{areaSelectionProvenance === "ad-hoc" ? (
 							<StandaloneProcessLoopRegistrationForm name={processLoopNameDraft} busy={processLoopOperation !== null}
 								selectionAvailable={staticFabSelection !== null && staticFabSelection.rail === areaSelection && staticFabEquipmentGroupCount === 0}
-								selectionUnavailableReason={staticFabEquipmentGroupCount > 0 ? `장비가 함께 선택되어 등록할 수 없습니다. ${compactInspectorSheetActive ? "패널을 접은 뒤 " : ""}장비를 Ctrl/⌘+클릭해 선택에서 제외하세요.` : undefined}
+								selectionUnavailableReason={staticFabEquipmentGroupCount > 0 ? "레일만 선택 버튼으로 장비를 선택에서 제외한 뒤 등록하세요. 장비와 소속은 바뀌지 않습니다." : undefined}
+								selectedEquipmentGroupCount={staticFabEquipmentGroupCount}
+								onSelectRailOnly={selectProcessLoopRailOnly}
 								onNameChange={(name) => { processLoopNameDraftRef.current = name; setProcessLoopNameDraft(name); }}
 								onRegister={() => { void registerSelectedProcessLoop(); }} />
 						) : null}

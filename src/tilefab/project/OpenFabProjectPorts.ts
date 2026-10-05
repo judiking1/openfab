@@ -13,6 +13,8 @@ export interface OpenFabProjectFileRead {
 /** Ephemeral, single-use write authority; never serialized with the authored project. */
 export interface OpenFabProjectWriteCapability {
 	readonly name: string;
+	/** Downloads acknowledge only a browser request, never a confirmed disk write. */
+	readonly delivery: "file" | "download";
 	commit(json: string): Promise<OpenFabProjectFileReference>;
 }
 
@@ -28,6 +30,11 @@ export class OpenFabProjectSaveAsRequiredError extends Error {
 
 export interface OpenFabProjectFileGateway {
 	chooseOpen(signal?: AbortSignal): Promise<OpenFabProjectFileRead | null>;
+	chooseOpenWithFileInput(signal?: AbortSignal): Promise<OpenFabProjectFileRead | null>;
+	acquireDownload(
+		suggestedName: string,
+		signal?: AbortSignal,
+	): Promise<OpenFabProjectWriteCapability>;
 	openRecent(
 		reference: OpenFabProjectFileReference,
 		signal?: AbortSignal,

@@ -331,7 +331,7 @@ describe("GuidedBuildMission", () => {
 			title: "OHB Port 배치",
 			suggestedAction: "ohb",
 			progressCue: {
-				label: "Port-first 진행",
+				label: "최소 Port 목표",
 				value: "OHB 0/1 · EQ 0/2 · Stocker 0/2",
 				instruction:
 					"왼쪽의 강조된 OHB · 단일 Port를 선택하세요. 캔버스 포커스에서 방향키로 슬롯을 고르고 Enter로 배치하거나, 점선 고리가 있는 청록 슬롯을 클릭하세요.",
@@ -490,7 +490,7 @@ describe("GuidedBuildMission", () => {
 		expect(
 			afterOhb.missions.find((mission) => mission.definition.id === "ports")?.prompt.progressCue,
 		).toEqual({
-			label: "Port-first 진행",
+			label: "최소 Port 목표",
 			value: "OHB 1/1 · EQ 0/2 · Stocker 0/2",
 			instruction:
 				"강조된 EQ · Port를 선택하세요. 청록색 1 시작과 2 끝을 차례로 클릭하거나 드래그하세요. 키보드는 시작과 끝에서 Enter를 사용합니다.",
@@ -502,7 +502,7 @@ describe("GuidedBuildMission", () => {
 		expect(
 			afterEq.missions.find((mission) => mission.definition.id === "ports")?.prompt.progressCue,
 		).toEqual({
-			label: "Port-first 진행",
+			label: "최소 Port 목표",
 			value: "OHB 1/1 · EQ 2/2 · Stocker 0/2",
 			instruction:
 				"왼쪽의 강조된 Stocker · 입출고 포트를 선택하세요. 캔버스에서 방향키와 Enter로 추천 슬롯 두 개를 고르거나, 황금 마름모 슬롯 두 개를 클릭한 뒤 Stocker 생성을 누르세요.",

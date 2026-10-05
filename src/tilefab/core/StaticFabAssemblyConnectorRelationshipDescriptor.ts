@@ -136,7 +136,9 @@ export function describeStaticFabAssemblyConnectorRelationship(
 			},
 		};
 	};
-	const legs = walks.map((walk, ordinal) => connectorLeg(final.map, walk, ordinal, scoped));
+	const legs = walks.map((walk, ordinal) =>
+		describeStaticFabAssemblyRelationshipLeg(final.map, walk, ordinal, scoped),
+	);
 	const record: StaticFabAssemblyRelationshipRecordV1 = {
 		id: relationshipId,
 		hierarchyRole: metadata.hierarchyRole,
@@ -227,11 +229,14 @@ function expandedConnectorWalk(
 	return ordered;
 }
 
-function connectorLeg(
+export function describeStaticFabAssemblyRelationshipLeg(
 	map: TileMap,
 	walk: readonly DirectedRailEdge[],
 	ordinal: number,
 	scoped: (edge: DirectedRailEdge) => StaticFabAssemblyScopedEdgeV1,
+	directionRole: StaticFabAssemblyRelationshipLegV1["directionRole"] = ordinal === 0
+		? "OUTBOUND"
+		: "RETURN",
 ): StaticFabAssemblyRelationshipLegV1 {
 	const exclusive = walk.map(scoped);
 	const indices = new Map(walk.map((edge, index) => [staticFabOrganizationEdgeKey(edge), index]));
@@ -288,7 +293,7 @@ function connectorLeg(
 	);
 	return {
 		ordinal,
-		directionRole: ordinal === 0 ? "OUTBOUND" : "RETURN",
+		directionRole,
 		exclusiveCutEdges: exclusive,
 		endpointSupports: supports,
 		seamContacts: contacts.map((value) => value.seam),

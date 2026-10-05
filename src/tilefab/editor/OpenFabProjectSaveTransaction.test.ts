@@ -12,7 +12,7 @@ function deferred<T>() {
 	});
 	return { promise, resolve };
 }
-function fixture() {
+function fixture(delivery: "file" | "download" = "file") {
 	const calls: string[] = [];
 	let current = true;
 	const reference = Object.freeze({
@@ -27,7 +27,7 @@ function fixture() {
 		expect(json).toBe(prepared.json);
 		return reference;
 	});
-	const capability = { name: reference.name, commit };
+	const capability = { name: reference.name, delivery, commit };
 	const acquireWrite = vi.fn(async () => {
 		calls.push("acquire");
 		return capability;
@@ -85,6 +85,34 @@ describe("project save transaction", () => {
 		expect(prepare).not.toHaveBeenCalled();
 		expect(assertCurrent).not.toHaveBeenCalled();
 		expect(f.commit).not.toHaveBeenCalled();
+	});
+	it("returns a download request, never a confirmed write, through the same preparation guards", async () => {
+		const f = fixture("download");
+		expect(await f.save()).toEqual({
+			status: "download-requested",
+			reference: f.reference,
+			prepared: f.prepared,
+		});
+		expect(f.calls).toEqual(["acquire", "assert", "prepare", "assert", "commit"]);
+	});
+	it("refuses a download after source replacement during serialization", async () => {
+		const f = fixture("download");
+		f.prepare.mockImplementation(async () => {
+			f.replace();
+			return f.prepared;
+		});
+		await expect(f.save()).rejects.toBeInstanceOf(RailStartupCancelledError);
+		expect(f.commit).not.toHaveBeenCalled();
+	});
+	it("does not return a download receipt when preparation or browser dispatch fails", async () => {
+		const f = fixture("download");
+		const invalid = new Error("project validation failed");
+		f.prepare.mockRejectedValueOnce(invalid);
+		await expect(f.save()).rejects.toBe(invalid);
+		expect(f.commit).not.toHaveBeenCalled();
+		const blocked = new DOMException("download blocked", "NotAllowedError");
+		f.commit.mockRejectedValueOnce(blocked);
+		await expect(f.save()).rejects.toBe(blocked);
 	});
 	it.each([
 		"SecurityError",

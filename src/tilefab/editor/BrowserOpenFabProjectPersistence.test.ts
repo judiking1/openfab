@@ -1,12 +1,23 @@
 import { IDBObjectStore as FakeIDBObjectStore, IDBFactory } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { planRailConstruction } from "../core/paint";
 import type { RailAreaStampTemplate } from "../core/RailAreaStamp";
+import { RailDocument } from "../core/RailDocument";
 import legacyOrganizationRecord from "../project/fixtures/legacy-organization-blueprint-v1.json";
 import {
 	createOpenFabRailAreaBlueprint,
 	updateOpenFabProjectBlueprint,
 } from "../project/OpenFabBlueprintLibrary";
-import { OPENFAB_PROJECT_MAX_JSON_CHARACTERS } from "../project/OpenFabProjectCodec";
+import {
+	captureOpenFabProject,
+	createOpenFabProjectManifest,
+	createRailSnapshotFromOpenFabProject,
+} from "../project/OpenFabProject";
+import {
+	OPENFAB_PROJECT_MAX_JSON_CHARACTERS,
+	parseOpenFabProjectJson,
+	serializeOpenFabProject,
+} from "../project/OpenFabProjectCodec";
 import type {
 	OpenFabProjectMetadataMutationAuthority,
 	OpenFabRecentProject,
@@ -33,6 +44,7 @@ import {
 	OPENFAB_USER_BLUEPRINT_LIBRARY_FILE_EXTENSION,
 	OPENFAB_USER_BLUEPRINT_LIBRARY_MAX_JSON_BYTES,
 } from "../project/OpenFabUserBlueprintLibraryBundle";
+import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
 import {
 	BrowserOpenFabProjectPersistence,
 	type BrowserProjectDatabaseConflictPredicate,
@@ -42,6 +54,7 @@ import {
 	type BrowserProjectDatabaseStoreKey,
 	type BrowserProjectDatabaseStoreValue,
 } from "./BrowserOpenFabProjectPersistence";
+import { saveOpenFabProject } from "./OpenFabProjectSaveTransaction";
 
 describe("BrowserOpenFabProjectPersistence", () => {
 	afterEach(() => vi.unstubAllGlobals());
@@ -1033,6 +1046,7 @@ describe("BrowserOpenFabProjectPersistence", () => {
 
 		const destination = await persistence.acquireWrite(null, "Portable FAB");
 		if (!destination) throw new Error("expected a download destination");
+		expect(destination.delivery).toBe("download");
 		const reference = await destination.commit("{}");
 
 		expect(nativeSavePicker).not.toHaveBeenCalled();
@@ -1041,6 +1055,227 @@ describe("BrowserOpenFabProjectPersistence", () => {
 			writable: false,
 			reopenable: false,
 		});
+	});
+
+	it("offers an explicit single-use download without a native picker or file handle", async () => {
+		const database = new MemoryProjectDatabase();
+		const nativeSavePicker = vi.fn();
+		vi.stubGlobal("window", { showSaveFilePicker: nativeSavePicker });
+		const download = stubProjectDownload();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const destination = await persistence.acquireDownload("Portable/FAB");
+		expect(download.click).not.toHaveBeenCalled();
+		expect(destination.delivery).toBe("download");
+		const reference = await destination.commit('{"prepared":"project"}');
+		expect(reference).toMatchObject({
+			name: "Portable-FAB.openfab",
+			writable: false,
+			reopenable: false,
+		});
+		expect(download.anchor.download).toBe(reference.name);
+		expect(download.click).toHaveBeenCalledOnce();
+		expect(await download.blob().text()).toBe('{"prepared":"project"}');
+		await expect(destination.commit("second request")).rejects.toThrow("이미 사용");
+		expect(download.click).toHaveBeenCalledOnce();
+		expect(nativeSavePicker).not.toHaveBeenCalled();
+		expect(await database.getAll("file-handles")).toEqual([]);
+		expect(await persistence.listRecent()).toEqual([]);
+	});
+
+	it("does not dispatch an explicit download after cancellation", async () => {
+		const download = stubProjectDownload();
+		const controller = new AbortController();
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		const destination = await persistence.acquireDownload("Cancelled", controller.signal);
+		controller.abort();
+		await expect(destination.commit("late")).rejects.toMatchObject({ name: "AbortError" });
+		await expect(persistence.acquireDownload("Cancelled", controller.signal)).rejects.toMatchObject(
+			{ name: "AbortError" },
+		);
+		expect(download.click).not.toHaveBeenCalled();
+	});
+
+	it("propagates a blocked download and removes its temporary anchor", async () => {
+		const failure = new DOMException("blocked", "NotAllowedError");
+		const download = stubProjectDownload();
+		download.click.mockImplementation(() => {
+			throw failure;
+		});
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		const destination = await persistence.acquireDownload("Blocked");
+		await expect(destination.commit("{}")).rejects.toBe(failure);
+		expect(download.anchor.remove).toHaveBeenCalledOnce();
+		expect(await persistence.listRecent()).toEqual([]);
+	});
+
+	it("opens an explicitly selected input file even when the native picker exists", async () => {
+		const nativePicker = vi.fn();
+		vi.stubGlobal("window", { showOpenFilePicker: nativePicker });
+		const input = stubProjectFileInput();
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		const opening = persistence.chooseOpenWithFileInput();
+		expect(input.click).toHaveBeenCalledOnce();
+		expect(input.accept).toBe(".openfab,.json,application/json");
+		input.files = [{ name: "Downloaded.openfab", size: 2, text: async () => "{}" }];
+		input.dispatchEvent(new Event("change"));
+		await expect(opening).resolves.toMatchObject({
+			reference: { name: "Downloaded.openfab", writable: false, reopenable: false },
+			json: "{}",
+		});
+		expect(nativePicker).not.toHaveBeenCalled();
+		expect(input.remove).toHaveBeenCalledOnce();
+		expect(await database.getAll("file-handles")).toEqual([]);
+	});
+
+	it("round-trips prepared download bytes through a fresh input adapter and codec into editable history", async () => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 10, y: 0 })),
+		).toBe(true);
+		const manifest = createOpenFabProjectManifest(
+			"portable-roundtrip",
+			"Portable FAB",
+			"2026-10-05T00:00:00.000Z",
+		);
+		const project = captureOpenFabProject(document, { manifest });
+		const download = stubProjectDownload();
+		const first = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		const result = await saveOpenFabProject({
+			acquireWrite: () => first.acquireDownload(manifest.name),
+			prepare: async () => ({ json: serializeOpenFabProject(project) }),
+			assertCurrent: () => undefined,
+		});
+		expect(result.status).toBe("download-requested");
+		const bytes = download.blob();
+		const input = stubProjectFileInput();
+		const next = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		const opening = next.chooseOpenWithFileInput();
+		input.files = [{ name: "Portable FAB.openfab", size: bytes.size, text: () => bytes.text() }];
+		input.dispatchEvent(new Event("change"));
+		const read = await opening;
+		if (!read) throw new Error("expected selected project bytes");
+		const reopened = parseOpenFabProjectJson(read.json).project;
+		expect(reopened).toEqual(project);
+		const loaded = hydrateRailMirrorSnapshotDocument(
+			createRailSnapshotFromOpenFabProject(reopened),
+		);
+		expect(loaded.canUndo).toBe(false);
+		expect(loaded.commit(planRailConstruction(loaded.map, { x: 10, y: 0 }, { x: 15, y: 0 }))).toBe(
+			true,
+		);
+		const edited = captureOpenFabProject(loaded, { manifest });
+		const originalChecksum = createRailSnapshotFromOpenFabProject(project).checksum;
+		const editedChecksum = createRailSnapshotFromOpenFabProject(edited).checksum;
+		expect(editedChecksum).not.toBe(originalChecksum);
+		expect(loaded.undo()).toBe(true);
+		expect(
+			createRailSnapshotFromOpenFabProject(captureOpenFabProject(loaded, { manifest })).checksum,
+		).toBe(originalChecksum);
+		expect(loaded.redo()).toBe(true);
+		expect(
+			createRailSnapshotFromOpenFabProject(captureOpenFabProject(loaded, { manifest })).checksum,
+		).toBe(editedChecksum);
+	});
+
+	it("keeps native and file-input cancellation distinct from acquisition failures", async () => {
+		const nativePicker = vi.fn(async () => {
+			throw new DOMException("cancelled", "AbortError");
+		});
+		vi.stubGlobal("window", { showOpenFilePicker: nativePicker });
+		const input = stubProjectFileInput();
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		await expect(persistence.chooseOpen()).resolves.toBeNull();
+		expect(input.click).not.toHaveBeenCalled();
+		const opening = persistence.chooseOpenWithFileInput();
+		input.dispatchEvent(new Event("cancel"));
+		await expect(opening).resolves.toBeNull();
+		expect(input.remove).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		"SecurityError",
+		"NotAllowedError",
+		"InvalidStateError",
+		"TypeError",
+	])("preserves native %s without silently choosing download or input", async (name) => {
+		const failure =
+			name === "TypeError" ? new TypeError("unavailable") : new DOMException("unavailable", name);
+		const picker = vi.fn(() => {
+			throw failure;
+		});
+		const createElement = vi.fn();
+		vi.stubGlobal("window", { showOpenFilePicker: picker, showSaveFilePicker: picker });
+		vi.stubGlobal("document", { createElement });
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		await expect(persistence.chooseOpen()).rejects.toBe(failure);
+		await expect(persistence.acquireWrite(null, "Unavailable")).rejects.toBe(failure);
+		expect(createElement).not.toHaveBeenCalled();
+	});
+
+	it("does not confuse a post-selection file read AbortError with picker cancellation", async () => {
+		const failure = new DOMException("file read failed", "AbortError");
+		const file = createFileHandle("Read-failure.openfab");
+		vi.spyOn(file.handle, "getFile").mockRejectedValueOnce(failure);
+		vi.stubGlobal("window", { showOpenFilePicker: async () => [file.handle] });
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		await expect(persistence.chooseOpen()).rejects.toBe(failure);
+	});
+
+	it("rejects superseded native open instead of reporting user cancellation", async () => {
+		const controller = new AbortController();
+		const file = createFileHandle("Superseded.openfab");
+		vi.stubGlobal("window", {
+			showOpenFilePicker: async () => {
+				controller.abort();
+				return [file.handle];
+			},
+		});
+		const database = new MemoryProjectDatabase();
+		const persistence = new BrowserOpenFabProjectPersistence(database);
+		await expect(persistence.chooseOpen(controller.signal)).rejects.toMatchObject({
+			name: "AbortError",
+		});
+		expect(await database.getAll("file-handles")).toEqual([]);
+	});
+
+	it("rejects superseded file input, removes it, and ignores a late selection", async () => {
+		const input = stubProjectFileInput();
+		const controller = new AbortController();
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		const opening = persistence.chooseOpenWithFileInput(controller.signal);
+		controller.abort();
+		await expect(opening).rejects.toMatchObject({ name: "AbortError" });
+		const text = vi.fn(async () => "late");
+		input.files = [{ name: "Late.openfab", size: 4, text }];
+		input.dispatchEvent(new Event("change"));
+		expect(text).not.toHaveBeenCalled();
+		expect(input.remove).toHaveBeenCalledOnce();
+	});
+
+	it("removes file input and propagates a chooser invocation failure", async () => {
+		const failure = new DOMException("blocked input", "SecurityError");
+		const input = stubProjectFileInput();
+		input.click.mockImplementation(() => {
+			throw failure;
+		});
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		await expect(persistence.chooseOpenWithFileInput()).rejects.toBe(failure);
+		expect(input.remove).toHaveBeenCalledOnce();
+	});
+
+	it("enforces the project size bound on explicit input before reading bytes", async () => {
+		const input = stubProjectFileInput();
+		const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+		const opening = persistence.chooseOpenWithFileInput();
+		const text = vi.fn(async () => "oversized");
+		input.files = [
+			{ name: "Oversized.openfab", size: OPENFAB_PROJECT_MAX_JSON_CHARACTERS + 1, text },
+		];
+		input.dispatchEvent(new Event("change"));
+		await expect(opening).rejects.toThrow("128 MiB");
+		expect(text).not.toHaveBeenCalled();
+		expect(input.remove).toHaveBeenCalledOnce();
 	});
 
 	it("treats native save chooser AbortError as a cancellation without retaining a file handle", async () => {
@@ -2526,6 +2761,47 @@ function assertTestMetadataAuthority(authority?: OpenFabProjectMetadataMutationA
 	if (authority && (authority.signal.aborted || !authority.isCurrent())) {
 		throw new DOMException("Metadata operation is stale.", "AbortError");
 	}
+}
+
+function stubProjectDownload() {
+	let downloaded: Blob | null = null;
+	const click = vi.fn();
+	const anchor = { href: "", download: "", click, remove: vi.fn() };
+	vi.stubGlobal("document", {
+		body: { append: vi.fn() },
+		createElement: () => anchor,
+	});
+	vi.stubGlobal("URL", {
+		createObjectURL: (blob: Blob) => {
+			downloaded = blob;
+			return "blob:explicit-openfab-test";
+		},
+		revokeObjectURL: vi.fn(),
+	});
+	return {
+		anchor,
+		click,
+		blob: (): Blob => {
+			if (!downloaded) throw new Error("expected a dispatched download");
+			return downloaded;
+		},
+	};
+}
+
+function stubProjectFileInput() {
+	const input = Object.assign(new EventTarget(), {
+		type: "",
+		accept: "",
+		hidden: false,
+		files: [] as { name: string; size: number; text(): Promise<string> }[],
+		click: vi.fn(),
+		remove: vi.fn(),
+	});
+	vi.stubGlobal("document", {
+		body: { append: vi.fn() },
+		createElement: () => input,
+	});
+	return input;
 }
 
 function createFileHandle(name: string): {

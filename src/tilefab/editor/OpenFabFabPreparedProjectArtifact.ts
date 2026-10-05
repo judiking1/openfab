@@ -360,8 +360,8 @@ function validateSnapshotEnvelope(
 		digest.equipmentGroupCount !== 0 ||
 		digest.organizationCount !== identity.counts.organizationRecords ||
 		digest.organizationNextId !== identity.nextOrganizationId ||
-		digest.assemblyRelationshipCount !== 0 ||
-		digest.assemblyRelationshipNextId !== 1
+		digest.assemblyRelationshipCount !== identity.counts.banks ||
+		digest.assemblyRelationshipNextId !== identity.counts.banks + 1
 	) {
 		throw new Error("Prepared OpenFab Fab project checksum counters do not match its identity.");
 	}
@@ -411,11 +411,11 @@ function validateV1ColumnLengths(
 	}
 	const organizations = snapshot.organizations;
 	if (
-		snapshot.relationships.nextRelationshipId !== 1 ||
-		snapshot.relationships.relationshipIds.length !== 0
+		snapshot.relationships.nextRelationshipId !== identity.counts.banks + 1 ||
+		snapshot.relationships.relationshipIds.length !== identity.counts.banks
 	) {
 		throw new Error(
-			"Prepared OpenFab Fab project relationships violate the producer-free contract.",
+			"Prepared OpenFab Fab project relationships violate the declared Bank attachment contract.",
 		);
 	}
 	const records = organizations.records;

@@ -37,6 +37,7 @@ export function reviewStaticFabSemanticBankDeleteProspective(
 			source.portEquipment,
 			source.organizations,
 			{ ...intent, action: "DETACH" },
+			source.relationships,
 		);
 		if (!detach.prospectiveDetachProved)
 			throw new Error(`삭제 전 독립 Detach 증명 실패 · ${detach.reason}`);

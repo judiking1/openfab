@@ -10,6 +10,7 @@ export interface PreparedOpenFabProjectSave {
 
 export type OpenFabProjectSaveTransactionResult<T extends PreparedOpenFabProjectSave> =
 	| Readonly<{ status: "cancelled" }>
+	| Readonly<{ status: "download-requested"; reference: OpenFabProjectFileReference; prepared: T }>
 	| Readonly<{ status: "written"; reference: OpenFabProjectFileReference; prepared: T }>;
 
 /** Acquire user-action authority before any asynchronous project preparation. */
@@ -24,6 +25,11 @@ export async function saveOpenFabProject<T extends PreparedOpenFabProjectSave>(o
 	const prepared = await options.prepare();
 	options.assertCurrent();
 	const reference = await destination.commit(prepared.json);
+	if (destination.delivery === "download") {
+		// The browser does not expose completion/cancellation of anchor downloads. Keep the
+		// current session's dirty state, file destination and recovery until a confirmed save.
+		return Object.freeze({ status: "download-requested", reference, prepared });
+	}
 	// close() may already have committed the bytes. The caller must retain this receipt even
 	// when the operation or source changed during close, rather than report cancellation.
 	return Object.freeze({ status: "written", reference, prepared });

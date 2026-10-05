@@ -3,6 +3,8 @@ export interface StandaloneProcessLoopRegistrationFormProps {
 	readonly busy: boolean;
 	readonly selectionAvailable: boolean;
 	readonly selectionUnavailableReason?: string;
+	readonly selectedEquipmentGroupCount?: number;
+	readonly onSelectRailOnly?: () => void;
 	readonly onNameChange: (name: string) => void;
 	readonly onRegister: () => void;
 }
@@ -13,6 +15,8 @@ export function StandaloneProcessLoopRegistrationForm({
 	busy,
 	selectionAvailable,
 	selectionUnavailableReason,
+	selectedEquipmentGroupCount = 0,
+	onSelectRailOnly,
 	onNameChange,
 	onRegister,
 }: StandaloneProcessLoopRegistrationFormProps) {
@@ -26,9 +30,20 @@ export function StandaloneProcessLoopRegistrationForm({
 				작업 루프 등록 <small>Process Loop</small>
 			</h3>
 			<p id="standalone-process-loop-instructions">
-				직접 만든 폐쇄 레일 전체를 선택해 등록하세요. 등록한 루프에 OHB·EQ·Stocker를 배치하고
-				소속시킬 수 있습니다.
+				직접 만든 폐쇄 레일 전체를 선택해 등록하세요. 이미 배치한 장비는 그대로 유지되며, 루프 등록
+				후 장비의 소속을 지정할 수 있습니다.
 			</p>
+			{selectedEquipmentGroupCount > 0 && onSelectRailOnly ? (
+				<button
+					type="button"
+					className="tilefab-loop-registration-control"
+					data-testid="process-loop-select-rail-only"
+					disabled={busy}
+					onClick={onSelectRailOnly}
+				>
+					레일만 선택 · 장비 {selectedEquipmentGroupCount}개 제외
+				</button>
+			) : null}
 			<label className="tilefab-organization-field">
 				<span>작업 루프 이름</span>
 				<input
@@ -63,7 +78,7 @@ export function StandaloneProcessLoopRegistrationForm({
 			<small data-testid="standalone-process-loop-selection-help">
 				{!selectionAvailable
 					? (selectionUnavailableReason ?? "검사에서 폐쇄 레일 전체를 선택한 뒤 여기서 등록하세요.")
-					: "장비는 제외해 선택하세요. 실패하면 레일과 선택이 유지됩니다."}
+					: "등록 시 폐합과 기존 소속을 검사합니다. 실패하면 레일과 선택이 유지됩니다."}
 			</small>
 		</section>
 	);

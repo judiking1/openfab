@@ -74,6 +74,29 @@ describe("OpenFabStartDialog", () => {
 });
 
 describe("GuidedBuildPanel", () => {
+	it("separates closed rail progress from actual Loop registration", () => {
+		const props = {
+			evaluation: evaluateGuidedBuildFoundation(evidence(completedThroughTwinBay())),
+			onAcknowledgeNavigation: () => undefined,
+			onActivateSuggestedAction: () => undefined,
+			onContinueChapter: () => undefined,
+			onStartEditing: () => undefined,
+			onMinimize: () => undefined,
+			onExit: () => undefined,
+		};
+		expect(
+			renderToStaticMarkup(<GuidedBuildPanel {...props} registeredProcessLoopCount={0} />),
+		).toContain("Process Loop 미등록");
+		expect(
+			renderToStaticMarkup(<GuidedBuildPanel {...props} registeredProcessLoopCount={1} />),
+		).not.toContain("Process Loop 미등록");
+		expect(
+			renderToStaticMarkup(
+				<GuidedBuildPanel {...props} registeredProcessLoopCount={0} practiceGraduated />,
+			),
+		).not.toContain("Process Loop 미등록");
+	});
+
 	it("presents one current objective and its registry-owned input hint", () => {
 		const markup = panelMarkup(evidence({ navigationAcknowledged: true }));
 
@@ -87,7 +110,7 @@ describe("GuidedBuildPanel", () => {
 		expect(markup).toContain("미션 2/3 · 전체 미션 2/13");
 		expect(markup).not.toContain("MISSION 2 · FIRST RAIL");
 		expect(markup).not.toContain('data-testid="guided-build-mission-detail"');
-		expect(markup).not.toContain("닫힌 Process Loop: locked");
+		expect(markup).not.toContain("닫힌 순환 레일: locked");
 		expect(markup).toContain("현재 도구 드래그");
 		expect(markup).toContain("TOUCH DRAG");
 		expect(markup).toContain("LMB DRAG");

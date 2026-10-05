@@ -199,6 +199,7 @@ export interface OpenFabProjectParseResult {
 		| 12
 		| 13
 		| 14
+		| 15
 		| null;
 }
 
@@ -224,11 +225,17 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	const schemaVersion = expectInteger(root.schemaVersion, "$.schemaVersion");
 	if (schemaVersion === OPENFAB_PROJECT_SCHEMA_VERSION) {
-		return Object.freeze({ project: validateVersionFifteen(root), migratedFromVersion: null });
+		return Object.freeze({ project: validateVersionSixteen(root), migratedFromVersion: null });
+	}
+	if (schemaVersion === 15) {
+		return Object.freeze({
+			project: validateVersionSixteen({ ...root, schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION }),
+			migratedFromVersion: 15,
+		});
 	}
 	if (schemaVersion === 14) {
 		return Object.freeze({
-			project: validateVersionFifteen({
+			project: validateVersionSixteen({
 				...root,
 				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 				equipment: validateEquipmentSection(root.equipment, true),
@@ -238,7 +245,7 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	if (schemaVersion === 13 || schemaVersion === 12) {
 		return Object.freeze({
-			project: validateVersionFifteen({
+			project: validateVersionSixteen({
 				...root,
 				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 				areas: validateOrganizationSection(root.areas, true),
@@ -250,7 +257,7 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	if (schemaVersion === 11) {
 		return Object.freeze({
-			project: validateVersionFifteen({
+			project: validateVersionSixteen({
 				...root,
 				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 				areas: validateOrganizationSection(root.areas, true),
@@ -340,7 +347,7 @@ export function serializeOpenFabProject(
 	) {
 		throw new Error("OpenFab project serialization limit is invalid.");
 	}
-	const normalized = validateVersionFifteen(expectRecord(project, "$", "INVALID_ROOT"));
+	const normalized = validateVersionSixteen(expectRecord(project, "$", "INVALID_ROOT"));
 	const sorted = sortJsonObjectKeys(normalized);
 	const characterLength = prettyJsonCharacterLength(sorted) + 1;
 	if (characterLength > maximumCharacters) {
@@ -407,7 +414,7 @@ export function parseOpenFabProjectBlueprintValue(value: unknown): OpenFabProjec
 	return record;
 }
 
-function validateVersionFifteen(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function validateVersionSixteen(root: Readonly<Record<string, unknown>>): OpenFabProject {
 	expectExactKeys(
 		root,
 		[
@@ -454,7 +461,7 @@ function validateVersionFifteen(root: Readonly<Record<string, unknown>>): OpenFa
 }
 
 function migrateVersionTen(project: OpenFabProjectVersionTen): OpenFabProject {
-	return validateVersionFifteen({
+	return validateVersionSixteen({
 		...project,
 		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 		relationships: createEmptyOpenFabProjectRelationshipSection(),

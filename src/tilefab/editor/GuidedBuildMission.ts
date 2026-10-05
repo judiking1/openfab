@@ -118,10 +118,11 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		sequence: 3,
 		activity: "build",
 		eyebrow: "MISSION 3 · PROCESS LOOP",
-		title: "닫힌 Process Loop",
+		title: "닫힌 순환 레일",
 		objective:
 			"레일을 계속 연결해 열린 끝이 없는 하나의 닫힌 방향성 회로를 만드세요. 편집·실행 취소로 열린 회로는 이 단계에서 이어갑니다.",
-		rationale: "작은 닫힌 회로는 Bay가 아니라 장비 접근의 기본 단위인 Process Loop입니다.",
+		rationale:
+			"이 단계는 레일 폐합 실습입니다. Process Loop 소속 등록은 검사에서 닫힌 레일 전체를 선택한 뒤 별도로 확정합니다.",
 		primaryCommandId: "canvas.primary-drag",
 	}),
 	Object.freeze({
@@ -928,7 +929,7 @@ function guidedBuildPortProgressCue(
 	): number =>
 		evidence.groupCount > 0 ? Math.min(evidence.largestGroupPortCount, kind === "OHB" ? 1 : 2) : 0;
 	return Object.freeze({
-		label: "Port-first 진행",
+		label: "최소 Port 목표",
 		value: `OHB ${completedPortCount("OHB", equipment.OHB)}/1 · EQ ${completedPortCount("EQ", equipment.EQ)}/2 · Stocker ${completedPortCount("STK", equipment.STK)}/2`,
 		instruction,
 	});

@@ -249,7 +249,7 @@ describe("ProductionBankParentGatewayPlanner", () => {
 			"FAB_INNER_PERIMETER",
 			"BANK_COLLECTOR_SECONDARY",
 		]);
-		expect(plan.buildSteps.every((step) => step.owner === "BANK")).toBe(true);
+		expect(plan.buildSteps.every((step) => step.owner === "FAB")).toBe(true);
 		expect(plan.buildSteps.flatMap((step) => step.ownedDirectedEdges).map(edgeKey)).toEqual(
 			ownedKeys,
 		);
