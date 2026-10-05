@@ -8,8 +8,11 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [0.1.56] - 2026-10-05
 
-R2 review and local validation candidate; publication requires exact-source CI and Pages verification.
+R2 Builder preview; publication uses a production build, public safety and actual Pages verification.
 V1 remains incomplete and simulation stays disabled.
+
+- Move full regression and authoring CI to explicit manual runs; publish from the ordinary
+  production build without waiting for the long validation matrix. Keep tests and assertions.
 
 - Show the current straight, corner or endpoint reshape action and its actual controls;
   cancel through Escape or right-click and return to inspection without changing rails.

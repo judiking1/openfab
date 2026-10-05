@@ -47,7 +47,15 @@ pnpm dev -- --host 127.0.0.1 --port 5181
 Then open `http://127.0.0.1:5181/` and choose Guided Build, Verified Template, or Blank Canvas.
 The current Builder interface is Korean-first while commands retain concise domain labels.
 
-## Verify
+## Build and publish
+
+Builder publication requires `pnpm check:public-release`, `pnpm build`, then actual Pages loading
+and simple editing verification. Full tests are available manually and do not block deployment.
+The CI workflow builds on pushes and pull requests; enable `run_full_validation` in a manual
+workflow run for the complete regression and authoring suites. Pages uses the existing `gh-pages`
+publication path. Unrun checks are not counted as passed; V1 remains incomplete.
+
+## Optional full verification
 
 ```bash
 pnpm check:core

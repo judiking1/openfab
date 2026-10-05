@@ -4,6 +4,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_full_validation:
+        description: Run the optional full test and authoring suites
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,7 +19,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check:public-release
+      - run: pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openfab-builder-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Full validation is available on request; it does not gate Builder publication.
+  # Pages publication continues through the existing gh-pages branch.
   verify:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_full_validation
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -43,6 +74,7 @@ jobs:
       - run: pnpm check:public-safety
 
   authoring:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_full_validation
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

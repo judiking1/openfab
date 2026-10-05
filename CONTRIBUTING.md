@@ -50,7 +50,20 @@ pnpm install
 pnpm dev -- --host 127.0.0.1 --port 5181
 ```
 
-Before submitting a change, run:
+Builder publication uses the ordinary production build and public-safety checks:
+
+```bash
+pnpm check:public-release
+pnpm build
+```
+
+Publish only the approved public source and verify the actual Pages version, loading and a simple
+edit. Full regression and authoring suites are optional manual diagnostics, not deployment gates.
+In Actions, choose **Run workflow** and enable `run_full_validation` to run both complete suites.
+Record unrun or failed checks honestly; a successful build does not establish full validation or V1
+completion. The existing `gh-pages` publication path is retained.
+
+For a full manual validation, run:
 
 ```bash
 pnpm check:core
@@ -64,7 +77,7 @@ pnpm check:public-safety
 pnpm check:live-demo
 ```
 
-Run the relevant browser gate as well: `check:authoring`, `check:project`, `check:scale`, or
+For area-specific manual validation, run: `check:authoring`, `check:project`, `check:scale`, or
 `check:3d`. Do not weaken an assertion, timeout, topology rule, or memory budget to make a change
 pass.
 
