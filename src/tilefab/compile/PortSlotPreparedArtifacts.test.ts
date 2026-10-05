@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import { DIR_E, DIR_W } from "../core/railShape";
@@ -8,6 +8,7 @@ import { collectTransferableBuffers } from "../worker/TransferableBuffers";
 import { PATH_INTERVAL_MAPPING_KIND } from "./CompoundPhysicalPath";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { compilePortEquipmentPresentation } from "./PortEquipmentPresentation";
+import * as PortSlotCompiler from "./PortSlotCompiler";
 import {
 	PORT_SLOT_STATUS,
 	PortSlotAvailabilityIndex,
@@ -27,6 +28,7 @@ import {
 	validatePortSlotPreparedArtifactCatalog,
 	validatePortSlotPreparedArtifacts,
 } from "./PortSlotPreparedArtifacts";
+import * as RailClearanceCompiler from "./RailClearanceCompiler";
 
 describe("PortSlotPreparedArtifacts", () => {
 	it("binds transferable OHB slot geometry and its spatial index to one physical revision", () => {
@@ -323,6 +325,57 @@ describe("PortSlotPreparedArtifacts", () => {
 		expect(checksumPortSlotPreparedArtifactCatalog(delivered, "physical-fixture")).toBe(
 			fingerprint,
 		);
+	});
+
+	it("shares validation preparation only within one synchronous catalog compilation", () => {
+		const layout = compilePhysicalRail(straightDocument().map);
+		const nextLayout = compilePhysicalRail(straightDocument().map);
+		expect(nextLayout.revision).toBe(layout.revision);
+		const expected = {
+			OHB: compilePortSlotPreparedArtifacts(layout, "OHB"),
+			EQ: compilePortSlotPreparedArtifacts(layout, "EQ"),
+			STK: compilePortSlotPreparedArtifacts(layout, "STK"),
+		};
+		const exclusionMask = vi.spyOn(PortSlotCompiler, "compilePortSlotExclusionMask");
+		const OriginalClearanceIndex = RailClearanceCompiler.RailEnvelopeSpatialIndex;
+		function constructClearanceIndex(
+			...args: ConstructorParameters<typeof OriginalClearanceIndex>
+		) {
+			return new OriginalClearanceIndex(...args);
+		}
+		const clearanceIndex = vi
+			.spyOn(RailClearanceCompiler, "RailEnvelopeSpatialIndex")
+			.mockImplementation(constructClearanceIndex);
+		try {
+			const catalog = compilePortSlotPreparedArtifactCatalog(layout);
+			// Three independent base compilers plus one call-local semantic-validation context.
+			expect(clearanceIndex).toHaveBeenCalledTimes(4);
+			// The base compiler's module-local mask calls are outside this export spy.
+			expect(exclusionMask).toHaveBeenCalledTimes(1);
+			expect(catalog).toEqual(expected);
+			expect(checksumPortSlotPreparedArtifactCatalog(catalog, "physical-fixture")).toBe(
+				checksumPortSlotPreparedArtifactCatalog(expected, "physical-fixture"),
+			);
+
+			clearanceIndex.mockClear();
+			exclusionMask.mockClear();
+			validatePortSlotPreparedArtifactCatalog(layout, structuredClone(catalog));
+			expect(clearanceIndex).toHaveBeenCalledTimes(3);
+			expect(exclusionMask).toHaveBeenCalledTimes(3);
+
+			clearanceIndex.mockClear();
+			exclusionMask.mockClear();
+			const next = compilePortSlotPreparedArtifactCatalog(nextLayout);
+			expect(clearanceIndex).toHaveBeenCalledTimes(4);
+			expect(exclusionMask).toHaveBeenCalledTimes(1);
+			expect(next).toEqual(expected);
+			expect(next.OHB.slots.statuses.buffer).not.toBe(catalog.OHB.slots.statuses.buffer);
+			expect(portSlotPreparedArtifactsHaveExactSourceLayout(next.OHB, nextLayout)).toBe(true);
+			expect(portSlotPreparedArtifactsHaveExactSourceLayout(next.OHB, layout)).toBe(false);
+		} finally {
+			exclusionMask.mockRestore();
+			clearanceIndex.mockRestore();
+		}
 	});
 
 	it("privately adopts a Worker catalog before cooperative callbacks can mutate validated rows", async () => {

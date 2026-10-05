@@ -6,6 +6,19 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.60] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Detach a terminal Bay Bank joined to a retained Fab by one explicit Connector relationship.
+  Review preserved and removed content before applying one independently validated change with
+  exact Undo/Redo. Preserve the Bank subtree, equipment and Ports; reject shared relationships,
+  connector Ports and cuts that would invalidate the retained Fab. Bank/Fab deletion is not enabled.
+- Explain equipment service-direction and body-size editing in Help and command search. Show
+  unapplied EQ dimension input and allow cancelling that input without changing project history.
+- Reuse clearance preparation within one Port-slot catalog compilation and release organization
+  placement preview references when the session ends or the project changes.
+
 ## [0.1.59] - 2026-10-05
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

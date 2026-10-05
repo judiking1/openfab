@@ -18,6 +18,7 @@ import type {
 	StaticFabAssemblyConnectorPurpose,
 } from "../core/StaticFabAssemblyConnector";
 import "./StaticFabSemanticBayMutationDialog.css";
+import "./StaticFabSemanticBankDetachDialog.css";
 
 export const STATIC_FAB_ASSEMBLE_DUPLICATE_CAPTURE_MODE = "EFFECTIVE" as const;
 
@@ -25,6 +26,10 @@ export interface StaticFabAssembleMenuProps {
 	readonly selectionCount: number;
 	readonly selectedBayCount: number;
 	readonly selectedBankCount: number;
+	readonly bankDetach?: Readonly<{
+		availability: StaticFabAssembleActionAvailability;
+		onDetach: (launcher: HTMLButtonElement) => void;
+	}>;
 	readonly connectorHierarchyRole: StaticFabAssemblyConnectorHierarchyRole | null;
 	readonly connectorPurpose: StaticFabAssemblyConnectorPurpose | null;
 	readonly duplicateAvailability: StaticFabAssembleActionAvailability;
@@ -61,6 +66,7 @@ export function StaticFabAssembleMenu({
 	selectionCount,
 	selectedBayCount,
 	selectedBankCount,
+	bankDetach,
 	connectorHierarchyRole,
 	connectorPurpose,
 	duplicateAvailability,
@@ -228,6 +234,24 @@ export function StaticFabAssembleMenu({
 						{connectorAvailability.reason}
 					</p>
 				</div>
+				{selectionCount === 1 && selectedBankCount === 1 && bankDetach ? (
+					<section className="tilefab-assemble-semantic-bank" aria-label="선택한 Bank 명령">
+						<strong>선택한 Bank</strong>
+						<button
+							type="button"
+							data-testid="assemble-detach-selected-bank"
+							aria-describedby="tilefab-assemble-bank-detach-status"
+							disabled={bankDetach.availability.state !== "ready"}
+							title={bankDetach.availability.reason}
+							onClick={(event) => bankDetach.onDetach(event.currentTarget)}
+						>
+							<Unlink size={15} /> Bank 분리…
+						</button>
+						<p id="tilefab-assemble-bank-detach-status" data-testid="assemble-bank-detach-status">
+							{bankDetach.availability.reason}
+						</p>
+					</section>
+				) : null}
 				{selectionCount === 1 && selectedBayCount === 1 ? (
 					<section className="tilefab-assemble-semantic-bay" aria-label="Selected Bay commands">
 						<header>

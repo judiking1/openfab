@@ -861,8 +861,11 @@ function EqBodyDimensionsEditor({
 }): ReactNode {
 	const current = resolveEqBodyDimensions(group);
 	const minimum = defaultEqBodyDimensions(group);
-	const [length, setLength] = useState(String(current.lengthMillimeters / 1_000));
-	const [width, setWidth] = useState(String(current.widthMillimeters / 1_000));
+	const currentLength = String(current.lengthMillimeters / 1_000);
+	const currentWidth = String(current.widthMillimeters / 1_000);
+	const [length, setLength] = useState(currentLength);
+	const [width, setWidth] = useState(currentWidth);
+	const hasDraft = length !== currentLength || width !== currentWidth;
 	return (
 		<details className="tilefab-equipment-more-actions" data-testid="eq-body-dimensions">
 			<summary>
@@ -918,6 +921,11 @@ function EqBodyDimensionsEditor({
 					{reason ??
 						`최소 ${minimum.lengthMillimeters / 1_000} × ${minimum.widthMillimeters / 1_000} m · 편집기 한도 각각 316 m`}
 				</p>
+				<p role="status" data-testid="eq-body-draft-status">
+					{hasDraft
+						? "미적용 입력이 있습니다. 크기 적용으로 반영하거나 입력 취소로 되돌리세요."
+						: "현재 적용된 크기입니다."}
+				</p>
 				<button
 					type="submit"
 					className="tilefab-inspector-primary"
@@ -925,6 +933,18 @@ function EqBodyDimensionsEditor({
 					disabled={disabled}
 				>
 					<Check size={15} /> 크기 적용
+				</button>
+				<button
+					type="button"
+					className="tilefab-inspector-primary"
+					data-testid="cancel-eq-body-dimensions"
+					disabled={!hasDraft}
+					onClick={() => {
+						setLength(currentLength);
+						setWidth(currentWidth);
+					}}
+				>
+					<X size={15} /> 입력 취소
 				</button>
 				<button
 					type="button"

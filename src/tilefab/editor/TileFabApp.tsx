@@ -1138,6 +1138,15 @@ import {
 	staticFabProjectChecksHaveAmbiguousPortEquipmentIdentity,
 } from "./StaticFabProjectCheckGuide";
 import { StaticFabSemanticBayMutationBridge } from "./StaticFabSemanticBayMutationBridge";
+import type { StaticFabSemanticBankDetachPlan } from "../core/StaticFabSemanticBankDetach";
+import { staticFabSemanticBankDetachPlanFingerprint } from "../core/StaticFabSemanticBankDetachCertification";
+import { StaticFabSemanticBankDetachBridge, type StaticFabSemanticBankDetachLiveState } from "./StaticFabSemanticBankDetachBridge";
+import { StaticFabSemanticBankDetachDialog } from "./StaticFabSemanticBankDetachDialog";
+import {
+	createStaticFabSemanticBankDetachSession,
+	reduceStaticFabSemanticBankDetachSession,
+	type StaticFabSemanticBankDetachSession,
+} from "./StaticFabSemanticBankDetachSession";
 import { StaticFabSemanticBayMutationDialog } from "./StaticFabSemanticBayMutationDialog";
 import {
 	createStaticFabSemanticBayMutationSession,
@@ -2375,6 +2384,20 @@ export default function TileFabApp(): React.ReactElement {
 	const staticFabSemanticBayMutationBridgeRef = useRef<StaticFabSemanticBayMutationBridge | null>(
 		null,
 	);
+	const staticFabSemanticBankDetachBridgeRef = useRef<StaticFabSemanticBankDetachBridge | null>(null);
+	const staticFabSemanticBankDetachPlanRef = useRef<StaticFabSemanticBankDetachPlan | null>(null);
+	const staticFabSemanticBankDetachUiRef = useRef<StaticFabSemanticBankDetachSession | null>(null);
+	const staticFabSemanticBankDetachSnapshotControllerRef = useRef<AbortController | null>(null);
+	const staticFabSemanticBankDetachRequestRef = useRef(0);
+	const staticFabSemanticBankDetachReturnFocusRef = useRef<HTMLElement | null>(null);
+	const cancelStaticFabSemanticBankDetachRef = useRef<(message?: string, restoreFocus?: boolean) => void>(() => undefined);
+	const pendingStaticFabSemanticBankSelectionRef = useRef<Readonly<{
+		projectId: string;
+		document: RailDocument;
+		patchSequence: number;
+		bankOrganizationId: number;
+		bankProjection: string;
+	}> | null>(null);
 	const staticFabSemanticBayMutationPlanRef = useRef<StaticFabSemanticBayMutationPlan | null>(null);
 	const staticFabSemanticBayMutationUiRef = useRef<StaticFabSemanticBayMutationSession | null>(
 		null,
@@ -3347,6 +3370,8 @@ export default function TileFabApp(): React.ReactElement {
 		);
 	const [staticFabSemanticBayMutation, setStaticFabSemanticBayMutation] =
 		useState<StaticFabSemanticBayMutationSession | null>(null);
+	const [staticFabSemanticBankDetach, setStaticFabSemanticBankDetach] =
+		useState<StaticFabSemanticBankDetachSession | null>(null);
 	const [staticFabBayFlowEdit, setStaticFabBayFlowEdit] =
 		useState<StaticFabBayFlowEditSession | null>(null);
 	const [patternResizeDraft, setPatternResizeDraft] = useState<RailPatternResizeDraft | null>(null);
@@ -4309,6 +4334,7 @@ export default function TileFabApp(): React.ReactElement {
 		stationProposalReview !== null ||
 		staticFabArrangement !== null ||
 		staticFabAssemblyConnector !== null ||
+		staticFabSemanticBankDetach !== null ||
 		staticFabSemanticBayMutation !== null ||
 		staticFabBayFlowEdit !== null;
 	const guidedPortCanvasActionable =
@@ -5251,6 +5277,7 @@ export default function TileFabApp(): React.ReactElement {
 				cancelStaticFabArrangementRef.current();
 				cancelStaticFabAssemblyConnectorRef.current();
 				cancelStaticFabSemanticBayMutationRef.current(undefined, false);
+				cancelStaticFabSemanticBankDetachRef.current(undefined, false);
 				cancelStaticFabBayFlowEditRef.current(undefined, false);
 				const previousBridge = workerBridgeRef.current;
 				mirrorPromoted = true;
@@ -5312,6 +5339,7 @@ export default function TileFabApp(): React.ReactElement {
 				organizationBundlePlacementPreviewArtifactRef.current = null;
 				organizationBundlePlacementPreviewRef.current = null;
 				organizationBundlePlacementPreviewPendingAnchorRef.current = null;
+				rendererRef.current.releaseOrganizationBundlePlacementPreview();
 				templateSessionRef.current = null;
 				templatePreviewAnchorRef.current = null;
 				setBuildAnchorState(null);
@@ -5706,6 +5734,12 @@ export default function TileFabApp(): React.ReactElement {
 				staticFabSemanticBayMutationSnapshotControllerRef.current = null;
 				staticFabSemanticBayMutationBridgeRef.current?.dispose();
 				staticFabSemanticBayMutationBridgeRef.current = null;
+				staticFabSemanticBankDetachRequestRef.current++;
+				staticFabSemanticBankDetachSnapshotControllerRef.current?.abort();
+				staticFabSemanticBankDetachSnapshotControllerRef.current = null;
+				staticFabSemanticBankDetachBridgeRef.current?.dispose();
+				staticFabSemanticBankDetachBridgeRef.current = null;
+				staticFabSemanticBankDetachPlanRef.current = null;
 				staticFabBayFlowEditRequestRef.current++;
 				staticFabBayFlowEditSnapshotControllerRef.current?.abort();
 				staticFabBayFlowEditSnapshotControllerRef.current = null;
@@ -6281,6 +6315,8 @@ export default function TileFabApp(): React.ReactElement {
 				canvasRef.current.dataset.organizationBundleInitialAccessibility = "";
 			}
 			organizationBundlePlacementPreviewArtifactRef.current = null;
+			rendererRef.current.releaseOrganizationBundlePlacementPreview();
+			scheduleRenderRef.current();
 			if (areaStampSessionRef.current === null) clearAreaStampKeyboardAccessibility();
 		} else {
 			const prepared = prepareStaticFabOrganizationBundlePlacementPreviewArtifact(
@@ -6601,6 +6637,7 @@ export default function TileFabApp(): React.ReactElement {
 		cancelStaticFabArrangementRef.current();
 		cancelStaticFabAssemblyConnectorRef.current();
 		cancelStaticFabSemanticBayMutationRef.current();
+		cancelStaticFabSemanticBankDetachRef.current();
 		cancelStaticFabBayFlowEditRef.current();
 		organizationMultiSelectionRef.current = next;
 		setOrganizationMultiSelection(next);
@@ -6886,6 +6923,10 @@ export default function TileFabApp(): React.ReactElement {
 			scheduleRender();
 			return true;
 		}
+		if (staticFabSemanticBankDetachUiRef.current) {
+			setStatus("현재 Bank 분리 검토를 적용하거나 취소한 뒤 다른 편집 명령을 사용하세요");
+			return true;
+		}
 		if (staticFabSemanticBayMutationUiRef.current) {
 			setStatus("현재 Bay 분리·삭제 검토를 적용하거나 취소한 뒤 다른 편집 명령을 사용하세요");
 			scheduleRender();
@@ -7096,6 +7137,7 @@ export default function TileFabApp(): React.ReactElement {
 		cancelStaticFabArrangementRef.current();
 		cancelStaticFabAssemblyConnectorRef.current();
 		cancelStaticFabSemanticBayMutationRef.current(undefined, false);
+		cancelStaticFabSemanticBankDetachRef.current(undefined, false);
 		cancelStaticFabBayFlowEditRef.current(undefined, false);
 		const document = nextModel.document;
 		const groupEdit = portEquipmentGroupEditSessionRef.current;
@@ -7233,6 +7275,14 @@ export default function TileFabApp(): React.ReactElement {
 			}
 		}
 		const pendingSemanticBayOrganizationId = pendingStaticFabSemanticBaySelectionRef.current;
+		const pendingBankSelection = pendingStaticFabSemanticBankSelectionRef.current;
+		if (pendingBankSelection) {
+			pendingStaticFabSemanticBankSelectionRef.current = null;
+			const bank = document.organizations.records.find((record) => record.id === pendingBankSelection.bankOrganizationId);
+			if (pendingBankSelection.projectId === projectSessionRef.current.manifest.id && pendingBankSelection.document === document &&
+				pendingBankSelection.patchSequence === document.getPatchSequence() && bank && staticFabOrganizationParentIds(bank).length === 0 &&
+				JSON.stringify(bank) === pendingBankSelection.bankProjection) restoreStaticFabOrganizationContext(bank.id);
+		}
 		if (pendingSemanticBayOrganizationId !== null) {
 			pendingStaticFabSemanticBaySelectionRef.current = null;
 			restoreStaticFabOrganizationContext(pendingSemanticBayOrganizationId);
@@ -8514,6 +8564,7 @@ export default function TileFabApp(): React.ReactElement {
 		cancelStaticFabArrangementRef.current();
 		cancelStaticFabAssemblyConnectorRef.current();
 		cancelStaticFabSemanticBayMutationRef.current();
+		cancelStaticFabSemanticBankDetachRef.current();
 		cancelStaticFabBayFlowEditRef.current();
 		cancelBlueprintPlacement();
 		const guidedRailKeyboardEndpoint = guidedRailKeyboardSessionRef.current?.endpoint ?? null;
@@ -9281,7 +9332,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (
 			staticFabArrangementUiRef.current ||
 			staticFabAssemblyConnectorUiRef.current ||
-			staticFabSemanticBayMutationUiRef.current ||
+			staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
 			staticFabBayFlowEditUiRef.current
 		) {
 			return "현재 FAB 명령을 적용하거나 Esc로 취소한 뒤 조직을 선택하세요";
@@ -12644,6 +12695,10 @@ export default function TileFabApp(): React.ReactElement {
 					cancelStationProposalReviewRef.current("Station review를 취소했습니다");
 					return;
 				}
+				if (staticFabSemanticBankDetachUiRef.current) {
+					if (staticFabSemanticBankDetachUiRef.current.phase !== "applying") cancelStaticFabSemanticBankDetachRef.current("Bank 분리 검토를 취소했습니다");
+					return;
+				}
 				if (staticFabSemanticBayMutationUiRef.current) {
 					cancelStaticFabSemanticBayMutation("Bay 구조 검토를 취소했습니다");
 					return;
@@ -14146,7 +14201,7 @@ export default function TileFabApp(): React.ReactElement {
 				!guidedRailKeyboardSessionRef.current &&
 				!guidedPortKeyboardSessionRef.current &&
 				!stationProposalReviewUiRef.current &&
-				!staticFabSemanticBayMutationUiRef.current &&
+				!staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
 				!staticFabBayFlowEditUiRef.current &&
 				!staticFabAssemblyConnectorUiRef.current &&
 				!staticFabArrangementUiRef.current &&
@@ -19835,6 +19890,10 @@ export default function TileFabApp(): React.ReactElement {
 		organizationBundlePlacementSessionRef.current = null;
 		organizationBundlePlacementCommittedCountRef.current = 0;
 		ordinaryDuplicatedAssemblyPlacementReceiptRef.current = null;
+		organizationBundlePlacementPreviewArtifactRef.current = null;
+		organizationBundlePlacementPreviewRef.current = null;
+		organizationBundlePlacementPreviewPendingAnchorRef.current = null;
+		rendererRef.current.releaseOrganizationBundlePlacementPreview();
 		organizationMultiSelectionRef.current = createStaticFabOrganizationMultiSelection();
 		templateSessionRef.current = null;
 		templatePreviewAnchorRef.current = null;
@@ -21329,7 +21388,7 @@ export default function TileFabApp(): React.ReactElement {
 			locationIndex: readinessIssueRef.current ? readinessIssueLocationRef.current : staticFabProjectIssueLocationRef.current,
 			projectIdle: domain.projectIdle && !processLoopOperationRef.current && !processLoopRailEditRef.current &&
 				!staticFabMutationHistoryRef.current && !staticFabArrangementUiRef.current &&
-				!staticFabAssemblyConnectorUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
+				!staticFabAssemblyConnectorUiRef.current && !staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
 				!staticFabBayFlowEditUiRef.current && !stationProposalReviewUiRef.current,
 			modelSyncPending: domain.modelSyncPending, checksCurrent };
 	}
@@ -21368,7 +21427,7 @@ export default function TileFabApp(): React.ReactElement {
 		const current = readStaticFabCheckRepairDomainCurrent();
 		if (!current || processLoopOperationRef.current || staticFabMutationHistoryRef.current ||
 			staticFabArrangementUiRef.current || staticFabAssemblyConnectorUiRef.current ||
-			staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current || stationProposalReviewUiRef.current) return false;
+			staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current || stationProposalReviewUiRef.current) return false;
 		// A repair may have authored changes. Verify today's exact domain/mirror, then run fresh
 		// Checks; the original issue ID is a navigation origin, never a cached diagnosis or Apply proof.
 		const currentContinuation = captureStaticFabCheckRepairContinuation(current.source as StaticFabCheckRepairSource,
@@ -23464,7 +23523,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (
 			staticFabArrangementUiRef.current ||
-			staticFabSemanticBayMutationUiRef.current ||
+			staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
 			staticFabBayFlowEditUiRef.current ||
 			stampSessionRef.current ||
 			areaStampSessionRef.current ||
@@ -24079,7 +24138,7 @@ export default function TileFabApp(): React.ReactElement {
 						projectIdle: projectOperationControllerRef.current === null && projectSessionRef.current.operation === "idle" &&
 							!modelSyncPendingRef.current && workerBridgeDocumentRef.current === model.document &&
 							!staticFabMutationHistoryRef.current && !staticFabArrangementUiRef.current &&
-							!staticFabAssemblyConnectorUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
+							!staticFabAssemblyConnectorUiRef.current && !staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
 							!staticFabBayFlowEditUiRef.current && !stationProposalReviewUiRef.current };
 				},
 				createCheckpoint: createStaticFabArrangementCheckpoint,
@@ -25205,10 +25264,10 @@ export default function TileFabApp(): React.ReactElement {
 				reason: "현재 Bay 흐름 검토를 적용하거나 취소한 뒤 연결하세요",
 			});
 		}
-		if (staticFabSemanticBayMutation !== null) {
+		if (staticFabSemanticBayMutation !== null || staticFabSemanticBankDetach !== null) {
 			return Object.freeze({
 				state: "blocked" as const,
-				reason: "현재 Bay 분리·삭제 검토를 적용하거나 취소한 뒤 연결하세요",
+				reason: "현재 구조 검토를 적용하거나 취소한 뒤 연결하세요",
 			});
 		}
 		if (staticFabAssemblyConnector !== null) {
@@ -25295,10 +25354,10 @@ export default function TileFabApp(): React.ReactElement {
 				reason: "현재 Bay 흐름 검토를 적용하거나 취소한 뒤 복제하세요",
 			});
 		}
-		if (staticFabSemanticBayMutation !== null) {
+		if (staticFabSemanticBayMutation !== null || staticFabSemanticBankDetach !== null) {
 			return Object.freeze({
 				state: "blocked" as const,
-				reason: "현재 Bay 분리·삭제 검토를 적용하거나 취소한 뒤 복제하세요",
+				reason: "현재 구조 검토를 적용하거나 취소한 뒤 복제하세요",
 			});
 		}
 		if (
@@ -25359,7 +25418,7 @@ export default function TileFabApp(): React.ReactElement {
 				reason: "분리하거나 삭제할 runtime-recognized Bay 조직 하나만 선택하세요",
 			});
 		}
-		if (staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current) {
+		if (staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current) {
 			return Object.freeze({
 				state: "blocked" as const,
 				reason: "현재 Bay 검토를 적용하거나 취소한 뒤 새 명령을 시작하세요",
@@ -25479,7 +25538,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (
 			(staticFabBayFlowEditUiRef.current &&
 				staticFabBayFlowEditUiRef.current !== retryingSession) ||
-			staticFabSemanticBayMutationUiRef.current
+			staticFabSemanticBayMutationUiRef.current || staticFabSemanticBankDetachUiRef.current
 		) {
 			return Object.freeze({
 				state: "blocked" as const,
@@ -25570,6 +25629,190 @@ export default function TileFabApp(): React.ReactElement {
 	): void => {
 		staticFabSemanticBayMutationUiRef.current = next;
 		setStaticFabSemanticBayMutation(next);
+	};
+	const currentBankDetachSource = (): StaticFabSemanticBankDetachLiveState => ({
+		document: editorModelRef.current.document,
+		scope: { projectId: projectSessionRef.current.manifest.id, projectGeneration: editorModelRef.current.generation },
+	});
+	const selectedSemanticBankOrganization = organizationMultiSelection.selectedOrganizationIds.length === 1 &&
+		selectedAssemblySemanticRole === "BAY_BANK"
+		? organizationRecordsById.get(organizationMultiSelection.selectedOrganizationIds[0] as number) ?? null : null;
+	const resolveBankDetachAvailability = (retrying?: StaticFabSemanticBankDetachSession): Readonly<{ state: "ready" | "blocked"; reason: string }> => {
+		const blocked = (reason: string) => ({ state: "blocked" as const, reason });
+		const bank = selectedSemanticBankOrganization;
+		if (!bank || organizationMultiSelectionRef.current.selectedOrganizationIds.length !== 1 ||
+			organizationMultiSelectionRef.current.selectedOrganizationIds[0] !== bank.id) return blocked("분리할 Bank 하나를 선택하세요");
+		if (editorActivityRef.current !== "assemble" || editorViewModeRef.current !== "2d") return blocked("2D Assemble에서 Bank를 선택하세요");
+		if (startupState.status !== "ready" || projectSessionRef.current.operation !== "idle" || projectOperationControllerRef.current ||
+			editorModelRef.current.document !== railDocument || modelSyncPendingRef.current) return blocked("현재 프로젝트 준비와 동기화를 기다리세요");
+		if ((staticFabSemanticBankDetachUiRef.current && staticFabSemanticBankDetachUiRef.current !== retrying) ||
+			staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current || staticFabAssemblyConnectorUiRef.current ||
+			staticFabArrangementUiRef.current || processLoopOperationRef.current || staticFabMutationHistoryRef.current ||
+			stationProposalReviewUiRef.current || operationalConfigurationOpen) return blocked("현재 구조 검토·편집을 완료하거나 취소하세요");
+		if (organizationEditorDirtyRef.current || organizationDetailsStale) return blocked("조직 속성 편집을 저장하거나 되돌리세요");
+		if (staticFabOrganizationOverlapSelectionRef.current || blueprintPlacementPendingRef.current || stampSessionRef.current ||
+			areaStampSessionRef.current || organizationBundlePlacementSessionRef.current || templateSessionRef.current ||
+			anchorRef.current || dragRef.current || inspectAreaDragRef.current || portRowDragRef.current || stkDraftSessionRef.current ||
+			ohbPlacementIntentRef.current || portEquipmentGroupEditSessionRef.current || portEquipmentMembershipEditSessionRef.current) return blocked("현재 배치·선택·장비 편집을 완료하거나 취소하세요");
+		const mirror = workerBridgeRef.current?.getState();
+		if (workerBridgeDocumentRef.current !== railDocument || mirror?.status !== "ready" ||
+			mirror.sequence !== railDocument.getPatchSequence() || mirror.targetSequence !== railDocument.getPatchSequence() ||
+			mirror.revision !== railDocument.map.getRevision() || mirror.targetRevision !== railDocument.map.getRevision()) return blocked("현재 문서의 Rail mirror 동기화를 기다리세요");
+		const parents = staticFabOrganizationParentIds(bank);
+		if (parents.length !== 1 || organizationSemanticRoles.get(parents[0] as number) !== "FAB") return blocked("하나의 FAB에 속한 Bank만 분리할 수 있습니다");
+		const relationships = railDocument.relationships.records.filter((record) => record.managedChildOrganizationIds.includes(bank.id));
+		if (relationships.length === 0) return blocked("이 Bank를 추가한 명시적 연결 관계가 없습니다");
+		const relationship = relationships[0];
+		if (relationships.length !== 1 || !relationship || relationship.managedChildOrganizationIds.length !== 1) return blocked("다른 Bank와 소속 관계를 공유하여 단독 분리할 수 없습니다");
+		if (relationship.parentOrganizationId !== parents[0] || relationship.hierarchyRole !== "BANK_TO_FAB" ||
+			relationship.purpose !== "HIERARCHY_LINK" || relationship.reviewPolicy !== "REVIEW_REQUIRED") return blocked("이 연결 관계는 현재 Bank 분리 범위에 해당하지 않습니다");
+		return { state: "ready", reason: "Bank 내부 구성을 보존하고 FAB 연결 제거를 검토합니다" };
+	};
+	const bankDetachAvailability = resolveBankDetachAvailability();
+	const publishBankDetach = (next: StaticFabSemanticBankDetachSession | null): void => {
+		staticFabSemanticBankDetachUiRef.current = next;
+		setStaticFabSemanticBankDetach(next);
+	};
+	const releaseBankDetachAnalysis = (): void => {
+		staticFabSemanticBankDetachSnapshotControllerRef.current?.abort();
+		staticFabSemanticBankDetachSnapshotControllerRef.current = null;
+		staticFabSemanticBankDetachBridgeRef.current?.dispose();
+		staticFabSemanticBankDetachBridgeRef.current = null;
+		staticFabSemanticBankDetachPlanRef.current = null;
+	};
+	const cancelBankDetach = (message?: string, restoreFocus = true): void => {
+		if (!staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBankDetachBridgeRef.current && !staticFabSemanticBankDetachSnapshotControllerRef.current) return;
+		staticFabSemanticBankDetachRequestRef.current++;
+		releaseBankDetachAnalysis();
+		publishBankDetach(null);
+		const launcher = staticFabSemanticBankDetachReturnFocusRef.current;
+		staticFabSemanticBankDetachReturnFocusRef.current = null;
+		if (message) setStatus(message);
+		if (restoreFocus) requestAnimationFrame(() => (launcher?.isConnected ? launcher : canvasRef.current)?.focus({ preventScroll: true }));
+	};
+	cancelStaticFabSemanticBankDetachRef.current = cancelBankDetach;
+	const rejectBankDetach = (requestSequence: number, reason: string): void => {
+		const active = staticFabSemanticBankDetachUiRef.current;
+		if (!active || active.requestSequence !== requestSequence || staticFabSemanticBankDetachRequestRef.current !== requestSequence) return;
+		releaseBankDetachAnalysis();
+		publishBankDetach(reduceStaticFabSemanticBankDetachSession(active, active.phase === "applying"
+			? { type: "APPLICATION_REJECTED", reason }
+			: { type: "ANALYSIS_REJECTED", requestSequence, reason }));
+	};
+	const startBankDetach = (launcher: HTMLButtonElement): void => {
+		const availability = resolveBankDetachAvailability();
+		const bank = selectedSemanticBankOrganization;
+		if (availability.state !== "ready" || !bank) { setStatus(availability.reason); return; }
+		clearTransientConstruction(undefined, { scheduleCanvas: false });
+		staticFabSemanticBankDetachReturnFocusRef.current = launcher;
+		const requestSequence = staticFabSemanticBankDetachRequestRef.current + 1;
+		staticFabSemanticBankDetachRequestRef.current = requestSequence;
+		publishBankDetach(createStaticFabSemanticBankDetachSession({ bankOrganizationId: bank.id, bankName: bank.name, requestSequence }));
+	};
+	const retryBankDetach = (): void => {
+		const active = staticFabSemanticBankDetachUiRef.current;
+		if (!active || active.phase !== "rejected") return;
+		const availability = resolveBankDetachAvailability(active);
+		if (availability.state !== "ready" || selectedSemanticBankOrganization?.id !== active.bankOrganizationId) {
+			publishBankDetach(Object.freeze({ ...active, reason: availability.state === "blocked" ? availability.reason : "선택 Bank가 변경되었습니다" }));
+			return;
+		}
+		releaseBankDetachAnalysis();
+		const requestSequence = staticFabSemanticBankDetachRequestRef.current + 1;
+		staticFabSemanticBankDetachRequestRef.current = requestSequence;
+		publishBankDetach(reduceStaticFabSemanticBankDetachSession(active, { type: "RETRY", requestSequence }));
+	};
+	const analyzeBankDetach = (requestSequence: number): void => {
+		requestAnimationFrame(() => {
+			const active = staticFabSemanticBankDetachUiRef.current;
+			if (!active || active.phase !== "analyzing" || active.requestSequence !== requestSequence || staticFabSemanticBankDetachRequestRef.current !== requestSequence) return;
+			const source = currentBankDetachSource();
+			const bank = source.document.organizations.records.find((record) => record.id === active.bankOrganizationId);
+			const parentIds = bank ? staticFabOrganizationParentIds(bank) : [];
+			const mirror = workerBridgeRef.current;
+			const mirrorState = mirror?.getState();
+			if (!bank || parentIds.length !== 1 || !mirror || workerBridgeDocumentRef.current !== source.document || modelSyncPendingRef.current ||
+				mirrorState?.status !== "ready" || mirrorState.sequence !== source.document.getPatchSequence() || mirrorState.revision !== source.document.map.getRevision()) {
+				rejectBankDetach(requestSequence, "Bank 소속 또는 문서 동기화가 변경되었습니다 · 다시 검토하세요");
+				return;
+			}
+			const controller = new AbortController();
+			staticFabSemanticBankDetachSnapshotControllerRef.current = controller;
+			void mirror.captureCurrentSnapshot(controller.signal).then((snapshot) => {
+				const live = currentBankDetachSource();
+				if (controller.signal.aborted || staticFabSemanticBankDetachRequestRef.current !== requestSequence) throw new DOMException("Bank review cancelled", "AbortError");
+				if (source.document !== live.document || source.scope.projectId !== live.scope.projectId || source.scope.projectGeneration !== live.scope.projectGeneration) throw new Error("검토 중 프로젝트·문서가 교체되었습니다");
+				staticFabSemanticBankDetachSnapshotControllerRef.current = null;
+				const bridge = new StaticFabSemanticBankDetachBridge();
+				staticFabSemanticBankDetachBridgeRef.current = bridge;
+				return bridge.prepare({ snapshot, intent: { version: 1, action: "DETACH", targetRole: "BAY_BANK", targetOrganizationId: bank.id, expectedParentOrganizationId: parentIds[0] as number }, getCurrentState: currentBankDetachSource });
+			}).then((prepared) => {
+				const current = staticFabSemanticBankDetachUiRef.current;
+				if (!current || current.phase !== "analyzing" || current.requestSequence !== requestSequence || staticFabSemanticBankDetachRequestRef.current !== requestSequence) return;
+				const plan = prepared.plan;
+				const evidence = prepared.validation.evidence;
+				if (!prepared.certified || !plan || !evidence?.sourceTopology || !evidence.evaluatedTopology || !evidence.selectedBankTopology || !evidence.retainedFabTopology) {
+					rejectBankDetach(requestSequence, prepared.validation.reason); return;
+				}
+				const review = plan.review;
+				staticFabSemanticBankDetachPlanRef.current = plan;
+				publishBankDetach(reduceStaticFabSemanticBankDetachSession(current, {
+					type: "ANALYSIS_READY", requestSequence, reason: "현재 Bank와 남는 FAB의 검증을 마쳤습니다. 변경 내용을 확인하고 적용하세요.",
+					review: { bankOrganizationId: review.bankOrganizationId, parentFabOrganizationId: review.fabOrganizationId,
+						planFingerprint: staticFabSemanticBankDetachPlanFingerprint(plan),
+						preserved: [
+							{ label: "Bank·하위 조직", count: review.preservedOrganizationCount, samples: review.preservedOrganizationIdSample },
+							{ label: "Bay", count: review.preservedBayCount, samples: review.preservedBayIdSample },
+							{ label: "Process Loop", count: review.preservedLoopCount, samples: review.preservedLoopIdSample },
+							{ label: "장비", count: review.preservedEquipmentGroupCount, samples: review.preservedEquipmentGroupIdSample },
+							{ label: "Port", count: review.preservedPortCount, samples: review.preservedPortIdSample },
+							{ label: "소유 레일 모듈", count: review.preservedRailModuleCount, samples: review.preservedRailModuleKeySample },
+							{ label: "고급 스위치", count: review.preservedAdvancedSwitchCount, samples: review.preservedAdvancedSwitchIdSample },
+							{ label: "남는 FAB의 Bank", count: review.retainedBankCount, samples: [] },
+						], removed: [
+							{ label: "상위 FAB 소속", count: 1, samples: [`${review.fabName} → ${review.bankName}`] },
+							{ label: "연결 관계", count: review.removedRelationshipIds.length, samples: review.removedRelationshipIds },
+							{ label: "연결 corridor", count: review.removedCorridorCount, samples: review.removedCorridorIdSample },
+							{ label: "방향 레일", count: review.removedDirectedEdgeCount, samples: [] },
+							{ label: "연결 레일 모듈", count: review.removedRailModuleCount, samples: review.removedRailModuleKeySample },
+							{ label: "고급 스위치", count: review.removedAdvancedSwitchCount, samples: [] },
+							{ label: "조직·장비·Port", count: 0, samples: [] },
+						] },
+					evidence: { source: evidence.sourceTopology, prospective: evidence.evaluatedTopology, selectedBank: evidence.selectedBankTopology, retainedFab: evidence.retainedFabTopology },
+				}));
+			}).catch((error: unknown) => {
+				if (controller.signal.aborted || staticFabSemanticBankDetachRequestRef.current !== requestSequence || (error instanceof DOMException && error.name === "AbortError")) return;
+				rejectBankDetach(requestSequence, error instanceof Error ? error.message : "Bank 분리를 검토하지 못했습니다");
+			});
+		});
+	};
+	const applyBankDetach = (): void => {
+		const active = staticFabSemanticBankDetachUiRef.current;
+		const plan = staticFabSemanticBankDetachPlanRef.current;
+		if (!active || active.phase !== "ready" || !plan || !active.review) return;
+		publishBankDetach(reduceStaticFabSemanticBankDetachSession(active, { type: "APPLY" }));
+		const source = currentBankDetachSource();
+		const mirror = workerBridgeRef.current?.getState();
+		const selected = organizationMultiSelectionRef.current.selectedOrganizationIds;
+		if (projectSessionRef.current.operation !== "idle" || projectOperationControllerRef.current || modelSyncPendingRef.current ||
+			workerBridgeDocumentRef.current !== source.document || mirror?.status !== "ready" ||
+			mirror.sequence !== source.document.getPatchSequence() || mirror.revision !== source.document.map.getRevision() ||
+			selected.length !== 1 || selected[0] !== active.bankOrganizationId ||
+			plan.intent.targetOrganizationId !== active.bankOrganizationId || staticFabSemanticBankDetachPlanFingerprint(plan) !== active.review.planFingerprint) {
+			rejectBankDetach(active.requestSequence, "현재 문서·선택·검토 인증이 변경되었습니다 · 다시 검토하세요"); return;
+		}
+		staticFabSemanticBankDetachPlanRef.current = null;
+		if (!source.document.commitStaticFabSemanticBankDetach(plan, source.scope)) {
+			rejectBankDetach(active.requestSequence, source.document.getLastCommandError() ?? "Bank 분리 인증이 만료되었습니다 · 다시 검토하세요"); return;
+		}
+		const bank = source.document.organizations.records.find((record) => record.id === active.bankOrganizationId);
+		if (bank) pendingStaticFabSemanticBankSelectionRef.current = { projectId: source.scope.projectId, document: source.document,
+			patchSequence: source.document.getPatchSequence(), bankOrganizationId: bank.id, bankProjection: JSON.stringify(bank) };
+		cancelBankDetach(undefined, false);
+		setTemplatePaletteOpen(false);
+		assemblePaletteReturnFocusRef.current = null;
+		syncModelUi(`${active.bankName} 분리 완료 · 내부 구성 유지 · 한 번의 실행 취소로 복원할 수 있습니다`);
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const cancelStaticFabSemanticBayMutation = (message?: string, restoreFocus = true): void => {
 		const active = staticFabSemanticBayMutationUiRef.current;
@@ -30499,7 +30742,7 @@ export default function TileFabApp(): React.ReactElement {
 				blockedRequest &&
 				(staticFabArrangement ||
 					staticFabAssemblyConnector ||
-					staticFabSemanticBayMutation ||
+					staticFabSemanticBankDetach || staticFabSemanticBayMutation ||
 					staticFabBayFlowEdit)
 			) {
 				blockedRequest.controller.abort();
@@ -30697,6 +30940,7 @@ export default function TileFabApp(): React.ReactElement {
 		staticFabArrangement,
 		staticFabAssemblyConnector,
 		staticFabBayFlowEdit,
+		staticFabSemanticBankDetach,
 		staticFabSemanticBayMutation,
 		staticFabOrganizationOutlineRetryGeneration,
 		stkDraftSelection,
@@ -30966,7 +31210,7 @@ export default function TileFabApp(): React.ReactElement {
 			portEquipmentMembershipEditSessionRef.current ||
 			staticFabArrangementUiRef.current ||
 			staticFabAssemblyConnectorUiRef.current ||
-			staticFabSemanticBayMutationUiRef.current ||
+			staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
 			staticFabBayFlowEditUiRef.current ||
 			stampSessionRef.current ||
 			areaStampSessionRef.current ||
@@ -31876,6 +32120,8 @@ export default function TileFabApp(): React.ReactElement {
 			? "Station review를 적용하거나 취소한 뒤 활동을 바꾸세요"
 			: staticFabBayFlowEdit !== null
 			? "Bay 흐름 검토를 적용하거나 취소한 뒤 활동을 바꾸세요"
+			: staticFabSemanticBankDetach !== null
+			? "Bank 분리 검토를 적용하거나 취소한 뒤 활동을 바꾸세요"
 			: staticFabSemanticBayMutation !== null
 				? "Bay 분리·삭제 검토를 적용하거나 취소한 뒤 활동을 바꾸세요"
 				: staticFabAssemblyConnector !== null
@@ -32213,7 +32459,11 @@ export default function TileFabApp(): React.ReactElement {
 		ordinaryRailKeyboardPhase:
 			guidedRailKeyboard?.scope === "ordinary" ? guidedRailKeyboard.phase : null,
 		equipmentEdit: portEquipmentMembershipEditSession
-			? { equipmentType: portEquipmentMembershipEditSession.portType, mode: "ports" }
+			? {
+					equipmentType: portEquipmentMembershipEditSession.portType,
+					mode: "ports",
+					preservesLoopOwnership: portEquipmentMembershipEditSession.preservesLoopOwnership,
+				}
 			: portEquipmentGroupEditSession
 				? { equipmentType: portEquipmentGroupEditSession.portType, mode: portEquipmentGroupEditSession.mode }
 				: ohbPlacementIntent
@@ -32961,6 +33211,7 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			data-assembly-connector-phase={staticFabAssemblyConnector?.session.phase ?? ""}
 			data-semantic-bay-command-phase={staticFabSemanticBayMutation?.phase ?? ""}
+			data-semantic-bank-detach-phase={staticFabSemanticBankDetach?.phase ?? ""}
 			data-semantic-bay-command-action={staticFabSemanticBayMutation?.action ?? ""}
 			data-semantic-bay-command-id={staticFabSemanticBayMutation?.bayOrganizationId ?? ""}
 			data-bay-flow-edit-command-phase={staticFabBayFlowEdit?.phase ?? ""}
@@ -33497,6 +33748,12 @@ export default function TileFabApp(): React.ReactElement {
 						openOrResumeGuidedBuild(commandHelpReturnFocusRef.current);
 					}}
 				/>
+				{staticFabSemanticBankDetach ? (
+					<StaticFabSemanticBankDetachDialog session={staticFabSemanticBankDetach}
+						returnFocus={staticFabSemanticBankDetachReturnFocusRef.current}
+						onAnalyze={analyzeBankDetach} onCancel={() => cancelBankDetach(undefined, false)}
+						onRetry={retryBankDetach} onApply={applyBankDetach} />
+				) : null}
 				{staticFabSemanticBayMutation ? (
 					<StaticFabSemanticBayMutationDialog
 						session={staticFabSemanticBayMutation}
@@ -34658,6 +34915,8 @@ export default function TileFabApp(): React.ReactElement {
 						placementBlockedReason={
 							staticFabBayFlowEdit
 								? "현재 Bay 흐름 검토를 적용하거나 취소한 뒤 프리셋을 배치하세요."
+								: staticFabSemanticBankDetach
+								? "현재 Bank 분리 검토를 적용하거나 취소한 뒤 프리셋을 배치하세요."
 								: staticFabSemanticBayMutation
 									? "현재 Bay 분리·삭제 검토를 적용하거나 취소한 뒤 프리셋을 배치하세요."
 									: staticFabAssemblyConnector
@@ -36536,6 +36795,7 @@ export default function TileFabApp(): React.ReactElement {
 								selectionCount={organizationMultiSelection.selectedOrganizationIds.length}
 								selectedBayCount={selectedProductionBayCount}
 								selectedBankCount={selectedBayBankCount}
+								bankDetach={{ availability: bankDetachAvailability, onDetach: startBankDetach }}
 								connectorHierarchyRole={assemblyConnectorHierarchyRole}
 								connectorPurpose={assemblyConnectorPurpose}
 								duplicateAvailability={assemblyDuplicateAvailability}
@@ -36744,7 +37004,7 @@ export default function TileFabApp(): React.ReactElement {
 					!staticFabMutationHistory &&
 				!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
-				!staticFabSemanticBayMutation &&
+				!staticFabSemanticBankDetach && !staticFabSemanticBayMutation &&
 				!staticFabBayFlowEdit &&
 				!ordinaryStaticFabIssueRecheck ? (
 					<fieldset
@@ -36820,7 +37080,7 @@ export default function TileFabApp(): React.ReactElement {
 				{!staticFabMutationHistory &&
 					!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
-				!staticFabSemanticBayMutation &&
+				!staticFabSemanticBankDetach && !staticFabSemanticBayMutation &&
 				!staticFabBayFlowEdit &&
 				!ordinaryStaticFabIssueRecheck &&
 				!portEquipmentGroupEditSession &&

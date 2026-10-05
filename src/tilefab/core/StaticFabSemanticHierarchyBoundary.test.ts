@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
 	certifyProductionBayModuleCatalogRequest,
 	defaultProductionBayModuleCatalogRequest,
@@ -11,12 +11,22 @@ import {
 	staticFabSemanticBankDetachPostCutModuleBudgetError,
 } from "../compile/StaticFabSemanticBankDetachProspective";
 import {
+	captureRailMirrorSnapshot,
+	checksumRailMap,
+	checksumRailPatchResult,
+} from "../worker/RailMirrorChecksum";
+import { RailPatchMirror } from "../worker/RailPatchMirror";
+import { decodeRailPatchSoA, encodeRailPatchEvent } from "../worker/railMirrorProtocol";
+import { staticFabSemanticBankDetachPreparedShapeError } from "../worker/StaticFabSemanticBankDetachResponseValidator";
+import { prepareStaticFabSemanticBankDetach } from "../worker/StaticFabSemanticBankDetachRuntime";
+import {
 	copyPortEquipmentState,
 	emptyPortEquipmentState,
 	type PortEquipmentState,
 } from "./EquipmentGroup";
 import type { CardinalPortRoute, PortRecord } from "./PortRecord";
 import { planRailPath } from "./paint";
+import { RailDocument, type RailPatchEvent } from "./RailDocument";
 import { buildRailModuleOwnershipIndex } from "./RailModuleOwnership";
 import { ALL_DIRECTIONS, type Direction, moveCell } from "./railShape";
 import {
@@ -28,6 +38,7 @@ import {
 	staticFabAssemblyConnectorHierarchyEligibility,
 	staticFabAssemblyInterbayConnectorHierarchyEligibility,
 } from "./StaticFabAssemblyConnector";
+import { produceStaticFabAssemblyConnectorRelationship } from "./StaticFabAssemblyConnectorRelationshipProduction";
 import { emptyStaticFabAssemblyRelationshipState } from "./StaticFabAssemblyRelationship";
 import {
 	compareDirectedRailEdges,
@@ -46,6 +57,17 @@ import {
 	type StaticFabOrganizationBundlePlacementProspectiveState,
 } from "./StaticFabOrganizationBundlePlacement";
 import {
+	planStaticFabSemanticBankDetach,
+	type StaticFabSemanticBankDetachIntent,
+} from "./StaticFabSemanticBankDetach";
+import {
+	adoptStaticFabSemanticBankDetachWorkerPlan,
+	issueStaticFabSemanticBankDetachPermit,
+	revokeStaticFabSemanticBankDetachPermit,
+	staticFabSemanticBankDetachIntentFingerprint,
+	staticFabSemanticBankDetachSourceIdentity,
+} from "./StaticFabSemanticBankDetachCertification";
+import {
 	inventoryStaticFabSemanticHierarchyBoundary,
 	STATIC_FAB_SEMANTIC_HIERARCHY_BOUNDARY_MAX_PORTS,
 } from "./StaticFabSemanticHierarchyBoundary";
@@ -63,6 +85,385 @@ import { TileMap } from "./TileMap";
 interface FixtureState extends StaticFabOrganizationBundlePlacementProspectiveState {
 	readonly patchSequence: number;
 }
+
+describe("Declared semantic Bank detach", () => {
+	let source: FixtureState;
+	beforeAll(() => {
+		source = threeBankFabFixture(true);
+		const selectedBank = source.organizations.records.find((record) => record.id === 15);
+		const retainedBank = source.organizations.records.find((record) => record.id === 13);
+		if (!selectedBank || !retainedBank) throw new Error("Expected end Banks.");
+		const equipment = twoOhbPortEquipment(
+			regularCardinalRouteForMembership(source.map, selectedBank.membership.railEdges),
+			regularCardinalRouteForMembership(source.map, retainedBank.membership.railEdges),
+		);
+		source = {
+			...source,
+			portEquipment: equipment,
+			organizations: attachEquipmentGroup(attachEquipmentGroup(source.organizations, 15, 1), 13, 2),
+		};
+	});
+	const sourceDocument = () =>
+		RailDocument.fromLoadedMap(
+			source.map.clone(),
+			source.patchSequence,
+			source.portEquipment,
+			source.organizations,
+			undefined,
+			source.relationships,
+		);
+	const detachIntent = (): StaticFabSemanticBankDetachIntent => ({
+		version: 1,
+		action: "DETACH",
+		targetRole: "BAY_BANK",
+		targetOrganizationId: 15,
+		expectedParentOrganizationId: 16,
+	});
+
+	it("detaches added end Bank C through one certified patch and exact mirror Undo/Redo", () => {
+		const fixture = source;
+		const document = sourceDocument();
+		const fab = fixture.organizations.records.find(
+			(record) =>
+				deriveStaticFabOrganizationSemanticRoles(fixture.organizations).get(record.id) === "FAB",
+		);
+		if (!fab) throw new Error("Expected synthetic Fab.");
+		const intent: StaticFabSemanticBankDetachIntent = {
+			version: 1,
+			action: "DETACH",
+			targetRole: "BAY_BANK",
+			targetOrganizationId: 15,
+			expectedParentOrganizationId: fab.id,
+		};
+		const planning = planStaticFabSemanticBankDetach(
+			document.map,
+			document.portEquipment,
+			document.getPatchSequence(),
+			document.organizations,
+			document.relationships,
+			intent,
+		);
+		expect(planning.valid, planning.reason).toBe(true);
+		const snapshot = captureRailMirrorSnapshot(
+			document.map,
+			document.getPatchSequence(),
+			document.portEquipment,
+			document.organizations,
+			document.relationships,
+		).snapshot;
+		const scope = { projectId: "synthetic-bank-detach", projectGeneration: 1 };
+		const permit = issueStaticFabSemanticBankDetachPermit(
+			document,
+			scope,
+			intent,
+			snapshot.checksum,
+		);
+		const prepared = prepareStaticFabSemanticBankDetach({
+			type: "PREPARE_STATIC_FAB_SEMANTIC_BANK_DETACH",
+			version: 1,
+			requestId: 1,
+			ticketId: permit.ticketId,
+			snapshot,
+			expectedSource: staticFabSemanticBankDetachSourceIdentity(document, snapshot.checksum),
+			intent,
+			expectedIntentFingerprint: staticFabSemanticBankDetachIntentFingerprint(intent),
+		});
+		expect(prepared.valid, prepared.reason).toBe(true);
+		expect(staticFabSemanticBankDetachPreparedShapeError(prepared)).toBeNull();
+		expect(
+			staticFabSemanticBankDetachPreparedShapeError({ ...prepared, unexpected: true }),
+		).not.toBeNull();
+		if (!prepared.plan || !prepared.ticket) throw new Error(prepared.reason);
+		const plan = adoptStaticFabSemanticBankDetachWorkerPlan(
+			permit,
+			prepared.ticket,
+			prepared.plan,
+			document,
+			scope,
+			intent,
+			checksumRailPatchResult(snapshot.checksum, prepared.plan.transition),
+		);
+		const cancelledPermit = issueStaticFabSemanticBankDetachPermit(
+			document,
+			scope,
+			intent,
+			snapshot.checksum,
+		);
+		const cancelledPlan = adoptStaticFabSemanticBankDetachWorkerPlan(
+			cancelledPermit,
+			{ ...prepared.ticket, ticketId: cancelledPermit.ticketId },
+			prepared.plan,
+			document,
+			scope,
+			intent,
+			checksumRailPatchResult(snapshot.checksum, prepared.plan.transition),
+		);
+		revokeStaticFabSemanticBankDetachPermit(cancelledPermit);
+		expect(document.commitStaticFabSemanticBankDetach(cancelledPlan, scope)).toBe(false);
+		expect(document.canUndo).toBe(false);
+		expect(document.getPatchSequence()).toBe(prepared.ticket.source.patchSequence);
+		expect(plan.review).toMatchObject({
+			preservedOrganizationCount: 5,
+			preservedBayCount: 2,
+			preservedLoopCount: 2,
+			preservedPortCount: 1,
+			preservedEquipmentGroupCount: 1,
+			preservedPortIdSample: [1],
+			removedAdvancedSwitchCount: 0,
+			removedCorridorCount: 2,
+		});
+		expect(plan.review.preservedRailModuleCount).toBeGreaterThan(8);
+		expect(plan.review.preservedRailModuleKeySample).toHaveLength(8);
+		expect(plan.review.removedRailModuleKeySample.length).toBe(
+			Math.min(8, plan.review.removedRailModuleCount),
+		);
+		const mirror = new RailPatchMirror();
+		mirror.sync(snapshot);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		expect(
+			document.commitStaticFabSemanticBankDetach(plan, scope),
+			document.getLastCommandError() ?? "",
+		).toBe(true);
+		expect(events).toHaveLength(1);
+		expect(document.portEquipment).toEqual(fixture.portEquipment);
+		expect(document.organizations.records).toHaveLength(fixture.organizations.records.length);
+		expect(document.relationships.records).toHaveLength(fixture.relationships.records.length - 1);
+		const detachedBank = document.organizations.records.find((record) => record.id === 15);
+		if (!detachedBank) throw new Error("Bank C must survive.");
+		expect(staticFabOrganizationParentIds(detachedBank)).toEqual([]);
+		const applyMirror = () => {
+			const event = events.at(-1);
+			if (!event) throw new Error("Expected one atomic patch.");
+			return mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		};
+		expect(() => mirror.applyPatch({ ...events[0], relationshipChanges: [] })).toThrow(/관계/);
+		expect(mirror.state.checksum).toBe(snapshot.checksum);
+		expect(applyMirror().checksum).toBe(prepared.ticket.prospective.checksum);
+		expect(document.undo(), document.getLastCommandError() ?? "").toBe(true);
+		expect(applyMirror().checksum).toBe(snapshot.checksum);
+		expect(document.redo(), document.getLastCommandError() ?? "").toBe(true);
+		expect(applyMirror().checksum).toBe(prepared.ticket.prospective.checksum);
+		expect(
+			checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(prepared.ticket.prospective.checksum);
+		expect(document.commitStaticFabSemanticBankDetach(plan, scope)).toBe(false);
+	});
+	it.each([
+		"missing",
+		"non-detachable",
+		"shared-managed",
+		"crossing-fab-loop",
+	] as const)("rejects %s relationships without inferring or rewriting identity", (condition) => {
+		const target = source.relationships.records.find((record) =>
+			record.managedChildOrganizationIds.includes(15),
+		);
+		if (!target) throw new Error("Expected the explicit C relationship.");
+		let relationships = source.relationships;
+		let map = source.map;
+		let organizations = source.organizations;
+		if (condition === "missing") relationships = emptyStaticFabAssemblyRelationshipState();
+		else if (condition === "crossing-fab-loop") {
+			const connection = firstValidConnector(source, 14, 15);
+			if (!connection.prospectiveState) throw new Error(connection.plan.reason);
+			relationships = produceStaticFabAssemblyConnectorRelationship(
+				source.organizations,
+				source.relationships,
+				connection,
+			).relationships;
+			map = connection.prospectiveState.map;
+			organizations = connection.prospectiveState.organizations;
+		} else
+			relationships = {
+				...relationships,
+				records: relationships.records.map((record) =>
+					record.id !== target.id
+						? record
+						: condition === "non-detachable"
+							? { ...record, reviewPolicy: "AUTHORING_NON_DETACHABLE" as const }
+							: { ...record, managedChildOrganizationIds: [...record.participantOrganizationIds] },
+				),
+			};
+		const before = checksumRailMap(map, source.portEquipment, organizations, relationships);
+		const result = planStaticFabSemanticBankDetach(
+			map,
+			source.portEquipment,
+			source.patchSequence,
+			organizations,
+			relationships,
+			detachIntent(),
+		);
+		expect(result.valid).toBe(false);
+		expect(result.issueCode).toBe(
+			condition === "missing"
+				? "RELATIONSHIP_MISSING"
+				: condition === "non-detachable"
+					? "RELATIONSHIP_NOT_DETACHABLE"
+					: condition === "shared-managed"
+						? "INVALID_SOURCE"
+						: "SHARED_RELATIONSHIP",
+		);
+		expect(checksumRailMap(map, source.portEquipment, organizations, relationships)).toBe(before);
+	});
+
+	it("rejects a Port on the removed connector and preserves all equipment", () => {
+		const relation = source.relationships.records.find((record) =>
+			record.managedChildOrganizationIds.includes(15),
+		);
+		if (!relation) throw new Error("Expected declared connector.");
+		const route = regularCardinalRouteForMembership(
+			source.map,
+			relation.connectionGroups.flatMap((group) =>
+				group.legs.flatMap((leg) => leg.exclusiveCutEdges.map((cut) => cut.edge)),
+			),
+		);
+		const port = { ...source.portEquipment.ports[0], route };
+		const equipment = copyPortEquipmentState({
+			...source.portEquipment,
+			ports: [port, source.portEquipment.ports[1]],
+		});
+		const bank = source.organizations.records.find((record) => record.id === 15);
+		if (!bank) throw new Error("Expected C.");
+		const organizations = attachEquipmentGroup(
+			replaceOrganization(source.organizations, {
+				...bank,
+				membership: { ...bank.membership, equipmentGroupIds: [] },
+			}),
+			16,
+			1,
+		);
+		const result = planStaticFabSemanticBankDetach(
+			source.map,
+			equipment,
+			source.patchSequence,
+			organizations,
+			source.relationships,
+			detachIntent(),
+		);
+		expect(result.valid).toBe(false);
+		expect(result.reason).toMatch(/Port|포트|equipment|장비/i);
+		expect(equipment.ports[0]).toEqual(port);
+	});
+
+	it.each([
+		"project",
+		"generation",
+		"document",
+		"map-generation",
+		"revision",
+		"sequence",
+		"relationship",
+		"checksum",
+		"intent",
+		"plan",
+		"ticket",
+		"revoke",
+	] as const)("consumes and refuses a stale or tampered %s permit", (condition) => {
+		const document = sourceDocument();
+		const snapshot = captureRailMirrorSnapshot(
+			document.map,
+			document.getPatchSequence(),
+			document.portEquipment,
+			document.organizations,
+			document.relationships,
+		).snapshot;
+		const scope = { projectId: "synthetic-bank-detach", projectGeneration: 1 };
+		const intent = detachIntent();
+		const permit = issueStaticFabSemanticBankDetachPermit(
+			document,
+			scope,
+			intent,
+			snapshot.checksum,
+		);
+		const prepared = prepareStaticFabSemanticBankDetach({
+			type: "PREPARE_STATIC_FAB_SEMANTIC_BANK_DETACH",
+			version: 1,
+			requestId: 1,
+			ticketId: permit.ticketId,
+			snapshot,
+			expectedSource: staticFabSemanticBankDetachSourceIdentity(document, snapshot.checksum),
+			intent,
+			expectedIntentFingerprint: staticFabSemanticBankDetachIntentFingerprint(intent),
+		});
+		if (!prepared.plan || !prepared.ticket) throw new Error(prepared.reason);
+		const originalPlan = prepared.plan;
+		const originalTicket = prepared.ticket;
+		let liveDocument = document;
+		if (condition === "document") liveDocument = sourceDocument();
+		if (condition === "map-generation") {
+			const checkpoint = document.map.createMutationCheckpoint();
+			document.map.applyAtomicMutations(originalPlan.transition.changes, []);
+			document.map.rollbackAtomicMutations(originalPlan.transition.changes, [], checkpoint);
+			expect(document.map.getRevision()).toBe(snapshot.revision);
+		}
+		if (condition === "revoke") revokeStaticFabSemanticBankDetachPermit(permit);
+		const workerPlan =
+			condition === "plan"
+				? { ...prepared.plan, review: { ...prepared.plan.review, preservedPortCount: 0 } }
+				: prepared.plan;
+		const ticket =
+			condition === "ticket"
+				? { ...originalTicket, prospective: { ...originalTicket.prospective, nextPortId: 99 } }
+				: condition === "checksum"
+					? {
+							...originalTicket,
+							prospective: { ...originalTicket.prospective, checksum: "tampered" },
+						}
+					: condition === "relationship" || condition === "sequence" || condition === "revision"
+						? {
+								...originalTicket,
+								source: {
+									...originalTicket.source,
+									...(condition === "relationship"
+										? { nextRelationshipId: originalTicket.source.nextRelationshipId + 1 }
+										: condition === "sequence"
+											? { patchSequence: originalTicket.source.patchSequence + 1 }
+											: { revision: originalTicket.source.revision + 1 }),
+								},
+							}
+						: originalTicket;
+		expect(() =>
+			adoptStaticFabSemanticBankDetachWorkerPlan(
+				permit,
+				ticket,
+				workerPlan,
+				liveDocument,
+				{
+					...scope,
+					projectId: condition === "project" ? "replaced" : scope.projectId,
+					projectGeneration: condition === "generation" ? 2 : 1,
+				},
+				condition === "intent" ? { ...intent, targetOrganizationId: 14 } : intent,
+				checksumRailPatchResult(snapshot.checksum, originalPlan.transition),
+			),
+		).toThrow();
+		expect(() =>
+			adoptStaticFabSemanticBankDetachWorkerPlan(
+				permit,
+				originalTicket,
+				originalPlan,
+				document,
+				scope,
+				intent,
+				checksumRailPatchResult(snapshot.checksum, originalPlan.transition),
+			),
+		).toThrow(/permit/);
+		expect(document.canUndo).toBe(false);
+		expect(
+			checksumRailMap(
+				document.map,
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			),
+		).toBe(snapshot.checksum);
+	});
+});
 
 describe("StaticFabSemanticHierarchyBoundary", () => {
 	it("enumerates deterministic native-reopen raw shared-vertex parent components without mutation authority", () => {
@@ -1250,7 +1651,7 @@ function reopenedThreeBankFabFixture(): FixtureState {
 	};
 }
 
-function threeBankFabFixture(): FixtureState {
+function threeBankFabFixture(persistRelationships = false): FixtureState {
 	const placed = placeProductionBays([
 		{ x: 0, y: 0 },
 		{ x: 100, y: 0 },
@@ -1269,8 +1670,14 @@ function threeBankFabFixture(): FixtureState {
 		);
 		if (!connection.prospectiveState) throw new Error(connection.plan.reason);
 		fixture = {
-			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...connection.prospectiveState,
+			relationships: persistRelationships
+				? produceStaticFabAssemblyConnectorRelationship(
+						fixture.organizations,
+						fixture.relationships,
+						connection,
+					).relationships
+				: emptyStaticFabAssemblyRelationshipState(),
 			patchSequence: fixture.patchSequence + 1,
 		};
 	}
@@ -1288,8 +1695,14 @@ function threeBankFabFixture(): FixtureState {
 		);
 		if (!connection.prospectiveState) throw new Error(connection.plan.reason);
 		fixture = {
-			relationships: emptyStaticFabAssemblyRelationshipState(),
 			...connection.prospectiveState,
+			relationships: persistRelationships
+				? produceStaticFabAssemblyConnectorRelationship(
+						fixture.organizations,
+						fixture.relationships,
+						connection,
+					).relationships
+				: emptyStaticFabAssemblyRelationshipState(),
 			patchSequence: fixture.patchSequence + 1,
 		};
 		roles = deriveStaticFabOrganizationSemanticRoles(fixture.organizations);

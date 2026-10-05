@@ -196,6 +196,14 @@ import {
 import { STATIC_FAB_PROCESS_LOOP_REPAIR_KIND } from "./StaticFabProcessLoopRepairContract";
 import type { StaticFabSelectionErasePlan } from "./StaticFabSelection";
 import {
+	STATIC_FAB_SEMANTIC_BANK_DETACH_KIND,
+	type StaticFabSemanticBankDetachPlan,
+} from "./StaticFabSemanticBankDetach";
+import {
+	consumeStaticFabSemanticBankDetachPlan,
+	type StaticFabSemanticBankDetachScope,
+} from "./StaticFabSemanticBankDetachCertification";
+import {
 	STATIC_FAB_SEMANTIC_BAY_DELETE_KIND,
 	STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND,
 	type StaticFabSemanticBayMutationPlan,
@@ -216,6 +224,7 @@ export type RailPatchKind =
 	| typeof STATIC_FAB_ARRANGEMENT_PLAN_KIND
 	| typeof STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND
 	| typeof STATIC_FAB_SEMANTIC_BAY_DELETE_KIND
+	| typeof STATIC_FAB_SEMANTIC_BANK_DETACH_KIND
 	| typeof STATIC_FAB_BAY_FLOW_EDIT_KIND
 	| typeof STATIC_FAB_ORGANIZATION_BUNDLE_PLACEMENT_KIND
 	| "erase-static-fab-selection"
@@ -617,6 +626,7 @@ export class RailDocument {
 		if (
 			"assemblyConnector" in plan ||
 			isStaticFabSemanticBayMutationKind(plan.kind) ||
+			(plan as { readonly kind: string }).kind === STATIC_FAB_SEMANTIC_BANK_DETACH_KIND ||
 			(plan as { readonly kind: string }).kind === STATIC_FAB_BAY_FLOW_EDIT_KIND
 		) {
 			return this.rejectCommand(
@@ -1916,6 +1926,74 @@ export class RailDocument {
 				entry.changes,
 				authorized,
 			);
+	}
+
+	/** Preserve one Bank subtree while atomically removing its certified Fab connection. */
+	commitStaticFabSemanticBankDetach(
+		plan: StaticFabSemanticBankDetachPlan,
+		scope: StaticFabSemanticBankDetachScope,
+	): boolean {
+		this.lastCommandError = null;
+		const authorityError = consumeStaticFabSemanticBankDetachPlan(plan, this, scope);
+		if (authorityError) return this.rejectCommand(authorityError, "Bank 분리를 거부했습니다");
+		const patch = plan.transition;
+		const entry = createHistoryEntry(
+			plan.kind,
+			patch.changes,
+			patch.switchChanges,
+			patch.portChanges,
+			patch.equipmentGroupChanges,
+			patch.organizationChanges,
+			patch.organizationNextIdBefore,
+			patch.organizationNextIdAfter,
+			patch.organizationImpactAuthorizations ?? [],
+			null,
+			null,
+			null,
+			patch.relationshipChanges ?? [],
+			patch.relationshipNextIdBefore,
+			patch.relationshipNextIdAfter,
+		);
+		try {
+			this.applyChanges(
+				entry.changes,
+				entry.switchChanges,
+				entry.portChanges,
+				entry.equipmentGroupChanges,
+				entry.organizationChanges,
+				entry.organizationNextIdBefore,
+				entry.organizationNextIdAfter,
+				false,
+				entry.organizationImpactAuthorizations,
+				null,
+				null,
+				null,
+				entry.relationshipChanges,
+				entry.relationshipNextIdBefore,
+				entry.relationshipNextIdAfter,
+			);
+		} catch (error) {
+			return this.rejectCommand(error, "Bank 분리를 원자적으로 적용할 수 없습니다");
+		}
+		this.pushUndoEntry(entry);
+		this.emit(
+			plan.kind,
+			plan.baseRevision,
+			entry.changes,
+			entry.switchChanges,
+			entry.portChanges,
+			entry.equipmentGroupChanges,
+			entry.organizationChanges,
+			entry.organizationNextIdBefore,
+			entry.organizationNextIdAfter,
+			entry.organizationImpactAuthorizations,
+			undefined,
+			null,
+			entry.relationshipChanges,
+			entry.relationshipNextIdBefore,
+			entry.relationshipNextIdAfter,
+		);
+		return true;
 	}
 
 	/** Commit one Worker-certified Bay disconnect or delete as one indivisible static-world command. */

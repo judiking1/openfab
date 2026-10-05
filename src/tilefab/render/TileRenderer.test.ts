@@ -2921,6 +2921,99 @@ describe("organization bundle ghost presentation", () => {
 		expect(renderer.getStats().organizationBundlePreviewVisibleCells).toBeGreaterThan(0);
 	});
 
+	it("retains organization preview buffers during hover loss and releases them at session end", () => {
+		const fixture = createOrganizationBundleGhostFixture();
+		const prepared = prepareStaticFabOrganizationBundlePlacementPreviewArtifact(fixture.bundle, 0);
+		expect(prepared.valid, prepared.reason).toBe(true);
+		if (!prepared.valid) return;
+		const preview = planStaticFabOrganizationBundlePlacementPreview(
+			fixture.map,
+			prepared.artifact,
+			{ x: 0, y: 0 },
+		);
+		const renderer = new TileRenderer();
+		const staticContext = createRecordingContext().context;
+		const overlay = createRecordingContext();
+		const input = {
+			map: fixture.map,
+			physicalPaths: fixture.physicalPaths,
+			ghost: null,
+			organizationBundlePreview: preview,
+			guidedOrganizationPlacement: {},
+			camera: fixture.camera,
+			width: 960,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		};
+		// Inspect strong references directly; garbage-collection timing is not a release guarantee.
+		const cache = () => ({
+			artifact: Reflect.get(renderer, "organizationBundlePreviewArtifact"),
+			generation: Reflect.get(renderer, "organizationBundlePreviewGeneration"),
+			stamps: [
+				Reflect.get(renderer, "organizationBundlePreviewCellStamps") as Uint32Array,
+				Reflect.get(renderer, "organizationBundlePreviewPortStamps") as Uint32Array,
+				Reflect.get(renderer, "organizationBundlePreviewGroupStamps") as Uint32Array,
+			],
+		});
+		const sourceBefore = JSON.stringify(fixture.bundle);
+		const revisionBefore = fixture.map.getRevision();
+		renderer.render(staticContext, overlay.context, input);
+		const active = cache();
+		const visible = renderer.getStats();
+		expect(active.artifact).toBe(prepared.artifact);
+		expect(active.stamps.every((stamp) => stamp.byteLength > 0)).toBe(true);
+		expect(visible.organizationBundlePreviewVisibleCells).toBeGreaterThan(0);
+		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([
+			expect.objectContaining({ role: "organization-placement" }),
+		]);
+
+		renderer.render(staticContext, overlay.context, { ...input, organizationBundlePreview: null });
+		expect(cache().artifact).toBe(active.artifact);
+		expect(cache().generation).toBe(active.generation);
+		for (const [index, stamp] of cache().stamps.entries()) {
+			expect(stamp).toBe(active.stamps[index]);
+		}
+		renderer.render(staticContext, overlay.context, input);
+		for (const [index, stamp] of cache().stamps.entries()) {
+			expect(stamp).toBe(active.stamps[index]);
+		}
+
+		renderer.releaseOrganizationBundlePlacementPreview();
+		expect(cache().artifact).toBeNull();
+		expect(cache().generation).toBe(0);
+		for (const [index, stamp] of cache().stamps.entries()) {
+			expect(stamp).not.toBe(active.stamps[index]);
+			expect(stamp.byteLength).toBe(0);
+		}
+		expect(renderer.getGuidedCanvasActionMarkers()).toEqual([]);
+		expect(renderer.getStats()).toMatchObject({
+			organizationBundlePreviewVisibleChunks: 0,
+			organizationBundlePreviewVisibleCells: 0,
+			organizationBundlePreviewVisiblePorts: 0,
+			staticRedraws: visible.staticRedraws,
+			physicalPathBindings: visible.physicalPathBindings,
+		});
+		renderer.releaseOrganizationBundlePlacementPreview();
+		renderer.render(staticContext, overlay.context, input);
+		expect(cache().artifact).toBe(prepared.artifact);
+		expect(cache().generation).toBe(1);
+		for (const [index, stamp] of cache().stamps.entries()) {
+			expect(stamp).not.toBe(active.stamps[index]);
+		}
+		expect(renderer.getStats()).toMatchObject({
+			organizationBundlePreviewVisibleCells: visible.organizationBundlePreviewVisibleCells,
+			organizationBundlePreviewVisiblePorts: visible.organizationBundlePreviewVisiblePorts,
+			staticRedraws: visible.staticRedraws,
+			physicalPathBindings: visible.physicalPathBindings,
+		});
+		expect(JSON.stringify(fixture.bundle)).toBe(sourceBefore);
+		expect(fixture.map.getRevision()).toBe(revisionBefore);
+	});
+
 	it("keeps a guided touch center on a shallow fitted organization ghost", () => {
 		const fixture = createOrganizationBundleGhostFixture();
 		const prepared = prepareStaticFabOrganizationBundlePlacementPreviewArtifact(fixture.bundle, 0);

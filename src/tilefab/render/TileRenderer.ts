@@ -1101,6 +1101,25 @@ export class TileRenderer {
 		this.staticKey = "";
 	}
 
+	/** End a placement session or replace its project; a temporary null hover preview is not an end. */
+	releaseOrganizationBundlePlacementPreview(): void {
+		if (!this.organizationBundlePreviewArtifact) return;
+		this.organizationBundlePreviewArtifact = null;
+		this.organizationBundlePreviewCellStamps = new Uint32Array();
+		this.organizationBundlePreviewPortStamps = new Uint32Array();
+		this.organizationBundlePreviewGroupStamps = new Uint32Array();
+		this.organizationBundlePreviewGeneration = 0;
+		this.organizationBundlePreviewCellBuffer.length = 0;
+		this.organizationBundlePreviewPortBuffer.length = 0;
+		this.organizationBundlePreviewGroupBuffer.length = 0;
+		this.organizationBundlePreviewVisibleChunks = 0;
+		this.organizationBundlePreviewVisibleCells = 0;
+		this.organizationBundlePreviewVisiblePorts = 0;
+		this.guidedCanvasActionMarkers = Object.freeze(
+			this.guidedCanvasActionMarkers.filter((marker) => marker.role !== "organization-placement"),
+		);
+	}
+
 	getGuidedCanvasActionMarkers(): readonly GuidedCanvasActionMarker[] {
 		return this.guidedCanvasActionMarkers;
 	}

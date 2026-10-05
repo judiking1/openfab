@@ -40,6 +40,11 @@ export interface PortSlotPreparedArtifactCatalog {
 	readonly STK: PortSlotPreparedArtifacts;
 }
 
+interface PortSlotSemanticValidationPreparation {
+	readonly exclusionMask: Uint8Array;
+	readonly railClearance: PortSlotRailClearanceIndex;
+}
+
 /** Live occupancy queries whose row inputs are bound to one validated prepared artifact. */
 export interface PreparedPortSlotAvailabilityIndex extends PortSlotAvailabilityIndex {
 	readonly kind: "prepared-port-slot-availability-index";
@@ -289,6 +294,7 @@ function compilePortSlotPreparedArtifactsWithPhysicalProof(
 	layout: CompiledPhysicalLayout,
 	portType: PortType,
 	physicalSourceRows: ValidatedPhysicalSourceRows,
+	validationPreparation?: PortSlotSemanticValidationPreparation,
 ): PortSlotPreparedArtifacts {
 	const slots = compileBasePortSlots(layout, portType);
 	const artifacts = Object.freeze({
@@ -298,7 +304,7 @@ function compilePortSlotPreparedArtifactsWithPhysicalProof(
 		slots,
 		spatialIndex: compilePortSlotSpatialIndex(slots),
 	});
-	validatePortSlotPreparedArtifacts(layout, artifacts);
+	validatePortSlotPreparedArtifactsWithPreparation(layout, artifacts, validationPreparation);
 	sealValidatedRows(artifacts, physicalSourceRows);
 	sourceLayoutsByPreparedArtifacts.set(artifacts, layout);
 	return artifacts;
@@ -452,12 +458,32 @@ export function compilePortSlotPreparedArtifactCatalog(
 	layout: CompiledPhysicalLayout,
 ): PortSlotPreparedArtifactCatalog {
 	const physicalSourceRows = validatedPhysicalSourceRows(layout);
+	// This synchronous call owns the preparation; public and transferred validators rebuild it.
+	const validationPreparation: PortSlotSemanticValidationPreparation = {
+		exclusionMask: compilePortSlotExclusionMask(layout),
+		railClearance: new PortSlotRailClearanceIndex(layout),
+	};
 	const catalog = Object.freeze({
-		OHB: compilePortSlotPreparedArtifactsWithPhysicalProof(layout, "OHB", physicalSourceRows),
-		EQ: compilePortSlotPreparedArtifactsWithPhysicalProof(layout, "EQ", physicalSourceRows),
-		STK: compilePortSlotPreparedArtifactsWithPhysicalProof(layout, "STK", physicalSourceRows),
+		OHB: compilePortSlotPreparedArtifactsWithPhysicalProof(
+			layout,
+			"OHB",
+			physicalSourceRows,
+			validationPreparation,
+		),
+		EQ: compilePortSlotPreparedArtifactsWithPhysicalProof(
+			layout,
+			"EQ",
+			physicalSourceRows,
+			validationPreparation,
+		),
+		STK: compilePortSlotPreparedArtifactsWithPhysicalProof(
+			layout,
+			"STK",
+			physicalSourceRows,
+			validationPreparation,
+		),
 	});
-	validatePortSlotPreparedArtifactCatalog(layout, catalog);
+	validatePortSlotPreparedArtifactCatalogWithPreparation(layout, catalog, validationPreparation);
 	return catalog;
 }
 
@@ -479,10 +505,23 @@ export function validatePortSlotPreparedArtifacts(
 	layout: CompiledPhysicalLayout,
 	artifacts: PortSlotPreparedArtifacts,
 ): void {
+	validatePortSlotPreparedArtifactsWithPreparation(layout, artifacts);
+}
+
+function validatePortSlotPreparedArtifactsWithPreparation(
+	layout: CompiledPhysicalLayout,
+	artifacts: PortSlotPreparedArtifacts,
+	preparation?: PortSlotSemanticValidationPreparation,
+): void {
 	if (!portSlotPreparedArtifactsMatch(layout, artifacts)) {
 		throw new Error("Prepared port slot artifacts do not match the physical layout.");
 	}
-	for (const _step of portSlotSemanticValidationSteps(layout, artifacts)) {
+	for (const _step of portSlotSemanticValidationSteps(
+		layout,
+		artifacts,
+		preparation?.exclusionMask,
+		preparation?.railClearance,
+	)) {
 		void _step;
 		// Exhaust the bounded semantic validator synchronously at trusted compile boundaries.
 	}
@@ -1158,11 +1197,19 @@ export function validatePortSlotPreparedArtifactCatalog(
 	layout: CompiledPhysicalLayout,
 	catalog: PortSlotPreparedArtifactCatalog,
 ): void {
+	validatePortSlotPreparedArtifactCatalogWithPreparation(layout, catalog);
+}
+
+function validatePortSlotPreparedArtifactCatalogWithPreparation(
+	layout: CompiledPhysicalLayout,
+	catalog: PortSlotPreparedArtifactCatalog,
+	preparation?: PortSlotSemanticValidationPreparation,
+): void {
 	if (!portSlotPreparedArtifactCatalogMatch(layout, catalog)) {
 		throw new Error("Prepared port slot artifact catalog does not match the physical layout.");
 	}
 	for (const portType of PORT_TYPES) {
-		validatePortSlotPreparedArtifacts(layout, catalog[portType]);
+		validatePortSlotPreparedArtifactsWithPreparation(layout, catalog[portType], preparation);
 	}
 }
 

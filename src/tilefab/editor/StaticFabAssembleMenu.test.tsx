@@ -70,6 +70,39 @@ describe("StaticFabAssembleMenu", () => {
 		expect(markup).not.toContain('data-testid="assemble-delete-selected-bay"');
 	});
 
+	it("shows only Bank detach and its blocked reason for one Bank", () => {
+		const markup = renderToStaticMarkup(
+			<StaticFabAssembleMenu
+				{...props({
+					selectionCount: 1,
+					selectedBankCount: 1,
+					bankDetach: {
+						availability: { state: "blocked", reason: "다른 Bank와 연결 관계를 공유합니다." },
+						onDetach: vi.fn(),
+					},
+				})}
+			/>,
+		);
+		expect(markup).toContain("선택한 Bank");
+		expect(markup).toContain("다른 Bank와 연결 관계를 공유합니다.");
+		expect(markup).toMatch(/data-testid="assemble-detach-selected-bank"[^>]*disabled/);
+		expect(markup).not.toContain("Bank 삭제");
+		expect(markup).not.toContain('data-testid="assemble-disconnect-selected-bay"');
+	});
+
+	it("hides Bank detach outside a single-Bank selection", () => {
+		const markup = renderToStaticMarkup(
+			<StaticFabAssembleMenu
+				{...props({
+					selectionCount: 2,
+					selectedBankCount: 2,
+					bankDetach: { availability: { state: "ready", reason: "분리 검토" }, onDetach: vi.fn() },
+				})}
+			/>,
+		);
+		expect(markup).not.toContain('data-testid="assemble-detach-selected-bank"');
+	});
+
 	it("shows one selected-Bay row with independent semantic command availability", () => {
 		const markup = renderToStaticMarkup(
 			<StaticFabAssembleMenu

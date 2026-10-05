@@ -21,7 +21,11 @@ export interface EditorHelpContextInput {
 	readonly ordinaryRailKeyboardPhase?: GuidedRailKeyboardPhase | null;
 	readonly equipmentEdit?:
 		| Readonly<{ equipmentType: "OHB" | "EQ" | "STK"; mode: "move" | "copy" }>
-		| Readonly<{ equipmentType: "EQ" | "STK"; mode: "ports" }>
+		| Readonly<{
+				equipmentType: "EQ" | "STK";
+				mode: "ports";
+				preservesLoopOwnership?: boolean;
+		  }>
 		| null;
 }
 
@@ -116,9 +120,17 @@ const ACTIVITY_HELP_CONTEXTS = Object.freeze({
 			],
 			[
 				"2 · 편집",
-				"장비의 이동·Port 구성은 바로 선택하고, 복제·철거와 연결 정보는 펼쳐서 확인합니다.",
+				"장비 Inspector에서 이동·Port 구성 편집을 선택하고, 복제·철거와 연결 정보는 펼쳐서 확인합니다.",
 			],
-			["3 · 검증", "Checks에서 끊긴 연결과 정적 FAB 준비 상태를 확인합니다."],
+			[
+				"3 · 서비스 방향",
+				"장비 Inspector의 서비스 방향 반전으로 전체 Port의 서비스 방향을 바꿉니다. 레일 흐름은 유지됩니다.",
+			],
+			[
+				"4 · EQ 몸체",
+				"EQ Inspector의 몸체 크기를 펼쳐 길이·폭을 입력한 뒤 크기 적용을 누릅니다. Port 위치·방향은 고정됩니다.",
+			],
+			["5 · 검증", "Checks에서 끊긴 연결과 정적 FAB 준비 상태를 확인합니다."],
 		],
 	),
 } satisfies Readonly<Record<EditorActivity, EditorHelpContext>>);
@@ -168,7 +180,9 @@ function equipmentEditHelpContext(
 		return helpContext(
 			`장비 · ${name} · 포트 구성`,
 			`${name}의 포트 구성 바꾸기`,
-			"기존 장비의 포트를 편집하는 단계입니다. 완료하기 전에는 원본 장비가 유지됩니다.",
+			edit.preservesLoopOwnership
+				? "모든 Port는 같은 Loop 안에 유지합니다. 기존 Port를 남겨 추가·제거하고, 전체 위치 변경은 장비 이동을 사용하세요. 완료하기 전에는 원본 장비가 유지됩니다."
+				: "기존 장비의 포트를 편집하는 단계입니다. 완료하기 전에는 원본 장비가 유지됩니다.",
 			[
 				[
 					"1 · 포트 선택",

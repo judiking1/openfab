@@ -301,4 +301,34 @@ describe("EditorCommandRegistry", () => {
 			),
 		).toBe(true);
 	});
+
+	it("finds Inspector equipment actions without adding or stealing shortcuts", () => {
+		const service = searchEditorCommands("서비스 방향 반전").find(
+			(command) => command.id === "equipment.reverse-service-direction",
+		);
+		expect(service?.label).toContain("장비 Inspector");
+		expect(service?.label).toContain("레일 흐름 유지");
+		expect(service?.bindings).toEqual([]);
+		expect(searchEditorCommands("방향").map((command) => command.id)).toEqual(
+			expect.arrayContaining(["equipment.reverse-service-direction", "placement.reverse-flow"]),
+		);
+		for (const query of ["몸체", "크기", "길이", "폭"]) {
+			const body = searchEditorCommands(query).find(
+				(command) => command.id === "equipment.edit-eq-body",
+			);
+			expect(body?.label).toContain("Inspector > 몸체 크기 > 크기 적용");
+			expect(body?.label).toContain("Port 고정");
+			expect(body?.bindings).toEqual([]);
+		}
+		expect(
+			editorCommandAriaKeyShortcuts([
+				"equipment.reverse-service-direction",
+				"equipment.edit-eq-body",
+			]),
+		).toBeUndefined();
+		expect(resolveEditorCommand(keyboard("KeyF"), "selection")).toBeNull();
+		expect(resolveEditorCommand(keyboard("KeyF"), "placement")?.command.id).toBe(
+			"placement.reverse-flow",
+		);
+	});
 });

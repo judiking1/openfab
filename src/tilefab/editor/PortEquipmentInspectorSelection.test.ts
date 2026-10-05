@@ -1,6 +1,7 @@
-import { createElement } from "react";
+import * as React from "react";
+import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EquipmentGroupRecord, PortEquipmentState } from "../core/EquipmentGroup";
 import type { PortRecord } from "../core/PortRecord";
 import { DIR_E, DIR_W } from "../core/railShape";
@@ -11,6 +12,11 @@ import {
 	resolveExactPortEquipmentSelection,
 	resolvePortEquipmentActionAvailability,
 } from "./PortEquipmentInspectorSelection";
+
+vi.mock("react", async (importOriginal) => {
+	const actual = await importOriginal<typeof React>();
+	return { ...actual, useState: vi.fn(actual.useState) };
+});
 
 describe("PortEquipmentInspectorSelection", () => {
 	it.each<{
@@ -240,6 +246,79 @@ describe("PortEquipmentInspectorSelection", () => {
 });
 
 describe("PortEquipmentInspector same-Loop editing", () => {
+	it.each([
+		undefined,
+		{ lengthMillimeters: 4_000, widthMillimeters: 1_200 },
+	])("separates draft cancellation from restoring Port-derived EQ size (%j)", (bodyDimensions) => {
+		const state = eqState(undefined, [
+			{
+				id: 1,
+				kind: "EQ",
+				pitchMillimeters: 1_000,
+				recipe: null,
+				portIds: [1, 2],
+				...(bodyDimensions ? { bodyDimensions } : {}),
+			},
+		]);
+		const selected = resolveEditablePortEquipmentSelection(state, selection());
+		if (!selected) throw new Error("Expected an editable EQ selection.");
+		const commit = vi.fn();
+		const clearSelection = vi.fn();
+		const props = {
+			...inspectorProps(state, selected),
+			commitSelectedEqBodyDimensions: commit,
+			clearPortEquipmentSelection: clearSelection,
+		};
+		const markup = renderToStaticMarkup(createElement(PortEquipmentInspector, props));
+		expect(markup).toContain('role="status" data-testid="eq-body-draft-status"');
+		expect(markup).toContain("현재 적용된 크기입니다.");
+		expect(markup).not.toContain("미적용 입력이 있습니다.");
+		const cancel = inspectorActionButton(markup, "cancel-eq-body-dimensions");
+		expect(cancel).toContain('type="button"');
+		expect(cancel).toContain('disabled=""');
+		expect(markup).toContain("입력 취소");
+		expect(inspectorActionButton(markup, "reset-eq-body-dimensions").includes('disabled=""')).toBe(
+			bodyDimensions === undefined,
+		);
+
+		// Exercise the rendered child handlers without a browser or a second document/history model.
+		const editor = findInspectorElement(
+			PortEquipmentInspector({ ...props, modelSyncPending: true }),
+			(element) => element.props.group === selected.equipmentGroup,
+		);
+		if (!editor || typeof editor.type !== "function") throw new Error("Expected EQ size editor.");
+		const setLength = vi.fn();
+		const setWidth = vi.fn();
+		const useState = vi
+			.mocked(React.useState)
+			.mockReturnValueOnce(["5.5", setLength])
+			.mockReturnValueOnce(["", setWidth]);
+		const sourceBefore = JSON.stringify(state);
+		try {
+			const renderEditor = editor.type as (props: Record<string, unknown>) => ReactNode;
+			const draft = renderEditor(editor.props);
+			const draftMarkup = renderToStaticMarkup(draft);
+			expect(draftMarkup).toContain("미적용 입력이 있습니다.");
+			expect(inspectorActionButton(draftMarkup, "apply-eq-body-dimensions")).toContain(
+				'disabled=""',
+			);
+			const cancelDraft = findInspectorElement(
+				draft,
+				(element) => element.props["data-testid"] === "cancel-eq-body-dimensions",
+			);
+			expect(cancelDraft?.props.disabled).toBe(false);
+			(cancelDraft?.props.onClick as () => void)();
+			expect(setLength).toHaveBeenCalledExactlyOnceWith(bodyDimensions ? "4" : "2");
+			expect(setWidth).toHaveBeenCalledExactlyOnceWith(bodyDimensions ? "1.2" : "0.9");
+			expect(commit).not.toHaveBeenCalled();
+			expect(clearSelection).not.toHaveBeenCalled();
+			expect(JSON.stringify(state)).toBe(sourceBefore);
+			expect(props.selectedPortEquipment).toEqual(selection());
+		} finally {
+			useState.mockRestore();
+		}
+	});
+
 	it.each([
 		"OHB",
 		"EQ",
@@ -533,6 +612,22 @@ describe("PortEquipmentInspector action explanations", () => {
 		).toBe(status !== "ready");
 	});
 });
+
+function findInspectorElement(
+	node: ReactNode,
+	matches: (element: ReactElement<Record<string, unknown>>) => boolean,
+): ReactElement<Record<string, unknown>> | null {
+	if (Array.isArray(node)) {
+		for (const child of node) {
+			const found = findInspectorElement(child, matches);
+			if (found) return found;
+		}
+	} else if (isValidElement<Record<string, unknown>>(node)) {
+		if (matches(node)) return node;
+		return findInspectorElement(node.props.children as ReactNode, matches);
+	}
+	return null;
+}
 
 function inspectorActionButton(markup: string, id: string): string {
 	const button = markup.match(new RegExp(`<button[^>]*data-testid="${id}"[^>]*>`))?.[0];

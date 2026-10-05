@@ -766,6 +766,28 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 		textInput: "block",
 	}),
 	command({
+		id: "equipment.reverse-service-direction",
+		group: "equipment",
+		contexts: ["selection"],
+		label: "서비스 방향 반전 · 장비 Inspector · 레일 흐름 유지",
+		glyph: "flow",
+		bindings: [],
+		repeat: "once",
+		textInput: "block",
+		keywords: ["service", "reverse", "direction", "서비스", "방향 반전", "Port", "장비"],
+	}),
+	command({
+		id: "equipment.edit-eq-body",
+		group: "equipment",
+		contexts: ["selection"],
+		label: "EQ 몸체 크기 · Inspector > 몸체 크기 > 크기 적용 · Port 고정",
+		glyph: "resize",
+		bindings: [],
+		repeat: "once",
+		textInput: "block",
+		keywords: ["EQ", "body", "size", "length", "width", "몸체", "크기", "길이", "폭", "장비"],
+	}),
+	command({
 		id: "equipment.navigate",
 		group: "equipment",
 		contexts: [

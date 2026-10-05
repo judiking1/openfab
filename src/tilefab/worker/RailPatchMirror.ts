@@ -86,6 +86,10 @@ import {
 import { assertStaticFabProcessLoopRepairSourceSteps } from "../core/StaticFabProcessLoopRepair";
 import { STATIC_FAB_PROCESS_LOOP_REPAIR_KIND } from "../core/StaticFabProcessLoopRepairContract";
 import {
+	assertStaticFabSemanticBankDetachPatchSource,
+	STATIC_FAB_SEMANTIC_BANK_DETACH_KIND,
+} from "../core/StaticFabSemanticBankDetach";
+import {
 	STATIC_FAB_SEMANTIC_BAY_DELETE_KIND,
 	STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND,
 } from "../core/StaticFabSemanticBayMutation";
@@ -422,6 +426,16 @@ export class RailPatchMirror {
 		validateOrganizationImpactAuthorizations(organizationImpactAuthorizations, historyOriginKind);
 		validateOperationalConfigurationPatchScope(patch, historyOriginKind);
 		validateStaticFabSemanticBayMutationPatch(patch);
+		if (historyOriginKind === STATIC_FAB_SEMANTIC_BANK_DETACH_KIND && patch.kind !== "undo") {
+			assertStaticFabSemanticBankDetachPatchSource(
+				this.mirroredMap,
+				this.mirroredPortEquipment,
+				this.currentSequence,
+				this.mirroredOrganizations,
+				this.mirroredRelationships,
+				patch,
+			);
+		}
 		validateStaticFabBayFlowEditPatch(patch, this.mirroredOrganizations, historyOriginKind);
 		if (patch.sequence !== expectedSequence) {
 			throw new Error(
@@ -898,7 +912,8 @@ function validateOrganizationImpactAuthorizations(
 		kind !== STATIC_FAB_ASSEMBLY_CONNECTOR_PATCH_KIND &&
 		kind !== STATIC_FAB_BAY_FLOW_EDIT_KIND &&
 		kind !== STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND &&
-		kind !== STATIC_FAB_SEMANTIC_BAY_DELETE_KIND
+		kind !== STATIC_FAB_SEMANTIC_BAY_DELETE_KIND &&
+		kind !== STATIC_FAB_SEMANTIC_BANK_DETACH_KIND
 	) {
 		throw new Error(`Rail patch kind '${kind}' cannot carry organization relocation authority.`);
 	}

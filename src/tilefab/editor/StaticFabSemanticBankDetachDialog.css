@@ -1,0 +1,205 @@
+.tilefab-assemble-semantic-bank {
+	display: grid;
+	gap: 6px;
+	padding-top: 8px;
+	border-top: 1px solid #293436;
+	color: #a8bfbb;
+	font-size: 11px;
+}
+
+.tilefab-assemble-semantic-bank p {
+	margin: 0;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-assemble-semantic-bank button,
+.tilefab-bank-detach-dialog button {
+	display: flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 8px 12px;
+	border: 1px solid #536c68;
+	border-radius: 5px;
+	color: #d5e7e1;
+	background: #1a2926;
+	cursor: pointer;
+	font: inherit;
+	font-weight: 700;
+}
+
+.tilefab-assemble-semantic-bank button:disabled,
+.tilefab-bank-detach-dialog button:disabled {
+	color: #7e8c89;
+	background: #15201e;
+	cursor: not-allowed;
+}
+
+.tilefab-bank-detach-backdrop {
+	position: fixed;
+	z-index: 90;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 16px;
+	background: #040a0ccc;
+}
+
+.tilefab-bank-detach-dialog {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr) auto;
+	width: min(720px, 100%);
+	max-height: calc(100dvh - 32px);
+	border: 1px solid #45605b;
+	border-radius: 10px;
+	color: #d0ded9;
+	background: #101918;
+	box-shadow: 0 24px 80px #0009;
+	font-size: 13px;
+	line-height: 1.55;
+}
+
+.tilefab-bank-detach-dialog header,
+.tilefab-bank-detach-dialog footer {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 18px;
+}
+
+.tilefab-bank-detach-dialog header {
+	border-bottom: 1px solid #30423d;
+	color: #e6f4ef;
+	font-size: 17px;
+}
+
+.tilefab-bank-detach-dialog footer {
+	justify-content: flex-end;
+	border-top: 1px solid #30423d;
+}
+
+.tilefab-bank-detach-dialog footer button:first-child {
+	margin-right: auto;
+}
+
+.tilefab-bank-detach-dialog footer button:last-child:not(:disabled) {
+	border-color: #98d6bd;
+	color: #10231b;
+	background: #b0e4cb;
+}
+
+.tilefab-bank-detach-workspace {
+	min-height: 0;
+	overflow: auto;
+	overscroll-behavior: contain;
+	padding: 4px 18px 18px;
+}
+
+.tilefab-bank-detach-workspace p,
+.tilefab-bank-detach-dialog small {
+	overflow-wrap: anywhere;
+}
+
+.tilefab-bank-detach-impact {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 12px;
+}
+
+.tilefab-bank-detach-impact-column,
+.tilefab-bank-detach-evidence {
+	min-width: 0;
+	padding: 12px;
+	border: 1px solid #304a41;
+	border-radius: 6px;
+	background: #13201c;
+}
+
+.tilefab-bank-detach-impact-column:last-child {
+	border-color: #665c3c;
+	background: #201e15;
+}
+
+.tilefab-bank-detach-dialog h3,
+.tilefab-bank-detach-dialog h4 {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0 0 10px;
+	font-size: 13px;
+}
+
+.tilefab-bank-detach-dialog dl {
+	display: grid;
+	gap: 8px;
+	margin: 0;
+}
+
+.tilefab-bank-detach-dialog dl > div {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 8px;
+}
+
+.tilefab-bank-detach-dialog dd {
+	margin: 0;
+	text-align: right;
+}
+
+.tilefab-bank-detach-dialog small {
+	display: block;
+	color: #9eb4ac;
+	font-size: 11px;
+}
+
+.tilefab-bank-detach-status {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 12px 0;
+}
+
+.tilefab-bank-detach-status svg {
+	flex-shrink: 0;
+	margin-top: 2px;
+}
+
+.tilefab-bank-detach-dialog[data-phase="rejected"] .tilefab-bank-detach-status {
+	color: #f5c895;
+}
+
+.tilefab-bank-detach-evidence summary {
+	min-height: 44px;
+	padding: 10px 0;
+	cursor: pointer;
+}
+
+.tilefab-bank-detach-dialog :focus-visible,
+.tilefab-assemble-semantic-bank button:focus-visible {
+	outline: 2px solid #b0e4cb;
+	outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+	.tilefab-bank-detach-backdrop {
+		align-items: end;
+		padding: 8px;
+	}
+
+	.tilefab-bank-detach-dialog {
+		max-height: calc(100dvh - 16px);
+	}
+
+	.tilefab-bank-detach-impact {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.tilefab-bank-detach-dialog header,
+	.tilefab-bank-detach-dialog footer,
+	.tilefab-bank-detach-workspace {
+		padding-right: 12px;
+		padding-left: 12px;
+	}
+}

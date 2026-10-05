@@ -100,6 +100,21 @@ describe("deriveEditorHelpContext", () => {
 		expect(context.steps[2]?.description).toContain("ARRANGE/CONNECT");
 	});
 
+	it("points equipment inspection Help to the service and EQ body controls", () => {
+		const context = deriveEditorHelpContext({
+			activity: "inspect",
+			organizationOpen: false,
+			organizationSelectionCount: 0,
+		});
+		const service = context.steps.find((step) => step.label.includes("서비스 방향"));
+		expect(service?.description).toContain("장비 Inspector의 서비스 방향 반전");
+		expect(service?.description).toContain("레일 흐름은 유지");
+		const body = context.steps.find((step) => step.label.includes("EQ 몸체"));
+		expect(body?.description).toContain("EQ Inspector의 몸체 크기");
+		expect(body?.description).toContain("크기 적용");
+		expect(body?.description).toContain("Port 위치·방향은 고정");
+	});
+
 	it.each([
 		"OHB",
 		"EQ",
@@ -136,6 +151,24 @@ describe("deriveEditorHelpContext", () => {
 		expect(context.steps[0]?.description).toContain(equipmentType === "EQ" ? "Q/E" : "Space");
 		expect(context.steps[2]?.description).toContain("Enter 또는 완료");
 		expect(context.steps[2]?.description).toContain("원본 장비를 유지");
+		expect(context.summary).not.toContain("같은 Loop");
+	});
+
+	it.each([
+		"EQ",
+		"STK",
+	] as const)("keeps the owned %s Port editing limits in current-task Help", (equipmentType) => {
+		const context = deriveEditorHelpContext({
+			activity: "equip",
+			organizationOpen: true,
+			organizationSelectionCount: 1,
+			equipmentEdit: { equipmentType, mode: "ports", preservesLoopOwnership: true },
+		});
+		expect(context.summary).toContain("모든 Port는 같은 Loop 안에 유지");
+		expect(context.summary).toContain("기존 Port를 남겨 추가·제거");
+		expect(context.summary).toContain("전체 위치 변경은 장비 이동");
+		expect(context.summary).toContain("완료하기 전에는 원본 장비가 유지");
+		expect(context.returnLabel).toBe("포트 구성 편집으로 돌아가기");
 	});
 
 	it("does not use an inactive equipment intent for another activity", () => {
