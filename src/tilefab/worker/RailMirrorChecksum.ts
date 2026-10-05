@@ -1194,6 +1194,11 @@ function hashEquipmentGroup(record: EquipmentGroupRecord, seed: number): number 
 	else if (record.kind === "EQ") {
 		hash = mixHash(hash, record.pitchMillimeters);
 		hash = mixString(hash, record.recipe ?? "");
+		if (record.bodyDimensions) {
+			hash = mixString(hash, "eq-body-dimensions-v1");
+			hash = mixHash(hash, record.bodyDimensions.lengthMillimeters);
+			hash = mixHash(hash, record.bodyDimensions.widthMillimeters);
+		}
 	} else hash = mixString(hash, record.template);
 	return finalizeHash(hash);
 }

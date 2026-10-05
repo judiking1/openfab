@@ -1,11 +1,11 @@
-import type { PortEquipmentState } from "../core/EquipmentGroup";
+import { type PortEquipmentState, STK_BODY_WIDTH_MILLIMETERS } from "../core/EquipmentGroup";
 import { type CardinalPortRoute, type PortRecord, portRouteIdentityKey } from "../core/PortRecord";
 import { type Direction, moveCell, oppositeDirection } from "../core/railShape";
 import { type CompiledPathIntervalRemap, PATH_SOURCE_IDENTITY_KIND } from "./CompoundPhysicalPath";
 import { PATH_KIND } from "./PhysicalPathCompiler";
 import type { CompiledPhysicalLayout } from "./PhysicalRailCompiler";
 
-export const STK_BODY_HALF_WIDTH_METERS = 0.42;
+export const STK_BODY_HALF_WIDTH_METERS = STK_BODY_WIDTH_MILLIMETERS / 2_000;
 const STK_BODY_END_MARGIN_METERS = 0.5;
 const SWEEP_OVERLAP_EPSILON_METERS = 1e-6;
 

@@ -98,6 +98,7 @@ import {
 	planCopyOhbToSlot,
 	planEraseEquipmentGroup,
 	planMoveOhbToSlot,
+	planResizeEqBody,
 	planReversePortEquipmentServiceDirection,
 	resolvePortEquipmentSelection,
 } from "../compile/PortEquipmentEditPlanner";
@@ -205,6 +206,7 @@ import { createConnectedStaticFabSelection } from "../core/ConnectedStaticFabSel
 import {
 	collectPortEquipmentIntegrityIssues,
 	EQ_MAXIMUM_PORT_COUNT,
+	type EqBodyDimensions,
 	type PortEquipmentState,
 	STK_MAXIMUM_PORT_COUNT,
 	type StkEquipmentTemplate,
@@ -21997,6 +21999,53 @@ export default function TileFabApp(): React.ReactElement {
 		scheduleRender();
 	};
 
+	const commitSelectedEqBodyDimensions = (
+		dimensions: EqBodyDimensions | null,
+		expectedSelection: PortEquipmentSelectionIdentity,
+	): void => {
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorActivityTransitionBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const { document: activeDocument, resolved, actions } = currentPortEquipmentActions();
+		const selection = selectedPortEquipmentRef.current;
+		if (
+			activeDocument !== railDocument ||
+			!selection ||
+			selection.portId !== expectedSelection.portId ||
+			selection.equipmentGroupId !== expectedSelection.equipmentGroupId
+		) {
+			setStatus("프로젝트 또는 선택한 EQ가 변경되었습니다 · 몸체 크기를 다시 입력하세요");
+			return;
+		}
+		if (blockPortEquipmentAction(actions.editEqBody) || resolved?.equipmentGroup.kind !== "EQ") return;
+		const plan = planResizeEqBody(
+			activeDocument.map,
+			activeDocument.portEquipment,
+			expectedSelection,
+			dimensions,
+			activeDocument.map.getRevision(),
+			activeDocument.getPatchSequence(),
+			activeDocument.organizations,
+		);
+		if (!activeDocument.commitPortEquipment(plan)) {
+			setStatus(portEquipmentReasonLabel(
+				plan.valid
+					? (activeDocument.getLastCommandError() ?? "EQ 몸체 편집 조건이 변경되었습니다 · 크기를 다시 확인하세요")
+					: plan.reason,
+			));
+			scheduleRender();
+			return;
+		}
+		clearTransientConstruction();
+		setPortEquipmentSelection(expectedSelection);
+		syncModelUi(
+			dimensions === null
+				? `EQ-${resolved.equipmentGroup.id} 몸체를 Port 기준 기본 크기로 복원했습니다`
+				: `EQ-${resolved.equipmentGroup.id} 몸체 크기를 ${dimensions.lengthMillimeters / 1_000} × ${dimensions.widthMillimeters / 1_000} m로 적용했습니다`,
+		);
+		restoreCanvasFocusAfterAction();
+	};
+
 	const reverseSelectedPortEquipmentServiceDirection = (): void => {
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorActivityTransitionBlockedReason();
@@ -38650,6 +38699,8 @@ export default function TileFabApp(): React.ReactElement {
 
 				{selectedPortDetails && selectedEquipmentGroup && portEquipmentInspectorVisible ? (
 					<PortEquipmentInspector
+						key={editorModel.generation}
+						commitSelectedEqBodyDimensions={commitSelectedEqBodyDimensions}
 						organizations={activeOrganizations}
 						activePortEquipment={activePortEquipment}
 						bindCompactInspectorDisclosure={bindCompactInspectorDisclosure}

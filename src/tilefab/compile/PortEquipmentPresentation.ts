@@ -1,4 +1,8 @@
-import { EQUIPMENT_GROUP_KINDS, type PortEquipmentState } from "../core/EquipmentGroup";
+import {
+	EQUIPMENT_GROUP_KINDS,
+	type EqBodyDimensions,
+	type PortEquipmentState,
+} from "../core/EquipmentGroup";
 import { PORT_TYPES } from "../core/PortRecord";
 import type { CompiledPhysicalLayout } from "./PhysicalRailCompiler";
 import type { PortAttachmentSourceIndex } from "./PortAttachmentResolver";
@@ -597,6 +601,7 @@ export function compilePortEquipmentPresentation(
 			groupTangents,
 			groupHalfExtents,
 			groupBounds,
+			group.kind === "EQ" ? group.bodyDimensions : undefined,
 		);
 	}
 	groupPortOffsets[equipmentGroupCount] = groupPortWrite;
@@ -832,6 +837,7 @@ function writeGroupGeometry(
 	groupTangents: Float32Array,
 	halfExtents: Float32Array,
 	bounds: Float32Array,
+	dimensions?: EqBodyDimensions,
 ): void {
 	const firstRow = portRows[0];
 	if (firstRow === undefined) throw new Error(`Equipment group row ${groupRow} has no ports.`);
@@ -863,8 +869,12 @@ function writeGroupGeometry(
 	const centerAcross = (minAcross + maxAcross) * 0.5;
 	const centerX = originX + tangentX * centerAlong + normalX * centerAcross;
 	const centerZ = originZ + tangentZ * centerAlong + normalZ * centerAcross;
-	const halfLength = Math.max(0.34, (maxAlong - minAlong) * 0.5 + 0.5);
-	const halfWidth = Math.max(0.28, (maxAcross - minAcross) * 0.5 + 0.45);
+	const halfLength = dimensions
+		? dimensions.lengthMillimeters / 2_000
+		: Math.max(0.34, (maxAlong - minAlong) * 0.5 + 0.5);
+	const halfWidth = dimensions
+		? dimensions.widthMillimeters / 2_000
+		: Math.max(0.28, (maxAcross - minAcross) * 0.5 + 0.45);
 	centers[groupRow * 2] = centerX;
 	centers[groupRow * 2 + 1] = centerZ;
 	groupTangents[groupRow * 2] = tangentX;

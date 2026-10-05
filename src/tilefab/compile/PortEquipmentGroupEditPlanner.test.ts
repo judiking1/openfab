@@ -3,6 +3,7 @@ import { planRailConstruction } from "../core/paint";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
 import { TileMap } from "../core/TileMap";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
+import { planResizeEqBody } from "./PortEquipmentEditPlanner";
 import {
 	PortEquipmentGroupSlotIndex,
 	planPortEquipmentGroupEdit,
@@ -13,6 +14,69 @@ import { PortSlotAvailabilityIndex } from "./PortSlotCompiler";
 import { compilePortSlotPreparedArtifactCatalog } from "./PortSlotPreparedArtifacts";
 
 describe("PortEquipmentGroupEditPlanner", () => {
+	it.each([
+		"move",
+		"copy",
+	] as const)("rejects authored EQ body overlap in %s preview before applying", (mode) => {
+		const document = closedLoopDocument(30, 4);
+		const physical = compilePhysicalRail(document.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const index = new PortEquipmentGroupSlotIndex(slots);
+		for (const xs of [
+			[2, 3],
+			[12, 13],
+		]) {
+			const placement = planEqRowPlacement(
+				slots,
+				xs.map((x) => rowAt(slots, x, 0)),
+				new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+				document.portEquipment,
+				1_000,
+				null,
+				document.map.getRevision(),
+				document.getPatchSequence(),
+			);
+			expect(document.commitPortEquipment(placement), placement.reason).toBe(true);
+		}
+		const resize = planResizeEqBody(
+			document.map,
+			document.portEquipment,
+			{ portId: 1, equipmentGroupId: 1 },
+			{ lengthMillimeters: 10_000, widthMillimeters: 900 },
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+		expect(document.commitPortEquipment(resize), resize.reason).toBe(true);
+		const source = document.portEquipment;
+		const sequence = document.getPatchSequence();
+		const planAt = (x: number, z: number, validation: "preview" | "commit") =>
+			planPortEquipmentGroupEdit(
+				document.map,
+				slots,
+				index,
+				new PortSlotAvailabilityIndex(physical, source, "EQ"),
+				source,
+				1,
+				1,
+				rowAt(slots, x, z),
+				mode,
+				document.map.getRevision(),
+				sequence,
+				validation,
+				document.organizations,
+			);
+		for (const validation of ["preview", "commit"] as const) {
+			const rejected = planAt(8, 0, validation);
+			expect(rejected.valid, rejected.reason).toBe(false);
+			expect(rejected.reason).toContain("겹칩니다");
+			const accepted = planAt(15, 4, validation);
+			expect(accepted.valid, accepted.reason).toBe(true);
+		}
+		expect(planAt(15, 4, "preview").portMutations).toEqual(planAt(15, 4, "commit").portMutations);
+		expect(document.portEquipment).toBe(source);
+		expect(document.getPatchSequence()).toBe(sequence);
+	});
 	it("moves a complete EQ group through a 180 degree rail rotation as one undoable patch", () => {
 		const document = closedLoopDocument(13, 4);
 		const physical = compilePhysicalRail(document.map);

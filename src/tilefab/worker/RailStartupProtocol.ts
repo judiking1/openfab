@@ -15,7 +15,7 @@ import type { CompiledPhysicalRailRenderArtifacts } from "../render/PhysicalRail
 import type { RailMirrorSnapshot } from "./RailMirrorChecksum";
 
 /** Worker-to-main startup payload contract. Bump whenever a required wire field changes. */
-export const RAIL_STARTUP_SCHEMA_VERSION = 24;
+export const RAIL_STARTUP_SCHEMA_VERSION = 25;
 /** Public browser scale acceptance contract; intentionally independent from the wire schema. */
 export const RAIL_SCALE_ACCEPTANCE_VERSION = 18;
 export const RAIL_ASSEMBLY_CONNECTOR_SCALE_PROBE_CELLS = 100_001;
@@ -121,6 +121,7 @@ export type RailStartupPayloadSource =
 				| 11
 				| 12
 				| 13
+				| 14
 				| null;
 			readonly sequence: number;
 			readonly revision: number;

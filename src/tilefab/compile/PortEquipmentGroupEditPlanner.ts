@@ -2,6 +2,7 @@ import {
 	applyPortEquipmentMutations,
 	type EquipmentGroupRecord,
 	equipmentGroupEquals,
+	hasAuthoredEqBodyDimensions,
 	type PortEquipmentState,
 } from "../core/EquipmentGroup";
 import {
@@ -10,7 +11,10 @@ import {
 	equipmentGroupPortBarcode,
 } from "../core/EquipmentGroupPortOrder";
 import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
-import { assertPortEquipmentLayout } from "../core/PortEquipmentLayoutValidator";
+import {
+	assertPortEquipmentLayout,
+	authoredEqBodyOverlapError,
+} from "../core/PortEquipmentLayoutValidator";
 import { portEquipmentLoopEditTargetError } from "../core/PortEquipmentLoopEdit";
 import {
 	createInvalidPortEquipmentMutationPlan,
@@ -464,14 +468,18 @@ export function planPortEquipmentGroupEdit(
 		if (ownershipError)
 			return invalid(kind, baseRevision, basePatchSequence, editMetadata, ownershipError);
 	}
-	if (validationMode === "commit") {
+	if (validationMode === "commit" || hasAuthoredEqBodyDimensions(state)) {
 		try {
 			const prospective = applyPortEquipmentMutations(
 				state,
 				portMutations,
 				equipmentGroupMutations,
 			);
-			assertPortEquipmentLayout(map, prospective);
+			if (validationMode === "commit") assertPortEquipmentLayout(map, prospective);
+			else {
+				const bodyError = authoredEqBodyOverlapError(map, prospective);
+				if (bodyError) throw new Error(bodyError);
+			}
 		} catch (error) {
 			return invalid(
 				kind,

@@ -703,6 +703,13 @@ function addEquipmentGroupRecord(
 	checksum.addStrings([record.kind]);
 	if (record.kind === "EQ") {
 		checksum.addNumbers([record.pitchMillimeters]);
+		if (record.bodyDimensions) {
+			checksum.addStrings(["eq-body-dimensions-v1"]);
+			checksum.addNumbers([
+				record.bodyDimensions.lengthMillimeters,
+				record.bodyDimensions.widthMillimeters,
+			]);
+		}
 		checksum.addStrings([record.recipe ?? ""]);
 	} else checksum.addStrings([record.template]);
 }

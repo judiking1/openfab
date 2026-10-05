@@ -8,6 +8,7 @@ import {
 	validateAdvancedSwitchTopology,
 } from "../core/AdvancedSwitch";
 import {
+	copyEqBodyDimensionsProperties,
 	EQUIPMENT_GROUP_KINDS,
 	type EquipmentGroupRecord,
 	equipmentGroupError,
@@ -182,7 +183,23 @@ export class OpenFabProjectParseError extends Error {
 
 export interface OpenFabProjectParseResult {
 	readonly project: OpenFabProject;
-	readonly migratedFromVersion: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | null;
+	readonly migratedFromVersion:
+		| 0
+		| 1
+		| 2
+		| 3
+		| 4
+		| 5
+		| 6
+		| 7
+		| 8
+		| 9
+		| 10
+		| 11
+		| 12
+		| 13
+		| 14
+		| null;
 }
 
 export function parseOpenFabProjectJson(source: string): OpenFabProjectParseResult {
@@ -207,14 +224,25 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	const schemaVersion = expectInteger(root.schemaVersion, "$.schemaVersion");
 	if (schemaVersion === OPENFAB_PROJECT_SCHEMA_VERSION) {
-		return Object.freeze({ project: validateVersionFourteen(root), migratedFromVersion: null });
+		return Object.freeze({ project: validateVersionFifteen(root), migratedFromVersion: null });
+	}
+	if (schemaVersion === 14) {
+		return Object.freeze({
+			project: validateVersionFifteen({
+				...root,
+				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
+				equipment: validateEquipmentSection(root.equipment, true),
+			}),
+			migratedFromVersion: 14,
+		});
 	}
 	if (schemaVersion === 13 || schemaVersion === 12) {
 		return Object.freeze({
-			project: validateVersionFourteen({
+			project: validateVersionFifteen({
 				...root,
 				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 				areas: validateOrganizationSection(root.areas, true),
+				equipment: validateEquipmentSection(root.equipment, true),
 				blueprints: migrateBlueprintSectionV4(root.blueprints),
 			}),
 			migratedFromVersion: schemaVersion,
@@ -222,10 +250,11 @@ export function parseOpenFabProjectValue(value: unknown): OpenFabProjectParseRes
 	}
 	if (schemaVersion === 11) {
 		return Object.freeze({
-			project: validateVersionFourteen({
+			project: validateVersionFifteen({
 				...root,
 				schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 				areas: validateOrganizationSection(root.areas, true),
+				equipment: validateEquipmentSection(root.equipment, true),
 				blueprints: migrateBlueprintSectionV3(root.blueprints),
 			}),
 			migratedFromVersion: 11,
@@ -311,7 +340,7 @@ export function serializeOpenFabProject(
 	) {
 		throw new Error("OpenFab project serialization limit is invalid.");
 	}
-	const normalized = validateVersionFourteen(expectRecord(project, "$", "INVALID_ROOT"));
+	const normalized = validateVersionFifteen(expectRecord(project, "$", "INVALID_ROOT"));
 	const sorted = sortJsonObjectKeys(normalized);
 	const characterLength = prettyJsonCharacterLength(sorted) + 1;
 	if (characterLength > maximumCharacters) {
@@ -378,7 +407,7 @@ export function parseOpenFabProjectBlueprintValue(value: unknown): OpenFabProjec
 	return record;
 }
 
-function validateVersionFourteen(root: Readonly<Record<string, unknown>>): OpenFabProject {
+function validateVersionFifteen(root: Readonly<Record<string, unknown>>): OpenFabProject {
 	expectExactKeys(
 		root,
 		[
@@ -402,7 +431,7 @@ function validateVersionFourteen(root: Readonly<Record<string, unknown>>): OpenF
 	const manifest = validateOpenFabProjectManifest(root.manifest);
 	const rail = validateRailSection(root.rail);
 	const ports = validatePortSection(root.ports);
-	const equipment = validateEquipmentSection(root.equipment);
+	const equipment = validateEquipmentSection(root.equipment, false);
 	const project = Object.freeze({
 		kind: OPENFAB_PROJECT_KIND,
 		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
@@ -425,7 +454,7 @@ function validateVersionFourteen(root: Readonly<Record<string, unknown>>): OpenF
 }
 
 function migrateVersionTen(project: OpenFabProjectVersionTen): OpenFabProject {
-	return validateVersionFourteen({
+	return validateVersionFifteen({
 		...project,
 		schemaVersion: OPENFAB_PROJECT_SCHEMA_VERSION,
 		relationships: createEmptyOpenFabProjectRelationshipSection(),
@@ -1069,12 +1098,15 @@ function validatePortRoute(value: unknown, path: string): OpenFabProjectPortRout
 	fail("INVALID_FIELD", `${path}.kind`, "unknown port route identity kind");
 }
 
-function validateEquipmentSection(value: unknown): OpenFabProjectEquipmentSection {
+function validateEquipmentSection(
+	value: unknown,
+	allowLegacy = true,
+): OpenFabProjectEquipmentSection {
 	const section = expectRecord(value, "$.equipment");
 	expectExactKeys(section, ["schemaVersion", "nextEquipmentGroupId", "records"], "$.equipment");
 	expectLiteral(
 		section.schemaVersion,
-		OPENFAB_EQUIPMENT_SECTION_SCHEMA_VERSION,
+		allowLegacy && section.schemaVersion === 1 ? 1 : OPENFAB_EQUIPMENT_SECTION_SCHEMA_VERSION,
 		"$.equipment.schemaVersion",
 	);
 	const nextEquipmentGroupId = expectIdCursor(
@@ -1082,6 +1114,17 @@ function validateEquipmentSection(value: unknown): OpenFabProjectEquipmentSectio
 		"$.equipment.nextEquipmentGroupId",
 	);
 	const rawRecords = expectArray(section.records, "$.equipment.records");
+	if (
+		section.schemaVersion === 1 &&
+		rawRecords.some((record) =>
+			Object.hasOwn(expectRecord(record, "$.equipment.records"), "bodyDimensions"),
+		)
+	)
+		fail(
+			"INVALID_PORT_EQUIPMENT",
+			"$.equipment.records",
+			"legacy equipment schema does not carry authored body dimensions",
+		);
 	if (rawRecords.length > OPENFAB_PROJECT_MAX_EQUIPMENT_GROUPS) {
 		fail("LIMIT_EXCEEDED", "$.equipment.records", "equipment group count exceeds 500,000");
 	}
@@ -1719,13 +1762,25 @@ function validateEquipmentGroup(value: unknown, path: string): OpenFabProjectEqu
 			portIds: validatePortIds(group.portIds, `${path}.portIds`),
 		});
 	} else if (kind === "EQ") {
-		expectExactKeys(group, ["id", "kind", "portIds", "pitchMillimeters", "recipe"], path);
+		expectExactKeys(
+			group,
+			[
+				"id",
+				"kind",
+				"portIds",
+				"pitchMillimeters",
+				"recipe",
+				...(Object.hasOwn(group, "bodyDimensions") ? ["bodyDimensions"] : []),
+			],
+			path,
+		);
 		parsed = Object.freeze({
 			id: expectPositiveInt32(group.id, `${path}.id`),
 			kind,
 			portIds: validatePortIds(group.portIds, `${path}.portIds`),
 			pitchMillimeters: expectInteger(group.pitchMillimeters, `${path}.pitchMillimeters`),
 			recipe: group.recipe === null ? null : expectString(group.recipe, `${path}.recipe`),
+			...validateEqBodyDimensionsProperties(group, path),
 		});
 	} else {
 		expectExactKeys(group, ["id", "kind", "template", "portIds"], path);
@@ -1744,6 +1799,32 @@ function validateEquipmentGroup(value: unknown, path: string): OpenFabProjectEqu
 function validatePortIds(value: unknown, path: string): readonly number[] {
 	const raw = expectArray(value, path);
 	return Object.freeze(raw.map((id, index) => expectPositiveInt32(id, `${path}[${index}]`)));
+}
+
+function validateEqBodyDimensionsProperties(
+	group: Readonly<Record<string, unknown>>,
+	path: string,
+): {
+	readonly bodyDimensions?: {
+		readonly lengthMillimeters: number;
+		readonly widthMillimeters: number;
+	};
+} {
+	if (!Object.hasOwn(group, "bodyDimensions")) return {};
+	const dimensions = expectRecord(group.bodyDimensions, `${path}.bodyDimensions`);
+	expectExactKeys(dimensions, ["lengthMillimeters", "widthMillimeters"], `${path}.bodyDimensions`);
+	return {
+		bodyDimensions: Object.freeze({
+			lengthMillimeters: expectInteger(
+				dimensions.lengthMillimeters,
+				`${path}.bodyDimensions.lengthMillimeters`,
+			),
+			widthMillimeters: expectInteger(
+				dimensions.widthMillimeters,
+				`${path}.bodyDimensions.widthMillimeters`,
+			),
+		}),
+	};
 }
 
 function validatePortEquipment(project: OpenFabProjectAuthoredSource): void {
@@ -2380,11 +2461,22 @@ function validateStaticFabBlueprintEquipmentGroups(
 				});
 			}
 			if (kind === "EQ") {
-				expectExactKeys(group, ["kind", "pitchMillimeters", "recipe", "portIndices"], groupPath);
+				expectExactKeys(
+					group,
+					[
+						"kind",
+						"pitchMillimeters",
+						"recipe",
+						"portIndices",
+						...(Object.hasOwn(group, "bodyDimensions") ? ["bodyDimensions"] : []),
+					],
+					groupPath,
+				);
 				return Object.freeze({
 					kind: "EQ" as const,
 					pitchMillimeters: expectInteger(group.pitchMillimeters, `${groupPath}.pitchMillimeters`),
 					recipe: group.recipe === null ? null : expectString(group.recipe, `${groupPath}.recipe`),
+					...validateEqBodyDimensionsProperties(group, groupPath),
 					portIndices,
 				});
 			}
@@ -2498,6 +2590,7 @@ function validateStaticFabBlueprintLayout(
 				kind: "EQ" as const,
 				pitchMillimeters: group.pitchMillimeters,
 				recipe: group.recipe,
+				...copyEqBodyDimensionsProperties(group),
 				portIds,
 			});
 		}

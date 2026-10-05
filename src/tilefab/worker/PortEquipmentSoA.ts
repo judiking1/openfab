@@ -11,7 +11,7 @@ import { copyPortRecord, type PortMutation, type PortRecord } from "../core/Port
 import type { Direction } from "../core/railShape";
 import { hasTransferableArrayBuffer, isTransferableTypedArray } from "./TransferableTypedArray";
 
-export const PORT_EQUIPMENT_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+export const PORT_EQUIPMENT_SNAPSHOT_SCHEMA_VERSION = 2 as const;
 
 const ROUTE_CARDINAL = 0;
 const ROUTE_ADVANCED_SWITCH = 1;
@@ -58,6 +58,8 @@ export interface EquipmentGroupFieldsSoA {
 	readonly portIds: Int32Array;
 	readonly templates: Uint8Array;
 	readonly pitchMillimeters: Uint32Array;
+	readonly bodyLengthMillimeters: Uint32Array;
+	readonly bodyWidthMillimeters: Uint32Array;
 	readonly recipes: readonly (string | null)[];
 }
 
@@ -458,6 +460,10 @@ function readEquipmentFromFields(
 	const start = fields.portOffsets[index] as number;
 	const end = fields.portOffsets[index + 1] as number;
 	const portIds = Object.freeze(Array.from(fields.portIds.slice(start, end)));
+	const lengthMillimeters = fields.bodyLengthMillimeters[index] as number;
+	const widthMillimeters = fields.bodyWidthMillimeters[index] as number;
+	if (kind !== "EQ" && (lengthMillimeters !== 0 || widthMillimeters !== 0))
+		throw new Error("Only EQ equipment can carry authored body dimensions.");
 	if (kind === "OHB") return copyEquipmentGroupRecord({ id, kind, template: "SINGLE", portIds });
 	if (kind === "EQ") {
 		return copyEquipmentGroupRecord({
@@ -466,6 +472,9 @@ function readEquipmentFromFields(
 			portIds,
 			pitchMillimeters: fields.pitchMillimeters[index] as number,
 			recipe: fields.recipes[index] ?? null,
+			...(lengthMillimeters === 0 && widthMillimeters === 0
+				? {}
+				: { bodyDimensions: { lengthMillimeters, widthMillimeters } }),
 		});
 	}
 	const template = enumValue(
@@ -639,6 +648,8 @@ function createEquipmentGroupFields(count: number, portCount: number): Equipment
 		portIds: new Int32Array(portCount),
 		templates: new Uint8Array(count),
 		pitchMillimeters: new Uint32Array(count),
+		bodyLengthMillimeters: new Uint32Array(count),
+		bodyWidthMillimeters: new Uint32Array(count),
 		recipes: new Array<string | null>(count).fill(null),
 	};
 }
@@ -657,6 +668,8 @@ function writeEquipmentGroup(
 	}
 	if (group.kind === "EQ") {
 		fields.pitchMillimeters[index] = group.pitchMillimeters;
+		fields.bodyLengthMillimeters[index] = group.bodyDimensions?.lengthMillimeters ?? 0;
+		fields.bodyWidthMillimeters[index] = group.bodyDimensions?.widthMillimeters ?? 0;
 		(fields.recipes as (string | null)[])[index] = group.recipe;
 		return;
 	}
@@ -765,6 +778,8 @@ function validateEquipmentFields(
 		fields.portOffsets.length !== count + 1 ||
 		fields.templates.length !== count ||
 		fields.pitchMillimeters.length !== count ||
+		fields.bodyLengthMillimeters.length !== count ||
+		fields.bodyWidthMillimeters.length !== count ||
 		fields.recipes.length !== count ||
 		(fields.portOffsets[0] as number) !== 0 ||
 		(fields.portOffsets[count] as number) !== fields.portIds.length
@@ -818,7 +833,9 @@ function validateEquipmentFieldTypes(fields: EquipmentGroupFieldsSoA, label: str
 		!(fields.portOffsets instanceof Uint32Array) ||
 		!(fields.portIds instanceof Int32Array) ||
 		!(fields.templates instanceof Uint8Array) ||
-		!(fields.pitchMillimeters instanceof Uint32Array)
+		!(fields.pitchMillimeters instanceof Uint32Array) ||
+		!(fields.bodyLengthMillimeters instanceof Uint32Array) ||
+		!(fields.bodyWidthMillimeters instanceof Uint32Array)
 	) {
 		throw new Error(`${label} numeric columns have invalid typed arrays.`);
 	}
@@ -854,6 +871,8 @@ function assertEmptyEquipmentFields(fields: EquipmentGroupFieldsSoA, index: numb
 		(fields.kinds[index] as number) !== 0 ||
 		(fields.templates[index] as number) !== 0 ||
 		(fields.pitchMillimeters[index] as number) !== 0 ||
+		(fields.bodyLengthMillimeters[index] as number) !== 0 ||
+		(fields.bodyWidthMillimeters[index] as number) !== 0 ||
 		fields.recipes[index] !== null
 	) {
 		throw new Error(`Absent equipment patch row ${index} carries record data.`);
@@ -893,6 +912,8 @@ function equipmentFieldArrays(fields: EquipmentGroupFieldsSoA): readonly Numeric
 		fields.portIds,
 		fields.templates,
 		fields.pitchMillimeters,
+		fields.bodyLengthMillimeters,
+		fields.bodyWidthMillimeters,
 	];
 }
 

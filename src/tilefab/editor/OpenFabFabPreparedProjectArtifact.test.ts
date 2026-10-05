@@ -69,10 +69,17 @@ beforeAll(() => {
 describe("OpenFabFabPreparedProjectArtifact", () => {
 	it("rebinds a manifest-neutral source while hiding its transferable snapshot", () => {
 		const fixture = transferableFixture();
-		expect(OPENFAB_FAB_PREPARED_PROJECT_VERSION).toBe(3);
-		expect(OPENFAB_FAB_PREPARED_PROJECT_PROTOCOL_VERSION).toBe(4);
-		expect(fixture.prepared.version).toBe(3);
-		expect(fixture.attestation.version).toBe(3);
+		expect(OPENFAB_FAB_PREPARED_PROJECT_VERSION).toBe(4);
+		expect(OPENFAB_FAB_PREPARED_PROJECT_PROTOCOL_VERSION).toBe(5);
+		expect(fixture.prepared.version).toBe(4);
+		expect(fixture.attestation.version).toBe(4);
+		expect(fixture.prepared.snapshot.portEquipment.schemaVersion).toBe(2);
+		expect(fixture.prepared.snapshot.portEquipment.equipmentGroups.bodyLengthMillimeters).toEqual(
+			new Uint32Array(0),
+		);
+		expect(fixture.prepared.snapshot.portEquipment.equipmentGroups.bodyWidthMillimeters).toEqual(
+			new Uint32Array(0),
+		);
 		const prepared = rebindTransferableOpenFabFabPreparedProject(
 			fixture.prepared,
 			fixture.attestation,

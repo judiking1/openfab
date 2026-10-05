@@ -1,4 +1,5 @@
 import type { EquipmentGroupRecord, StkEquipmentTemplate } from "./EquipmentGroup";
+import { copyEqBodyDimensionsProperties } from "./EquipmentGroup";
 import type { PortRecord } from "./PortRecord";
 import { moveCell } from "./railShape";
 import { analyzeStkPortLayout } from "./StkPortLayout";
@@ -90,6 +91,7 @@ export function copyEquipmentGroupWithPortIds(
 			kind: "EQ",
 			pitchMillimeters: source.pitchMillimeters,
 			recipe: source.recipe,
+			...copyEqBodyDimensionsProperties(source),
 			portIds: frozenPortIds,
 		});
 	}

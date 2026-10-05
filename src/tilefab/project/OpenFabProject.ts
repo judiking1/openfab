@@ -65,13 +65,13 @@ import {
 } from "./OpenFabProjectRelationships";
 
 export const OPENFAB_PROJECT_KIND = "openfab/tilefab-project" as const;
-export const OPENFAB_PROJECT_SCHEMA_VERSION = 14 as const;
+export const OPENFAB_PROJECT_SCHEMA_VERSION = 15 as const;
 export const OPENFAB_RAIL_GRAMMAR = "directed-cardinal-1m-v1" as const;
 export const OPENFAB_RAIL_CELL_ENCODING = "incoming-low-outgoing-high-v1" as const;
 export const OPENFAB_RAIL_CELL_SIZE_MILLIMETERS = 1_000 as const;
 export const OPENFAB_RESERVED_SECTION_SCHEMA_VERSION = 0 as const;
 export const OPENFAB_PORT_SECTION_SCHEMA_VERSION = 1 as const;
-export const OPENFAB_EQUIPMENT_SECTION_SCHEMA_VERSION = 1 as const;
+export const OPENFAB_EQUIPMENT_SECTION_SCHEMA_VERSION = 2 as const;
 // Fits the complete signed-int32 coordinate domain even in a compact unobstructed viewport.
 export const OPENFAB_PROJECT_VIEW_MIN_ZOOM_PIXELS_PER_METER = 2 ** -30;
 export const OPENFAB_PROJECT_VIEW_MAX_ZOOM_PIXELS_PER_METER = 512;

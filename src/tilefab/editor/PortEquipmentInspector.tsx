@@ -14,12 +14,25 @@ import {
 	Warehouse,
 	X,
 } from "lucide-react";
-import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
+import {
+	type Dispatch,
+	type ReactNode,
+	type RefObject,
+	type SetStateAction,
+	useState,
+} from "react";
 import type { PortEquipmentGroupEditMode } from "../compile/PortEquipmentGroupEditPlanner";
 import type {
+	EqBodyDimensions,
+	EqEquipmentGroup,
 	EquipmentGroupRecord,
 	PortEquipmentState,
 	StkEquipmentTemplate,
+} from "../core/EquipmentGroup";
+import {
+	defaultEqBodyDimensions,
+	EQ_MAXIMUM_BODY_DIMENSION_MILLIMETERS,
+	resolveEqBodyDimensions,
 } from "../core/EquipmentGroup";
 import type { PortRecord } from "../core/PortRecord";
 import type {
@@ -51,6 +64,10 @@ import {
 } from "./PortEquipmentInspectorSelection";
 
 export interface PortEquipmentInspectorProps {
+	readonly commitSelectedEqBodyDimensions: (
+		dimensions: EqBodyDimensions | null,
+		expectedSelection: PortEquipmentSelectionIdentity,
+	) => void;
 	readonly organizations?: StaticFabOrganizationState;
 	readonly activePortEquipment: Pick<PortEquipmentState, "equipmentGroups">;
 	readonly bindCompactInspectorDisclosure: (node: HTMLButtonElement | null) => void;
@@ -113,6 +130,7 @@ export interface PortEquipmentInspectorProps {
 }
 
 export function PortEquipmentInspector({
+	commitSelectedEqBodyDimensions,
 	organizations,
 	activePortEquipment,
 	bindCompactInspectorDisclosure,
@@ -527,6 +545,18 @@ export function PortEquipmentInspector({
 								<RotateCw size={15} /> 서비스 방향 반전
 							</button>
 						</div>
+						{selectedEquipmentGroup.kind === "EQ" && selectedPortEquipment ? (
+							<EqBodyDimensionsEditor
+								key={`${selectedEquipmentGroup.id}:${selectedEquipmentGroup.bodyDimensions?.lengthMillimeters ?? "auto"}:${selectedEquipmentGroup.bodyDimensions?.widthMillimeters ?? "auto"}`}
+								group={selectedEquipmentGroup}
+								selection={selectedPortEquipment}
+								disabled={
+									!actions.editEqBody.allowed || modelSyncPending || workerState.status !== "ready"
+								}
+								reason={actions.editEqBody.reason}
+								commit={commitSelectedEqBodyDimensions}
+							/>
+						) : null}
 						<button
 							type="button"
 							className="tilefab-inspector-primary tilefab-equipment-repeat"
@@ -810,6 +840,103 @@ export function PortEquipmentInspector({
 				</details>
 			</div>
 		</aside>
+	);
+}
+
+function EqBodyDimensionsEditor({
+	group,
+	selection,
+	disabled,
+	reason,
+	commit,
+}: {
+	readonly group: EqEquipmentGroup;
+	readonly selection: PortEquipmentSelectionIdentity;
+	readonly disabled: boolean;
+	readonly reason: string | null;
+	readonly commit: (
+		dimensions: EqBodyDimensions | null,
+		expectedSelection: PortEquipmentSelectionIdentity,
+	) => void;
+}): ReactNode {
+	const current = resolveEqBodyDimensions(group);
+	const minimum = defaultEqBodyDimensions(group);
+	const [length, setLength] = useState(String(current.lengthMillimeters / 1_000));
+	const [width, setWidth] = useState(String(current.widthMillimeters / 1_000));
+	return (
+		<details className="tilefab-equipment-more-actions" data-testid="eq-body-dimensions">
+			<summary>
+				<span>
+					몸체 크기 · {current.lengthMillimeters / 1_000} × {current.widthMillimeters / 1_000} m
+				</span>
+				<ChevronDown size={15} aria-hidden="true" />
+			</summary>
+			<form
+				className="tilefab-equipment-more-actions-body"
+				onSubmit={(event) => {
+					event.preventDefault();
+					if (!disabled)
+						commit(
+							{
+								lengthMillimeters: Math.round(Number(length) * 1_000),
+								widthMillimeters: Math.round(Number(width) * 1_000),
+							},
+							selection,
+						);
+				}}
+			>
+				<p>Port 위치와 방향을 유지하며 EQ 몸체만 변경합니다.</p>
+				<label>
+					길이 (m)
+					<input
+						data-testid="eq-body-length"
+						type="number"
+						required
+						step="0.001"
+						min={minimum.lengthMillimeters / 1_000}
+						max={EQ_MAXIMUM_BODY_DIMENSION_MILLIMETERS / 1_000}
+						value={length}
+						disabled={disabled}
+						onChange={(event) => setLength(event.currentTarget.value)}
+					/>
+				</label>
+				<label>
+					폭 (m)
+					<input
+						data-testid="eq-body-width"
+						type="number"
+						required
+						step="0.001"
+						min={minimum.widthMillimeters / 1_000}
+						max={EQ_MAXIMUM_BODY_DIMENSION_MILLIMETERS / 1_000}
+						value={width}
+						disabled={disabled}
+						onChange={(event) => setWidth(event.currentTarget.value)}
+					/>
+				</label>
+				<p>
+					{reason ??
+						`최소 ${minimum.lengthMillimeters / 1_000} × ${minimum.widthMillimeters / 1_000} m · 편집기 한도 각각 316 m`}
+				</p>
+				<button
+					type="submit"
+					className="tilefab-inspector-primary"
+					data-testid="apply-eq-body-dimensions"
+					disabled={disabled}
+				>
+					<Check size={15} /> 크기 적용
+				</button>
+				<button
+					type="button"
+					className="tilefab-inspector-primary"
+					data-testid="reset-eq-body-dimensions"
+					disabled={disabled || group.bodyDimensions === undefined}
+					onClick={() => commit(null, selection)}
+				>
+					Port 기준 기본 크기
+				</button>
+			</form>
+		</details>
 	);
 }
 

@@ -19,6 +19,7 @@ import {
 	validateAdvancedSwitchPatch,
 	validateAdvancedSwitchTopology,
 } from "../core/AdvancedSwitch";
+import { resolveEqBodyEditTransition } from "../core/EqBodyEdit";
 import {
 	applyPortEquipmentMutations,
 	emptyPortEquipmentState,
@@ -555,15 +556,25 @@ export class RailPatchMirror {
 				patch.equipmentGroupChanges,
 			);
 			if (serviceDirection?.reason) throw new Error(serviceDirection.reason);
+			const bodyEdit = resolveEqBodyEditTransition(
+				this.mirroredOrganizations,
+				this.mirroredPortEquipment,
+				nextPortEquipment,
+				patch.portChanges,
+				patch.equipmentGroupChanges,
+			);
+			if (bodyEdit?.reason) throw new Error(bodyEdit.reason);
 			if (
-				serviceDirection &&
+				(serviceDirection || bodyEdit) &&
 				(railMutationCount > 0 ||
 					patch.organizationChanges.length > 0 ||
 					patch.relationshipChanges.length > 0 ||
 					patch.operationalConfigurationPatch ||
 					organizationImpactAuthorizations.length > 0)
 			) {
-				throw new Error("서비스 방향 반전은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다");
+				throw new Error(
+					`${bodyEdit ? "EQ 몸체 크기 편집" : "서비스 방향 반전"}은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다`,
+				);
 			}
 			if (railMutationCount > 0) {
 				this.mirroredMap.applyAtomicMutations(patch.changes, patch.switchChanges);
@@ -592,6 +603,7 @@ export class RailPatchMirror {
 			}
 			// The mirror independently proves same-Loop containment; no new transport permit is trusted.
 			const loopEdit =
+				bodyEdit ??
 				serviceDirection ??
 				(railMutationCount === 0 &&
 				patch.organizationChanges.length === 0 &&

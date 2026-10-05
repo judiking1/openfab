@@ -1,9 +1,14 @@
+import { stableSortSteps } from "./CooperativeSort";
+import { completeCooperativeSteps } from "./CooperativeTask";
 import {
+	type EqBodyDimensions,
 	type EqEquipmentGroup,
 	type EquipmentGroupRecord,
 	equipmentGroupError,
+	hasAuthoredEqBodyDimensions,
 	type PortEquipmentState,
 	portEquipmentStateError,
+	STK_BODY_WIDTH_MILLIMETERS,
 	type StkEquipmentGroup,
 } from "./EquipmentGroup";
 import {
@@ -40,6 +45,7 @@ export const PORT_EQUIPMENT_LAYOUT_ISSUE_CODES = [
 	"PORT_STATION_OCCUPIED",
 	"PORT_SPACING",
 	"EQ_STK_BODY_OVERLAP",
+	"EQ_AUTHORED_BODY_OVERLAP",
 	"STK_RESERVATION_OVERLAP",
 	"STK_RESERVATION_CROSSES_EQUIPMENT",
 ] as const;
@@ -112,6 +118,8 @@ export function portEquipmentLayoutError(map: TileMap, state: PortEquipmentState
 	}
 	const spacingError = portEquipmentSpacingError(state);
 	if (spacingError) return spacingError;
+	const authoredBodyIssue = collectAuthoredEqBodyOverlapIssues(map, state)[0];
+	if (authoredBodyIssue) return authoredBodyIssue.message;
 	return portEquipmentBodyOverlapError(map, state);
 }
 
@@ -155,6 +163,7 @@ export function collectPortEquipmentLayoutIssuesFromIntegrityValidState(
 		}
 	}
 	issues.push(...collectPortEquipmentSpacingIssues(state));
+	issues.push(...collectAuthoredEqBodyOverlapIssues(map, state));
 	issues.push(...collectPortEquipmentBodyOverlapIssues(map, state));
 	return Object.freeze(issues);
 }
@@ -766,10 +775,13 @@ export function equipmentGroupBodyBounds(
 	const ports = group.portIds
 		.map((portId) => portsById.get(portId))
 		.filter(Boolean) as PortRecord[];
-	return equipmentPortsBodyBounds(ports);
+	return equipmentPortsBodyBounds(ports, group.kind === "EQ" ? group.bodyDimensions : undefined);
 }
 
-export function equipmentPortsBodyBounds(ports: readonly PortRecord[]): EquipmentBodyBounds | null {
+export function equipmentPortsBodyBounds(
+	ports: readonly PortRecord[],
+	dimensions?: EqBodyDimensions,
+): EquipmentBodyBounds | null {
 	const first = ports[0];
 	if (!first || first.route.kind !== "CARDINAL_CELL" || first.route.to === 0) return null;
 	const tangent = moveCell({ x: 0, y: 0 }, first.route.to);
@@ -796,8 +808,12 @@ export function equipmentPortsBodyBounds(ports: readonly PortRecord[]): Equipmen
 	const centerAcross = (minAcross + maxAcross) * 0.5;
 	const centerX = origin.x + tangent.x * centerAlong + normal.x * centerAcross;
 	const centerZ = origin.z + tangent.y * centerAlong + normal.y * centerAcross;
-	const halfLength = Math.max(0.34, (maxAlong - minAlong) * 0.5 + 0.5);
-	const halfWidth = Math.max(0.28, (maxAcross - minAcross) * 0.5 + 0.45);
+	const halfLength = dimensions
+		? dimensions.lengthMillimeters / 2_000
+		: Math.max(0.34, (maxAlong - minAlong) * 0.5 + 0.5);
+	const halfWidth = dimensions
+		? dimensions.widthMillimeters / 2_000
+		: Math.max(0.28, (maxAcross - minAcross) * 0.5 + 0.45);
 	const extentX = Math.abs(tangent.x) * halfLength + Math.abs(normal.x) * halfWidth;
 	const extentZ = Math.abs(tangent.y) * halfLength + Math.abs(normal.y) * halfWidth;
 	return {
@@ -830,6 +846,135 @@ function portWorldPosition(port: PortRecord): { readonly x: number; readonly z: 
 		x: route.x + 0.5 + tangent.x * stationOffset + normal.x * lateralOffset,
 		z: route.z + 0.5 + tangent.y * stationOffset + normal.y * lateralOffset,
 	};
+}
+
+/** Existing default bodies stay compatible; explicit EQ dimensions participate in spatial checks. */
+export function authoredEqBodyOverlapError(map: TileMap, state: PortEquipmentState): string | null {
+	return collectAuthoredEqBodyOverlapIssues(map, state)[0]?.message ?? null;
+}
+
+function collectAuthoredEqBodyOverlapIssues(
+	map: TileMap,
+	state: PortEquipmentState,
+): readonly PortEquipmentLayoutIssue[] {
+	if (!hasAuthoredEqBodyDimensions(state)) return [];
+	const portsById = new Map(state.ports.map((port) => [port.id, port]));
+	const runs = state.equipmentGroups.some((group) => group.kind === "STK")
+		? compileStraightRailRuns(map)
+		: new Map<string, CoreRailRun>();
+	return completeCooperativeSteps(authoredEqBodyOverlapSteps(state, portsById, runs));
+}
+
+async function authoredEqBodyOverlapIssuesCooperatively(
+	map: TileMap,
+	state: PortEquipmentState,
+	portsById: ReadonlyMap<number, PortRecord>,
+	consumeOperation: PortEquipmentValidationOperation,
+): Promise<readonly PortEquipmentLayoutIssue[]> {
+	let needed = false;
+	let hasStk = false;
+	for (const group of state.equipmentGroups) {
+		needed ||= group.kind === "EQ" && group.bodyDimensions !== undefined;
+		hasStk ||= group.kind === "STK";
+		await consumeOperation();
+	}
+	if (!needed) return [];
+	const runs = hasStk
+		? await compileRelevantStraightRailRunsCooperatively(map, state, consumeOperation)
+		: new Map<string, CoreRailRun>();
+	const steps = authoredEqBodyOverlapSteps(state, portsById, runs);
+	let next = steps.next();
+	while (!next.done) {
+		await consumeOperation();
+		next = steps.next();
+	}
+	return next.value;
+}
+
+function* authoredEqBodyOverlapSteps(
+	state: PortEquipmentState,
+	portsById: ReadonlyMap<number, PortRecord>,
+	runs: ReadonlyMap<string, CoreRailRun>,
+): Generator<void, readonly PortEquipmentLayoutIssue[]> {
+	const sections: { group: EquipmentGroupRecord; bounds: EquipmentBodyBounds }[] = [];
+	let minX = Infinity,
+		minZ = Infinity,
+		maxX = -Infinity,
+		maxZ = -Infinity;
+	const append = (group: EquipmentGroupRecord, bounds: EquipmentBodyBounds | null): void => {
+		if (!bounds) return;
+		sections.push({ group, bounds });
+		minX = Math.min(minX, bounds.minX);
+		minZ = Math.min(minZ, bounds.minZ);
+		maxX = Math.max(maxX, bounds.maxX);
+		maxZ = Math.max(maxZ, bounds.maxZ);
+	};
+	for (const group of state.equipmentGroups) {
+		if (group.kind === "STK" && group.template !== "CUSTOM") {
+			for (const extent of equipmentBodyExtentsByRun(group, portsById, runs).values()) {
+				const ports = extent.portIds.map((id) => portsById.get(id) as PortRecord);
+				append(
+					group,
+					equipmentPortsBodyBounds(ports, {
+						lengthMillimeters: Math.round((extent.max - extent.min) * 1_000) + 1_000,
+						widthMillimeters: STK_BODY_WIDTH_MILLIMETERS,
+					}),
+				);
+				yield;
+			}
+		} else append(group, equipmentGroupBodyBounds(group, portsById));
+		yield;
+	}
+	const alongX = maxX - minX >= maxZ - minZ;
+	const lower = (bounds: EquipmentBodyBounds) => (alongX ? bounds.minX : bounds.minZ);
+	const upper = (bounds: EquipmentBodyBounds) => (alongX ? bounds.maxX : bounds.maxZ);
+	yield* stableSortSteps(
+		sections,
+		(left, right) => lower(left.bounds) - lower(right.bounds) || left.group.id - right.group.id,
+	);
+	const prefixMax: number[] = [];
+	for (const section of sections) {
+		prefixMax.push(Math.max(prefixMax.at(-1) ?? -Infinity, upper(section.bounds)));
+		yield;
+	}
+	const issues: PortEquipmentLayoutIssue[] = [];
+	const reported = new Set<string>();
+	for (const section of sections) {
+		yield;
+		if (section.group.kind !== "EQ" || !section.group.bodyDimensions) continue;
+		let low = 0,
+			high = sections.length;
+		while (low < high) {
+			const mid = (low + high) >>> 1;
+			if ((prefixMax[mid] as number) <= lower(section.bounds)) low = mid + 1;
+			else high = mid;
+		}
+		for (let index = low; index < sections.length; index++) {
+			const other = sections[index] as typeof section;
+			if (lower(other.bounds) >= upper(section.bounds)) break;
+			yield;
+			if (
+				other.group.id === section.group.id ||
+				!equipmentBodyBoundsOverlap(section.bounds, other.bounds)
+			)
+				continue;
+			const key = [section.group.id, other.group.id].sort((a, b) => a - b).join(":");
+			if (reported.has(key)) continue;
+			reported.add(key);
+			issues.push(
+				createLayoutIssue({
+					code: "EQ_AUTHORED_BODY_OVERLAP",
+					message: `EQ ${section.group.id} 몸체가 ${other.group.kind} ${other.group.id} 몸체와 겹칩니다 · 길이·폭을 줄이거나 주변 장비를 이동하세요`,
+					portIds: [...section.group.portIds, ...other.group.portIds],
+					equipmentGroupIds: [section.group.id, other.group.id],
+					routes: [...section.group.portIds, ...other.group.portIds].map(
+						(id) => (portsById.get(id) as PortRecord).route,
+					),
+				}),
+			);
+		}
+	}
+	return issues;
 }
 
 function collectStkEquipmentLayoutIssues(
@@ -1041,6 +1186,11 @@ export async function assertPortEquipmentLayoutCooperatively(
 	}
 	const spacingError = await portEquipmentSpacingErrorCooperatively(state, consumeOperation);
 	if (spacingError) throwInvalidPortEquipmentLayout(spacingError);
+	const authoredBodyIssue = (
+		await authoredEqBodyOverlapIssuesCooperatively(map, state, portsById, consumeOperation)
+	)[0];
+	if (authoredBodyIssue) throwInvalidPortEquipmentLayout(authoredBodyIssue.message);
+	await consumeOperation();
 	const bodyError = await portEquipmentBodyOverlapErrorCooperatively(
 		map,
 		state,

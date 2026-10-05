@@ -19,6 +19,43 @@ import {
 import { checksumRailMap } from "./RailMirrorChecksum";
 
 describe("PortEquipmentSoA", () => {
+	it("preserves optional EQ dimensions in snapshot, cooperative patch and checksum, rejecting non-EQ columns", async () => {
+		const source = copyPortEquipmentState(fixture());
+		const before = source.equipmentGroups.find((group) => group.kind === "EQ");
+		if (before?.kind !== "EQ") throw new Error("Expected EQ.");
+		const after = {
+			...before,
+			bodyDimensions: { lengthMillimeters: 5_000, widthMillimeters: 2_000 },
+		};
+		const target = copyPortEquipmentState({
+			...source,
+			equipmentGroups: source.equipmentGroups.map((group) =>
+				group.id === after.id ? after : group,
+			),
+		});
+		const snapshot = createPortEquipmentSnapshot(target);
+		expect(hydratePortEquipmentSnapshot(snapshot)).toEqual(target);
+		expect(
+			await hydratePortEquipmentSnapshotCooperatively(snapshot, async () => undefined, 1),
+		).toEqual(target);
+		const encoded = await encodePortEquipmentPatchCooperatively(
+			[],
+			[{ id: after.id, before, after }],
+			async () => undefined,
+			1,
+		);
+		expect(decodePortEquipmentPatch(encoded.fields).equipmentGroupChanges).toEqual([
+			{ id: after.id, before, after },
+		]);
+		expect(checksumRailMap(new TileMap(), source)).not.toBe(checksumRailMap(new TileMap(), target));
+		const index = Array.from(snapshot.equipmentGroupIds).indexOf(after.id);
+		snapshot.equipmentGroups.bodyWidthMillimeters[index] = 0;
+		expect(() => hydratePortEquipmentSnapshot(snapshot)).toThrow(/몸체/);
+		const forged = createPortEquipmentSnapshot(source);
+		forged.equipmentGroups.bodyLengthMillimeters[0] = 5_000;
+		expect(() => hydratePortEquipmentSnapshot(forged)).toThrow(/Only EQ/);
+	});
+
 	it("round-trips every Phase 3 record variant through deterministic typed buffers", () => {
 		const canonical = copyPortEquipmentState(fixture());
 		const snapshot = createPortEquipmentSnapshot(fixture());

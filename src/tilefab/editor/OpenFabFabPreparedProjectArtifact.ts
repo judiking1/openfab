@@ -20,6 +20,7 @@ import {
 import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import type { OpenFabProjectManifest } from "../project/OpenFabProject";
 import { validateOpenFabProjectManifest } from "../project/OpenFabProjectCodec";
+import { PORT_EQUIPMENT_SNAPSHOT_SCHEMA_VERSION } from "../worker/PortEquipmentSoA";
 import { RailChecksumAccumulator, type RailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import {
 	staticFabAssemblyRelationshipSnapshotTransfers,
@@ -89,6 +90,8 @@ const EQUIPMENT_RECORD_KEYS = Object.freeze([
 	"portIds",
 	"templates",
 	"pitchMillimeters",
+	"bodyLengthMillimeters",
+	"bodyWidthMillimeters",
 	"recipes",
 ] as const);
 const ORGANIZATION_KEYS = Object.freeze([
@@ -389,7 +392,7 @@ function validateV1ColumnLengths(
 	}
 	const ports = snapshot.portEquipment;
 	if (
-		ports.schemaVersion !== 1 ||
+		ports.schemaVersion !== PORT_EQUIPMENT_SNAPSHOT_SCHEMA_VERSION ||
 		ports.portIds.length !== 0 ||
 		ports.equipmentGroupIds.length !== 0 ||
 		ports.ports.barcodes.length !== 0 ||
@@ -523,6 +526,8 @@ function collectExpectedViews(snapshotValue: unknown): readonly ExpectedView[] {
 		view(groups.portIds, Int32Array, "equipment port ids"),
 		view(groups.templates, Uint8Array, "equipment templates"),
 		view(groups.pitchMillimeters, Uint32Array, "equipment pitches"),
+		view(groups.bodyLengthMillimeters, Uint32Array, "equipment body lengths"),
+		view(groups.bodyWidthMillimeters, Uint32Array, "equipment body widths"),
 		view(snapshot.organizations.organizationIds, Int32Array, "organization ids"),
 		view(organizations.kinds, Uint8Array, "organization kinds"),
 		view(organizations.declaredSemanticRoles, Uint8Array, "organization declared semantic roles"),

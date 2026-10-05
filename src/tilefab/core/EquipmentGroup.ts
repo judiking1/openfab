@@ -15,6 +15,14 @@ export type EquipmentGroupKind = (typeof EQUIPMENT_GROUP_KINDS)[number];
 export const EQ_PORT_PITCHES_MILLIMETERS = Object.freeze([1_000, 2_000, 3_000, 4_000, 5_000]);
 export const EQ_MINIMUM_PORT_COUNT = 2;
 export const EQ_MAXIMUM_PORT_COUNT = 64;
+/** Editor geometry bound from the largest existing EQ row, not an industrial equipment spec. */
+export const EQ_MAXIMUM_BODY_DIMENSION_MILLIMETERS = (EQ_MAXIMUM_PORT_COUNT - 1) * 5_000 + 1_000;
+export const EQ_DEFAULT_BODY_WIDTH_MILLIMETERS = 900;
+
+export interface EqBodyDimensions {
+	readonly lengthMillimeters: number;
+	readonly widthMillimeters: number;
+}
 
 export const STK_EQUIPMENT_TEMPLATES = [
 	"CUSTOM",
@@ -30,6 +38,7 @@ export const STK_MAXIMUM_PORT_COUNT = 16;
 export const STK_MAXIMUM_BACK_TO_BACK_LANE_SEPARATION_CELLS = 6;
 /** Product safety bound for one derived stocker body; this is not an equipment specification. */
 export const STK_FLEX_MAXIMUM_SPAN_CELLS = 64;
+export const STK_BODY_WIDTH_MILLIMETERS = 840;
 
 interface EquipmentGroupBase {
 	readonly id: number;
@@ -46,6 +55,61 @@ export interface EqEquipmentGroup extends EquipmentGroupBase {
 	readonly kind: "EQ";
 	readonly pitchMillimeters: number;
 	readonly recipe: string | null;
+	/** Omission preserves the historical Port-derived body. Ports remain the placement anchors. */
+	readonly bodyDimensions?: EqBodyDimensions;
+}
+
+export function defaultEqBodyDimensions(
+	group: Pick<EqEquipmentGroup, "portIds" | "pitchMillimeters">,
+): EqBodyDimensions {
+	return {
+		lengthMillimeters: (group.portIds.length - 1) * group.pitchMillimeters + 1_000,
+		widthMillimeters: EQ_DEFAULT_BODY_WIDTH_MILLIMETERS,
+	};
+}
+
+export function resolveEqBodyDimensions(group: EqEquipmentGroup): EqBodyDimensions {
+	return group.bodyDimensions ?? defaultEqBodyDimensions(group);
+}
+
+export function eqBodyDimensionsError(value: EqBodyDimensions): string | null {
+	if (
+		!value ||
+		!Number.isInteger(value.lengthMillimeters) ||
+		!Number.isInteger(value.widthMillimeters) ||
+		value.lengthMillimeters < 1_000 ||
+		value.widthMillimeters < EQ_DEFAULT_BODY_WIDTH_MILLIMETERS ||
+		value.lengthMillimeters > EQ_MAXIMUM_BODY_DIMENSION_MILLIMETERS ||
+		value.widthMillimeters > EQ_MAXIMUM_BODY_DIMENSION_MILLIMETERS
+	) {
+		return "EQ 몸체 길이·폭은 정수 mm여야 하며 기존 몸체 최소 폭 900 mm와 편집기 최대 316000 mm 범위를 지켜야 합니다";
+	}
+	return null;
+}
+
+export function eqBodyDimensionsEqual(
+	left: EqBodyDimensions | undefined,
+	right: EqBodyDimensions | undefined,
+): boolean {
+	return left === undefined || right === undefined
+		? left === right
+		: left.lengthMillimeters === right.lengthMillimeters &&
+				left.widthMillimeters === right.widthMillimeters;
+}
+
+/** Preserve absence for old sources/checksums, and own the optional nested authored record. */
+export function copyEqBodyDimensionsProperties(source: {
+	readonly bodyDimensions?: EqBodyDimensions;
+}): { readonly bodyDimensions?: EqBodyDimensions } {
+	if (source.bodyDimensions === undefined) return {};
+	const error = eqBodyDimensionsError(source.bodyDimensions);
+	if (error) throw new TypeError(error);
+	return {
+		bodyDimensions: Object.freeze({
+			lengthMillimeters: source.bodyDimensions.lengthMillimeters,
+			widthMillimeters: source.bodyDimensions.widthMillimeters,
+		}),
+	};
 }
 
 export interface StkEquipmentGroup extends EquipmentGroupBase {
@@ -70,6 +134,18 @@ export interface PortEquipmentState {
 
 /** Opaque runtime provenance for generations built by the canonical copy/hydration boundaries. */
 const canonicalPortEquipmentStates = new WeakSet<object>();
+const authoredEqBodyPresence = new WeakMap<object, boolean>();
+
+/** Stable source generations avoid a whole-group scan on every pointer preview. */
+export function hasAuthoredEqBodyDimensions(state: PortEquipmentState): boolean {
+	const cached = authoredEqBodyPresence.get(state);
+	if (cached !== undefined) return cached;
+	const present = state.equipmentGroups.some(
+		(group) => group.kind === "EQ" && group.bodyDimensions !== undefined,
+	);
+	if (canonicalPortEquipmentStates.has(state)) authoredEqBodyPresence.set(state, present);
+	return present;
+}
 
 export function isCanonicalPortEquipmentState(state: PortEquipmentState): boolean {
 	return canonicalPortEquipmentStates.has(state);
@@ -248,6 +324,12 @@ export function equipmentGroupError(group: EquipmentGroupRecord): string | null 
 		}
 		if (group.recipe !== null && !validPortableLabel(group.recipe, 120)) {
 			return "EQ recipe must be a trimmed portable label up to 120 characters";
+		}
+		if (group.bodyDimensions !== undefined) {
+			const error = eqBodyDimensionsError(group.bodyDimensions);
+			if (error) return error;
+			if (group.bodyDimensions.lengthMillimeters < defaultEqBodyDimensions(group).lengthMillimeters)
+				return "EQ 몸체 길이는 기존 Port 행과 양끝 여유 1000 mm를 포함해야 합니다";
 		}
 		return null;
 	}
@@ -608,6 +690,7 @@ export function copyEquipmentGroupRecord(group: EquipmentGroupRecord): Equipment
 						portIds: frozenPortIds,
 						pitchMillimeters: group.pitchMillimeters,
 						recipe: group.recipe,
+						...copyEqBodyDimensionsProperties(group),
 					}
 				: { id: group.id, kind, template: group.template, portIds: frozenPortIds };
 	const error = equipmentGroupError(copy);
@@ -625,7 +708,11 @@ export function equipmentGroupEquals(
 	}
 	if (left.kind === "OHB" && right.kind === "OHB") return left.template === right.template;
 	if (left.kind === "EQ" && right.kind === "EQ") {
-		return left.pitchMillimeters === right.pitchMillimeters && left.recipe === right.recipe;
+		return (
+			left.pitchMillimeters === right.pitchMillimeters &&
+			left.recipe === right.recipe &&
+			eqBodyDimensionsEqual(left.bodyDimensions, right.bodyDimensions)
+		);
 	}
 	return left.kind === "STK" && right.kind === "STK" && left.template === right.template;
 }

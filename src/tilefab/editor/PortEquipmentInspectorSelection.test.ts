@@ -78,6 +78,7 @@ describe("PortEquipmentInspectorSelection", () => {
 			});
 			const ordered = [actions.move, actions.copy, actions.editMembership, actions.delete];
 			expect(actions.reverseServiceDirection).toEqual(actions.move);
+			expect(actions.editEqBody.allowed).toBe(group.kind === "EQ" && !directlyOwned);
 			expect(ordered.map((action) => action.allowed)).toEqual(directlyOwned ? owned : unowned);
 			expect(Object.isFrozen(actions)).toBe(true);
 			for (const action of ordered) {
@@ -264,6 +265,7 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 		});
 		expect(actions.move.allowed).toBe(true);
 		expect(actions.reverseServiceDirection.allowed).toBe(true);
+		expect(actions.editEqBody.allowed).toBe(kind === "EQ");
 		expect(actions.copy.allowed).toBe(true);
 		expect(actions.editMembership.allowed).toBe(kind !== "OHB");
 		expect(actions.delete).toMatchObject({ allowed: false, code: "DIRECTLY_OWNED" });
@@ -287,6 +289,13 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 		);
 		expect(markup).toContain("소속을 유지하며 같은 Process Loop 안에서");
 		expect(markup).toContain(actions.delete.reason);
+		if (kind === "EQ") {
+			expect(markup).toContain('data-testid="eq-body-length"');
+			expect(markup).toContain('data-testid="eq-body-width"');
+			expect(inspectorActionButton(markup, "apply-eq-body-dimensions")).not.toContain(
+				'disabled=""',
+			);
+		}
 		for (const pending of [
 			{ modelSyncPending: true },
 			{ workerState: { status: "syncing" as const } },
@@ -542,6 +551,7 @@ function inspectorProps(
 		canvasRef: { current: null },
 		chooseGuidedEquipmentTool: () => false,
 		clearPortEquipmentSelection: noop,
+		commitSelectedEqBodyDimensions: noop,
 		commitSelectedEquipmentProcessLoopMembership: noop,
 		compactInspectorCloseRef: { current: null },
 		compactInspectorDisclosureFocusedRef: { current: false },

@@ -1,5 +1,7 @@
 import {
 	applyPortEquipmentMutations,
+	copyEqBodyDimensionsProperties,
+	type EqBodyDimensions,
 	type EquipmentGroupMutation,
 	type EquipmentGroupRecord,
 	type PortEquipmentState,
@@ -61,6 +63,7 @@ export type StaticFabBlueprintEquipmentGroupTemplate =
 			readonly kind: "EQ";
 			readonly pitchMillimeters: number;
 			readonly recipe: string | null;
+			readonly bodyDimensions?: EqBodyDimensions;
 			readonly portIndices: readonly number[];
 	  }
 	| {
@@ -472,6 +475,7 @@ function copyGroupTemplate(
 			kind: "EQ",
 			pitchMillimeters: group.pitchMillimeters,
 			recipe: group.recipe,
+			...copyEqBodyDimensionsProperties(group),
 			portIndices: frozenPortIndices,
 		});
 	}
@@ -497,6 +501,7 @@ function copyBlueprintEquipmentGroupTemplate(
 			kind: "EQ",
 			pitchMillimeters: group.pitchMillimeters,
 			recipe: group.recipe,
+			...copyEqBodyDimensionsProperties(group),
 			portIndices,
 		});
 	}
@@ -548,6 +553,7 @@ function instantiateEquipmentGroup(
 			kind: "EQ",
 			pitchMillimeters: template.pitchMillimeters,
 			recipe: template.recipe,
+			...copyEqBodyDimensionsProperties(template),
 			portIds,
 		});
 	}

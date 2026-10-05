@@ -8,6 +8,7 @@ import {
 import { completeCooperativeSteps, createCooperativeTask } from "./CooperativeTask";
 import {
 	applyPortEquipmentMutations,
+	copyEqBodyDimensionsProperties,
 	copyEquipmentGroupRecord,
 	type EquipmentGroupMutation,
 	type EquipmentGroupRecord,
@@ -1583,6 +1584,7 @@ function instantiateEquipmentGroup(
 			kind: "EQ",
 			pitchMillimeters: template.pitchMillimeters,
 			recipe: template.recipe,
+			...copyEqBodyDimensionsProperties(template),
 			portIds: canonicalIds,
 		});
 	}
@@ -1783,6 +1785,13 @@ function* addStaticFabOrganizationBundleToChecksumSteps(
 		yield* checksum.addNumbersSteps(group.portIndices);
 		if (group.kind === "EQ") {
 			checksum.addNumbers([group.pitchMillimeters, group.recipe === null ? 0 : 1]);
+			if (group.bodyDimensions) {
+				checksum.addStrings(["eq-body-dimensions-v1"]);
+				checksum.addNumbers([
+					group.bodyDimensions.lengthMillimeters,
+					group.bodyDimensions.widthMillimeters,
+				]);
+			}
 			checksum.addStrings([group.recipe ?? ""]);
 		} else {
 			checksum.addStrings([group.template]);
@@ -1939,6 +1948,13 @@ function* addEquipmentGroupRecordToChecksumSteps(
 	checksum.addStrings([record.kind]);
 	if (record.kind === "EQ") {
 		checksum.addNumbers([record.pitchMillimeters]);
+		if (record.bodyDimensions) {
+			checksum.addStrings(["eq-body-dimensions-v1"]);
+			checksum.addNumbers([
+				record.bodyDimensions.lengthMillimeters,
+				record.bodyDimensions.widthMillimeters,
+			]);
+		}
 		checksum.addStrings([record.recipe ?? ""]);
 		return;
 	}

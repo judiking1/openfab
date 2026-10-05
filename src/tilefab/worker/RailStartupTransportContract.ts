@@ -337,6 +337,8 @@ const EQUIPMENT_GROUP_VIEWS = {
 	portIds: Int32Array,
 	templates: Uint8Array,
 	pitchMillimeters: Uint32Array,
+	bodyLengthMillimeters: Uint32Array,
+	bodyWidthMillimeters: Uint32Array,
 } as const satisfies ViewSchema;
 
 const ORGANIZATION_RECORD_VIEWS = {

@@ -5,6 +5,7 @@ import {
 	validateAdvancedSwitchPatchSteps,
 } from "./AdvancedSwitch";
 import { createCooperativeTask } from "./CooperativeTask";
+import { resolveEqBodyEditTransition } from "./EqBodyEdit";
 import {
 	applyPortEquipmentAdditionsCooperatively,
 	applyPortEquipmentMutations,
@@ -3921,8 +3922,16 @@ export class RailDocument {
 			effectiveEquipmentGroupChanges,
 		);
 		if (serviceDirection?.reason) throw new Error(serviceDirection.reason);
+		const bodyEdit = resolveEqBodyEditTransition(
+			this.currentOrganizations,
+			this.currentPortEquipment,
+			nextPortEquipment,
+			effectivePortChanges,
+			effectiveEquipmentGroupChanges,
+		);
+		if (bodyEdit?.reason) throw new Error(bodyEdit.reason);
 		if (
-			serviceDirection &&
+			(serviceDirection || bodyEdit) &&
 			(effectiveChanges.length > 0 ||
 				effectiveSwitchChanges.length > 0 ||
 				effectiveOrganizationChanges.length > 0 ||
@@ -3930,7 +3939,9 @@ export class RailDocument {
 				operationalConfigurationPatch ||
 				organizationImpactAuthorizations.length > 0)
 		) {
-			throw new Error("서비스 방향 반전은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다");
+			throw new Error(
+				`${bodyEdit ? "EQ 몸체 크기 편집" : "서비스 방향 반전"}은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다`,
+			);
 		}
 		assertPortEquipmentLayout(resolvedNextMap, nextPortEquipment);
 		const affectedOrganizations = staticFabOrganizationImpactsForPatch(
@@ -3953,6 +3964,7 @@ export class RailDocument {
 		// Recompute this narrow port-only exemption from the current source, never from UI state
 		// or an authorization carried by the plan. History reversal is checked identically.
 		const loopEdit =
+			bodyEdit ??
 			serviceDirection ??
 			(effectiveChanges.length === 0 &&
 			effectiveSwitchChanges.length === 0 &&

@@ -135,6 +135,8 @@ export function createStaticFabOrganizationBundlePlacementCapture(
 			portIds: { type: Int32Array, maximum: MAX_PORTS },
 			templates: row(Uint8Array, groupCount),
 			pitchMillimeters: row(Uint32Array, groupCount),
+			bodyLengthMillimeters: row(Uint32Array, groupCount),
+			bodyWidthMillimeters: row(Uint32Array, groupCount),
 			recipes: { type: "text", count: groupCount, length: 120, nullable: true },
 		},
 		"equipment groups",

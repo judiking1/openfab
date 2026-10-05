@@ -21,6 +21,7 @@ export type PortEquipmentActionBlockCode =
 	| "SELECTION_NOT_EDITABLE"
 	| "DIRECTLY_OWNED"
 	| "LEGACY_CUSTOM"
+	| "EQ_BODY_ONLY"
 	| "OHB_MEMBERSHIP_UNSUPPORTED";
 
 export type PortEquipmentActionDecision =
@@ -36,6 +37,7 @@ export interface PortEquipmentActionAvailability {
 	readonly copy: PortEquipmentActionDecision;
 	readonly editMembership: PortEquipmentActionDecision;
 	readonly reverseServiceDirection: PortEquipmentActionDecision;
+	readonly editEqBody: PortEquipmentActionDecision;
 	readonly delete: PortEquipmentActionDecision;
 }
 
@@ -81,6 +83,7 @@ export function resolvePortEquipmentActionAvailability({
 			copy: blocked,
 			editMembership: blocked,
 			reverseServiceDirection: blocked,
+			editEqBody: blocked,
 			delete: blocked,
 		});
 	}
@@ -108,6 +111,10 @@ export function resolvePortEquipmentActionAvailability({
 		move: ownershipBlock ?? customBlock ?? EQUIPMENT_ACTION_ALLOWED,
 		copy: customBlock ?? EQUIPMENT_ACTION_ALLOWED,
 		reverseServiceDirection: ownershipBlock ?? customBlock ?? EQUIPMENT_ACTION_ALLOWED,
+		editEqBody:
+			group.kind === "EQ"
+				? (ownershipBlock ?? EQUIPMENT_ACTION_ALLOWED)
+				: blockedEquipmentAction("EQ_BODY_ONLY", "몸체 길이·폭 편집은 EQ에서 사용할 수 있습니다"),
 		editMembership:
 			group.kind === "OHB"
 				? blockedEquipmentAction(

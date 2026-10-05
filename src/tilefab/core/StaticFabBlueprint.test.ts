@@ -25,6 +25,36 @@ import { createStaticFabSelection } from "./StaticFabSelection";
 import { TileMap } from "./TileMap";
 
 describe("StaticFabBlueprint", () => {
+	it("retains authored EQ dimensions in capture, rotation and copied runtime groups", () => {
+		const document = longBayDocument();
+		const source = mixedEquipmentState(document);
+		const dimensions = { lengthMillimeters: 2_000, widthMillimeters: 1_000 };
+		const state = {
+			...source,
+			equipmentGroups: source.equipmentGroups.map((group) =>
+				group.kind === "EQ" ? { ...group, bodyDimensions: dimensions } : group,
+			),
+		};
+		const template = createStaticFabBlueprintTemplate(
+			createStaticFabSelection(selectWholeMap(document), state, 9, [1, 2, 3]),
+		);
+		expect(template.equipmentGroups.find((group) => group.kind === "EQ")).toMatchObject({
+			bodyDimensions: dimensions,
+		});
+		const plan = planStaticFabBlueprintPlacement(
+			document.map,
+			state,
+			9,
+			template,
+			{ x: 120, y: 50 },
+			{ ...initialRailAreaStampPose(), quarterTurns: 1 },
+		);
+		expect(plan.valid, plan.reason).toBe(true);
+		expect(
+			plan.equipmentGroupMutations.find((change) => change.after?.kind === "EQ")?.after,
+		).toMatchObject({ bodyDimensions: dimensions });
+	});
+
 	it("captures one rail, OHB, EQ, and STK template and allocates new runtime identities", () => {
 		const document = longBayDocument();
 		const state = mixedEquipmentState(document);

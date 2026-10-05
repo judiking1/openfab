@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
+import { planResizeEqBody } from "../compile/PortEquipmentEditPlanner";
 import { portEquipmentGroupSlotIndexFor } from "../compile/PortEquipmentGroupEditPlanner";
 import { planPortEquipmentMembershipEdit } from "../compile/PortEquipmentMembershipEditPlanner";
 import { planEqRowPlacement, planStkPlacement } from "../compile/PortPlacementPlanner";
@@ -76,6 +77,73 @@ import {
 } from "./OpenFabProjectCodec";
 
 describe("OpenFab project codec", () => {
+	it("opens native v14 and preserves authored EQ dimensions through resaving and recovery", () => {
+		const rails = new RailDocument();
+		expect(rails.commit(planRailConstruction(rails.map, { x: -4, y: 0 }, { x: 5, y: 0 }))).toBe(
+			true,
+		);
+		const state: PortEquipmentState = {
+			nextPortId: 3,
+			nextEquipmentGroupId: 2,
+			ports: portEquipmentFixture().ports.map((port) => ({
+				...port,
+				equipmentGroupId: 1,
+				portType: "EQ",
+				side: "CENTER",
+				lateralOffsetMillimeters: 0,
+			})),
+			equipmentGroups: [
+				{ id: 1, kind: "EQ", portIds: [1, 2], pitchMillimeters: 1_000, recipe: null },
+			],
+		};
+		const document = RailDocument.fromLoadedMap(rails.map, rails.getPatchSequence(), state);
+		const current = captureOpenFabProject(document, { manifest: MANIFEST });
+		const legacy = {
+			...current,
+			schemaVersion: 14,
+			equipment: { ...current.equipment, schemaVersion: 1 },
+		};
+		const expectedChecksum = createRailSnapshotFromOpenFabProject(current).checksum;
+		const opened = parseOpenFabProjectJson(JSON.stringify(legacy));
+		expect(opened.migratedFromVersion).toBe(14);
+		expect(opened.project.equipment.records).toEqual(current.equipment.records);
+		expect(opened.project.equipment.records[0]).not.toHaveProperty("bodyDimensions");
+		expect(
+			compileRailStartup({
+				kind: "project-json",
+				json: JSON.stringify(legacy),
+				expectedAuthoredChecksum: expectedChecksum,
+			}).authoredChecksum,
+		).toBe(expectedChecksum);
+		const originalPorts = document.portEquipment.ports;
+		const plan = planResizeEqBody(
+			document.map,
+			document.portEquipment,
+			{ portId: 1, equipmentGroupId: 1 },
+			{ lengthMillimeters: 4_000, widthMillimeters: 1_500 },
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+		expect(document.commitPortEquipment(plan), plan.reason).toBe(true);
+		const saved = serializeOpenFabProject(captureOpenFabProject(document, { manifest: MANIFEST }));
+		const reopened = parseOpenFabProjectJson(saved);
+		expect(reopened.migratedFromVersion).toBeNull();
+		expect(reopened.project.schemaVersion).toBe(15);
+		expect(reopened.project.equipment.schemaVersion).toBe(2);
+		expect(createPortEquipmentStateFromOpenFabProject(reopened.project)).toEqual(
+			document.portEquipment,
+		);
+		expect(document.portEquipment.ports).toEqual(originalPorts);
+		expect(reopened.project.equipment.records[0]).toMatchObject({
+			bodyDimensions: { lengthMillimeters: 4_000, widthMillimeters: 1_500 },
+		});
+		expect(serializeOpenFabProject(reopened.project)).toBe(saved);
+		expect(compileRailStartup({ kind: "project-json", json: saved }).authoredChecksum).toBe(
+			createRailSnapshotFromOpenFabProject(reopened.project).checksum,
+		);
+	});
+
 	it("saves a valid project created on a clock ahead of the current host", () => {
 		const sourceManifest = createOpenFabProjectManifest(
 			"clock-ahead-project",
@@ -176,7 +244,7 @@ describe("OpenFab project codec", () => {
 		);
 		const parsed = parseOpenFabProjectJson(serialized);
 
-		expect(parsed.project.schemaVersion).toBe(14);
+		expect(parsed.project.schemaVersion).toBe(15);
 		expect(parsed.project.operations).toEqual(operations);
 		expect(Object.isFrozen(parsed.project.operations)).toBe(true);
 		expect(Object.isFrozen(parsed.project.operations.vehicleProfile)).toBe(true);
@@ -250,7 +318,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(9);
-		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.schemaVersion).toBe(15);
 		expect(migrated.project.operations).toMatchObject({
 			schemaVersion: 2,
 			nextResidentHomeSlotId: 1,
@@ -290,7 +358,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(10);
-		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.schemaVersion).toBe(15);
 		expect(migrated.project.relationships).toEqual({
 			schemaVersion: 1,
 			nextRelationshipId: 1,
@@ -314,7 +382,7 @@ describe("OpenFab project codec", () => {
 		};
 		const migrated = parseOpenFabProjectValue(legacy);
 		expect(migrated.migratedFromVersion).toBe(11);
-		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.schemaVersion).toBe(15);
 		expect(migrated.project.relationships).toEqual(current.relationships);
 		const blueprint = migrated.project.blueprints.records[0];
 		if (blueprint?.kind !== "STATIC_FAB_ORGANIZATION") throw new Error("Missing migrated bundle");
@@ -395,7 +463,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(8);
-		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.schemaVersion).toBe(15);
 		expect(migrated.project.operations).toEqual(emptyOperationalConfigurationState());
 		expect(
 			parseOpenFabProjectJson(serializeOpenFabProject(migrated.project)).migratedFromVersion,
@@ -430,7 +498,7 @@ describe("OpenFab project codec", () => {
 		const parsed = parseOpenFabProjectJson(serializeOpenFabProject(project));
 		const snapshot = createRailSnapshotFromOpenFabProject(parsed.project);
 
-		expect(project.schemaVersion).toBe(14);
+		expect(project.schemaVersion).toBe(15);
 		expect(parsed.migratedFromVersion).toBeNull();
 		expect(parsed.project.areas).toEqual({
 			schemaVersion: 3,
@@ -584,7 +652,7 @@ describe("OpenFab project codec", () => {
 		});
 		expect(payload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 14,
+			schemaVersion: 15,
 			migratedFromVersion: 12,
 			view: current.view,
 		});
@@ -874,7 +942,7 @@ describe("OpenFab project codec", () => {
 		expect(loadedSnapshot.sequence).toBe(beforeSnapshot.sequence);
 		expect(loadedPayload.source).toMatchObject({
 			kind: "project",
-			schemaVersion: 14,
+			schemaVersion: 15,
 			migratedFromVersion: null,
 		});
 
@@ -937,7 +1005,7 @@ describe("OpenFab project codec", () => {
 		});
 
 		expect(parsed.migratedFromVersion).toBe(2);
-		expect(parsed.project.schemaVersion).toBe(14);
+		expect(parsed.project.schemaVersion).toBe(15);
 		expect(parsed.project.equipment.records).toEqual([
 			{ id: 1, kind: "STK", template: "CUSTOM", portIds: [1, 2] },
 		]);
@@ -993,10 +1061,10 @@ describe("OpenFab project codec", () => {
 		};
 		const v1Result = parseOpenFabProjectValue(v1);
 		expect(v1Result.migratedFromVersion).toBe(1);
-		expect(v1Result.project.schemaVersion).toBe(14);
+		expect(v1Result.project.schemaVersion).toBe(15);
 		expect(v1Result.project.ports).toEqual({ schemaVersion: 1, nextPortId: 1, records: [] });
 		expect(v1Result.project.equipment).toEqual({
-			schemaVersion: 1,
+			schemaVersion: 2,
 			nextEquipmentGroupId: 1,
 			records: [],
 		});
@@ -1017,7 +1085,7 @@ describe("OpenFab project codec", () => {
 
 		const result = parseOpenFabProjectValue(v0);
 		expect(result.migratedFromVersion).toBe(0);
-		expect(result.project.schemaVersion).toBe(14);
+		expect(result.project.schemaVersion).toBe(15);
 		expect(result.project.ports.records).toEqual([]);
 		expect(result.project.equipment.records).toEqual([]);
 		expect(result.project.areas.records).toEqual([]);
@@ -1072,7 +1140,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(4);
-		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.schemaVersion).toBe(15);
 		expect(migrated.project.blueprints).toEqual({ schemaVersion: 5, records: [blueprint] });
 	});
 
@@ -1092,7 +1160,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(5);
-		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.schemaVersion).toBe(15);
 		expect(migrated.project.areas).toEqual({
 			schemaVersion: 3,
 			nextOrganizationId: 1,
@@ -1148,7 +1216,7 @@ describe("OpenFab project codec", () => {
 		const migrated = parseOpenFabProjectValue(legacy);
 
 		expect(migrated.migratedFromVersion).toBe(6);
-		expect(migrated.project.schemaVersion).toBe(14);
+		expect(migrated.project.schemaVersion).toBe(15);
 		expect(migrated.project.areas).toMatchObject({ schemaVersion: 3, nextOrganizationId: 2 });
 		expect(migrated.project.areas.records[0]).toMatchObject({
 			kind: "BAY",
@@ -1159,7 +1227,14 @@ describe("OpenFab project codec", () => {
 	});
 
 	it("round-trips and strictly validates portable mixed static FAB blueprints", () => {
-		const blueprint = createOpenFabStaticFabBlueprint(STATIC_FAB_TEMPLATE, {
+		const dimensions = { lengthMillimeters: 2_000, widthMillimeters: 1_000 };
+		const template = {
+			...STATIC_FAB_TEMPLATE,
+			equipmentGroups: STATIC_FAB_TEMPLATE.equipmentGroups.map((group) =>
+				group.kind === "EQ" ? { ...group, bodyDimensions: dimensions } : group,
+			),
+		};
+		const blueprint = createOpenFabStaticFabBlueprint(template, {
 			id: "blueprint-photo-bay",
 			name: "Photo bay",
 			folder: "FAB/Photo",
@@ -1177,6 +1252,9 @@ describe("OpenFab project codec", () => {
 		expect(restored?.kind).toBe("STATIC_FAB");
 		if (!restored || restored.kind !== "STATIC_FAB")
 			throw new Error("Expected static FAB blueprint.");
+		expect(restored.equipmentGroups.find((group) => group.kind === "EQ")).toMatchObject({
+			bodyDimensions: dimensions,
+		});
 		expect(restored.ports[0]).not.toHaveProperty("id");
 		expect(restored.ports[0]).not.toHaveProperty("barcode");
 		expect(serializeOpenFabProject(parsed)).toBe(serialized);
@@ -1247,7 +1325,7 @@ describe("OpenFab project codec", () => {
 		const serialized = serializeOpenFabProject(project);
 		const parsed = parseOpenFabProjectJson(serialized);
 
-		expect(parsed.project.schemaVersion).toBe(14);
+		expect(parsed.project.schemaVersion).toBe(15);
 		expect(parsed.project.blueprints.schemaVersion).toBe(5);
 		expect(parsed.project.blueprints.records).toEqual([blueprint]);
 		expect(parsed.project.blueprints.records[0]?.kind).toBe("STATIC_FAB_ORGANIZATION");
@@ -1326,7 +1404,7 @@ describe("OpenFab project codec", () => {
 		const reparsed = parseOpenFabProjectJson(serialized);
 
 		expect(upgraded.migratedFromVersion).toBe(7);
-		expect(upgraded.project.schemaVersion).toBe(14);
+		expect(upgraded.project.schemaVersion).toBe(15);
 		expect(upgraded.project.blueprints.schemaVersion).toBe(5);
 		expect(upgraded.project.blueprints.records).toEqual(records);
 		expect(reparsed.migratedFromVersion).toBeNull();

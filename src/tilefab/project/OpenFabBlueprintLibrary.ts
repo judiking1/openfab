@@ -1,3 +1,4 @@
+import { copyEqBodyDimensionsProperties, type EqBodyDimensions } from "../core/EquipmentGroup";
 import {
 	RAIL_AREA_STAMP_MAX_EDGES,
 	type RailAreaStampEdge,
@@ -61,6 +62,7 @@ export type OpenFabStaticFabBlueprintEquipmentGroup =
 			readonly kind: "EQ";
 			readonly pitchMillimeters: number;
 			readonly recipe: string | null;
+			readonly bodyDimensions?: EqBodyDimensions;
 			readonly portIndices: readonly number[];
 	  }
 	| {
@@ -366,6 +368,7 @@ function copyStaticFabEquipmentGroup(
 			kind: "EQ",
 			pitchMillimeters: group.pitchMillimeters,
 			recipe: group.recipe,
+			...copyEqBodyDimensionsProperties(group),
 			portIndices: Object.freeze([...group.portIndices]),
 		});
 	}

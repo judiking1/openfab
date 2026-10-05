@@ -1,10 +1,16 @@
+import { resolveEqBodyEditTransition } from "../core/EqBodyEdit";
 import {
+	applyPortEquipmentMutations,
 	collectPortEquipmentIntegrityIssues,
+	copyEqBodyDimensionsProperties,
+	type EqBodyDimensions,
 	type EquipmentGroupRecord,
+	equipmentGroupEquals,
 	type OhbEquipmentGroup,
 	type PortEquipmentState,
 } from "../core/EquipmentGroup";
 import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
+import { assertPortEquipmentLayout } from "../core/PortEquipmentLayoutValidator";
 import { portEquipmentLoopEditTargetError } from "../core/PortEquipmentLoopEdit";
 import {
 	createInvalidPortEquipmentMutationPlan,
@@ -17,6 +23,7 @@ import {
 } from "../core/PortEquipmentServiceDirection";
 import { type PortRecord, portRecordEquals } from "../core/PortRecord";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
+import type { TileMap } from "../core/TileMap";
 import {
 	type CompiledPortSlots,
 	PORT_SLOT_STATUS,
@@ -32,6 +39,55 @@ export interface PortEquipmentSelectionRecord {
 interface OhbEquipmentSelectionRecord {
 	readonly port: PortRecord;
 	readonly equipmentGroup: OhbEquipmentGroup;
+}
+
+export function planResizeEqBody(
+	map: TileMap,
+	state: PortEquipmentState,
+	selection: { readonly portId: number; readonly equipmentGroupId: number },
+	dimensions: EqBodyDimensions | null,
+	baseRevision: number,
+	basePatchSequence: number,
+	organizations: StaticFabOrganizationState,
+): PortEquipmentMutationPlan {
+	const fail = (reason: string) =>
+		invalid("edit-port-equipment", baseRevision, basePatchSequence, reason);
+	if (map.getRevision() !== baseRevision)
+		return fail("원본 레일이 변경되었습니다 · EQ를 다시 선택하세요");
+	if (collectPortEquipmentIntegrityIssues(state).length > 0)
+		return fail("장비 Port 관계가 불완전합니다 · 무결성을 복구한 뒤 다시 선택하세요");
+	const source = state.equipmentGroups.find((group) => group.id === selection.equipmentGroupId);
+	const port = state.ports.find((candidate) => candidate.id === selection.portId);
+	if (
+		source?.kind !== "EQ" ||
+		!port ||
+		port.equipmentGroupId !== source.id ||
+		!source.portIds.includes(port.id)
+	)
+		return fail("몸체 크기를 편집할 EQ와 Port를 다시 선택하세요");
+	try {
+		const target = {
+			...source,
+			...copyEqBodyDimensionsProperties(dimensions === null ? {} : { bodyDimensions: dimensions }),
+		};
+		if (dimensions === null) delete target.bodyDimensions;
+		if (equipmentGroupEquals(source, target)) return fail("EQ 몸체 크기가 현재 값과 같습니다");
+		const changes = [{ id: source.id, before: source, after: target }];
+		const after = applyPortEquipmentMutations(state, [], changes);
+		const transition = resolveEqBodyEditTransition(organizations, state, after, [], changes);
+		if (!transition || transition.reason)
+			return fail(transition?.reason ?? "EQ 몸체 크기 변경을 확인할 수 없습니다");
+		assertPortEquipmentLayout(map, after);
+		return createPortEquipmentMutationPlan(
+			"edit-port-equipment",
+			baseRevision,
+			basePatchSequence,
+			[],
+			changes,
+		);
+	} catch (error) {
+		return fail(error instanceof Error ? error.message : "EQ 몸체 크기를 적용할 수 없습니다");
+	}
 }
 
 /** Flip service facing in place as one atomic edit; rail flow and slot geometry stay unchanged. */

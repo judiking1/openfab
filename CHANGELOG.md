@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.59] - 2026-10-05
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Edit supported single-EQ body length and width while keeping every Port's position, identity,
+  barcode, service direction and organization membership fixed.
+- Preserve existing derived body dimensions for older projects; carry authored dimensions through
+  atomic history, project files, copies, blueprints and the Worker mirror.
+
 ## [0.1.58] - 2026-10-05
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

@@ -10564,6 +10564,45 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	border-top: 1px solid #2f3a3c;
 }
 
+.tilefab-equipment-more-actions-body:where(form) {
+	gap: 8px;
+}
+
+.tilefab-equipment-more-actions-body:where(form) > p {
+	margin: 0;
+	color: #91a8aa;
+	font-size: var(--tilefab-font-label);
+	line-height: 1.5;
+}
+
+.tilefab-equipment-more-actions-body:where(form) > label {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 100px);
+	align-items: center;
+	gap: 8px;
+	color: #c3d6d7;
+	font-size: var(--tilefab-font-label);
+}
+
+.tilefab-equipment-more-actions-body:where(form) input {
+	width: 100%;
+	min-width: 0;
+	min-height: 36px;
+	box-sizing: border-box;
+	padding: 6px 8px;
+	border: 1px solid #3b4b4d;
+	border-radius: 3px;
+	color: #d9e8e9;
+	background: #151c1d;
+	font: inherit;
+	text-align: right;
+}
+
+.tilefab-equipment-more-actions-body:where(form) input:focus-visible {
+	outline: 2px solid #79d3d9;
+	outline-offset: 1px;
+}
+
 .tilefab-selection-scope-note {
 	display: flex;
 	align-items: flex-start;

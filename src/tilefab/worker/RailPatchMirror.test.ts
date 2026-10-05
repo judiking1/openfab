@@ -4,6 +4,7 @@ import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import {
 	planEraseEquipmentGroup,
 	planMoveOhbToSlot,
+	planResizeEqBody,
 	planReversePortEquipmentServiceDirection,
 } from "../compile/PortEquipmentEditPlanner";
 import {
@@ -11,6 +12,10 @@ import {
 	planPortEquipmentGroupEdit,
 } from "../compile/PortEquipmentGroupEditPlanner";
 import { planPortEquipmentMembershipEdit } from "../compile/PortEquipmentMembershipEditPlanner";
+import {
+	compilePortEquipmentPresentation,
+	PortEquipmentSpatialIndex,
+} from "../compile/PortEquipmentPresentation";
 import {
 	planEqRowPlacement,
 	planOhbPlacement,
@@ -30,6 +35,11 @@ import {
 	checksumOperationalConfigurationState,
 	emptyOperationalConfigurationState,
 } from "../core/OperationalConfiguration";
+import {
+	assertPortEquipmentLayoutCooperatively,
+	collectPortEquipmentLayoutIssues,
+	equipmentGroupBodyBounds,
+} from "../core/PortEquipmentLayoutValidator";
 import { createPortEquipmentMutationPlan } from "../core/PortEquipmentPlan";
 import type { PortRecord } from "../core/PortRecord";
 import { PORT_SLOT_MAX_ROWS } from "../core/PortSlotPolicy";
@@ -56,6 +66,214 @@ import { captureRailMirrorSnapshot, checksumRailMap } from "./RailMirrorChecksum
 import { RailPatchMirror } from "./RailPatchMirror";
 import { checksumRailPhysicalLayout } from "./RailPhysicalLayout";
 import { decodeRailPatchSoA, encodeRailPatchEvent } from "./railMirrorProtocol";
+
+describe("Port-fixed EQ body dimensions", () => {
+	it.each([
+		"unowned",
+		"loop",
+		"standalone",
+	] as const)("resizes %s EQ with matching body selection, typed Worker and atomic history", (ownership) => {
+		const { document, physical, move } = loopEquipmentFixture("EQ", ownership);
+		const original = document.portEquipment;
+		const organizations = document.organizations;
+		const mirror = new RailPatchMirror();
+		mirror.sync(
+			captureRailMirrorSnapshot(document.map, document.getPatchSequence(), original, organizations)
+				.snapshot,
+		);
+		const buffers = mirror.getPhysicalPublication().current.buffers;
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => {
+			events.push(event);
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		});
+		const beforeView = compilePortEquipmentPresentation(physical, original);
+		const plan = planResizeEqBody(
+			document.map,
+			original,
+			{ portId: 1, equipmentGroupId: 1 },
+			{ lengthMillimeters: 4_000, widthMillimeters: 2_000 },
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			organizations,
+		);
+		expect(plan.valid, plan.reason).toBe(true);
+		expect(plan.portMutations).toEqual([]);
+		expect(document.commitPortEquipment(plan), document.getLastCommandError() ?? plan.reason).toBe(
+			true,
+		);
+		const resized = document.portEquipment;
+		const resizedGroup = resized.equipmentGroups[0];
+		if (!resizedGroup) throw new Error("Expected resized EQ.");
+		expect(resized.ports).toEqual(original.ports);
+		expect(resized.equipmentGroups[0]).toMatchObject({
+			bodyDimensions: { lengthMillimeters: 4_000, widthMillimeters: 2_000 },
+		});
+		const view = compilePortEquipmentPresentation(physical, resized);
+		expect([...view.groupHalfExtents]).toEqual([2, 1]);
+		expect(view.worldPositions).toEqual(beforeView.worldPositions);
+		const x = view.groupCenters[0] as number,
+			z = view.groupCenters[1] as number;
+		expect(new PortEquipmentSpatialIndex(beforeView).groupAt(x, z + 0.8)).toBeNull();
+		expect(new PortEquipmentSpatialIndex(view).groupAt(x, z + 0.8)?.equipmentGroupId).toBe(1);
+		expect(
+			equipmentGroupBodyBounds(resizedGroup, new Map(resized.ports.map((port) => [port.id, port]))),
+		).toEqual({
+			minX: view.groupBounds[0],
+			minZ: view.groupBounds[1],
+			maxX: view.groupBounds[2],
+			maxZ: view.groupBounds[3],
+		});
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment).toEqual(original);
+		expect(document.redo()).toBe(true);
+		expect(document.portEquipment).toEqual(resized);
+		expect(events).toHaveLength(3);
+		expect(
+			events.every(
+				(event) => event.portChanges.length === 0 && event.organizationChanges.length === 0,
+			),
+		).toBe(true);
+		expect(document.organizations).toBe(organizations);
+		expect(mirror.state.checksum).toBe(checksumRailMap(document.map, resized, organizations));
+		expect(mirror.getPhysicalPublication().current.buffers).toBe(buffers);
+		expect(document.commitPortEquipment(move(7, true))).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]).toEqual(resized.equipmentGroups[0]);
+		const reset = planResizeEqBody(
+			document.map,
+			document.portEquipment,
+			{ portId: 1, equipmentGroupId: 1 },
+			null,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			organizations,
+		);
+		expect(document.commitPortEquipment(reset), reset.reason).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]).not.toHaveProperty("bodyDimensions");
+	});
+
+	it("rejects length and cross-lane width collisions in planner, Document, Worker and cooperative validation", async () => {
+		const source = loopEquipmentFixture("EQ", "unowned").document;
+		const first = source.portEquipment.equipmentGroups[0];
+		if (!first) throw new Error("Expected source EQ.");
+		for (const crossLane of [false, true]) {
+			const extra = source.portEquipment.ports.map(
+				(port, index): PortRecord => ({
+					...port,
+					id: index + 3,
+					equipmentGroupId: 2,
+					barcode: `EQ-2-${index}`,
+					route: {
+						kind: "CARDINAL_CELL",
+						x: crossLane ? 3 - index : 6 + index,
+						z: crossLane ? 4 : 0,
+						from: crossLane ? DIR_E : DIR_W,
+						to: crossLane ? DIR_W : DIR_E,
+					},
+				}),
+			);
+			const document = RailDocument.fromLoadedMap(source.map, source.getPatchSequence(), {
+				...source.portEquipment,
+				nextPortId: 5,
+				nextEquipmentGroupId: 3,
+				ports: [...source.portEquipment.ports, ...extra],
+				equipmentGroups: [first, { ...first, id: 2, portIds: [3, 4] }],
+			});
+			const dimensions = {
+				lengthMillimeters: crossLane ? 2_000 : 10_000,
+				widthMillimeters: crossLane ? 8_000 : 900,
+			};
+			const validElsewhere = planResizeEqBody(
+				source.map,
+				source.portEquipment,
+				{ portId: 1, equipmentGroupId: 1 },
+				dimensions,
+				source.map.getRevision(),
+				source.getPatchSequence(),
+				source.organizations,
+			);
+			expect(validElsewhere.valid, validElsewhere.reason).toBe(true);
+			expect(
+				planResizeEqBody(
+					document.map,
+					document.portEquipment,
+					{ portId: 1, equipmentGroupId: 1 },
+					dimensions,
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					document.organizations,
+				),
+			).toMatchObject({ valid: false, reason: expect.stringContaining("겹칩니다") });
+			assertLoopEditRejected(document, validElsewhere, /겹칩니다/);
+			const target = validElsewhere.equipmentGroupMutations[0]?.after;
+			if (!target) throw new Error("Expected a proposed EQ body.");
+			const prospective = {
+				...document.portEquipment,
+				equipmentGroups: document.portEquipment.equipmentGroups.map((group) =>
+					group.id === 1 ? target : group,
+				),
+			};
+			expect(
+				collectPortEquipmentLayoutIssues(document.map, prospective).some(
+					(issue) => issue.code === "EQ_AUTHORED_BODY_OVERLAP",
+				),
+			).toBe(true);
+			let checkpoints = 0;
+			await expect(
+				assertPortEquipmentLayoutCooperatively(
+					document.map,
+					prospective,
+					async () => {
+						checkpoints++;
+					},
+					1,
+				),
+			).rejects.toThrow(/겹칩니다/);
+			expect(checkpoints).toBeGreaterThan(4);
+		}
+	});
+
+	it("rejects mixed Port edits, stale plans, unsupported owners and invalid dimensions", () => {
+		const { document } = loopEquipmentFixture("EQ");
+		const resize = (dimensions: { lengthMillimeters: number; widthMillimeters: number }) =>
+			planResizeEqBody(
+				document.map,
+				document.portEquipment,
+				{ portId: 1, equipmentGroupId: 1 },
+				dimensions,
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.organizations,
+			);
+		for (const dimensions of [
+			{ lengthMillimeters: 1_999, widthMillimeters: 900 },
+			{ lengthMillimeters: 4_000, widthMillimeters: 899 },
+			{ lengthMillimeters: 4_000.5, widthMillimeters: 900 },
+			{ lengthMillimeters: 316_001, widthMillimeters: 900 },
+		])
+			expect(resize(dimensions).valid).toBe(false);
+		const valid = resize({ lengthMillimeters: 4_000, widthMillimeters: 2_000 });
+		const port = document.portEquipment.ports[0];
+		if (!port) throw new Error("Expected selected EQ Port.");
+		assertLoopEditRejected(
+			document,
+			{
+				...valid,
+				portMutations: [{ id: port.id, before: port, after: { ...port, barcode: "CHANGED" } }],
+			},
+			/Port를 고정/,
+		);
+		for (const owner of ["area", "multiple"] as const)
+			assertLoopEditRejected(
+				loopEquipmentFixture("EQ", owner).document,
+				valid,
+				/Process Loop가 아닙니다|여러 조직/,
+			);
+		expect(document.commitPortEquipment(valid)).toBe(true);
+		expect(document.commitPortEquipment(valid)).toBe(false);
+		expect(document.getLastCommandError()).toContain("원본이 변경");
+	});
+});
 
 describe("equipment service direction reversal", () => {
 	it.each([

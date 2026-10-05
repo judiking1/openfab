@@ -662,7 +662,14 @@ describe("StaticFabOrganizationBundle", () => {
 
 	it("captures complete OHB, EQ, and STK groups without runtime identities", () => {
 		const fixture = longBayFixture();
-		const equipment = mixedEquipmentState(fixture.document);
+		const source = mixedEquipmentState(fixture.document);
+		const dimensions = { lengthMillimeters: 2_000, widthMillimeters: 1_000 };
+		const equipment = {
+			...source,
+			equipmentGroups: source.equipmentGroups.map((group) =>
+				group.kind === "EQ" ? { ...group, bodyDimensions: dimensions } : group,
+			),
+		};
 		const base = organizationRecord(1, "AREA", "Port-first Area", [], fixture.modules);
 		const record: StaticFabOrganizationRecord = Object.freeze({
 			...base,
@@ -684,6 +691,16 @@ describe("StaticFabOrganizationBundle", () => {
 		expect(result.valid, result.reason).toBe(true);
 		if (!result.valid) return;
 		expect(result.bundle.equipmentGroups.map((group) => group.kind)).toEqual(["OHB", "EQ", "STK"]);
+		expect(result.bundle.equipmentGroups.find((group) => group.kind === "EQ")).toMatchObject({
+			bodyDimensions: dimensions,
+		});
+		expect(
+			materializeStaticFabOrganizationBundle(
+				result.bundle,
+				{ x: 120, y: 40 },
+				1,
+			).equipmentGroups.find((group) => group.kind === "EQ"),
+		).toMatchObject({ bodyDimensions: dimensions });
 		expect(result.bundle.ports).toHaveLength(7);
 		expect(result.bundle.organizations[0]?.membership.equipmentGroupIndices).toEqual([0, 1, 2]);
 		expect(JSON.stringify(result.bundle)).not.toMatch(/barcode|nextPortId|equipmentGroupId/);

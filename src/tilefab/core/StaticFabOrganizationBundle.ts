@@ -11,7 +11,9 @@ import {
 	createCooperativeTask,
 } from "./CooperativeTask";
 import {
+	copyEqBodyDimensionsProperties,
 	createCanonicalPortEquipmentStateBuilder,
+	type EqBodyDimensions,
 	type EquipmentGroupRecord,
 	equipmentGroupError,
 	type PortEquipmentState,
@@ -198,6 +200,7 @@ export type StaticFabOrganizationBundleEquipmentGroup =
 			readonly kind: "EQ";
 			readonly pitchMillimeters: number;
 			readonly recipe: string | null;
+			readonly bodyDimensions?: EqBodyDimensions;
 			readonly portIndices: readonly number[];
 	  }
 	| {
@@ -1645,6 +1648,7 @@ function copyPortableEquipmentGroup(
 			kind: "EQ",
 			pitchMillimeters: group.pitchMillimeters,
 			recipe: group.recipe,
+			...copyEqBodyDimensionsProperties(group),
 			portIndices,
 		});
 	}
@@ -1698,6 +1702,7 @@ function portableEquipmentGroup(
 			kind: "EQ",
 			pitchMillimeters: group.pitchMillimeters,
 			recipe: group.recipe,
+			...copyEqBodyDimensionsProperties(group),
 			portIndices,
 		});
 	}
@@ -1719,6 +1724,7 @@ function runtimeEquipmentGroup(
 			kind: "EQ",
 			pitchMillimeters: group.pitchMillimeters,
 			recipe: group.recipe,
+			...copyEqBodyDimensionsProperties(group),
 			portIds,
 		};
 	}
@@ -2112,7 +2118,18 @@ function portablePortRouteHasExactKeys(route: unknown): boolean {
 function portableEquipmentGroupHasExactKeys(group: unknown): boolean {
 	if (!isRecord(group)) return false;
 	if (group.kind === "OHB") return hasExactKeys(group, OHB_GROUP_KEYS);
-	if (group.kind === "EQ") return hasExactKeys(group, EQ_GROUP_KEYS);
+	if (group.kind === "EQ")
+		return (
+			hasExactKeys(
+				group,
+				Object.hasOwn(group, "bodyDimensions")
+					? [...EQ_GROUP_KEYS, "bodyDimensions"]
+					: EQ_GROUP_KEYS,
+			) &&
+			(!Object.hasOwn(group, "bodyDimensions") ||
+				(isRecord(group.bodyDimensions) &&
+					hasExactKeys(group.bodyDimensions, ["lengthMillimeters", "widthMillimeters"])))
+		);
 	if (group.kind === "STK") return hasExactKeys(group, STK_GROUP_KEYS);
 	return false;
 }

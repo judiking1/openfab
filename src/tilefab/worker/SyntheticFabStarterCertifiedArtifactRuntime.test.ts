@@ -42,6 +42,17 @@ describe("SyntheticFabStarterCertifiedArtifactRuntime", () => {
 		}
 		const transfers = collectTransferableBuffers(response.prepared);
 		expect(transfers.length).toBeGreaterThan(20);
+		const equipment = response.prepared.snapshot.portEquipment;
+		expect(equipment.schemaVersion).toBe(2);
+		for (const dimensions of [
+			equipment.equipmentGroups.bodyLengthMillimeters,
+			equipment.equipmentGroups.bodyWidthMillimeters,
+		]) {
+			expect(dimensions).toBeInstanceOf(Uint32Array);
+			expect(dimensions).toHaveLength(equipment.equipmentGroupIds.length);
+			expect(dimensions.every((dimension) => dimension === 0)).toBe(true);
+			expect(transfers).toContain(dimensions.buffer);
+		}
 
 		const cloned = structuredClone(response, { transfer: transfers });
 		expect(transfers.every((buffer) => buffer.byteLength === 0)).toBe(true);
@@ -51,6 +62,12 @@ describe("SyntheticFabStarterCertifiedArtifactRuntime", () => {
 			starter,
 		);
 		if (!hydrated) throw new Error("Expected main-realm certification rebinding.");
+		expect(hydrated.prepared.snapshot.portEquipment.equipmentGroups.bodyLengthMillimeters).toEqual(
+			new Uint32Array(hydrated.prepared.snapshot.portEquipment.equipmentGroupIds.length),
+		);
+		expect(hydrated.prepared.snapshot.portEquipment.equipmentGroups.bodyWidthMillimeters).toEqual(
+			new Uint32Array(hydrated.prepared.snapshot.portEquipment.equipmentGroupIds.length),
+		);
 		expect(isSyntheticFabStarterCertificationEvidence(hydrated.evidence)).toBe(true);
 		expect(
 			certificationEvidenceMatchesPrepared(hydrated.evidence, hydrated.prepared, starter),
