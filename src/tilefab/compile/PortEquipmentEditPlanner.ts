@@ -1,7 +1,8 @@
-import type {
-	EquipmentGroupRecord,
-	OhbEquipmentGroup,
-	PortEquipmentState,
+import {
+	collectPortEquipmentIntegrityIssues,
+	type EquipmentGroupRecord,
+	type OhbEquipmentGroup,
+	type PortEquipmentState,
 } from "../core/EquipmentGroup";
 import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
 import { portEquipmentLoopEditTargetError } from "../core/PortEquipmentLoopEdit";
@@ -10,6 +11,10 @@ import {
 	createPortEquipmentMutationPlan,
 	type PortEquipmentMutationPlan,
 } from "../core/PortEquipmentPlan";
+import {
+	resolvePortEquipmentServiceDirectionTransition,
+	reversePortServiceDirection,
+} from "../core/PortEquipmentServiceDirection";
 import { type PortRecord, portRecordEquals } from "../core/PortRecord";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import {
@@ -27,6 +32,60 @@ export interface PortEquipmentSelectionRecord {
 interface OhbEquipmentSelectionRecord {
 	readonly port: PortRecord;
 	readonly equipmentGroup: OhbEquipmentGroup;
+}
+
+/** Flip service facing in place as one atomic edit; rail flow and slot geometry stay unchanged. */
+export function planReversePortEquipmentServiceDirection(
+	state: PortEquipmentState,
+	selection: { readonly portId: number; readonly equipmentGroupId: number },
+	baseRevision: number,
+	basePatchSequence: number,
+	organizations: StaticFabOrganizationState,
+): PortEquipmentMutationPlan {
+	const fail = (reason: string) =>
+		invalid("edit-port-equipment", baseRevision, basePatchSequence, reason);
+	if (collectPortEquipmentIntegrityIssues(state).length > 0) {
+		return fail("장비 Port 관계가 불완전합니다 · 검사 화면에서 무결성을 복구한 뒤 다시 선택하세요");
+	}
+	const group = state.equipmentGroups.find(
+		(candidate) => candidate.id === selection.equipmentGroupId,
+	);
+	const selected = state.ports.find((port) => port.id === selection.portId);
+	if (
+		!group ||
+		!selected ||
+		selected.equipmentGroupId !== group.id ||
+		!group.portIds.includes(selected.id)
+	) {
+		return fail(
+			"선택한 장비 또는 Port가 변경되었습니다 · 서비스 방향을 반전할 장비를 다시 선택하세요",
+		);
+	}
+	const mutations = state.ports
+		.filter((port) => port.equipmentGroupId === group.id)
+		.map((port) => ({
+			id: port.id,
+			before: port,
+			after: { ...port, direction: reversePortServiceDirection(port.direction) },
+		}));
+	const replacements = new Map(mutations.map((change) => [change.id, change.after]));
+	const after = { ...state, ports: state.ports.map((port) => replacements.get(port.id) ?? port) };
+	const transition = resolvePortEquipmentServiceDirectionTransition(
+		organizations,
+		state,
+		after,
+		mutations,
+		[],
+	);
+	if (!transition || transition.reason)
+		return fail(transition?.reason ?? "반전할 전체 Port를 찾을 수 없습니다");
+	return createPortEquipmentMutationPlan(
+		"edit-port-equipment",
+		baseRevision,
+		basePatchSequence,
+		mutations,
+		[],
+	);
 }
 
 export function resolvePortEquipmentSelection(

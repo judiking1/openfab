@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.58] - 2026-10-05
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Reverse every Port's service direction in a selected equipment group through one atomic action,
+  preserving routes, stations, IDs, barcodes and organization membership with one-step Undo/Redo.
+- Keep the existing F shortcut for rail-flow reversal; equipment service direction is a separate action.
+
 ## [0.1.57] - 2026-10-05
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

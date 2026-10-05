@@ -35,6 +35,7 @@ export interface PortEquipmentActionAvailability {
 	readonly move: PortEquipmentActionDecision;
 	readonly copy: PortEquipmentActionDecision;
 	readonly editMembership: PortEquipmentActionDecision;
+	readonly reverseServiceDirection: PortEquipmentActionDecision;
 	readonly delete: PortEquipmentActionDecision;
 }
 
@@ -79,6 +80,7 @@ export function resolvePortEquipmentActionAvailability({
 			move: blocked,
 			copy: blocked,
 			editMembership: blocked,
+			reverseServiceDirection: blocked,
 			delete: blocked,
 		});
 	}
@@ -99,12 +101,13 @@ export function resolvePortEquipmentActionAvailability({
 		group.kind === "STK" && group.template === "CUSTOM"
 			? blockedEquipmentAction(
 					"LEGACY_CUSTOM",
-					"이전 CUSTOM Stocker는 이동·복제·Port 편집을 지원하지 않습니다 · FLEX Stocker로 새로 배치하세요",
+					"이전 CUSTOM Stocker는 이동·복제·Port 편집·서비스 방향 반전을 지원하지 않습니다 · FLEX Stocker로 새로 배치하세요",
 				)
 			: null;
 	return Object.freeze({
 		move: ownershipBlock ?? customBlock ?? EQUIPMENT_ACTION_ALLOWED,
 		copy: customBlock ?? EQUIPMENT_ACTION_ALLOWED,
+		reverseServiceDirection: ownershipBlock ?? customBlock ?? EQUIPMENT_ACTION_ALLOWED,
 		editMembership:
 			group.kind === "OHB"
 				? blockedEquipmentAction(

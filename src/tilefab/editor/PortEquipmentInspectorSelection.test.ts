@@ -77,6 +77,7 @@ describe("PortEquipmentInspectorSelection", () => {
 				directlyOwned,
 			});
 			const ordered = [actions.move, actions.copy, actions.editMembership, actions.delete];
+			expect(actions.reverseServiceDirection).toEqual(actions.move);
 			expect(ordered.map((action) => action.allowed)).toEqual(directlyOwned ? owned : unowned);
 			expect(Object.isFrozen(actions)).toBe(true);
 			for (const action of ordered) {
@@ -99,6 +100,11 @@ describe("PortEquipmentInspectorSelection", () => {
 				"edit-port-equipment-membership",
 				"delete-port-equipment",
 			];
+			expect(
+				inspectorActionButton(markup, "reverse-port-equipment-service-direction").includes(
+					'disabled=""',
+				),
+			).toBe(!actions.reverseServiceDirection.allowed);
 			for (const [index, id] of ids.entries()) {
 				const button = markup.match(new RegExp(`<button[^>]*data-testid="${id}"[^>]*>`))?.[0];
 				if (group.kind === "OHB" && index === 2) expect(button).toBeUndefined();
@@ -175,7 +181,8 @@ describe("PortEquipmentInspectorSelection", () => {
 			expect(button?.includes('disabled=""'), id).toBe(template === "CUSTOM");
 		}
 		expect(markup).not.toContain("장비 전체 이동·복제는 사용할 수");
-		if (template === "CUSTOM") expect(markup).toContain("이동·복제·Port 편집을 지원하지 않습니다");
+		if (template === "CUSTOM")
+			expect(markup).toContain("이동·복제·Port 편집·서비스 방향 반전을 지원하지 않습니다");
 		const deleteButton = markup.match(/<button[^>]*data-testid="delete-port-equipment"[^>]*>/)?.[0];
 		expect(deleteButton).toBeDefined();
 		expect(deleteButton).not.toContain('disabled=""');
@@ -256,6 +263,7 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 			organizations,
 		});
 		expect(actions.move.allowed).toBe(true);
+		expect(actions.reverseServiceDirection.allowed).toBe(true);
 		expect(actions.copy.allowed).toBe(true);
 		expect(actions.editMembership.allowed).toBe(kind !== "OHB");
 		expect(actions.delete).toMatchObject({ allowed: false, code: "DIRECTLY_OWNED" });
@@ -274,8 +282,26 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 				'disabled=""',
 			);
 		expect(inspectorActionButton(markup, "delete-port-equipment")).toContain('disabled=""');
+		expect(inspectorActionButton(markup, "reverse-port-equipment-service-direction")).not.toContain(
+			'disabled=""',
+		);
 		expect(markup).toContain("소속을 유지하며 같은 Process Loop 안에서");
 		expect(markup).toContain(actions.delete.reason);
+		for (const pending of [
+			{ modelSyncPending: true },
+			{ workerState: { status: "syncing" as const } },
+		]) {
+			const pendingMarkup = renderToStaticMarkup(
+				createElement(PortEquipmentInspector, {
+					...inspectorProps(state, selected),
+					organizations,
+					...pending,
+				}),
+			);
+			expect(
+				inspectorActionButton(pendingMarkup, "reverse-port-equipment-service-direction"),
+			).toContain('disabled=""');
+		}
 	});
 
 	it.each([
@@ -305,6 +331,7 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 			organizations,
 		});
 		expect(actions.move.allowed).toBe(false);
+		expect(actions.reverseServiceDirection.allowed).toBe(false);
 		expect(actions.editMembership.allowed).toBe(false);
 		expect(actions.delete.allowed).toBe(false);
 		expect(actions.copy.allowed).toBe(condition !== "custom");
@@ -329,6 +356,9 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 		).slice(6, -7);
 		expect(markup).toContain(escapedReason);
 		expect(inspectorActionButton(markup, "move-port-equipment-group")).toContain('disabled=""');
+		expect(inspectorActionButton(markup, "reverse-port-equipment-service-direction")).toContain(
+			'disabled=""',
+		);
 	});
 });
 
@@ -529,6 +559,7 @@ function inspectorProps(
 		processLoopMembershipDisclosureRef: { current: null },
 		processLoopPrimaryActionRef: { current: null },
 		processLoopPrimaryStatusRef: { current: null },
+		reverseSelectedPortEquipmentServiceDirection: noop,
 		scheduleRender: noop,
 		selectConnectedAuthoredComponent: noop,
 		selectNextPortEquipmentGroup: noop,

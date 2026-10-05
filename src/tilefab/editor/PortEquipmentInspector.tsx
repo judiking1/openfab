@@ -9,6 +9,7 @@ import {
 	MousePointer2,
 	Move,
 	Plus,
+	RotateCw,
 	Trash2,
 	Warehouse,
 	X,
@@ -81,6 +82,7 @@ export interface PortEquipmentInspectorProps {
 	readonly processLoopMembershipDisclosureRef: RefObject<HTMLElement | null>;
 	readonly processLoopPrimaryActionRef: RefObject<HTMLButtonElement | null>;
 	readonly processLoopPrimaryStatusRef: RefObject<HTMLDivElement | null>;
+	readonly reverseSelectedPortEquipmentServiceDirection: () => void;
 	readonly scheduleRender: () => void;
 	readonly selectConnectedAuthoredComponent: () => void;
 	readonly selectNextPortEquipmentGroup: () => void;
@@ -134,6 +136,7 @@ export function PortEquipmentInspector({
 	processLoopMembershipDisclosureRef,
 	processLoopPrimaryActionRef,
 	processLoopPrimaryStatusRef,
+	reverseSelectedPortEquipmentServiceDirection,
 	scheduleRender,
 	selectConnectedAuthoredComponent,
 	selectNextPortEquipmentGroup,
@@ -505,6 +508,24 @@ export function PortEquipmentInspector({
 									) : null}
 								</>
 							)}
+							<button
+								type="button"
+								className="tilefab-inspector-primary"
+								data-testid="reverse-port-equipment-service-direction"
+								disabled={
+									!actions.reverseServiceDirection.allowed ||
+									modelSyncPending ||
+									workerState.status !== "ready"
+								}
+								aria-describedby={equipmentActionDescriptionId(actions.reverseServiceDirection)}
+								title={
+									actions.reverseServiceDirection.reason ??
+									"전체 Port의 서비스 방향을 반전합니다 · 레일 흐름과 위치는 유지됩니다"
+								}
+								onClick={reverseSelectedPortEquipmentServiceDirection}
+							>
+								<RotateCw size={15} /> 서비스 방향 반전
+							</button>
 						</div>
 						<button
 							type="button"

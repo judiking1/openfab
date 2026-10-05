@@ -42,6 +42,7 @@ import {
 } from "../core/OperationalConfigurationMutation";
 import { assertPortEquipmentLayout } from "../core/PortEquipmentLayoutValidator";
 import { resolvePortEquipmentLoopEditTransition } from "../core/PortEquipmentLoopEdit";
+import { resolvePortEquipmentServiceDirectionTransition } from "../core/PortEquipmentServiceDirection";
 import type { RailHistoryOriginKind, RailPatchEvent } from "../core/RailDocument";
 import {
 	appendBoundedRailHistoryEntry,
@@ -546,6 +547,24 @@ export class RailPatchMirror {
 				patch.portChanges,
 				patch.equipmentGroupChanges,
 			);
+			const serviceDirection = resolvePortEquipmentServiceDirectionTransition(
+				this.mirroredOrganizations,
+				this.mirroredPortEquipment,
+				nextPortEquipment,
+				patch.portChanges,
+				patch.equipmentGroupChanges,
+			);
+			if (serviceDirection?.reason) throw new Error(serviceDirection.reason);
+			if (
+				serviceDirection &&
+				(railMutationCount > 0 ||
+					patch.organizationChanges.length > 0 ||
+					patch.relationshipChanges.length > 0 ||
+					patch.operationalConfigurationPatch ||
+					organizationImpactAuthorizations.length > 0)
+			) {
+				throw new Error("서비스 방향 반전은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다");
+			}
 			if (railMutationCount > 0) {
 				this.mirroredMap.applyAtomicMutations(patch.changes, patch.switchChanges);
 				mapApplied = true;
@@ -573,7 +592,8 @@ export class RailPatchMirror {
 			}
 			// The mirror independently proves same-Loop containment; no new transport permit is trusted.
 			const loopEdit =
-				railMutationCount === 0 &&
+				serviceDirection ??
+				(railMutationCount === 0 &&
 				patch.organizationChanges.length === 0 &&
 				organizationImpactAuthorizations.length === 0 &&
 				affectedOrganizations.length > 0
@@ -584,7 +604,7 @@ export class RailPatchMirror {
 							patch.portChanges,
 							patch.equipmentGroupChanges,
 						)
-					: { organizationIds: [], reason: null };
+					: { organizationIds: [], reason: null });
 			if (loopEdit.reason) throw new Error(loopEdit.reason);
 			const unhandledOrganizations = unhandledStaticFabOrganizationImpacts(
 				this.organizationImpactIndex,

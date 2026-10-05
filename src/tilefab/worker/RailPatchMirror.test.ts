@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { compilePhysicalPathMigration } from "../compile/PhysicalPathMigration";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
-import { planEraseEquipmentGroup, planMoveOhbToSlot } from "../compile/PortEquipmentEditPlanner";
+import {
+	planEraseEquipmentGroup,
+	planMoveOhbToSlot,
+	planReversePortEquipmentServiceDirection,
+} from "../compile/PortEquipmentEditPlanner";
 import {
 	PortEquipmentGroupSlotIndex,
 	planPortEquipmentGroupEdit,
@@ -43,6 +47,7 @@ import {
 import {
 	compareDirectedRailEdges,
 	copyStaticFabOrganizationState,
+	emptyStaticFabOrganizationState,
 } from "../core/StaticFabOrganization";
 import { planCreateStaticFabOrganizationFromSelection } from "../core/StaticFabOrganizationPlan";
 import { createStaticFabSelection, planStaticFabSelectionErase } from "../core/StaticFabSelection";
@@ -51,6 +56,289 @@ import { captureRailMirrorSnapshot, checksumRailMap } from "./RailMirrorChecksum
 import { RailPatchMirror } from "./RailPatchMirror";
 import { checksumRailPhysicalLayout } from "./RailPhysicalLayout";
 import { decodeRailPatchSoA, encodeRailPatchEvent } from "./railMirrorProtocol";
+
+describe("equipment service direction reversal", () => {
+	it.each([
+		"OHB",
+		"EQ",
+		"STK",
+	] as const)("reverses every %s Port with typed Worker parity and one-step history", (kind) => {
+		for (const ownership of ["unowned", "loop", "standalone"] as const) {
+			const { document } = loopEquipmentFixture(kind, ownership);
+			const mirror = new RailPatchMirror();
+			mirror.sync(
+				captureRailMirrorSnapshot(
+					document.map,
+					document.getPatchSequence(),
+					document.portEquipment,
+					document.organizations,
+				).snapshot,
+			);
+			const original = document.portEquipment;
+			const organizations = document.organizations;
+			const revision = document.map.getRevision();
+			const buffers = mirror.getPhysicalPublication().current.buffers;
+			const events: RailPatchEvent[] = [];
+			document.subscribe((event) => {
+				events.push(event);
+				mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+			});
+			const plan = serviceDirectionPlan(document);
+			expect(plan.valid, plan.reason).toBe(true);
+			expect(
+				document.commitPortEquipment(plan),
+				document.getLastCommandError() ?? plan.reason,
+			).toBe(true);
+			const reversed = document.portEquipment;
+			expect(reversed).toEqual({
+				...original,
+				ports: original.ports.map((port) => ({ ...port, direction: "AGAINST_TRAVEL" })),
+			});
+			expect(events).toHaveLength(1);
+			expect(events[0]).toMatchObject({
+				kind: "edit-port-equipment",
+				changes: [],
+				switchChanges: [],
+				equipmentGroupChanges: [],
+				organizationChanges: [],
+				organizationImpactAuthorizations: [],
+			});
+			expect(document.undo()).toBe(true);
+			expect(document.portEquipment).toEqual(original);
+			expect(document.redo()).toBe(true);
+			expect(document.portEquipment).toEqual(reversed);
+			expect(document.commitPortEquipment(serviceDirectionPlan(document))).toBe(true);
+			expect(document.portEquipment).toEqual(original);
+			expect(events).toHaveLength(4);
+			expect(document.map.getRevision()).toBe(revision);
+			expect(document.organizations).toBe(organizations);
+			expect(mirror.organizationState).toEqual(organizations);
+			expect(mirror.state.checksum).toBe(
+				checksumRailMap(document.map, document.portEquipment, organizations),
+			);
+			expect(mirror.getPhysicalPublication().current.buffers).toBe(buffers);
+		}
+	});
+
+	it.each([
+		"unowned",
+		"loop",
+	] as const)("rejects partial and mixed-field %s reversal patches atomically", (ownership) => {
+		const { document, move } = loopEquipmentFixture("EQ", ownership);
+		const valid = serviceDirectionPlan(document);
+		expect(valid.valid).toBe(true);
+		assertLoopEditRejected(
+			document,
+			{ ...valid, portMutations: valid.portMutations.slice(0, 1) },
+			/전체 Port/,
+		);
+		for (const field of ["barcode", "station", "route", "side-and-offset"] as const) {
+			const relocated = move(7, false);
+			const changes = valid.portMutations.map((change, index) => {
+				const after = change.after as PortRecord;
+				if (index !== 0) return change;
+				return {
+					...change,
+					after: {
+						...after,
+						...(field === "barcode" ? { barcode: "REPLACED" } : {}),
+						...(field === "station" ? { stationMillimeters: after.stationMillimeters + 1 } : {}),
+						...(field === "route"
+							? { route: relocated.portMutations[0]?.after?.route as PortRecord["route"] }
+							: {}),
+						...(field === "side-and-offset"
+							? { side: "LEFT" as const, lateralOffsetMillimeters: 1_000 }
+							: {}),
+					},
+				};
+			});
+			assertLoopEditRejected(document, { ...valid, portMutations: changes }, /direction만/);
+		}
+	});
+
+	it.each([
+		"area",
+		"multiple",
+	] as const)("rechecks latest %s ownership in planner, Document and Worker", (ownership) => {
+		const { document } = loopEquipmentFixture("EQ", ownership);
+		const reason = ownership === "area" ? /Process Loop가 아닙니다/ : /여러 조직/;
+		expect(serviceDirectionPlan(document)).toMatchObject({
+			valid: false,
+			reason: expect.stringMatching(reason),
+		});
+		const bypass = serviceDirectionPlan(loopEquipmentFixture("EQ").document);
+		assertLoopEditRejected(document, bypass, reason);
+	});
+
+	it.each([
+		"FOUR_PORT",
+		"SIX_PORT",
+		"BACK_TO_BACK",
+	] as const)("reverses supported %s Stocker Ports without changing their layout", (template) => {
+		const source = loopEquipmentFixture("STK", "loop", template).document;
+		const document = RailDocument.fromLoadedMap(
+			source.map,
+			source.getPatchSequence(),
+			{
+				...source.portEquipment,
+				ports: source.portEquipment.ports.map((port) => ({ ...port, direction: "AGAINST_TRAVEL" })),
+			},
+			source.organizations,
+		);
+		const before = document.portEquipment;
+		const mirror = new RailPatchMirror();
+		mirror.sync(
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				before,
+				document.organizations,
+			).snapshot,
+		);
+		document.subscribe((event) =>
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch)),
+		);
+		const plan = serviceDirectionPlan(document);
+		expect(plan.valid, plan.reason).toBe(true);
+		expect(document.commitPortEquipment(plan), document.getLastCommandError() ?? plan.reason).toBe(
+			true,
+		);
+		expect(document.portEquipment).toEqual({
+			...before,
+			ports: before.ports.map((port) => ({ ...port, direction: "WITH_TRAVEL" })),
+		});
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment).toEqual(before);
+		expect(document.redo()).toBe(true);
+		expect(mirror.state.checksum).toBe(
+			checksumRailMap(document.map, document.portEquipment, document.organizations),
+		);
+	});
+
+	it("rejects settings changes and two equipment groups bundled with a reversal", () => {
+		const { document } = loopEquipmentFixture("EQ", "unowned");
+		const valid = serviceDirectionPlan(document);
+		const group = document.portEquipment.equipmentGroups[0];
+		if (group?.kind !== "EQ") throw new Error("Expected EQ.");
+		assertLoopEditRejected(
+			document,
+			{
+				...valid,
+				equipmentGroupMutations: [
+					{ id: group.id, before: group, after: { ...group, recipe: "CHANGED" } },
+				],
+			},
+			/종류·설정·Port 구성/,
+		);
+		const extraPort: PortRecord = {
+			...(document.portEquipment.ports[0] as PortRecord),
+			id: 3,
+			equipmentGroupId: 2,
+			barcode: "EQ-3",
+			route: { kind: "CARDINAL_CELL" as const, x: 8, z: 0, from: DIR_W, to: DIR_E },
+		};
+		const secondExtraPort: PortRecord = {
+			...extraPort,
+			id: 4,
+			barcode: "EQ-4",
+			route: { kind: "CARDINAL_CELL", x: 9, z: 0, from: DIR_W, to: DIR_E },
+		};
+		const twoGroups = RailDocument.fromLoadedMap(
+			document.map,
+			document.getPatchSequence(),
+			{
+				...document.portEquipment,
+				nextPortId: 5,
+				nextEquipmentGroupId: 3,
+				ports: [...document.portEquipment.ports, extraPort, secondExtraPort],
+				equipmentGroups: [
+					...document.portEquipment.equipmentGroups,
+					{ ...group, id: 2, portIds: [3, 4] },
+				],
+			},
+			document.organizations,
+		);
+		assertLoopEditRejected(
+			twoGroups,
+			{
+				...valid,
+				portMutations: [
+					...valid.portMutations,
+					{ id: 3, before: extraPort, after: { ...extraPort, direction: "AGAINST_TRAVEL" } },
+					{
+						id: 4,
+						before: secondExtraPort,
+						after: { ...secondExtraPort, direction: "AGAINST_TRAVEL" },
+					},
+				],
+			},
+			/전체 Port/,
+		);
+	});
+
+	it("rejects stale plans and mismatched or incomplete selection with a current reason", () => {
+		const { document } = loopEquipmentFixture("EQ");
+		for (const selection of [
+			{ portId: 9, equipmentGroupId: 1 },
+			{ portId: 1, equipmentGroupId: 9 },
+		]) {
+			expect(
+				planReversePortEquipmentServiceDirection(
+					document.portEquipment,
+					selection,
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					document.organizations,
+				),
+			).toMatchObject({ valid: false, reason: expect.stringContaining("다시 선택") });
+		}
+		expect(
+			planReversePortEquipmentServiceDirection(
+				{ ...document.portEquipment, ports: document.portEquipment.ports.slice(0, 1) },
+				{ portId: 1, equipmentGroupId: 1 },
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.organizations,
+			),
+		).toMatchObject({ valid: false, reason: expect.stringContaining("불완전") });
+		const stale = serviceDirectionPlan(document);
+		expect(document.commitPortEquipment(stale)).toBe(true);
+		const after = document.portEquipment;
+		const sequence = document.getPatchSequence();
+		expect(document.commitPortEquipment(stale)).toBe(false);
+		expect(document.getLastCommandError()).toContain("원본이 변경");
+		expect(document.portEquipment).toBe(after);
+		expect(document.getPatchSequence()).toBe(sequence);
+	});
+
+	it("rejects legacy CUSTOM facing changes even when forged through the generic edit command", () => {
+		const source = loopEquipmentFixture("STK").document;
+		const document = RailDocument.fromLoadedMap(
+			source.map,
+			source.getPatchSequence(),
+			{
+				...source.portEquipment,
+				equipmentGroups: [{ id: 1, kind: "STK", template: "CUSTOM", portIds: [1, 2] }],
+			},
+			source.organizations,
+		);
+		expect(serviceDirectionPlan(document)).toMatchObject({
+			valid: false,
+			reason: expect.stringContaining("CUSTOM"),
+		});
+		assertLoopEditRejected(document, serviceDirectionPlan(source), /CUSTOM/);
+	});
+});
+
+function serviceDirectionPlan(document: RailDocument) {
+	return planReversePortEquipmentServiceDirection(
+		document.portEquipment,
+		{ portId: 1, equipmentGroupId: 1 },
+		document.map.getRevision(),
+		document.getPatchSequence(),
+		document.organizations,
+	);
+}
 
 describe("same-Loop equipment edits", () => {
 	it.each([
@@ -361,7 +649,8 @@ describe("same-Loop equipment edits", () => {
 
 function loopEquipmentFixture(
 	kind: "OHB" | "EQ" | "STK",
-	ownership: "loop" | "area" | "multiple" | "standalone" = "loop",
+	ownership: "loop" | "area" | "multiple" | "standalone" | "unowned" = "loop",
+	stkTemplate: "FLEX" | "FOUR_PORT" | "SIX_PORT" | "BACK_TO_BACK" = "FLEX",
 ) {
 	const source = new RailDocument();
 	for (const [start, end] of [
@@ -390,7 +679,13 @@ function loopEquipmentFixture(
 	const physical = compilePhysicalRail(source.map);
 	const slots = compilePortSlotPreparedArtifactCatalog(physical)[kind].slots;
 	const availability = new PortSlotAvailabilityIndex(physical, source.portEquipment, kind);
-	const rows = [2, 3].map((x) => portSlotRowAt(slots, x, 0));
+	const rows = (
+		kind === "STK" && (stkTemplate === "FOUR_PORT" || stkTemplate === "SIX_PORT")
+			? Array.from({ length: stkTemplate === "FOUR_PORT" ? 4 : 6 }, (_, index) => index + 2)
+			: [2, 3]
+	).map((x) => portSlotRowAt(slots, x, 0));
+	if (kind === "STK" && stkTemplate === "BACK_TO_BACK")
+		rows.push(portSlotRowAt(slots, 3, 4), portSlotRowAt(slots, 2, 4));
 	const placement =
 		kind === "OHB"
 			? planOhbPlacement(
@@ -417,7 +712,7 @@ function loopEquipmentFixture(
 						rows,
 						availability,
 						source.portEquipment,
-						"FLEX",
+						stkTemplate,
 						source.map.getRevision(),
 						source.getPatchSequence(),
 					);
@@ -459,7 +754,7 @@ function loopEquipmentFixture(
 		source.map,
 		source.getPatchSequence(),
 		source.portEquipment,
-		organizations,
+		ownership === "unowned" ? emptyStaticFabOrganizationState() : organizations,
 	);
 	const move = (
 		x: number,

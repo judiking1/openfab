@@ -57,6 +57,7 @@ import {
 	portEquipmentPlanKindError,
 	portEquipmentPlanKindErrorCooperatively,
 } from "./PortEquipmentPlan";
+import { resolvePortEquipmentServiceDirectionTransition } from "./PortEquipmentServiceDirection";
 import {
 	copyPortRecord,
 	type PortMutation,
@@ -700,6 +701,9 @@ export class RailDocument {
 			plan.baseRevision !== this.map.getRevision() ||
 			plan.basePatchSequence !== this.patchSequence
 		) {
+			this.lastCommandError = !plan.valid
+				? plan.reason
+				: "장비 편집의 원본이 변경되었습니다 · 장비를 다시 선택한 뒤 다시 실행하세요";
 			return Object.freeze({ committed: false, timings: null });
 		}
 		if (portEquipmentPlanKindError(plan)) {
@@ -724,13 +728,13 @@ export class RailDocument {
 		) {
 			return Object.freeze({ committed: false, timings: null });
 		}
-		if (
-			legacyCustomEquipmentMutationError(
-				plan.portMutations,
-				plan.equipmentGroupMutations,
-				this.legacyCustomEquipment,
-			) !== null
-		) {
+		const legacyCustomError = legacyCustomEquipmentMutationError(
+			plan.portMutations,
+			plan.equipmentGroupMutations,
+			this.legacyCustomEquipment,
+		);
+		if (legacyCustomError) {
+			this.lastCommandError = legacyCustomError;
 			return Object.freeze({ committed: false, timings: null });
 		}
 		const commandValidationFinishedAt = readTime();
@@ -3909,6 +3913,25 @@ export class RailDocument {
 						effectiveRelationshipNextId,
 					)
 				: this.currentRelationships;
+		const serviceDirection = resolvePortEquipmentServiceDirectionTransition(
+			this.currentOrganizations,
+			this.currentPortEquipment,
+			nextPortEquipment,
+			effectivePortChanges,
+			effectiveEquipmentGroupChanges,
+		);
+		if (serviceDirection?.reason) throw new Error(serviceDirection.reason);
+		if (
+			serviceDirection &&
+			(effectiveChanges.length > 0 ||
+				effectiveSwitchChanges.length > 0 ||
+				effectiveOrganizationChanges.length > 0 ||
+				effectiveRelationshipChanges.length > 0 ||
+				operationalConfigurationPatch ||
+				organizationImpactAuthorizations.length > 0)
+		) {
+			throw new Error("서비스 방향 반전은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다");
+		}
 		assertPortEquipmentLayout(resolvedNextMap, nextPortEquipment);
 		const affectedOrganizations = staticFabOrganizationImpactsForPatch(
 			this.organizationImpactIndex,
@@ -3930,7 +3953,8 @@ export class RailDocument {
 		// Recompute this narrow port-only exemption from the current source, never from UI state
 		// or an authorization carried by the plan. History reversal is checked identically.
 		const loopEdit =
-			effectiveChanges.length === 0 &&
+			serviceDirection ??
+			(effectiveChanges.length === 0 &&
 			effectiveSwitchChanges.length === 0 &&
 			effectiveOrganizationChanges.length === 0 &&
 			organizationImpactAuthorizations.length === 0 &&
@@ -3942,7 +3966,7 @@ export class RailDocument {
 						effectivePortChanges,
 						effectiveEquipmentGroupChanges,
 					)
-				: { organizationIds: [], reason: null };
+				: { organizationIds: [], reason: null });
 		if (loopEdit.reason) throw new Error(loopEdit.reason);
 		const authorizedRelocations = new Set([
 			...organizationImpactAuthorizations,

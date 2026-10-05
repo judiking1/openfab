@@ -98,6 +98,7 @@ import {
 	planCopyOhbToSlot,
 	planEraseEquipmentGroup,
 	planMoveOhbToSlot,
+	planReversePortEquipmentServiceDirection,
 	resolvePortEquipmentSelection,
 } from "../compile/PortEquipmentEditPlanner";
 import {
@@ -21996,6 +21997,40 @@ export default function TileFabApp(): React.ReactElement {
 		scheduleRender();
 	};
 
+	const reverseSelectedPortEquipmentServiceDirection = (): void => {
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorActivityTransitionBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const { document: activeDocument, resolved, actions } = currentPortEquipmentActions();
+		if (blockPortEquipmentAction(actions.reverseServiceDirection) || !resolved) return;
+		const selection = {
+			portId: resolved.port.id,
+			equipmentGroupId: resolved.equipmentGroup.id,
+		};
+		const plan = planReversePortEquipmentServiceDirection(
+			activeDocument.portEquipment,
+			selection,
+			activeDocument.map.getRevision(),
+			activeDocument.getPatchSequence(),
+			activeDocument.organizations,
+		);
+		if (!activeDocument.commitPortEquipment(plan)) {
+			setStatus(portEquipmentReasonLabel(
+				plan.valid
+					? (activeDocument.getLastCommandError() ?? "서비스 방향 편집 조건이 변경되었습니다 · 장비를 다시 선택하세요")
+					: plan.reason,
+			));
+			scheduleRender();
+			return;
+		}
+		clearTransientConstruction();
+		setPortEquipmentSelection(selection);
+		syncModelUi(
+			`${resolved.equipmentGroup.kind}-${resolved.equipmentGroup.id} 전체 Port ${resolved.equipmentGroup.portIds.length}개의 서비스 방향을 반전했습니다`,
+		);
+		restoreCanvasFocusAfterAction();
+	};
+
 	const startSelectedOhbPlacementIntent = (kind: OhbPlacementIntent["kind"]): void => {
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
@@ -29129,6 +29164,7 @@ export default function TileFabApp(): React.ReactElement {
 		? [...new Set([
 			selectedPortActions.move.reason,
 			selectedPortActions.copy.reason,
+			selectedPortActions.reverseServiceDirection.reason,
 			...(selectedPortDetails.equipmentGroup.kind === "OHB" ? [] : [selectedPortActions.editMembership.reason]),
 			selectedPortActions.delete.reason,
 		].filter((reason): reason is string => reason !== null))]
@@ -35949,6 +35985,16 @@ export default function TileFabApp(): React.ReactElement {
 									<button
 										type="button"
 										role="menuitem"
+										data-testid="context-reverse-port-equipment-service-direction"
+										disabled={!selectedPortActions.reverseServiceDirection.allowed || modelSyncPending || workerState.status !== "ready"}
+										title={selectedPortActions.reverseServiceDirection.reason ?? "전체 Port의 서비스 방향을 반전합니다 · 레일 흐름과 위치는 유지됩니다"}
+										onClick={() => runContextPaletteAction(reverseSelectedPortEquipmentServiceDirection)}
+									>
+										<RotateCw size={16} /> 서비스 방향 반전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
 										disabled={!selectedPortActions.delete.allowed}
 										title={selectedPortActions.delete.reason ?? undefined}
 										onClick={() => runContextPaletteAction(deleteSelected)}
@@ -38627,6 +38673,7 @@ export default function TileFabApp(): React.ReactElement {
 						processLoopMembershipDisclosureRef={processLoopMembershipDisclosureRef}
 						processLoopPrimaryActionRef={processLoopPrimaryActionRef}
 						processLoopPrimaryStatusRef={processLoopPrimaryStatusRef}
+						reverseSelectedPortEquipmentServiceDirection={reverseSelectedPortEquipmentServiceDirection}
 						scheduleRender={scheduleRender}
 						selectConnectedAuthoredComponent={selectConnectedAuthoredComponent}
 						selectNextPortEquipmentGroup={selectNextPortEquipmentGroup}
