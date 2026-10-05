@@ -10,12 +10,14 @@ import {
 } from "../core/EquipmentGroupPortOrder";
 import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
 import { assertPortEquipmentLayout } from "../core/PortEquipmentLayoutValidator";
+import { portEquipmentLoopEditTargetError } from "../core/PortEquipmentLoopEdit";
 import {
 	createInvalidPortEquipmentMutationPlan,
 	createPortEquipmentMutationPlan,
 	type PortEquipmentMutationPlan,
 } from "../core/PortEquipmentPlan";
 import type { PortMutation, PortRecord } from "../core/PortRecord";
+import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import {
 	capturePortEquipmentGroupEditSnapshot,
@@ -54,6 +56,7 @@ export function planPortEquipmentMembershipEdit(
 	targetRows: readonly number[],
 	baseRevision: number,
 	basePatchSequence: number,
+	organizations?: StaticFabOrganizationState,
 ): PortEquipmentMembershipEditPlan {
 	const emptyMetadata = metadata(sourceEquipmentGroupId, targetRows, [], [], []);
 	if (
@@ -279,6 +282,17 @@ export function planPortEquipmentMembershipEdit(
 		);
 	}
 
+	if (organizations) {
+		const ownershipError = portEquipmentLoopEditTargetError(
+			organizations,
+			snapshot.equipmentGroup,
+			snapshot.ports,
+			targetGroup,
+			targetPorts,
+		);
+		if (ownershipError)
+			return invalid(baseRevision, basePatchSequence, emptyMetadata, ownershipError);
+	}
 	const portMutations: PortMutation[] = [
 		...removedPorts.map((before) => Object.freeze({ id: before.id, before, after: null })),
 		...addedPorts.map((after) => Object.freeze({ id: after.id, before: null, after })),

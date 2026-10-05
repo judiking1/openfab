@@ -4,12 +4,14 @@ import type {
 	PortEquipmentState,
 } from "../core/EquipmentGroup";
 import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
+import { portEquipmentLoopEditTargetError } from "../core/PortEquipmentLoopEdit";
 import {
 	createInvalidPortEquipmentMutationPlan,
 	createPortEquipmentMutationPlan,
 	type PortEquipmentMutationPlan,
 } from "../core/PortEquipmentPlan";
 import { type PortRecord, portRecordEquals } from "../core/PortRecord";
+import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import {
 	type CompiledPortSlots,
 	PORT_SLOT_STATUS,
@@ -83,6 +85,7 @@ export function planMoveOhbToSlot(
 	equipmentGroupId: number,
 	baseRevision: number,
 	basePatchSequence: number,
+	organizations?: StaticFabOrganizationState,
 ): PortEquipmentMutationPlan {
 	const source = resolveSingleOhb(state, equipmentGroupId);
 	if (typeof source === "string") {
@@ -96,6 +99,17 @@ export function planMoveOhbToSlot(
 		...portSlotRecord(slots, row, source.port.id, source.equipmentGroup.id, source.port.barcode),
 		direction: source.port.direction,
 	};
+	const ownershipError = organizations
+		? portEquipmentLoopEditTargetError(
+				organizations,
+				source.equipmentGroup,
+				[source.port],
+				source.equipmentGroup,
+				[moved],
+			)
+		: null;
+	if (ownershipError)
+		return invalid("edit-port-equipment", baseRevision, basePatchSequence, ownershipError);
 	if (portRecordEquals(source.port, moved)) {
 		return invalid(
 			"edit-port-equipment",

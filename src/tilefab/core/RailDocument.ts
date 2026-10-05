@@ -49,6 +49,7 @@ import {
 	assertPortEquipmentLayout,
 	assertPortEquipmentLayoutCooperatively,
 } from "./PortEquipmentLayoutValidator";
+import { resolvePortEquipmentLoopEditTransition } from "./PortEquipmentLoopEdit";
 import {
 	PORT_EQUIPMENT_BATCH_PLAN_KIND,
 	type PortEquipmentMutationPlan,
@@ -3926,7 +3927,27 @@ export class RailDocument {
 				throw new Error(`정적 FAB 조직 ${organizationId}의 보호 인증 범위가 실제 변경과 다릅니다`);
 			}
 		}
-		const authorizedRelocations = new Set(organizationImpactAuthorizations);
+		// Recompute this narrow port-only exemption from the current source, never from UI state
+		// or an authorization carried by the plan. History reversal is checked identically.
+		const loopEdit =
+			effectiveChanges.length === 0 &&
+			effectiveSwitchChanges.length === 0 &&
+			effectiveOrganizationChanges.length === 0 &&
+			organizationImpactAuthorizations.length === 0 &&
+			affectedOrganizations.length > 0
+				? resolvePortEquipmentLoopEditTransition(
+						this.currentOrganizations,
+						this.currentPortEquipment,
+						nextPortEquipment,
+						effectivePortChanges,
+						effectiveEquipmentGroupChanges,
+					)
+				: { organizationIds: [], reason: null };
+		if (loopEdit.reason) throw new Error(loopEdit.reason);
+		const authorizedRelocations = new Set([
+			...organizationImpactAuthorizations,
+			...loopEdit.organizationIds,
+		]);
 		const unhandledOrganizations = unhandledStaticFabOrganizationImpacts(
 			this.organizationImpactIndex,
 			affectedOrganizations,

@@ -3,7 +3,9 @@ import {
 	type PortEquipmentIntegrityIssue,
 	type PortEquipmentState,
 } from "../core/EquipmentGroup";
+import { resolvePortEquipmentLoopEditOwnership } from "../core/PortEquipmentLoopEdit";
 import type { PortRecord } from "../core/PortRecord";
+import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 
 export interface PortEquipmentSelectionIdentity {
 	readonly portId: number;
@@ -41,6 +43,8 @@ export interface PortEquipmentActionContext {
 	readonly editableSelection: ResolvedPortEquipmentSelection | null;
 	/** Direct stored equipment membership in any organization from the same current source. */
 	readonly directlyOwned: boolean;
+	/** Current document source; omission keeps the older fail-closed ownership restriction. */
+	readonly organizations?: StaticFabOrganizationState;
 }
 
 const EQUIPMENT_ACTION_ALLOWED: PortEquipmentActionDecision = Object.freeze({
@@ -64,6 +68,7 @@ function blockedEquipmentAction(
 export function resolvePortEquipmentActionAvailability({
 	editableSelection,
 	directlyOwned,
+	organizations,
 }: PortEquipmentActionContext): PortEquipmentActionAvailability {
 	if (!editableSelection) {
 		const blocked = blockedEquipmentAction(
@@ -78,12 +83,18 @@ export function resolvePortEquipmentActionAvailability({
 		});
 	}
 	const group = editableSelection.equipmentGroup;
-	const ownershipBlock = directlyOwned
-		? blockedEquipmentAction(
-				"DIRECTLY_OWNED",
-				"이 장비는 조직에 소속되어 있습니다 · 소속을 먼저 분리한 뒤 이동·Port 편집·철거하세요",
-			)
+	const ownership = organizations
+		? resolvePortEquipmentLoopEditOwnership(organizations, group.id)
 		: null;
+	const hasOwner = ownership ? ownership.ownerOrganizationIds.length > 0 : directlyOwned;
+	const ownershipBlock = ownership?.reason
+		? blockedEquipmentAction("DIRECTLY_OWNED", ownership.reason)
+		: !ownership && directlyOwned
+			? blockedEquipmentAction(
+					"DIRECTLY_OWNED",
+					"이 장비는 조직에 소속되어 있습니다 · 소속을 먼저 분리한 뒤 이동·Port 편집·철거하세요",
+				)
+			: null;
 	const customBlock =
 		group.kind === "STK" && group.template === "CUSTOM"
 			? blockedEquipmentAction(
@@ -101,7 +112,13 @@ export function resolvePortEquipmentActionAvailability({
 						"OHB는 한 개 Port를 사용합니다 · Port 구성 편집은 EQ 또는 Stocker에서 사용할 수 있습니다",
 					)
 				: (ownershipBlock ?? customBlock ?? EQUIPMENT_ACTION_ALLOWED),
-		delete: ownershipBlock ?? EQUIPMENT_ACTION_ALLOWED,
+		delete: hasOwner
+			? (ownershipBlock ??
+				blockedEquipmentAction(
+					"DIRECTLY_OWNED",
+					"이 장비는 조직에 소속되어 있습니다 · 철거하려면 소속을 먼저 분리하세요",
+				))
+			: EQUIPMENT_ACTION_ALLOWED,
 	});
 }
 

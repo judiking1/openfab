@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compilePhysicalPathMigration } from "../compile/PhysicalPathMigration";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
+import { planEraseEquipmentGroup, planMoveOhbToSlot } from "../compile/PortEquipmentEditPlanner";
 import {
 	PortEquipmentGroupSlotIndex,
 	planPortEquipmentGroupEdit,
@@ -39,12 +40,500 @@ import {
 	createStaticFabBlueprintTemplate,
 	planStaticFabBlueprintPlacement,
 } from "../core/StaticFabBlueprint";
+import {
+	compareDirectedRailEdges,
+	copyStaticFabOrganizationState,
+} from "../core/StaticFabOrganization";
 import { planCreateStaticFabOrganizationFromSelection } from "../core/StaticFabOrganizationPlan";
 import { createStaticFabSelection, planStaticFabSelectionErase } from "../core/StaticFabSelection";
 import { encodeRailCell, TileMap } from "../core/TileMap";
 import { captureRailMirrorSnapshot, checksumRailMap } from "./RailMirrorChecksum";
 import { RailPatchMirror } from "./RailPatchMirror";
 import { checksumRailPhysicalLayout } from "./RailPhysicalLayout";
+import { decodeRailPatchSoA, encodeRailPatchEvent } from "./railMirrorProtocol";
+
+describe("same-Loop equipment edits", () => {
+	it.each([
+		"OHB",
+		"EQ",
+		"STK",
+	] as const)("moves owned %s through typed patches with stable identity and atomic history", (kind) => {
+		const { document, slots, physical, move } = loopEquipmentFixture(kind);
+		const mirror = new RailPatchMirror();
+		mirror.sync(
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+			).snapshot,
+		);
+		const original = document.portEquipment;
+		const organizations = document.organizations;
+		const buffers = mirror.getPhysicalPublication().current.buffers;
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => {
+			events.push(event);
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		});
+		const preview = move(7, true, "preview", 4);
+		const plan = move(7, true, "commit", 4);
+		expect(preview.valid, preview.reason).toBe(true);
+		expect(plan.portMutations).toEqual(preview.portMutations);
+		expect(document.commitPortEquipment(plan), document.getLastCommandError() ?? plan.reason).toBe(
+			true,
+		);
+		const moved = document.portEquipment;
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			organizationChanges: [],
+			organizationImpactAuthorizations: [],
+		});
+		expect(document.organizations).toBe(organizations);
+		expect(
+			moved.ports.map(({ id, barcode, direction, equipmentGroupId }) => ({
+				id,
+				barcode,
+				direction,
+				equipmentGroupId,
+			})),
+		).toEqual(
+			original.ports.map(({ id, barcode, direction, equipmentGroupId }) => ({
+				id,
+				barcode,
+				direction,
+				equipmentGroupId,
+			})),
+		);
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment).toEqual(original);
+		expect(document.redo()).toBe(true);
+		expect(document.portEquipment).toEqual(moved);
+		expect(events).toHaveLength(3);
+		expect(mirror.organizationState).toEqual(organizations);
+		expect(mirror.state.checksum).toBe(
+			checksumRailMap(document.map, document.portEquipment, organizations),
+		);
+		expect(mirror.getPhysicalPublication().current.buffers).toBe(buffers);
+		expect(physical.revision).toBe(slots.revision);
+	});
+
+	it.each([
+		"EQ",
+		"STK",
+	] as const)("edits owned %s Port membership without detaching through undo/redo", (kind) => {
+		const { document, slots, physical } = loopEquipmentFixture(kind);
+		const mirror = new RailPatchMirror();
+		mirror.sync(
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+			).snapshot,
+		);
+		const organizations = document.organizations;
+		const originalPorts = document.portEquipment.ports;
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => {
+			events.push(event);
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		});
+		const edit = (xs: readonly number[]) =>
+			planPortEquipmentMembershipEdit(
+				document.map,
+				slots,
+				new PortEquipmentGroupSlotIndex(slots),
+				new PortSlotAvailabilityIndex(physical, document.portEquipment, kind),
+				document.portEquipment,
+				1,
+				xs.map((x) => portSlotRowAt(slots, x, 0)),
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.organizations,
+			);
+		const add = edit([2, 3, 4]);
+		expect(add.valid, add.reason).toBe(true);
+		expect(document.commitPortEquipment(add), document.getLastCommandError() ?? add.reason).toBe(
+			true,
+		);
+		expect(events).toHaveLength(1);
+		expect(document.portEquipment.ports.slice(0, 2)).toEqual(originalPorts);
+		const remove = edit([3, 4]);
+		expect(
+			document.commitPortEquipment(remove),
+			document.getLastCommandError() ?? remove.reason,
+		).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]?.portIds).toEqual([2, 3]);
+		const replace = edit([4, 5]);
+		expect(replace.membershipEdit).toMatchObject({
+			retainedPortIds: [3],
+			removedPortIds: [2],
+			addedPortIds: [4],
+		});
+		expect(
+			document.commitPortEquipment(replace),
+			document.getLastCommandError() ?? replace.reason,
+		).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]?.portIds).toEqual([3, 4]);
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]?.portIds).toEqual([2, 3]);
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]?.portIds).toEqual([1, 2, 3]);
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment.ports).toEqual(originalPorts);
+		expect(document.redo()).toBe(true);
+		expect(document.redo()).toBe(true);
+		expect(document.redo()).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]?.portIds).toEqual([3, 4]);
+		expect(document.organizations).toBe(organizations);
+		expect(mirror.organizationState).toEqual(organizations);
+		expect(mirror.state.checksum).toBe(
+			checksumRailMap(document.map, document.portEquipment, organizations),
+		);
+	});
+
+	it.each([
+		"OHB",
+		"EQ",
+		"STK",
+	] as const)("rejects an owned %s destination outside the Loop in preview, commit and Worker", (kind) => {
+		const { document, move } = loopEquipmentFixture(kind);
+		for (const mode of ["preview", "commit"] as const) {
+			const plan = move(23, true, mode);
+			expect(plan).toMatchObject({ valid: false, reason: expect.stringContaining("밖에") });
+		}
+		const bypassPreview = move(23, false);
+		expect(bypassPreview.valid, bypassPreview.reason).toBe(true);
+		assertLoopEditRejected(document, bypassPreview, /밖에/);
+	});
+
+	it("checks every FLEX Port even when the retained anchor stays inside its Loop", () => {
+		const { document, slots, physical } = loopEquipmentFixture("STK");
+		const args = [
+			document.map,
+			slots,
+			new PortEquipmentGroupSlotIndex(slots),
+			new PortSlotAvailabilityIndex(physical, document.portEquipment, "STK"),
+			document.portEquipment,
+			1,
+			[2, 23].map((x) => portSlotRowAt(slots, x, 0)),
+			document.map.getRevision(),
+			document.getPatchSequence(),
+		] as const;
+		expect(planPortEquipmentMembershipEdit(...args, document.organizations)).toMatchObject({
+			valid: false,
+			reason: expect.stringContaining("밖에"),
+		});
+		const bypassPreview = planPortEquipmentMembershipEdit(...args);
+		expect(bypassPreview.valid, bypassPreview.reason).toBe(true);
+		assertLoopEditRejected(document, bypassPreview, /밖에/);
+	});
+
+	it.each([
+		"area",
+		"multiple",
+	] as const)("rejects %s ownership from latest state even for a plan prepared without ownership", (ownership) => {
+		const { document, move } = loopEquipmentFixture("EQ", ownership);
+		const reason = ownership === "area" ? /Process Loop가 아닙니다/ : /여러 조직/;
+		expect(move(7, true)).toMatchObject({ valid: false, reason: expect.stringMatching(reason) });
+		assertLoopEditRejected(document, move(7, false), reason);
+	});
+
+	it("revalidates changed owners when source replacement preserves revision and patch counters", () => {
+		const original = loopEquipmentFixture("EQ");
+		const plan = original.move(7, true);
+		expect(plan.valid).toBe(true);
+		const replacement = loopEquipmentFixture("EQ", "multiple");
+		expect(replacement.document.getPatchSequence()).toBe(plan.basePatchSequence);
+		expect(replacement.document.map.getRevision()).toBe(plan.baseRevision);
+		assertLoopEditRejected(replacement.document, plan, /여러 조직/);
+	});
+
+	it("allows an explicitly declared standalone Process Loop without a Bay parent", () => {
+		const { document, move } = loopEquipmentFixture("EQ", "standalone");
+		const plan = move(7, true);
+		expect(plan.valid, plan.reason).toBe(true);
+		const organizations = document.organizations;
+		expect(document.commitPortEquipment(plan), document.getLastCommandError() ?? plan.reason).toBe(
+			true,
+		);
+		expect(document.organizations).toBe(organizations);
+		expect(document.undo()).toBe(true);
+		expect(document.redo()).toBe(true);
+	});
+
+	it("keeps owned deletion and identity changes blocked and rejects stale accepted plans", () => {
+		const { document, move } = loopEquipmentFixture("OHB");
+		const stale = move(7, true);
+		expect(document.commitPortEquipment(move(8, true))).toBe(true);
+		const sequence = document.getPatchSequence();
+		expect(document.commitPortEquipment(stale)).toBe(false);
+		expect(document.getPatchSequence()).toBe(sequence);
+		assertLoopEditRejected(
+			document,
+			planEraseEquipmentGroup(document.portEquipment, 1, document.map.getRevision(), sequence),
+			/철거하려면/,
+		);
+		const before = document.portEquipment.ports[0] as PortRecord;
+		assertLoopEditRejected(
+			document,
+			createPortEquipmentMutationPlan(
+				"edit-port-equipment",
+				document.map.getRevision(),
+				sequence,
+				[{ id: before.id, before, after: { ...before, barcode: "REPLACED" } }],
+				[],
+			),
+			/바코드/,
+		);
+	});
+
+	it.each([
+		"OHB",
+		"EQ",
+		"STK",
+	] as const)("rejects %s identity replacement at the same station and during movement", (kind) => {
+		for (const relocate of [false, true]) {
+			const { document, move } = loopEquipmentFixture(kind);
+			const beforeGroup = document.portEquipment.equipmentGroups[0];
+			if (!beforeGroup) throw new Error("Expected the owned group.");
+			const moved = move(7, false);
+			expect(moved.valid, moved.reason).toBe(true);
+			const targets = relocate
+				? moved.portMutations.map((change) => change.after as PortRecord)
+				: document.portEquipment.ports;
+			const replacements = targets.map((port, index) => ({
+				...port,
+				id: document.portEquipment.nextPortId + index,
+				barcode: `${kind}-REPLACED-${index}`,
+				direction: "AGAINST_TRAVEL" as const,
+			}));
+			const plan = createPortEquipmentMutationPlan(
+				"edit-port-equipment",
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				[
+					...document.portEquipment.ports.map((before) => ({ id: before.id, before, after: null })),
+					...replacements.map((after) => ({ id: after.id, before: null, after })),
+				],
+				[
+					{
+						id: beforeGroup.id,
+						before: beforeGroup,
+						after: { ...beforeGroup, portIds: replacements.map((port) => port.id) },
+					},
+				],
+			);
+			assertLoopEditRejected(document, plan, /ID|유지/);
+		}
+	});
+
+	it.each([
+		"EQ",
+		"STK",
+	] as const)("rejects partial %s re-identification of an existing slot", (kind) => {
+		const { document } = loopEquipmentFixture(kind);
+		const beforeGroup = document.portEquipment.equipmentGroups[0];
+		const beforePort = document.portEquipment.ports[0];
+		if (!beforeGroup || !beforePort) throw new Error("Expected the owned group and Port.");
+		const afterPort = { ...beforePort, id: document.portEquipment.nextPortId, barcode: "REPLACED" };
+		const afterGroup = {
+			...beforeGroup,
+			portIds: beforeGroup.portIds.map((id) => (id === beforePort.id ? afterPort.id : id)),
+		};
+		assertLoopEditRejected(
+			document,
+			createPortEquipmentMutationPlan(
+				"edit-port-equipment",
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				[
+					{ id: beforePort.id, before: beforePort, after: null },
+					{ id: afterPort.id, before: null, after: afterPort },
+				],
+				[{ id: beforeGroup.id, before: beforeGroup, after: afterGroup }],
+			),
+			/ID|유지/,
+		);
+	});
+});
+
+function loopEquipmentFixture(
+	kind: "OHB" | "EQ" | "STK",
+	ownership: "loop" | "area" | "multiple" | "standalone" = "loop",
+) {
+	const source = new RailDocument();
+	for (const [start, end] of [
+		[
+			{ x: 0, y: 0 },
+			{ x: 15, y: 0 },
+		],
+		[
+			{ x: 15, y: 0 },
+			{ x: 15, y: 4 },
+		],
+		[
+			{ x: 15, y: 4 },
+			{ x: 0, y: 4 },
+		],
+		[
+			{ x: 0, y: 4 },
+			{ x: 0, y: 0 },
+		],
+		[
+			{ x: 20, y: 0 },
+			{ x: 35, y: 0 },
+		],
+	] as const)
+		expect(source.commit(planRailConstruction(source.map, start, end))).toBe(true);
+	const physical = compilePhysicalRail(source.map);
+	const slots = compilePortSlotPreparedArtifactCatalog(physical)[kind].slots;
+	const availability = new PortSlotAvailabilityIndex(physical, source.portEquipment, kind);
+	const rows = [2, 3].map((x) => portSlotRowAt(slots, x, 0));
+	const placement =
+		kind === "OHB"
+			? planOhbPlacement(
+					slots,
+					rows[0] as number,
+					availability,
+					source.portEquipment,
+					source.map.getRevision(),
+					source.getPatchSequence(),
+				)
+			: kind === "EQ"
+				? planEqRowPlacement(
+						slots,
+						rows,
+						availability,
+						source.portEquipment,
+						1_000,
+						null,
+						source.map.getRevision(),
+						source.getPatchSequence(),
+					)
+				: planStkPlacement(
+						slots,
+						rows,
+						availability,
+						source.portEquipment,
+						"FLEX",
+						source.map.getRevision(),
+						source.getPatchSequence(),
+					);
+	expect(source.commitPortEquipment(placement), placement.reason).toBe(true);
+	const railEdges = buildRailModuleOwnershipIndex(source.map)
+		.modules.flatMap((module) => module.eraseEdges)
+		.filter((edge) => edge.from.x < 20 && edge.to.x < 20)
+		.sort(compareDirectedRailEdges);
+	const organizations = copyStaticFabOrganizationState({
+		nextOrganizationId: 4,
+		records: [
+			{
+				id: 1,
+				kind: "BAY",
+				name: "Synthetic Bay",
+				membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [] },
+			},
+			{
+				id: 2,
+				kind: ownership === "area" ? "AREA" : "AISLE",
+				name: "Synthetic Loop",
+				parentOrganizationIds: ownership === "area" || ownership === "standalone" ? [] : [1],
+				declaredSemanticRole: ownership === "standalone" ? "PROCESS_LOOP" : null,
+				membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [1] },
+			},
+			...(ownership === "multiple"
+				? [
+						{
+							id: 3,
+							kind: "AREA" as const,
+							name: "Shared Area",
+							membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [1] },
+						},
+					]
+				: []),
+		],
+	});
+	const document = RailDocument.fromLoadedMap(
+		source.map,
+		source.getPatchSequence(),
+		source.portEquipment,
+		organizations,
+	);
+	const move = (
+		x: number,
+		checkOwnership: boolean,
+		validation: "preview" | "commit" = "commit",
+		z = 0,
+	) => {
+		const liveAvailability = new PortSlotAvailabilityIndex(physical, document.portEquipment, kind);
+		return kind === "OHB"
+			? planMoveOhbToSlot(
+					slots,
+					portSlotRowAt(slots, x, z),
+					liveAvailability,
+					document.portEquipment,
+					1,
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					checkOwnership ? document.organizations : undefined,
+				)
+			: planPortEquipmentGroupEdit(
+					document.map,
+					slots,
+					new PortEquipmentGroupSlotIndex(slots),
+					liveAvailability,
+					document.portEquipment,
+					1,
+					1,
+					portSlotRowAt(slots, x, z),
+					"move",
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					validation,
+					checkOwnership ? document.organizations : undefined,
+				);
+	};
+	return { document, slots, physical, move };
+}
+
+function assertLoopEditRejected(
+	document: RailDocument,
+	plan: ReturnType<typeof createPortEquipmentMutationPlan>,
+	reason: RegExp,
+): void {
+	const before = document.portEquipment;
+	const organizations = document.organizations;
+	const sequence = document.getPatchSequence();
+	expect(document.commitPortEquipment(plan)).toBe(false);
+	expect(document.getLastCommandError()).toMatch(reason);
+	expect(document.portEquipment).toBe(before);
+	expect(document.organizations).toBe(organizations);
+	expect(document.getPatchSequence()).toBe(sequence);
+	const mirror = new RailPatchMirror();
+	mirror.sync(captureRailMirrorSnapshot(document.map, sequence, before, organizations).snapshot);
+	const state = mirror.state;
+	const publication = mirror.getPhysicalPublication();
+	const patch: RailPatchEvent = {
+		...emptyOrganizationPatch(),
+		kind: plan.kind,
+		sequence: sequence + 1,
+		baseRevision: document.map.getRevision(),
+		revision: document.map.getRevision(),
+		changes: [],
+		switchChanges: [],
+		portChanges: plan.portMutations,
+		equipmentGroupChanges: plan.equipmentGroupMutations,
+		organizationNextIdBefore: organizations.nextOrganizationId,
+		organizationNextIdAfter: organizations.nextOrganizationId,
+	};
+	expect(() => mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(patch).patch))).toThrow(
+		reason,
+	);
+	expect(mirror.state).toEqual(state);
+	expect(mirror.getPhysicalPublication()).toBe(publication);
+}
 
 describe("RailPatchMirror", () => {
 	it("rejects a derived point allocation overflow before publication and permits a corrected retry", () => {

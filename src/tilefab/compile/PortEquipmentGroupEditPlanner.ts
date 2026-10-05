@@ -11,6 +11,7 @@ import {
 } from "../core/EquipmentGroupPortOrder";
 import { allocatePortEquipmentRecordIds } from "../core/PortEquipmentIdAllocator";
 import { assertPortEquipmentLayout } from "../core/PortEquipmentLayoutValidator";
+import { portEquipmentLoopEditTargetError } from "../core/PortEquipmentLoopEdit";
 import {
 	createInvalidPortEquipmentMutationPlan,
 	createPortEquipmentMutationPlan,
@@ -28,6 +29,7 @@ import {
 	moveCell,
 	oppositeDirection,
 } from "../core/railShape";
+import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import {
 	type CompiledPortSlots,
@@ -172,6 +174,7 @@ export function planPortEquipmentGroupEdit(
 	baseRevision: number,
 	basePatchSequence: number,
 	validationMode: PortEquipmentGroupEditValidationMode = "commit",
+	organizations?: StaticFabOrganizationState,
 ): PortEquipmentGroupEditPlan {
 	const kind = editPlanKind(state, sourceEquipmentGroupId, mode);
 	const emptyMetadata = metadata(
@@ -449,6 +452,17 @@ export function planPortEquipmentGroupEdit(
 			editMetadata,
 			"Choose a different legal target for this equipment group.",
 		);
+	}
+	if (mode === "move" && organizations) {
+		const ownershipError = portEquipmentLoopEditTargetError(
+			organizations,
+			snapshot.equipmentGroup,
+			snapshot.ports,
+			targetGroup,
+			finalTargetPorts,
+		);
+		if (ownershipError)
+			return invalid(kind, baseRevision, basePatchSequence, editMetadata, ownershipError);
 	}
 	if (validationMode === "commit") {
 		try {

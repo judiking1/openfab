@@ -11484,11 +11484,11 @@ async function assertOwnedEquipmentContextActions(page, targets, label) {
 		const move = menu.getByRole("menuitem", { name: target.kind === "OHB" ? "포트 이동" : "그룹 전체 이동", exact: true });
 		const copy = menu.getByRole("menuitem", { name: target.kind === "OHB" ? "포트 복제" : "그룹 전체 복제", exact: true });
 		const remove = menu.getByRole("menuitem", { name: "장비 그룹 철거", exact: true });
-		assertEqual(await move.isDisabled(), true, `${label} owned ${target.kind} menu move`);
+		assertEqual(await move.isEnabled(), true, `${label} single-Loop ${target.kind} menu move`);
 		assertEqual(await remove.isDisabled(), true, `${label} owned ${target.kind} menu delete`);
 		assertIncludes(await remove.getAttribute("title"), "소속", `${label} owned ${target.kind} menu explains refusal`);
 		assertEqual(await copy.isEnabled(), true, `${label} owned ${target.kind} menu copy`);
-		if (target.kind !== "OHB") assertEqual(await menu.getByRole("menuitem", { name: "포트 구성 편집", exact: true }).isDisabled(), true, `${label} owned ${target.kind} Port membership`);
+		if (target.kind !== "OHB") assertEqual(await menu.getByRole("menuitem", { name: "포트 구성 편집", exact: true }).isEnabled(), true, `${label} single-Loop ${target.kind} Port membership`);
 		await page.keyboard.press("Escape");
 		await page.getByTestId("rail-canvas").press("Delete");
 		assertIncludes(await page.locator(".tilefab-statusbar [role='status']").innerText(), "소속", `${label} owned ${target.kind} keyboard uses same refusal`);

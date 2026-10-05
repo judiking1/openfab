@@ -1314,6 +1314,7 @@ interface OhbPlacementIntent extends PortEquipmentSelection {
 
 interface PortEquipmentGroupEditSession {
 	readonly mode: PortEquipmentGroupEditMode;
+	readonly preservesLoopOwnership: boolean;
 	readonly modelGeneration: number;
 	readonly document: RailDocument;
 	readonly slots: CompiledPortSlots;
@@ -1332,6 +1333,7 @@ interface PortEquipmentGroupEditSession {
 }
 
 interface PortEquipmentMembershipEditSessionBase {
+	readonly preservesLoopOwnership: boolean;
 	readonly modelGeneration: number;
 	readonly document: RailDocument;
 	readonly sourceState: PortEquipmentState;
@@ -10730,6 +10732,25 @@ export default function TileFabApp(): React.ReactElement {
 			cancelOrdinaryPortKeyboardDeferredApply();
 		}
 		let resolvedEvaluation = evaluation;
+		const placementIntent =
+			session.portType === "OHB" ? ohbPlacementIntentRef.current : null;
+		if (placementIntent?.kind === "move" && !resolvedEvaluation) {
+			const { document, slots, availability, revision, patchSequence } = session.binding;
+			const plan = planMoveOhbToSlot(
+				slots,
+				session.currentRow,
+				availability,
+				document.portEquipment,
+				placementIntent.equipmentGroupId,
+				revision,
+				patchSequence,
+				document.organizations,
+			);
+			resolvedEvaluation = {
+				legal: plan.valid,
+				reason: plan.valid ? "이동 가능" : portEquipmentReasonLabel(plan.reason),
+			};
+		}
 		if (session.portType === "STK" && !resolvedEvaluation) {
 			const currentDraft = stkDraftSessionRef.current;
 			const draft: StkDraftSession =
@@ -10771,8 +10792,6 @@ export default function TileFabApp(): React.ReactElement {
 		const currentRowSelected =
 			session.portType === "STK" &&
 			(stkDraftSessionRef.current?.selection.rows.includes(session.currentRow) ?? false);
-		const placementIntent =
-			session.portType === "OHB" ? ohbPlacementIntentRef.current : null;
 		const currentRowLegal =
 			resolvedEvaluation?.legal ??
 			session.binding.availability.statusFor(
@@ -11360,6 +11379,7 @@ export default function TileFabApp(): React.ReactElement {
 						placementIntent.equipmentGroupId,
 						activeModel.document.map.getRevision(),
 						activeModel.document.getPatchSequence(),
+						activeModel.document.organizations,
 					)
 				: planCopyOhbToSlot(
 						slots,
@@ -11371,12 +11391,17 @@ export default function TileFabApp(): React.ReactElement {
 						activeModel.document.getPatchSequence(),
 					);
 		if (!activeModel.document.commitPortEquipment(plan)) {
-			setStatus(portEquipmentReasonLabel(plan.reason));
+			const reason = portEquipmentReasonLabel(
+				plan.valid
+					? (activeModel.document.getLastCommandError() ?? "OHB 편집 조건이 변경되었습니다 · 대상을 다시 선택하세요")
+					: plan.reason,
+			);
+			setStatus(reason);
 			const keyboardSession = guidedPortKeyboardSessionRef.current;
 			if (keyboardSession?.portType === "OHB") {
 				guidedPortKeyboardRowPresentation(keyboardSession, {
 					legal: false,
-					reason: portEquipmentReasonLabel(plan.reason),
+					reason,
 				});
 			}
 			scheduleRender();
@@ -16369,7 +16394,9 @@ export default function TileFabApp(): React.ReactElement {
 					? `valid:${session.eligibleProcessLoopIds?.join(",") ?? ""}`
 					: "invalid";
 		const loopSummary = plan?.valid
-			? session.eligibleProcessLoopIds?.length
+			? session.preservesLoopOwnership
+				? " · 현재 Loop 소속 유지 · 모든 Port가 같은 Loop 안에 있습니다"
+				: session.eligibleProcessLoopIds?.length
 				? ` · ${session.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능 · 소속은 배치 후 별도로 지정하세요`
 				: " · 모든 Port를 포함하는 Loop 없음 · 다른 위치 또는 Port 구성을 확인하세요"
 			: "";
@@ -16463,6 +16490,7 @@ export default function TileFabApp(): React.ReactElement {
 						session.baseRevision,
 						session.basePatchSequence,
 						"preview",
+						session.document.organizations,
 					);
 		session.eligibleProcessLoopIds = null;
 		if (session.plan?.valid) {
@@ -16526,6 +16554,7 @@ export default function TileFabApp(): React.ReactElement {
 			session.baseRevision,
 			session.basePatchSequence,
 			"commit",
+			session.document.organizations,
 		);
 		session.plan = plan;
 		if (!plan.valid) {
@@ -16534,9 +16563,17 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (!session.document.commitPortEquipment(plan)) {
-			exitPortEquipmentGroupEditToInspect(
-				"장비 그룹 편집 직전에 정적 FAB가 변경되었습니다 · 다시 시도하세요",
+			const reason = portEquipmentReasonLabel(
+				session.document.getLastCommandError() ?? "장비 그룹 편집 조건이 변경되었습니다 · 대상을 다시 선택하세요",
 			);
+			if (!isCurrentPortEquipmentGroupEdit(session)) {
+				exitPortEquipmentGroupEditToInspect(reason);
+				return;
+			}
+			session.plan = Object.freeze({ ...plan, valid: false, reason });
+			publishPortEquipmentGroupEditAccessibility(session);
+			setStatus(reason);
+			scheduleRender();
 			return;
 		}
 		const targetAnchorPortId = plan.groupEdit.portTargets.find(
@@ -16902,6 +16939,7 @@ export default function TileFabApp(): React.ReactElement {
 			selectedRows,
 			session.baseRevision,
 			session.basePatchSequence,
+			session.document.organizations,
 		);
 		const planElapsed = Math.max(0, performanceNow() - planStartedAt);
 		const telemetry = portEquipmentMembershipTelemetryRef.current;
@@ -16918,12 +16956,17 @@ export default function TileFabApp(): React.ReactElement {
 			commitDispatchElapsed,
 		);
 		if (!plan.valid || !committed) {
+			const reason = portEquipmentReasonLabel(
+				plan.valid
+					? (session.document.getLastCommandError() ?? "포트 편집 조건이 변경되었습니다 · 구성을 다시 확인하세요")
+					: plan.reason,
+			);
 			const next = Object.freeze({
 				...session,
-				plan,
+				plan: plan.valid ? Object.freeze({ ...plan, valid: false, reason }) : plan,
 			}) satisfies PortEquipmentMembershipEditSession;
 			updatePortEquipmentMembershipEditSession(next);
-			setStatus(portEquipmentReasonLabel(plan.reason));
+			setStatus(reason);
 			scheduleRender();
 			return;
 		}
@@ -17957,6 +18000,11 @@ export default function TileFabApp(): React.ReactElement {
 			);
 		}
 		const activePortKeyboardSession = guidedPortKeyboardSessionRef.current;
+		const continuesOhbPlacementIntent =
+			activePortKeyboardSession?.portType === "OHB" &&
+			toolRef.current === "ohb" &&
+			ohbPlacementIntentRef.current !== null &&
+			guidedPortKeyboardSessionCurrent(activePortKeyboardSession);
 		const continuesStkSelection =
 			activePortKeyboardSession?.portType === "STK" &&
 			toolRef.current === "stk" &&
@@ -17969,7 +18017,7 @@ export default function TileFabApp(): React.ReactElement {
 			portRowDragRef.current.pointerId === -1 &&
 			portRowDragRef.current.anchorRow === activePortKeyboardSession.anchorRow &&
 			isCurrentPortRowDrag(portRowDragRef.current);
-		if (activePortKeyboardSession && event.button === 0 && !continuesStkSelection && !continuesEqSelection) {
+		if (activePortKeyboardSession && event.button === 0 && !continuesOhbPlacementIntent && !continuesStkSelection && !continuesEqSelection) {
 			clearTransientConstruction("포인터 Port 배치로 전환했습니다");
 		}
 		if (staticFabArrangementUiRef.current) {
@@ -18214,6 +18262,11 @@ export default function TileFabApp(): React.ReactElement {
 				return;
 			}
 			if (placementIntent) {
+				if (continuesOhbPlacementIntent && activePortKeyboardSession) {
+					presentGuidedPortKeyboardSession(
+						moveGuidedPortKeyboardCursor(activePortKeyboardSession, row),
+					);
+				}
 				commitOhbPlacementIntentAtRow(placementIntent, row);
 				return;
 			}
@@ -21789,7 +21842,7 @@ export default function TileFabApp(): React.ReactElement {
 		const directlyOwned = resolved !== null && document.organizations.records.some((record) =>
 			record.membership.equipmentGroupIds.includes(resolved.equipmentGroup.id),
 		);
-		return { document, resolved, actions: resolvePortEquipmentActionAvailability({ editableSelection: resolved, directlyOwned }) };
+		return { document, resolved, directlyOwned, actions: resolvePortEquipmentActionAvailability({ editableSelection: resolved, directlyOwned, organizations: document.organizations }) };
 	};
 
 	const blockPortEquipmentAction = (decision: PortEquipmentActionDecision): boolean => {
@@ -21947,7 +22000,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
-		const { resolved, actions } = currentPortEquipmentActions();
+		const { resolved, actions, directlyOwned } = currentPortEquipmentActions();
 		if (blockPortEquipmentAction(actions[kind])) return;
 		const selectedPort = selectedPortEquipmentRef.current;
 		if (!resolved || resolved.equipmentGroup.kind !== "OHB") {
@@ -21980,7 +22033,7 @@ export default function TileFabApp(): React.ReactElement {
 		startOrdinaryPortKeyboard("OHB", undefined, initialTarget);
 		setStatus(
 			kind === "move"
-				? `${resolved.port.barcode ?? `PORT-${resolved.port.id}`} 이동 · 방향키/WASD로 합법 슬롯 이동 · Enter 또는 클릭으로 확정 · Esc 취소`
+				? `${resolved.port.barcode ?? `PORT-${resolved.port.id}`} 이동${directlyOwned ? " · 현재 Loop 소속 유지 · 같은 Loop 안의 슬롯을 선택하세요" : ""} · 방향키/WASD로 합법 슬롯 이동 · Enter 또는 클릭으로 확정 · Esc 취소`
 				: `${resolved.port.barcode ?? `PORT-${resolved.port.id}`} 복제 · 방향키/WASD로 합법 슬롯 이동 · Enter 또는 클릭으로 확정 · Esc 취소`,
 		);
 		scheduleRender();
@@ -21990,7 +22043,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
-		const { resolved, actions } = currentPortEquipmentActions();
+		const { resolved, actions, directlyOwned } = currentPortEquipmentActions();
 		if (blockPortEquipmentAction(actions[mode])) return;
 		const selectedPort = selectedPortEquipmentRef.current;
 		if (
@@ -22022,6 +22075,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const session: PortEquipmentGroupEditSession = {
 			mode,
+			preservesLoopOwnership: mode === "move" && directlyOwned,
 			modelGeneration: model.generation,
 			document: model.document,
 			slots,
@@ -22045,7 +22099,7 @@ export default function TileFabApp(): React.ReactElement {
 		updatePortEquipmentGroupEditSession(session);
 		publishPortEquipmentGroupEditAccessibility(session);
 		setStatus(
-			`${portType}-${resolved.equipmentGroup.id} 전체 ${mode === "move" ? "이동" : "복제"} · 기준 포트를 놓을 슬롯을 선택하세요`,
+			`${portType}-${resolved.equipmentGroup.id} 전체 ${mode === "move" ? "이동" : "복제"}${session.preservesLoopOwnership ? " · 현재 Loop 소속 유지 · 모든 Port가 같은 Loop 안에 있어야 합니다" : ""} · 기준 포트를 놓을 슬롯을 선택하세요`,
 		);
 		scheduleRender();
 		requestAnimationFrame(() => canvasRef.current?.focus());
@@ -22055,7 +22109,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
-		const { resolved, actions } = currentPortEquipmentActions();
+		const { resolved, actions, directlyOwned } = currentPortEquipmentActions();
 		if (blockPortEquipmentAction(actions.editMembership)) return;
 		const selectedPort = selectedPortEquipmentRef.current;
 		if (
@@ -22104,6 +22158,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const rows = sourceRows as number[];
 		const base = {
+			preservesLoopOwnership: directlyOwned,
 			modelGeneration: model.generation,
 			document: model.document,
 			sourceState: model.document.portEquipment,
@@ -29068,6 +29123,7 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedPortActions = resolvePortEquipmentActionAvailability({
 		editableSelection: selectedPortEditableDetails,
 		directlyOwned: selectedEquipmentDirectlyOwned,
+		organizations: activeOrganizations,
 	});
 	const contextPortActionReasons = selectedPortDetails && !templateSession && !areaStampSession && !areaSelection && !organizationBundlePlacementSession
 		? [...new Set([
@@ -29718,17 +29774,22 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const structurallyReady =
 			session.portType === "EQ" ? session.selection.valid : session.selection.canComplete;
+		const draftReason = session.portType === "EQ"
+			? session.selection.reason
+			: stkDraftReasonLabel(session.selection.reason);
 		return Object.freeze({
 			sourceCount: sourceRows.size,
 			draftCount: draftRows.length,
 			added,
 			removed,
 			dirty: added > 0 || removed > 0,
-			canComplete: structurallyReady && (added > 0 || removed > 0),
+			canComplete: structurallyReady && (added > 0 || removed > 0) && session.plan?.valid !== false,
 			reason:
-				session.portType === "EQ"
-					? session.selection.reason
-					: stkDraftReasonLabel(session.selection.reason),
+				session.plan?.valid === false
+					? portEquipmentReasonLabel(session.plan.reason)
+					: session.preservesLoopOwnership
+						? `현재 Loop 소속 유지 · ${draftReason}`
+						: draftReason,
 		});
 	}, [portEquipmentMembershipEditSession]);
 	const ordinaryPortGroupCounts = useMemo(
@@ -38543,6 +38604,7 @@ export default function TileFabApp(): React.ReactElement {
 
 				{selectedPortDetails && selectedEquipmentGroup && portEquipmentInspectorVisible ? (
 					<PortEquipmentInspector
+						organizations={activeOrganizations}
 						activePortEquipment={activePortEquipment}
 						bindCompactInspectorDisclosure={bindCompactInspectorDisclosure}
 						canvasRef={canvasRef}

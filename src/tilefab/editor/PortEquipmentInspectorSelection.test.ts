@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { EquipmentGroupRecord, PortEquipmentState } from "../core/EquipmentGroup";
 import type { PortRecord } from "../core/PortRecord";
 import { DIR_E, DIR_W } from "../core/railShape";
+import { copyStaticFabOrganizationState } from "../core/StaticFabOrganization";
 import { PortEquipmentInspector, type PortEquipmentInspectorProps } from "./PortEquipmentInspector";
 import {
 	resolveEditablePortEquipmentSelection,
@@ -229,6 +230,136 @@ describe("PortEquipmentInspectorSelection", () => {
 		}
 	});
 });
+
+describe("PortEquipmentInspector same-Loop editing", () => {
+	it.each([
+		"OHB",
+		"EQ",
+		"STK",
+	] as const)("enables owned %s edits with current Loop source and keeps deletion blocked", (kind) => {
+		const group: EquipmentGroupRecord =
+			kind === "EQ"
+				? { id: 1, kind, portIds: [1, 2], pitchMillimeters: 1_000, recipe: null }
+				: kind === "STK"
+					? { id: 1, kind, portIds: [1, 2], template: "FLEX" }
+					: { id: 1, kind, portIds: [1], template: "SINGLE" };
+		const state = eqState(
+			group.portIds.map((id) => ({ ...port(id, 1, `${kind}-${id}`, id * 1_000), portType: kind })),
+			[group],
+		);
+		const selected = resolveEditablePortEquipmentSelection(state, selection());
+		if (!selected) throw new Error("Expected a complete group.");
+		const organizations = inspectorLoopOrganizations();
+		const actions = resolvePortEquipmentActionAvailability({
+			editableSelection: selected,
+			directlyOwned: false,
+			organizations,
+		});
+		expect(actions.move.allowed).toBe(true);
+		expect(actions.copy.allowed).toBe(true);
+		expect(actions.editMembership.allowed).toBe(kind !== "OHB");
+		expect(actions.delete).toMatchObject({ allowed: false, code: "DIRECTLY_OWNED" });
+		const markup = renderToStaticMarkup(
+			createElement(PortEquipmentInspector, {
+				...inspectorProps(state, selected),
+				selectedEquipmentDirectlyOwned: true,
+				organizations,
+			}),
+		);
+		expect(
+			inspectorActionButton(markup, kind === "OHB" ? "move-ohb-port" : "move-port-equipment-group"),
+		).not.toContain('disabled=""');
+		if (kind !== "OHB")
+			expect(inspectorActionButton(markup, "edit-port-equipment-membership")).not.toContain(
+				'disabled=""',
+			);
+		expect(inspectorActionButton(markup, "delete-port-equipment")).toContain('disabled=""');
+		expect(markup).toContain("소속을 유지하며 같은 Process Loop 안에서");
+		expect(markup).toContain(actions.delete.reason);
+	});
+
+	it.each([
+		"area",
+		"multiple",
+		"custom",
+		"missing-source",
+	] as const)("keeps %s ownership constraints visible before starting an edit", (condition) => {
+		const state =
+			condition === "custom"
+				? eqState(
+						[{ ...port(1, 1, "STK-1", 500), portType: "STK" }],
+						[{ id: 1, kind: "STK", template: "CUSTOM", portIds: [1] }],
+					)
+				: eqState();
+		const selected = resolveEditablePortEquipmentSelection(state, selection());
+		if (!selected) throw new Error("Expected a complete group.");
+		const organizations =
+			condition === "missing-source"
+				? undefined
+				: inspectorLoopOrganizations(
+						condition === "area" || condition === "multiple" ? condition : "loop",
+					);
+		const actions = resolvePortEquipmentActionAvailability({
+			editableSelection: selected,
+			directlyOwned: true,
+			organizations,
+		});
+		expect(actions.move.allowed).toBe(false);
+		expect(actions.editMembership.allowed).toBe(false);
+		expect(actions.delete.allowed).toBe(false);
+		expect(actions.copy.allowed).toBe(condition !== "custom");
+		expect(actions.move.reason).toMatch(
+			condition === "area"
+				? /Process Loop가 아닙니다/
+				: condition === "multiple"
+					? /여러 조직/
+					: condition === "custom"
+						? /CUSTOM/
+						: /소속을 먼저/,
+		);
+		const markup = renderToStaticMarkup(
+			createElement(PortEquipmentInspector, {
+				...inspectorProps(state, selected),
+				selectedEquipmentDirectlyOwned: true,
+				organizations,
+			}),
+		);
+		const escapedReason = renderToStaticMarkup(
+			createElement("span", null, actions.move.reason),
+		).slice(6, -7);
+		expect(markup).toContain(escapedReason);
+		expect(inspectorActionButton(markup, "move-port-equipment-group")).toContain('disabled=""');
+	});
+});
+
+function inspectorLoopOrganizations(kind: "loop" | "area" | "multiple" = "loop") {
+	const membership = {
+		railEdges: [{ from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }],
+		advancedSwitchIds: [],
+		equipmentGroupIds: [1],
+	};
+	return copyStaticFabOrganizationState({
+		nextOrganizationId: 4,
+		records: [
+			{
+				id: 1,
+				kind: "BAY",
+				name: "Synthetic Bay",
+				membership: { ...membership, equipmentGroupIds: [] },
+			},
+			{
+				id: 2,
+				kind: kind === "area" ? "AREA" : "AISLE",
+				name: "Synthetic Loop",
+				parentOrganizationIds: kind === "area" ? [] : [1],
+				membership,
+			},
+			...(kind === "multiple"
+				? [{ id: 3, kind: "AREA" as const, name: "Shared Area", membership }]
+				: []),
+		],
+	});
+}
 
 describe("PortEquipmentInspector action explanations", () => {
 	it.each([

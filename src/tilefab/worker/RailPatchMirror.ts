@@ -41,6 +41,7 @@ import {
 	OPERATIONAL_CONFIGURATION_PATCH_KIND,
 } from "../core/OperationalConfigurationMutation";
 import { assertPortEquipmentLayout } from "../core/PortEquipmentLayoutValidator";
+import { resolvePortEquipmentLoopEditTransition } from "../core/PortEquipmentLoopEdit";
 import type { RailHistoryOriginKind, RailPatchEvent } from "../core/RailDocument";
 import {
 	appendBoundedRailHistoryEntry,
@@ -570,6 +571,21 @@ export class RailPatchMirror {
 					);
 				}
 			}
+			// The mirror independently proves same-Loop containment; no new transport permit is trusted.
+			const loopEdit =
+				railMutationCount === 0 &&
+				patch.organizationChanges.length === 0 &&
+				organizationImpactAuthorizations.length === 0 &&
+				affectedOrganizations.length > 0
+					? resolvePortEquipmentLoopEditTransition(
+							this.mirroredOrganizations,
+							this.mirroredPortEquipment,
+							nextPortEquipment,
+							patch.portChanges,
+							patch.equipmentGroupChanges,
+						)
+					: { organizationIds: [], reason: null };
+			if (loopEdit.reason) throw new Error(loopEdit.reason);
 			const unhandledOrganizations = unhandledStaticFabOrganizationImpacts(
 				this.organizationImpactIndex,
 				affectedOrganizations,
@@ -580,7 +596,7 @@ export class RailPatchMirror {
 				patch.equipmentGroupChanges,
 				this.mirroredPortEquipment,
 				nextPortEquipment,
-				new Set(organizationImpactAuthorizations),
+				new Set([...organizationImpactAuthorizations, ...loopEdit.organizationIds]),
 			);
 			if (unhandledOrganizations.length > 0) {
 				throw new Error(

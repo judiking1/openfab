@@ -24,6 +24,7 @@ import type { PortRecord } from "../core/PortRecord";
 import type {
 	StaticFabOrganizationRecord,
 	StaticFabOrganizationSemanticRole,
+	StaticFabOrganizationState,
 } from "../core/StaticFabOrganization";
 import { staticFabOrganizationParentIds } from "../core/StaticFabOrganization";
 import type { StaticFabProcessLoopEquipmentMembershipQuery } from "../core/StaticFabOrganizationPlan";
@@ -49,6 +50,7 @@ import {
 } from "./PortEquipmentInspectorSelection";
 
 export interface PortEquipmentInspectorProps {
+	readonly organizations?: StaticFabOrganizationState;
 	readonly activePortEquipment: Pick<PortEquipmentState, "equipmentGroups">;
 	readonly bindCompactInspectorDisclosure: (node: HTMLButtonElement | null) => void;
 	readonly canvasRef: RefObject<HTMLCanvasElement | null>;
@@ -109,6 +111,7 @@ export interface PortEquipmentInspectorProps {
 }
 
 export function PortEquipmentInspector({
+	organizations,
 	activePortEquipment,
 	bindCompactInspectorDisclosure,
 	canvasRef,
@@ -159,6 +162,7 @@ export function PortEquipmentInspector({
 	const actions = resolvePortEquipmentActionAvailability({
 		editableSelection: selectedPortEditableDetails,
 		directlyOwned: selectedEquipmentDirectlyOwned,
+		organizations,
 	});
 	return (
 		<aside
@@ -448,13 +452,16 @@ export function PortEquipmentInspector({
 							</>
 						) : null}
 						<div className="tilefab-device-actions">
-							{actions.move.code === "DIRECTLY_OWNED" ? (
+							{actions.delete.code === "DIRECTLY_OWNED" ? (
 								<p
 									className="tilefab-inspector-notice"
 									id="tilefab-equipment-organization-mutation-note"
 									data-testid="equipment-organization-mutation-note"
 								>
-									{actions.move.reason}.{" "}
+									{actions.move.allowed
+										? `소속을 유지하며 같은 Process Loop 안에서 ${actions.editMembership.allowed ? "이동·Port 편집" : "이동"}할 수 있습니다. `
+										: null}
+									{actions.move.reason ?? actions.delete.reason}.{" "}
 									{selectedEquipmentOwnedOutsideProcessLoop
 										? "FAB 구조에서 소속을 먼저 정리하세요."
 										: "아래 소속을 먼저 분리하세요."}

@@ -6,6 +6,18 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.57] - 2026-10-05
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Move EQ, OHB and supported Stocker equipment within its single owning Process Loop without
+  detaching the group. Edit EQ/Stocker Port membership while keeping every resulting Port inside
+  that same Loop, preserving equipment identity and one-step Undo/Redo.
+- Reject targets outside the owning Loop, multiple owners, non-Loop ownership and unsupported
+  legacy CUSTOM transforms. Validate the same transition in the document and Worker mirror.
+- Show current refusal reasons and keep rejected edits atomic; retain the draft for correction.
+  Owned equipment deletion still requires explicit detachment.
+
 ## [0.1.56] - 2026-10-05
 
 R2 Builder preview; publication uses a production build, public safety and actual Pages verification.
