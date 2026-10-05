@@ -12,6 +12,7 @@ export interface EditorActionHint {
 
 export interface EditorActionHintContext {
 	readonly tool: EditorTool;
+	readonly reshapeKind?: "straight" | "corner" | "endpoint" | null;
 	readonly ohbPlacementIntentActive: boolean;
 	readonly equipmentGroupEditActive: boolean;
 	readonly equipmentMembershipEditType: "EQ" | "STK" | null;
@@ -169,6 +170,27 @@ export function deriveEditorActionHints(
 			),
 			editorActionHint("open-blueprints", "blueprint.open-library", "청사진 라이브러리"),
 			editorActionHint("cancel-template", "command.cancel", "배치 취소"),
+		]);
+	}
+	if (context.tool === "reshape") {
+		const action =
+			context.reshapeKind === "straight"
+				? "직선 평행 이동"
+				: context.reshapeKind === "corner"
+					? "코너 이동"
+					: context.reshapeKind === "endpoint"
+						? "끝점 이동"
+						: "레일 위치 이동";
+		return Object.freeze([
+			editorActionHintAlternatives(
+				"move-reshape",
+				["canvas.primary-click", "canvas.primary-drag"],
+				action,
+			),
+			editorActionHint("cancel-reshape", "command.cancel", "이동 취소", {
+				includeAllBindings: true,
+			}),
+			editorActionHint("pan-reshape", "camera.pan-pointer", "화면 이동"),
 		]);
 	}
 	if (context.hasAreaSelection) {

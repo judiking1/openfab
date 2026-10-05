@@ -6,6 +6,22 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.56] - 2026-10-05
+
+R2 review and local validation candidate; publication requires exact-source CI and Pages verification.
+V1 remains incomplete and simulation stays disabled.
+
+- Show the current straight, corner or endpoint reshape action and its actual controls;
+  cancel through Escape or right-click and return to inspection without changing rails.
+- Keep reshape hints and camera/menu controls usable on narrow screens.
+- Show disabled equipment command reasons in the context menu and focus its close button when
+  every command is unavailable, preserving Escape's return to Canvas.
+- Label Process Loop dimensions as loop length and lane spacing while preserving stored keys.
+- Share equipment move/copy/Port-edit/delete availability between Inspector, menu and execution;
+  recheck the current source when acting and preserve ownership and legacy CUSTOM restrictions.
+- Report the current rail command's refusal, with collision, protected-Port and stale-source recovery
+  in resize/Loop editing; retain rejected resize feedback until the draft changes or is cancelled.
+
 ## [0.1.55] - 2026-10-05
 
 Accumulated public preview candidate including the 0.1.47–0.1.54 checkpoints below.

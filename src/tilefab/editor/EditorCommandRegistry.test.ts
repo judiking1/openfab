@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	deriveEditorActionHints,
+	type EditorActionHintContext,
+} from "./EditorActionHintPresentation";
+import {
 	EDITOR_COMMAND_REGISTRY,
 	editorCommandAriaKeyShortcuts,
 	editorCommandHintBinding,
@@ -26,6 +30,96 @@ const keyboard = (
 	altKey: false,
 	shiftKey: false,
 	...overrides,
+});
+
+describe("reshape action hints", () => {
+	const context: EditorActionHintContext = {
+		tool: "reshape",
+		ohbPlacementIntentActive: false,
+		equipmentGroupEditActive: false,
+		equipmentMembershipEditType: null,
+		hasAreaSelection: false,
+		hasEquipmentSelection: false,
+		hasPortEquipmentSelection: false,
+		hasAuthoredEquipment: false,
+		hasAuthoredRails: true,
+		areaSelectionCopyable: false,
+		hasSingleSelection: false,
+		hasCloneableSelection: false,
+		areaStampActive: false,
+		placementExitIsCancellation: false,
+		placementPrimaryIsSingleCommit: false,
+		organizationBundleActive: false,
+		moduleStampActive: false,
+		templateActive: false,
+		stkDraftActive: false,
+		stkKeyboardActive: false,
+		eqKeyboardActive: false,
+		eqKeyboardDraftActive: false,
+	};
+
+	it.each([
+		["straight", "직선 평행 이동"],
+		["corner", "코너 이동"],
+		["endpoint", "끝점 이동"],
+	] as const)("describes %s movement with only supported input bindings", (reshapeKind, action) => {
+		const input = { ...context, reshapeKind };
+		const hints = deriveEditorActionHints(input);
+		expect(hints[0]).toMatchObject({
+			action,
+			commandIds: ["canvas.primary-click", "canvas.primary-drag"],
+			inputs: ["LMB", "LMB DRAG"],
+			inputJoin: "or",
+			pointer: true,
+		});
+		expect(hints.find((hint) => hint.commandIds.includes("command.cancel"))).toMatchObject({
+			action: "이동 취소",
+			inputs: ["ESC", "RMB"],
+			inputJoin: "or",
+		});
+		expect(hints.find((hint) => hint.commandIds.includes("camera.pan-pointer"))).toMatchObject({
+			action: "화면 이동",
+			inputs: ["RMB DRAG"],
+		});
+		expect(hints.flatMap((hint) => hint.commandIds)).toEqual([
+			"canvas.primary-click",
+			"canvas.primary-drag",
+			"command.cancel",
+			"camera.pan-pointer",
+		]);
+		expect(hints.map((hint) => hint.action)).not.toContain("레일 건설");
+	});
+
+	it("keeps an active reshape ahead of retained rail selection", () => {
+		const input = {
+			...context,
+			reshapeKind: "straight" as const,
+			hasAreaSelection: true,
+			hasSingleSelection: true,
+			hasCloneableSelection: true,
+			areaSelectionCopyable: true,
+		};
+		expect(deriveEditorActionHints(input)[0]?.action).toBe("직선 평행 이동");
+	});
+
+	it("does not invent construction or a specific movement when reshape kind is absent", () => {
+		for (const input of [context, { ...context, reshapeKind: null }]) {
+			expect(deriveEditorActionHints(input)[0]?.action).toBe("레일 위치 이동");
+		}
+	});
+
+	it("returns to selection and construction hints when the reshape tool ends", () => {
+		const selected = {
+			...context,
+			tool: "inspect" as const,
+			reshapeKind: "straight" as const,
+			hasSingleSelection: true,
+			hasCloneableSelection: true,
+		};
+		expect(deriveEditorActionHints(selected).map((hint) => hint.action)).toContain("선택 복제");
+		const build = { ...context, tool: "build" as const, reshapeKind: "corner" as const };
+		expect(deriveEditorActionHints(build)[0]?.action).toBe("레일 건설");
+	});
 });
 
 describe("EditorCommandRegistry", () => {

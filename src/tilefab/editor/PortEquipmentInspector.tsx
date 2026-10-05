@@ -41,9 +41,11 @@ import { scrollFocusedInspectorDisclosure } from "./InspectorDisclosureFocus";
 import type { OrdinaryCompletedModuleHandoffPresentation } from "./OrdinaryCompletedModuleHandoff";
 import type { OrdinaryEqToStkHandoffPresentation } from "./OrdinaryEqToStkHandoff";
 import { ORDINARY_STK_HANDOFF_ENTRY_STATUS } from "./OrdinaryEqToStkHandoff";
-import type {
-	PortEquipmentSelectionIdentity,
-	ResolvedPortEquipmentSelection,
+import {
+	type PortEquipmentActionDecision,
+	type PortEquipmentSelectionIdentity,
+	type ResolvedPortEquipmentSelection,
+	resolvePortEquipmentActionAvailability,
 } from "./PortEquipmentInspectorSelection";
 
 export interface PortEquipmentInspectorProps {
@@ -154,8 +156,10 @@ export function PortEquipmentInspector({
 	viewMode,
 	workerState,
 }: PortEquipmentInspectorProps): ReactNode {
-	const legacyCustom =
-		selectedEquipmentGroup.kind === "STK" && selectedEquipmentGroup.template === "CUSTOM";
+	const actions = resolvePortEquipmentActionAvailability({
+		editableSelection: selectedPortEditableDetails,
+		directlyOwned: selectedEquipmentDirectlyOwned,
+	});
 	return (
 		<aside
 			className="tilefab-inspector tilefab-equipment-inspector"
@@ -313,8 +317,8 @@ export function PortEquipmentInspector({
 						type="button"
 						data-testid="move-port-equipment-group-primary"
 						aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 장비 전체 이동을 시작하고 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
-						disabled={modelSyncPending || workerState.status !== "ready" || legacyCustom}
-						aria-describedby={legacyCustom ? "tilefab-stk-membership-note" : undefined}
+						disabled={modelSyncPending || workerState.status !== "ready" || !actions.move.allowed}
+						aria-describedby={equipmentActionDescriptionId(actions.move)}
 						onClick={() => startSelectedPortEquipmentGroupEdit("move")}
 					>
 						<Move
@@ -362,19 +366,20 @@ export function PortEquipmentInspector({
 				className="tilefab-contextual-inspector-content"
 				hidden={compactInspectorSheetActive && !compactInspectorExpanded}
 			>
-				{selectedPortEditableDetails ? null : (
-					<p className="tilefab-inspector-notice" role="status">
+				{actions.move.code === "SELECTION_NOT_EDITABLE" ? (
+					<p
+						id="tilefab-equipment-selection-mutation-note"
+						className="tilefab-inspector-notice"
+						role="status"
+					>
 						<AlertTriangle size={15} aria-hidden="true" />
-						무결성 진단 대상입니다. 잘못 연결된 그룹을 수정하기 전까지 편집 명령은 비활성화됩니다.
+						{actions.move.reason}
 					</p>
-				)}
-				{viewMode === "2d" &&
-				selectedPortEditableDetails &&
-				selectedEquipmentGroup.kind === "STK" &&
-				selectedEquipmentGroup.template === "CUSTOM" ? (
+				) : null}
+				{viewMode === "2d" && actions.copy.code === "LEGACY_CUSTOM" ? (
 					<p id="tilefab-stk-membership-note" className="tilefab-inspector-notice">
-						이전 CUSTOM 구성은 이동·복제·Port 편집을 지원하지 않습니다. FLEX Stocker로 새로
-						배치하세요. 기존 장비의 철거와 실행 취소는 사용할 수 있습니다.
+						{actions.copy.reason}
+						{actions.delete.allowed ? ". 기존 장비의 철거와 실행 취소는 사용할 수 있습니다." : null}
 					</p>
 				) : null}
 
@@ -443,15 +448,17 @@ export function PortEquipmentInspector({
 							</>
 						) : null}
 						<div className="tilefab-device-actions">
-							{selectedEquipmentDirectlyOwned ? (
+							{actions.move.code === "DIRECTLY_OWNED" ? (
 								<p
 									className="tilefab-inspector-notice"
 									id="tilefab-equipment-organization-mutation-note"
 									data-testid="equipment-organization-mutation-note"
 								>
+									{actions.move.reason}.{" "}
 									{selectedEquipmentOwnedOutsideProcessLoop
-										? "이 장비는 기존 FAB 조직에 소속되어 있습니다. 이동·Port 편집·철거하려면 FAB 구조에서 소속을 먼저 정리하세요. 복제는 계속할 수 있습니다."
-										: "이 장비는 Process Loop에 소속되어 있습니다. 이동·Port 편집·철거하려면 아래 소속을 먼저 분리하세요. 복제는 계속할 수 있습니다."}
+										? "FAB 구조에서 소속을 먼저 정리하세요."
+										: "아래 소속을 먼저 분리하세요."}
+									{actions.copy.allowed ? " 복제는 계속할 수 있습니다." : null}
 								</p>
 							) : null}
 							{selectedEquipmentGroup.kind === "OHB" ? (
@@ -459,12 +466,8 @@ export function PortEquipmentInspector({
 									type="button"
 									className="tilefab-inspector-primary"
 									data-testid="move-ohb-port"
-									disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
-									aria-describedby={
-										selectedEquipmentDirectlyOwned
-											? "tilefab-equipment-organization-mutation-note"
-											: undefined
-									}
+									disabled={!actions.move.allowed}
+									aria-describedby={equipmentActionDescriptionId(actions.move)}
 									onClick={() => startSelectedOhbPlacementIntent("move")}
 								>
 									<Move size={15} /> 위치 이동
@@ -475,21 +478,8 @@ export function PortEquipmentInspector({
 										type="button"
 										className="tilefab-inspector-primary"
 										data-testid="edit-port-equipment-membership"
-										aria-describedby={
-											selectedEquipmentDirectlyOwned
-												? "tilefab-equipment-organization-mutation-note"
-												: selectedPortEditableDetails &&
-														selectedEquipmentGroup.kind === "STK" &&
-														selectedEquipmentGroup.template === "CUSTOM"
-													? "tilefab-stk-membership-note"
-													: undefined
-										}
-										disabled={
-											!selectedPortEditableDetails ||
-											selectedEquipmentDirectlyOwned ||
-											(selectedEquipmentGroup.kind === "STK" &&
-												selectedEquipmentGroup.template === "CUSTOM")
-										}
+										aria-describedby={equipmentActionDescriptionId(actions.editMembership)}
+										disabled={!actions.editMembership.allowed}
 										onClick={startSelectedPortEquipmentMembershipEdit}
 									>
 										<MousePointer2 size={15} /> Port 구성 편집
@@ -499,18 +489,8 @@ export function PortEquipmentInspector({
 											type="button"
 											className="tilefab-inspector-primary"
 											data-testid="move-port-equipment-group"
-											disabled={
-												!selectedPortEditableDetails ||
-												selectedEquipmentDirectlyOwned ||
-												legacyCustom
-											}
-											aria-describedby={
-												selectedEquipmentDirectlyOwned
-													? "tilefab-equipment-organization-mutation-note"
-													: legacyCustom
-														? "tilefab-stk-membership-note"
-														: undefined
-											}
+											disabled={!actions.move.allowed}
+											aria-describedby={equipmentActionDescriptionId(actions.move)}
 											onClick={() => startSelectedPortEquipmentGroupEdit("move")}
 										>
 											<Move size={15} /> 장비 이동
@@ -686,7 +666,8 @@ export function PortEquipmentInspector({
 									type="button"
 									className="tilefab-inspector-primary"
 									data-testid="copy-ohb-port"
-									disabled={!selectedPortEditableDetails}
+									disabled={!actions.copy.allowed}
+									aria-describedby={equipmentActionDescriptionId(actions.copy)}
 									onClick={() => startSelectedOhbPlacementIntent("copy")}
 								>
 									<Copy size={15} /> OHB 복제
@@ -696,8 +677,8 @@ export function PortEquipmentInspector({
 									type="button"
 									className="tilefab-inspector-primary"
 									data-testid="copy-port-equipment-group"
-									disabled={!selectedPortEditableDetails || legacyCustom}
-									aria-describedby={legacyCustom ? "tilefab-stk-membership-note" : undefined}
+									disabled={!actions.copy.allowed}
+									aria-describedby={equipmentActionDescriptionId(actions.copy)}
 									onClick={() => startSelectedPortEquipmentGroupEdit("copy")}
 								>
 									<Copy size={15} /> 장비 복제
@@ -707,12 +688,8 @@ export function PortEquipmentInspector({
 								type="button"
 								className="tilefab-inspector-danger"
 								data-testid="delete-port-equipment"
-								disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
-								aria-describedby={
-									selectedEquipmentDirectlyOwned
-										? "tilefab-equipment-organization-mutation-note"
-										: undefined
-								}
+								disabled={!actions.delete.allowed}
+								aria-describedby={equipmentActionDescriptionId(actions.delete)}
 								onClick={deleteSelected}
 							>
 								<Trash2 size={15} /> 장비와 연결 Port 철거
@@ -806,4 +783,17 @@ export function PortEquipmentInspector({
 			</div>
 		</aside>
 	);
+}
+
+function equipmentActionDescriptionId(action: PortEquipmentActionDecision): string | undefined {
+	switch (action.code) {
+		case "SELECTION_NOT_EDITABLE":
+			return "tilefab-equipment-selection-mutation-note";
+		case "DIRECTLY_OWNED":
+			return "tilefab-equipment-organization-mutation-note";
+		case "LEGACY_CUSTOM":
+			return "tilefab-stk-membership-note";
+		default:
+			return undefined;
+	}
 }

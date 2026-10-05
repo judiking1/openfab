@@ -15,6 +15,96 @@ export interface ResolvedPortEquipmentSelection {
 	readonly equipmentGroup: PortEquipmentState["equipmentGroups"][number];
 }
 
+export type PortEquipmentActionBlockCode =
+	| "SELECTION_NOT_EDITABLE"
+	| "DIRECTLY_OWNED"
+	| "LEGACY_CUSTOM"
+	| "OHB_MEMBERSHIP_UNSUPPORTED";
+
+export type PortEquipmentActionDecision =
+	| { readonly allowed: true; readonly code: null; readonly reason: null }
+	| {
+			readonly allowed: false;
+			readonly code: PortEquipmentActionBlockCode;
+			readonly reason: string;
+	  };
+
+export interface PortEquipmentActionAvailability {
+	readonly move: PortEquipmentActionDecision;
+	readonly copy: PortEquipmentActionDecision;
+	readonly editMembership: PortEquipmentActionDecision;
+	readonly delete: PortEquipmentActionDecision;
+}
+
+export interface PortEquipmentActionContext {
+	/** Result of resolveEditablePortEquipmentSelection, not the display-only resolver. */
+	readonly editableSelection: ResolvedPortEquipmentSelection | null;
+	/** Direct stored equipment membership in any organization from the same current source. */
+	readonly directlyOwned: boolean;
+}
+
+const EQUIPMENT_ACTION_ALLOWED: PortEquipmentActionDecision = Object.freeze({
+	allowed: true,
+	code: null,
+	reason: null,
+});
+
+function blockedEquipmentAction(
+	code: PortEquipmentActionBlockCode,
+	reason: string,
+): PortEquipmentActionDecision {
+	return Object.freeze({ allowed: false, code, reason });
+}
+
+/**
+ * Selection capability only, not mutation authority or a placement-validity result. Handlers must
+ * resolve selection/integrity and direct ownership again from the current document before changing
+ * tools or capturing a draft. Existing project/mirror/session guards and planners remain required.
+ */
+export function resolvePortEquipmentActionAvailability({
+	editableSelection,
+	directlyOwned,
+}: PortEquipmentActionContext): PortEquipmentActionAvailability {
+	if (!editableSelection) {
+		const blocked = blockedEquipmentAction(
+			"SELECTION_NOT_EDITABLE",
+			"편집할 장비 포트를 다시 선택하세요 · 무결성 문제가 있으면 검사 화면에서 먼저 복구하세요",
+		);
+		return Object.freeze({
+			move: blocked,
+			copy: blocked,
+			editMembership: blocked,
+			delete: blocked,
+		});
+	}
+	const group = editableSelection.equipmentGroup;
+	const ownershipBlock = directlyOwned
+		? blockedEquipmentAction(
+				"DIRECTLY_OWNED",
+				"이 장비는 조직에 소속되어 있습니다 · 소속을 먼저 분리한 뒤 이동·Port 편집·철거하세요",
+			)
+		: null;
+	const customBlock =
+		group.kind === "STK" && group.template === "CUSTOM"
+			? blockedEquipmentAction(
+					"LEGACY_CUSTOM",
+					"이전 CUSTOM Stocker는 이동·복제·Port 편집을 지원하지 않습니다 · FLEX Stocker로 새로 배치하세요",
+				)
+			: null;
+	return Object.freeze({
+		move: ownershipBlock ?? customBlock ?? EQUIPMENT_ACTION_ALLOWED,
+		copy: customBlock ?? EQUIPMENT_ACTION_ALLOWED,
+		editMembership:
+			group.kind === "OHB"
+				? blockedEquipmentAction(
+						"OHB_MEMBERSHIP_UNSUPPORTED",
+						"OHB는 한 개 Port를 사용합니다 · Port 구성 편집은 EQ 또는 Stocker에서 사용할 수 있습니다",
+					)
+				: (ownershipBlock ?? customBlock ?? EQUIPMENT_ACTION_ALLOWED),
+		delete: ownershipBlock ?? EQUIPMENT_ACTION_ALLOWED,
+	});
+}
+
 /** Resolve an exact display target even when the surrounding authored relationship is invalid. */
 export function resolveExactPortEquipmentSelection(
 	state: PortEquipmentState,

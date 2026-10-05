@@ -934,8 +934,10 @@ import {
 } from "./OpenTerminalSnap";
 import {
 	type PortEquipmentSelectionIdentity,
+	type PortEquipmentActionDecision,
 	resolveEditablePortEquipmentSelection,
 	resolveExactPortEquipmentSelection,
+	resolvePortEquipmentActionAvailability,
 } from "./PortEquipmentInspectorSelection";
 import {
 	nextPortEquipmentSlotRow,
@@ -1750,6 +1752,10 @@ interface RailPatternResizeDraft {
 	readonly candidate: RailPatternCandidate;
 	readonly parameters: RailTemplateParameters;
 }
+
+type RailPlanCommitResult =
+	| { readonly committed: true; readonly evaluation: RailDraftEvaluation | null; readonly reason: null }
+	| { readonly committed: false; readonly evaluation: RailDraftEvaluation | null; readonly reason: string };
 
 interface ContextPaletteState {
 	readonly left: number;
@@ -5175,7 +5181,9 @@ export default function TileFabApp(): React.ReactElement {
 					Math.min(contextPalette.top, container.clientHeight - palette.offsetHeight - 12),
 				)}px`;
 			}
-			palette?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+			const initialFocus = palette?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ??
+				palette?.querySelector<HTMLButtonElement>('[data-testid="close-context-construction-palette"]');
+			initialFocus?.focus();
 		});
 		return () => cancelAnimationFrame(frame);
 	}, [contextPalette]);
@@ -7035,42 +7043,38 @@ export default function TileFabApp(): React.ReactElement {
 	);
 	const commitPlan = (
 		plan: RailDraftPlan | RailErasePlan,
-	): { committed: boolean; evaluation: RailDraftEvaluation | null } => {
-		if (
-			startupState.status !== "ready" ||
-			projectOperationControllerRef.current !== null ||
-			projectSession.operation !== "idle" ||
-			modelSyncPendingRef.current ||
-			workerState.status !== "ready" ||
-			staticFabExclusiveCommandActive
-		) {
-			return { committed: false, evaluation: null };
+	): RailPlanCommitResult => {
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked || staticFabExclusiveCommandActive) {
+			return { committed: false, evaluation: null, reason: `변경을 적용하지 않았습니다 · ${blocked ?? "현재 편집 검토를 적용하거나 취소한 뒤 다시 시도하세요"}` };
 		}
 		if (processLoopRailEditRef.current) {
-			setStatus("이 배치는 작업 루프 레일 편집을 종료한 뒤 사용하세요");
-			return { committed: false, evaluation: null };
+			return { committed: false, evaluation: null, reason: "변경을 적용하지 않았습니다 · 작업 루프 레일 편집 중입니다 · 이 배치는 편집 종료 후 사용하세요" };
 		}
 		const activeDocument = editorModelRef.current.document;
 		if (plan.kind === "erase") {
-			return { committed: activeDocument.commit(plan), evaluation: null };
+			return activeDocument.commit(plan)
+				? { committed: true, evaluation: null, reason: null }
+				: { committed: false, evaluation: null, reason: activeDocument.getLastCommandError() ?? (!plan.valid ? plan.reason : "철거를 적용하지 않았습니다 · 선택이 변경되었습니다 · 레일을 다시 선택하세요") };
 		}
 		if (isRailAreaStampPreviewPlan(plan)) {
-			return { committed: false, evaluation: null };
+			return { committed: false, evaluation: null, reason: "배치를 적용하지 않았습니다 · 미리보기 준비가 끝나지 않았습니다 · 배치 후보를 다시 선택하세요" };
 		}
 		const evaluation = evaluateBuildPlan(plan);
 		if (
-			!evaluation.valid ||
+			evaluation.stale ||
 			evaluation.baseRevision !== activeDocument.map.getRevision() ||
 			evaluation.committedRevision !== activeDocument.map.getRevision()
 		) {
-			return { committed: false, evaluation };
+			return { committed: false, evaluation, reason: "변경을 적용하지 않았습니다 · 초안 이후 레일이 변경되었습니다 · 현재 레일을 다시 선택해 초안을 준비하세요" };
 		}
-		return {
-			committed: isStaticFabMutationPlan(evaluation.plan)
-				? activeDocument.commitStaticFab(evaluation.plan)
-				: activeDocument.commit(evaluation.plan),
-			evaluation,
-		};
+		if (!evaluation.valid) return { committed: false, evaluation, reason: evaluation.reason };
+		const committed = isStaticFabMutationPlan(evaluation.plan)
+			? activeDocument.commitStaticFab(evaluation.plan)
+			: activeDocument.commit(evaluation.plan);
+		return committed
+			? { committed: true, evaluation, reason: null }
+			: { committed: false, evaluation, reason: activeDocument.getLastCommandError() ?? "변경을 적용하지 않았습니다 · 확정 조건이 변경되었습니다 · 현재 레일을 다시 선택해 시도하세요" };
 	};
 
 	const publishEditorModel = (nextModel: ActiveRailEditorModel, message: string): void => {
@@ -9874,11 +9878,7 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			const result = commitPlan(preview.plan);
 			if (!result.committed) {
-				setStatus(
-					editorModelRef.current.document.getLastCommandError() ??
-						result.evaluation?.reason ??
-						"Worker 동기화가 끝난 뒤 다시 배치하세요",
-				);
+				setStatus(result.reason);
 				updateModuleStampKeyboardAccessibility(moduleSession, "immediate");
 				scheduleRender();
 				return;
@@ -9931,11 +9931,7 @@ export default function TileFabApp(): React.ReactElement {
 					templateFeedback: null,
 				};
 			}
-			showAreaStampPlacementFailure(
-				editorModelRef.current.document.getLastCommandError() ??
-					result.evaluation?.reason ??
-					"Worker 동기화가 끝난 뒤 다시 배치하세요",
-			);
+			showAreaStampPlacementFailure(result.reason);
 			updateAreaStampKeyboardAccessibility(session, "immediate");
 			scheduleRender();
 			return;
@@ -10394,11 +10390,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const result = commitPlan(plan);
 		if (!result.committed) {
-			setStatus(
-				editorModelRef.current.document.getLastCommandError() ??
-					result.evaluation?.reason ??
-					"Worker 동기화가 끝난 뒤 이 구간을 다시 확정하세요",
-			);
+			setStatus(result.reason);
 			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 			scheduleRender();
 			return;
@@ -12677,6 +12669,7 @@ export default function TileFabApp(): React.ReactElement {
 					templateSessionRef.current ||
 					anchorRef.current ||
 					dragRef.current ||
+					reshapeRef.current ||
 					portRowDragRef.current ||
 					stkDraftSessionRef.current ||
 					ohbPlacementIntentRef.current ||
@@ -12684,7 +12677,9 @@ export default function TileFabApp(): React.ReactElement {
 					portEquipmentMembershipEditSessionRef.current
 				) {
 					clearTransientConstruction(
-						portEquipmentMembershipEditSessionRef.current
+						reshapeRef.current
+							? "레일 이동을 취소했습니다 · 검사로 돌아왔습니다"
+							: portEquipmentMembershipEditSessionRef.current
 							? `${portEquipmentMembershipEditSessionRef.current.portType} 포트 편집을 취소했습니다`
 							: portEquipmentGroupEditSessionRef.current
 								? `${portEquipmentGroupEditSessionRef.current.portType} 그룹 편집을 취소했습니다`
@@ -18889,6 +18884,7 @@ export default function TileFabApp(): React.ReactElement {
 					organizationBundlePlacementSessionRef.current ||
 					templateSessionRef.current ||
 					anchorRef.current ||
+					reshapeRef.current ||
 					portRowDragRef.current ||
 					stkDraftSessionRef.current ||
 					portEquipmentGroupEditSessionRef.current ||
@@ -18896,7 +18892,9 @@ export default function TileFabApp(): React.ReactElement {
 				) {
 					const portType = portRowDragRef.current?.portType ?? portTypeForTool(toolRef.current);
 					clearTransientConstruction(
-						portType
+						reshapeRef.current
+							? "레일 이동을 취소했습니다 · 검사로 돌아왔습니다"
+							: portType
 							? `${portType} 배치를 취소했습니다`
 							: organizationBundlePlacementSessionRef.current
 								? organizationBundlePlacementExitStatus(
@@ -19126,7 +19124,7 @@ export default function TileFabApp(): React.ReactElement {
 			void runProcessLoopRepair(finalPlan);
 			return;
 		}
-		const commitResult = finalPlan ? commitPlan(finalPlan) : { committed: false, evaluation: null };
+		const commitResult: RailPlanCommitResult = finalPlan ? commitPlan(finalPlan) : { committed: false, evaluation: null, reason: "배치를 적용하지 않았습니다 · 유효한 초안이 없습니다 · 시작점과 끝점을 다시 선택하세요" };
 		if (!commitResult.committed) {
 			if (
 				drag.tool === "build" &&
@@ -19163,10 +19161,7 @@ export default function TileFabApp(): React.ReactElement {
 					}
 				}
 			}
-			const failureMessage = railDocument.getLastCommandError() ??
-				commitResult.evaluation?.reason ??
-				finalPlan?.reason ??
-				"배치를 완료하지 못했습니다";
+			const failureMessage = commitResult.reason;
 			if (activeAreaStamp) showAreaStampPlacementFailure(failureMessage);
 			else setStatus(failureMessage);
 			scheduleRender();
@@ -21672,9 +21667,7 @@ export default function TileFabApp(): React.ReactElement {
 			const plan = planRepairOneWayCorridor(activeMap, corridor);
 			const commitResult = commitPlan(plan);
 			if (!commitResult.committed) {
-				setStatus(
-					railDocument.getLastCommandError() ?? commitResult.evaluation?.reason ?? plan.reason,
-				);
+				setStatus(commitResult.reason);
 				return;
 			}
 			setReadinessOpen(false);
@@ -21789,15 +21782,20 @@ export default function TileFabApp(): React.ReactElement {
 		else focusStaticFabProjectIssue(next.issue);
 	};
 
-	const blockDirectlyOwnedEquipmentMutation = (equipmentGroupId: number): boolean => {
-		const owner = editorModelRef.current.document.organizations.records.find((record) =>
-			record.membership.equipmentGroupIds.includes(equipmentGroupId),
+	const currentPortEquipmentActions = () => {
+		const document = editorModelRef.current.document;
+		const selection = selectedPortEquipmentRef.current;
+		const resolved = selection ? resolveEditablePortEquipmentSelection(document.portEquipment, selection) : null;
+		const directlyOwned = resolved !== null && document.organizations.records.some((record) =>
+			record.membership.equipmentGroupIds.includes(resolved.equipmentGroup.id),
 		);
-		if (!owner) return false;
-		setStatus(
-			`장비 그룹 ${equipmentGroupId}은 '${owner.name}'에 소속되어 있습니다 · 소속을 먼저 분리한 뒤 이동·Port 편집·철거하세요`,
-		);
-		requestAnimationFrame(() => {
+		return { document, resolved, actions: resolvePortEquipmentActionAvailability({ editableSelection: resolved, directlyOwned }) };
+	};
+
+	const blockPortEquipmentAction = (decision: PortEquipmentActionDecision): boolean => {
+		if (decision.allowed) return false;
+		setStatus(decision.reason);
+		if (decision.code === "DIRECTLY_OWNED") requestAnimationFrame(() => {
 			processLoopMembershipDisclosureRef.current?.scrollIntoView({ block: "nearest" });
 			processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
 		});
@@ -21882,39 +21880,32 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const portSelection = selectedPortEquipmentRef.current;
 		if (portSelection) {
+			const blocked = editorMutationWaitBlockedReason();
+			if (blocked) { setStatus(blocked); return; }
+			const { document: activeDocument, resolved, actions } = currentPortEquipmentActions();
 			const focusRecoveryAfterDelete =
 				document.activeElement instanceof HTMLElement &&
 				document.activeElement.closest('[data-testid="delete-port-equipment"]') !== null;
-			const exact = resolveExactPortEquipmentSelection(railDocument.portEquipment, portSelection);
+			const exact = resolveExactPortEquipmentSelection(activeDocument.portEquipment, portSelection);
 			if (!exact) {
 				clearPortEquipmentSelection();
 				setStatus("선택한 포트가 더 이상 존재하지 않습니다");
 				return;
 			}
-			const resolved = resolveEditablePortEquipmentSelection(
-				railDocument.portEquipment,
-				portSelection,
-				activePortEquipmentIntegrityIssues,
-			);
-			if (!resolved) {
-				setStatus("무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요");
-				scheduleRender();
-				return;
-			}
-			if (blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
+			if (blockPortEquipmentAction(actions.delete) || !resolved) return;
 			clearTransientConstruction();
 			const plan = planEraseEquipmentGroup(
-				railDocument.portEquipment,
+				activeDocument.portEquipment,
 				resolved.equipmentGroup.id,
-				railDocument.map.getRevision(),
-				railDocument.getPatchSequence(),
+				activeDocument.map.getRevision(),
+				activeDocument.getPatchSequence(),
 			);
-			if (railDocument.commitPortEquipment(plan)) {
+			if (activeDocument.commitPortEquipment(plan)) {
 				const continuation = equipmentAuthoringContinuation(resolved.equipmentGroup);
 				setEquipmentDeletionRecovery(
 					Object.freeze({
-						document: railDocument,
-						patchSequence: railDocument.getPatchSequence(),
+						document: activeDocument,
+						patchSequence: activeDocument.getPatchSequence(),
 						selection: Object.freeze({
 							portId: resolved.port.id,
 							equipmentGroupId: resolved.equipmentGroup.id,
@@ -21935,7 +21926,7 @@ export default function TileFabApp(): React.ReactElement {
 				});
 				return;
 			}
-			setStatus(railDocument.getLastCommandError() ?? plan.reason);
+			setStatus(activeDocument.getLastCommandError() ?? plan.reason);
 			scheduleRender();
 			return;
 		}
@@ -21953,15 +21944,12 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startSelectedOhbPlacementIntent = (kind: OhbPlacementIntent["kind"]): void => {
-		if (modelSyncPendingRef.current) return;
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const { resolved, actions } = currentPortEquipmentActions();
+		if (blockPortEquipmentAction(actions[kind])) return;
 		const selectedPort = selectedPortEquipmentRef.current;
-		const resolved = selectedPort
-			? resolveEditablePortEquipmentSelection(
-					railDocument.portEquipment,
-					selectedPort,
-					activePortEquipmentIntegrityIssues,
-				)
-			: null;
 		if (!resolved || resolved.equipmentGroup.kind !== "OHB") {
 			setStatus(
 				selectedPort
@@ -21970,7 +21958,6 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
-		if (kind === "move" && blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
 		const presentation = portEquipmentPresentationRef.current;
 		const sourceRow = presentation?.portIds.indexOf(resolved.port.id) ?? -1;
 		if (!presentation || sourceRow < 0) {
@@ -22000,15 +21987,12 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startSelectedPortEquipmentGroupEdit = (mode: PortEquipmentGroupEditMode): void => {
-		if (modelSyncPendingRef.current) return;
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const { resolved, actions } = currentPortEquipmentActions();
+		if (blockPortEquipmentAction(actions[mode])) return;
 		const selectedPort = selectedPortEquipmentRef.current;
-		const resolved = selectedPort
-			? resolveEditablePortEquipmentSelection(
-					railDocument.portEquipment,
-					selectedPort,
-					activePortEquipmentIntegrityIssues,
-				)
-			: null;
 		if (
 			!resolved ||
 			(resolved.equipmentGroup.kind !== "EQ" && resolved.equipmentGroup.kind !== "STK")
@@ -22018,11 +22002,6 @@ export default function TileFabApp(): React.ReactElement {
 					? "무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요"
 					: "EQ 또는 Stocker 그룹의 포트를 먼저 선택하세요",
 			);
-			return;
-		}
-		if (mode === "move" && blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
-		if (resolved.equipmentGroup.kind === "STK" && resolved.equipmentGroup.template === "CUSTOM") {
-			setStatus("이전 CUSTOM Stocker는 이동·복제를 지원하지 않습니다 · FLEX Stocker로 새로 배치하세요");
 			return;
 		}
 		const portType = resolved.equipmentGroup.kind;
@@ -22073,15 +22052,12 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startSelectedPortEquipmentMembershipEdit = (): void => {
-		if (modelSyncPendingRef.current) return;
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const { resolved, actions } = currentPortEquipmentActions();
+		if (blockPortEquipmentAction(actions.editMembership)) return;
 		const selectedPort = selectedPortEquipmentRef.current;
-		const resolved = selectedPort
-			? resolveEditablePortEquipmentSelection(
-					railDocument.portEquipment,
-					selectedPort,
-					activePortEquipmentIntegrityIssues,
-				)
-			: null;
 		if (
 			!resolved ||
 			(resolved.equipmentGroup.kind !== "EQ" && resolved.equipmentGroup.kind !== "STK")
@@ -22091,11 +22067,6 @@ export default function TileFabApp(): React.ReactElement {
 					? "무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요"
 					: "EQ 또는 Stocker 그룹의 포트를 먼저 선택하세요",
 			);
-			return;
-		}
-		if (blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
-		if (resolved.equipmentGroup.kind === "STK" && resolved.equipmentGroup.template === "CUSTOM") {
-			setStatus("기존 CUSTOM Stocker는 읽기 전용입니다 · FLEX Stocker로 다시 배치하세요");
 			return;
 		}
 		const portType = resolved.equipmentGroup.kind;
@@ -22277,10 +22248,8 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const commitResult = commitPlan(plan);
 		if (!commitResult.committed) {
-			setSwitchReshapeReason(plan.reason);
-			setStatus(
-				railDocument.getLastCommandError() ?? commitResult.evaluation?.reason ?? plan.reason,
-			);
+			setSwitchReshapeReason(commitResult.reason);
+			setStatus(commitResult.reason);
 			return;
 		}
 		const next = plan.switchRecord;
@@ -22299,9 +22268,7 @@ export default function TileFabApp(): React.ReactElement {
 		const plan = planRemoveBranchRoute(activeMap, selected);
 		const commitResult = commitPlan(plan);
 		if (!commitResult.committed) {
-			setStatus(
-				railDocument.getLastCommandError() ?? commitResult.evaluation?.reason ?? plan.reason,
-			);
+			setStatus(commitResult.reason);
 			return;
 		}
 		clearRailSelection();
@@ -22584,7 +22551,7 @@ export default function TileFabApp(): React.ReactElement {
 			}),
 		);
 		setStatus(
-			`${railTemplateCatalogItem(candidate.templateId).label} 원본 구조 편집 · 치수를 변경하면 전체 레일이 한 번에 미리 표시됩니다`,
+			`${railTemplateCatalogItem(candidate.templateId).statusLabel} 치수 변경 · 치수를 조절하면 전체 레일이 한 번에 미리 표시됩니다`,
 		);
 		scheduleRender();
 	};
@@ -22615,21 +22582,22 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		if (plan.mutations.length > 0) {
 			const evaluation = publishBuildPreview(plan);
-			setStatus(evaluation.valid ? plan.reason : evaluation.reason);
+			setStatus(evaluation.valid ? plan.reason : processLoopRailFailureFeedback(evaluation.reason, "resize", evaluation));
 		} else {
 			previewRef.current = null;
 			if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
-			setStatus(plan.reason);
+			setStatus(plan.reason === "변경된 패턴 치수가 없습니다" ? plan.reason : processLoopRailFailureFeedback(plan.reason, "resize"));
 		}
 		scheduleRender();
 	};
 
 	const cancelPatternResize = (): void => {
 		if (processLoopRailEditRef.current) cancelProcessLoopOperation();
+		setProcessLoopRailEditFeedback(null);
 		updatePatternResizeDraft(null);
 		if (isRailPatternResizePlan(previewRef.current?.plan)) previewRef.current = null;
 		if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
-		setStatus("원본 구조 편집을 취소했습니다");
+		setStatus("치수 변경을 취소했습니다");
 		scheduleRender();
 	};
 
@@ -22654,18 +22622,16 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const result = commitPlan(plan);
 		if (!result.committed) {
-			setStatus(
-				model.document.getLastCommandError() ??
-					(result.evaluation?.valid === false ? result.evaluation.reason : null) ??
-					(!plan.valid ? plan.reason : "치수 변경을 적용하지 못했습니다 · 레일을 다시 선택한 뒤 시도하세요"),
-			);
+			const feedback = processLoopRailFailureFeedback(result.reason, "resize", result.evaluation);
+			setProcessLoopRailEditFeedback(feedback);
+			setStatus(feedback);
 			return;
 		}
 		updatePatternResizeDraft(null);
 		previewRef.current = null;
 		if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
 		syncModelUi(
-			`${railTemplateCatalogItem(draft.candidate.templateId).label} 치수를 한 번의 구조 편집으로 변경했습니다`,
+			`${railTemplateCatalogItem(draft.candidate.templateId).statusLabel} 치수를 한 번의 구조 편집으로 변경했습니다`,
 		);
 	};
 
@@ -23328,16 +23294,8 @@ export default function TileFabApp(): React.ReactElement {
 			portId: target.portId,
 			equipmentGroupId: target.equipmentGroupId,
 		});
-		const selectedEquipment = resolveEditablePortEquipmentSelection(
-			editorModelRef.current.document.portEquipment,
-			{ portId: target.portId, equipmentGroupId: target.equipmentGroupId },
-			activePortEquipmentIntegrityIssues,
-		);
-		if (!selectedEquipment) {
-			setStatus("무결성 진단 대상 장비는 복제할 수 없습니다 · 검사 화면에서 관계를 먼저 복구하세요");
-			scheduleRender();
-			return;
-		}
+		const { resolved: selectedEquipment, actions } = currentPortEquipmentActions();
+		if (blockPortEquipmentAction(actions.copy) || !selectedEquipment) return;
 		if (selectedEquipment.equipmentGroup.kind === "OHB") {
 			startSelectedOhbPlacementIntent("copy");
 		} else {
@@ -23496,18 +23454,8 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		const selectedPort = selectedPortEquipmentRef.current;
-		const selectedEquipment = selectedPort
-			? resolveEditablePortEquipmentSelection(
-					railDocument.portEquipment,
-					selectedPort,
-					activePortEquipmentIntegrityIssues,
-				)
-			: null;
-		if (selectedPort && !selectedEquipment) {
-			setStatus("무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요");
-			scheduleRender();
-			return;
-		}
+		const { resolved: selectedEquipment, actions } = currentPortEquipmentActions();
+		if (selectedPort && blockPortEquipmentAction(actions.copy)) return;
 		if (selectedEquipment?.equipmentGroup.kind === "OHB") {
 			startSelectedOhbPlacementIntent("copy");
 			return;
@@ -24141,11 +24089,17 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus("작업 루프 편집에서는 일반 레일 그리기와 지우기를 사용하세요 · 다른 배치는 편집 종료 후 사용하세요");
 			return;
 		}
+		const failureMode = isRailPatternResizePlan(plan) ? "resize" : "rail";
+		const showFailure = (reason: string, evaluation: RailDraftEvaluation | null = null): void => {
+			const feedback = processLoopRailFailureFeedback(reason, failureMode, evaluation);
+			setProcessLoopRailEditFeedback(feedback);
+			setStatus(feedback);
+		};
 		if (plan) {
-			if (!plan.valid) { setStatus(plan.reason); return; }
+			if (!plan.valid) { showFailure(plan.reason); return; }
 			if (plan.kind !== "erase") {
 				const evaluation = evaluateBuildPlan(plan);
-				if (!evaluation.valid) { setStatus(evaluation.reason); return; }
+				if (!evaluation.valid) { showFailure(evaluation.reason, evaluation); return; }
 			}
 		}
 		const document = context.document;
@@ -24180,9 +24134,7 @@ export default function TileFabApp(): React.ReactElement {
 			if (processLoopOperationRef.current === request && editorModelRef.current.document === document) {
 				restoreProcessLoopKeyboardPreview();
 				const reason = error instanceof Error ? error.message : "루프 레일 편집을 적용하지 못했습니다";
-				const feedback = `${reason.startsWith("Port equipment layout is invalid") ? "장비 포트 경로에 필요한 레일입니다 · 다른 구간을 선택하세요" : reason === "New repair rail must touch the existing Loop footprint." ? "새 레일은 이 작업 루프와 이어져야 합니다 · 시작점을 기존 루프에 맞추세요" : reason} · 기존 레일과 장비는 유지됩니다`;
-				setProcessLoopRailEditFeedback(feedback);
-				setStatus(feedback);
+				showFailure(reason);
 			}
 		} finally {
 			if (processLoopOperationRef.current === request) {
@@ -29083,8 +29035,9 @@ export default function TileFabApp(): React.ReactElement {
 			: null,
 		[activePortEquipment, activeOrganizations, selectedEquipmentGroup],
 	);
-	const selectedEquipmentDirectlyOwned =
-		(selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.length ?? 0) > 0;
+	const selectedEquipmentDirectlyOwned = selectedEquipmentGroup !== undefined && activeOrganizations.records.some((record) =>
+		record.membership.equipmentGroupIds.includes(selectedEquipmentGroup.id),
+	);
 	const selectedEquipmentOwnedOutsideProcessLoop =
 		selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.some(
 			(id) => organizationSemanticRoles.get(id) !== "PROCESS_LOOP",
@@ -29112,6 +29065,18 @@ export default function TileFabApp(): React.ReactElement {
 				activePortEquipmentIntegrityIssues,
 			)
 		: null;
+	const selectedPortActions = resolvePortEquipmentActionAvailability({
+		editableSelection: selectedPortEditableDetails,
+		directlyOwned: selectedEquipmentDirectlyOwned,
+	});
+	const contextPortActionReasons = selectedPortDetails && !templateSession && !areaStampSession && !areaSelection && !organizationBundlePlacementSession
+		? [...new Set([
+			selectedPortActions.move.reason,
+			selectedPortActions.copy.reason,
+			...(selectedPortDetails.equipmentGroup.kind === "OHB" ? [] : [selectedPortActions.editMembership.reason]),
+			selectedPortActions.delete.reason,
+		].filter((reason): reason is string => reason !== null))]
+		: [];
 	const selectedSwitch =
 		selectedOwnership?.advancedSwitchId != null
 			? activeMap.getAdvancedSwitch(selectedOwnership.advancedSwitchId)
@@ -29843,11 +29808,14 @@ export default function TileFabApp(): React.ReactElement {
 					? "blueprint"
 					: templateSession
 						? "template"
-						: areaSelection || selectedOwnership || selectedPortDetails
-							? "selection"
-							: tool;
+						: tool === "reshape"
+							? `reshape-${reshapeKind ?? "rail"}`
+							: areaSelection || selectedOwnership || selectedPortDetails
+								? "selection"
+								: tool;
 	const actionHints = deriveEditorActionHints({
 		tool,
+		reshapeKind,
 		ohbPlacementIntentActive: ohbPlacementIntent !== null,
 		equipmentGroupEditActive: portEquipmentGroupEditSession !== null,
 		equipmentMembershipEditType: portEquipmentMembershipEditSession?.portType ?? null,
@@ -29858,7 +29826,7 @@ export default function TileFabApp(): React.ReactElement {
 		hasAuthoredRails: editorModel.map.size > 0,
 		areaSelectionCopyable: areaStampEligibility?.valid === true,
 		hasSingleSelection: selectedOwnership !== null || selectedPortDetails !== null,
-		hasCloneableSelection: selectedOwnership !== null || selectedPortEditableDetails !== null,
+		hasCloneableSelection: selectedOwnership !== null || selectedPortActions.copy.allowed,
 		areaStampActive: areaStampSession !== null,
 		placementExitIsCancellation:
 			guidedAreaStampSingleCommit ||
@@ -35629,6 +35597,7 @@ export default function TileFabApp(): React.ReactElement {
 						style={{ left: contextPalette.left, top: contextPalette.top }}
 						role="menu"
 						aria-label="상황별 편집 명령"
+						aria-describedby={contextPortActionReasons.length > 0 ? "context-port-action-reasons" : undefined}
 						onKeyDown={handleContextPaletteKeyDown}
 					>
 						<header>
@@ -35658,10 +35627,15 @@ export default function TileFabApp(): React.ReactElement {
 														: "QUICK BUILD"}
 								</strong>
 							</span>
-							<button type="button" aria-label="상황별 명령 닫기" onClick={closeContextPalette}>
+							<button type="button" data-testid="close-context-construction-palette" aria-label="상황별 명령 닫기" aria-describedby={contextPortActionReasons.length > 0 ? "context-port-action-reasons" : undefined} onClick={closeContextPalette}>
 								<X size={14} />
 							</button>
 						</header>
+						{contextPortActionReasons.length > 0 ? (
+							<div id="context-port-action-reasons" className="tilefab-context-action-reasons" role="note">
+								{contextPortActionReasons.map((reason) => <p key={reason}>{reason}</p>)}
+							</div>
+						) : null}
 						<section>
 							{templateSession ? (
 								<>
@@ -35854,7 +35828,8 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
+												disabled={!selectedPortActions.move.allowed}
+												title={selectedPortActions.move.reason ?? undefined}
 												onClick={() =>
 													runContextPaletteAction(() => startSelectedOhbPlacementIntent("move"))
 												}
@@ -35864,7 +35839,8 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={!selectedPortEditableDetails}
+												disabled={!selectedPortActions.copy.allowed}
+												title={selectedPortActions.copy.reason ?? undefined}
 												onClick={() =>
 													runContextPaletteAction(() => startSelectedOhbPlacementIntent("copy"))
 												}
@@ -35877,12 +35853,8 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={
-													!selectedPortEditableDetails ||
-													selectedEquipmentDirectlyOwned ||
-													(selectedPortDetails.equipmentGroup.kind === "STK" &&
-														selectedPortDetails.equipmentGroup.template === "CUSTOM")
-												}
+												disabled={!selectedPortActions.editMembership.allowed}
+												title={selectedPortActions.editMembership.reason ?? undefined}
 												onClick={() =>
 													runContextPaletteAction(startSelectedPortEquipmentMembershipEdit)
 												}
@@ -35892,12 +35864,8 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={
-													!selectedPortEditableDetails ||
-													selectedEquipmentDirectlyOwned ||
-													(selectedPortDetails.equipmentGroup.kind === "STK" &&
-														selectedPortDetails.equipmentGroup.template === "CUSTOM")
-												}
+												disabled={!selectedPortActions.move.allowed}
+												title={selectedPortActions.move.reason ?? undefined}
 												onClick={() =>
 													runContextPaletteAction(() => startSelectedPortEquipmentGroupEdit("move"))
 												}
@@ -35907,11 +35875,8 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={
-													!selectedPortEditableDetails ||
-													(selectedPortDetails.equipmentGroup.kind === "STK" &&
-														selectedPortDetails.equipmentGroup.template === "CUSTOM")
-												}
+												disabled={!selectedPortActions.copy.allowed}
+												title={selectedPortActions.copy.reason ?? undefined}
 												onClick={() =>
 													runContextPaletteAction(() => startSelectedPortEquipmentGroupEdit("copy"))
 												}
@@ -35923,7 +35888,8 @@ export default function TileFabApp(): React.ReactElement {
 									<button
 										type="button"
 										role="menuitem"
-										disabled={!selectedPortEditableDetails}
+										disabled={!selectedPortActions.delete.allowed}
+										title={selectedPortActions.delete.reason ?? undefined}
 										onClick={() => runContextPaletteAction(deleteSelected)}
 									>
 										<Trash2 size={16} /> 장비 그룹 철거
@@ -38179,10 +38145,10 @@ export default function TileFabApp(): React.ReactElement {
 							>
 								<header>
 									<span>
-										<Move size={15} /> EDIT IN PLACE
+										<Move size={15} /> 치수 변경
 									</span>
 									<strong>
-										{railTemplateCatalogItem(patternResizeDraft.candidate.templateId).label}
+										{railTemplateCatalogItem(patternResizeDraft.candidate.templateId).statusLabel}
 									</strong>
 								</header>
 								<div className="tilefab-pattern-resize-parameters">
@@ -38240,8 +38206,10 @@ export default function TileFabApp(): React.ReactElement {
 								</div>
 								<p data-state={patternResizeCanApply ? "ready" : "blocked"}>
 									{processLoopRailEditFeedback ?? (patternResizeEvaluation?.valid === false
-										? patternResizeEvaluation.reason
-										: patternResizePlan?.reason)}
+										? processLoopRailFailureFeedback(patternResizeEvaluation.reason, "resize", patternResizeEvaluation)
+										: patternResizePlan?.valid === false && patternResizePlan.reason !== "변경된 패턴 치수가 없습니다"
+											? processLoopRailFailureFeedback(patternResizePlan.reason, "resize")
+											: patternResizePlan?.reason)}
 								</p>
 								<div className="tilefab-pattern-resize-actions">
 									<button type="button" onClick={cancelPatternResize}>
@@ -40381,6 +40349,42 @@ function authoritativeUserBlueprintLibraryError(
 	return null;
 }
 
+
+function processLoopRailFailureFeedback(
+	reason: string,
+	mode: "resize" | "rail",
+	evaluation: RailDraftEvaluation | null = null,
+): string {
+	const stale = evaluation?.stale || [
+		"변경을 적용하지 않았습니다 · 초안 이후 레일이 변경되었습니다 · 현재 레일을 다시 선택해 초안을 준비하세요",
+		"선택 영역이 오래되어 패턴을 다시 선택해야 합니다",
+		"패턴 카탈로그 버전이 변경되어 다시 선택해야 합니다",
+		"선택한 레일이 원래 인식한 카탈로그 패턴과 더 이상 일치하지 않습니다",
+		"Loop 작업 준비 중 프로젝트나 선택이 변경되었습니다 · 다시 시도하세요",
+		"레일 편집 초안이 변경되었습니다",
+		"레일 선택이 오래되었습니다 · 다시 선택하세요",
+		"선택한 레일 모듈이 변경되었습니다 · 다시 선택하세요",
+		"선택한 모듈의 연결이 변경되었습니다 · 다시 선택하세요",
+		"Loop rail repair source, candidate or intent is no longer current.",
+	].includes(reason);
+	if (stale) {
+		return `이번 변경을 적용하지 않았습니다 · 레일이나 선택이 변경되어 초안이 오래되었습니다 · ${mode === "resize" ? "취소 후 현재 레일을 다시 선택하고 치수 변경을 다시 여세요" : "Esc로 초안을 닫고 현재 작업 루프의 레일을 다시 선택하세요"}`;
+	}
+	if ((evaluation?.invalidatedPortIds.length ?? 0) > 0 || reason.startsWith("Port equipment layout is invalid") || /^PORT-\d+가 선택 패턴에 배치되어/.test(reason)) {
+		return `기존 레일과 장비는 유지됩니다 · 장비 포트 경로에 필요한 레일입니다 · ${mode === "resize" ? "취소 후 Port가 없는 다른 패턴을 선택하세요" : "Port가 없는 다른 구간을 선택하세요"}`;
+	}
+	if ((evaluation?.issues.length ?? 0) > 0 || reason === "변경된 패턴의 확장 영역에 다른 레일이 있습니다" || /^변경된 패턴이 고급 스위치 \d+ 영역과 충돌합니다$/.test(reason)) {
+		return `기존 레일과 장비는 유지됩니다 · 변경할 레일이 다른 레일과 충돌하거나 안전 간격을 침범합니다 · ${mode === "resize" ? "치수 값을 조정해 미리보기를 다시 확인하세요" : "끝점이나 경로를 바꿔 다시 시도하세요"}`;
+	}
+	if (reason === "New repair rail must touch the existing Loop footprint.") {
+		return "기존 레일과 장비는 유지됩니다 · 새 레일은 이 작업 루프와 이어져야 합니다 · Esc로 초안을 닫고 기존 루프에서 시작점을 다시 선택하세요";
+	}
+	if (/^Loop rail repair would touch protected organization \d+\.$/.test(reason)) {
+		return `기존 레일과 장비는 유지됩니다 · 다른 조직에 소속된 레일을 함께 변경할 수 없습니다 · ${mode === "resize" ? "취소 후 다른 조직과 공유하지 않는 패턴을 선택하세요" : "다른 조직과 공유하지 않는 레일 구간을 선택하세요"}`;
+	}
+	if (reason.startsWith("변경을 적용하지 않았습니다 ·")) return reason;
+	return `이번 변경을 적용하지 않았습니다 · ${reason} · ${mode === "resize" ? "취소 후 현재 패턴을 다시 선택해 치수를 확인하세요" : "Esc로 초안을 닫고 편집할 레일을 다시 선택하세요"}`;
+}
 
 function trapDialogTabNavigation(event: ReactKeyboardEvent<HTMLElement>): void {
 	if (event.key !== "Tab") return;

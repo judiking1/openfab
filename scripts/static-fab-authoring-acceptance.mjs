@@ -11380,6 +11380,169 @@ async function checkRepairHistoryRoundTrip(page, before, beforeSource, after, af
 }
 
 
+async function assertRailReshapeHintCancellation(page, world, kind, command, label) {
+	const before = await readMetrics(page);
+	const source = await readStandaloneLoopAuthoringContract(page);
+	await page.getByTestId("rail-canvas").press("Escape");
+	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await revealOrdinaryEquipmentSlot(page, world, `${label} ${kind} rail selection`);
+	await clickWorld(page, world, false);
+	await clickActivityCommand(page, "inspect", "상황별 편집 명령");
+	await page.getByTestId("context-construction-palette").getByRole("menuitem", { name: command, exact: true }).click();
+	const hints = page.locator(`.tilefab-action-hints[data-context="reshape-${kind}"]`);
+	await hints.waitFor({ state: "visible" });
+	await assertLocatorInsideViewport(page, hints);
+	const text = await hints.innerText();
+	assertIncludes(text, "이동", `${label} ${kind} active movement hint`);
+	assertIncludes(text, "취소", `${label} ${kind} cancellation hint`);
+	assertEqual(/Enter|Q\s*\/\s*E/.test(text), false, `${label} ${kind} has no unsupported controls`);
+	await page.getByTestId("rail-canvas").press("Escape");
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-editor-tool"), "inspect", `${label} ${kind} cancel returns to inspection`);
+	await page.getByTestId("rail-canvas").press("Shift+F10");
+	await page.getByTestId("context-construction-palette").getByRole("menuitem", { name: command, exact: true }).click();
+	const cancelPoint = await revealOrdinaryEquipmentSlot(page, world, `${label} ${kind} secondary cancellation`);
+	assertEqual(await page.getByTestId("tilefab-app").getAttribute("data-editor-tool"), "reshape", `${label} ${kind} camera pan keeps the edit`);
+	await page.mouse.click(cancelPoint.x, cancelPoint.y, { button: "right" });
+	await page.waitForFunction(() => document.querySelector('[data-testid="tilefab-app"]')?.dataset.editorTool === "inspect");
+	assertProjectUnchanged(await readMetrics(page), before, `${label} ${kind} cancellation`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} ${kind} preserves authored contracts`);
+}
+
+async function exerciseStandaloneLoopDimensions(page, loopId, label, protectedByPort = false) {
+	const before = await readMetrics(page);
+	const source = await readStandaloneLoopAuthoringContract(page);
+	const canvas = page.getByTestId("rail-canvas");
+	await openStandaloneLoopRailEdit(page, loopId, label);
+	const openResize = async () => {
+		await page.getByTestId("select-process-loop-rail").click();
+		await canvas.press("ControlOrMeta+a");
+		const disclosure = page.getByTestId("compact-inspector-disclosure");
+		if ((await disclosure.count()) && (await disclosure.getAttribute("aria-expanded")) === "false") await disclosure.click();
+		const edit = page.getByTestId("edit-recognized-rail-pattern");
+		if (await edit.count()) await edit.click();
+		else await page.getByRole("button", { name: "USE PROCESS LOOP", exact: true }).click();
+		const panel = page.getByTestId("rail-pattern-resize-editor");
+		await panel.waitFor({ state: "visible" });
+		return panel;
+	};
+	let panel = await openResize();
+	assertIncludes(await panel.innerText(), "작업 루프", `${label} resize uses the user-facing Loop name`);
+	const length = panel.getByRole("spinbutton", { name: "루프 길이", exact: true });
+	const spacing = panel.getByRole("spinbutton", { name: "레인 간격", exact: true });
+	const initialLength = Number(await length.inputValue());
+	await length.fill(String(initialLength + 1));
+	const apply = panel.getByTestId("apply-rail-pattern-resize");
+	for (const control of [length, spacing, apply, panel.getByRole("button", { name: "취소", exact: true })]) {
+		await control.scrollIntoViewIfNeeded();
+		await assertLocatorInsideViewport(page, control);
+		await assertLocatorOwnsHitArea(control, `${label} resize ${await control.getAttribute("id") ?? await control.innerText()}`);
+	}
+	assertEqual(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), true, `${label} resize has no horizontal overflow`);
+	if (protectedByPort) {
+		assertEqual(await apply.isDisabled(), true, `${label} protected resize cannot apply`);
+		const feedbackElement = panel.locator(":scope > p");
+		await feedbackElement.scrollIntoViewIfNeeded();
+		await assertLocatorInsideViewport(page, feedbackElement);
+		const feedback = await feedbackElement.innerText();
+		assertIncludes(feedback, "기존 레일과 장비는 유지됩니다", `${label} protected resize outcome`);
+		assertIncludes(feedback, "장비 포트 경로", `${label} protected resize cause`);
+		assertIncludes(feedback, "취소 후", `${label} protected resize recovery`);
+		assertEqual(/장비를 이동|철거해야/.test(feedback), false, `${label} resize offers no forbidden equipment operation`);
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-resize-port-protected.png`) });
+		await panel.getByRole("button", { name: "취소", exact: true }).click();
+		assertProjectUnchanged(await readMetrics(page), before, `${label} protected resize cancellation`);
+	} else {
+		assertEqual(await apply.isEnabled(), true, `${label} legal resize can apply`);
+		await page.screenshot({ path: path.join(artifactRoot, `${label}-resize-ready.png`) });
+		await apply.click();
+		const changed = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1);
+		assertEqual(Number(changed.authoredEdges), Number(before.authoredEdges) + 2, `${label} one-metre Loop extension adds two directed edges`);
+		const redone = await undoAndRedo(page, before, changed, null, true);
+		await canvas.press("ControlOrMeta+z");
+		await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(redone.workerTargetSequence) + 1 && metrics.modelChecksum === before.modelChecksum);
+		panel = await openResize();
+		await panel.getByRole("spinbutton", { name: "루프 길이", exact: true }).fill(String(initialLength + 1));
+		const unchanged = await readMetrics(page);
+		await panel.getByRole("button", { name: "취소", exact: true }).click();
+		assertProjectUnchanged(await readMetrics(page), unchanged, `${label} editable resize cancellation`);
+	}
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} resize restores all five authored contracts`);
+	await page.getByTestId("exit-process-loop-edit").click();
+	return { protectedByPort, initialLength, appliedAndReplayed: !protectedByPort, cancelled: true };
+}
+
+async function assertOwnedEquipmentContextActions(page, targets, label) {
+	const before = await readMetrics(page);
+	const source = await readStandaloneLoopAuthoringContract(page);
+	for (const target of targets) {
+		await clickActivityCommand(page, "inspect", "선택 및 정보");
+		await revealOrdinaryEquipmentSlot(page, target.world, `${label} owned ${target.kind}`);
+		await clickWorld(page, target.world, false);
+		await page.waitForFunction((id) => document.querySelector('[data-testid="tilefab-app"]')?.dataset.selectedEquipmentGroupId === String(id), target.id);
+		await clickActivityCommand(page, "inspect", "상황별 편집 명령");
+		const menu = page.getByTestId("context-construction-palette");
+		const move = menu.getByRole("menuitem", { name: target.kind === "OHB" ? "포트 이동" : "그룹 전체 이동", exact: true });
+		const copy = menu.getByRole("menuitem", { name: target.kind === "OHB" ? "포트 복제" : "그룹 전체 복제", exact: true });
+		const remove = menu.getByRole("menuitem", { name: "장비 그룹 철거", exact: true });
+		assertEqual(await move.isDisabled(), true, `${label} owned ${target.kind} menu move`);
+		assertEqual(await remove.isDisabled(), true, `${label} owned ${target.kind} menu delete`);
+		assertIncludes(await remove.getAttribute("title"), "소속", `${label} owned ${target.kind} menu explains refusal`);
+		assertEqual(await copy.isEnabled(), true, `${label} owned ${target.kind} menu copy`);
+		if (target.kind !== "OHB") assertEqual(await menu.getByRole("menuitem", { name: "포트 구성 편집", exact: true }).isDisabled(), true, `${label} owned ${target.kind} Port membership`);
+		await page.keyboard.press("Escape");
+		await page.getByTestId("rail-canvas").press("Delete");
+		assertIncludes(await page.locator(".tilefab-statusbar [role='status']").innerText(), "소속", `${label} owned ${target.kind} keyboard uses same refusal`);
+		assertProjectUnchanged(await readMetrics(page), before, `${label} owned ${target.kind} refusal is atomic`);
+	}
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} menu and keyboard preserve authored contracts`);
+	return targets.map((target) => target.kind);
+}
+
+async function assertOwnedLegacyStockerMenuFocus(page, savedPath, groupId, world, label) {
+	const saved = JSON.parse(await readFile(savedPath, "utf8"));
+	const group = saved.equipment.records.find((record) => record.id === groupId);
+	assertEqual(group?.kind, "STK", `${label} synthetic legacy input is a Stocker`);
+	group.template = "CUSTOM";
+	const fixturePath = path.join(artifactRoot, `${label}-owned-legacy-stocker.openfab`);
+	await writeFile(fixturePath, JSON.stringify(saved));
+	await page.keyboard.press("Escape");
+	const chooserPromise = page.waitForEvent("filechooser");
+	if (page.viewportSize().width <= 760) {
+		await page.locator(".tilefab-project-trigger").click();
+		await page.locator(".tilefab-project-menu-commands").getByRole("button", { name: "열기", exact: true }).click();
+	} else await page.getByRole("button", { name: "프로젝트 열기" }).click();
+	await (await chooserPromise).setFiles(fixturePath);
+	await page.waitForFunction((id) => window.__tileFab?.getEditorModel().document.portEquipment.equipmentGroups.find((item) => item.id === id)?.template === "CUSTOM", groupId);
+	await waitForWorker(page, (metrics) => metrics.equipmentGroups === "3");
+	const before = await readMetrics(page);
+	const source = await readStandaloneLoopAuthoringContract(page);
+	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await revealOrdinaryEquipmentSlot(page, world, `${label} owned CUSTOM Stocker`);
+	await clickWorld(page, world, false);
+	await page.waitForFunction((id) => document.querySelector('[data-testid="tilefab-app"]')?.dataset.selectedEquipmentGroupId === String(id), groupId);
+	const canvas = page.getByTestId("rail-canvas");
+	await canvas.press("Shift+F10");
+	const menu = page.getByTestId("context-construction-palette");
+	await menu.waitFor({ state: "visible" });
+	assertEqual(await menu.locator('[role="menuitem"]:not(:disabled)').count(), 0, `${label} owned CUSTOM has no enabled command`);
+	const close = menu.getByTestId("close-context-construction-palette");
+	await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "close-context-construction-palette");
+	await assertLocatorInsideViewport(page, menu);
+	await assertLocatorOwnsHitArea(close, `${label} all-disabled menu close target`);
+	const reasons = menu.locator("#context-port-action-reasons");
+	await assertLocatorInsideViewport(page, reasons);
+	assertIncludes(await reasons.innerText(), "소속", `${label} visible ownership refusal`);
+	assertIncludes(await reasons.innerText(), "CUSTOM", `${label} visible legacy refusal`);
+	assertEqual(await close.getAttribute("aria-describedby"), "context-port-action-reasons", `${label} focused close exposes the reasons`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-owned-custom-menu.png`) });
+	await close.press("Escape");
+	await menu.waitFor({ state: "hidden" });
+	assertEqual(await canvas.evaluate((element) => element === document.activeElement), true, `${label} menu Escape restores Canvas focus`);
+	assertProjectUnchanged(await readMetrics(page), before, `${label} all-disabled menu is a no-op`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} menu keeps the exact imported source`);
+	return { initialFocus: "close", ownershipReason: true, legacyReason: true, escapeReturnsToCanvas: true };
+}
+
 async function exerciseManualStandaloneLoopRegistration(page, label) {
 	const canvas = page.getByTestId("rail-canvas");
 	const empty = await readMetrics(page);
@@ -11435,6 +11598,8 @@ async function exerciseManualStandaloneLoopRegistration(page, label) {
 			position = next;
 		}
 	}
+	await assertRailReshapeHintCancellation(page, { x: start.x + 10.5, y: start.y + 0.5 }, "straight", "직선 평행 이동", label);
+	await assertRailReshapeHintCancellation(page, { x: start.x + 0.5, y: start.y + 0.5 }, "corner", "코너 재배치", label);
 	await page.getByTestId("editor-activity-inspect").click();
 	await canvas.press("ControlOrMeta+a");
 	const selection = await readMetrics(page);
@@ -11563,6 +11728,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 			if (standalone) {
 				standaloneRegistration = await exerciseManualStandaloneLoopRegistration(page, label);
 				loopIds = [standaloneRegistration.organizationId];
+				standaloneRegistration.dimensions = await exerciseStandaloneLoopDimensions(page, loopIds[0], label);
 			} else {
 				await page.getByTestId("editor-activity-assemble").click();
 				await page.getByTestId("production-bay-module-browser").click();
@@ -11892,6 +12058,10 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 				true,
 				`${label} all complete groups have direct Loop routes`,
 			);
+			const ownedActionParity = standalone ? await assertOwnedEquipmentContextActions(page, [
+				{ id: eqId, kind: "EQ", world: eqPlan.start }, { id: ohbId, kind: "OHB", world: ohbPlan }, { id: stkId, kind: "STK", world: stkPlan },
+			], label) : null;
+			const protectedResize = standalone ? await exerciseStandaloneLoopDimensions(page, eqPlan.loopId, label, true) : null;
 			const mixedSelectionRefusal = standalone ? await assertStandaloneMixedSelectionRegistrationRefused(page, [{ id: eqId, world: eqPlan.start }, { id: ohbId, world: ohbPlan }, { id: stkId, world: stkPlan }], label) : null;
 			const standaloneRepair = standalone ? await exerciseStandaloneLoopRepair(page, eqPlan.loopId, label) : null;
 			await openStaticFabNavigatorTab(page, "checks");
@@ -11926,6 +12096,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 			const reopenedContext = await browserInstance.newContext({ viewport, acceptDownloads: true });
 			const reopenedPage = await reopenedContext.newPage();
 			let reopened;
+			let legacyMenuFocus = null;
 			try {
 				reopenedPage.on("console", (message) => {
 					if (message.type() === "error") result.consoleErrors.push(message.text());
@@ -11989,6 +12160,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 					true,
 					`${label} native reopen preserves three exact direct Loop owners`,
 				);
+				if (standalone) legacyMenuFocus = await assertOwnedLegacyStockerMenuFocus(reopenedPage, savedPath, stkId, stkPlan, label);
 			} finally {
 				await closeBrowserResource(reopenedPage, `${label} reopened all-equipment page`);
 				await closeBrowserResource(reopenedContext, `${label} reopened all-equipment context`);
@@ -12089,6 +12261,9 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 				groupIds,
 				loopIds,
 				standaloneRegistration,
+				ownedActionParity,
+				protectedResize,
+				legacyMenuFocus,
 				mixedSelectionRefusal,
 				standaloneRepair,
 				standaloneIdentityReset,
@@ -36486,7 +36661,7 @@ async function exerciseCompactLayout(page) {
 	}
 	const flowToggle = page.getByTestId("template-flow-toggle");
 	const rotateClockwise = page.getByTestId("template-rotate-clockwise");
-	const aisleIncrease = page.getByRole("button", { name: "AISLE 늘리기" });
+	const aisleIncrease = page.getByRole("button", { name: "루프 길이 늘리기" });
 	for (const control of [flowToggle, rotateClockwise, aisleIncrease]) {
 		await assertLocatorInsideViewport(page, control);
 	}

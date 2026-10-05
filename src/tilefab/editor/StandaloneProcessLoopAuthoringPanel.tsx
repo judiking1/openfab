@@ -30,7 +30,7 @@ export function StandaloneProcessLoopRegistrationForm({
 				소속시킬 수 있습니다.
 			</p>
 			<label className="tilefab-organization-field">
-				<span>루프 이름</span>
+				<span>작업 루프 이름</span>
 				<input
 					className="tilefab-loop-registration-control tilefab-loop-registration-input"
 					value={name}
@@ -97,7 +97,9 @@ export function StandaloneProcessLoopAuthoringBar({
 			aria-busy={pendingLabel !== null}
 		>
 			<div>
-				<strong>{ownerName ? `${ownerName} · 레일 편집` : "작업 루프"}</strong>
+				<strong>
+					{ownerName ? `${ownerName} · 작업 루프 레일 편집` : "작업 루프 · Process Loop"}
+				</strong>
 				<p role="status" data-testid="process-loop-edit-feedback">
 					{pendingLabel ?? feedback ?? "그리기·지우기·Delete · 장비와 루프 소속은 유지됩니다"}
 				</p>

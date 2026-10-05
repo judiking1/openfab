@@ -605,9 +605,11 @@ export function StaticFabOrganizationLibrary({
 					>
 						<header>
 							<span>
-								{staticFabOrganizationSemanticRoleLabel(
-									organizationSemanticRoles.get(selectedStaticFabOrganization.id),
-								) ?? selectedStaticFabOrganization.kind}
+								{organizationSemanticRoles.get(selectedStaticFabOrganization.id) === "PROCESS_LOOP"
+									? "작업 루프 · Process Loop"
+									: (staticFabOrganizationSemanticRoleLabel(
+											organizationSemanticRoles.get(selectedStaticFabOrganization.id),
+										) ?? selectedStaticFabOrganization.kind)}
 								-{selectedStaticFabOrganization.id}
 							</span>
 							<button

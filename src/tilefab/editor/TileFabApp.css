@@ -2242,12 +2242,10 @@
 	}
 }
 
-/* Keep camera controls clear of the activity rail while equipment uses a bottom sheet. */
+/* Keep camera controls clear of the activity rail while an Inspector uses a bottom sheet. */
 @media (max-width: 430px) {
 	.tilefab-app[data-guided-build-active="false"]
-		.tilefab-workspace:has(
-			.tilefab-inspector[data-testid="port-equipment-inspector"][data-compact-layout="bottom-sheet"]
-		)
+		.tilefab-workspace:has(.tilefab-inspector[data-compact-layout="bottom-sheet"])
 		.tilefab-camera-controls {
 		top: 10px;
 		right: 10px;
@@ -6054,6 +6052,8 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-organization-editor > header span {
+	min-width: 0;
+	overflow-wrap: anywhere;
 	color: #8bdce0;
 	font-size: var(--tilefab-font-caption);
 	font-weight: 760;
@@ -9301,7 +9301,8 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-pattern-configurator {
 	display: grid;
-	grid-template-rows: minmax(170px, 1fr) auto minmax(0, auto);
+	grid-template-rows: minmax(170px, 1fr);
+	grid-auto-rows: max-content;
 	gap: 8px;
 	min-height: 0;
 	padding: 8px;
@@ -9534,12 +9535,13 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-pattern-config-parameters > div {
 	display: grid;
-	grid-template-columns: minmax(78px, 1fr) 36px 68px 36px 26px;
+	grid-template-columns: 36px minmax(0, 1fr) 36px 26px;
 	align-items: center;
 	gap: 4px;
 }
 
 .tilefab-pattern-config-parameters label {
+	grid-column: 1 / -1;
 	color: #899699;
 	font-size: 11px;
 	font-weight: 710;
@@ -9643,7 +9645,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-context-palette {
 	position: absolute;
-	z-index: 8;
+	z-index: 20;
 	display: grid;
 	width: min(286px, calc(100% - 24px));
 	overflow: hidden;
@@ -9704,6 +9706,23 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	grid-template-columns: 1fr 1fr;
 	gap: 5px;
 	padding: 6px;
+}
+
+.tilefab-context-action-reasons {
+	padding: 8px 11px;
+	border-bottom: 1px solid #334043;
+	color: #c4d3d5;
+	font-size: var(--tilefab-font-caption, 12px);
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-context-action-reasons p {
+	margin: 0;
+}
+
+.tilefab-context-action-reasons p + p {
+	margin-top: 6px;
 }
 
 .tilefab-context-palette > section > button {
@@ -11021,6 +11040,8 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-pattern-resize > header strong {
+	min-width: 0;
+	overflow-wrap: anywhere;
 	color: #dce5e6;
 	font-size: var(--tilefab-font-body);
 }
@@ -11981,6 +12002,21 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 @media (max-width: 760px) {
+	.tilefab-action-hints[data-context^="reshape-"] {
+		width: auto;
+		height: auto;
+		flex-wrap: wrap;
+		overflow: hidden;
+	}
+
+	.tilefab-app .tilefab-action-hints[data-context^="reshape-"] .tilefab-action-hint {
+		min-width: 0;
+		min-height: 44px;
+		flex: 1 1 180px;
+		justify-content: flex-start;
+		white-space: normal;
+	}
+
 	.tilefab-action-hints[data-context="equipment-membership-edit"] {
 		bottom: 152px;
 		width: auto;
