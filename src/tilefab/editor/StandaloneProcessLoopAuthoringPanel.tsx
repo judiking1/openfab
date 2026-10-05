@@ -40,7 +40,12 @@ export function StandaloneProcessLoopRegistrationForm({
 					aria-describedby="standalone-process-loop-instructions"
 					onChange={(event) => onNameChange(event.currentTarget.value)}
 					onKeyDown={(event) => {
-						if (event.key !== "Enter") return;
+						if (
+							event.key !== "Enter" ||
+							event.nativeEvent.isComposing ||
+							event.nativeEvent.keyCode === 229
+						)
+							return;
 						event.preventDefault();
 						if (!busy && selectionAvailable && name.trim().length > 0) onRegister();
 					}}

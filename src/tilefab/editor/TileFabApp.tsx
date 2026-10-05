@@ -1,6 +1,5 @@
 import {
 	AlertTriangle,
-	ArchiveRestore,
 	ArrowLeft,
 	ArrowLeftRight,
 	ArrowUpDown,
@@ -14,17 +13,13 @@ import {
 	Copy,
 	CornerDownRight,
 	Crosshair,
-	Download,
-	EllipsisVertical,
 	Factory,
 	FilePlus2,
-	FileUp,
 	FolderClock,
 	FolderOpen,
 	GitBranch,
 	GraduationCap,
 	Grid3X3,
-	GripVertical,
 	Home,
 	Layers3,
 	LayoutTemplate,
@@ -51,7 +46,6 @@ import {
 	Save,
 	SaveAll,
 	Scissors,
-	Search,
 	Stamp,
 	Star,
 	Trash2,
@@ -99,10 +93,7 @@ import {
 	compilePhysicalModuleSelection,
 	railRouteHintForPhysicalPath,
 } from "../compile/PhysicalPathSelection";
-import {
-	type CompiledPhysicalLayout,
-	compilePhysicalRail,
-} from "../compile/PhysicalRailCompiler";
+import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import {
 	planCopyOhbToSlot,
 	planEraseEquipmentGroup,
@@ -204,7 +195,6 @@ import {
 import type { PreparedSyntheticFabStarter } from "../compile/SyntheticFabStarterPreview";
 import {
 	ADVANCED_SWITCH_PROFILE_CLASSES,
-	ADVANCED_SWITCH_SHARED_TRUNK_PROFILE,
 	type AdvancedSwitchProfileClass,
 	type AdvancedSwitchRecord,
 	deriveAdvancedSwitchGeometry,
@@ -437,9 +427,7 @@ import {
 	deriveStaticFabOrganizationSemanticRoles,
 	normalizeStaticFabOrganizationName,
 	resolveStaticFabOrganizationDescendantIds,
-	STATIC_FAB_ORGANIZATION_COLORS,
 	STATIC_FAB_ORGANIZATION_KINDS,
-	STATIC_FAB_ORGANIZATION_MAX_DESCRIPTION_LENGTH,
 	type StaticFabOrganizationColor,
 	type StaticFabOrganizationKind,
 	type StaticFabOrganizationRecord,
@@ -614,6 +602,21 @@ import {
 	shouldRetainPlacementGhostOnPointerLeave,
 } from "./BlueprintCommandLoop";
 import { BlueprintPlacementBridge } from "./BlueprintPlacementBridge";
+import { BlueprintLibraryPanel } from "./BlueprintLibraryPanel";
+import type {
+	BlueprintLibraryTab,
+	ContextualBlueprintSaveRequest,
+	PendingUserBlueprintImport,
+	RailClipboard,
+	RailClipboardHistoryEntry,
+	UserBlueprintMetadataDraft,
+} from "./BlueprintLibraryTypes";
+import {
+	createPortEquipmentEditorSnapshot,
+	type PortDerivedArtifactBundle,
+	type PortEquipmentEditorSnapshot,
+	preparePortDerivedArtifactBundle,
+} from "./PortEquipmentEditorSnapshot";
 import {
 	type BlueprintRecordCommandId,
 	type BlueprintRecordContextScope,
@@ -623,8 +626,6 @@ import {
 	type UserBlueprintOrganizationTarget,
 } from "./BlueprintRecordContext";
 import {
-	BlueprintRecordContextTray,
-	RailBlueprintMiniature,
 	RailTemplateMiniature,
 } from "./BlueprintRecordPresentation";
 import {
@@ -660,7 +661,8 @@ import {
 	validateContextualBlueprintSaveDraft,
 } from "./ContextualBlueprintSave";
 import { ContextualBlueprintSaveDialog } from "./ContextualBlueprintSaveDialog";
-import { EDITOR_ACTIVITY_DEFINITIONS, type EditorActivity, editorActivityCanvasLabel } from "./EditorActivity";
+import { type EditorActivity, editorActivityCanvasLabel } from "./EditorActivity";
+import { EditorActivityTools } from "./EditorActivityTools";
 import { EditorActivityRail } from "./EditorActivityRail";
 import { editorToolDensityPresentation } from "./EditorToolDensityPresentation";
 import { DeferredEditorCommandHelpDialog } from "./DeferredEditorCommandHelpDialog";
@@ -682,12 +684,10 @@ import {
 	ordinaryEqAnchorEdgePresentation,
 } from "./OrdinaryEqAnchorEdgePresentation";
 import {
-	ORDINARY_STK_HANDOFF_ENTRY_STATUS,
 	ordinaryEqToStkHandoff,
 } from "./OrdinaryEqToStkHandoff";
 import {
 	ORDINARY_EQ_HANDOFF_ENTRY_STATUS,
-	ordinaryEqHandoffRailPrerequisiteStatus,
 	ordinaryNextPortHandoff,
 } from "./OrdinaryNextPortHandoff";
 import { ordinaryCompletedModuleHandoff } from "./OrdinaryCompletedModuleHandoff";
@@ -746,6 +746,11 @@ import {
 } from "./EditorCommandRegistry";
 import { deriveEditorActionHints, editorActionHint } from "./EditorActionHintPresentation";
 import type { EditorTool } from "./EditorTool";
+import { PortEquipmentMembershipEditBar } from "./PortEquipmentMembershipEditBar";
+import { PortEquipmentGroupTransformBar } from "./PortEquipmentGroupTransformBar";
+import { PortEquipmentPlacementWorkspace } from "./PortEquipmentPlacementWorkspace";
+import { PortEquipmentInspector } from "./PortEquipmentInspector";
+import { RailModuleInspector } from "./RailModuleInspector";
 import { EditorInputCue } from "./EditorInputCue";
 import {
 	createInspectAreaKeyboardSession,
@@ -862,7 +867,6 @@ import { portAuthoringSurfacePresentation } from "./PortAuthoringSurfacePresenta
 import { applyTileFabCameraZoom, fitTileFabCameraZoom } from "./TileFabCameraZoom";
 import { railPointerPlanningIssue, rejectedRailPointerPlan } from "./RailPointerPlanning";
 import { tileFabMapScale } from "./TileFabMapScale";
-import { scrollFocusedInspectorDisclosure } from "./InspectorDisclosureFocus";
 import {
 	analyzeGuidedBuildRailReuse,
 	EMPTY_GUIDED_BUILD_RAIL_REUSE_EVIDENCE,
@@ -947,7 +951,6 @@ import { decidePortRowPointerFrame } from "./PortRowPointerFrame";
 import {
 	type EquipmentAuthoringContinuation,
 	equipmentAuthoringContinuation,
-	equipmentAuthoringContinuationExplanation,
 	equipmentAuthoringContinuationStatus,
 } from "./EquipmentAuthoringContinuation";
 import {
@@ -1085,6 +1088,10 @@ import {
 } from "./StaticFabBayFlowEditSession";
 import { staticFabCheckEntryPresentation } from "./StaticFabCheckEntryPresentation";
 import { StaticFabChecksSummary } from "./StaticFabChecksSummary";
+import {
+	StaticFabOrganizationLibrary,
+	type OrganizationDetailTab,
+} from "./StaticFabOrganizationLibrary";
 import type { StaticFabInspection3DCommand } from "./StaticFabInspection3DViewport";
 import {
 	DEFAULT_STATIC_FAB_INSPECTION_3D_VISIBILITY,
@@ -1162,7 +1169,6 @@ import {
 } from "./UserBlueprintLibraryCrossTabRefreshController";
 import "./TileFabApp.css";
 import "./StaticFabCheckRepairChooser.css";
-import { EquipmentAuthoringWorkspace } from "./EquipmentAuthoringWorkspace";
 import {
 	compileOrdinaryPortProcessLoopScope,
 	ordinaryPortProcessLoopScopeMatches,
@@ -1733,16 +1739,6 @@ interface RailAreaStampEligibility {
 	readonly reason: string;
 }
 
-interface PortDerivedArtifactBundle {
-	readonly physical: CompiledPhysicalLayout;
-	readonly artifacts: PortSlotPreparedArtifacts | null;
-	readonly portEquipment: PortEquipmentState;
-	readonly portType: PortType | null;
-	readonly presentation: CompiledPortEquipmentPresentation;
-	readonly slots: CompiledPortSlots | null;
-	readonly availability: PreparedPortSlotAvailabilityIndex | null;
-}
-
 interface RailTemplateSession {
 	readonly id: RailTemplateId;
 	readonly pose: RailTemplatePose;
@@ -1925,42 +1921,9 @@ interface KeyboardActions {
 	selectStaticFabOrganizationCanvas: (primaryModifier: boolean, shiftModifier: boolean) => void;
 }
 
-type RailClipboard =
-	| {
-			readonly kind: "area";
-			readonly template: RailAreaStampTemplate;
-			readonly staticFabTemplate?: StaticFabBlueprintTemplate;
-	  }
-	| { readonly kind: "module"; readonly template: RailModuleStampTemplate }
-	| {
-			readonly kind: "organization";
-			readonly bundle: StaticFabOrganizationBundle;
-			readonly label: string;
-	  };
-
-interface RailClipboardHistoryEntry {
-	readonly id: number;
-	readonly clipboard: RailClipboard;
-}
-
-type BlueprintLibraryTab = "saved" | "user" | "recent";
 type BlueprintSaveDestination = ContextualBlueprintSaveDestination;
-type OrganizationDetailTab = "overview" | "relations" | "properties";
 
 const RAIL_CLIPBOARD_HISTORY_LIMIT = 8;
-
-interface UserBlueprintMetadataDraft {
-	readonly id: string;
-	readonly name: string;
-	readonly folder: string;
-}
-
-interface PendingUserBlueprintImport {
-	readonly fileName: string;
-	readonly record: OpenFabUserBlueprintRecord;
-	readonly name: string;
-	readonly folder: string;
-}
 
 interface PendingUserBlueprintLibraryRestore {
 	readonly Dialog: typeof import("./UserBlueprintLibraryRestoreDialog").UserBlueprintLibraryRestoreDialog;
@@ -1982,8 +1945,6 @@ type ContextualBlueprintSaveCapture =
 			bundle: StaticFabOrganizationBundle;
 			summary: ContextualBlueprintSaveSourceSummary;
 	  }>;
-
-type ContextualBlueprintSaveRequest = "context" | "area" | "organization" | "whole-map";
 
 interface UserBlueprintPersistenceResult {
 	readonly saved: boolean;
@@ -2346,6 +2307,12 @@ export default function TileFabApp(): React.ReactElement {
 	const [renderPerformance] = useState(() => new RenderPerformanceTelemetry());
 	const draftEvaluatorRef = useRef(new RailDraftEvaluator());
 	const workerBridgeRef = useRef<RailWorkerBridgeHandle | null>(null);
+	const railMirrorRetryButtonRef = useRef<HTMLButtonElement | null>(null);
+	const railMirrorRetryAttemptRef = useRef<Readonly<{
+		document: RailDocument;
+		bridge: RailWorkerBridgeHandle;
+		promise: Promise<RailWorkerBridgeState>;
+	}> | null>(null);
 	const workerBridgeDocumentRef = useRef<RailDocument | null>(null);
 	const staticFabArrangementBridgeRef = useRef<StaticFabArrangementBridge | null>(null);
 	const staticFabArrangementBindingRef = useRef<StaticFabArrangementBinding | null>(null);
@@ -2876,7 +2843,9 @@ export default function TileFabApp(): React.ReactElement {
 			? parseRailEquipmentScaleProbePortCount(window.location.search)
 			: 0,
 	);
-	const [editorModel, setEditorModel] = useState<ActiveRailEditorModel>(() => {
+	const [editorSnapshot, setEditorSnapshot] = useState<
+		PortEquipmentEditorSnapshot<ActiveRailEditorModel>
+	>(() => {
 		const document = measureStartup(renderPerformance, () => new RailDocument());
 		const authoredChecksum = measureStartup(renderPerformance, () =>
 			checksumRailMap(
@@ -2890,7 +2859,7 @@ export default function TileFabApp(): React.ReactElement {
 		const portSlotArtifacts = measureStartup(renderPerformance, () =>
 			compilePortSlotPreparedArtifactCatalog(physical),
 		);
-		return Object.freeze({
+		const model: ActiveRailEditorModel = Object.freeze({
 			generation: 0,
 			document,
 			operationalConfiguration: document.operationalConfiguration,
@@ -2911,7 +2880,15 @@ export default function TileFabApp(): React.ReactElement {
 			draftArtifacts: null,
 			portSlotArtifacts,
 		});
+		return createPortEquipmentEditorSnapshot(
+			model,
+			measureStartup(renderPerformance, () =>
+				compilePortEquipmentPresentation(model.physical, model.portEquipment),
+			),
+		);
 	});
+	const { model: editorModel, portEquipmentPresentation: activePortEquipmentPresentation } =
+		editorSnapshot;
 	const editorModelRef = useRef(editorModel);
 	const operationalConfigurationFingerprint = useMemo(
 		() => checksumOperationalConfigurationState(editorModel.operationalConfiguration),
@@ -2946,10 +2923,6 @@ export default function TileFabApp(): React.ReactElement {
 	const analysis = editorModel.analysis;
 	const physical = editorModel.physical;
 	const readiness = editorModel.readiness;
-	const activePortEquipmentPresentation = useMemo(
-		() => compilePortEquipmentPresentation(physical, activePortEquipment),
-		[activePortEquipment, physical],
-	);
 	const [viewMode, setViewMode] = useState<EditorViewMode>("2d");
 	const [inspection3DInitialFocus, setInspection3DInitialFocus] = useState<
 		Readonly<{ x: number; z: number }>
@@ -3391,6 +3364,7 @@ export default function TileFabApp(): React.ReactElement {
 	const [railPresentationMode, setRailPresentationMode] =
 		useState<RailPresentationMode>("profiled");
 	const [workerState, setWorkerState] = useState<RailWorkerBridgeState>(INITIAL_RAIL_WORKER_STATE);
+	const [railMirrorRetryPending, setRailMirrorRetryPending] = useState(false);
 	const [modelSyncPending, setModelSyncPending] = useState(false);
 	const [modelDerivationMetrics, setModelDerivationMetrics] = useState<RailModelDerivationMetrics>({
 		status: "idle",
@@ -5252,6 +5226,15 @@ export default function TileFabApp(): React.ReactElement {
 					generation: editorModelRef.current.generation + 1,
 					...candidate.activation.model,
 				});
+				const portDerivedArtifacts = preparePortDerivedArtifactBundle(
+					nextModel,
+					portTypeForTool(toolRef.current),
+					portDerivedArtifactsRef.current,
+				);
+				const nextSnapshot = createPortEquipmentEditorSnapshot(
+					nextModel,
+					portDerivedArtifacts.presentation,
+				);
 				cancelStaticFabArrangementRef.current();
 				cancelStaticFabAssemblyConnectorRef.current();
 				cancelStaticFabSemanticBayMutationRef.current(undefined, false);
@@ -5262,6 +5245,9 @@ export default function TileFabApp(): React.ReactElement {
 				workerBridgeDocumentRef.current = nextModel.document;
 				draftEvaluatorRef.current = candidate.draftEvaluator;
 				editorModelRef.current = nextModel;
+				// Cancellation can change the tool; the layout effect rebinds availability
+				// to the final tool using this same prepared presentation.
+				portDerivedArtifactsRef.current = portDerivedArtifacts;
 				dragRef.current = null;
 				portRowDragRef.current = null;
 				stkDraftSessionRef.current = null;
@@ -5342,7 +5328,7 @@ export default function TileFabApp(): React.ReactElement {
 				setStaticFabSelection(null);
 				setPatternResizeDraft(null);
 				if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
-				setEditorModel(nextModel);
+				setEditorSnapshot(nextSnapshot);
 				setWorkerState(candidate.workerState);
 				setStartupState((current) => ({
 					status: "ready",
@@ -6144,45 +6130,15 @@ export default function TileFabApp(): React.ReactElement {
 	const refreshPortDerivedArtifacts = (
 		model: ActiveRailEditorModel,
 		portType: PortType | null,
-	): void => {
-		const portEquipment = model.portEquipment;
-		const artifacts = portType ? model.portSlotArtifacts[portType] : null;
+	): PortDerivedArtifactBundle => {
 		const previous = portDerivedArtifactsRef.current;
-		const presentation =
-			previous?.physical === model.physical && previous.portEquipment === portEquipment
-				? previous.presentation
-				: compilePortEquipmentPresentation(model.physical, portEquipment);
-		const canReuseAvailability =
-			previous?.physical === model.physical &&
-			previous.artifacts === artifacts &&
-			previous.portEquipment === portEquipment &&
-			previous.portType === portType &&
-			previous.presentation === presentation;
-		const availability = canReuseAvailability
-			? previous.availability
-			: artifacts
-				? createPreparedPortSlotAvailabilityIndex(
-						model.physical,
-						artifacts,
-						portEquipment,
-						presentation.resolvedPositions,
-					)
-				: null;
-		const changed = !canReuseAvailability;
-		const nextBundle = Object.freeze({
-			physical: model.physical,
-			artifacts,
-			portEquipment,
-			portType,
-			presentation,
-			slots: artifacts?.slots ?? null,
-			availability,
-		});
+		const nextBundle = preparePortDerivedArtifactBundle(model, portType, previous);
 		portDerivedArtifactsRef.current = nextBundle;
-		if (!changed) return;
+		if (nextBundle === previous) return nextBundle;
 		hoverPortSlotRef.current = null;
 		hoverPortIdRef.current = null;
 		rendererRef.current.invalidateStatic();
+		return nextBundle;
 	};
 	const setBuildAnchor = (
 		next: Cell | null,
@@ -7165,7 +7121,14 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			updateStkDraftSession(null);
 		}
-		refreshPortDerivedArtifacts(nextModel, portTypeForTool(toolRef.current));
+		const portDerivedArtifacts = refreshPortDerivedArtifacts(
+			nextModel,
+			portTypeForTool(toolRef.current),
+		);
+		const nextSnapshot = createPortEquipmentEditorSnapshot(
+			nextModel,
+			portDerivedArtifacts.presentation,
+		);
 		if (previousModel.document !== nextModel.document) {
 			clearAreaStampPlacementFailure();
 			setOrganizationBundlePublicationNotice(null);
@@ -7174,7 +7137,7 @@ export default function TileFabApp(): React.ReactElement {
 		refreshTemplateAttachmentGuide(nextModel, templateSessionRef.current);
 		// Publish the checksum with the document-backed counts and history. Deferring this
 		// state can temporarily label a committed equipment edit as already saved.
-		setEditorModel(nextModel);
+		setEditorSnapshot(nextSnapshot);
 		const focusedIssueId = readinessIssueRef.current?.id ?? null;
 		const nextFocusedIssue = focusedIssueId
 			? (nextModel.readiness.issues.find((issue) => issue.id === focusedIssueId) ?? null)
@@ -9230,6 +9193,42 @@ export default function TileFabApp(): React.ReactElement {
 		clearTransientConstruction("청사진 정밀 검사를 취소했습니다 · 기존 편집 기록은 유지됩니다");
 		return true;
 	};
+	const retryCurrentRailMirror = (): void => {
+		const model = editorModelRef.current;
+		const bridge = workerBridgeRef.current;
+		if (!bridge || workerBridgeDocumentRef.current !== model.document ||
+			startupState.status !== "ready" || projectOperationControllerRef.current !== null ||
+			projectSessionRef.current.operation !== "idle" || modelSyncPendingRef.current ||
+			processLoopOperationRef.current || staticFabMutationHistoryRef.current) return;
+		const promise = bridge.retryCurrentDocument();
+		if (!promise) return;
+		const attempt = { document: model.document, bridge, promise };
+		railMirrorRetryAttemptRef.current = attempt;
+		setRailMirrorRetryPending(true);
+		setStatus("지도 동기화를 다시 시도합니다 · 현재 편집 내용과 실행 취소 기록은 유지됩니다");
+		const ownsAttempt = (): boolean => railMirrorRetryAttemptRef.current === attempt &&
+			workerBridgeRef.current === bridge && workerBridgeDocumentRef.current === model.document &&
+			editorModelRef.current.document === model.document &&
+			editorModelRef.current.generation === model.generation;
+		void promise.then(() => {
+			if (!ownsAttempt()) return;
+			setStatus("지도 동기화가 복구되었습니다 · 편집과 저장을 계속하세요");
+			if (document.activeElement === railMirrorRetryButtonRef.current) {
+				canvasRef.current?.focus({ preventScroll: true });
+			}
+		}).catch(() => {
+			if (ownsAttempt()) setStatus("지도 동기화를 완료하지 못했습니다 · 현재 내용은 유지되며 다시 시도할 수 있습니다");
+		}).finally(() => {
+			if (railMirrorRetryAttemptRef.current !== attempt) return;
+			railMirrorRetryAttemptRef.current = null;
+			if (workerBridgeRef.current !== null) setRailMirrorRetryPending(false);
+		});
+	};
+	const currentRailMirrorRetryPending = railMirrorRetryPending &&
+		railMirrorRetryAttemptRef.current?.document === railDocument;
+	const railMirrorRetryBlocked = startupState.status !== "ready" ||
+		projectSession.operation !== "idle" || modelSyncPending ||
+		processLoopOperation !== null || staticFabMutationHistory !== null;
 	const editorMutationWaitBlockedReason = (): string | null => {
 		if (processLoopOperationRef.current) return "작업 루프 준비를 기다리거나 Esc로 취소하세요";
 		if (staticFabMutationHistoryRef.current) return "편집 이력 처리를 기다리거나 Esc로 취소하세요";
@@ -9238,6 +9237,7 @@ export default function TileFabApp(): React.ReactElement {
 			return "프로젝트 작업이 끝난 뒤 편집을 계속하세요";
 		}
 		if (modelSyncPendingRef.current) return "Worker 동기화가 끝난 뒤 편집을 계속하세요";
+		if (workerState.status === "error") return "지도 동기화가 중단되었습니다 · 화면의 다시 시도 버튼으로 복구하세요";
 		if (workerState.status !== "ready") return "Rail mirror Worker가 준비된 뒤 편집을 계속하세요";
 		return null;
 	};
@@ -14659,6 +14659,7 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			if (
 				portEquipmentGroupEditSessionRef.current &&
+				target === canvas &&
 				!event.metaKey &&
 				!event.ctrlKey &&
 				!event.altKey
@@ -19662,11 +19663,14 @@ export default function TileFabApp(): React.ReactElement {
 
 	const promotePreparedProject = (
 		prepared: PreparedOpenFabProjectLoad,
+		nextSnapshot: PortEquipmentEditorSnapshot<ActiveRailEditorModel>,
+		portDerivedArtifacts: PortDerivedArtifactBundle,
 		fileReference: OpenFabProjectFileReference | null,
 		message: string,
 		needsSave: boolean,
 		sourceOperation: Exclude<ProjectOperation, "idle" | "saving">,
 	): void => {
+		const nextModel = nextSnapshot.model;
 		// A prepared replacement owns a new document/Worker generation. Invalidate any derived-model
 		// activation for the outgoing document before publishing the replacement so an aborted stale
 		// continuation cannot leave the new project permanently marked as synchronizing.
@@ -19712,10 +19716,6 @@ export default function TileFabApp(): React.ReactElement {
 		connectedFabHandoffStatusOverrideRef.current = null;
 		staticFabAssemblyConnectorReturnFocusRef.current = null;
 		staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current = false;
-		const nextModel: ActiveRailEditorModel = Object.freeze({
-			generation: editorModelRef.current.generation + 1,
-			...prepared.candidate.activation.model,
-		});
 		liveSimulationScenarioEditorController.replaceProject(
 			prepared.metadata.manifest.id,
 			nextModel.document,
@@ -19730,6 +19730,9 @@ export default function TileFabApp(): React.ReactElement {
 		draftEvaluatorRef.current = prepared.candidate.draftEvaluator;
 		setOrganizationBundlePublicationNotice(null);
 		editorModelRef.current = nextModel;
+		// Cancellation can change the tool; the layout effect rebinds availability
+		// to the final tool using this same prepared presentation.
+		portDerivedArtifactsRef.current = portDerivedArtifacts;
 		dragRef.current = null;
 		portRowDragRef.current = null;
 		stkDraftSessionRef.current = null;
@@ -19821,7 +19824,7 @@ export default function TileFabApp(): React.ReactElement {
 		setStaticFabSelection(null);
 		setPatternResizeDraft(null);
 		if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
-		setEditorModel(nextModel);
+		setEditorSnapshot(nextSnapshot);
 		setWorkerState(prepared.candidate.workerState);
 		setStartupState({
 			status: "ready",
@@ -19921,9 +19924,31 @@ export default function TileFabApp(): React.ReactElement {
 			prepared.candidate.mirrorBridge.dispose();
 			throw new RailStartupCancelledError();
 		}
+		let nextSnapshot: PortEquipmentEditorSnapshot<ActiveRailEditorModel>;
+		let portDerivedArtifacts: PortDerivedArtifactBundle;
+		try {
+			const nextModel: ActiveRailEditorModel = Object.freeze({
+				generation: editorModelRef.current.generation + 1,
+				...prepared.candidate.activation.model,
+			});
+			portDerivedArtifacts = preparePortDerivedArtifactBundle(
+				nextModel,
+				portTypeForTool(toolRef.current),
+				portDerivedArtifactsRef.current,
+			);
+			nextSnapshot = createPortEquipmentEditorSnapshot(
+				nextModel,
+				portDerivedArtifacts.presentation,
+			);
+		} catch (error: unknown) {
+			prepared.candidate.mirrorBridge.dispose();
+			throw error;
+		}
 		promoted = true;
 		promotePreparedProject(
 			prepared,
+			nextSnapshot,
+			portDerivedArtifacts,
 			fileReference,
 			message,
 			operation !== "opening",
@@ -21996,6 +22021,10 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (mode === "move" && blockDirectlyOwnedEquipmentMutation(resolved.equipmentGroup.id)) return;
+		if (resolved.equipmentGroup.kind === "STK" && resolved.equipmentGroup.template === "CUSTOM") {
+			setStatus("이전 CUSTOM Stocker는 이동·복제를 지원하지 않습니다 · FLEX Stocker로 새로 배치하세요");
+			return;
+		}
 		const portType = resolved.equipmentGroup.kind;
 		lastEquipmentToolRef.current = portType === "EQ" ? "eq" : "stk";
 		updateEditorActivity("equip");
@@ -22547,6 +22576,7 @@ export default function TileFabApp(): React.ReactElement {
 		clearTransientConstruction();
 		toolRef.current = "inspect";
 		setTool("inspect");
+		setProcessLoopRailEditFeedback(null);
 		updatePatternResizeDraft(
 			Object.freeze({
 				candidate,
@@ -22560,6 +22590,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const updatePatternResizeParameter = (key: RailTemplateParameterKey, value: number): void => {
+		if (processLoopOperationRef.current) return;
 		const current = patternResizeDraftRef.current;
 		const selection = areaSelectionRef.current;
 		const model = editorModelRef.current;
@@ -22574,6 +22605,7 @@ export default function TileFabApp(): React.ReactElement {
 			),
 		}) satisfies RailPatternResizeDraft;
 		updatePatternResizeDraft(next);
+		setProcessLoopRailEditFeedback(null);
 		const plan = planRailPatternResize(
 			model.map,
 			model.document.portEquipment,
@@ -22593,6 +22625,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const cancelPatternResize = (): void => {
+		if (processLoopRailEditRef.current) cancelProcessLoopOperation();
 		updatePatternResizeDraft(null);
 		if (isRailPatternResizePlan(previewRef.current?.plan)) previewRef.current = null;
 		if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
@@ -22601,6 +22634,9 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const applyPatternResize = (): void => {
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
 		const draft = patternResizeDraftRef.current;
 		const selection = areaSelectionRef.current;
 		const model = editorModelRef.current;
@@ -22612,9 +22648,17 @@ export default function TileFabApp(): React.ReactElement {
 			draft.candidate,
 			draft.parameters,
 		);
+		if (processLoopRailEditRef.current) {
+			void runProcessLoopRepair(plan, null, () => updatePatternResizeDraft(null));
+			return;
+		}
 		const result = commitPlan(plan);
 		if (!result.committed) {
-			setStatus(railDocument.getLastCommandError() ?? result.evaluation?.reason ?? plan.reason);
+			setStatus(
+				model.document.getLastCommandError() ??
+					(result.evaluation?.valid === false ? result.evaluation.reason : null) ??
+					(!plan.valid ? plan.reason : "치수 변경을 적용하지 못했습니다 · 레일을 다시 선택한 뒤 시도하세요"),
+			);
 			return;
 		}
 		updatePatternResizeDraft(null);
@@ -24091,7 +24135,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
-		if (plan && plan.kind !== "erase" && (plan.kind !== "build" ||
+		if (plan && plan.kind !== "erase" && !isRailPatternResizePlan(plan) && (plan.kind !== "build" ||
 			isRailModuleStampPlan(plan) || isRailAreaStampPlan(plan) || isRailTemplatePlan(plan) ||
 			isAdvancedSwitchPlan(plan) || isRailNetworkLinkPlan(plan) || isStaticFabMutationPlan(plan))) {
 			setStatus("작업 루프 편집에서는 일반 레일 그리기와 지우기를 사용하세요 · 다른 배치는 편집 종료 후 사용하세요");
@@ -24105,7 +24149,7 @@ export default function TileFabApp(): React.ReactElement {
 			}
 		}
 		const document = context.document;
-		const selectionIntent = Object.freeze({ area: areaSelectionRef.current, selection: staticFabSelectionRef.current, module: selectedModuleRef.current, port: selectedPortEquipmentRef.current, keyboard: guidedRailKeyboardSessionRef.current });
+		const selectionIntent = Object.freeze({ area: areaSelectionRef.current, selection: staticFabSelectionRef.current, module: selectedModuleRef.current, port: selectedPortEquipmentRef.current, keyboard: guidedRailKeyboardSessionRef.current, resize: patternResizeDraftRef.current });
 		const request = Object.freeze({ document });
 		processLoopOperationRef.current = request;
 		setProcessLoopOperation("루프 레일 편집 준비 중 · Esc로 취소");
@@ -24118,10 +24162,10 @@ export default function TileFabApp(): React.ReactElement {
 			const controller = getProcessLoopAuthoringController();
 			const isCurrent = () => processLoopOperationRef.current === request && processLoopRailEditRef.current === context &&
 				areaSelectionRef.current === selectionIntent.area && staticFabSelectionRef.current === selectionIntent.selection &&
-				selectedModuleRef.current === selectionIntent.module && selectedPortEquipmentRef.current === selectionIntent.port && guidedRailKeyboardSessionRef.current === selectionIntent.keyboard;
+				selectedModuleRef.current === selectionIntent.module && selectedPortEquipmentRef.current === selectionIntent.port && guidedRailKeyboardSessionRef.current === selectionIntent.keyboard && patternResizeDraftRef.current === selectionIntent.resize;
 			const result = selectedModules
 				? await controller.repairSelection(owner.id, selectedModules, isCurrent)
-				: plan ? await controller.repair(owner.id, plan.mutations, plan.switchMutations ?? [], isCurrent) : null;
+				: plan ? await controller.repair(owner.id, plan.mutations, "switchMutations" in plan ? plan.switchMutations ?? [] : [], isCurrent) : null;
 			if (processLoopOperationRef.current !== request || editorModelRef.current.document !== document) return;
 			if (!result?.commit.committed) throw new Error(document.getLastCommandError() ?? "루프 레일 편집을 적용하지 못했습니다");
 			processLoopOperationRef.current = null;
@@ -25321,7 +25365,9 @@ export default function TileFabApp(): React.ReactElement {
 	const semanticBayDisconnectAvailability =
 		resolveStaticFabSemanticBayMutationAvailability("DISCONNECT");
 	const semanticBayDeleteAvailability = resolveStaticFabSemanticBayMutationAvailability("DELETE");
-	const resolveStaticFabBayFlowEditAvailability = (): Readonly<{
+	const resolveStaticFabBayFlowEditAvailability = (
+		retryingSession?: StaticFabBayFlowEditSession,
+	): Readonly<{
 		state: "ready" | "blocked";
 		reason: string;
 	}> => {
@@ -25339,7 +25385,11 @@ export default function TileFabApp(): React.ReactElement {
 				reason: "내부 흐름을 지정할 runtime-recognized Twin Bay 조직 하나만 선택하세요",
 			});
 		}
-		if (staticFabBayFlowEditUiRef.current || staticFabSemanticBayMutationUiRef.current) {
+		if (
+			(staticFabBayFlowEditUiRef.current &&
+				staticFabBayFlowEditUiRef.current !== retryingSession) ||
+			staticFabSemanticBayMutationUiRef.current
+		) {
 			return Object.freeze({
 				state: "blocked" as const,
 				reason: "현재 Bay 검토를 적용하거나 취소한 뒤 새 명령을 시작하세요",
@@ -25857,6 +25907,52 @@ export default function TileFabApp(): React.ReactElement {
 			}),
 		);
 		setStatus(`Bay 흐름 명령을 검증하지 못했습니다 · ${reason}`);
+	};
+
+	const retryStaticFabBayFlowEdit = (): void => {
+		const current = staticFabBayFlowEditUiRef.current;
+		if (!current || current.phase !== "rejected") return;
+		const availability = resolveStaticFabBayFlowEditAvailability(current);
+		const sourceSelectionMatches =
+			selectedSemanticBayOrganization?.id === current.bayOrganizationId;
+		const requestSequence =
+			Math.max(staticFabBayFlowEditRequestRef.current, current.requestSequence) + 1;
+		const retrying = reduceStaticFabBayFlowEditSession(current, {
+			type: "RETRY",
+			requestSequence,
+		});
+		if (retrying === current) return;
+		staticFabBayFlowEditRequestRef.current = requestSequence;
+		const controller = staticFabBayFlowEditSnapshotControllerRef.current;
+		staticFabBayFlowEditSnapshotControllerRef.current = null;
+		controller?.abort();
+		const bridge = staticFabBayFlowEditBridgeRef.current;
+		staticFabBayFlowEditBridgeRef.current = null;
+		bridge?.dispose();
+		staticFabBayFlowEditPlanRef.current = null;
+		if (appRootRef.current) {
+			appRootRef.current.dataset.bayFlowEditCommandStartedAt = String(performance.now());
+			appRootRef.current.dataset.bayFlowEditSnapshotStatus = "deferred-until-painted";
+			appRootRef.current.dataset.bayFlowEditFirstPaintMs = "";
+			appRootRef.current.dataset.bayFlowEditSnapshotHandoffMs = "";
+			appRootRef.current.dataset.bayFlowEditHydrationMs = "";
+			appRootRef.current.dataset.bayFlowEditWorkerRoundTripMs = "";
+			appRootRef.current.dataset.bayFlowEditResponseValidationMs = "";
+			appRootRef.current.dataset.bayFlowEditAdoptionMs = "";
+		}
+		publishStaticFabBayFlowEdit(retrying);
+		if (!sourceSelectionMatches || availability.state !== "ready") {
+			rejectStaticFabBayFlowEditAnalysis(
+				requestSequence,
+				!sourceSelectionMatches
+					? "검토한 Bay 선택이 변경되었습니다. 취소한 뒤 Bay를 다시 선택하세요"
+					: availability.reason,
+			);
+			return;
+		}
+		setStatus(
+			`${current.bayName}의 현재 지도에서 ${current.targetInternalFlowPattern} 목표 흐름을 다시 검토합니다`,
+		);
 	};
 
 	const analyzeStaticFabBayFlowEdit = (requestSequence: number): void => {
@@ -28241,7 +28337,8 @@ export default function TileFabApp(): React.ReactElement {
 			? activePreview.evaluation
 			: null;
 	const patternResizeCanApply =
-		patternResizePlan?.valid === true && patternResizeEvaluation?.valid !== false;
+		patternResizePlan?.valid === true && patternResizeEvaluation?.valid !== false &&
+		!processLoopRailEditFeedback && !staticFabExclusiveCommandActive && editorMutationWaitBlockedReason() === null;
 	const areaStampWidthMeters = areaStampSession
 		? areaStampSession.pose.quarterTurns % 2 === 0
 			? areaStampSession.template.sourceWidthMeters
@@ -29081,6 +29178,7 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedEquipmentNeedsGroupMoveForProcessLoop =
 		selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 &&
 		selectedEquipmentGroup?.kind === "STK" &&
+		selectedEquipmentGroup.template !== "CUSTOM" &&
 		selectedEquipmentGroup.portIds.length > 1 &&
 		equipmentProcessLoopChoices.length > 0;
 	const selectedEquipmentGroupMoveRecoveryId = selectedEquipmentNeedsGroupMoveForProcessLoop
@@ -33242,6 +33340,23 @@ export default function TileFabApp(): React.ReactElement {
 				aria-hidden={openFabStartDialogOpen || commandHelpOpen ? true : undefined}
 				inert={openFabStartDialogOpen || commandHelpOpen ? true : undefined}
 			>
+				{startupState.status === "ready" &&
+					(workerState.status === "error" || currentRailMirrorRetryPending) ? (
+					<div className="tilefab-mirror-recovery" data-testid="rail-mirror-recovery"
+						role={currentRailMirrorRetryPending ? "status" : "alert"} aria-atomic="true">
+						<div>
+							<strong>{currentRailMirrorRetryPending ? "지도 동기화 중" : "지도 동기화가 중단되었습니다"}</strong>
+							<p>현재 편집 내용과 실행 취소 기록은 유지됩니다. 복구 후 편집·저장을 계속하세요.</p>
+						</div>
+						<button ref={railMirrorRetryButtonRef} className="tilefab-mirror-retry-button" type="button" data-testid="retry-rail-mirror"
+							disabled={railMirrorRetryBlocked}
+							aria-disabled={currentRailMirrorRetryPending || railMirrorRetryBlocked}
+							aria-busy={currentRailMirrorRetryPending || undefined}
+							onClick={retryCurrentRailMirror} title={workerState.message ?? undefined}>
+							{currentRailMirrorRetryPending ? "동기화 중…" : "지도 동기화 다시 시도"}
+						</button>
+					</div>
+				) : null}
 				<DeferredEditorCommandHelpDialog
 					open={commandHelpOpen}
 					context={editorHelpContext}
@@ -33283,6 +33398,7 @@ export default function TileFabApp(): React.ReactElement {
 						session={staticFabBayFlowEdit}
 						returnFocus={staticFabBayFlowEditReturnFocusRef.current}
 						onAnalyze={analyzeStaticFabBayFlowEdit}
+						onRetry={retryStaticFabBayFlowEdit}
 						onCancel={() => cancelStaticFabBayFlowEdit(undefined, false)}
 						onApply={applyStaticFabBayFlowEdit}
 					/>
@@ -35443,227 +35559,34 @@ export default function TileFabApp(): React.ReactElement {
 							) : null}
 						</>
 					) : null}
-					<fieldset
-						id="tilefab-editor-activity-tools"
-						className="tilefab-editor-activity-tools"
-						data-activity={editorActivity}
-						aria-label={`${EDITOR_ACTIVITY_DEFINITIONS.find(({ id }) => id === editorActivity)?.label} 도구`}
-					>
-						{editorActivity === "build" ? (
-							<>
-								{!guidedBuildExperienceActive || guidedBuildEraseRevealed || tool !== "build" ? (
-									<ToolButton
-										label="레일 건설"
-										active={tool === "build"}
-										disabled={staticFabExclusiveCommandActive}
-										caption="레일 건설"
-										captionDescription="끌어서 Smart Route"
-										guidedCaption={
-											guidedBuildPrimaryTarget?.kind === "rail-tool"
-												? "레일 건설 · Smart Route"
-												: undefined
-										}
-										guidedTarget={guidedBuildPrimaryTarget?.kind === "rail-tool"}
-										guidedActionId="tool:build"
-										guidedDescriptionId={
-											guidedBuildPrimaryTarget?.kind === "rail-tool"
-												? "tilefab-guided-primary-target-description"
-												: undefined
-										}
-										onClick={() => chooseExplicitEditorTool("build")}
-									>
-										<Route size={18} />
-									</ToolButton>
-								) : null}
-								{!guidedBuildExperienceActive || guidedBuildEraseRevealed || tool === "erase" ? (
-									<ToolButton
-										label="모듈 철거"
-										active={tool === "erase"}
-										disabled={staticFabExclusiveCommandActive}
-										tone="danger"
-										caption="모듈 철거"
-										captionDescription="클릭 또는 드래그"
-										onClick={() => chooseExplicitEditorTool("erase")}
-									>
-										<Trash2 size={18} />
-									</ToolButton>
-								) : null}
-							</>
-						) : null}
-						{editorActivity === "assemble" ? (
-							<ToolButton
-								label="내 청사진"
-								active={blueprintLibraryOpen}
-								disabled={staticFabExclusiveCommandActive}
-								caption="내 청사진"
-								captionDescription="저장·배치·관리"
-								controls="tilefab-blueprint-library"
-								expanded={blueprintLibraryOpen}
-								keyShortcuts="B"
-								onClick={(event) =>
-									blueprintLibraryOpen
-										? closeBlueprintLibrary()
-										: openBlueprintLibraryFromActivity("saved", event.currentTarget)
-								}
-							>
-								<LibraryBig size={18} />
-							</ToolButton>
-						) : null}
-						{editorActivity === "equip" ? (
-							<>
-								{!guidedBuildExperienceActive || guidedBuildVisibleEquipmentToolIds.includes("ohb") || tool === "ohb" ? (
-									<ToolButton
-										label="OHB 포트 배치"
-										active={tool === "ohb"}
-										disabled={staticFabExclusiveCommandActive}
-										caption={!guidedBuildOpen ? "OHB Port" : undefined}
-										captionDescription={!guidedBuildOpen ? "레일 옆 원 · 클릭 또는 드래그" : undefined}
-										compactCaption="OHB"
-										guidedCaption={guidedBuildOpen ? "1 · OHB · Port 1개" : undefined}
-										guidedTarget={
-											guidedBuildPrimaryTarget?.kind === "equipment-tool" &&
-											guidedBuildPrimaryTarget.tool === "ohb"
-										}
-										guidedActionId="tool:ohb"
-										guidedDescriptionId={
-											guidedBuildPrimaryTarget?.kind === "equipment-tool" &&
-											guidedBuildPrimaryTarget.tool === "ohb"
-												? "tilefab-guided-primary-target-description"
-												: undefined
-										}
-										guidedSelected={
-											guidedBuildCurrentSuggestedAction === "ohb" && tool === "ohb"
-										}
-										onClick={() => chooseGuidedEquipmentTool("ohb")}
-									>
-										<PackagePlus size={18} />
-									</ToolButton>
-								) : null}
-								{!guidedBuildExperienceActive || guidedBuildVisibleEquipmentToolIds.includes("eq") || tool === "eq" ? (
-									<ToolButton
-										label="EQ 포트 행 배치"
-										active={tool === "eq"}
-										disabled={staticFabExclusiveCommandActive}
-										caption={!guidedBuildOpen ? "EQ Port 행" : undefined}
-										captionDescription={!guidedBuildOpen ? "같은 직선 레일 · 시작점 → 끝점 클릭" : undefined}
-										compactCaption="EQ"
-										guidedCaption={guidedBuildOpen ? "2 · EQ · 직선 Port 행" : undefined}
-										guidedTarget={
-											guidedBuildPrimaryTarget?.kind === "equipment-tool" &&
-											guidedBuildPrimaryTarget.tool === "eq"
-										}
-										guidedActionId="tool:eq"
-										guidedDescriptionId={
-											guidedBuildPrimaryTarget?.kind === "equipment-tool" &&
-											guidedBuildPrimaryTarget.tool === "eq"
-												? "tilefab-guided-primary-target-description"
-												: undefined
-										}
-										guidedSelected={
-											guidedBuildCurrentSuggestedAction === "eq" && tool === "eq"
-										}
-										onClick={() => chooseGuidedEquipmentTool("eq")}
-									>
-										<Factory size={18} />
-									</ToolButton>
-								) : null}
-								{!guidedBuildExperienceActive || guidedBuildVisibleEquipmentToolIds.includes("stk") || tool === "stk" ? (
-									<ToolButton
-										label="Stocker 포트 그룹 배치"
-										active={tool === "stk"}
-										disabled={staticFabExclusiveCommandActive}
-										caption={!guidedBuildOpen ? "Stocker · 포트 선택" : undefined}
-										captionDescription={!guidedBuildOpen ? "금색 ◇ 포트 · 선택 후 Stocker 생성" : undefined}
-										compactCaption="Stocker"
-										guidedCaption={guidedBuildOpen ? "3 · Stocker · 입출고 2개" : undefined}
-										guidedTarget={
-											guidedBuildPrimaryTarget?.kind === "equipment-tool" &&
-											guidedBuildPrimaryTarget.tool === "stk"
-										}
-										guidedActionId="tool:stk"
-										guidedDescriptionId={
-											guidedBuildPrimaryTarget?.kind === "equipment-tool" &&
-											guidedBuildPrimaryTarget.tool === "stk"
-												? "tilefab-guided-primary-target-description"
-												: undefined
-										}
-										guidedSelected={
-											guidedBuildCurrentSuggestedAction === "stk" && tool === "stk"
-										}
-										onClick={() => chooseGuidedEquipmentTool("stk")}
-									>
-										<Warehouse size={18} />
-									</ToolButton>
-								) : null}
-								{!guidedBuildExperienceActive || guidedBuildEvaluation.complete || stationProposalReview ? (
-									<ToolButton
-										label="Station proposal 가져오기"
-										caption={!guidedBuildOpen ? "고급 가져오기" : undefined}
-										captionDescription={!guidedBuildOpen ? "외부 Station proposal 검토" : undefined}
-										compactCaption="IMPORT"
-										active={stationProposalReview !== null}
-										disabled={staticFabExclusiveCommandActive}
-										onClick={(event) => void openStationProposalReview(event.currentTarget)}
-									>
-										<FileUp size={18} />
-									</ToolButton>
-								) : null}
-							</>
-						) : null}
-						{editorActivity === "inspect" ? (
-							<>
-								<ToolButton
-									label="FAB 내비게이터"
-									caption="FAB 내비게이터"
-									captionDescription="문제 · 구조 · 장비"
-									active={staticFabNavigatorOpen}
-									disclosure
-									disabled={
-										!startupReady ||
-										projectBusy ||
-										modelSyncPending ||
-										staticFabExclusiveCommandActive
-									}
-									controls="tilefab-fab-navigator"
-									expanded={staticFabNavigatorOpen}
-									onClick={(event) => {
-										if (staticFabNavigatorOpen) closeStaticFabNavigator();
-										else chooseStaticFabNavigatorTab("map", event.currentTarget);
-									}}
-								>
-									<MapIcon size={18} />
-								</ToolButton>
-								<ToolButton
-									label="선택 및 정보"
-									caption="선택 및 정보"
-									captionDescription="Canvas에서 항목 선택"
-									active={!staticFabNavigatorOpen && (tool === "inspect" || tool === "reshape")}
-									disabled={staticFabExclusiveCommandActive || editorMutationWaitActive}
-									guidedTarget={guidedBuildPrimaryTarget?.kind === "inspect-tool"}
-									guidedActionId="tool:inspect"
-									guidedDescriptionId={
-										guidedBuildPrimaryTarget?.kind === "inspect-tool"
-											? "tilefab-guided-primary-target-description"
-											: undefined
-									}
-									onClick={() => chooseExplicitEditorTool("inspect")}
-								>
-									<MousePointer2 size={18} />
-								</ToolButton>
-								<ToolButton
-									label="상황별 편집 명령"
-									caption="상황별 편집"
-									captionDescription="선택 항목의 다음 작업"
-									active={contextPalette !== null}
-									disabled={staticFabExclusiveCommandActive}
-									keyShortcuts="ContextMenu Shift+F10"
-									onClick={toggleContextPalette}
-								>
-									<Crosshair size={18} />
-								</ToolButton>
-							</>
-						) : null}
-					</fieldset>
+					<EditorActivityTools
+						editorActivity={editorActivity}
+						tool={tool}
+						guidedBuildExperienceActive={guidedBuildExperienceActive}
+						guidedBuildEraseRevealed={guidedBuildEraseRevealed}
+						guidedBuildOpen={guidedBuildOpen}
+						guidedBuildPrimaryTarget={guidedBuildPrimaryTarget}
+						guidedBuildVisibleEquipmentToolIds={guidedBuildVisibleEquipmentToolIds}
+						guidedBuildCurrentSuggestedAction={guidedBuildCurrentSuggestedAction}
+						guidedBuildComplete={guidedBuildEvaluation.complete}
+						staticFabExclusiveCommandActive={staticFabExclusiveCommandActive}
+						editorMutationWaitActive={editorMutationWaitActive}
+						blueprintLibraryOpen={blueprintLibraryOpen}
+						stationProposalReviewActive={stationProposalReview !== null}
+						staticFabNavigatorOpen={staticFabNavigatorOpen}
+						startupReady={startupReady}
+						projectBusy={projectBusy}
+						modelSyncPending={modelSyncPending}
+						contextPaletteOpen={contextPalette !== null}
+						chooseExplicitEditorTool={chooseExplicitEditorTool}
+						closeBlueprintLibrary={closeBlueprintLibrary}
+						openBlueprintLibraryFromActivity={openBlueprintLibraryFromActivity}
+						chooseGuidedEquipmentTool={chooseGuidedEquipmentTool}
+						openStationProposalReview={openStationProposalReview}
+						closeStaticFabNavigator={closeStaticFabNavigator}
+						chooseStaticFabNavigatorTab={chooseStaticFabNavigatorTab}
+						toggleContextPalette={toggleContextPalette}
+					/>
 					<span className="tilefab-navigation-scroll-hint" aria-hidden="true">아래 도구 · 스크롤 ↓</span>
 				</nav>
 
@@ -35969,7 +35892,12 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
+												disabled={
+													!selectedPortEditableDetails ||
+													selectedEquipmentDirectlyOwned ||
+													(selectedPortDetails.equipmentGroup.kind === "STK" &&
+														selectedPortDetails.equipmentGroup.template === "CUSTOM")
+												}
 												onClick={() =>
 													runContextPaletteAction(() => startSelectedPortEquipmentGroupEdit("move"))
 												}
@@ -35979,7 +35907,11 @@ export default function TileFabApp(): React.ReactElement {
 											<button
 												type="button"
 												role="menuitem"
-												disabled={!selectedPortEditableDetails}
+												disabled={
+													!selectedPortEditableDetails ||
+													(selectedPortDetails.equipmentGroup.kind === "STK" &&
+														selectedPortDetails.equipmentGroup.template === "CUSTOM")
+												}
 												onClick={() =>
 													runContextPaletteAction(() => startSelectedPortEquipmentGroupEdit("copy"))
 												}
@@ -36119,1167 +36051,97 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 
 				{blueprintLibraryOpen ? (
-					<aside
-						id="tilefab-blueprint-library"
-						className="tilefab-blueprint-library"
-						data-testid="blueprint-library"
-						data-tab={blueprintLibraryTab}
-						aria-label="OpenFab 청사진 라이브러리"
-						onPointerDownCapture={(event) => {
-							if (!blueprintRecordContext) return;
-							const target = event.target;
-							if (!(target instanceof Element)) return;
-							if (
-								target.closest(
-									'[data-testid="blueprint-record-context"], [data-testid="blueprint-record-menu"], [data-testid="user-blueprint-record-menu"], .tilefab-blueprint-record-drag',
-								)
-							) {
-								return;
-							}
-							setBlueprintRecordContext(null);
-							setPendingUserBlueprintDeleteId(null);
-						}}
-					>
-						<header>
-							<span>
-								<LibraryBig size={15} />
-								<strong>BLUEPRINT LIBRARY</strong>
-							</span>
-							<button
-								type="button"
-								aria-label="청사진 라이브러리 닫기"
-								onClick={() => closeBlueprintLibrary()}
-							>
-								<X size={14} />
-							</button>
-						</header>
-						<div className="tilefab-blueprint-tabs" aria-label="청사진 보기" role="tablist">
-							<button
-								ref={blueprintSavedTabRef}
-								id="tilefab-blueprint-tab-saved"
-								type="button"
-								role="tab"
-								aria-selected={blueprintLibraryTab === "saved"}
-								aria-controls="tilefab-blueprint-panel-saved"
-								tabIndex={blueprintLibraryTab === "saved" ? 0 : -1}
-								data-active={blueprintLibraryTab === "saved"}
-								onClick={() => chooseBlueprintLibraryTab("saved")}
-								onKeyDown={handleBlueprintLibraryTabKeyDown}
-							>
-								<LibraryBig size={14} />
-								PROJECT
-								<small>{projectBlueprints.records.length}</small>
-							</button>
-							<button
-								ref={blueprintUserTabRef}
-								id="tilefab-blueprint-tab-user"
-								type="button"
-								role="tab"
-								aria-selected={blueprintLibraryTab === "user"}
-								aria-controls="tilefab-blueprint-panel-user"
-								tabIndex={blueprintLibraryTab === "user" ? 0 : -1}
-								data-active={blueprintLibraryTab === "user"}
-								data-testid="blueprint-user-tab"
-								onClick={() => chooseBlueprintLibraryTab("user")}
-								onKeyDown={handleBlueprintLibraryTabKeyDown}
-							>
-								<FolderOpen size={14} />
-								BROWSER LOCAL
-								<small>{userBlueprints.length}</small>
-							</button>
-							<button
-								ref={blueprintRecentTabRef}
-								id="tilefab-blueprint-tab-recent"
-								type="button"
-								role="tab"
-								aria-selected={blueprintLibraryTab === "recent"}
-								aria-controls="tilefab-blueprint-panel-recent"
-								tabIndex={blueprintLibraryTab === "recent" ? 0 : -1}
-								data-active={blueprintLibraryTab === "recent"}
-								data-testid="blueprint-recent-tab"
-								onClick={() => chooseBlueprintLibraryTab("recent")}
-								onKeyDown={handleBlueprintLibraryTabKeyDown}
-							>
-								<FolderClock size={14} />
-								RECENT
-								<small>{recentRailClipboards.length}</small>
-							</button>
-						</div>
-						<section
-							className="tilefab-blueprint-save"
-							data-ready={
-								areaStampEligibility?.valid === true ||
-								organizationMultiSelection.selectedOrganizationIds.length > 0
-							}
-							data-destination={blueprintSaveDestination}
-						>
-							<div className="tilefab-blueprint-save-actions">
-								<button
-									type="button"
-									disabled={
-										(areaStampEligibility?.valid !== true &&
-											organizationMultiSelection.selectedOrganizationIds.length === 0) ||
-										projectBusy ||
-										modelSyncPending ||
-										userBlueprintLibraryBusy !== null
-									}
-									data-testid="save-area-blueprint"
-									onClick={(event) =>
-										requestContextualBlueprintSave(
-											"context",
-											event.currentTarget,
-											blueprintSaveDestination,
-										)
-									}
-									title="선택한 레일·장비 또는 FAB 조직의 저장 옵션 열기"
-								>
-									<Save size={14} /> 선택을 청사진으로 저장
-								</button>
-								<button
-									type="button"
-									disabled={
-										!wholeMapBlueprintAvailable ||
-										projectBusy ||
-										modelSyncPending ||
-										userBlueprintLibraryBusy !== null
-									}
-									data-testid="save-whole-map-blueprint"
-									onClick={(event) =>
-										requestContextualBlueprintSave(
-											"whole-map",
-											event.currentTarget,
-											blueprintSaveDestination,
-										)
-									}
-									title={
-										wholeMapBlueprintAvailable
-											? `현재 정적 FAB 전체를 ${
-													blueprintSaveDestination === "project" ? "프로젝트" : "내 라이브러리"
-												} 청사진으로 저장`
-											: "저장할 레일이 없습니다"
-									}
-								>
-									<SaveAll size={14} /> 전체를 청사진으로 저장
-								</button>
-							</div>
-						</section>
-						{blueprintLibraryTab === "saved" ? (
-							<section
-								id="tilefab-blueprint-panel-saved"
-								className="tilefab-blueprint-list"
-								role="tabpanel"
-								aria-labelledby="tilefab-blueprint-tab-saved"
-							>
-								{orderedProjectBlueprints.length === 0 ? (
-									<div className="tilefab-blueprint-empty">
-										<LibraryBig size={24} />
-										<strong>NO SAVED BLUEPRINTS</strong>
-										<small>SHIFT + DRAG → CTRL + S</small>
-									</div>
-								) : (
-									orderedProjectBlueprints.map((record) => (
-										<article
-											key={record.id}
-											data-testid="blueprint-record"
-											data-blueprint-id={record.id}
-											data-blueprint-name={record.name}
-											data-favorite={record.favorite}
-											data-kind={record.kind}
-											data-equipment-groups={
-												record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
-													? record.equipmentGroups.length
-													: 0
-											}
-											data-ports={
-												record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB ? record.ports.length : 0
-											}
-											onContextMenu={(event) => {
-												event.preventDefault();
-												const trigger = resolveBlueprintRecordContextTrigger(
-													event.target,
-													"project",
-													record.id,
-												);
-												if (trigger) openBlueprintRecordContext("project", record.id, trigger);
-											}}
-											onKeyDown={(event) => {
-												if (
-													!(event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey))
-												) {
-													return;
-												}
-												event.preventDefault();
-												const trigger = resolveBlueprintRecordContextTrigger(
-													event.target,
-													"project",
-													record.id,
-												);
-												if (trigger) openBlueprintRecordContext("project", record.id, trigger);
-											}}
-										>
-											<button
-												type="button"
-												className="tilefab-blueprint-place"
-												data-testid="blueprint-place"
-												disabled={projectBusy}
-												onClick={() => placeProjectBlueprint(record)}
-												title={`${record.name} 배치`}
-											>
-												<RailBlueprintMiniature record={record} />
-												<span>
-													<strong>{record.name}</strong>
-													<small>
-														{record.folder || "PROJECT"} · {record.widthMeters}×
-														{record.heightMeters} m
-													</small>
-													<small className="tilefab-blueprint-kind">
-														{record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
-															? `STATIC FAB · ${record.equipmentGroups.length} GROUPS · ${record.ports.length} PORTS`
-															: record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION
-																? `ORGANIZED FAB · ${record.bundle.organizations.length} ORGANIZATIONS · ${record.bundle.equipmentGroups.length} GROUPS`
-																: `RAIL ONLY · ${record.sourceModuleCount} MODULES`}
-													</small>
-												</span>
-											</button>
-											<div className="tilefab-blueprint-record-tools">
-												<button
-													ref={(element) => {
-														const key = blueprintRecordContextKey("project", record.id);
-														if (element)
-															blueprintRecordContextTriggerRefs.current.set(key, element);
-														else blueprintRecordContextTriggerRefs.current.delete(key);
-													}}
-													type="button"
-													data-testid="blueprint-record-menu"
-													disabled={projectBusy || userBlueprintLibraryBusy !== null}
-													aria-label={`${record.name} 청사진 메뉴`}
-													aria-haspopup="menu"
-													aria-expanded={
-														blueprintRecordContext?.scope === "project" &&
-														blueprintRecordContext.recordId === record.id
-													}
-													aria-controls={`tilefab-blueprint-context-project-${record.id}`}
-													title="청사진 명령"
-													onClick={(event) =>
-														openBlueprintRecordContext("project", record.id, event.currentTarget)
-													}
-												>
-													<EllipsisVertical size={17} />
-												</button>
-											</div>
-											{blueprintRecordContext?.scope === "project" &&
-											blueprintRecordContext.recordId === record.id ? (
-												<BlueprintRecordContextTray
-													state={blueprintRecordContext}
-													recordName={record.name}
-													favorite={record.favorite}
-													quickSlot={null}
-													quickSlots={USER_BLUEPRINT_QUICK_SLOTS}
-													quickSlotOwners={userBlueprintQuickSlotOwners}
-													busy={projectBusy || userBlueprintLibraryBusy !== null}
-													deleteConfirmation={false}
-													contextRef={blueprintRecordContextRef}
-													onCommand={(commandId) =>
-														runProjectBlueprintRecordCommand(commandId, record)
-													}
-													onQuickSlot={() => undefined}
-													onBack={() => undefined}
-													onClose={() => closeBlueprintRecordContext()}
-													onKeyDown={handleBlueprintRecordContextKeyDown}
-												/>
-											) : null}
-										</article>
-									))
-								)}
-							</section>
-						) : blueprintLibraryTab === "user" ? (
-							<section
-								ref={userBlueprintPanelRef}
-								id="tilefab-blueprint-panel-user"
-								className="tilefab-blueprint-list tilefab-blueprint-user-panel"
-								role="tabpanel"
-								aria-labelledby="tilefab-blueprint-tab-user"
-								data-testid="blueprint-user-panel"
-								aria-busy={userBlueprintLibraryBusy !== null}
-							>
-								<div className="tilefab-blueprint-user-toolbar">
-									<label className="tilefab-blueprint-user-search">
-										<Search size={14} />
-										<input
-											type="search"
-											value={userBlueprintSearch}
-											aria-label="내 라이브러리 검색"
-											placeholder="Search all blueprints"
-											onChange={(event) => setUserBlueprintSearch(event.currentTarget.value)}
-											onInput={() => setUserBlueprintVisibleLimit(USER_BLUEPRINT_VISIBLE_PAGE_SIZE)}
-										/>
-									</label>
-									<button
-										type="button"
-										data-testid="user-blueprint-all"
-										onClick={() => chooseUserBlueprintFolder(Object.freeze([]))}
-										aria-label="모든 청사진 보기"
-										title="모든 청사진"
-									>
-										<LibraryBig size={16} />
-									</button>
-									<button
-										type="button"
-										data-testid="user-blueprint-refresh"
-										disabled={userBlueprintLibraryBusy !== null}
-										onClick={() => void refreshUserBlueprintLibrary()}
-										aria-label="내 라이브러리 새로고침"
-										title="내 라이브러리 새로고침"
-									>
-										<RefreshCcw size={16} />
-									</button>
-									<button
-										ref={userBlueprintImportButtonRef}
-										type="button"
-										data-testid="user-blueprint-import"
-										disabled={projectBusy || userBlueprintLibraryBusy !== null}
-										onClick={() => void chooseUserBlueprintImport()}
-										aria-label=".openfabbp 청사진 가져오기"
-										title=".openfabbp 가져오기"
-									>
-										<FileUp size={16} />
-									</button>
-								</div>
-								<section
-									className="tilefab-blueprint-library-safety"
-									aria-label="내 라이브러리 백업과 복원"
-									data-testid="user-blueprint-library-safety"
-									data-durability={userBlueprintStorageStatus.durability}
-								>
-									<FolderOpen size={16} aria-hidden="true" />
-									<span>
-										<strong>
-											BROWSER LOCAL · {userBlueprints.length.toLocaleString()} ·{" "}
-											{userBlueprintStorageStatus.durability === "persistent"
-												? "INDEXEDDB"
-												: "SESSION ONLY"}
-										</strong>
-										<small>
-											{userBlueprintLibrarySafetyBlockedReason ??
-												(userBlueprintCrossTabRefresh.lastOutcome === "failed"
-													? "다른 탭 변경을 읽지 못했습니다 · 새로고침으로 다시 시도하세요"
-													: userBlueprintCrossTabRefresh.pending ||
-														userBlueprintCrossTabRefresh.inFlight
-														? "다른 탭 변경을 확인하는 중 · 프로젝트 맵은 그대로 유지됩니다"
-														: userBlueprintCrossTabRefresh.available
-															? "열린 탭 자동 갱신 · 클라우드 동기화 없음 · 전체 이동은 .openfablib"
-															: "탭 자동 갱신 미지원 · 전체 이동은 .openfablib · 개별 공유는 .openfabbp")}
-										</small>
-									</span>
-									<div className="tilefab-blueprint-library-safety-actions">
-										{userBlueprintLibraryBusy === "restore-library-file" ? (
-											<button
-												ref={userBlueprintLibraryRestoreCancelButtonRef}
-												type="button"
-												onClick={() => userBlueprintLibraryRestoreControllerRef.current?.abort()}
-												aria-label="청사진 라이브러리 파일 검증 취소"
-												title="검증 취소 (Esc)"
-											>
-												<X size={15} />
-												<span>CANCEL CHECK</span>
-											</button>
-										) : (
-											<>
-												<button
-													type="button"
-													disabled={
-														projectBusy ||
-														userBlueprintLibraryBusy !== null ||
-														userBlueprintLibrarySafetyBlockedReason !== null
-													}
-													onClick={() => void backupUserBlueprintLibrary()}
-													aria-label="전체 청사진 라이브러리 백업 파일 생성"
-													title={
-														userBlueprintLibrarySafetyBlockedReason ??
-														"전체 라이브러리 .openfablib 백업"
-													}
-												>
-													<Download size={15} />
-													<span>BACKUP</span>
-												</button>
-												<button
-													ref={userBlueprintLibraryRestoreButtonRef}
-													type="button"
-													disabled={
-														projectBusy ||
-														userBlueprintLibraryBusy !== null ||
-														userBlueprintLibrarySafetyBlockedReason !== null
-													}
-													onClick={() => void chooseUserBlueprintLibraryRestore()}
-													aria-label="전체 청사진 라이브러리 백업 복원"
-													title={
-														userBlueprintLibrarySafetyBlockedReason ?? ".openfablib 검증 후 복원"
-													}
-												>
-													<ArchiveRestore size={15} />
-													<span>RESTORE</span>
-												</button>
-											</>
-										)}
-									</div>
-								</section>
-								<section
-									className="tilefab-user-blueprint-quick-slots"
-									aria-label="내 청사진 빠른 슬롯"
-									data-testid="user-blueprint-quick-slots"
-								>
-									<header>
-										<strong>QUICK SLOTS</strong>
-										<small>ALT + 1…9</small>
-									</header>
-									<div className="tilefab-user-blueprint-quick-slot-grid">
-										{userBlueprintQuickSlotEntries.map(({ slot, record }) => {
-											const target = Object.freeze({
-												kind: "quick-slot" as const,
-												quickSlot: slot,
-												occupiedById: record?.id ?? null,
-											});
-											return (
-												<button
-													type="button"
-													key={slot}
-													data-testid={`user-blueprint-quick-slot-${slot}`}
-													data-filled={record !== null}
-													disabled={projectBusy || userBlueprintLibraryBusy !== null}
-													onClick={() => {
-														if (record) {
-															placeProjectBlueprint(record.blueprint);
-														} else {
-															setStatus(`MY LIBRARY SLOT ${slot}이 비어 있습니다`);
-														}
-													}}
-													onDragOver={(event) =>
-														dragOverUserBlueprintOrganizationTarget(event, target)
-													}
-													onDragLeave={(event) => leaveUserBlueprintOrganizationTarget(event)}
-													onDrop={(event) => dropUserBlueprintOnOrganizationTarget(event, target)}
-													aria-label={
-														record
-															? `빠른 슬롯 ${slot}: ${record.blueprint.name} 배치`
-															: `빠른 슬롯 ${slot}: 비어 있음`
-													}
-													title={
-														record
-															? `Alt+${slot} · ${record.blueprint.name}`
-															: `Alt+${slot} · 비어 있음`
-													}
-												>
-													<kbd>{slot}</kbd>
-													<span>{record?.blueprint.name ?? "EMPTY"}</span>
-												</button>
-											);
-										})}
-									</div>
-								</section>
-								<nav
-									className="tilefab-blueprint-folder-breadcrumb"
-									aria-label="라이브러리 경로 탐색"
-								>
-									<button
-										type="button"
-										aria-current={userBlueprintFolderPath.length === 0 ? "page" : undefined}
-										onClick={() => chooseUserBlueprintFolder(Object.freeze([]))}
-										onDragOver={(event) =>
-											dragOverUserBlueprintOrganizationTarget(
-												event,
-												userBlueprintRootFolderDropTarget,
-											)
-										}
-										onDragLeave={(event) => leaveUserBlueprintOrganizationTarget(event)}
-										onDrop={(event) =>
-											dropUserBlueprintOnOrganizationTarget(
-												event,
-												userBlueprintRootFolderDropTarget,
-											)
-										}
-									>
-										<LibraryBig size={13} />
-										ALL
-									</button>
-									{userBlueprintFolderPath.map((segment, index) => {
-										const folderPath = Object.freeze(userBlueprintFolderPath.slice(0, index + 1));
-										const target = Object.freeze({
-											kind: "folder" as const,
-											folderPath,
-										});
-										return (
-											<Fragment key={folderPath.join("/")}>
-												<ChevronRight size={12} />
-												<button
-													type="button"
-													aria-current={
-														index === userBlueprintFolderPath.length - 1 ? "page" : undefined
-													}
-													onClick={() => chooseUserBlueprintFolder(folderPath)}
-													onDragOver={(event) =>
-														dragOverUserBlueprintOrganizationTarget(event, target)
-													}
-													onDragLeave={(event) => leaveUserBlueprintOrganizationTarget(event)}
-													onDrop={(event) => dropUserBlueprintOnOrganizationTarget(event, target)}
-												>
-													{segment}
-												</button>
-											</Fragment>
-										);
-									})}
-								</nav>
-								{userBlueprintStorageStatus.durability === "session-only" ||
-								userBlueprintStorageStatus.rejectedRecordCount > 0 ||
-								userBlueprintStorageStatus.overflowDetected ? (
-									<div
-										className="tilefab-blueprint-storage-status"
-										role="status"
-										data-durability={userBlueprintStorageStatus.durability}
-									>
-										<AlertTriangle size={16} />
-										<span>
-											<strong>
-												{userBlueprintStorageStatus.durability === "session-only"
-													? "BROWSER LIBRARY UNAVAILABLE"
-													: "LIBRARY RECORDS ISOLATED"}
-											</strong>
-											<small>
-												{userBlueprintStorageStatus.durability === "session-only"
-													? "빈 목록은 브라우저 로컬 데이터가 없다는 뜻이 아닙니다. 연결을 다시 확인하세요."
-													: `${userBlueprintStorageStatus.rejectedRecordCountIsLowerBound ? "최소 " : ""}${userBlueprintStorageStatus.rejectedRecordCount}개 레코드를 격리했습니다${userBlueprintStorageStatus.overflowDetected ? " · 저장 한도 초과 감지" : ""}`}
-											</small>
-										</span>
-										<button
-											type="button"
-											disabled={userBlueprintLibraryBusy !== null}
-											onClick={() => void refreshUserBlueprintLibrary()}
-											aria-label="내 라이브러리 저장소 다시 확인"
-											title="저장소 다시 확인"
-										>
-											<RefreshCcw size={15} />
-										</button>
-									</div>
-								) : null}
-								{userBlueprintRejectedDiagnostics.length > 0 ? (
-									<section
-										className="tilefab-blueprint-quarantine"
-										aria-label="격리된 청사진 레코드"
-										data-testid="user-blueprint-quarantine"
-									>
-										<header>
-											<span>
-												<strong>QUARANTINE RECOVERY</strong>
-												<small>
-													{userBlueprintRejectedDiagnostics.length}개 표시 /{" "}
-													{userBlueprintStorageStatus.rejectedRecordCountIsLowerBound
-														? "최소 "
-														: ""}
-													{userBlueprintStorageStatus.rejectedRecordCount}개 감지
-												</small>
-											</span>
-										</header>
-										<ol>
-											{userBlueprintRejectedDiagnostics.map((diagnostic) => (
-												<li key={diagnostic.token}>
-													<span>
-														<strong>
-															#{diagnostic.ordinal} · {diagnostic.code}
-														</strong>
-														<code>{diagnostic.path}</code>
-														<small>{diagnostic.message}</small>
-													</span>
-													<button
-														type="button"
-														disabled={userBlueprintLibraryBusy !== null}
-														onClick={() => void exportRejectedUserBlueprintDiagnostic(diagnostic)}
-														aria-label={
-															diagnostic.code === "LIMIT_EXCEEDED"
-																? `한도 초과 레코드 ${diagnostic.ordinal}를 청사진 파일로 백업하고 저장소에서 제거`
-																: `격리 레코드 ${diagnostic.ordinal} 원본 진단 JSON 내보내기`
-														}
-														title={
-															diagnostic.code === "LIMIT_EXCEEDED"
-																? ".openfabbp 백업 후 원본 제거"
-																: "원본 진단 JSON 내보내기"
-														}
-													>
-														<Download size={16} />
-													</button>
-												</li>
-											))}
-										</ol>
-									</section>
-								) : null}
-								{deletedUserBlueprintRecovery ? (
-									<div
-										className="tilefab-blueprint-delete-recovery"
-										role="status"
-										data-testid="user-blueprint-delete-recovery"
-									>
-										<Undo2 size={16} />
-										<span>
-											<strong>DELETED</strong>
-											<small>{deletedUserBlueprintRecovery.blueprint.name}</small>
-										</span>
-										<button
-											type="button"
-											disabled={userBlueprintLibraryBusy !== null}
-											onClick={() => void restoreDeletedUserBlueprint()}
-										>
-											UNDO DELETE
-										</button>
-										<button
-											type="button"
-											aria-label="삭제 복구 알림 닫기"
-											onClick={() => {
-												setDeletedUserBlueprintRecovery(null);
-												requestAnimationFrame(() => blueprintUserTabRef.current?.focus());
-											}}
-										>
-											<X size={14} />
-										</button>
-									</div>
-								) : null}
-								{pendingUserBlueprintImport && pendingUserBlueprintImportPreview ? (
-									<form
-										className="tilefab-blueprint-import-preview"
-										data-testid="user-blueprint-import-preview"
-										onSubmit={(event) => {
-											event.preventDefault();
-											void confirmUserBlueprintImport();
-										}}
-									>
-										<header>
-											<FileUp size={16} />
-											<span>
-												<strong>IMPORT PREVIEW</strong>
-												<small>{pendingUserBlueprintImport.fileName}</small>
-											</span>
-										</header>
-										<div className="tilefab-blueprint-import-summary">
-											<RailBlueprintMiniature
-												record={pendingUserBlueprintImport.record.blueprint}
-											/>
-											<span>
-												<strong>{pendingUserBlueprintImport.record.blueprint.kind}</strong>
-												<small>
-													{pendingUserBlueprintImport.record.blueprint.widthMeters}×
-													{pendingUserBlueprintImport.record.blueprint.heightMeters} m ·{" "}
-													{pendingUserBlueprintImport.record.blueprint.edges.length.toLocaleString()}{" "}
-													EDGES
-												</small>
-												{pendingUserBlueprintImportPreview.idCollision ||
-												pendingUserBlueprintImportPreview.quickSlotCollision ? (
-													<small data-warning="true">
-														{pendingUserBlueprintImportPreview.idCollision
-															? "새 라이브러리 ID"
-															: ""}
-														{pendingUserBlueprintImportPreview.idCollision &&
-														pendingUserBlueprintImportPreview.quickSlotCollision
-															? " · "
-															: ""}
-														{pendingUserBlueprintImportPreview.quickSlotCollision
-															? "quick slot 해제"
-															: ""}
-													</small>
-												) : null}
-											</span>
-										</div>
-										<div className="tilefab-blueprint-import-fields">
-											<label>
-												<span>NAME</span>
-												<input
-													ref={userBlueprintImportNameRef}
-													value={pendingUserBlueprintImport.name}
-													aria-label="가져올 청사진 이름"
-													onChange={(event) => {
-														const name = event.currentTarget.value;
-														setPendingUserBlueprintImport((current) =>
-															current ? Object.freeze({ ...current, name }) : null,
-														);
-													}}
-												/>
-											</label>
-											<label>
-												<span>FOLDER</span>
-												<input
-													value={pendingUserBlueprintImport.folder}
-													aria-label="가져올 청사진 폴더"
-													placeholder="Process/Photo"
-													onChange={(event) => {
-														const folder = event.currentTarget.value;
-														setPendingUserBlueprintImport((current) =>
-															current ? Object.freeze({ ...current, folder }) : null,
-														);
-													}}
-												/>
-											</label>
-										</div>
-										<small className="tilefab-blueprint-import-resolution">
-											SAVE AS ·{" "}
-											{pendingUserBlueprintImportPreview.folderPath.join("/") || "MY LIBRARY"} /{" "}
-											{pendingUserBlueprintImportPreview.name || "NAME REQUIRED"}
-										</small>
-										<footer>
-											<button type="button" onClick={cancelUserBlueprintImport}>
-												CANCEL
-											</button>
-											<button
-												type="submit"
-												disabled={
-													!pendingUserBlueprintImportPreview.name ||
-													userBlueprintLibraryBusy !== null
-												}
-											>
-												IMPORT
-											</button>
-										</footer>
-									</form>
-								) : null}
-								{userBlueprintChildFolders.length > 0 ? (
-									<div
-										className="tilefab-blueprint-folder-list"
-										data-testid="user-blueprint-folders"
-									>
-										{userBlueprintChildFolders.map((folder) => {
-											const target = Object.freeze({
-												kind: "folder" as const,
-												folderPath: folder.path,
-											});
-											return (
-												<button
-													key={folder.path.join("/")}
-													type="button"
-													onClick={() => chooseUserBlueprintFolder(folder.path)}
-													onDragOver={(event) =>
-														dragOverUserBlueprintOrganizationTarget(event, target)
-													}
-													onDragLeave={(event) => leaveUserBlueprintOrganizationTarget(event)}
-													onDrop={(event) => dropUserBlueprintOnOrganizationTarget(event, target)}
-												>
-													<FolderOpen size={16} />
-													<span>
-														<strong>{folder.name}</strong>
-														<small>{folder.count} BLUEPRINTS</small>
-													</span>
-													<ChevronRight size={14} />
-												</button>
-											);
-										})}
-									</div>
-								) : null}
-								{displayedUserBlueprints.length === 0 && userBlueprintChildFolders.length === 0 ? (
-									<div className="tilefab-blueprint-empty">
-										<FolderOpen size={24} />
-										<strong>
-											{userBlueprints.length === 0 ? "MY LIBRARY IS EMPTY" : "NO MATCHES"}
-										</strong>
-										<small>
-											{userBlueprints.length === 0
-												? "위 저장 대상을 MY LIBRARY로 선택해 바로 저장하세요"
-												: "이름, 폴더 또는 종류로 다시 검색하세요"}
-										</small>
-									</div>
-								) : (
-									<>
-										{visibleUserBlueprints.map((entry) => {
-											const record = entry.blueprint;
-											return (
-												<article
-													key={entry.id}
-													ref={(element) => {
-														if (element) userBlueprintRecordRefs.current.set(entry.id, element);
-														else userBlueprintRecordRefs.current.delete(entry.id);
-													}}
-													data-testid="user-blueprint-record"
-													data-blueprint-id={entry.id}
-													data-blueprint-name={record.name}
-													data-favorite={record.favorite}
-													data-kind={record.kind}
-													data-quick-slot={entry.quickSlot ?? ""}
-													data-equipment-groups={
-														record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
-															? record.equipmentGroups.length
-															: record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION
-																? record.bundle.equipmentGroups.length
-																: 0
-													}
-													data-ports={
-														record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
-															? record.ports.length
-															: record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION
-																? record.bundle.ports.length
-																: 0
-													}
-													onContextMenu={(event) => {
-														event.preventDefault();
-														const trigger = resolveBlueprintRecordContextTrigger(
-															event.target,
-															"user",
-															entry.id,
-														);
-														if (trigger) openBlueprintRecordContext("user", entry.id, trigger);
-													}}
-													onKeyDown={(event) => {
-														if (
-															!(
-																event.key === "ContextMenu" ||
-																(event.key === "F10" && event.shiftKey)
-															)
-														) {
-															return;
-														}
-														event.preventDefault();
-														const trigger = resolveBlueprintRecordContextTrigger(
-															event.target,
-															"user",
-															entry.id,
-														);
-														if (trigger) openBlueprintRecordContext("user", entry.id, trigger);
-													}}
-												>
-													{userBlueprintMetadataDraft?.id === entry.id ? (
-														<form
-															className="tilefab-user-blueprint-metadata-editor"
-															onSubmit={(event) => {
-																event.preventDefault();
-																void saveUserBlueprintMetadata();
-															}}
-														>
-															<RailBlueprintMiniature record={record} />
-															<div className="tilefab-user-blueprint-metadata-fields">
-																<label>
-																	<span>NAME</span>
-																	<input
-																		ref={userBlueprintMetadataNameRef}
-																		value={userBlueprintMetadataDraft.name}
-																		aria-label={`${record.name} 새 이름`}
-																		onChange={(event) => {
-																			const name = event.currentTarget.value;
-																			setUserBlueprintMetadataDraft((current) =>
-																				current
-																					? Object.freeze({
-																							...current,
-																							name,
-																						})
-																					: null,
-																			);
-																		}}
-																	/>
-																</label>
-																<label>
-																	<span>FOLDER · UP TO 4 LEVELS</span>
-																	<input
-																		value={userBlueprintMetadataDraft.folder}
-																		aria-label={`${record.name} 새 폴더`}
-																		placeholder="Process/Photo"
-																		onChange={(event) => {
-																			const folder = event.currentTarget.value;
-																			setUserBlueprintMetadataDraft((current) =>
-																				current
-																					? Object.freeze({
-																							...current,
-																							folder,
-																						})
-																					: null,
-																			);
-																		}}
-																	/>
-																</label>
-															</div>
-															<footer>
-																<button type="button" onClick={cancelUserBlueprintMetadataEdit}>
-																	<X size={14} />
-																	CANCEL
-																</button>
-																<button
-																	type="submit"
-																	disabled={
-																		!normalizeBlueprintName(userBlueprintMetadataDraft.name) ||
-																		userBlueprintLibraryBusy !== null
-																	}
-																>
-																	<Check size={14} />
-																	SAVE
-																</button>
-															</footer>
-														</form>
-													) : (
-														<>
-															<button
-																type="button"
-																className="tilefab-blueprint-place"
-																disabled={projectBusy || userBlueprintLibraryBusy !== null}
-																onClick={() => placeProjectBlueprint(record)}
-																title={`${record.name} 배치`}
-															>
-																<RailBlueprintMiniature record={record} />
-																<span>
-																	<strong>{record.name}</strong>
-																	<small>
-																		{entry.folderPath.join("/") || "MY LIBRARY"} ·{" "}
-																		{record.widthMeters}×{record.heightMeters} m
-																		{entry.quickSlot === null ? "" : ` · SLOT ${entry.quickSlot}`}
-																	</small>
-																	<small className="tilefab-blueprint-kind">
-																		{record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
-																			? `STATIC FAB · ${record.equipmentGroups.length} GROUPS · ${record.ports.length} PORTS`
-																			: record.kind ===
-																					OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION
-																				? `ORGANIZED FAB · ${record.bundle.organizations.length} ORGANIZATIONS`
-																				: `RAIL ONLY · ${record.sourceModuleCount} MODULES`}
-																	</small>
-																</span>
-															</button>
-															<div className="tilefab-blueprint-record-tools">
-																<button
-																	type="button"
-																	className="tilefab-blueprint-record-drag"
-																	draggable={!projectBusy && userBlueprintLibraryBusy === null}
-																	disabled={projectBusy || userBlueprintLibraryBusy !== null}
-																	aria-label={`${record.name} 정리 위치 선택`}
-																	aria-haspopup="menu"
-																	aria-expanded={
-																		blueprintRecordContext?.scope === "user" &&
-																		blueprintRecordContext.recordId === entry.id
-																	}
-																	aria-controls={`tilefab-blueprint-context-user-${entry.id}`}
-																	title="폴더, Quick Slot 또는 휴지통으로 드래그"
-																	onDragStart={(event) => beginUserBlueprintDrag(event, entry)}
-																	onDragEnd={finishUserBlueprintDrag}
-																	onClick={(event) =>
-																		openBlueprintRecordContext(
-																			"user",
-																			entry.id,
-																			event.currentTarget,
-																		)
-																	}
-																>
-																	<GripVertical size={17} />
-																</button>
-																<button
-																	ref={(element) => {
-																		const key = blueprintRecordContextKey("user", entry.id);
-																		if (element)
-																			blueprintRecordContextTriggerRefs.current.set(key, element);
-																		else blueprintRecordContextTriggerRefs.current.delete(key);
-																	}}
-																	type="button"
-																	data-testid="user-blueprint-record-menu"
-																	disabled={projectBusy || userBlueprintLibraryBusy !== null}
-																	aria-label={`${record.name} 청사진 메뉴`}
-																	aria-haspopup="menu"
-																	aria-expanded={
-																		blueprintRecordContext?.scope === "user" &&
-																		blueprintRecordContext.recordId === entry.id
-																	}
-																	aria-controls={`tilefab-blueprint-context-user-${entry.id}`}
-																	title="청사진 명령"
-																	onClick={(event) =>
-																		openBlueprintRecordContext(
-																			"user",
-																			entry.id,
-																			event.currentTarget,
-																		)
-																	}
-																>
-																	<EllipsisVertical size={17} />
-																</button>
-															</div>
-															{blueprintRecordContext?.scope === "user" &&
-															blueprintRecordContext.recordId === entry.id ? (
-																<BlueprintRecordContextTray
-																	state={blueprintRecordContext}
-																	recordName={record.name}
-																	favorite={record.favorite}
-																	quickSlot={entry.quickSlot}
-																	quickSlots={USER_BLUEPRINT_QUICK_SLOTS}
-																	quickSlotOwners={userBlueprintQuickSlotOwners}
-																	busy={projectBusy || userBlueprintLibraryBusy !== null}
-																	deleteConfirmation={pendingUserBlueprintDeleteId === entry.id}
-																	contextRef={blueprintRecordContextRef}
-																	onCommand={(commandId) =>
-																		runUserBlueprintRecordCommand(commandId, entry)
-																	}
-																	onQuickSlot={(quickSlot) => {
-																		if (quickSlot === entry.quickSlot) {
-																			closeBlueprintRecordContext();
-																			return;
-																		}
-																		closeBlueprintRecordContext(false);
-																		void updateUserBlueprintQuickSlot(entry, quickSlot);
-																	}}
-																	onBack={() => {
-																		setBlueprintRecordContext(
-																			Object.freeze({
-																				scope: "user",
-																				recordId: entry.id,
-																				view: "commands",
-																			}),
-																		);
-																		focusBlueprintRecordContextFirstCommand();
-																	}}
-																	onClose={() => closeBlueprintRecordContext()}
-																	onKeyDown={handleBlueprintRecordContextKeyDown}
-																/>
-															) : null}
-														</>
-													)}
-												</article>
-											);
-										})}
-										{visibleUserBlueprints.length < displayedUserBlueprints.length ? (
-											<button
-												type="button"
-												className="tilefab-blueprint-show-more"
-												data-testid="user-blueprint-show-more"
-												onClick={revealMoreUserBlueprints}
-											>
-												SHOW{" "}
-												{Math.min(
-													USER_BLUEPRINT_VISIBLE_PAGE_SIZE,
-													displayedUserBlueprints.length - visibleUserBlueprints.length,
-												)}{" "}
-												MORE
-											</button>
-										) : null}
-									</>
-								)}
-								<div
-									className="tilefab-blueprint-drag-dock"
-									data-testid="user-blueprint-drag-dock"
-									aria-hidden="true"
-								>
-									<fieldset
-										className="tilefab-blueprint-drop-target"
-										data-kind="folder"
-										data-testid="user-blueprint-drag-root"
-										onDragOver={(event) =>
-											dragOverUserBlueprintOrganizationTarget(
-												event,
-												userBlueprintRootFolderDropTarget,
-											)
-										}
-										onDragLeave={(event) => leaveUserBlueprintOrganizationTarget(event)}
-										onDrop={(event) =>
-											dropUserBlueprintOnOrganizationTarget(
-												event,
-												userBlueprintRootFolderDropTarget,
-											)
-										}
-									>
-										<FolderOpen size={17} />
-										<span>ROOT</span>
-									</fieldset>
-									<div className="tilefab-blueprint-drag-slot-strip">
-										{userBlueprintQuickSlotEntries.map(({ slot, record }) => {
-											const target = Object.freeze({
-												kind: "quick-slot" as const,
-												quickSlot: slot,
-												occupiedById: record?.id ?? null,
-											});
-											return (
-												<fieldset
-													key={slot}
-													className="tilefab-blueprint-drop-target"
-													data-kind="quick-slot"
-													data-testid={`user-blueprint-drag-slot-${slot}`}
-													data-filled={record !== null}
-													onDragOver={(event) =>
-														dragOverUserBlueprintOrganizationTarget(event, target)
-													}
-													onDragLeave={(event) => leaveUserBlueprintOrganizationTarget(event)}
-													onDrop={(event) => dropUserBlueprintOnOrganizationTarget(event, target)}
-												>
-													<kbd>{slot}</kbd>
-												</fieldset>
-											);
-										})}
-									</div>
-									<fieldset
-										className="tilefab-blueprint-drop-target"
-										data-kind="trash"
-										data-testid="user-blueprint-drag-trash"
-										onDragOver={(event) =>
-											dragOverUserBlueprintOrganizationTarget(event, userBlueprintTrashDropTarget)
-										}
-										onDragLeave={(event) => leaveUserBlueprintOrganizationTarget(event)}
-										onDrop={(event) =>
-											dropUserBlueprintOnOrganizationTarget(event, userBlueprintTrashDropTarget)
-										}
-									>
-										<Trash2 size={17} />
-										<span>TRASH</span>
-									</fieldset>
-								</div>
-							</section>
-						) : (
-							<section
-								id="tilefab-blueprint-panel-recent"
-								className="tilefab-blueprint-list tilefab-blueprint-recent-panel"
-								role="tabpanel"
-								aria-labelledby="tilefab-blueprint-tab-recent"
-								data-testid="blueprint-recent-panel"
-							>
-								{recentBlueprint ? (
-									recentRailClipboards.map(({ id, clipboard }, index) => (
-										<article
-											key={id}
-											data-testid={
-												index === 0 ? "blueprint-recent-record" : "blueprint-recent-history-record"
-											}
-											data-recent-index={index}
-											data-active={index === recentRailClipboardActiveIndex}
-										>
-											<button
-												type="button"
-												className="tilefab-blueprint-place"
-												aria-current={index === recentRailClipboardActiveIndex ? "true" : undefined}
-												onClick={() => {
-													closeBlueprintLibrary(false);
-													chooseRecentRailClipboard(index, true);
-												}}
-											>
-												<span className="tilefab-blueprint-recent-glyph">
-													<Copy size={24} />
-													<small>{index === 0 ? "LATEST" : `-${index}`}</small>
-												</span>
-												<span>
-													<strong>
-														{index === recentRailClipboardActiveIndex
-															? `ACTIVE · RECENT ${index + 1}`
-															: index === 0
-																? "LATEST CAPTURE"
-																: `RECENT ${index + 1}`}
-													</strong>
-													<small>
-														{clipboard.kind === "organization"
-															? `${clipboard.bundle.sourceWidthMeters}×${clipboard.bundle.sourceHeightMeters} m · ${clipboard.bundle.sourceModuleCount} MODULES`
-															: clipboard.kind === "area"
-																? `${clipboard.template.sourceWidthMeters}×${clipboard.template.sourceHeightMeters} m · ${clipboard.template.sourceModuleCount} MODULES`
-																: `${clipboard.template.grammar} · ${clipboard.template.path.length} CELLS`}
-													</small>
-													<small className="tilefab-blueprint-kind">
-														{clipboard.kind === "organization"
-															? `ORGANIZATION FAB · ${clipboard.bundle.organizations.length} ORGS · ${clipboard.bundle.equipmentGroups.length} GROUPS · ${clipboard.bundle.ports.length} PORTS`
-															: clipboard.kind === "area" && clipboard.staticFabTemplate
-																? `STATIC FAB · ${clipboard.staticFabTemplate.equipmentGroups.length} GROUPS · ${clipboard.staticFabTemplate.ports.length} PORTS`
-																: "TRANSIENT CLIPBOARD · CTRL + V"}
-													</small>
-												</span>
-											</button>
-										</article>
-									))
-								) : (
-									<div className="tilefab-blueprint-empty">
-										<FolderClock size={24} />
-										<strong>NO RECENT BLUEPRINT</strong>
-										<small>SHIFT + DRAG → CTRL + C OR CTRL + S</small>
-									</div>
-								)}
-							</section>
-						)}
-					</aside>
+					<BlueprintLibraryPanel
+						areaStampSelectionValid={areaStampEligibility?.valid === true}
+						backupUserBlueprintLibrary={backupUserBlueprintLibrary}
+						beginUserBlueprintDrag={beginUserBlueprintDrag}
+						blueprintLibraryTab={blueprintLibraryTab}
+						blueprintRecentTabRef={blueprintRecentTabRef}
+						blueprintRecordContext={blueprintRecordContext}
+						blueprintRecordContextKey={blueprintRecordContextKey}
+						blueprintRecordContextRef={blueprintRecordContextRef}
+						blueprintRecordContextTriggerRefs={blueprintRecordContextTriggerRefs}
+						blueprintSaveDestination={blueprintSaveDestination}
+						blueprintSavedTabRef={blueprintSavedTabRef}
+						blueprintUserTabRef={blueprintUserTabRef}
+						cancelUserBlueprintImport={cancelUserBlueprintImport}
+						cancelUserBlueprintMetadataEdit={cancelUserBlueprintMetadataEdit}
+						chooseBlueprintLibraryTab={chooseBlueprintLibraryTab}
+						chooseRecentRailClipboard={chooseRecentRailClipboard}
+						chooseUserBlueprintFolder={chooseUserBlueprintFolder}
+						chooseUserBlueprintImport={chooseUserBlueprintImport}
+						chooseUserBlueprintLibraryRestore={chooseUserBlueprintLibraryRestore}
+						closeBlueprintLibrary={closeBlueprintLibrary}
+						closeBlueprintRecordContext={closeBlueprintRecordContext}
+						confirmUserBlueprintImport={confirmUserBlueprintImport}
+						deletedUserBlueprintRecovery={deletedUserBlueprintRecovery}
+						displayedUserBlueprintCount={displayedUserBlueprints.length}
+						dragOverUserBlueprintOrganizationTarget={dragOverUserBlueprintOrganizationTarget}
+						dropUserBlueprintOnOrganizationTarget={dropUserBlueprintOnOrganizationTarget}
+						exportRejectedUserBlueprintDiagnostic={exportRejectedUserBlueprintDiagnostic}
+						finishUserBlueprintDrag={finishUserBlueprintDrag}
+						focusBlueprintRecordContextFirstCommand={focusBlueprintRecordContextFirstCommand}
+						handleBlueprintLibraryTabKeyDown={handleBlueprintLibraryTabKeyDown}
+						handleBlueprintRecordContextKeyDown={handleBlueprintRecordContextKeyDown}
+						hasRecentBlueprint={Boolean(recentBlueprint)}
+						leaveUserBlueprintOrganizationTarget={leaveUserBlueprintOrganizationTarget}
+						modelSyncPending={modelSyncPending}
+						normalizeBlueprintName={normalizeBlueprintName}
+						openBlueprintRecordContext={openBlueprintRecordContext}
+						orderedProjectBlueprints={orderedProjectBlueprints}
+						pendingUserBlueprintDeleteId={pendingUserBlueprintDeleteId}
+						pendingUserBlueprintImport={pendingUserBlueprintImport}
+						pendingUserBlueprintImportPreview={pendingUserBlueprintImportPreview}
+						placeProjectBlueprint={placeProjectBlueprint}
+						projectBlueprintCount={projectBlueprints.records.length}
+						projectBusy={projectBusy}
+						recentRailClipboardActiveIndex={recentRailClipboardActiveIndex}
+						recentRailClipboards={recentRailClipboards}
+						refreshUserBlueprintLibrary={refreshUserBlueprintLibrary}
+						requestContextualBlueprintSave={requestContextualBlueprintSave}
+						resolveBlueprintRecordContextTrigger={resolveBlueprintRecordContextTrigger}
+						restoreDeletedUserBlueprint={restoreDeletedUserBlueprint}
+						revealMoreUserBlueprints={revealMoreUserBlueprints}
+						runProjectBlueprintRecordCommand={runProjectBlueprintRecordCommand}
+						runUserBlueprintRecordCommand={runUserBlueprintRecordCommand}
+						saveUserBlueprintMetadata={saveUserBlueprintMetadata}
+						selectedOrganizationCount={organizationMultiSelection.selectedOrganizationIds.length}
+						setBlueprintRecordContext={setBlueprintRecordContext}
+						setDeletedUserBlueprintRecovery={setDeletedUserBlueprintRecovery}
+						setPendingUserBlueprintDeleteId={setPendingUserBlueprintDeleteId}
+						setPendingUserBlueprintImport={setPendingUserBlueprintImport}
+						setStatus={setStatus}
+						setUserBlueprintMetadataDraft={setUserBlueprintMetadataDraft}
+						setUserBlueprintSearch={setUserBlueprintSearch}
+						setUserBlueprintVisibleLimit={setUserBlueprintVisibleLimit}
+						updateUserBlueprintQuickSlot={updateUserBlueprintQuickSlot}
+						userBlueprintChildFolders={userBlueprintChildFolders}
+						userBlueprintCount={userBlueprints.length}
+						userBlueprintCrossTabRefresh={userBlueprintCrossTabRefresh}
+						userBlueprintFolderPath={userBlueprintFolderPath}
+						userBlueprintImportButtonRef={userBlueprintImportButtonRef}
+						userBlueprintImportNameRef={userBlueprintImportNameRef}
+						userBlueprintLibraryBusy={userBlueprintLibraryBusy}
+						userBlueprintLibraryRestoreButtonRef={userBlueprintLibraryRestoreButtonRef}
+						userBlueprintLibraryRestoreCancelButtonRef={userBlueprintLibraryRestoreCancelButtonRef}
+						userBlueprintLibraryRestoreControllerRef={userBlueprintLibraryRestoreControllerRef}
+						userBlueprintLibrarySafetyBlockedReason={userBlueprintLibrarySafetyBlockedReason}
+						userBlueprintMetadataDraft={userBlueprintMetadataDraft}
+						userBlueprintMetadataNameRef={userBlueprintMetadataNameRef}
+						userBlueprintPanelRef={userBlueprintPanelRef}
+						userBlueprintQuickSlotEntries={userBlueprintQuickSlotEntries}
+						userBlueprintQuickSlotOwners={userBlueprintQuickSlotOwners}
+						userBlueprintQuickSlots={USER_BLUEPRINT_QUICK_SLOTS}
+						userBlueprintRecordRefs={userBlueprintRecordRefs}
+						userBlueprintRejectedDiagnostics={userBlueprintRejectedDiagnostics}
+						userBlueprintRootFolderDropTarget={userBlueprintRootFolderDropTarget}
+						userBlueprintSearch={userBlueprintSearch}
+						userBlueprintStorageStatus={userBlueprintStorageStatus}
+						userBlueprintTrashDropTarget={userBlueprintTrashDropTarget}
+						userBlueprintVisiblePageSize={USER_BLUEPRINT_VISIBLE_PAGE_SIZE}
+						visibleUserBlueprints={visibleUserBlueprints}
+						wholeMapBlueprintAvailable={wholeMapBlueprintAvailable}
+					/>
 				) : null}
 
 				{editorActivity === "assemble" && templatePaletteOpen ? (
@@ -38940,1236 +37802,180 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 
 				{!staticFabExclusiveCommandActive && portEquipmentMembershipEditSession ? (
-					<div
-						className="tilefab-buildbar tilefab-equipment-transformbar tilefab-equipment-membershipbar"
-						data-testid="port-equipment-membership-editbar"
-						data-port-type={portEquipmentMembershipEditSession.portType}
-						data-state={
-							portEquipmentMembershipSummary?.canComplete
-								? "valid"
-								: portEquipmentMembershipSummary?.dirty
-									? "incomplete"
-									: "pristine"
-						}
-					>
-						<span
-							id="tilefab-port-membership-description"
-							className="tilefab-sr-only"
-							aria-live="polite"
-						>
-							{portEquipmentMembershipEditSession.portType} 포트 구성 편집. 현재{" "}
-							{portEquipmentMembershipSummary?.draftCount ?? 0}개. 커서 X{" "}
-							{
-								portEquipmentMembershipEditSession.slots.routeXs[
-									portEquipmentMembershipEditSession.keyboardRow
-								]
-							}
-							, Z{" "}
-							{
-								portEquipmentMembershipEditSession.slots.routeZs[
-									portEquipmentMembershipEditSession.keyboardRow
-								]
-							}
-							. 방향키로 이동하고{" "}
-							{portEquipmentMembershipEditSession.portType === "STK"
-								? "Space로 포트를 추가하거나 제거한 뒤 "
-								: "Q 또는 E로 1번 시작 쪽과 2번 끝 쪽을 바꾼 뒤 "}
-							Enter로 완료, Escape로 취소합니다.
-						</span>
-						<span className="tilefab-buildbar-title">
-							<MousePointer2 size={15} />
-							{portEquipmentMembershipEditSession.portType}-
-							{portEquipmentMembershipEditSession.sourceEquipmentGroupId}
-						</span>
-						<strong>
-							포트 구성 · 기존 {portEquipmentMembershipSummary?.sourceCount ?? 0} → 변경{" "}
-							{portEquipmentMembershipSummary?.draftCount ?? 0}
-						</strong>
-						<span className="tilefab-equipment-transform-state">
-							추가 {portEquipmentMembershipSummary?.added ?? 0} · 제거{" "}
-							{portEquipmentMembershipSummary?.removed ?? 0} ·{" "}
-							{portEquipmentMembershipSummary?.reason ?? "포트 슬롯을 선택하세요"}
-						</span>
-						<span
-							className="tilefab-membership-cursor"
-							data-testid="port-equipment-membership-cursor"
-						>
-							<Crosshair size={13} />X{" "}
-							{
-								portEquipmentMembershipEditSession.slots.routeXs[
-									portEquipmentMembershipEditSession.keyboardRow
-								]
-							}{" "}
-							· Z{" "}
-							{
-								portEquipmentMembershipEditSession.slots.routeZs[
-									portEquipmentMembershipEditSession.keyboardRow
-								]
-							}
-						</span>
-						{portEquipmentMembershipEditSession.portType === "EQ" ? (
-							<button
-								type="button"
-								className="tilefab-placement-exit"
-								data-testid="switch-eq-membership-endpoint"
-								onClick={switchEqMembershipEndpoint}
-								title="Q/E"
-								aria-keyshortcuts="Q E"
-							aria-label={`반대쪽 끝으로 전환 · 현재 ${
-								portEquipmentMembershipEditSession.activeEndpoint === "upstream"
-									? "1번 시작 쪽"
-									: "2번 끝 쪽"
-							}`}
-							>
-								<ArrowLeftRight size={14} />{" "}
-								{portEquipmentMembershipEditSession.activeEndpoint === "upstream"
-								? "1번 시작 쪽"
-								: "2번 끝 쪽"}
-							</button>
-						) : null}
-						{portEquipmentMembershipEditSession.portType === "STK" ? (
-							<button type="button" className="tilefab-placement-exit" data-testid="stk-membership-fit-selection" disabled={!portEquipmentMembershipEditSession.selection.rows.length} onClick={showStkSelection}>
-								<Search size={14} aria-hidden="true" /> 선택 범위 보기
-							</button>
-						) : null}
-						<button
-							type="button"
-							className="tilefab-inspector-primary"
-							data-testid="complete-port-equipment-membership"
-							disabled={!portEquipmentMembershipSummary?.canComplete}
-							onClick={completePortEquipmentMembershipEdit}
-							aria-keyshortcuts="Enter"
-						>
-							<Check size={14} /> 완료
-						</button>
-						<button
-							type="button"
-							className="tilefab-placement-exit"
-							data-testid="cancel-port-equipment-membership"
-							aria-keyshortcuts="Escape"
-							aria-label="포트 구성 편집 취소"
-							onClick={() => clearTransientConstruction("포트 구성 편집을 취소했습니다")}
-						>
-							<X size={14} /> ESC
-						</button>
-					</div>
+					<PortEquipmentMembershipEditBar
+						clearTransientConstruction={clearTransientConstruction}
+						completePortEquipmentMembershipEdit={completePortEquipmentMembershipEdit}
+						portEquipmentMembershipEditSession={portEquipmentMembershipEditSession}
+						portEquipmentMembershipSummary={portEquipmentMembershipSummary}
+						showStkSelection={showStkSelection}
+						switchEqMembershipEndpoint={switchEqMembershipEndpoint}
+					/>
 				) : !staticFabExclusiveCommandActive && portEquipmentGroupEditSession ? (
-					<div
-						className="tilefab-buildbar tilefab-equipment-transformbar tilefab-equipment-group-transformbar"
-						data-testid="port-equipment-group-transformbar"
-						data-port-type={portEquipmentGroupEditSession.portType}
-						data-mode={portEquipmentGroupEditSession.mode}
-						data-state={portEquipmentGroupEditState}
-						data-eligible-process-loop-ids={
-							portEquipmentGroupEditSession.eligibleProcessLoopIds?.join(",") ?? ""
-						}
-					>
-						<span className="tilefab-buildbar-title">
-							{portEquipmentGroupEditSession.mode === "move" ? (
-								<Move size={15} />
-							) : (
-								<Copy size={15} />
-							)}
-							{portEquipmentGroupEditSession.portType}-
-							{portEquipmentGroupEditSession.sourceEquipmentGroupId}
-						</span>
-						<strong>
-							{portEquipmentGroupEditSession.mode === "move" ? "MOVE" : "COPY"} ·{" "}
-							{portEquipmentGroupEditSource?.portIds.length ?? 0} PORTS
-						</strong>
-						<span className="tilefab-equipment-transform-state">
-							{portEquipmentGroupEditState === "valid"
-								? "ENTER / LMB 배치 · 방향키 / WASD"
-								: portEquipmentGroupEditState === "invalid"
-									? portEquipmentReasonLabel(
-											portEquipmentGroupEditSession.plan?.reason ?? "배치할 수 없습니다",
-										)
-									: "방향키 / WASD로 기준 슬롯 선택"}
-							{portEquipmentGroupEditSession.plan?.valid ? (
-								<small
-									className="tilefab-equipment-group-loop-preview"
-									data-testid="equipment-group-loop-preview"
-									data-state={
-										portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? "eligible" : "none"
-									}
-								>
-									{portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? (
-										<>
-											{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능
-											<br />소속은 배치 후 별도 지정
-										</>
-									) : (
-										<>
-											모든 Port를 포함하는 Loop 없음
-											<br />다른 위치 또는 Port 구성 확인
-										</>
-									)}
-								</small>
-							) : null}
-						</span>
-						<button
-							type="button"
-							className="tilefab-placement-exit"
-							onClick={() => {
-								exitPortEquipmentGroupEditToInspect("장비 그룹 편집을 취소했습니다");
-							}}
-						>
-							<X size={14} /> ESC
-						</button>
-					</div>
+					<PortEquipmentGroupTransformBar
+						exitPortEquipmentGroupEditToInspect={exitPortEquipmentGroupEditToInspect}
+						portEquipmentGroupEditSession={portEquipmentGroupEditSession}
+						portEquipmentGroupEditSource={portEquipmentGroupEditSource}
+						portEquipmentGroupEditState={portEquipmentGroupEditState}
+					/>
 				) : equipmentWorkspaceActive && activePortAuthoringType && activePortAuthoringPresentation ? (
-					<EquipmentAuthoringWorkspace
+					<PortEquipmentPlacementWorkspace
 						key={tool}
-						portType={activePortAuthoringType}
-						intent={tool === "ohb" ? (ohbPlacementIntent?.kind ?? "place") : "place"}
-						heading={
-							<span className="tilefab-equipment-workspace-title">
-								{tool === "stk" ? (
-									<Warehouse size={15} />
-								) : tool === "eq" ? (
-									<Factory size={15} />
-								) : ohbPlacementIntent?.kind === "move" ? (
-									<Move size={15} />
-								) : (
-									<PackagePlus size={15} />
-								)}
-								{tool === "ohb" && ohbPlacementIntent?.kind === "move"
-									? "OHB 위치 변경"
-									: tool === "ohb" && ohbPlacementIntent?.kind === "copy"
-										? "OHB 복제"
-										: activePortAuthoringType === "OHB"
-											? "OHB · 상부 보관"
-											: activePortAuthoringType === "EQ"
-												? "EQ · 공정 장비"
-												: "Stocker · 보관 장비"}
-							</span>
-						}
-						exit={
-							!guidedBuildExperienceActive || ordinaryEqRowExit ? (
-								<button
-									type="button"
-									className="tilefab-placement-exit tilefab-port-authoring-exit"
-									data-testid="ordinary-port-authoring-exit"
-									aria-keyshortcuts={
-										tool === "stk" && (stkDraftSelection?.rows.length ?? 0) > 0 ? undefined : "Escape"
-									}
-									aria-label={
-										ordinaryEqRowExit?.ariaLabel ??
-										(ohbPlacementIntent
-											? "OHB 이동·복제 취소"
-											: tool === "stk"
-												? "Stocker 배치 종료"
-												: "Port 배치 종료")
-									}
-									data-exit-scope={ordinaryEqRowExit ? "eq-row" : "port-authoring"}
-									onClick={() => {
-										if (ordinaryEqRowExit) {
-											cancelGuidedPortKeyboard(
-												ordinaryPortKeyboardEscapePresentation("EQ", "choose-end").message,
-												true,
-												true,
-											);
-											return;
-										}
-										exitOrdinaryPortAuthoring();
-									}}
-								>
-									<X size={14} />{" "}
-									{ordinaryEqRowExit?.label ??
-										(ohbPlacementIntent
-											? "이동·복제 취소"
-											: tool === "stk"
-												? "Stocker 배치 종료"
-												: "Port 배치 종료")}
-								</button>
-							) : null
-						}
-						selection={
-							<>
-								{!guidedBuildExperienceActive && !ohbPlacementIntent && equipmentProcessLoopChoices.length > 0 ? (
-									<div className="tilefab-equipment-process-loop-target">
-										<label htmlFor="tilefab-ordinary-port-process-loop-target">
-											<span className="tilefab-equipment-process-loop-label-full">Port 배치 범위</span>
-											<span className="tilefab-equipment-process-loop-label-compact">Port 범위</span>
-										</label>
-										<select
-											id="tilefab-ordinary-port-process-loop-target"
-											aria-label="Port 배치 범위 (Process Loop)"
-											data-testid="ordinary-port-process-loop-target"
-											value={ordinaryPortProcessLoopTargetId ?? ""}
-											onChange={(event) => chooseOrdinaryPortProcessLoop(
-												event.currentTarget.value === "" ? null : Number(event.currentTarget.value),
-											)}
-										>
-											<option value="">전체 Port 슬롯</option>
-											{equipmentProcessLoopChoices.map((choice) => (
-												<option key={choice.id} value={choice.id}>{choice.label}</option>
-											))}
-										</select>
-										<button
-											type="button"
-											className="tilefab-equipment-process-loop-start"
-											data-testid="ordinary-port-process-loop-start"
-											disabled={ordinaryPortProcessLoopTargetId !== null && !selectedEquipmentProcessLoopScope?.eligibleCount}
-												onClick={() => {
-												setOrdinaryPortProcessLoopFeedback(null);
-												if (!guidedPortKeyboardSessionRef.current && activePortAuthoringType) {
-													startOrdinaryPortKeyboard(activePortAuthoringType);
-												} else canvasRef.current?.focus({ preventScroll: true });
-											}}
-										>배치 시작</button>
-										{ordinaryPortProcessLoopTargetId !== null || ordinaryPortProcessLoopFeedback ? (
-											<small data-testid="ordinary-port-process-loop-target-count">
-												{ordinaryPortProcessLoopTargetId !== null && selectedEquipmentProcessLoopChoice ? (
-													<span className="tilefab-equipment-process-loop-selected-name" data-testid="ordinary-port-process-loop-selected-name">
-														{selectedEquipmentProcessLoopChoice.label} · {" "}
-													</span>
-												) : null}
-												{ordinaryPortProcessLoopTargetId !== null ? (
-													<>
-														직접 연결된 {activePortAuthoringType} 슬롯 {selectedEquipmentProcessLoopScope?.eligibleCount ?? 0}개
-														{selectedEquipmentProcessLoopScope?.eligibleCount ? " · 생성 뒤 장비 속성에서 소속 확정" : null}
-													</>
-												) : null}
-												{ordinaryPortProcessLoopFeedback ? (
-													<span ref={ordinaryPortProcessLoopFeedbackRef} className="tilefab-equipment-process-loop-feedback" data-testid="ordinary-port-process-loop-feedback" role="note">
-														{ordinaryPortProcessLoopFeedback.message}
-													</span>
-												) : null}
-											</small>
-										) : null}
-									</div>
-								) : null}
-								{(guidedBuildExperienceActive || ohbPlacementIntent || equipmentProcessLoopChoices.length === 0) && ordinaryPortProcessLoopFeedback ? (
-									<small ref={ordinaryPortProcessLoopFeedbackRef} className="tilefab-equipment-process-loop-feedback tilefab-equipment-process-loop-feedback-standalone" data-testid="ordinary-port-process-loop-feedback" role="note">
-										{ordinaryPortProcessLoopFeedback.message}
-									</small>
-								) : null}
-								<span
-									id="tilefab-port-authoring-instruction"
-									className="tilefab-port-authoring-instruction"
-									data-state={tool === "stk" && stkDraftReview.issue ? "blocked" : "ready"}
-								>
-									<span
-										role={guidedPortKeyboard ? undefined : "status"}
-										aria-live={guidedPortKeyboard ? "off" : "polite"}
-									>
-										{tool === "stk" ? (
-											<span className="tilefab-stk-review" data-testid="stk-draft-review">
-												<strong>{stkDraftReview.title}</strong>
-												<span>{basePortAuthoringInstruction}</span>
-												{stkDraftReview.issue ? (
-													<span className="tilefab-stk-review-issue">{stkDraftReview.issue}</span>
-												) : null}
-											</span>
-										) : null}
-										{tool !== "stk" ? (
-											<span className="tilefab-port-authoring-detail">
-												{ohbPlacementIntent
-													? `PORT-${ohbPlacementIntent.portId} · 방향키/WASD로 대상 이동 · Enter 또는 클릭으로 ${ohbPlacementIntent.kind === "move" ? "이동" : "복제"} · Esc 취소`
-													: activePortAuthoringInstruction}
-											</span>
-										) : null}
-									</span>
-									<span className="tilefab-equipment-view-actions">
-									{guidedBuildPortPlacementCoach ? (
-										<button type="button" className="tilefab-equipment-fit-selection" data-testid="guided-port-recommendations-reset" disabled={!guidedBuildCommandsActionable} onClick={reframeGuidedPortRecommendations}>
-											<Search size={14} aria-hidden="true" /> {tool === "eq" && guidedPortKeyboard?.phase === "choose-end" ? "행 선택 취소 · 추천 보기" : "추천 위치 다시 보기"}
-										</button>
-									) : null}
-									{!guidedBuildExperienceActive && tool === "stk" && (stkDraftSelection?.rows.length ?? 0) > 0 ? (
-										<button type="button" className="tilefab-equipment-fit-selection" data-testid="stk-fit-selection" onClick={showStkSelection}>
-											<Search size={14} aria-hidden="true" /> 선택 범위 보기
-										</button>
-									) : null}
-									{guidedPortKeyboard ? (
-										<button
-											ref={portTargetZoomButtonRef}
-											type="button"
-											className="tilefab-stk-zoom-current tilefab-equipment-zoom-current"
-											data-testid={tool === "stk" ? "ordinary-stk-zoom-in" : "ordinary-port-zoom-in"}
-											hidden={cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM && cameraFitScopeRef.current !== "stk-selection"}
-											onClick={zoomCurrentPortTarget}
-										>
-											<Search size={14} aria-hidden="true" />
-											{tool === "stk" ? activeStkZoomActionLabel : "현재 Port 확대"}
-														</button>
-													) : null}
-												{guidedPortKeyboard?.scope === "ordinary" && !guidedBuildExperienceActive && !ohbPlacementIntent ? (
-													<button
-														type="button"
-														className="tilefab-equipment-fit-selection"
-														data-testid="ordinary-port-next-candidate"
-										aria-label={`다른 Port (±${PORT_EQUIPMENT_NEXT_CANDIDATE_RADIUS_METERS}m) · 현재 Port 주변 가로·세로 ±${PORT_EQUIPMENT_NEXT_CANDIDATE_RADIUS_METERS}미터 범위에서 보기`}
-														onClick={showNextOrdinaryPort}
-													>
-														<ChevronRight size={14} aria-hidden="true" /> 다른 Port (±{PORT_EQUIPMENT_NEXT_CANDIDATE_RADIUS_METERS}m)
-													</button>
-												) : null}
-												{guidedPortKeyboard?.scope === "ordinary" && visibleRecentPlacedOhb ? (
-													<button
-														type="button"
-														className="tilefab-equipment-fit-selection tilefab-recent-ohb-inspect"
-														data-testid="ordinary-recent-ohb-inspect"
-														aria-label={`방금 만든 OHB-${visibleRecentPlacedOhb.selection.equipmentGroupId} 속성 보기`}
-														disabled={editorMutationWaitActive || modelSyncPending || workerState.status !== "ready"}
-														onClick={inspectRecentPlacedOhb}
-													>OHB-{visibleRecentPlacedOhb.selection.equipmentGroupId} 속성 보기</button>
-												) : null}
-											</span>
-										</span>
-								{ordinaryPortKeyboardEntryVisible || (visibleRecentPlacedOhb && guidedPortKeyboard?.scope !== "ordinary") ? (
-									<span className="tilefab-port-postplacement-actions">
-									{ordinaryPortKeyboardEntryVisible ? <button
-										type="button"
-										className="tilefab-port-keyboard-start"
-										data-testid="ordinary-port-keyboard-start"
-										disabled={editorMutationWaitActive || portRowDragRef.current !== null ||
-											(ordinaryPortProcessLoopTargetId !== null && !selectedEquipmentProcessLoopScope?.eligibleCount)}
-										onClick={resumeOrdinaryPortKeyboard}
-									>
-										키보드 배치 시작
-									</button> : null}
-									{visibleRecentPlacedOhb && guidedPortKeyboard?.scope !== "ordinary" ? <button
-										type="button"
-										className="tilefab-port-keyboard-start tilefab-recent-ohb-inspect"
-										data-testid="ordinary-recent-ohb-inspect"
-										aria-label={`방금 만든 OHB-${visibleRecentPlacedOhb.selection.equipmentGroupId} 속성 보기`}
-										disabled={editorMutationWaitActive || modelSyncPending || workerState.status !== "ready"}
-										onClick={inspectRecentPlacedOhb}
-									>OHB-{visibleRecentPlacedOhb.selection.equipmentGroupId} 속성 보기</button> : null}
-									</span>
-								) : null}
-								{tool !== "stk" ? (
-									<span
-										ref={bindEquipmentSelectionReadout}
-										className="tilefab-equipment-selection-readout"
-										data-reserve-feedback={tool === "eq" && !guidedBuildExperienceActive}
-										tabIndex={tool === "eq" && !guidedBuildExperienceActive ? 0 : undefined}
-										aria-live={guidedPortKeyboard ? "off" : "polite"}
-									/>
-								) : null}
-							</>
-						}
-						settings={
-							activePortAuthoringPresentation.configurationAvailable && (tool === "eq" || tool === "stk") ? (
-								<>
-									{tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
-										<fieldset className="tilefab-segmented tilefab-eq-pitch" aria-label="EQ 포트 피치">
-											<legend>Port 간격</legend>
-											{EQ_PORT_PITCHES_MILLIMETERS.map((pitch) => (
-												<button
-													type="button"
-													key={pitch}
-													data-active={eqPitchMillimeters === pitch}
-													aria-pressed={eqPitchMillimeters === pitch}
-													onClick={() => setEqPitchMillimeters(pitch)}
-												>
-													{pitch / 1_000} m
-												</button>
-											))}
-										</fieldset>
-									) : null}{" "}
-									{tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
-										<label className="tilefab-stk-template-choice">
-											<span>포트 구성</span>
-											<select
-												data-testid="stk-template-select"
-												aria-label="Stocker 포트 구성"
-												aria-describedby="tilefab-port-authoring-instruction"
-												value={stkTemplate}
-												onChange={(event) => setStkTemplate(event.target.value as StkAuthoringTemplate, false)}
-											>
-												{STK_AUTHORING_TEMPLATES.map((template) => (
-													<option key={template} value={template}>{stkTemplatePresentation(template).label}</option>
-												))}
-											</select>
-										</label>
-									) : null}
-								</>
-							) : null
-						}
-						actions={
-							tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
-								<fieldset className="tilefab-segmented tilefab-stk-actions" aria-label="Stocker 포트 선택 작업">
-									<button
-										type="button"
-										data-testid="stk-remove-last"
-										aria-label="마지막 Port 제거"
-										title="마지막 Port 제거"
-										disabled={!stkDraftSelection?.rows.length}
-										onClick={removeLastStkDraftPort}
-									>
-										<Undo2 size={13} />
-									</button>
-									<button
-										type="button"
-										className="tilefab-stk-cancel"
-										data-testid="stk-cancel"
-										aria-label="선택한 Stocker 포트 모두 취소"
-										title="선택한 Stocker 포트 모두 취소"
-										aria-keyshortcuts="Escape"
-										disabled={!stkDraftSelection?.rows.length}
-										onClick={() =>
-											cancelGuidedPortKeyboard(
-												ordinaryPortKeyboardEscapePresentation(
-													"STK",
-													"choose-slot",
-													stkDraftSelection?.rows.length ?? 0,
-												).message,
-												true,
-												true,
-											)
-										}
-									>
-										<X size={13} /> 선택 초기화
-									</button>
-									<button
-										type="button"
-										className="tilefab-stk-complete"
-										data-testid="stk-complete"
-										data-guided-action-id="command:stk.complete"
-										data-guided-target={
-											guidedBuildPrimaryTarget?.id === "command:stk.complete" ? "true" : undefined
-										}
-										disabled={editorMutationWaitActive || !stkDraftReady}
-										aria-keyshortcuts="Shift+Enter"
-										aria-describedby={
-											guidedBuildPrimaryTarget?.id === "command:stk.complete"
-												? "tilefab-port-authoring-instruction tilefab-guided-primary-target-description"
-												: "tilefab-port-authoring-instruction"
-										}
-										onClick={completeStkDraft}
-									>
-										<Check size={13} /> Stocker 생성
-									</button>
-								</fieldset>
-							) : null
-						}
-						continuation={
-							ordinaryOhbNextPortHandoff ||
-							(!guidedBuildExperienceActive &&
-								activePortAuthoringPresentation.prerequisiteAction &&
-								!ohbPlacementIntent) ? (
-								<>
-									{!guidedBuildExperienceActive &&
-									activePortAuthoringPresentation.prerequisiteAction &&
-									!ohbPlacementIntent ? (
-										<button
-											type="button"
-											className="tilefab-port-next-kind tilefab-port-prerequisite"
-											data-testid="ordinary-port-build-prerequisite"
-											aria-label={activePortAuthoringPresentation.prerequisiteAction.ariaLabel}
-											aria-describedby="tilefab-port-authoring-instruction"
-											onClick={() => {
-												if (!chooseExplicitEditorTool("build")) return;
-												setStatus(
-													activeMap.size === 0
-														? "빈 FAB · 드래그 또는 Enter로 첫 직선 레일을 만드세요"
-														: "레일 · 직선 레일을 늘리거나 새로 만드세요",
-												);
-												requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
-											}}
-										>
-											<Route size={14} aria-hidden="true" />
-											<strong>{activePortAuthoringPresentation.prerequisiteAction.label}</strong>
-											<ChevronRight size={14} aria-hidden="true" />
-										</button>
-									) : null}
-									{ordinaryOhbNextPortHandoff ? (
-										<>
-											<span id="tilefab-next-port-handoff-description" className="tilefab-sr-only">
-												{ordinaryOhbNextPortHandoff.description}
-											</span>
-											<button
-												type="button"
-												className="tilefab-port-next-kind"
-												data-testid="ordinary-next-port-handoff"
-												data-handoff-action={ordinaryOhbNextPortHandoff.action}
-												aria-label={ordinaryOhbNextPortHandoff.ariaLabel}
-												aria-describedby="tilefab-next-port-handoff-description"
-												onClick={() => {
-													if (ordinaryOhbNextPortHandoff.action === "prepare-eq-rail") {
-														if (chooseExplicitEditorTool("build")) {
-															setStatus(ordinaryEqHandoffRailPrerequisiteStatus(eqPitchMillimeters));
-															requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
-														}
-													} else if (chooseGuidedEquipmentTool("eq")) {
-														setStatus(ORDINARY_EQ_HANDOFF_ENTRY_STATUS);
-													}
-												}}
-											>
-												{ordinaryOhbNextPortHandoff.action === "prepare-eq-rail" ? (
-													<Route size={14} aria-hidden="true" />
-												) : (
-													<Factory size={14} aria-hidden="true" />
-												)}
-												<span className="tilefab-next-port-handoff-copy">
-													<strong>{ordinaryOhbNextPortHandoff.label}</strong>
-													<small>{ordinaryOhbNextPortHandoff.instruction}</small>
-												</span>
-												<ChevronRight size={14} aria-hidden="true" />
-											</button>
-										</>
-									) : null}
-								</>
-							) : null
-						}
-						optionalSettings={
-							tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
-								<label className="tilefab-eq-recipe">
-									<span>공정 Recipe</span>
-									<input
-										type="text"
-										value={eqRecipe}
-										maxLength={120}
-										placeholder="선택 사항"
-										onChange={(event) => setEqRecipe(event.currentTarget.value)}
-									/>
-								</label>
-							) : null
-						}
+						activeMap={activeMap}
+						activePortAuthoringInstruction={activePortAuthoringInstruction}
+						activePortAuthoringPresentation={activePortAuthoringPresentation}
+						activePortAuthoringType={activePortAuthoringType}
+						activeStkZoomActionLabel={activeStkZoomActionLabel}
+						basePortAuthoringInstruction={basePortAuthoringInstruction}
+						bindEquipmentSelectionReadout={bindEquipmentSelectionReadout}
+						cancelGuidedPortKeyboard={cancelGuidedPortKeyboard}
+						canvasRef={canvasRef}
+						chooseExplicitEditorTool={chooseExplicitEditorTool}
+						chooseGuidedEquipmentTool={chooseGuidedEquipmentTool}
+						chooseOrdinaryPortProcessLoop={chooseOrdinaryPortProcessLoop}
+						completeStkDraft={completeStkDraft}
+						editorMutationWaitActive={editorMutationWaitActive}
+						eqPitchMillimeters={eqPitchMillimeters}
+						eqRecipe={eqRecipe}
+						equipmentProcessLoopChoices={equipmentProcessLoopChoices}
+						exitOrdinaryPortAuthoring={exitOrdinaryPortAuthoring}
+						guidedBuildCommandsActionable={guidedBuildCommandsActionable}
+						guidedBuildExperienceActive={guidedBuildExperienceActive}
+						guidedBuildPortPlacementCoach={guidedBuildPortPlacementCoach}
+						guidedBuildPrimaryTarget={guidedBuildPrimaryTarget}
+						guidedPortKeyboard={guidedPortKeyboard}
+						guidedPortKeyboardSessionRef={guidedPortKeyboardSessionRef}
+						inspectRecentPlacedOhb={inspectRecentPlacedOhb}
+						modelSyncPending={modelSyncPending}
+						ohbPlacementIntent={ohbPlacementIntent}
+						ordinaryEqRowExit={ordinaryEqRowExit}
+						ordinaryOhbNextPortHandoff={ordinaryOhbNextPortHandoff}
+						ordinaryPortKeyboardEntryVisible={ordinaryPortKeyboardEntryVisible}
+						ordinaryPortProcessLoopFeedback={ordinaryPortProcessLoopFeedback}
+						ordinaryPortProcessLoopFeedbackRef={ordinaryPortProcessLoopFeedbackRef}
+						ordinaryPortProcessLoopTargetId={ordinaryPortProcessLoopTargetId}
+						portRowDragActive={portRowDragRef.current !== null}
+						portTargetZoomHidden={cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM &&
+							cameraFitScopeRef.current !== "stk-selection"}
+						portTargetZoomButtonRef={portTargetZoomButtonRef}
+						reframeGuidedPortRecommendations={reframeGuidedPortRecommendations}
+						removeLastStkDraftPort={removeLastStkDraftPort}
+						resumeOrdinaryPortKeyboard={resumeOrdinaryPortKeyboard}
+						selectedEquipmentProcessLoopChoice={selectedEquipmentProcessLoopChoice}
+						selectedEquipmentProcessLoopScope={selectedEquipmentProcessLoopScope}
+						setEqPitchMillimeters={setEqPitchMillimeters}
+						setEqRecipe={setEqRecipe}
+						setOrdinaryPortProcessLoopFeedback={setOrdinaryPortProcessLoopFeedback}
+						setStatus={setStatus}
+						setStkTemplate={setStkTemplate}
+						showNextOrdinaryPort={showNextOrdinaryPort}
+						showStkSelection={showStkSelection}
+						startOrdinaryPortKeyboard={startOrdinaryPortKeyboard}
+						stkDraftReady={stkDraftReady}
+						stkDraftReview={stkDraftReview}
+						stkDraftSelection={stkDraftSelection}
+						stkTemplate={stkTemplate}
+						tool={tool}
+						visibleRecentPlacedOhb={visibleRecentPlacedOhb}
+						workerState={workerState}
+						zoomCurrentPortTarget={zoomCurrentPortTarget}
 					/>
 				) : null}
 
 				{organizationLibraryOpen && !readinessOpen ? (
-					<aside
-						id="tilefab-fab-navigator"
-						className="tilefab-organization-library"
-						data-testid="static-fab-organization-library"
-						data-count={activeOrganizations.records.length}
-						data-filter={organizationFilter}
-						data-guided-picker={guidedBuildOrganizationPickerActive ? "true" : undefined}
-						aria-label="저장된 정적 FAB 조직"
-					>
-						<header>
-							<span>
-								<MapPinned size={15} />
-								<strong>FAB ORGANIZATION</strong>
-								<small>
-									{guidedBuildOrganizationPickerSelectionCount === null
-										? activeOrganizations.records.length
-										: guidedBuildOrganizationSelectionTargetCount === null
-											? `${guidedBuildOrganizationPickerSelectionCount} 선택`
-											: `${guidedBuildOrganizationPickerSelectionCount} / ${guidedBuildOrganizationSelectionTargetCount} 선택`}
-								</small>
-							</span>
-							<button
-								type="button"
-								className="tilefab-navigator-close"
-								aria-label="FAB 조직 라이브러리 닫기"
-								data-guided-action-id={
-									guidedBuildPrimaryTarget?.kind === "navigator-close"
-										? guidedBuildPrimaryTarget.id
-										: undefined
-								}
-								data-guided-target={
-									guidedBuildPrimaryTarget?.kind === "navigator-close" || undefined
-								}
-								aria-describedby={
-									guidedBuildPrimaryTarget?.kind === "navigator-close"
-										? "tilefab-guided-primary-target-description"
-										: undefined
-								}
-								onClick={closeStaticFabNavigator}
-							>
-								<X size={15} />
-							</button>
-						</header>
-						<StaticFabNavigator
-							tab="organizations"
-							model={navigatorModel}
-							preparing={currentStaticFabInspectionPending}
-							selectedOrganizationIds={organizationMultiSelection.selectedOrganizationIds}
-							organizationMode={organizationSelectionMode}
-							issues={navigatorIssueMarkers}
-							totalIssueCount={staticFabCheckIssueCount}
-							equipmentGroupCount={activePortEquipment.equipmentGroups.length}
-							equipmentActionDisabled={
-								projectBusy || modelSyncPending || staticFabExclusiveCommandActive
-							}
-							unavailableMessage={staticFabChecksUnavailableMessage}
-							focusedIssueId={readinessIssueId ?? staticFabProjectIssueId}
-							getViewportBounds={getNavigatorViewportBounds}
-							onTabChange={chooseStaticFabNavigatorTab}
-							onCenterWorld={centerNavigatorWorld}
-							onFitAll={fitMap}
-							onInspectEquipment={inspectStaticFabEquipment}
-						/>
-						<div
-							className="tilefab-navigator-tabpanel tilefab-navigator-tabpanel--organizations"
-							role="tabpanel"
-							id="tilefab-fab-navigator-panel-organizations"
-							aria-labelledby="tilefab-fab-navigator-tab-organizations"
-						>
-						<div className="tilefab-organization-filters" role="tablist" aria-label="조직 종류">
-							{STATIC_FAB_ORGANIZATION_FILTERS.map((kind, index) => {
-								const count =
-									kind === "ALL"
-										? activeOrganizations.records.length
-										: (organizationKindCounts.get(kind) ?? 0);
-								return (
-									<button
-										key={kind}
-										type="button"
-										role="tab"
-										id={`tilefab-organization-filter-${kind.toLocaleLowerCase("en-US")}`}
-										aria-label={`${staticFabOrganizationKindShortLabel(kind)} ${count}`}
-										aria-controls="tilefab-organization-list"
-										aria-selected={organizationFilter === kind}
-										data-active={organizationFilter === kind}
-										tabIndex={organizationFilter === kind ? 0 : -1}
-										title={staticFabOrganizationKindLabelForFilter(kind)}
-										onClick={() => chooseStaticFabOrganizationFilter(kind)}
-										onKeyDown={(event) => handleStaticFabOrganizationFilterKeyDown(event, index)}
-									>
-										<span>{staticFabOrganizationKindTabLabel(kind)}</span>
-										<small>{count}</small>
-									</button>
-								);
-							})}
-						</div>
-						<label className="tilefab-organization-search">
-							<Search size={14} />
-							<input
-								ref={organizationSearchInputRef}
-								value={organizationSearch}
-								placeholder="이름으로 조직 찾기"
-								aria-label="저장된 FAB 조직 검색"
-								onChange={(event) => updateStaticFabOrganizationSearch(event.currentTarget.value)}
-								onKeyDown={handleStaticFabOrganizationSearchKeyDown}
-							/>
-						</label>
-						<section
-							className="tilefab-organization-selection-toolbar"
-							data-count={organizationSelectionCount}
-							aria-label="선택한 FAB 조직 청사진 작업"
-						>
-							<div
-								className="tilefab-organization-selection-summary"
-								data-testid="static-fab-organization-selection-summary"
-							>
-								<strong>
-									선택 조직 {organizationSelectionCount.toLocaleString()}개
-								</strong>
-								<span>{organizationSelectionGuidance}</span>
-								{selectedStaticFabOrganization && selectedStaticFabOrganizationVisible ? (
-									<button
-										type="button"
-										className="tilefab-organization-detail-jump"
-										onClick={() => {
-											const editor = organizationEditorRef.current;
-											editor?.scrollIntoView({ block: "nearest" });
-											editor?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
-										}}
-									>
-										세부 편집
-									</button>
-								) : null}
-							</div>
-							{organizationSelectionCount > 0 ? (
-								<>
-									<fieldset
-										className="tilefab-segmented tilefab-organization-selection-mode"
-										aria-label="조직 청사진 포함 범위"
-										aria-describedby="tilefab-organization-copy-scope-description"
-									>
-										<button
-											type="button"
-											data-active={organizationSelectionMode === "DIRECT"}
-											aria-pressed={organizationSelectionMode === "DIRECT"}
-											title="선택한 조직 자체만 포함"
-											onClick={() => chooseOrganizationSelectionMode("DIRECT")}
-										>
-											선택 조직만
-										</button>
-										<button
-											type="button"
-											data-active={organizationSelectionMode === "EFFECTIVE"}
-											aria-pressed={organizationSelectionMode === "EFFECTIVE"}
-											title="선택한 조직과 모든 하위 조직 포함"
-											onClick={() => chooseOrganizationSelectionMode("EFFECTIVE")}
-										>
-											하위 조직 포함
-										</button>
-									</fieldset>
-									<p
-										id="tilefab-organization-copy-scope-description"
-										className="tilefab-organization-scope-description"
-									>
-										{organizationSelectionMode === "DIRECT"
-											? "선택한 조직에 직접 속한 레일과 장비만 포함합니다."
-											: "하위 조직의 레일과 장비까지 함께 포함합니다."}
-									</p>
-									<div
-										className="tilefab-organization-selection-actions"
-										data-count={organizationSelectionCount}
-									>
-										<button
-											type="button"
-											onClick={() =>
-												showSelectedStaticFabOrganizationOnMap(organizationSelectionMode)
-											}
-										>
-											<Crosshair size={15} /> 지도 보기
-										</button>
-
-										<button
-											type="button"
-											disabled={
-												modelSyncPending || organizationEditorDirty || organizationDetailsStale
-											}
-											className="tilefab-organization-copy"
-											onClick={copySelectionToRailClipboard}
-										>
-											<Copy size={15} /> 복사·배치
-										</button>
-										<button
-											type="button"
-											data-testid="save-organization-blueprint"
-											title="선택한 조직을 재사용 청사진으로 저장 · 전체 파일은 상단 프로젝트 저장 (.openfab)"
-											disabled={
-												modelSyncPending || organizationEditorDirty || organizationDetailsStale
-											}
-											onClick={(event) =>
-												requestContextualBlueprintSave("organization", event.currentTarget)
-											}
-										>
-											<Save size={15} /> 청사진 저장
-										</button>
-										{organizationSelectionCount > 1 ? (
-											<div className="tilefab-organization-pair-actions">
-												<button
-													type="button"
-													data-testid="connect-static-fab-assemblies"
-													aria-keyshortcuts="J"
-													disabled={assemblyConnectorAvailability.state !== "ready"}
-													onClick={startStaticFabAssemblyConnector}
-													title={assemblyConnectorAvailability.reason}
-												>
-													<Link2 size={15} />{" "}
-													{assemblyConnectorPurpose === "FAB_LOOP"
-														? "ADD FAB LOOP"
-														: assemblyConnectorHierarchyRole === "BANK_TO_FAB"
-															? "CONNECT BANKS"
-															: "CONNECT BAYS"}
-												</button>
-												<button
-													type="button"
-													data-testid="arrange-static-fab-organizations"
-													aria-keyshortcuts="L"
-													disabled={
-														modelSyncPending ||
-														organizationEditorDirty ||
-														organizationDetailsStale
-													}
-													onClick={() => startStaticFabArrangement()}
-													title="선택한 조직 루트를 정렬하거나 균등 분배 · L"
-												>
-													<ArrowLeftRight size={15} /> ARRANGE
-												</button>
-											</div>
-										) : null}
-									</div>
-								</>
-							) : null}
-						</section>
-						<div
-							id="tilefab-organization-list"
-							ref={organizationListRef}
-							className="tilefab-organization-list"
-							role="listbox"
-							aria-multiselectable="true"
-							aria-label="FAB 조직 목록"
-						>
-							{filteredStaticFabOrganizations.length === 0 ? (
-								<div className="tilefab-organization-empty">
-									<MapPinned size={20} />
-									<strong>
-										{activeOrganizations.records.length === 0
-											? "NO SAVED ORGANIZATION"
-											: "NO MATCHING ORGANIZATION"}
-									</strong>
-									<small>
-										{activeOrganizations.records.length === 0
-											? "범위를 선택한 뒤 AREA, BAY, AISLE 또는 PROCESS FAMILY로 분류하세요."
-											: "필터나 검색어를 지우면 저장된 조직을 다시 볼 수 있습니다."}
-									</small>
-									<button
-										type="button"
-										onClick={() => {
-											if (activeOrganizations.records.length === 0) {
-												startStaticFabOrganizationSelection();
-											} else {
-												updateStaticFabOrganizationSearch("");
-												chooseStaticFabOrganizationFilter("ALL");
-												requestAnimationFrame(() => organizationSearchInputRef.current?.focus());
-											}
-										}}
-									>
-										{activeOrganizations.records.length === 0
-											? "START ORGANIZATION SELECTION"
-											: "SHOW ALL"}
-									</button>
-								</div>
-							) : (
-								filteredStaticFabOrganizations.map((record, index) => {
-									const organizationSelected =
-										organizationMultiSelection.selectedOrganizationIds.includes(record.id);
-									const guidedSelectionTarget =
-										guidedBuildOrganizationRowOwnsNextStep &&
-										guidedBuildOrganizationNextRecord?.id === record.id;
-									return (
-										<button
-										key={record.id}
-										type="button"
-										role="option"
-										id={`static-fab-organization-${record.id}`}
-										data-testid="static-fab-organization-item"
-										data-organization-id={record.id}
-										data-organization-name={record.name}
-										data-active={selectedOrganizationId === record.id}
-										data-selected={organizationSelected}
-										data-guided-target={guidedSelectionTarget || undefined}
-										data-guided-action-id={
-											guidedSelectionTarget
-												? (guidedBuildOrganizationRowTargetId ?? undefined)
-												: undefined
-										}
-										aria-selected={organizationSelected}
-										aria-describedby={
-											guidedSelectionTarget
-												? "tilefab-guided-primary-target-description"
-												: undefined
-										}
-										tabIndex={
-											guidedBuildOrganizationRowOwnsNextStep
-												? guidedSelectionTarget
-													? 0
-													: -1
-												: selectedOrganizationId === record.id ||
-														(!selectedStaticFabOrganizationVisible && index === 0)
-													? 0
-													: -1
-										}
-										onClick={(event) => handleStaticFabOrganizationClick(event, record)}
-										onKeyDown={(event) => handleStaticFabOrganizationOptionKeyDown(event, index)}
-									>
-										<StaticFabOrganizationKindIcon kind={record.kind} size={15} />
-										<span>
-											<strong>
-												<em>
-													{staticFabOrganizationSemanticRoleLabel(
-														organizationSemanticRoles.get(record.id),
-													) ?? staticFabOrganizationKindShortLabel(record.kind)}
-												</em>
-												{record.name}
-											</strong>
-											<small>
-												{record.membership.railEdges.length} EDGES ·{" "}
-												{record.membership.equipmentGroupIds.length} GROUPS
-											</small>
-										</span>
-										{organizationSelected ? (
-											<Check size={15} />
-										) : guidedBuildOrganizationPickerActive ? (
-											<Plus size={15} aria-hidden="true" />
-										) : (
-											<ChevronRight size={14} />
-										)}
-										</button>
-									);
-								})
-							)}
-						</div>
-						{selectedStaticFabOrganization && selectedStaticFabOrganizationVisible ? (
-							<section
-								className="tilefab-organization-editor"
-								ref={organizationEditorRef}
-								data-tab={organizationDetailTab}
-								data-dirty={organizationEditorDirty}
-							>
-								<header>
-									<span>
-										{staticFabOrganizationSemanticRoleLabel(
-											organizationSemanticRoles.get(selectedStaticFabOrganization.id),
-										) ?? selectedStaticFabOrganization.kind}
-										-{selectedStaticFabOrganization.id}
-									</span>
-									<button
-										type="button"
-										className="tilefab-organization-return"
-										onClick={() => organizationSearchInputRef.current?.focus()}
-									>
-										목록·복사
-									</button>
-									<small>
-										{organizationDetailsStale
-											? "STALE"
-											: organizationEditorDirty
-												? "UNSAVED"
-												: "SAVED"}
-									</small>
-								</header>
-								<div
-									className="tilefab-organization-detail-tabs"
-									role="tablist"
-									aria-label="FAB 조직 상세"
-								>
-									{ORGANIZATION_DETAIL_TABS.map((tab, index) => (
-										<button
-											key={tab}
-											type="button"
-											role="tab"
-											id={`organization-detail-tab-${tab}`}
-											aria-controls={`organization-detail-panel-${tab}`}
-											aria-selected={organizationDetailTab === tab}
-											tabIndex={organizationDetailTab === tab ? 0 : -1}
-											data-active={organizationDetailTab === tab}
-											onClick={() => setOrganizationDetailTab(tab)}
-											onKeyDown={(event) => handleOrganizationDetailTabKeyDown(event, index)}
-										>
-											{tab === "overview"
-												? "OVERVIEW"
-												: tab === "relations"
-													? "RELATIONS"
-													: "PROPERTIES"}
-										</button>
-									))}
-								</div>
-								{organizationDetailTab === "overview" ? (
-									<div
-										className="tilefab-organization-detail-panel"
-										role="tabpanel"
-										id="organization-detail-panel-overview"
-										aria-labelledby="organization-detail-tab-overview"
-									>
-										<label className="tilefab-organization-field">
-											<span>NAME</span>
-											<input
-												value={organizationRenameDraft}
-												maxLength={120}
-												aria-label="선택한 FAB 조직 이름"
-												onChange={(event) => setOrganizationRenameDraft(event.currentTarget.value)}
-												onKeyDown={(event) => {
-													if (event.key !== "Enter") return;
-													event.preventDefault();
-													renameSelectedStaticFabOrganization();
-												}}
-											/>
-										</label>
-										<dl className="tilefab-organization-coverage">
-											<div>
-												<dt>직접 소속</dt>
-												<dd>
-													레일 구간 {selectedStaticFabOrganization.membership.railEdges.length}개 ·{" "}
-													장비 {selectedStaticFabOrganization.membership.equipmentGroupIds.length}개
-												</dd>
-											</div>
-											<div>
-												<dt>하위 조직</dt>
-												<dd>{selectedStaticFabOrganizationDescendantIds.length}개</dd>
-											</div>
-											<div>
-												<dt>하위 포함</dt>
-												<dd>조직 {selectedStaticFabOrganizationDescendantIds.length + 1}개</dd>
-											</div>
-										</dl>
-										<div className="tilefab-organization-editor-actions">
-											{selectedStaticFabOrganization.kind === "AISLE" && selectedStaticFabOrganization.declaredSemanticRole === "PROCESS_LOOP" && staticFabOrganizationParentIds(selectedStaticFabOrganization).length === 0 ? (
-												<button type="button" data-testid="edit-process-loop-rail" disabled={modelSyncPending || staticFabExclusiveCommandActive} onClick={() => startProcessLoopRailEdit(selectedStaticFabOrganization.id)}>작업 루프 레일 편집</button>
-											) : null}
-											<button
-												type="button"
-												onClick={() => showSelectedStaticFabOrganizationOnMap("DIRECT")}
-											>
-												<Crosshair size={14} /> 직접 소속 보기
-											</button>
-											{selectedStaticFabOrganizationDescendantIds.length > 0 ? (
-												<button
-													type="button"
-													onClick={() => showSelectedStaticFabOrganizationOnMap("EFFECTIVE")}
-												>
-													<Layers3 size={14} /> 하위 포함 보기
-												</button>
-											) : null}
-											<button
-												type="button"
-												disabled={
-													modelSyncPending ||
-													organizationRenameDraft.trim().length === 0 ||
-													organizationRenameDraft.trim() === selectedStaticFabOrganization.name
-												}
-												onClick={renameSelectedStaticFabOrganization}
-											>
-												<Save size={14} /> RENAME
-											</button>
-										</div>
-									</div>
-								) : organizationDetailTab === "relations" ? (
-									<div
-										className="tilefab-organization-detail-panel"
-										role="tabpanel"
-										id="organization-detail-panel-relations"
-										aria-labelledby="organization-detail-tab-relations"
-									>
-										<div className="tilefab-organization-section-heading">
-											<span>SAVED PARENTS</span>
-											<small>
-												{organizationParentIdsDraft.length} SELECTED ·{" "}
-												{organizationParentCandidateCount} MATCHES
-											</small>
-										</div>
-										<p
-											className="tilefab-organization-relations-scope"
-											data-testid="organization-relations-metadata-scope"
-											role="note"
-										>
-											<AlertTriangle size={14} aria-hidden="true" />
-											<span>
-												<strong>ORGANIZATION ONLY</strong>
-												Parent changes do not alter Rail connectors. Semantic geometry detach/delete is a
-												separate protected command.
-											</span>
-										</p>
-										<label className="tilefab-organization-field">
-											<span>PARENT SEARCH</span>
-											<input
-												value={organizationParentSearch}
-												aria-label="부모 조직 검색"
-												placeholder="Search parent organization"
-												onChange={(event) => setOrganizationParentSearch(event.currentTarget.value)}
-											/>
-										</label>
-										<div className="tilefab-organization-parent-list">
-											{organizationParentCandidates.length === 0 ? (
-												<small>NO AVAILABLE ORGANIZATIONS</small>
-											) : (
-												organizationParentCandidates.map((candidate) => {
-													const blocked = organizationRelationshipBlockedIds.has(candidate.id);
-													return (
-														<label
-															key={candidate.id}
-															data-blocked={blocked}
-															title={blocked ? "하위 조직은 부모로 지정할 수 없습니다" : undefined}
-														>
-															<input
-																type="checkbox"
-																checked={organizationParentIdsDraft.includes(candidate.id)}
-																disabled={blocked}
-																onChange={() => toggleStaticFabOrganizationParent(candidate.id)}
-															/>
-															<StaticFabOrganizationKindIcon kind={candidate.kind} size={14} />
-															<span>
-																<strong>{candidate.name}</strong>
-																<small>
-																	{candidate.kind}-{candidate.id}
-																	{blocked ? " · DESCENDANT" : ""}
-																</small>
-															</span>
-														</label>
-													);
-												})
-											)}
-										</div>
-									</div>
-								) : (
-									<div
-										className="tilefab-organization-detail-panel"
-										role="tabpanel"
-										id="organization-detail-panel-properties"
-										aria-labelledby="organization-detail-tab-properties"
-									>
-										<label className="tilefab-organization-field">
-											<span>DESCRIPTION</span>
-											<textarea
-												value={organizationDescriptionDraft}
-												maxLength={STATIC_FAB_ORGANIZATION_MAX_DESCRIPTION_LENGTH}
-												onChange={(event) => {
-													setOrganizationDescriptionDraft(event.currentTarget.value);
-													setOrganizationDetailsError(null);
-												}}
-											/>
-											<small>
-												{organizationDescriptionDraft.length}/
-												{STATIC_FAB_ORGANIZATION_MAX_DESCRIPTION_LENGTH}
-											</small>
-										</label>
-										<fieldset className="tilefab-organization-colors" aria-label="조직 색상">
-											<legend>COLOR</legend>
-											{STATIC_FAB_ORGANIZATION_COLORS.map((color) => (
-												<button
-													key={color}
-													type="button"
-													data-color={color}
-													data-active={organizationColorDraft === color}
-													aria-label={color}
-													aria-pressed={organizationColorDraft === color}
-													onClick={() => {
-														setOrganizationColorDraft(color);
-														setOrganizationDetailsError(null);
-													}}
-												>
-													<span />
-												</button>
-											))}
-										</fieldset>
-									</div>
-								)}
-								{organizationDetailsError ? (
-									<div className="tilefab-organization-error" role="alert">
-										<AlertTriangle size={14} /> {organizationDetailsError}
-									</div>
-								) : null}
-								{organizationDetailsStale ? (
-									<div className="tilefab-organization-stale" role="alert">
-										<span>
-											<AlertTriangle size={14} /> 편집 기록이 바뀌어 현재 초안을 바로 저장할 수
-											없습니다.
-										</span>
-										<button type="button" onClick={reloadSelectedStaticFabOrganizationDetails}>
-											<RefreshCcw size={14} /> RELOAD
-										</button>
-									</div>
-								) : null}
-								<div className="tilefab-organization-editor-footer">
-									<button
-										type="button"
-										disabled={
-											modelSyncPending || !organizationDetailsDirty || organizationDetailsStale
-										}
-										onClick={saveSelectedStaticFabOrganizationDetails}
-									>
-										<Save size={14} /> SAVE DETAILS
-									</button>
-									<button
-										type="button"
-										className="tilefab-organization-remove"
-										disabled={
-											modelSyncPending ||
-											organizationEditorDirty ||
-											organizationDetailsStale ||
-											selectedStaticFabOrganizationChildCount > 0
-										}
-										title={
-											selectedStaticFabOrganizationChildCount > 0
-												? `먼저 ${selectedStaticFabOrganizationChildCount}개 자식 조직의 부모 관계를 해제하세요`
-												: organizationEditorDirty || organizationDetailsStale
-													? "관계와 속성 편집을 저장하거나 다시 불러온 뒤 제거하세요"
-													: undefined
-										}
-										onClick={removeSelectedStaticFabOrganization}
-									>
-										<Trash2 size={14} />
-										{selectedStaticFabOrganizationChildCount > 0
-											? `${selectedStaticFabOrganizationChildCount} CHILDREN`
-											: "REMOVE METADATA"}
-									</button>
-								</div>
-							</section>
-						) : null}
-						</div>
-					</aside>
+					<StaticFabOrganizationLibrary
+						assemblyConnectorAvailability={assemblyConnectorAvailability}
+						assemblyConnectorHierarchyRole={assemblyConnectorHierarchyRole}
+						assemblyConnectorPurpose={assemblyConnectorPurpose}
+						centerNavigatorWorld={centerNavigatorWorld}
+						chooseOrganizationSelectionMode={chooseOrganizationSelectionMode}
+						chooseStaticFabNavigatorTab={chooseStaticFabNavigatorTab}
+						chooseStaticFabOrganizationFilter={chooseStaticFabOrganizationFilter}
+						closeStaticFabNavigator={closeStaticFabNavigator}
+						copySelectionToRailClipboard={copySelectionToRailClipboard}
+						currentStaticFabInspectionPending={currentStaticFabInspectionPending}
+						equipmentGroupCount={activePortEquipment.equipmentGroups.length}
+						filteredStaticFabOrganizations={filteredStaticFabOrganizations}
+						fitMap={fitMap}
+						focusedIssueId={readinessIssueId ?? staticFabProjectIssueId}
+						getNavigatorViewportBounds={getNavigatorViewportBounds}
+						guidedBuildNavigatorCloseTarget={guidedBuildPrimaryTarget?.kind === "navigator-close"}
+						guidedBuildNavigatorCloseTargetId={guidedBuildPrimaryTarget?.kind === "navigator-close" ? guidedBuildPrimaryTarget.id : undefined}
+						guidedBuildOrganizationNextRecordId={guidedBuildOrganizationNextRecord?.id}
+						guidedBuildOrganizationPickerActive={guidedBuildOrganizationPickerActive}
+						guidedBuildOrganizationPickerSelectionCount={guidedBuildOrganizationPickerSelectionCount}
+						guidedBuildOrganizationRowOwnsNextStep={guidedBuildOrganizationRowOwnsNextStep}
+						guidedBuildOrganizationRowTargetId={guidedBuildOrganizationRowTargetId}
+						guidedBuildOrganizationSelectionTargetCount={guidedBuildOrganizationSelectionTargetCount}
+						handleOrganizationDetailTabKeyDown={handleOrganizationDetailTabKeyDown}
+						handleStaticFabOrganizationClick={handleStaticFabOrganizationClick}
+						handleStaticFabOrganizationFilterKeyDown={handleStaticFabOrganizationFilterKeyDown}
+						handleStaticFabOrganizationOptionKeyDown={handleStaticFabOrganizationOptionKeyDown}
+						handleStaticFabOrganizationSearchKeyDown={handleStaticFabOrganizationSearchKeyDown}
+						inspectStaticFabEquipment={inspectStaticFabEquipment}
+						modelSyncPending={modelSyncPending}
+						navigatorIssueMarkers={navigatorIssueMarkers}
+						navigatorModel={navigatorModel}
+						organizationColorDraft={organizationColorDraft}
+						organizationCount={activeOrganizations.records.length}
+						organizationDescriptionDraft={organizationDescriptionDraft}
+						organizationDetailsDirty={organizationDetailsDirty}
+						organizationDetailsError={organizationDetailsError}
+						organizationDetailsStale={organizationDetailsStale}
+						organizationDetailTab={organizationDetailTab}
+						organizationDetailTabs={ORGANIZATION_DETAIL_TABS}
+						organizationEditorDirty={organizationEditorDirty}
+						organizationEditorRef={organizationEditorRef}
+						organizationFilter={organizationFilter}
+						organizationFilters={STATIC_FAB_ORGANIZATION_FILTERS}
+						organizationKindCounts={organizationKindCounts}
+						organizationListRef={organizationListRef}
+						organizationParentCandidateCount={organizationParentCandidateCount}
+						organizationParentCandidates={organizationParentCandidates}
+						organizationParentIdsDraft={organizationParentIdsDraft}
+						organizationParentSearch={organizationParentSearch}
+						organizationRelationshipBlockedIds={organizationRelationshipBlockedIds}
+						organizationRenameDraft={organizationRenameDraft}
+						organizationSearch={organizationSearch}
+						organizationSearchInputRef={organizationSearchInputRef}
+						organizationSelectionCount={organizationSelectionCount}
+						organizationSelectionGuidance={organizationSelectionGuidance}
+						organizationSelectionMode={organizationSelectionMode}
+						organizationSemanticRoles={organizationSemanticRoles}
+						projectBusy={projectBusy}
+						reloadSelectedStaticFabOrganizationDetails={reloadSelectedStaticFabOrganizationDetails}
+						removeSelectedStaticFabOrganization={removeSelectedStaticFabOrganization}
+						renameSelectedStaticFabOrganization={renameSelectedStaticFabOrganization}
+						requestContextualBlueprintSave={requestContextualBlueprintSave}
+						saveSelectedStaticFabOrganizationDetails={saveSelectedStaticFabOrganizationDetails}
+						selectedOrganizationDescendantCount={selectedStaticFabOrganizationDescendantIds.length}
+						selectedOrganizationId={selectedOrganizationId}
+						selectedOrganizationIds={organizationMultiSelection.selectedOrganizationIds}
+						selectedStaticFabOrganization={selectedStaticFabOrganization}
+						selectedStaticFabOrganizationChildCount={selectedStaticFabOrganizationChildCount}
+						selectedStaticFabOrganizationVisible={selectedStaticFabOrganizationVisible}
+						setOrganizationColorDraft={setOrganizationColorDraft}
+						setOrganizationDescriptionDraft={setOrganizationDescriptionDraft}
+						setOrganizationDetailsError={setOrganizationDetailsError}
+						setOrganizationDetailTab={setOrganizationDetailTab}
+						setOrganizationParentSearch={setOrganizationParentSearch}
+						setOrganizationRenameDraft={setOrganizationRenameDraft}
+						showSelectedStaticFabOrganizationOnMap={showSelectedStaticFabOrganizationOnMap}
+						startProcessLoopRailEdit={startProcessLoopRailEdit}
+						startStaticFabArrangement={startStaticFabArrangement}
+						startStaticFabAssemblyConnector={startStaticFabAssemblyConnector}
+						startStaticFabOrganizationSelection={startStaticFabOrganizationSelection}
+						staticFabCheckIssueCount={staticFabCheckIssueCount}
+						staticFabChecksUnavailableMessage={staticFabChecksUnavailableMessage}
+						staticFabExclusiveCommandActive={staticFabExclusiveCommandActive}
+						StaticFabOrganizationKindIcon={StaticFabOrganizationKindIcon}
+						staticFabOrganizationKindLabelForFilter={staticFabOrganizationKindLabelForFilter}
+						staticFabOrganizationKindShortLabel={staticFabOrganizationKindShortLabel}
+						staticFabOrganizationKindTabLabel={staticFabOrganizationKindTabLabel}
+						staticFabOrganizationParentIds={staticFabOrganizationParentIds}
+						staticFabOrganizationSemanticRoleLabel={staticFabOrganizationSemanticRoleLabel}
+						toggleStaticFabOrganizationParent={toggleStaticFabOrganizationParent}
+						updateStaticFabOrganizationSearch={updateStaticFabOrganizationSearch}
+					/>
 				) : null}
 
 				{areaSelection && railAreaSelectionInspectorVisible ? (
@@ -40257,7 +38063,7 @@ export default function TileFabApp(): React.ReactElement {
 							<span>
 								<strong>부분 선택도 바로 복제됩니다</strong>
 								<small>
-									드래그 상자에 닿은 레일 모듈만 선택합니다. 닫힌 Loop일 필요는 없습니다.
+									드래그 상자에 닿은 레일 모듈과 장비 그룹 전체를 선택합니다. 닫힌 Loop일 필요는 없습니다. 장비를 제외하려면 Ctrl/⌘+클릭하세요.
 								</small>
 							</span>
 						</p>
@@ -40394,6 +38200,7 @@ export default function TileFabApp(): React.ReactElement {
 													<button
 														type="button"
 														aria-label={`${descriptor.label} 줄이기`}
+														disabled={processLoopOperation !== null}
 														onClick={() =>
 															updatePatternResizeParameter(descriptor.key, value - descriptor.step)
 														}
@@ -40402,6 +38209,7 @@ export default function TileFabApp(): React.ReactElement {
 													</button>
 													<input
 														id={`tilefab-pattern-resize-${descriptor.key}`}
+														disabled={processLoopOperation !== null}
 														type="number"
 														min={descriptor.minimum}
 														max={descriptor.maximum}
@@ -40417,6 +38225,7 @@ export default function TileFabApp(): React.ReactElement {
 													<button
 														type="button"
 														aria-label={`${descriptor.label} 늘리기`}
+														disabled={processLoopOperation !== null}
 														onClick={() =>
 															updatePatternResizeParameter(descriptor.key, value + descriptor.step)
 														}
@@ -40430,9 +38239,9 @@ export default function TileFabApp(): React.ReactElement {
 									)}
 								</div>
 								<p data-state={patternResizeCanApply ? "ready" : "blocked"}>
-									{patternResizeEvaluation?.valid === false
+									{processLoopRailEditFeedback ?? (patternResizeEvaluation?.valid === false
 										? patternResizeEvaluation.reason
-										: patternResizePlan?.reason}
+										: patternResizePlan?.reason)}
 								</p>
 								<div className="tilefab-pattern-resize-actions">
 									<button type="button" onClick={cancelPatternResize}>
@@ -40617,7 +38426,11 @@ export default function TileFabApp(): React.ReactElement {
 										maxLength={120}
 										onChange={(event) => setOrganizationNameDraft(event.currentTarget.value)}
 										onKeyDown={(event) => {
-											if (event.key !== "Enter") return;
+											if (
+												event.key !== "Enter" ||
+												event.nativeEvent.isComposing ||
+												event.nativeEvent.keyCode === 229
+											) return;
 											event.preventDefault();
 											saveStaticFabSelectionAsOrganization();
 										}}
@@ -40761,984 +38574,94 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 
 				{selectedPortDetails && selectedEquipmentGroup && portEquipmentInspectorVisible ? (
-					<aside
-						className="tilefab-inspector tilefab-equipment-inspector"
-						aria-label={`${selectedEquipmentGroup.kind} 장비 속성`}
-						data-testid="port-equipment-inspector"
-						data-port-id={selectedPortDetails.port.id}
-						data-equipment-group-id={selectedEquipmentGroup.id}
-						data-editable={selectedPortEditableDetails !== null}
-						data-primary-process-loop-visible={
-							selectedEquipmentPrimaryProcessLoopId !== null ||
-							selectedEquipmentDirectlyOwned ||
-							selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
-						}
-						data-primary-process-loop-availability={
-							selectedEquipmentNeedsGroupMoveForProcessLoop
-								? "move"
-								: selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
-									? "none"
-									: undefined
-						}
-						data-compact-layout={compactInspectorSheetActive ? "bottom-sheet" : "side-panel"}
-						data-compact-obstruction="equipment"
-						data-compact-expanded={compactInspectorSheetActive ? compactInspectorExpanded : true}
-						data-compact-snap={
-							compactInspectorSheetActive && !compactInspectorExpanded ? "peek" : "expanded"
-						}
-					>
-						<header>
-							<span>
-								<small>
-									{selectedEquipmentGroup.kind === "OHB"
-										? "OHB · 상부 보관"
-										: selectedEquipmentGroup.kind === "EQ"
-											? "EQ · 공정 장비"
-											: "Stocker · 보관 장비"}
-								</small>
-								<strong>
-									<span className="tilefab-device-id">
-										{selectedEquipmentGroup.kind}-{selectedEquipmentGroup.id}
-									</span>
-									<span className="tilefab-device-ports">
-										Port {selectedEquipmentGroup.portIds.length}개
-									</span>
-								</strong>
-							</span>
-							<div className="tilefab-inspector-header-actions">
-								{compactInspectorSheetActive ? (
-									<button
-										ref={bindCompactInspectorDisclosure}
-										type="button"
-										className="tilefab-inspector-disclosure"
-										data-testid="compact-inspector-disclosure"
-										aria-label="선택 세부정보"
-										aria-expanded={compactInspectorExpanded}
-										aria-controls="port-equipment-inspector-content"
-										title={compactInspectorExpanded ? "선택 세부정보 접기" : "선택 세부정보 펼치기"}
-										onFocus={() => {
-											compactInspectorDisclosureFocusedRef.current = true;
-										}}
-										onBlur={() => {
-											compactInspectorDisclosureFocusedRef.current = false;
-										}}
-										onClick={() => setCompactInspectorExpanded((expanded) => !expanded)}
-									>
-										{compactInspectorExpanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
-										<small>{compactInspectorExpanded ? "접기" : "열기"}</small>
-									</button>
-								) : null}
-								<button
-									ref={compactInspectorCloseRef}
-									type="button"
-									className="tilefab-inspector-close"
-									aria-label="장비 선택 닫기"
-									title="장비 선택 닫기"
-									onClick={() => {
-										clearPortEquipmentSelection();
-										scheduleRender();
-										canvasRef.current?.focus({ preventScroll: true });
-									}}
-								>
-									<X size={15} />
-								</button>
-							</div>
-						</header>
-						{selectedEquipmentPrimaryProcessLoopId !== null ? (
-							<div className="tilefab-equipment-process-loop-primary">
-								<button
-									ref={processLoopPrimaryActionRef}
-									type="button"
-									data-testid="attach-equipment-process-loop-primary"
-									data-process-loop-id={selectedEquipmentPrimaryProcessLoopId}
-									aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}을(를) ${organizationRecordsById.get(selectedEquipmentPrimaryProcessLoopId)?.name ?? `Process Loop ${selectedEquipmentPrimaryProcessLoopId}`}에 소속시키기`}
-									disabled={modelSyncPending || workerState.status !== "ready"}
-									onClick={() => commitSelectedEquipmentProcessLoopMembership("attach", selectedEquipmentPrimaryProcessLoopId, {
-										portId: selectedPortDetails.port.id,
-										equipmentGroupId: selectedEquipmentGroup.id,
-									}, "primary")}
-								>
-									<Plus className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
-									<span className="tilefab-equipment-process-loop-primary-copy"><strong className="tilefab-equipment-process-loop-primary-title">이 Process Loop에 소속</strong><small className="tilefab-equipment-process-loop-primary-name">{organizationRecordsById.get(selectedEquipmentPrimaryProcessLoopId)?.name ?? `Process Loop ${selectedEquipmentPrimaryProcessLoopId}`}</small></span>
-								</button>
-							</div>
-						) : selectedEquipmentDirectlyOwned && selectedEquipmentProcessLoopMembership ? (
-							<div className="tilefab-equipment-process-loop-primary">
-								<div
-									ref={processLoopPrimaryStatusRef}
-									className="tilefab-equipment-process-loop-primary-owned"
-									data-testid="equipment-process-loop-primary-status"
-									data-process-loop-id={selectedEquipmentOwnedProcessLoopId ?? undefined}
-									role="status"
-									tabIndex={-1}
-								>
-									<Check className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
-									<span className="tilefab-equipment-process-loop-primary-copy">
-										<strong className="tilefab-equipment-process-loop-primary-title">{selectedEquipmentOwnedOutsideProcessLoop ? "FAB 조직 소속" : "Process Loop 소속 완료"}</strong>
-										<small className="tilefab-equipment-process-loop-primary-name">{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.map((id) => organizationRecordsById.get(id)?.name ?? `조직 ${id}`).join(", ")}</small>
-									</span>
-								</div>
-							</div>
-						) : selectedEquipmentNeedsGroupMoveForProcessLoop ? (
-							<div className="tilefab-equipment-process-loop-primary">
-								<button
-									ref={processLoopPrimaryActionRef}
-									type="button"
-									data-testid="move-port-equipment-group-primary"
-									aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 장비 전체 이동을 시작하고 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
-									disabled={modelSyncPending || workerState.status !== "ready"}
-									onClick={() => startSelectedPortEquipmentGroupEdit("move")}
-								>
-									<Move className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
-									<span className="tilefab-equipment-process-loop-primary-copy">
-										<strong className="tilefab-equipment-process-loop-primary-title">연결할 Loop 없음 · 전체 이동</strong>
-										<small className="tilefab-equipment-process-loop-primary-name">이동 미리보기에서 Loop 소속 확인</small>
-									</span>
-								</button>
-							</div>
-						) : selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 ? (
-							<div className="tilefab-equipment-process-loop-primary">
-								<div
-									ref={processLoopPrimaryStatusRef}
-									className="tilefab-equipment-process-loop-primary-owned tilefab-equipment-process-loop-primary-unavailable"
-									data-testid="equipment-process-loop-unavailable"
-									role="status"
-									aria-label={`Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
-									title={selectedEquipmentUnownedProcessLoopMembership?.reason ?? undefined}
-									tabIndex={-1}
-								>
-									<AlertTriangle className="tilefab-equipment-process-loop-primary-icon" size={15} aria-hidden="true" />
-									<span className="tilefab-equipment-process-loop-primary-copy"><strong className="tilefab-equipment-process-loop-primary-title">Loop 없음</strong><small className="tilefab-equipment-process-loop-primary-name">{selectedEquipmentNoProcessLoopHint}</small></span>
-								</div>
-							</div>
-						) : null}
-						<div
-							id="port-equipment-inspector-content"
-							className="tilefab-contextual-inspector-content"
-							hidden={compactInspectorSheetActive && !compactInspectorExpanded}
-						>
-							{selectedPortEditableDetails ? null : (
-								<p className="tilefab-inspector-notice" role="status">
-									<AlertTriangle size={15} aria-hidden="true" />
-									무결성 진단 대상입니다. 잘못 연결된 그룹을 수정하기 전까지 편집 명령은 비활성화됩니다.
-								</p>
-							)}
-							{viewMode === "2d" &&
-							selectedPortEditableDetails &&
-							selectedEquipmentGroup.kind === "STK" &&
-							selectedEquipmentGroup.template === "CUSTOM" ? (
-								<p id="tilefab-stk-membership-note" className="tilefab-inspector-notice">
-									이 사용자 구성은 Port 편집을 지원하지 않습니다. 장비 전체 이동·복제는 사용할 수
-									있습니다.
-								</p>
-							) : null}
-
-							{viewMode === "2d" ? (
-								<>
-									{completedModuleHandoff ? (
-										<>
-											<span
-												id="tilefab-completed-module-handoff-description"
-												className="tilefab-sr-only"
-											>
-												{completedModuleHandoff.description}
-											</span>
-											<button
-												type="button"
-												className="tilefab-equipment-next-kind tilefab-completed-module-handoff"
-												data-testid="ordinary-completed-module-handoff"
-												data-action={completedModuleHandoff.action}
-												aria-label={completedModuleHandoff.ariaLabel}
-												aria-describedby="tilefab-completed-module-handoff-description"
-												aria-keyshortcuts={editorCommandAriaKeyShortcuts(["selection.connected"])}
-												onClick={selectConnectedAuthoredComponent}
-												onKeyDown={(event) => {
-													if (
-														!editorCommandMatchesKeyboard("selection.connected", event.nativeEvent, {
-															context: "selection",
-														})
-													) {
-														return;
-													}
-													event.preventDefault();
-													event.stopPropagation();
-													selectConnectedAuthoredComponent();
-												}}
-											>
-												<Layers3 size={15} aria-hidden="true" />
-												<span className="tilefab-next-port-handoff-copy">
-													<strong>{completedModuleHandoff.label}</strong>
-													<small>{completedModuleHandoff.instruction}</small>
-												</span>
-												<ChevronRight size={15} aria-hidden="true" />
-											</button>
-										</>
-									) : null}
-									{eqToStkHandoff ? (
-										<>
-											<span id="tilefab-eq-to-stk-handoff-description" className="tilefab-sr-only">
-												{eqToStkHandoff.description}
-											</span>
-											<button
-												type="button"
-												className="tilefab-equipment-next-kind"
-												data-testid="ordinary-next-stk-handoff"
-												aria-label={eqToStkHandoff.ariaLabel}
-												aria-describedby="tilefab-eq-to-stk-handoff-description"
-												onClick={() => {
-													if (chooseGuidedEquipmentTool("stk", selectedPortEquipment)) {
-														setStatus(ORDINARY_STK_HANDOFF_ENTRY_STATUS);
-													}
-												}}
-											>
-												<Warehouse size={15} aria-hidden="true" />
-												<span className="tilefab-next-port-handoff-copy">
-													<strong>{eqToStkHandoff.label}</strong>
-													<small>{eqToStkHandoff.instruction}</small>
-												</span>
-												<ChevronRight size={15} aria-hidden="true" />
-											</button>
-										</>
-									) : null}
-									<div className="tilefab-device-actions">
-										{selectedEquipmentDirectlyOwned ? (
-											<p className="tilefab-inspector-notice" id="tilefab-equipment-organization-mutation-note" data-testid="equipment-organization-mutation-note">
-												{selectedEquipmentOwnedOutsideProcessLoop
-												? "이 장비는 기존 FAB 조직에 소속되어 있습니다. 이동·Port 편집·철거하려면 FAB 구조에서 소속을 먼저 정리하세요. 복제는 계속할 수 있습니다."
-												: "이 장비는 Process Loop에 소속되어 있습니다. 이동·Port 편집·철거하려면 아래 소속을 먼저 분리하세요. 복제는 계속할 수 있습니다."}
-											</p>
-										) : null}
-										{selectedEquipmentGroup.kind === "OHB" ? (
-											<button
-												type="button"
-												className="tilefab-inspector-primary"
-												data-testid="move-ohb-port"
-												disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
-												aria-describedby={selectedEquipmentDirectlyOwned ? "tilefab-equipment-organization-mutation-note" : undefined}
-												onClick={() => startSelectedOhbPlacementIntent("move")}
-											>
-												<Move size={15} /> 위치 이동
-											</button>
-										) : (
-											<>
-												<button
-													type="button"
-													className="tilefab-inspector-primary"
-													data-testid="edit-port-equipment-membership"
-													aria-describedby={
-														selectedEquipmentDirectlyOwned
-															? "tilefab-equipment-organization-mutation-note"
-															: selectedPortEditableDetails &&
-														selectedEquipmentGroup.kind === "STK" &&
-														selectedEquipmentGroup.template === "CUSTOM"
-															? "tilefab-stk-membership-note"
-															: undefined
-													}
-													disabled={
-													!selectedPortEditableDetails ||
-													selectedEquipmentDirectlyOwned ||
-													(selectedEquipmentGroup.kind === "STK" &&
-															selectedEquipmentGroup.template === "CUSTOM")
-													}
-													onClick={startSelectedPortEquipmentMembershipEdit}
-												>
-													<MousePointer2 size={15} /> Port 구성 편집
-												</button>
-												{!selectedEquipmentNeedsGroupMoveForProcessLoop ? <button
-													type="button"
-													className="tilefab-inspector-primary"
-													data-testid="move-port-equipment-group"
-													disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
-													aria-describedby={selectedEquipmentDirectlyOwned ? "tilefab-equipment-organization-mutation-note" : undefined}
-													onClick={() => startSelectedPortEquipmentGroupEdit("move")}
-												>
-													<Move size={15} /> 장비 이동
-												</button> : null}
-											</>
-										)}
-									</div>
-									<button
-										type="button"
-										className="tilefab-inspector-primary tilefab-equipment-repeat"
-										data-testid="repeat-port-equipment-authoring"
-										onClick={() =>
-											startEquipmentAuthoringContinuation(
-												equipmentAuthoringContinuation(selectedEquipmentGroup),
-												selectedPortEquipment,
-											)
-										}
-									>
-										<Plus size={15} />{" "}
-										{equipmentAuthoringContinuation(selectedEquipmentGroup).buttonLabel}
-									</button>
-									<p className="tilefab-equipment-repeat-explanation">
-										{equipmentAuthoringContinuationExplanation(
-											equipmentAuthoringContinuation(selectedEquipmentGroup),
-										)}
-									</p>
-									{selectedEquipmentProcessLoopMembership ? (
-										<details
-											key={`process-loop-${selectedEquipmentGroup.id}`}
-											className="tilefab-equipment-process-loop"
-											data-testid="equipment-process-loop-membership"
-											data-owner-ids={selectedEquipmentProcessLoopMembership.ownerOrganizationIds.join(",")}
-											onToggle={(event) => scrollFocusedInspectorDisclosure(event.currentTarget)}
-											onKeyDown={(event) => {
-												if (event.key !== "Escape" || !event.currentTarget.open) return;
-												event.preventDefault();
-												event.stopPropagation();
-												event.currentTarget.open = false;
-												processLoopMembershipDisclosureRef.current?.focus({ preventScroll: true });
-											}}
-										>
-											<summary ref={processLoopMembershipDisclosureRef}>
-												<span>
-													<strong>Process Loop 소속</strong>
-													<small>
-														{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.length === 0
-															? "미지정 · 연결할 Loop 선택"
-															: selectedEquipmentProcessLoopMembership.ownerOrganizationIds
-																.map((id) => organizationRecordsById.get(id)?.name ?? `조직 ${id}`)
-																.join(", ")}
-													</small>
-												</span>
-												<ChevronDown size={15} aria-hidden="true" />
-											</summary>
-											<div className="tilefab-equipment-process-loop-body">
-												{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.length > 0 ? (
-													<>
-														<p>현재 장비가 직접 속한 조직입니다. 다른 Loop로 옮기려면 먼저 소속을 분리하세요.</p>
-														{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.map((id) => {
-															const record = organizationRecordsById.get(id);
-															const isProcessLoop = organizationSemanticRoles.get(id) === "PROCESS_LOOP";
-															return (
-																<div className="tilefab-equipment-process-loop-row" key={id}>
-																	<span>{record?.name ?? `조직 ${id}`}<small>{isProcessLoop ? "Process Loop" : "기존 조직 소속"}</small></span>
-																	{isProcessLoop ? (
-																		<button
-																			type="button"
-																			data-testid="detach-equipment-process-loop"
-																			disabled={!selectedPortEditableDetails || modelSyncPending || workerState.status !== "ready"}
-																					onClick={() => commitSelectedEquipmentProcessLoopMembership("detach", id, {
-																					portId: selectedPortDetails.port.id,
-																					equipmentGroupId: selectedEquipmentGroup.id,
-																				})}
-																		>
-																			소속 분리
-																		</button>
-																	) : null}
-																</div>
-															);
-														})}
-														{selectedEquipmentProcessLoopMembership.ownerOrganizationIds.some(
-															(id) => organizationSemanticRoles.get(id) !== "PROCESS_LOOP",
-														) ? <p>다른 종류의 기존 소속은 구조 편집에서 정리하세요.</p> : null}
-													</>
-												) : selectedEquipmentProcessLoopMembership.eligibleProcessLoopIds.length > 0 ? (
-													<>
-														<p>장비의 모든 Port 경로가 포함된 Process Loop를 선택하세요. 장비와 Port의 위치는 유지됩니다.</p>
-														{selectedEquipmentProcessLoopMembership.eligibleProcessLoopIds.map((id) => {
-															const record = organizationRecordsById.get(id);
-															const bay = record ? staticFabOrganizationParentIds(record)
-																.map((parentId) => organizationRecordsById.get(parentId))
-																.find((parent) => parent && organizationSemanticRoles.get(parent.id) === "BAY") : undefined;
-															return (
-																<button
-																	key={id}
-																	type="button"
-																	className="tilefab-equipment-process-loop-choice"
-																	data-testid="attach-equipment-process-loop"
-																	data-process-loop-id={id}
-																	disabled={!selectedPortEditableDetails || modelSyncPending || workerState.status !== "ready"}
-																		onClick={() => commitSelectedEquipmentProcessLoopMembership("attach", id, {
-																		portId: selectedPortDetails.port.id,
-																		equipmentGroupId: selectedEquipmentGroup.id,
-																	})}
-																>
-																	<span><strong>{record?.name ?? `Process Loop ${id}`}</strong><small>{bay ? `${bay.name} / Process Loop` : "Process Loop"}</small></span>
-																	<Plus size={15} aria-hidden="true" />
-																</button>
-															);
-														})}
-													</>
-												) : (
-													<p role="status">{selectedEquipmentProcessLoopMembership.reason ?? "연결 가능한 Process Loop가 없습니다."} · FAB 구조에서 Loop와 Port 경로를 확인하세요.</p>
-												)}
-											</div>
-										</details>
-									) : null}
-								</>
-							) : null}
-
-							{viewMode === "2d" ? (
-								<details
-									key={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}-PORT-${selectedPortDetails.port.id}`}
-									className="tilefab-equipment-more-actions"
-									data-testid="port-equipment-more-actions"
-									onToggle={(event) => scrollFocusedInspectorDisclosure(event.currentTarget)}
-								>
-									<summary>
-										<span>복제·철거</span>
-										<ChevronDown size={15} aria-hidden="true" />
-									</summary>
-									<div className="tilefab-equipment-more-actions-body">
-										{selectedEquipmentGroup.kind === "OHB" ? (
-											<button
-												type="button"
-												className="tilefab-inspector-primary"
-												data-testid="copy-ohb-port"
-												disabled={!selectedPortEditableDetails}
-												onClick={() => startSelectedOhbPlacementIntent("copy")}
-											>
-												<Copy size={15} /> OHB 복제
-											</button>
-										) : (
-											<button
-												type="button"
-												className="tilefab-inspector-primary"
-												data-testid="copy-port-equipment-group"
-												disabled={!selectedPortEditableDetails}
-												onClick={() => startSelectedPortEquipmentGroupEdit("copy")}
-											>
-												<Copy size={15} /> 장비 복제
-											</button>
-										)}
-										<button
-											type="button"
-											className="tilefab-inspector-danger"
-															data-testid="delete-port-equipment"
-															disabled={!selectedPortEditableDetails || selectedEquipmentDirectlyOwned}
-															aria-describedby={selectedEquipmentDirectlyOwned ? "tilefab-equipment-organization-mutation-note" : undefined}
-											onClick={deleteSelected}
-										>
-											<Trash2 size={15} /> 장비와 연결 Port 철거
-										</button>
-									</div>
-								</details>
-							) : null}
-							{selectedEquipmentGroup.kind !== "OHB" ? (
-								<dl className="tilefab-device-facts">
-									{selectedEquipmentGroup.kind === "EQ" ? (
-										<>
-											<div>
-												<dt>Port 간격</dt>
-												<dd>{selectedEquipmentGroup.pitchMillimeters / 1_000} m</dd>
-											</div>
-											<div>
-												<dt>공정 Recipe</dt>
-												<dd>{selectedEquipmentGroup.recipe ?? "-"}</dd>
-											</div>
-										</>
-									) : null}
-									{selectedEquipmentGroup.kind === "STK" ? (
-										<div>
-											<dt>Port 구성</dt>
-											<dd>{stkAuthoringTemplateLabel(selectedEquipmentGroup.template)}</dd>
-										</div>
-									) : null}
-								</dl>
-							) : null}
-
-							{viewMode === "2d" ? (
-								<button
-									ref={nextPortEquipmentButtonRef}
-									type="button"
-									className="tilefab-equipment-next-selection"
-									data-testid="select-next-port-equipment"
-									title="가려진 장비를 순서대로 선택"
-									disabled={activePortEquipment.equipmentGroups.length < 2}
-									onClick={selectNextPortEquipmentGroup}
-								>
-									<ChevronRight size={15} aria-hidden="true" />{" "}
-									{activePortEquipment.equipmentGroups.length > 1 ? "다음 장비 선택" : "다른 장비 없음"}
-								</button>
-							) : null}
-
-							<details
-								key={selectedPortDetails.port.id}
-								className="tilefab-equipment-more-actions"
-								data-testid="equipment-port-connection-details"
-								onToggle={(event) => scrollFocusedInspectorDisclosure(event.currentTarget)}
-							>
-								<summary>
-									<span>연결 정보 · Port {selectedPortDetails.port.id}</span>
-									<ChevronDown size={15} aria-hidden="true" />
-								</summary>
-								<dl>
-									{selectedPortDetails.port.barcode ? (
-										<div>
-											<dt>바코드</dt>
-											<dd>{selectedPortDetails.port.barcode}</dd>
-										</div>
-									) : null}
-									<div>
-										<dt>PORT ID</dt>
-										<dd>PORT-{selectedPortDetails.port.id}</dd>
-									</div>
-
-									<div>
-										<dt>ROUTE</dt>
-										<dd title={portRouteDetail(selectedPortDetails.port)}>
-											{portRouteSummary(selectedPortDetails.port)}
-										</dd>
-									</div>
-									<div>
-										<dt>STATION</dt>
-										<dd>{selectedPortDetails.port.stationMillimeters} mm</dd>
-									</div>
-									<div>
-										<dt>SIDE / OFFSET</dt>
-										<dd>
-											{selectedPortDetails.port.side} ·{" "}
-											{selectedPortDetails.port.lateralOffsetMillimeters} mm
-										</dd>
-									</div>
-									<div>
-										<dt>DIRECTION</dt>
-										<dd>{selectedPortDetails.port.direction.replaceAll("_", " ")}</dd>
-									</div>
-								</dl>
-							</details>
-						</div>
-					</aside>
+					<PortEquipmentInspector
+						activePortEquipment={activePortEquipment}
+						bindCompactInspectorDisclosure={bindCompactInspectorDisclosure}
+						canvasRef={canvasRef}
+						chooseGuidedEquipmentTool={chooseGuidedEquipmentTool}
+						clearPortEquipmentSelection={clearPortEquipmentSelection}
+						commitSelectedEquipmentProcessLoopMembership={commitSelectedEquipmentProcessLoopMembership}
+						compactInspectorCloseRef={compactInspectorCloseRef}
+						compactInspectorDisclosureFocusedRef={compactInspectorDisclosureFocusedRef}
+						compactInspectorExpanded={compactInspectorExpanded}
+						compactInspectorSheetActive={compactInspectorSheetActive}
+						completedModuleHandoff={completedModuleHandoff}
+						deleteSelected={deleteSelected}
+						eqToStkHandoff={eqToStkHandoff}
+						modelSyncPending={modelSyncPending}
+						nextPortEquipmentButtonRef={nextPortEquipmentButtonRef}
+						organizationRecordsById={organizationRecordsById}
+						organizationSemanticRoles={organizationSemanticRoles}
+						portRouteDetail={portRouteDetail}
+						portRouteSummary={portRouteSummary}
+						processLoopMembershipDisclosureRef={processLoopMembershipDisclosureRef}
+						processLoopPrimaryActionRef={processLoopPrimaryActionRef}
+						processLoopPrimaryStatusRef={processLoopPrimaryStatusRef}
+						scheduleRender={scheduleRender}
+						selectConnectedAuthoredComponent={selectConnectedAuthoredComponent}
+						selectNextPortEquipmentGroup={selectNextPortEquipmentGroup}
+						selectedEquipmentDirectlyOwned={selectedEquipmentDirectlyOwned}
+						selectedEquipmentGroup={selectedEquipmentGroup}
+						selectedEquipmentNeedsGroupMoveForProcessLoop={selectedEquipmentNeedsGroupMoveForProcessLoop}
+						selectedEquipmentNoProcessLoopHint={selectedEquipmentNoProcessLoopHint}
+						selectedEquipmentOwnedOutsideProcessLoop={selectedEquipmentOwnedOutsideProcessLoop}
+						selectedEquipmentOwnedProcessLoopId={selectedEquipmentOwnedProcessLoopId}
+						selectedEquipmentPrimaryProcessLoopId={selectedEquipmentPrimaryProcessLoopId}
+						selectedEquipmentProcessLoopMembership={selectedEquipmentProcessLoopMembership}
+						selectedEquipmentUnownedProcessLoopMembership={selectedEquipmentUnownedProcessLoopMembership}
+						selectedPortDetails={selectedPortDetails}
+						selectedPortEditableDetails={selectedPortEditableDetails}
+						selectedPortEquipment={selectedPortEquipment}
+						setCompactInspectorExpanded={setCompactInspectorExpanded}
+						setStatus={setStatus}
+						startEquipmentAuthoringContinuation={startEquipmentAuthoringContinuation}
+						startSelectedOhbPlacementIntent={startSelectedOhbPlacementIntent}
+						startSelectedPortEquipmentGroupEdit={startSelectedPortEquipmentGroupEdit}
+						startSelectedPortEquipmentMembershipEdit={startSelectedPortEquipmentMembershipEdit}
+						stkAuthoringTemplateLabel={stkAuthoringTemplateLabel}
+						viewMode={viewMode}
+						workerState={workerState}
+					/>
 				) : null}
 
 				{selected && selectedRail && railModuleInspectorVisible ? (
-					<aside
-						className="tilefab-inspector"
-						aria-label={selectedSwitch ? `스위치 SW-${selectedSwitch.id} 속성` : "레일 모듈 속성"}
-						data-testid={selectedSwitch ? "advanced-switch-inspector" : "rail-inspector"}
-						data-switch-id={selectedSwitch?.id ?? ""}
-						data-switch-profile={selectedSwitch?.profileClass ?? ""}
-						data-switch-side={selectedSwitch ? advancedSwitchSide(selectedSwitch) : ""}
-						data-copy-catalog-id={selectedCopyPreset?.catalogId ?? ""}
-						data-copy-grammar={selectedCopyPreset?.grammar ?? ""}
-						data-copy-span={selectedCopyPreset?.span ?? ""}
-						data-module-owner-id={selectedOwnership?.key ?? ""}
-						data-module-owner-source={selectedOwnership?.kind ?? ""}
-						data-module-owner-cells={selectedOwnership?.footprintCells.length ?? 0}
-						data-compact-layout={compactInspectorSheetActive ? "bottom-sheet" : "side-panel"}
-						data-compact-obstruction="selection"
-						data-compact-expanded={
-							compactInspectorSheetActive ? compactInspectorExpanded : true
-						}
-						data-compact-snap={
-							compactInspectorSheetActive && !compactInspectorExpanded ? "peek" : "expanded"
-						}
-					>
-						<header>
-							<span>
-								<small>{selectedSwitch ? "ADVANCED SWITCH" : "RAIL MODULE"}</small>
-								<strong>
-									{selectedSwitch
-										? `SW-${selectedSwitch.id} · CLASS ${selectedSwitch.profileClass}`
-										: `X ${selected.x} · Z ${selected.y}`}
-								</strong>
-							</span>
-							<div className="tilefab-inspector-header-actions">
-								{compactInspectorSheetActive ? (
-									<button
-										ref={bindCompactInspectorDisclosure}
-										type="button"
-										className="tilefab-inspector-disclosure"
-										data-testid="compact-inspector-disclosure"
-										aria-label="선택 세부정보"
-										aria-expanded={compactInspectorExpanded}
-										aria-controls="rail-module-inspector-content"
-										title={compactInspectorExpanded ? "선택 세부정보 접기" : "선택 세부정보 펼치기"}
-										onFocus={() => {
-											compactInspectorDisclosureFocusedRef.current = true;
-										}}
-										onBlur={() => {
-											compactInspectorDisclosureFocusedRef.current = false;
-										}}
-										onClick={() => setCompactInspectorExpanded((expanded) => !expanded)}
-									>
-										{compactInspectorExpanded ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
-										<small>{compactInspectorExpanded ? "접기" : "열기"}</small>
-									</button>
-								) : null}
-								<button
-									ref={compactInspectorCloseRef}
-									type="button"
-									className="tilefab-inspector-close"
-									aria-label="선택 닫기"
-									title="선택 닫기"
-									onClick={() => {
-										clearTransientConstruction("선택을 해제했습니다");
-										clearRailSelection();
-										scheduleRender();
-										canvasRef.current?.focus({ preventScroll: true });
-									}}
-								>
-									<X size={15} />
-								</button>
-							</div>
-						</header>
-						<div
-							id="rail-module-inspector-content"
-							className="tilefab-contextual-inspector-content"
-							hidden={compactInspectorSheetActive && !compactInspectorExpanded}
-						>
-						{selectedSwitch ? (
-							<fieldset
-								className="tilefab-switch-output-actions tilefab-inspector-priority-actions"
-								aria-label="스위치 출력 연장"
-							>
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									data-testid="continue-switch-output-0"
-									disabled={selectedSwitchOutputConnected[0]}
-									aria-label={
-										selectedSwitchOutputConnected[0]
-											? "OUT 1은 이미 연결되어 있습니다"
-											: "OUT 1에서 레일 연장"
-									}
-									onClick={() => continueFromSwitchOutput(0)}
-								>
-									<Crosshair size={14} />{" "}
-									{selectedSwitchOutputConnected[0] ? "OUT 1 연결됨" : "OUT 1 연장"}
-								</button>
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									data-testid="continue-switch-output-1"
-									disabled={selectedSwitchOutputConnected[1]}
-									aria-label={
-										selectedSwitchOutputConnected[1]
-											? "OUT 2는 이미 연결되어 있습니다"
-											: "OUT 2에서 레일 연장"
-									}
-									onClick={() => continueFromSwitchOutput(1)}
-								>
-									<Crosshair size={14} />{" "}
-									{selectedSwitchOutputConnected[1] ? "OUT 2 연결됨" : "OUT 2 연장"}
-								</button>
-							</fieldset>
-						) : (
-							<button
-								type="button"
-								className="tilefab-inspector-primary tilefab-inspector-priority-action"
-								data-testid="continue-selected-rail"
-								onClick={continueFromSelected}
-							>
-								<Crosshair size={15} /> 이 모듈에서 계속 건설
-							</button>
-						)}
-						<dl>
-							{selectedSwitch && selectedSwitchGeometry ? (
-								<>
-									<div>
-										<dt>IDENTITY</dt>
-										<dd>SW-{selectedSwitch.id}</dd>
-									</div>
-									<div>
-										<dt>TOPOLOGY / GRID</dt>
-										<dd>CLASS {selectedSwitch.profileClass} · K2,2 · 1 m</dd>
-									</div>
-									<div>
-										<dt>ORIENTATION</dt>
-										<dd>
-											{directionNames(selectedSwitch.forward)} ·{" "}
-											{advancedSwitchSide(selectedSwitch)}
-										</dd>
-									</div>
-									<div>
-										<dt>PORTS</dt>
-										<dd title={advancedSwitchPortSummary(selectedSwitch)}>2 IN · 2 OUT</dd>
-									</div>
-									<div className="tilefab-switch-movement-row">
-										<dt>MOVEMENTS</dt>
-										<dd data-movements="4/4">
-											<span
-												className="tilefab-switch-matrix"
-												role="img"
-												aria-label="4개 이동 모두 허용"
-											>
-												<i />
-												<i />
-												<i />
-												<i />
-											</span>
-											4 / 4
-										</dd>
-									</div>
-									<div>
-										<dt>SHARED THROAT</dt>
-										<dd title={ADVANCED_SWITCH_SHARED_TRUNK_PROFILE.id}>400 · 200 · 400 mm</dd>
-									</div>
-									<div>
-										<dt>FOOTPRINT</dt>
-										<dd>
-											{selectedSwitchGeometry.claimedCells.length} CLAIM ·{" "}
-											{selectedSwitchGeometry.reservedCells.length} RES
-										</dd>
-									</div>
-									{selectedPhysical?.geometryKind ? (
-										<div>
-											<dt>SELECTED LEG</dt>
-											<dd
-												data-fit={
-													selectedPhysical.geometryKind === "OPENFAB_PARAMETRIC"
-														? selectedPhysical.fitKind
-														: "BASELINE"
-												}
-												title={`${selectedPhysical.type} · ${selectedPhysical.geometryKind} · ${selectedPhysical.fitKind ?? "NOT_APPLICABLE"}`}
-											>
-												{selectedPhysical.geometryKind === "OPENFAB_PARAMETRIC" ? (
-													<>CATALOG · {selectedPhysical.fitKind}</>
-												) : (
-													<>
-														BASELINE ·{" "}
-														{selectedPhysical.fitKind === "NOT_APPLICABLE"
-															? "N/A"
-															: selectedPhysical.fitKind}
-													</>
-												)}
-											</dd>
-										</div>
-									) : null}
-								</>
-							) : (
-								<>
-									<div>
-										<dt>IN</dt>
-										<dd>{directionNames(selectedRail.incoming)}</dd>
-									</div>
-									<div>
-										<dt>OUT</dt>
-										<dd>{directionNames(selectedRail.outgoing)}</dd>
-									</div>
-									<div>
-										<dt>AUTHOR</dt>
-										<dd>{selectedType}</dd>
-									</div>
-									<div>
-										<dt>MODULE OWNER</dt>
-										<dd title={selectedOwnership?.key}>
-											{selectedOwnership?.kind ?? "rail"} ·{" "}
-											{selectedOwnership?.footprintCells.length ?? 1} CELLS
-										</dd>
-									</div>
-									<div>
-										<dt>PHYSICAL PIECE</dt>
-										<dd>
-											{selectedPhysical?.type ??
-												(selectedType === "TERMINAL" ? "TERMINAL" : "JUNCTION")}
-										</dd>
-									</div>
-									{selectedPhysical?.geometryKind === "OPENFAB_PARAMETRIC" ? (
-										<>
-											<div>
-												<dt>FIT</dt>
-												<dd data-fit={selectedFitLabel}>{selectedFitLabel}</dd>
-											</div>
-											<div>
-												<dt>R · ANGLE</dt>
-												<dd>
-													R{selectedPhysical.radiusMillimeters} · {selectedPhysical.rotationDegrees}
-													°
-												</dd>
-											</div>
-											<div>
-												<dt>LEAD I / O</dt>
-												<dd>
-													{selectedPhysical.leadInMillimeters} /{" "}
-													{selectedPhysical.leadOutMillimeters} mm
-												</dd>
-											</div>
-											<div>
-												<dt>CATALOG / COMP</dt>
-												<dd
-													title={`${selectedPhysical.nominalProfileId} · MIDDLE ${selectedPhysical.middleMillimeters ?? 0} mm · ΔLEAD ${selectedPhysical.leadInResidualMillimeters ?? 0}/${selectedPhysical.leadOutResidualMillimeters ?? 0} mm · ΔMID ${selectedPhysical.middleResidualMillimeters ?? 0} mm · ΔLEN ${selectedPhysical.lengthResidualMillimeters ?? 0} mm · ΔF ${selectedPhysical.forwardFitDeltaMillimeters ?? 0} mm · ΔL ${selectedPhysical.lateralFitDeltaMillimeters ?? 0} mm`}
-												>
-													{(
-														selectedPhysical.nominalLengthMeters ?? selectedPhysical.lengthMeters
-													).toFixed(3)}{" "}
-													/ {selectedPhysical.lengthMeters.toFixed(3)} m
-												</dd>
-											</div>
-										</>
-									) : selectedPhysical?.geometryKind === "BASELINE_STITCHED" ? (
-										<>
-											<div>
-												<dt>FIT</dt>
-												<dd data-fit="BASELINE">BASELINE</dd>
-											</div>
-											<div>
-												<dt>COMPILED</dt>
-												<dd>{selectedPhysical.lengthMeters.toFixed(3)} m</dd>
-											</div>
-										</>
-									) : selectedPhysical ? (
-										<div>
-											<dt>LENGTH</dt>
-											<dd>{selectedPhysical.lengthMeters.toFixed(2)} m</dd>
-										</div>
-									) : null}
-									{selectedJunction ? (
-										<>
-											<div>
-												<dt>TRUNK</dt>
-												<dd>
-													{directionNames(selectedJunction.through.incoming)}
-													{" → "}
-													{directionNames(selectedJunction.through.outgoing)}
-												</dd>
-											</div>
-											<div>
-												<dt>DIVERGE</dt>
-												<dd>{directionNames(selectedJunction.divergingSide)}</dd>
-											</div>
-											<div>
-												<dt>LEAD IN / OUT</dt>
-												<dd>
-													{selectedJunction.leadInMillimeters} /{" "}
-													{selectedJunction.leadOutMillimeters} mm
-												</dd>
-											</div>
-											<div>
-												<dt>PROFILE</dt>
-												<dd>{selectedJunction.profileId}</dd>
-											</div>
-										</>
-									) : null}
-								</>
-							)}
-						</dl>
-						{selectedCopyPreset ? (
-							<button
-								type="button"
-								className="tilefab-inspector-primary"
-								data-testid="copy-construction-preset"
-								onClick={() => copyConstructionPreset(selectedCopyPreset)}
-								title={`${selectedCopyPreset.grammar} · ${selectedCopyPreset.sourceId}`}
-							>
-								<Copy size={15} /> 건설 설정 복사
-							</button>
-						) : null}
-						{selectedOwnership ? (
-							<>
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									data-testid="duplicate-module-stamp"
-									onClick={() => startModuleStamp(selectedOwnership)}
-									title="선택한 모듈의 정확한 문법과 치수를 복제 배치"
-								>
-									<Stamp size={15} /> 모듈 복제 배치
-								</button>
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									data-testid="cut-rail-module"
-									aria-keyshortcuts="Control+X Meta+X"
-									onClick={cutSelectionToRailClipboard}
-									title="선택한 모듈을 원자적으로 잘라내고 최근 클립보드에 보관"
-								>
-									<Scissors size={15} /> 모듈 잘라내기
-								</button>
-							</>
-						) : null}
-						{selectedSwitch ? (
-							<section
-								className="tilefab-switch-reshape"
-								aria-label="스위치 형상 변경"
-								data-testid="advanced-switch-reshape-controls"
-							>
-								<span>TOPOLOGY</span>
-								<fieldset
-									className="tilefab-segmented"
-									aria-label="선택한 스위치 토폴로지 클래스 변경"
-								>
-									{ADVANCED_SWITCH_PROFILE_CLASSES.map((profileClass) => (
-										<button
-											type="button"
-											key={profileClass}
-											data-testid={`reshape-switch-profile-${profileClass}`}
-											data-active={selectedSwitch.profileClass === profileClass}
-											aria-pressed={selectedSwitch.profileClass === profileClass}
-											aria-label={`클래스 ${profileClass}: ${advancedSwitchProfileTitle(profileClass)}`}
-											disabled={selectedSwitch.profileClass === profileClass}
-											onClick={() => reshapeSelectedSwitch(profileClass)}
-											title={advancedSwitchProfileTitle(profileClass)}
-										>
-											{profileClass}
-										</button>
-									))}
-								</fieldset>
-								<span>CHIRALITY</span>
-								<fieldset className="tilefab-segmented" aria-label="선택한 스위치 좌우 변경">
-									{(["left", "right"] as const).map((side) => {
-										const active = advancedSwitchSide(selectedSwitch) === side.toUpperCase();
-										return (
-											<button
-												type="button"
-												key={side}
-												data-testid={`reshape-switch-side-${side}`}
-												data-active={active}
-												aria-pressed={active}
-												disabled={active}
-												onClick={() => reshapeSelectedSwitch(selectedSwitch.profileClass, side)}
-											>
-												{side.toUpperCase()}
-											</button>
-										);
-									})}
-								</fieldset>
-								{switchReshapeReason ? (
-									<p role="status" data-testid="advanced-switch-reshape-reason">
-										{switchReshapeReason}
-									</p>
-								) : null}
-							</section>
-						) : null}
-						{selectedSwitch ? null : (
-							<>
-								{selectedType === "LEFT_CURVE" || selectedType === "RIGHT_CURVE" ? (
-									<button
-										type="button"
-										className="tilefab-inspector-primary"
-										onClick={() => startReshape("corner")}
-									>
-										<CornerDownRight size={15} /> 코너 구간 재배치
-									</button>
-								) : null}
-								{selectedType === "TERMINAL" ? (
-									<button
-										type="button"
-										className="tilefab-inspector-primary"
-										onClick={() => startReshape("endpoint")}
-									>
-										<Move size={15} /> 끝점 재배치
-									</button>
-								) : null}
-								{selectedType === "LINEAR" ? (
-									<button
-										type="button"
-										className="tilefab-inspector-primary"
-										onClick={() => startReshape("straight")}
-									>
-										<Move size={15} /> 직선 구간 평행 이동
-									</button>
-								) : null}
-								{selectedType === "BRANCH" || selectedType === "MERGE" ? (
-									<button
-										type="button"
-										className="tilefab-inspector-danger"
-										onClick={removeSelectedBranch}
-									>
-										<GitBranch size={15} /> 우회 분기 전체 철거
-									</button>
-								) : null}
-							</>
-						)}
-						<button type="button" className="tilefab-inspector-danger" onClick={deleteSelected}>
-							<Trash2 size={15} /> {selectedSwitch ? "스위치 전체 철거" : "정확한 모듈 철거"}
-						</button>
-						</div>
-					</aside>
+					<RailModuleInspector
+						selected={selected}
+						selectedRail={selectedRail}
+						selectedSwitch={selectedSwitch}
+						selectedSwitchGeometry={selectedSwitchGeometry}
+						selectedCopyPreset={selectedCopyPreset}
+						selectedOwnership={selectedOwnership}
+						compactInspectorSheetActive={compactInspectorSheetActive}
+						compactInspectorExpanded={compactInspectorExpanded}
+						bindCompactInspectorDisclosure={bindCompactInspectorDisclosure}
+						compactInspectorDisclosureFocusedRef={compactInspectorDisclosureFocusedRef}
+						setCompactInspectorExpanded={setCompactInspectorExpanded}
+						compactInspectorCloseRef={compactInspectorCloseRef}
+						clearTransientConstruction={clearTransientConstruction}
+						clearRailSelection={clearRailSelection}
+						scheduleRender={scheduleRender}
+						canvasRef={canvasRef}
+						selectedSwitchOutputConnected={selectedSwitchOutputConnected}
+						continueFromSwitchOutput={continueFromSwitchOutput}
+						continueFromSelected={continueFromSelected}
+						directionNames={directionNames}
+						advancedSwitchSide={advancedSwitchSide}
+						advancedSwitchPortSummary={advancedSwitchPortSummary}
+						selectedPhysical={selectedPhysical}
+						selectedType={selectedType}
+						selectedFitLabel={selectedFitLabel}
+						selectedJunction={selectedJunction}
+						copyConstructionPreset={copyConstructionPreset}
+						startModuleStamp={startModuleStamp}
+						cutSelectionToRailClipboard={cutSelectionToRailClipboard}
+						advancedSwitchProfileTitle={advancedSwitchProfileTitle}
+						reshapeSelectedSwitch={reshapeSelectedSwitch}
+						switchReshapeReason={switchReshapeReason}
+						startReshape={startReshape}
+						removeSelectedBranch={removeSelectedBranch}
+						deleteSelected={deleteSelected}
+					/>
 				) : null}
 
 				<div className="tilefab-scale" role="img" aria-label="지도 거리 눈금 준비 중">
@@ -41857,91 +38780,6 @@ function IconButton({
 			onClick={onClick}
 		>
 			{children}
-		</button>
-	);
-}
-
-function ToolButton({
-	label,
-	active,
-	disabled = false,
-	tone = "default",
-	controls,
-	expanded,
-	keyShortcuts,
-	caption,
-	captionDescription,
-	compactCaption,
-	guidedCaption,
-	guidedTarget = false,
-	guidedActionId,
-	guidedSelected = false,
-	guidedDescriptionId,
-	disclosure = false,
-	onClick,
-	children,
-}: {
-	label: string;
-	active: boolean;
-	disabled?: boolean;
-	tone?: "default" | "danger";
-	controls?: string;
-	expanded?: boolean;
-	keyShortcuts?: string;
-	caption?: string;
-	captionDescription?: string;
-	compactCaption?: string;
-	guidedCaption?: string;
-	guidedTarget?: boolean;
-	guidedActionId?: string;
-	guidedSelected?: boolean;
-	guidedDescriptionId?: string;
-	disclosure?: boolean;
-	onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
-	children: React.ReactNode;
-}): React.ReactElement {
-	const visibleCaption = guidedCaption ?? caption;
-	return (
-		<button
-			type="button"
-			className="tilefab-tool-button"
-			data-active={active}
-			data-guided-action-id={guidedActionId}
-			data-guided-target={guidedTarget || undefined}
-			data-compact-caption={compactCaption}
-			data-tone={tone}
-			disabled={disabled}
-			aria-label={label}
-			aria-describedby={guidedDescriptionId}
-			aria-pressed={disclosure ? undefined : active}
-			aria-controls={controls}
-			aria-expanded={expanded}
-			aria-keyshortcuts={keyShortcuts}
-			title={label}
-			onClick={onClick}
-		>
-			<span className="tilefab-tool-button-icon" aria-hidden="true">
-				{children}
-			</span>
-			{compactCaption ? (
-				<small className="tilefab-tool-button-compact-caption" aria-hidden="true">
-					{compactCaption}
-				</small>
-			) : null}
-			{visibleCaption ? (
-				<span className="tilefab-tool-button-caption">
-					<strong>{visibleCaption}</strong>
-					<small>
-						{guidedCaption
-							? guidedSelected
-								? "선택됨 · 캔버스에서 진행"
-								: guidedTarget
-									? "다음 단계 도구"
-									: "완료한 도구"
-							: captionDescription}
-					</small>
-				</span>
-			) : null}
 		</button>
 	);
 }

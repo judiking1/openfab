@@ -6,6 +6,114 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.55] - 2026-10-05
+
+Accumulated public preview candidate including the 0.1.47–0.1.54 checkpoints below.
+Publication requires exact-source CI and Pages verification; V1 remains incomplete.
+
+- Keep IME confirmation Enter separate from Loop registration and organization naming.
+- Preserve OHB access direction when moving or copying equipment, including Undo/Redo.
+- Disable unsupported legacy CUSTOM Stocker move/copy consistently and explain the FLEX
+  replacement path; keep deletion and Undo available.
+- Apply recognized standalone Loop dimension edits through the existing atomic Loop repair
+  command, preserving identity, membership, history and Worker checks. Keep selected-Port
+  and protected-organization restrictions, and retain failure reasons in the resize panel.
+- Fit resize labels, inputs, units and feedback inside the narrow Inspector.
+
+## [0.1.54] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Describe rail construction in the accessible first-OHB handoff without claiming the
+  project file has already been saved.
+- Make Build Help explain selection of intersected rail modules and whole equipment groups,
+  explicitly stored as a blueprint. Preserve existing commands, layout and Loop ownership.
+- Reuse existing keyboard and Help acceptance paths; no new harness or timing budget changes.
+
+## [0.1.53] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Extract complete Organization Library presentation while retaining App filtering, source
+  guards, commands, refs, timers and focus ownership. Remove 543 lines from the main editor.
+- Preserve original organization rows, role/detail tabs, events and visibility conditions;
+  existing held Connector, Arrangement and registered Loop flows pass at three widths.
+- Keep actual OS write/reopen and independent first-use validation open; retain whole
+  authoring for the accumulated public release instead of inventing speculative product work.
+
+## [0.1.52] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Extract Blueprint Library presentation while retaining App queries, command ownership,
+  storage, focus, refs and history. Remove 1,102 lines from the main editor.
+- Make empty BROWSER LOCAL guidance name the actual save buttons and explain the first
+  authoring step; preserve the existing dialog's automatically selected local destination.
+- Reuse existing focused Library flows, correct stale recovery startup/error expectations
+  and route their output outside user artifacts. Remove four inactive historical build copies.
+
+## [0.1.51] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Reuse the prepared equipment presentation during model publication instead of compiling
+  it again in React render. Pair source and presentation atomically with exact provenance.
+- Prepare incoming project and scale presentation before promotion, dispose rejected project
+  candidates, and retain current-tool slot correction without another presentation compile.
+- Preserve serialized source, typed Worker messages, commands and Undo/Redo; existing repeat,
+  equipment, project and full scale checks pass without changing performance budgets.
+
+## [0.1.50] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Preserve native Enter/Space activation for focused buttons while moving or copying an
+  equipment group. Apply/navigation shortcuts remain available with Canvas focus.
+- Extract unchanged rail and advanced-switch Inspector presentation while retaining App
+  selection, commands, refs and editing ownership.
+- Condense the current roadmap summary after losslessly archiving its previous form;
+  retain phase contracts and historical evidence.
+
+## [0.1.49] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Explain that drag selection includes intersected rail modules and whole equipment groups,
+  with Ctrl/⌘+click to exclude equipment, in Help and the selection Inspector.
+- Extract unchanged activity-tool presentation from the App while retaining commands,
+  current button launchers, guide/disclosure behavior and disabled conditions.
+- Archive the exact roadmap and remove only reviewed historical verification receipts;
+  retain all phase contracts, sequencing, performance and publication gates.
+
+## [0.1.48] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Recheck a failed Bay flow review while keeping the selected Bay and explicit target.
+  Discard old authority, capture the current document and retain all admission checks.
+- Keep keyboard focus inside Bay review while rechecking, and show blocked reasons there.
+- Clear Station READY evaluation after its idle Worker fails, preserving the review draft
+  for explicit reevaluation. Keep retired callbacks and accepted Apply completion isolated.
+
+## [0.1.47] - 2026-10-04
+
+Local validation passes for this development checkpoint. Public deployment is deferred
+to the next accumulated release; this entry does not establish V1 completion.
+
+- Split equipment placement, group transforms, Port configuration editing and the equipment
+  Inspector into explicit presentation components, preserving the existing commands and state.
+- Offer explicit current-document mirror recovery after a terminal synchronization fault,
+  retaining authored data and Undo/Redo. Keep the existing recovery limits and timeout.
+- Show an accessible recovery notice and 44 px Retry button on compact screens where the
+  diagnostic footer is hidden.
+
 ## [0.1.46] - 2026-10-04
 
 Local validation passes for this development checkpoint. Public deployment is recorded

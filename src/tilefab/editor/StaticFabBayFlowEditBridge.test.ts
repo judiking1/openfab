@@ -363,6 +363,72 @@ describe("StaticFabBayFlowEditBridge", () => {
 		expect(worker.terminationCount).toBe(1);
 	}, 120_000);
 
+	it("rechecks a failed review with fresh capture authority and a new one-shot permit", async () => {
+		const fixture = bridgeFixture(composition);
+		const document = fixture.document;
+		const before = {
+			map: document.map,
+			ports: document.portEquipment,
+			organizations: document.organizations,
+			relationships: document.relationships,
+			sequence: document.getPatchSequence(),
+			history: document.captureRailMirrorHistoryLedger(),
+		};
+		const failedWorker = new InlineRuntimeWorker((response) => response, false);
+		const failedBridge = new StaticFabBayFlowEditBridge(() => failedWorker);
+		const retryWorker = new InlineRuntimeWorker();
+		const retryBridge = new StaticFabBayFlowEditBridge(() => retryWorker);
+		try {
+			const preparing = failedBridge.prepare(fixture.input);
+			const rejection = expect(preparing).rejects.toThrow("Injected review Worker failure");
+			failedWorker.deliverNext();
+			const oldPrepare = failedWorker.requests[1];
+			if (oldPrepare?.type !== "PREPARE_STATIC_FAB_BAY_FLOW_EDIT") {
+				throw new Error("Expected the failed attempt's bound prepare request.");
+			}
+			const lateHandler = requireValue(failedWorker.onmessage, "retired review handler");
+			failedWorker.onerror?.({ message: "Injected review Worker failure" } as ErrorEvent);
+			await rejection;
+			expect(failedWorker.terminationCount).toBe(1);
+			await expect(failedBridge.prepare(fixture.input)).rejects.toThrow(/capture authority/i);
+			const snapshot = captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot;
+			const refreshed = await retryBridge.prepare({ ...fixture.input, snapshot });
+			const plan = requireValue(refreshed.plan, "freshly adopted flow plan");
+			const newPrepare = retryWorker.requests[1];
+			if (newPrepare?.type !== "PREPARE_STATIC_FAB_BAY_FLOW_EDIT") {
+				throw new Error("Expected a fresh bound prepare request.");
+			}
+			expect(newPrepare.intent).toEqual(oldPrepare.intent);
+			expect(newPrepare.expectedSource).toEqual(oldPrepare.expectedSource);
+			expect(newPrepare.ticketId).not.toBe(oldPrepare.ticketId);
+			expect(refreshed.certified).toBe(true);
+			failedWorker.deliverNext(lateHandler);
+			await Promise.resolve();
+			expect(isIssuedStaticFabBayFlowEditPlan(plan)).toBe(true);
+			expect(document.map).toBe(before.map);
+			expect(document.portEquipment).toBe(before.ports);
+			expect(document.organizations).toBe(before.organizations);
+			expect(document.relationships).toBe(before.relationships);
+			expect(document.getPatchSequence()).toBe(before.sequence);
+			expect(document.captureRailMirrorHistoryLedger()).toEqual(before.history);
+			expect(document.commitStaticFabBayFlowEdit(plan)).toBe(true);
+			expect(document.getPatchSequence()).toBe(before.sequence + 1);
+			expect(document.captureRailMirrorHistoryLedger().undo).toHaveLength(
+				before.history.undo.length + 1,
+			);
+			expect(document.commitStaticFabBayFlowEdit(plan)).toBe(false);
+		} finally {
+			failedBridge.dispose();
+			retryBridge.dispose();
+		}
+	}, 120_000);
+
 	it("times out a silent Worker and revokes the disposable request", async () => {
 		vi.useFakeTimers();
 		try {

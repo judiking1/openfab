@@ -31,7 +31,7 @@ class RuntimeWorker implements OpenFabStationProposalReviewWorkerPort {
 	onerror: ((event: ErrorEvent) => void) | null = null;
 	onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
 	private readonly session = new OpenFabStationProposalReviewWorkerSession();
-	private terminated = false;
+	terminated = false;
 	postMessage(
 		message: OpenFabStationProposalReviewWorkerRequest,
 		transfer: Transferable[] = [],
@@ -48,6 +48,12 @@ class RuntimeWorker implements OpenFabStationProposalReviewWorkerPort {
 			})
 			.catch(() => this.onerror?.({ message: "Synthetic review Worker failed" } as ErrorEvent));
 	}
+	emitError(): void {
+		this.onerror?.({ message: "Synthetic review Worker failed" } as ErrorEvent);
+	}
+	emitMessageError(): void {
+		this.onmessageerror?.({ data: null } as MessageEvent<unknown>);
+	}
 	terminate(): void {
 		this.terminated = true;
 		this.session.terminate();
@@ -55,6 +61,142 @@ class RuntimeWorker implements OpenFabStationProposalReviewWorkerPort {
 }
 
 describe("OpenFabStationProposalEditorController terminal completion", () => {
+	it.each([
+		"native",
+		"decode",
+	] as const)("clears READY after an idle %s fault, retains the draft, and permits fresh evaluation", async (fault) => {
+		const fixture = await reviewFixture();
+		try {
+			await ready(fixture);
+			const original = fixture.view.current;
+			if (!original) throw new Error("Expected a READY review");
+			const summary = original.session.getSummary();
+			const worker = fixture.workers[0];
+			if (!worker) throw new Error("Expected a live READY Worker");
+			const retiredError = worker.onerror;
+			const retiredDecode = worker.onmessageerror;
+			if (fault === "native") worker.emitError();
+			else worker.emitMessageError();
+			expect(fixture.view.current).toMatchObject({ phase: "reviewing", evaluation: null });
+			expect(fixture.view.current?.error).toBe(
+				fault === "native"
+					? "Station proposal review Worker failed."
+					: "Station proposal review Worker response was unreadable.",
+			);
+			expect(fixture.view.current?.session).toBe(original.session);
+			expect(original.session.getSummary()).toEqual(summary);
+			expect(worker.terminated).toBe(true);
+			expect(sourceReceipt(fixture.document)).toEqual(fixture.before);
+			const recovered = deferred<void>();
+			const publish = fixture.publish.getMockImplementation();
+			fixture.publish.mockImplementation((next) => {
+				publish?.(next);
+				if (next?.phase === "ready") recovered.resolve();
+			});
+			fixture.commands.evaluateStationProposalReview();
+			await recovered.promise;
+			expect(fixture.view.current?.evaluation?.canApply).toBe(true);
+			expect(fixture.workers).toHaveLength(2);
+			const publications = fixture.publish.mock.calls.length;
+			const statuses = fixture.status.mock.calls.length;
+			retiredError?.({ message: "Retired synthetic fault" } as ErrorEvent);
+			retiredDecode?.({ data: null } as MessageEvent<unknown>);
+			await settleCompletionMicrotasks();
+			expect(fixture.publish).toHaveBeenCalledTimes(publications);
+			expect(fixture.status).toHaveBeenCalledTimes(statuses);
+			expect(sourceReceipt(fixture.document)).toEqual(fixture.before);
+		} finally {
+			fixture.owner.dispose();
+		}
+	});
+
+	it("does not publish a fault status after failure publication reentrantly disposes the owner", async () => {
+		const fixture = await reviewFixture();
+		try {
+			await ready(fixture);
+			const publish = fixture.publish.getMockImplementation();
+			fixture.publish.mockImplementation((next) => {
+				publish?.(next);
+				if (next?.phase === "reviewing" && next.error) fixture.owner.dispose();
+			});
+			const statuses = fixture.status.mock.calls.length;
+			fixture.workers[0]?.emitError();
+			await settleCompletionMicrotasks();
+			expect(fixture.status).toHaveBeenCalledTimes(statuses);
+			expect(sourceReceipt(fixture.document)).toEqual(fixture.before);
+		} finally {
+			fixture.owner.dispose();
+		}
+	});
+
+	it("suppresses resolved READY when its idle Worker faults before the success microtask", async () => {
+		const fixture = await reviewFixture();
+		try {
+			fixture.commands.evaluateStationProposalReview();
+			const result = await fixture.evaluated.promise;
+			fixture.workers[0]?.emitError();
+			fixture.releaseEvaluation.resolve(result);
+			await settleCompletionMicrotasks();
+			expect(fixture.view.current).toMatchObject({
+				phase: "reviewing",
+				evaluation: null,
+				error: "Station proposal review Worker failed.",
+			});
+			expect(fixture.publish.mock.calls.some(([view]) => view?.phase === "ready")).toBe(false);
+			expect(fixture.status.mock.calls.some(([message]) => message.includes("READY"))).toBe(false);
+			expect(sourceReceipt(fixture.document)).toEqual(fixture.before);
+		} finally {
+			fixture.owner.dispose();
+		}
+	});
+
+	it("keeps the failure status when publishing READY reentrantly faults the Worker", async () => {
+		const fixture = await reviewFixture();
+		try {
+			const publish = fixture.publish.getMockImplementation();
+			fixture.publish.mockImplementation((next) => {
+				publish?.(next);
+				if (next?.phase === "ready") fixture.workers[0]?.emitError();
+			});
+			await ready(fixture);
+			await settleCompletionMicrotasks();
+			expect(fixture.view.current).toMatchObject({
+				phase: "reviewing",
+				evaluation: null,
+				error: "Station proposal review Worker failed.",
+			});
+			expect(fixture.status.mock.calls.at(-1)?.[0]).toBe("Station proposal review Worker failed.");
+			expect(fixture.status.mock.calls.some(([message]) => message.includes("READY"))).toBe(false);
+			expect(sourceReceipt(fixture.document)).toEqual(fixture.before);
+		} finally {
+			fixture.owner.dispose();
+		}
+	});
+
+	it.each([
+		"cancel",
+		"dispose",
+		"model replacement",
+	] as const)("suppresses idle READY fault UI after %s", async (finish) => {
+		const fixture = await reviewFixture();
+		try {
+			await ready(fixture);
+			const fault = fixture.workers[0]?.onerror;
+			if (finish === "cancel") fixture.commands.cancelStationProposalReview("Cancelled");
+			else if (finish === "dispose") fixture.owner.dispose();
+			else fixture.editorModelRef.current = { ...fixture.editorModelRef.current, generation: 2 };
+			const publications = fixture.publish.mock.calls.length;
+			const statuses = fixture.status.mock.calls.length;
+			fault?.({ message: "Retired synthetic fault" } as ErrorEvent);
+			await settleCompletionMicrotasks();
+			expect(fixture.publish).toHaveBeenCalledTimes(publications);
+			expect(fixture.status).toHaveBeenCalledTimes(statuses);
+			expect(sourceReceipt(fixture.document)).toEqual(fixture.before);
+		} finally {
+			fixture.owner.dispose();
+		}
+	});
+
 	it("does not publish READY when a resolved evaluation is disposed before its success microtask", async () => {
 		const fixture = await reviewFixture();
 		try {
@@ -119,15 +261,26 @@ describe("OpenFabStationProposalEditorController terminal completion", () => {
 		}
 	});
 
-	it("publishes one normal Apply success after its accepted commit advances the source", async () => {
+	it("publishes one Apply success after an accepted commit despite retired Worker faults", async () => {
 		const fixture = await reviewFixture();
 		try {
 			await ready(fixture);
+			const retiredError = fixture.workers[0]?.onerror;
+			const retiredDecode = fixture.workers[0]?.onmessageerror;
 			const held = holdCommittedResult(fixture.document);
 			fixture.commands.applyStationProposalReview();
 			const result = await held.committed.promise;
 			expect(result.committed).toBe(true);
 			expect(fixture.document.getPatchSequence()).toBe(fixture.before.sequence + 1);
+			const committedSource = sourceReceipt(fixture.document);
+			const publications = fixture.publish.mock.calls.length;
+			const statuses = fixture.status.mock.calls.length;
+			retiredError?.({ message: "Retired synthetic fault" } as ErrorEvent);
+			retiredDecode?.({ data: null } as MessageEvent<unknown>);
+			expect(fixture.publish).toHaveBeenCalledTimes(publications);
+			expect(fixture.status).toHaveBeenCalledTimes(statuses);
+			expect(fixture.view.current?.phase).toBe("applying");
+			expect(sourceReceipt(fixture.document)).toEqual(committedSource);
 			held.release.resolve(result);
 			await settleCompletionMicrotasks();
 			expect(fixture.recordApplied).toHaveBeenCalledTimes(1);
@@ -148,13 +301,8 @@ async function reviewFixture() {
 	const evaluated = deferred<OpenFabStationProposalReviewBridgeEvaluation>();
 	const releaseEvaluation = deferred<OpenFabStationProposalReviewBridgeEvaluation>();
 	const publishedReady = deferred<void>();
-	const bridge = new OpenFabStationProposalReviewBridge(
-		() => new RuntimeWorker(),
-		30_000,
-		async () => {},
-		() => 0,
-		1,
-	);
+	const workers: RuntimeWorker[] = [];
+	let holdFirstEvaluation = true;
 	const owner = new OpenFabStationProposalEditorController(view, {
 		reader: {
 			read: async (source) =>
@@ -164,15 +312,31 @@ async function reviewFixture() {
 			cancel: vi.fn(),
 			dispose: vi.fn(),
 		},
-		createReviewBridge: () => ({
-			evaluate: async (input, signal) => {
-				const evaluation = await bridge.evaluate(input, signal);
-				evaluated.resolve(evaluation);
-				return releaseEvaluation.promise;
-			},
-			apply: bridge.apply.bind(bridge),
-			dispose: bridge.dispose.bind(bridge),
-		}),
+		createReviewBridge: (onReadyInvalidated) => {
+			const bridge = new OpenFabStationProposalReviewBridge(
+				() => {
+					const worker = new RuntimeWorker();
+					workers.push(worker);
+					return worker;
+				},
+				30_000,
+				async () => {},
+				() => 0,
+				1,
+				onReadyInvalidated,
+			);
+			return {
+				evaluate: async (input, signal) => {
+					const evaluation = await bridge.evaluate(input, signal);
+					if (!holdFirstEvaluation) return evaluation;
+					holdFirstEvaluation = false;
+					evaluated.resolve(evaluation);
+					return releaseEvaluation.promise;
+				},
+				apply: bridge.apply.bind(bridge),
+				dispose: bridge.dispose.bind(bridge),
+			};
+		},
 	});
 	const publish = vi.fn((next: OpenFabStationProposalReviewUiState | null) => {
 		// Exclusive-command consumers see the new ref before the React publication callback.
@@ -182,8 +346,9 @@ async function reviewFixture() {
 	const status = vi.fn<(message: string) => void>();
 	const recordApplied = vi.fn<OpenFabStationProposalEditorEnvironment["recordApplied"]>();
 	const syncModelUi = vi.fn<OpenFabStationProposalEditorEnvironment["syncModelUi"]>();
+	const editorModelRef = { current: { document, map: document.map, generation: 1 } };
 	const commands = owner.bind({
-		editorModelRef: { current: { document, map: document.map, generation: 1 } },
+		editorModelRef,
 		modelSyncPendingRef: { current: false },
 		projectOperationControllerRef: { current: null },
 		workerBridgeDocumentRef: { current: document },
@@ -270,6 +435,8 @@ async function reviewFixture() {
 		view,
 		owner,
 		commands,
+		workers,
+		editorModelRef,
 		evaluated,
 		releaseEvaluation,
 		publishedReady,

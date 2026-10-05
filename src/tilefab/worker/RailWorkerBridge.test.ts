@@ -3069,6 +3069,381 @@ describe("RailWorkerBridge", () => {
 		bridge.dispose();
 	});
 
+	it("explicitly retries a terminal mirror over the same authored source and undo/redo history", async () => {
+		const document = new RailDocument();
+		const workers: InProcessRailWorker[] = [];
+		let unavailable = false;
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => {
+				if (unavailable) throw new Error("Injected replacement creation failure");
+				const worker = new InProcessRailWorker();
+				worker.reportPhysicalInvalid = workers.length > 0;
+				workers.push(worker);
+				return worker;
+			},
+		);
+		try {
+			await bridge.waitUntilReady(readyExpectation(document));
+			expect(bridge.retryCurrentDocument()).toBeNull();
+			expect(
+				document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
+			).toBe(true);
+			await bridge.waitUntilReady(readyExpectation(document));
+			const before = {
+				map: document.map,
+				ports: document.portEquipment,
+				organizations: document.organizations,
+				relationships: document.relationships,
+				operations: document.operationalConfiguration,
+				expected: readyExpectation(document),
+				history: document.captureRailMirrorHistoryLedger(),
+			};
+			unavailable = true;
+			(workers[0] as InProcessRailWorker).emitExecutionError();
+			expect(bridge.getState().status).toBe("error");
+			unavailable = false;
+			const retry = bridge.retryCurrentDocument();
+			if (!retry) throw new Error("Expected explicit retry admission");
+			expect(bridge.retryCurrentDocument()).toBeNull();
+			await expect(retry).resolves.toMatchObject({
+				status: "ready",
+				epoch: 2,
+				sequence: before.expected.sequence,
+				revision: before.expected.revision,
+				checksum: before.expected.checksum,
+				physicalValid: false,
+				simulationReady: false,
+			});
+			expect(document.map).toBe(before.map);
+			expect(document.portEquipment).toBe(before.ports);
+			expect(document.organizations).toBe(before.organizations);
+			expect(document.relationships).toBe(before.relationships);
+			expect(document.operationalConfiguration).toBe(before.operations);
+			expect(readyExpectation(document)).toEqual(before.expected);
+			expect(document.captureRailMirrorHistoryLedger()).toEqual(before.history);
+			await expect(bridge.waitUntilReady(before.expected)).rejects.toThrow(/physical identity/);
+			expect(document.undo()).toBe(true);
+			await bridge.waitUntilSnapshotReady(readyExpectation(document));
+			expect(document.redo()).toBe(true);
+			await expect(
+				bridge.waitUntilSnapshotReady(readyExpectation(document)),
+			).resolves.toMatchObject({
+				sequence: before.expected.sequence + 2,
+				checksum: before.expected.checksum,
+			});
+			expect(workers).toHaveLength(2);
+			expect((workers[1] as InProcessRailWorker).syncCount).toBe(1);
+		} finally {
+			bridge.dispose();
+		}
+		expect(bridge.retryCurrentDocument()).toBeNull();
+	});
+
+	it.each([
+		"commit",
+		"undo",
+		"redo",
+		"ready callback",
+	] as const)("resolves explicit recovery of the current source after %s advances its initial target", async (action) => {
+		const document = new RailDocument();
+		const workers: InProcessRailWorker[] = [];
+		let unavailable = false;
+		let advanceOnReady = false;
+		let callbackAuthoredMap: RailDocument["map"] | null = null;
+		const bridge = new RailWorkerBridge(
+			document,
+			(state) => {
+				if (state.status === "ready" && advanceOnReady) {
+					advanceOnReady = false;
+					expect(
+						document.commit(planRailConstruction(document.map, { x: 20, y: 10 }, { x: 24, y: 10 })),
+					).toBe(true);
+					callbackAuthoredMap = document.map;
+				}
+			},
+			() => {
+				if (unavailable) throw new Error("Injected replacement creation failure");
+				const worker = new InProcessRailWorker();
+				worker.reportPhysicalInvalid = workers.length > 0;
+				workers.push(worker);
+				return worker;
+			},
+		);
+		try {
+			await bridge.waitUntilReady(readyExpectation(document));
+			expect(
+				document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
+			).toBe(true);
+			await bridge.waitUntilReady(readyExpectation(document));
+			if (action === "redo") {
+				expect(document.undo()).toBe(true);
+				await bridge.waitUntilReady(readyExpectation(document));
+			}
+			unavailable = true;
+			(workers[0] as InProcessRailWorker).emitExecutionError();
+			unavailable = false;
+			vi.useFakeTimers();
+			const retry = bridge.retryCurrentDocument();
+			if (!retry) throw new Error("Expected explicit retry admission");
+			const initial = bridge.getState();
+			if (action === "undo") expect(document.undo()).toBe(true);
+			else if (action === "redo") expect(document.redo()).toBe(true);
+			else
+				expect(
+					document.commit(planRailConstruction(document.map, { x: 8, y: 0 }, { x: 12, y: 0 })),
+				).toBe(true);
+			const advanced = {
+				map: document.map,
+				expected: readyExpectation(document),
+				history: document.captureRailMirrorHistoryLedger(),
+			};
+			expect(advanced.expected.sequence).toBe(initial.targetSequence + 1);
+			// Fixed external waiters must remain stale even while the owned recovery follows source changes.
+			const fixed = bridge.waitUntilSnapshotReady({
+				checksum: initial.targetChecksum,
+				sequence: initial.targetSequence,
+				revision: initial.targetRevision,
+			});
+			const rejected = expect(fixed).rejects.toThrow(/snapshot authored identity/);
+			advanceOnReady = action === "ready callback";
+			await vi.advanceTimersByTimeAsync(0);
+			const ready = await retry;
+			await rejected;
+			expect(ready).toMatchObject({
+				status: "ready",
+				epoch: 2,
+				sequence: advanced.expected.sequence,
+				revision: advanced.expected.revision,
+				checksum: advanced.expected.checksum,
+				physicalValid: false,
+				simulationReady: false,
+			});
+			await vi.advanceTimersByTimeAsync(0);
+			expect(
+				railWorkerStateMatchesSnapshotReadyExpectation(
+					bridge.getState(),
+					readyExpectation(document),
+				),
+			).toBe(true);
+			expect(document.map).toBe(action === "ready callback" ? callbackAuthoredMap : advanced.map);
+			if (action !== "ready callback") {
+				expect(readyExpectation(document)).toEqual(advanced.expected);
+				expect(document.captureRailMirrorHistoryLedger()).toEqual(advanced.history);
+			} else {
+				expect(document.getPatchSequence()).toBe(advanced.expected.sequence + 1);
+				expect(document.captureRailMirrorHistoryLedger().undo).toHaveLength(
+					advanced.history.undo.length + 1,
+				);
+			}
+			expect(workers).toHaveLength(2);
+			expect((workers[1] as InProcessRailWorker).syncCount).toBe(1);
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			bridge.dispose();
+			vi.useRealTimers();
+		}
+	});
+
+	it.each([
+		"creation",
+		"post",
+	] as const)("relatches repeated explicit retry %s failures until availability returns", async (failure) => {
+		const document = new RailDocument();
+		const original = new InProcessRailWorker();
+		let creationCount = 0;
+		let unavailable = true;
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => {
+				creationCount++;
+				if (creationCount === 1) return original;
+				if (unavailable) {
+					if (failure === "creation") throw new Error("Injected retry creation failure");
+					return new FailingRailWorker();
+				}
+				return new InProcessRailWorker();
+			},
+		);
+		try {
+			await bridge.waitUntilReady(readyExpectation(document));
+			original.emitExecutionError();
+			await flushWorkerMessages();
+			expect(bridge.getState().status).toBe("error");
+			for (let attempt = 0; attempt < 2; attempt++) {
+				const count = creationCount;
+				const retry = bridge.retryCurrentDocument();
+				if (!retry) throw new Error("Expected explicit retry admission");
+				expect(bridge.retryCurrentDocument()).toBeNull();
+				await expect(retry).rejects.toThrow(/Injected (retry creation|mirror post) failure/);
+				await flushWorkerMessages(6);
+				expect(creationCount).toBe(count + 1);
+				expect(bridge.getState().status).toBe("error");
+			}
+			unavailable = false;
+			const retry = bridge.retryCurrentDocument();
+			if (!retry) throw new Error("Expected restored explicit retry admission");
+			await expect(retry).resolves.toMatchObject({ status: "ready", simulationReady: false });
+		} finally {
+			bridge.dispose();
+		}
+	});
+
+	it("admits retry from terminal notification and suppresses retired callbacks and queued resync", async () => {
+		const document = new RailDocument();
+		const workers: InProcessRailWorker[] = [];
+		let unavailable = false;
+		const retries: Promise<RailWorkerBridgeState>[] = [];
+		const bridge = new RailWorkerBridge(
+			document,
+			(state) => {
+				if (state.status === "error" && retries.length === 0) {
+					unavailable = false;
+					const retry = bridge.retryCurrentDocument();
+					if (retry) retries.push(retry);
+				}
+			},
+			() => {
+				if (unavailable) throw new Error("Injected queued replacement failure");
+				const worker = new InProcessRailWorker();
+				workers.push(worker);
+				return worker;
+			},
+		);
+		try {
+			await bridge.waitUntilReady(readyExpectation(document));
+			const original = workers[0] as InProcessRailWorker;
+			const old = {
+				message: original.onmessage,
+				error: original.onerror,
+				messageerror: original.onmessageerror,
+			};
+			unavailable = true;
+			original.desyncNextPatch = true;
+			original.executionErrorAfterDesyncNextPatch = true;
+			expect(
+				document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
+			).toBe(true);
+			const oldWait = bridge.waitUntilSnapshotReady(readyExpectation(document));
+			const rejected = expect(oldWait).rejects.toThrow("Injected queued replacement failure");
+			await flushWorkerMessages(6);
+			await rejected;
+			const retry = retries[0];
+			if (!retry) throw new Error("Expected notification-owned retry");
+			const ready = await retry;
+			expect(ready).toMatchObject({
+				status: "ready",
+				epoch: 2,
+				sequence: 1,
+				simulationReady: false,
+			});
+			expect((workers[1] as InProcessRailWorker).syncCount).toBe(1);
+			const message = {
+				type: "RAIL_MIRROR_ERROR",
+				epoch: ready.epoch,
+				sequence: ready.sequence,
+				revision: ready.revision,
+				message: "Queued obsolete mirror failure",
+			} as const;
+			old.message?.({ data: message } as MessageEvent<RailMirrorToMainMessage>);
+			old.error?.({ message: "Queued obsolete execution failure" } as ErrorEvent);
+			old.messageerror?.({ data: null } as MessageEvent<unknown>);
+			(workers[1] as InProcessRailWorker).onmessage?.({
+				data: { ...message, epoch: ready.epoch - 1 },
+			} as MessageEvent<RailMirrorToMainMessage>);
+			await flushWorkerMessages(6);
+			expect(bridge.getState()).toBe(ready);
+			expect(workers).toHaveLength(2);
+			expect(original.terminated).toBe(true);
+			expect(original.onmessage).toBeNull();
+			expect(original.onerror).toBeNull();
+			expect(original.onmessageerror).toBeNull();
+		} finally {
+			bridge.dispose();
+		}
+	});
+
+	it.each([
+		"deadline",
+		"dispose",
+	] as const)("bounds a silent explicit retry through %s without an external readiness consumer", async (finish) => {
+		const document = new RailDocument();
+		const workers: InProcessRailWorker[] = [];
+		let unavailable = false;
+		let silent = false;
+		const bridge = new RailWorkerBridge(
+			document,
+			() => undefined,
+			() => {
+				if (unavailable) throw new Error("Injected replacement creation failure");
+				const worker = new InProcessRailWorker();
+				worker.dropAcknowledgements = silent;
+				workers.push(worker);
+				return worker;
+			},
+		);
+		await bridge.waitUntilReady(readyExpectation(document));
+		unavailable = true;
+		(workers[0] as InProcessRailWorker).emitExecutionError();
+		unavailable = false;
+		silent = true;
+		vi.useFakeTimers();
+		try {
+			const retry = bridge.retryCurrentDocument();
+			if (!retry) throw new Error("Expected explicit retry admission");
+			const outcome = retry.then(
+				() => null,
+				(error: unknown) => error,
+			);
+			expect(bridge.retryCurrentDocument()).toBeNull();
+			await vi.advanceTimersByTimeAsync(39_999);
+			expect(bridge.getState().status).toBe("syncing");
+			expect(workers).toHaveLength(2);
+			expect(vi.getTimerCount()).toBe(1);
+			expect(
+				document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 4, y: 0 })),
+			).toBe(true);
+			expect(document.undo()).toBe(true);
+			expect(document.redo()).toBe(true);
+			const advanced = {
+				expected: readyExpectation(document),
+				history: document.captureRailMirrorHistoryLedger(),
+			};
+			await vi.advanceTimersByTimeAsync(0);
+			expect(bridge.getState().status).toBe("syncing");
+			expect(vi.getTimerCount()).toBe(1);
+			if (finish === "dispose") bridge.dispose();
+			else await vi.advanceTimersByTimeAsync(1);
+			expect(await outcome).toMatchObject({
+				message: expect.stringMatching(
+					finish === "dispose" ? /disposed/i : /snapshot readiness timed out after 40000 ms/,
+				),
+			});
+			expect(vi.getTimerCount()).toBe(0);
+			expect(readyExpectation(document)).toEqual(advanced.expected);
+			expect(document.captureRailMirrorHistoryLedger()).toEqual(advanced.history);
+			if (finish === "deadline") {
+				expect(bridge.getState().status).toBe("error");
+				(workers[1] as InProcessRailWorker).dropAcknowledgements = false;
+				(workers[1] as InProcessRailWorker).replayLastAcknowledgement();
+				await vi.advanceTimersByTimeAsync(80_000);
+				expect(bridge.getState().status).toBe("error");
+				expect(workers).toHaveLength(2);
+				silent = false;
+				const restored = bridge.retryCurrentDocument();
+				if (!restored) throw new Error("Expected retry after deadline");
+				await vi.advanceTimersByTimeAsync(0);
+				await expect(restored).resolves.toMatchObject({ status: "ready", epoch: 3 });
+				expect(vi.getTimerCount()).toBe(0);
+			} else expect(bridge.retryCurrentDocument()).toBeNull();
+		} finally {
+			bridge.dispose();
+			vi.useRealTimers();
+		}
+	});
+
 	it("snapshot-recovers when an acknowledgement carries a stale physical revision", async () => {
 		const document = new RailDocument();
 		const port = new InProcessRailWorker();
@@ -3407,6 +3782,7 @@ class InProcessRailWorker implements RailWorkerPort {
 	readonly mirror = new RailPatchMirror();
 	reportPhysicalInvalid = false;
 	dropNextAcknowledgement = false;
+	dropAcknowledgements = false;
 	desyncNextPatch = false;
 	executionErrorAfterDesyncNextPatch = false;
 	corruptAuthoredRevisionNextPatch = false;
@@ -3800,7 +4176,7 @@ class InProcessRailWorker implements RailWorkerPort {
 	private emit(message: RailMirrorToMainMessage): void {
 		if (message.type === "RAIL_SYNCED" || message.type === "RAIL_PATCH_APPLIED") {
 			this.lastAcknowledgement = message;
-			if (this.dropNextAcknowledgement) {
+			if (this.dropAcknowledgements || this.dropNextAcknowledgement) {
 				this.dropNextAcknowledgement = false;
 				return;
 			}

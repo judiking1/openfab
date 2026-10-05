@@ -95,6 +95,52 @@ describe("StaticFabBayFlowEditSession", () => {
 		).toMatchObject({ phase: "analyzing", requestSequence: 2, review: null });
 	});
 
+	it("retries a failed Apply with the same target and requires newly sequenced evidence", () => {
+		const initial = createStaticFabBayFlowEditSession({
+			bayOrganizationId: 7,
+			bayName: "Bay 7",
+			targetInternalFlowPattern: "co-rotating",
+		});
+		const analysis = {
+			type: "ANALYSIS_READY" as const,
+			requestSequence: 1,
+			reason: "Exact target certified.",
+			review: review(),
+			sourceEvidence: evidence(),
+			prospectiveEvidence: evidence(),
+			timings: { planningMilliseconds: 4, validationMilliseconds: 5 },
+		};
+		const ready = reduceStaticFabBayFlowEditSession(initial, analysis);
+		const rejected = reduceStaticFabBayFlowEditSession(
+			reduceStaticFabBayFlowEditSession(ready, { type: "APPLY" }),
+			{ type: "APPLICATION_REJECTED", reason: "The one-shot source certification expired." },
+		);
+		const retrying = reduceStaticFabBayFlowEditSession(rejected, {
+			type: "RETRY",
+			requestSequence: 2,
+		});
+
+		expect(retrying).toMatchObject({
+			bayOrganizationId: initial.bayOrganizationId,
+			bayName: initial.bayName,
+			targetInternalFlowPattern: initial.targetInternalFlowPattern,
+			phase: "analyzing",
+			requestSequence: 2,
+			review: null,
+			sourceEvidence: null,
+			prospectiveEvidence: null,
+			timings: null,
+		});
+		expect(staticFabBayFlowEditSessionCanApply(retrying)).toBe(false);
+		expect(reduceStaticFabBayFlowEditSession(retrying, analysis)).toBe(retrying);
+		expect(reduceStaticFabBayFlowEditSession(retrying, { type: "APPLY" })).toBe(retrying);
+		const refreshed = reduceStaticFabBayFlowEditSession(retrying, {
+			...analysis,
+			requestSequence: 2,
+		});
+		expect(staticFabBayFlowEditSessionCanApply(refreshed)).toBe(true);
+	});
+
 	it("publishes a source-not-recognized review whose source pattern is unavailable", () => {
 		const initial = createStaticFabBayFlowEditSession({
 			bayOrganizationId: 7,

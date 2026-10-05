@@ -14,6 +14,7 @@ import {
 	OpenFabStationProposalReviewBridge,
 	type OpenFabStationProposalReviewBridgeEvaluation,
 	OpenFabStationProposalReviewCancelledError,
+	type OpenFabStationProposalReviewReadyInvalidationHandler,
 	type PreparedOpenFabStationProposalReviewApply,
 } from "./OpenFabStationProposalReviewBridge";
 import type { OpenFabStationProposalReviewUiPhase } from "./OpenFabStationProposalReviewPanel";
@@ -94,7 +95,9 @@ type StationReviewBridge = Pick<
 
 export interface OpenFabStationProposalEditorDependencies {
 	readonly reader?: StationReviewReader;
-	readonly createReviewBridge?: () => StationReviewBridge;
+	readonly createReviewBridge?: (
+		onReadyInvalidated: OpenFabStationProposalReviewReadyInvalidationHandler,
+	) => StationReviewBridge;
 }
 
 /** Owns the existing transient review lifecycle; project authority remains in RailDocument. */
@@ -106,7 +109,9 @@ export class OpenFabStationProposalEditorController {
 	};
 	private readonly stationProposalReviewGenerationRef: StationReviewRef<number> = { current: 0 };
 	private readonly stationProposalBridge: StationReviewReader;
-	private readonly createReviewBridge: () => StationReviewBridge;
+	private readonly createReviewBridge: (
+		onReadyInvalidated: OpenFabStationProposalReviewReadyInvalidationHandler,
+	) => StationReviewBridge;
 	private disposed = false;
 
 	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: bind() reads this field through destructuring.
@@ -119,7 +124,16 @@ export class OpenFabStationProposalEditorController {
 		this.stationProposalReviewUiRef = stationProposalReviewUiRef;
 		this.stationProposalBridge = dependencies.reader ?? new OpenFabStationProposalBridge();
 		this.createReviewBridge =
-			dependencies.createReviewBridge ?? (() => new OpenFabStationProposalReviewBridge());
+			dependencies.createReviewBridge ??
+			((onReadyInvalidated) =>
+				new OpenFabStationProposalReviewBridge(
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					onReadyInvalidated,
+				));
 	}
 
 	/** Terminal owner cleanup only; App retains its existing HMR lifetime guard and UI cleanup. */
@@ -368,7 +382,39 @@ export class OpenFabStationProposalEditorController {
 			const controller = new AbortController();
 			stationProposalReviewReadControllerRef.current = controller;
 			stationProposalReviewBridgeRef.current?.dispose();
-			const bridge = this.createReviewBridge();
+			const bridgeBinding: StationReviewRef<StationReviewBridge | null> = { current: null };
+			const bridge = this.createReviewBridge((evaluation, error) => {
+				const activeReview = stationProposalReviewUiRef.current;
+				if (
+					!bridgeBinding.current ||
+					stationProposalReviewBridgeRef.current !== bridgeBinding.current ||
+					controller.signal.aborted ||
+					stationProposalReviewGenerationRef.current !== current.generation ||
+					!stationProposalReviewBindingIsCurrent(current) ||
+					!activeReview ||
+					(activeReview.phase !== "ready" && activeReview.phase !== "evaluating") ||
+					(activeReview.phase === "ready" && activeReview.evaluation !== evaluation)
+				)
+					return;
+				// Also retire a READY result that resolved before its UI success microtask ran.
+				controller.abort();
+				if (stationProposalReviewReadControllerRef.current === controller) {
+					stationProposalReviewReadControllerRef.current = null;
+				}
+				updateStationProposalReview(current, {
+					phase: "reviewing",
+					evaluation: null,
+					error: error.message,
+				});
+				if (
+					!stationProposalReviewBindingIsCurrent(current) ||
+					stationProposalReviewGenerationRef.current !== current.generation ||
+					stationProposalReviewBridgeRef.current !== bridgeBinding.current
+				)
+					return;
+				setStatus(error.message);
+			});
+			bridgeBinding.current = bridge;
 			stationProposalReviewBridgeRef.current = bridge;
 			updateStationProposalReview(current, {
 				phase: "evaluating",
@@ -407,6 +453,11 @@ export class OpenFabStationProposalEditorController {
 							? null
 							: "Worker evaluation found blocking review or prospective-layout issues.",
 					});
+					if (
+						!stationProposalReviewOperationIsLive(current, controller) ||
+						stationProposalReviewBridgeRef.current !== bridge
+					)
+						return;
 					setStatus(
 						evaluation.canApply
 							? `Station review READY · ${evaluation.preview.includedPortCount.toLocaleString()} ports · 명시적 APPLY가 필요합니다`

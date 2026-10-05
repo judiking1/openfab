@@ -38,7 +38,7 @@ const FIRST_PORT_HANDOFF = Object.freeze({
 	instruction: "하늘색 원 클릭 · 또는 Enter",
 	ariaLabel: "다음 작업: 장비 메뉴에서 레일 옆 하늘색 원을 클릭하거나 Enter로 OHB Port 1개 놓기",
 	description:
-		"레일은 저장되었습니다. 장비 메뉴에서 하늘색 원을 클릭하거나 흰 테두리·화살표 대상에서 Enter를 눌러 첫 OHB Port를 놓습니다.",
+		"레일을 건설했습니다. 장비 메뉴에서 하늘색 원을 클릭하거나 흰 테두리·화살표 대상에서 Enter를 눌러 첫 OHB Port를 놓습니다.",
 }) satisfies OrdinaryFirstPortHandoffPresentation;
 
 /**

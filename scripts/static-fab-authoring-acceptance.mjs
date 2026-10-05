@@ -106,6 +106,7 @@ const ASSEMBLE_CONNECTOR_HELD_ONLY_COMPLETE = new Error(
 const ASSEMBLE_LOOP_HELD_ONLY_COMPLETE = new Error(
 	"Combined registered Loop held Assemble admission acceptance completed.",
 );
+const BLUEPRINT_LIBRARY_TABS_ONLY_COMPLETE = new Error("Blueprint Library tabs acceptance completed.");
 const browserEmergencyKillers = new WeakMap();
 let contextualSaveResponsiveVerified = false;
 const execFileAsync = promisify(execFile);
@@ -155,6 +156,90 @@ try {
 	await waitForServer(`${baseUrl}/`);
 	browser = await launchBrowserWithRetry();
 	recordStep("browser-text-line-measurement", await verifyWrappedTextLineCount(browser));
+	if (process.env.OPENFAB_BLUEPRINT_LIBRARY_TABS_ACCEPTANCE_ONLY === "1") {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		desktopPage = await context.newPage();
+		desktopPage.on("console", (message) => {
+			if (message.type() === "error") result.consoleErrors.push(message.text());
+		});
+		desktopPage.on("pageerror", (error) => result.pageErrors.push(error.message));
+		await desktopPage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+		await waitForReady(desktopPage, { physicalPaths: 0 });
+		const startDialog = desktopPage.getByTestId("openfab-start-dialog");
+		await startDialog.waitFor({ state: "visible" });
+		await startDialog.getByRole("button", { name: /BLANK CANVAS/ }).click();
+		await startDialog.waitFor({ state: "hidden" });
+		const longBay = await placePattern(desktopPage, "long-bay", { x: 0, y: 0 });
+		assertEqual(longBay.readinessReady, "true", "Long Bay readiness");
+		assertEqual(longBay.strongComponents, "1", "Long Bay directed component count");
+		assertAtLeast(Number(longBay.physicalPaths), 1, "Long Bay physical paths");
+		recordStep("long-bay", longBay);
+		await placeOneOhb(desktopPage);
+		const equipped = await readMetrics(desktopPage);
+		assertEqual(equipped.equipmentGroups, "1", "OHB equipment group count");
+		assertEqual(equipped.equipmentPorts, "1", "OHB port count");
+		recordStep("ohb", equipped);
+		await selectWorldArea(desktopPage, expandBounds({ minX: 0, minY: 0, maxX: 24, maxY: 6 }, 2));
+		const selection = await readMetrics(desktopPage);
+		assertAtLeast(Number(selection.selectionModules), 1, "selected rail modules");
+		assertEqual(selection.selectionEquipmentGroups, "1", "selected equipment groups");
+		assertEqual(selection.selectionPorts, "1", "selected equipment ports");
+		recordStep("mixed-selection", selection);
+		const recentBeforeBlueprintSave = await readMetrics(desktopPage);
+		await saveSelectionAsBlueprint(desktopPage, "Whole Flow Bay", "Acceptance");
+		const savedBlueprint = await readMetrics(desktopPage);
+		assertEqual(savedBlueprint.projectBlueprints, "1", "project blueprint count");
+		assertEqual(savedBlueprint.railClipboard, recentBeforeBlueprintSave.railClipboard, "saving does not overwrite recent clipboard");
+		assertEqual(savedBlueprint.railClipboardVersion, recentBeforeBlueprintSave.railClipboardVersion, "saving does not write recent clipboard");
+		recordStep("blueprint-saved", savedBlueprint);
+		await desktopPage.getByTestId("blueprint-user-tab").click();
+		const emptyLibrary = desktopPage.getByTestId("blueprint-user-panel").locator(".tilefab-blueprint-empty");
+		await emptyLibrary.waitFor({ state: "visible" });
+		assertIncludes(await emptyLibrary.innerText(), "BROWSER LOCAL IS EMPTY", "empty local library tab name");
+		const emptyLibraryCaption = emptyLibrary.locator("small");
+		assertIncludes(await emptyLibraryCaption.innerText(), "선택을 청사진으로 저장", "empty library selection action");
+		assertIncludes(await emptyLibraryCaption.innerText(), "전체를 청사진으로 저장", "empty library whole-map action");
+		await desktopPage.setViewportSize({ width: 390, height: 720 });
+		await emptyLibraryCaption.scrollIntoViewIfNeeded();
+		await assertLocatorInsideViewport(desktopPage, emptyLibraryCaption);
+		assertEqual(await desktopPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "390px empty library horizontal overflow");
+		await desktopPage.getByTestId("blueprint-library").getByTestId("save-area-blueprint").click();
+		const localSaveDialog = desktopPage.getByTestId("contextual-blueprint-save-dialog");
+		await localSaveDialog.waitFor({ state: "visible" });
+		assertEqual(await localSaveDialog.getByTestId("contextual-save-user-library").locator("input").isChecked(), true, "local tab selects local save destination");
+		await localSaveDialog.getByRole("button", { name: "취소", exact: true }).click();
+		await localSaveDialog.waitFor({ state: "hidden" });
+		await desktopPage.setViewportSize({ width: 1440, height: 900 });
+		await desktopPage.locator("#tilefab-blueprint-tab-saved").click();
+		const afterLocalSaveCancel = await readMetrics(desktopPage);
+		assertExactStaticFabModelIdentity(afterLocalSaveCancel, savedBlueprint, "local save cancellation");
+		for (const key of ["userBlueprints", "historyCanUndo", "historyCanRedo", "railClipboardVersion"]) {
+			assertEqual(afterLocalSaveCancel[key], savedBlueprint[key], `local save cancellation preserves ${key}`);
+		}
+		recordStep("empty-local-library-save-guidance", afterLocalSaveCancel);
+		const recentClipboardVersion = await exerciseBlueprintClipboardShortcuts(desktopPage);
+		recordStep("blueprint-clipboard-shortcuts", await readMetrics(desktopPage));
+		const beforeBlueprintCopy = await readMetrics(desktopPage);
+		await startSavedBlueprintPlacement(desktopPage, "Whole Flow Bay");
+		assertEqual((await readMetrics(desktopPage)).railClipboardVersion, recentClipboardVersion, "library placement preserves recent clipboard");
+		const wholeFlowBayPointer = { x: 12, y: 23 };
+		await assertPlacementGhostSurvivesEditorChrome(desktopPage, wholeFlowBayPointer, "library");
+		await placeActiveConstruction(desktopPage, wholeFlowBayPointer);
+		const duplicated = await waitForMetricChange(desktopPage, beforeBlueprintCopy, "physicalPaths");
+		assertEqual(duplicated.equipmentGroups, "2", "duplicated equipment group count");
+		assertEqual(duplicated.equipmentPorts, "2", "duplicated equipment port count");
+		assertEqual(duplicated.strongComponents, "2", "separate closed Bay component count");
+		assertEqual(duplicated.workerSimulationReady, "false", "simulation readiness gate");
+		recordStep("blueprint-placed", duplicated);
+		await undoAndRedo(desktopPage, beforeBlueprintCopy, duplicated, "library");
+		recordStep("undo-redo", await readMetrics(desktopPage));
+		assertEqual(result.consoleErrors.length, 0, "Blueprint Library console errors");
+		assertEqual(result.pageErrors.length, 0, "Blueprint Library page errors");
+		result.final = await readMetrics(desktopPage);
+		result.status = "PASS";
+		console.log("PASS existing Blueprint Library PROJECT and RECENT flow");
+		throw BLUEPRINT_LIBRARY_TABS_ONLY_COMPLETE;
+	}
 	if (process.env.OPENFAB_ASSEMBLE_CONNECTOR_HELD_ACCEPTANCE_ONLY === "1") {
 		const proof = await exerciseAssembleConnectorHeldAdmission(browser, { includeArrangement: process.env.OPENFAB_ASSEMBLE_ARRANGEMENT_HELD_EXTENSION === "1" });
 		result.final = proof.finalMetrics;
@@ -2937,6 +3022,7 @@ try {
 	);
 } catch (error) {
 	if (
+		error === BLUEPRINT_LIBRARY_TABS_ONLY_COMPLETE ||
 		error === GUIDED_ONLY_COMPLETE ||
 		error === RECOVERY_START_ONLY_COMPLETE ||
 		error === NON_LOOP_FRAGMENT_ONLY_COMPLETE ||
@@ -4862,6 +4948,166 @@ async function recoverOrdinaryStkFromOccupiedStart(page, baseline, label) {
 	);
 }
 
+async function installDerivativeRecoveryFaultControl(context, entry) {
+	await context.addInitScript((entry) => {
+		const NativeWorker = globalThis.Worker;
+		const hooks = new Map();
+		let lastSnapshot = null;
+		const control = {
+			live: null, started: 0, terminated: 0, failNext: false, holdNext: false,
+			held: null, hydrations: [], evaluations: [],
+			failCurrent() {
+				if (!this.live) throw new Error(`Required live ${entry} Worker is missing`);
+				const event = new ErrorEvent("error", {
+					message: `OpenFab acceptance injected ${entry} fault`, cancelable: true,
+				});
+				event.preventDefault();
+				this.live.dispatchEvent(event);
+			},
+			release() {
+				const held = this.held;
+				if (!held || held.worker !== this.live) throw new Error("Owned Bay response is missing");
+				this.held = null;
+				held.worker.dispatchEvent(new MessageEvent("message", { data: held.data }));
+			},
+			proof() {
+				return { started: this.started, terminated: this.terminated, live: hooks.size,
+					hydrations: this.hydrations, evaluations: this.evaluations };
+			},
+			restore() {
+				for (const retire of [...hooks.values()]) retire();
+				this.held = lastSnapshot = null;
+				globalThis.Worker = NativeWorker;
+				delete globalThis.__openfabDerivativeRecoveryAcceptance;
+				return { hooks: hooks.size, factoryRestored: globalThis.Worker === NativeWorker };
+			},
+		};
+		globalThis.__openfabDerivativeRecoveryAcceptance = control;
+		globalThis.Worker = new Proxy(NativeWorker, {
+			construct(target, args) {
+				const worker = Reflect.construct(target, args);
+				const basename = new URL(String(args[0]), location.href).pathname.split("/").at(-1);
+				if (!new RegExp(`^${entry}(?:-[\\w-]+)?\\.js$`).test(basename)) return worker;
+				control.started++;
+				control.live = worker;
+				const post = worker.postMessage;
+				const terminate = worker.terminate;
+				const message = (event) => {
+					if (control.holdNext && event.data?.type === "STATIC_FAB_BAY_FLOW_EDIT_HYDRATED") {
+						control.holdNext = false;
+						control.held = { worker, data: event.data };
+						event.stopImmediatePropagation();
+					}
+				};
+				const retire = () => {
+					worker.removeEventListener("message", message, true);
+					worker.postMessage = post;
+					worker.terminate = terminate;
+					hooks.delete(worker);
+					if (control.live === worker) control.live = null;
+				};
+				hooks.set(worker, retire);
+				worker.addEventListener("message", message, true);
+				worker.postMessage = function (request, ...rest) {
+					if (request.type === "HYDRATE_STATIC_FAB_BAY_FLOW_EDIT") {
+						const snapshot = request.snapshot;
+						control.hydrations.push({ fresh: snapshot !== lastSnapshot &&
+							snapshot.xs.buffer !== lastSnapshot?.xs.buffer, sequence: snapshot.sequence,
+							revision: snapshot.revision, checksum: snapshot.checksum });
+						lastSnapshot = snapshot;
+					}
+					if (request.type === "EVALUATE_OPENFAB_STATION_PROPOSAL_REVIEW") {
+						const { draftFingerprint, proposalSemanticFingerprint,
+							proposalSnapshotFingerprint, sourceChecksum } = request;
+						control.evaluations.push({ draftFingerprint, proposalSemanticFingerprint,
+							proposalSnapshotFingerprint, sourceChecksum });
+					}
+					if (control.failNext) { control.failNext = false; control.failCurrent(); return; }
+					return Reflect.apply(post, this, [request, ...rest]);
+				};
+				worker.terminate = function () {
+					control.terminated++;
+					retire();
+					return Reflect.apply(terminate, this, []);
+				};
+				return worker;
+			},
+		});
+	}, entry);
+}
+
+async function waitForDerivativeReviewPhase(page, testId, phase) {
+	await page.waitForFunction(({ testId, phase }) =>
+		document.querySelector(`[data-testid="${testId}"]`)?.getAttribute("data-phase") === phase,
+		{ testId, phase }, { timeout: 30_000 });
+}
+
+async function exerciseCompactBayFlowRetry(page, bayId) {
+	if (!bayId) throw new Error("Compact Bay recovery fixture has no authored Bay");
+	await selectOrganizationIdThroughBrowser(page, await readMetrics(page), bayId);
+	const source = await readMetrics(page);
+	assertEqual(source.organizationSelectionIds, String(bayId), "Bay retry selects the standalone runtime-recognized Twin");
+	const authored = await readStandaloneLoopAuthoringContract(page);
+	const menu = page.getByTestId("static-fab-assemble-menu");
+	await openStaticFabAssembleMenu(page, menu, "Bay retry");
+	const target = menu.getByTestId("assemble-edit-selected-bay-co-rotating");
+	assertEqual(await target.isEnabled(), true, "Standalone Twin admits a flow review");
+	await page.evaluate(() => { globalThis.__openfabDerivativeRecoveryAcceptance.failNext = true; });
+	await target.scrollIntoViewIfNeeded();
+	await target.click();
+	const dialog = page.getByTestId("bay-flow-edit-dialog");
+	await waitForDerivativeReviewPhase(page, "bay-flow-edit-dialog", "rejected");
+	await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+	const failed = await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.proof());
+	assertEqual(failed.started, 1, "Bay failure waits for explicit retry");
+	assertEqual(failed.terminated, 1, "Failed Bay Worker retires");
+	assertEqual(failed.live, 0, "Rejected Bay has no live Worker");
+	assertProjectUnchanged(await readMetrics(page), source, "Rejected Bay preserves authored source/history");
+	assertEqual(await page.getByTestId("bay-flow-edit-apply").count(), 0, "Rejected Bay replaces Apply with Retry");
+	const retry = page.getByTestId("bay-flow-edit-retry");
+	assertEqual(await dialog.getByRole("button", { name: "다시 검토", exact: true }).count(), 1, "Bay explicit retry label");
+	await assertLocatorInsideViewport(page, retry);
+	await assertLocatorOwnsHitArea(retry, "Bay retry at 390x600");
+	const bounds = await retry.boundingBox();
+	assertAtLeast(bounds?.width ?? 0, 44, "Bay retry target width");
+	assertAtLeast(bounds?.height ?? 0, 44, "Bay retry target height");
+	await page.evaluate(() => { globalThis.__openfabDerivativeRecoveryAcceptance.holdNext = true; });
+	await retry.click();
+	await waitForDerivativeReviewPhase(page, "bay-flow-edit-dialog", "analyzing");
+	await page.waitForFunction(() => globalThis.__openfabDerivativeRecoveryAcceptance.held !== null &&
+		document.activeElement?.getAttribute("data-testid") === "bay-flow-edit-cancel");
+	const analyzing = await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.proof());
+	assertEqual(analyzing.started, 2, "Explicit Bay retry owns one replacement Worker");
+	assertEqual(analyzing.hydrations.length, 2, "Bay retry captures again");
+	assertEqual(analyzing.hydrations[1].fresh, true, "Bay retry uses a fresh snapshot and buffer");
+	assertEqual(analyzing.hydrations[1].checksum, source.modelChecksum, "Bay retry captures current source");
+	assertProjectUnchanged(await readMetrics(page), source, "Bay retry analysis preserves source/history");
+	await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.release());
+	await page.waitForFunction(() => ["ready", "rejected"].includes(document
+		.querySelector('[data-testid="bay-flow-edit-dialog"]')?.getAttribute("data-phase")),
+		undefined, { timeout: 30_000 });
+	if ((await dialog.getAttribute("data-phase")) === "rejected")
+		throw new Error(`Bay retry rejected current source: ${await dialog.locator(".tilefab-semantic-bay-status-copy").innerText()}`);
+	assertEqual(await page.getByTestId("bay-flow-edit-cancel").evaluate((node) => node === document.activeElement), true, "Ready Bay keeps Cancel focus");
+	assertEqual(JSON.stringify(await readStandaloneLoopAuthoringContract(page)), JSON.stringify(authored), "Bay retry keeps the authored document");
+	const recovered = await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.proof());
+	assertEqual(recovered.terminated, 2, "Both Bay Workers retire before Apply");
+	assertEqual(recovered.live, 0, "Ready Bay has no live disposable Worker");
+	assertBayFlowExactSource(await readMetrics(page), source, "Ready Bay retry is read-only");
+	await page.getByTestId("bay-flow-edit-apply").click();
+	await dialog.waitFor({ state: "hidden" });
+	const after = await waitForWorker(page, (metrics) =>
+		Number(metrics.workerTargetSequence) === Number(source.workerTargetSequence) + 1 &&
+		metrics.modelChecksum !== source.modelChecksum && metrics.workerChecksum === metrics.modelChecksum);
+	assertEqual(Number(after.modelSequence), Number(source.modelSequence) + 1, "Bay retry Apply is atomic");
+	assertBayFlowCountIdentity(after, source, "Bay retry Apply preserves counts");
+	await undoAndRedo(page, source, after, null, true);
+	const retired = await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.restore());
+	assertEqual(retired.hooks, 0, "Bay acceptance retires owned hooks");
+	assertEqual(retired.factoryRestored, true, "Bay acceptance restores the Worker factory");
+	return { failed, analyzing, recovered, retired };
+}
+
 async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 	const proofs = [];
 	for (const viewport of [
@@ -4872,6 +5118,8 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 	]) {
 		const label = `${viewport.width}x${viewport.height}`;
 		const context = await browserInstance.newContext({ viewport });
+		if (viewport.width === 390 && viewport.height === 600)
+			await installDerivativeRecoveryFaultControl(context, "staticFabBayFlowEditWorker");
 		const page = await context.newPage();
 		page.on("console", (message) => {
 			if (message.type() === "error") result.consoleErrors.push(message.text());
@@ -4884,6 +5132,31 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 				.getByTestId("openfab-start-dialog")
 				.getByRole("button", { name: /BLANK CANVAS/ })
 				.click();
+			let bayFlowRecovery = null;
+			if (viewport.width === 390 && viewport.height === 600) {
+				await page.getByTestId("editor-activity-assemble").click();
+				await page.getByTestId("production-bay-module-browser").click();
+				const fixturePanel = page.getByTestId("production-bay-module-panel");
+				await fixturePanel.waitFor({ state: "visible" });
+				await fixturePanel.getByRole("button", { name: "배치 위치 선택" }).click();
+				const fixtureCanvas = page.getByTestId("rail-canvas");
+				await fixtureCanvas.press("Enter");
+				await page.getByTestId("ordinary-placed-twin-bay-duplicate-handoff").waitFor({ state: "visible" });
+				const app = page.getByTestId("tilefab-app");
+				const bayId = Number(await app.getAttribute("data-last-placed-organization-root-id"));
+				assertEqual(Number.isSafeInteger(bayId) && bayId > 0, true, "Standalone recovery pins the authored Twin id");
+				assertNotEqual((await app.getAttribute("data-last-placed-twin-bay-fingerprint")) ?? "", "", "Standalone recovery fixture is runtime-recognized");
+				await fixtureCanvas.press("Escape");
+				await page.waitForFunction(() => document.querySelector('[data-testid="tilefab-app"]')?.dataset.organizationBundleActive === "false");
+				const standalone = await readMetrics(page);
+				assertEqual(standalone.modelRelationships, "0", "Recovery Twin has no external connector");
+				assertEqual(standalone.staticFabOrganizations, "3", "Recovery has one Bay and two Process Loops");
+				bayFlowRecovery = await exerciseCompactBayFlowRetry(page, bayId);
+				const reset = await createSyntheticFabProject(page, "blank");
+				assertEqual(reset.physicalPaths, "0", "Recovery resets through New Project UI");
+				assertEqual(reset.staticFabOrganizations, "0", "Original compact fixture begins empty");
+				assertEqual(reset.historyCanUndo, "false", "Original compact fixture has fresh history");
+			}
 			await page.getByTestId("editor-activity-assemble").click();
 			await page.getByTestId("production-bay-module-browser").click();
 			const panel = page.getByTestId("production-bay-module-panel");
@@ -5226,7 +5499,7 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 				`history preserves the manual camera ${label}`,
 			);
 			proofs.push({
-				viewport,
+				viewport, bayFlowRecovery,
 				...target,
 				sequence: before.workerSequence,
 				reviewFrame,
@@ -5266,6 +5539,7 @@ async function exerciseCompactBayConfigurationContinuation(browserInstance) {
 				.catch(() => undefined);
 			throw error;
 		} finally {
+			await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance?.restore()).catch(() => undefined);
 			await closeBrowserResource(page, "compact Bay configuration page");
 			await closeBrowserResource(context, "compact Bay configuration context");
 		}
@@ -7759,6 +8033,29 @@ async function exerciseStkGroupRecoveryCopy(page, fixture, dimensions, savedCont
 		[fixture.loopId],
 		`${label} preview preserves owned original`,
 	);
+	if (dimensions === "390x600") {
+		const cancel = page.getByTestId("port-equipment-group-transformbar")
+			.getByRole("button", { name: "ESC", exact: true });
+		await cancel.focus();
+		assertEqual(await cancel.evaluate((button) => button === document.activeElement),
+			true, `${label} native Copy Cancel owns focus`);
+		await cancel.press("Space");
+		await inspector.waitFor({ state: "visible" });
+		assertEqual(await page.getByTestId("port-equipment-group-transformbar").count(),
+			0, `${label} native Space clears Copy preview`);
+		const cancelled = await readMetrics(page);
+		assertProjectUnchanged(cancelled, before, `${label} native Space preserves source and history`);
+		assertExactStaticFabModelIdentity(cancelled, before, `${label} native Space exact source identity`);
+		for (const key of ["documentCanUndo", "documentCanRedo"]) {
+			assertEqual(cancelled[key], before[key], `${label} native Space preserves ${key}`);
+		}
+		await assertStkGroupRecoveryRecords(page, fixture.movedEquipment, [fixture.loopId],
+			`${label} native Space preserves owned original`);
+		await openPortEquipmentMoreActions(page);
+		await copy.scrollIntoViewIfNeeded();
+		await copy.click();
+		await page.getByTestId("port-equipment-group-transformbar").waitFor({ state: "visible" });
+	}
 	await hoverStkGroupRecoveryPreview(
 		page,
 		fixture.copyTarget,
@@ -7963,12 +8260,34 @@ async function exerciseStkGroupLoopRecovery(browserInstance) {
 					`${label} no-Loop preview`,
 				);
 				if (name === "impossible") {
-					await page.getByTestId("rail-canvas").press("Escape");
+					if (viewport.width === 390) {
+						const cancel = page.getByTestId("port-equipment-group-transformbar")
+							.getByRole("button", { name: "ESC", exact: true });
+						const readout = page.getByTestId("port-equipment-group-edit-readout");
+						const targetBeforeArrow = await readout.textContent();
+						await cancel.focus();
+						assertEqual(await cancel.evaluate((button) => button === document.activeElement),
+							true, `${label} native Cancel owns focus`);
+						await cancel.press("ArrowRight");
+						assertEqual(await readout.textContent(), targetBeforeArrow,
+							`${label} native Cancel arrow preserves target`);
+						const afterArrow = await readMetrics(page);
+						assertProjectUnchanged(afterArrow, source, `${label} native Cancel arrow isolation`);
+						assertExactStaticFabModelIdentity(afterArrow, source,
+							`${label} native Cancel arrow exact authored and Worker identity`);
+						for (const key of ["documentCanUndo", "documentCanRedo"]) {
+							assertEqual(afterArrow[key], source[key], `${label} native Cancel arrow preserves ${key}`);
+						}
+						await cancel.press("Enter");
+					} else {
+						await page.getByTestId("rail-canvas").press("Escape");
+					}
+					const cancelGesture = viewport.width === 390 ? "native Cancel Enter" : "Canvas Escape";
 					await page.getByTestId("port-equipment-inspector").waitFor({ state: "visible" });
 					assertEqual(
 						await page.getByTestId("port-equipment-group-transformbar").count(),
 						0,
-						`${label} Escape clears preview`,
+						`${label} ${cancelGesture} clears preview`,
 					);
 					assertEqual(
 						await page.getByTestId("attach-equipment-process-loop-primary").count(),
@@ -7978,23 +8297,23 @@ async function exerciseStkGroupLoopRecovery(browserInstance) {
 					assertEqual(
 						await page.getByTestId("port-equipment-inspector").getAttribute("data-port-id"),
 						String(fixture.anchorPortId),
-						`${label} Escape restores exact first Port selection`,
+						`${label} ${cancelGesture} restores exact first Port selection`,
 					);
 					const cancelled = await readMetrics(page);
 					assertProjectUnchanged(
 						cancelled,
 						source,
-						`${label} Escape preserves project and history`,
+						`${label} ${cancelGesture} preserves project and history`,
 					);
 					assertExactStaticFabModelIdentity(
 						cancelled,
 						source,
-						`${label} Escape preserves exact authored and Worker identity`,
+						`${label} ${cancelGesture} preserves exact authored and Worker identity`,
 					);
 					for (const key of ["documentCanUndo", "documentCanRedo"]) {
-						assertEqual(cancelled[key], source[key], `${label} Escape preserves ${key}`);
+						assertEqual(cancelled[key], source[key], `${label} ${cancelGesture} preserves ${key}`);
 					}
-					await assertStkGroupRecoveryRecords(page, fixture.sourceEquipment, [], `${label} Escape`);
+					await assertStkGroupRecoveryRecords(page, fixture.sourceEquipment, [], `${label} ${cancelGesture}`);
 					proofs.push({
 						viewport: dimensions,
 						case: name,
@@ -8028,7 +8347,15 @@ async function exerciseStkGroupLoopRecovery(browserInstance) {
 					[],
 					`${label} eligible preview`,
 				);
-				await clickWorld(page, fixture.target, false);
+				if (viewport.width === 390) {
+					const canvas = page.getByTestId("rail-canvas");
+					await canvas.focus();
+					assertEqual(await canvas.evaluate((element) => element === document.activeElement),
+						true, `${label} Canvas owns Apply focus`);
+					await canvas.press("Enter");
+				} else {
+					await clickWorld(page, fixture.target, false);
+				}
 				const moved = await waitForWorker(
 					page,
 					(metrics) =>
@@ -25609,7 +25936,7 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 	const partialSelectionInspector = page.getByTestId("rail-area-selection-inspector");
 	assertEqual(
 		await partialSelectionInspector
-			.getByText("드래그 상자에 닿은 레일 모듈만 선택합니다. 닫힌 Loop일 필요는 없습니다.", {
+			.getByText("드래그 상자에 닿은 레일 모듈과 장비 그룹 전체를 선택합니다. 닫힌 Loop일 필요는 없습니다. 장비를 제외하려면 Ctrl/⌘+클릭하세요.", {
 				exact: true,
 			})
 			.count(),
@@ -30345,6 +30672,7 @@ async function exerciseStationProposalReviewApply(browserInstance) {
 		viewport: { width: 1440, height: 900 },
 		acceptDownloads: true,
 	});
+	await installDerivativeRecoveryFaultControl(context, "openFabStationProposalReviewWorker");
 	let page;
 	try {
 		page = await context.newPage();
@@ -30554,6 +30882,35 @@ async function exerciseStationProposalReviewApply(browserInstance) {
 			path: path.join(artifactRoot, "station-review-four-row-ready-390x600.png"),
 			fullPage: true,
 		});
+		const readySource = await readStandaloneLoopAuthoringContract(page);
+		const readyWorker = await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.proof());
+		assertEqual(readyWorker.started, 1, "Station READY owns the evaluation Worker");
+		assertEqual(readyWorker.live, 1, "Station READY Worker is idle and live");
+		await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.failCurrent());
+		await waitForDerivativeReviewPhase(page, "openfab-station-proposal-review", "reviewing");
+		assertEqual(await panel.locator(".tilefab-station-review-evaluation").count(), 0, "Station idle fault clears stale evaluation");
+		assertEqual(await panel.getByRole("button", { name: "APPLY ONCE" }).isDisabled(), true, "Station idle fault disables Apply");
+		assertEqual(await panel.getAttribute("data-capture-ready"), "true", "Station idle fault retains the review draft");
+		assertProjectUnchanged(await readMetrics(page), before, "Station idle fault preserves source/history");
+		assertEqual(JSON.stringify(await readStandaloneLoopAuthoringContract(page)), JSON.stringify(readySource), "Station idle fault keeps the authored document");
+		const failedWorker = await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.proof());
+		assertEqual(failedWorker.started, 1, "Station idle fault does not auto-evaluate");
+		assertEqual(failedWorker.terminated, 1, "Station failed READY Worker retires");
+		assertEqual(failedWorker.live, 0, "Station review has no stale Worker");
+		const evaluate = panel.getByRole("button", { name: "EVALUATE" });
+		await assertLocatorInsideViewport(page, evaluate);
+		await assertLocatorOwnsHitArea(evaluate, "Station recovery at 390x600");
+		await evaluate.click();
+		await waitForDerivativeReviewPhase(page, "openfab-station-proposal-review", "ready");
+		const freshWorker = await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.proof());
+		assertEqual(freshWorker.started, 2, "Station reevaluation creates one fresh Worker");
+		assertEqual(freshWorker.evaluations.length, 2, "Station reevaluates explicitly");
+		assertEqual(JSON.stringify(freshWorker.evaluations[1]), JSON.stringify(readyWorker.evaluations[0]), "Station reevaluation preserves proposal/draft/source fingerprints");
+		assertProjectUnchanged(await readMetrics(page), before, "Station reevaluation is read-only");
+		assertEqual(await panel.getByRole("button", { name: "APPLY ONCE" }).isEnabled(), true, "Fresh Station READY restores Apply");
+		const recoveryHooks = await page.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance.restore());
+		assertEqual(recoveryHooks.hooks, 0, "Station acceptance retires owned hooks");
+		assertEqual(recoveryHooks.factoryRestored, true, "Station acceptance restores the Worker factory");
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.evaluate(() => {
 			const document = window.__tileFab?.getDocument();
@@ -30623,11 +30980,13 @@ async function exerciseStationProposalReviewApply(browserInstance) {
 		assertEqual(reopened.equipmentGroups, "3", "Station native reopen equipment groups");
 		return {
 			rows: 4,
+			idleWorkerRecovery: { readyWorker, failedWorker, freshWorker, recoveryHooks },
 			ports: Number(reopened.equipmentPorts),
 			groups: Number(reopened.equipmentGroups),
 			checksum: reopened.modelChecksum,
 		};
 	} finally {
+		await page?.evaluate(() => globalThis.__openfabDerivativeRecoveryAcceptance?.restore()).catch(() => undefined);
 		await page?.close().catch(() => undefined);
 		await context.close().catch(() => undefined);
 	}
@@ -39953,6 +40312,39 @@ async function continueWithoutSavingIfVisible(page, expected = null) {
 
 async function exerciseCompactProjectStarterRetry(browserInstance) {
 	const context = await browserInstance.newContext({ viewport: { width: 390, height: 600 } });
+	await context.addInitScript(() => {
+		const NativeWorker = globalThis.Worker;
+		const liveMirrors = new Set();
+		const control = {
+			liveMirror: null, failConstructors: false, constructorFailures: 0,
+			restoreFactory() {
+				this.failConstructors = false;
+				globalThis.Worker = NativeWorker;
+			},
+		};
+		Object.defineProperty(globalThis, "__openfabMirrorRetryAcceptance", { value: control });
+		globalThis.Worker = new Proxy(NativeWorker, {
+			construct(target, argumentsList) {
+				if (!/railMirrorWorker/i.test(String(argumentsList[0] ?? ""))) {
+					return Reflect.construct(target, argumentsList);
+				}
+				if (control.failConstructors) {
+					control.constructorFailures++;
+					throw new Error("OpenFab acceptance mirror replacement constructor failure");
+				}
+				const worker = Reflect.construct(target, argumentsList);
+				liveMirrors.add(worker);
+				control.liveMirror = worker;
+				const terminate = worker.terminate.bind(worker);
+				worker.terminate = () => {
+					liveMirrors.delete(worker);
+					control.liveMirror = [...liveMirrors].at(-1) ?? null;
+					terminate();
+				};
+				return worker;
+			},
+		});
+	});
 	try {
 		const page = await context.newPage();
 		page.on("console", (message) => {
@@ -40001,7 +40393,92 @@ async function exerciseCompactProjectStarterRetry(browserInstance) {
 		await page.getByTestId("close-synthetic-fab-starter").click();
 		await dialog.waitFor({ state: "hidden" });
 		assertProjectUnchanged(await readMetrics(page), before, "Project starter retry then cancel");
-		return { viewport: "390x600", workerFailures, retryHitTarget: true, preservedProject: true };
+		const railBefore = await readMetrics(page);
+		const blankSource = await readStandaloneLoopAuthoringContract(page);
+		const { canvas } = await prepareStandaloneDetachedKeyboardDraft(page, blankSource, "mirror-retry", {
+			from: { x: 0, y: 0 }, to: { x: 5, y: 0 },
+		});
+		await canvas.press("Enter");
+		const authored = await waitForWorker(page, (metrics) =>
+			metrics.projectId === railBefore.projectId &&
+			Number(metrics.modelSequence) === Number(railBefore.modelSequence) + 1 &&
+			Number(metrics.authoredEdges) === Number(railBefore.authoredEdges) + 5);
+		await canvas.press("Escape");
+		await page.waitForFunction(() =>
+			document.querySelector('[data-testid="rail-canvas"]')?.dataset.railKeyboardScope === "");
+		assertAtLeast(Number(authored.authoredCells), 6, "Mirror retry uses nonempty authored source");
+		assertEqual(authored.documentCanUndo, "true", "Mirror retry has existing Undo history");
+		const authoredSource = await readStandaloneLoopAuthoringContract(page);
+		await page.evaluate(() => {
+			const control = globalThis.__openfabMirrorRetryAcceptance;
+			if (!control?.liveMirror) throw new Error("Required live mirror Worker is missing");
+			control.failConstructors = true;
+			const fault = new ErrorEvent("error", {
+				message: "OpenFab acceptance injected terminal mirror fault", cancelable: true,
+			});
+			fault.preventDefault();
+			control.liveMirror.dispatchEvent(fault);
+		});
+		await page.waitForFunction((expected) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			const model = window.__tileFab?.getEditorModel();
+			return canvas?.dataset.workerStatus === "error" &&
+				globalThis.__openfabMirrorRetryAcceptance.constructorFailures > 0 &&
+				canvas.dataset.projectId === expected.projectId &&
+				String(model?.document.getPatchSequence()) === expected.modelSequence &&
+				String(model?.map.getRevision()) === expected.modelRevision &&
+				model?.authoredChecksum === expected.modelChecksum;
+		}, authored, { timeout: 20_000 });
+		const recovery = page.getByTestId("rail-mirror-recovery");
+		await recovery.waitFor({ state: "visible" });
+		assertEqual(["alert", "status"].includes(await recovery.getAttribute("role")), true,
+			"Mirror recovery notice is announced accessibly");
+		const mirrorRetry = recovery.getByTestId("retry-rail-mirror");
+		assertEqual(await recovery.getByRole("button", { name: "지도 동기화 다시 시도", exact: true }).count(), 1,
+			"Mirror recovery offers the accessible Retry label");
+		await assertLocatorInsideViewport(page, recovery, { requireHitTarget: false });
+		await assertLocatorInsideViewport(page, mirrorRetry);
+		await assertLocatorOwnsHitArea(mirrorRetry, "Mirror retry at 390x600");
+		const retryBounds = await mirrorRetry.boundingBox();
+		assertAtLeast(retryBounds?.width ?? 0, 44, "Mirror retry target width");
+		assertAtLeast(retryBounds?.height ?? 0, 44, "Mirror retry target height");
+		const failed = await readMetrics(page);
+		assertProjectUnchanged(failed, authored, "Terminal mirror failure preserves source/history");
+		assertEqual(failed.documentCanUndo, authored.documentCanUndo, "Terminal failure keeps document Undo");
+		assertEqual(failed.documentCanRedo, authored.documentCanRedo, "Terminal failure keeps document Redo");
+		assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), authoredSource), true,
+			"Terminal mirror failure preserves all five authored contracts");
+		await page.screenshot({ path: path.join(artifactRoot, "rail-mirror-recovery-390x600.png") });
+		await mirrorRetry.focus();
+		await mirrorRetry.press("Enter");
+		await page.waitForFunction(() => {
+			const retry = document.querySelector('[data-testid="retry-rail-mirror"]');
+			return retry?.getAttribute("aria-disabled") === "false" &&
+				document.querySelector('[data-testid="rail-canvas"]')?.dataset.workerStatus === "error";
+		});
+		assertEqual(await mirrorRetry.evaluate((button) => document.activeElement === button), true,
+			"Failed keyboard Retry retains button focus");
+		assertProjectUnchanged(await readMetrics(page), authored, "Failed explicit Retry preserves source/history");
+		await page.evaluate(() => globalThis.__openfabMirrorRetryAcceptance.restoreFactory());
+		await mirrorRetry.press("Enter");
+		const recovered = await waitForWorker(page, (metrics) =>
+			metrics.projectId === authored.projectId && metrics.modelSequence === authored.modelSequence &&
+			metrics.modelRevision === authored.modelRevision && metrics.modelChecksum === authored.modelChecksum);
+		await recovery.waitFor({ state: "hidden" });
+		assertEqual(await canvas.evaluate((element) => document.activeElement === element), true,
+			"Successful keyboard Retry returns focus to Canvas");
+		assertProjectUnchanged(recovered, authored, "Mirror Retry preserves source/history");
+		assertExactStaticFabModelIdentity(recovered, authored, "Mirror Retry exact current-source ACK");
+		assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), authoredSource), true,
+			"Mirror Retry ready source preserves all five authored contracts");
+		const redone = await undoAndRedo(page, railBefore, recovered, null, true);
+		assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), authoredSource), true,
+			"Recovered mirror Undo/Redo restores all five authored contracts");
+		await page.screenshot({ path: path.join(artifactRoot, "rail-mirror-recovered-390x600.png") });
+		return {
+			viewport: "390x600", workerFailures, retryHitTarget: true, preservedProject: true,
+			mirrorRetry: { terminalError: true, currentSourceReady: true, undoRedo: true, authoredEdges: redone.authoredEdges },
+		};
 	} finally {
 		await context.close();
 	}

@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { isValidElement, type KeyboardEvent, type ReactElement } from "react";
+import { describe, expect, it, vi } from "vitest";
 import { checksumOperationalConfigurationState } from "../core/OperationalConfiguration";
 import { planRailConstruction, planRailErase } from "../core/paint";
 import { createRailAreaSelectionFromOwnerships } from "../core/RailAreaSelection";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
 import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
+import { recognizeRailPattern } from "../core/RailPatternRecognition";
+import { planRailPatternResize } from "../core/RailPatternResizePlanner";
+import { setRailTemplateParameter } from "../core/RailTemplateCatalog";
 import { createStaticFabSelection } from "../core/StaticFabSelection";
 import { TileMap } from "../core/TileMap";
 import {
@@ -27,12 +31,53 @@ import {
 	type StandaloneProcessLoopAuthoringResult,
 	type StandaloneProcessLoopAuthoringSource,
 } from "./StandaloneProcessLoopAuthoringController";
+import { StandaloneProcessLoopRegistrationForm } from "./StandaloneProcessLoopAuthoringPanel";
 import {
 	StaticFabProcessLoopTopologyBridge,
 	type StaticFabProcessLoopTopologyWorkerPort,
 } from "./StaticFabProcessLoopTopologyBridge";
 
 describe("standalone Loop editor command lifetime", () => {
+	it.each([
+		{ isComposing: true, keyCode: 13 },
+		{ isComposing: false, keyCode: 229 },
+	])("keeps IME confirmation separate from Loop registration: %j", (nativeEvent) => {
+		const onRegister = vi.fn();
+		const form = StandaloneProcessLoopRegistrationForm({
+			name: "공정 루프",
+			busy: false,
+			selectionAvailable: true,
+			onNameChange: vi.fn(),
+			onRegister,
+		});
+		const inputs: ReactElement<{ onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void }>[] =
+			[];
+		const visit = (node: unknown): void => {
+			if (Array.isArray(node)) node.forEach(visit);
+			else if (isValidElement<{ children?: unknown }>(node)) {
+				if (node.type === "input") inputs.push(node as (typeof inputs)[number]);
+				else visit(node.props.children);
+			}
+		};
+		visit(form);
+		expect(inputs).toHaveLength(1);
+		const preventDefault = vi.fn();
+		const event = {
+			key: "Enter",
+			nativeEvent,
+			preventDefault,
+		} as unknown as KeyboardEvent<HTMLInputElement>;
+		inputs[0].props.onKeyDown(event);
+		expect(onRegister).not.toHaveBeenCalled();
+		expect(preventDefault).not.toHaveBeenCalled();
+		inputs[0].props.onKeyDown({
+			...event,
+			nativeEvent: { isComposing: false, keyCode: 13 },
+		} as KeyboardEvent<HTMLInputElement>);
+		expect(onRegister).toHaveBeenCalledOnce();
+		expect(preventDefault).toHaveBeenCalledOnce();
+	});
+
 	it("registers, opens, replays and closes the same synthetic owner through typed mirror events", async () => {
 		const f = fixture();
 		try {
@@ -59,6 +104,87 @@ describe("standalone Loop editor command lifetime", () => {
 			expect(f.events).toHaveLength(4);
 			expect(f.mirror.state.sequence).toBe(f.document.getPatchSequence());
 			expect(f.controller.busy).toBe(false);
+		} finally {
+			f.controller.dispose();
+		}
+	});
+
+	it.each([
+		false,
+		true,
+	])("resizes a registered Loop atomically or rejects a changed draft intent (%s)", async (changeIntent) => {
+		const f = fixture(15, 10);
+		try {
+			expect((await f.controller.register("Resize Loop", () => true)).commit.committed).toBe(true);
+			f.refresh();
+			const selection = createRailAreaSelectionFromOwnerships(
+				f.source.ownership,
+				f.source.ownership.modules,
+			);
+			const candidate = recognizeRailPattern(selection).candidates.find(
+				(value) => value.templateId === "long-bay",
+			);
+			if (!candidate) throw new Error("Expected a recognized synthetic Loop.");
+			const plan = planRailPatternResize(
+				f.document.map,
+				f.document.portEquipment,
+				selection,
+				candidate,
+				setRailTemplateParameter(
+					candidate.templateId,
+					candidate.parameters,
+					"aisleLengthMeters",
+					16,
+				),
+			);
+			expect(plan.valid, plan.reason).toBe(true);
+			expect(plan.patternResize).toMatchObject({ beforeEdgeCount: 50, afterEdgeCount: 52 });
+			const beforeOwner = f.document.organizations.records[0];
+			const beforeMap = f.document.map;
+			const equipment = f.document.portEquipment;
+			const relationships = f.document.relationships;
+			const beforeMirror = f.mirror.state;
+			let intentCurrent = true;
+			if (changeIntent)
+				f.setCheckpointHook(() => {
+					intentCurrent = false;
+				});
+			const repair = f.controller.repair(1, plan.mutations, [], () => intentCurrent);
+			if (changeIntent) {
+				await expect(repair).rejects.toThrow();
+				expect(f.document.map).toBe(beforeMap);
+				expect(f.document.organizations.records[0]).toBe(beforeOwner);
+				expect(f.mirror.state).toEqual(beforeMirror);
+				expect(f.events).toHaveLength(1);
+				return;
+			}
+			expect((await repair).commit.committed).toBe(true);
+			f.refresh();
+			const resizedOwner = f.document.organizations.records[0];
+			expect(resizedOwner).toEqual({
+				...beforeOwner,
+				membership: { ...beforeOwner?.membership, railEdges: resizedOwner?.membership.railEdges },
+			});
+			expect(resizedOwner?.membership.railEdges).toHaveLength(52);
+			expect(f.document.portEquipment).toBe(equipment);
+			expect(f.document.relationships).toBe(relationships);
+			expect(f.events).toHaveLength(2);
+			expect(f.mirror.state.edges).toBe(52);
+			expect(f.mirror.organizationState).toEqual(f.document.organizations);
+			const resizedChecksum = f.mirror.state.checksum;
+			expect((await f.controller.replay("undo", () => true)).commit.committed).toBe(true);
+			f.refresh();
+			expect(f.document.organizations.records[0]).toEqual(beforeOwner);
+			expect(f.mirror.state.checksum).toBe(beforeMirror.checksum);
+			expect(f.mirror.state.edges).toBe(50);
+			expect((await f.controller.replay("redo", () => true)).commit.committed).toBe(true);
+			f.refresh();
+			expect(f.document.organizations.records[0]).toEqual(resizedOwner);
+			expect(f.mirror.state.checksum).toBe(resizedChecksum);
+			expect(f.mirror.state.edges).toBe(52);
+			expect(f.mirror.organizationState).toEqual(f.document.organizations);
+			expect(f.mirror.state.sequence).toBe(f.document.getPatchSequence());
+			expect(f.events).toHaveLength(4);
 		} finally {
 			f.controller.dispose();
 		}

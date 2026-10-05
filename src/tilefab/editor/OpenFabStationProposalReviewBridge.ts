@@ -99,6 +99,12 @@ export interface OpenFabStationProposalReviewBridgeEvaluation {
 	readonly canApply: boolean;
 }
 
+/** The settled READY evaluation lost its live Worker/Apply authority. */
+export type OpenFabStationProposalReviewReadyInvalidationHandler = (
+	evaluation: OpenFabStationProposalReviewBridgeEvaluation,
+	error: Error,
+) => void;
+
 export interface PreparedOpenFabStationProposalReviewApply {
 	readonly kind: "prepared-openfab-station-proposal-review-apply";
 	readonly apply: ReviewedPortEquipmentApply;
@@ -252,6 +258,7 @@ export class OpenFabStationProposalReviewBridge {
 	private readonly checkpoint: (signal: AbortSignal) => Promise<void>;
 	private readonly now: () => number;
 	private readonly sliceMilliseconds: number;
+	private readonly onReadyInvalidated?: OpenFabStationProposalReviewReadyInvalidationHandler;
 	private preparation: PreparationState | null = null;
 	private active: ActiveSession | null = null;
 	private nextRequestId = 1;
@@ -267,6 +274,7 @@ export class OpenFabStationProposalReviewBridge {
 		checkpoint: (signal: AbortSignal) => Promise<void> = nextMainTask,
 		now: () => number = () => performance.now(),
 		sliceMilliseconds = 4,
+		onReadyInvalidated?: OpenFabStationProposalReviewReadyInvalidationHandler,
 	) {
 		if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1) {
 			throw new RangeError("Station proposal review timeout must be a positive safe integer.");
@@ -279,6 +287,7 @@ export class OpenFabStationProposalReviewBridge {
 		this.checkpoint = checkpoint;
 		this.now = now;
 		this.sliceMilliseconds = sliceMilliseconds;
+		this.onReadyInvalidated = onReadyInvalidated;
 	}
 
 	async evaluate(
@@ -1060,6 +1069,13 @@ export class OpenFabStationProposalReviewBridge {
 	private failActive(active: ActiveSession, error: Error): void {
 		if (this.active !== active) return;
 		trustBridgeError(error);
+		const epoch = this.epoch;
+		const invalidatedEvaluation =
+			active.phase === "ready" &&
+			active.pendingReject === null &&
+			!(error instanceof OpenFabStationProposalReviewCancelledError)
+				? active.evaluation
+				: null;
 		const reject = active.pendingReject;
 		active.pendingResolve = null;
 		active.pendingReject = null;
@@ -1069,6 +1085,19 @@ export class OpenFabStationProposalReviewBridge {
 		}
 		this.finishActive(active);
 		reject?.(error);
+		if (
+			invalidatedEvaluation &&
+			!this.disposed &&
+			this.epoch === epoch &&
+			this.active === null &&
+			this.preparation === null
+		) {
+			try {
+				this.onReadyInvalidated?.(invalidatedEvaluation, error);
+			} catch {
+				// Notification cannot restore revoked authority or disturb a reentrant newer owner.
+			}
+		}
 	}
 
 	private finishActive(active: ActiveSession): void {

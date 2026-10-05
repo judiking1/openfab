@@ -1086,6 +1086,10 @@ class ControlledMirrorGate implements RailWorkerBridgeHandle {
 		return this.state;
 	}
 
+	retryCurrentDocument(): null {
+		return null;
+	}
+
 	captureCurrentSnapshot(): Promise<never> {
 		return Promise.reject(new Error("Snapshot capture is not used by this startup test."));
 	}

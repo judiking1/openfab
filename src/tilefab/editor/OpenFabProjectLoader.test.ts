@@ -217,6 +217,10 @@ class DisposableMirror implements RailWorkerBridgeHandle {
 		return INITIAL_RAIL_WORKER_STATE;
 	}
 
+	retryCurrentDocument(): null {
+		return null;
+	}
+
 	captureCurrentSnapshot(): Promise<never> {
 		return Promise.reject(new Error("Snapshot capture is not used by this loader test."));
 	}

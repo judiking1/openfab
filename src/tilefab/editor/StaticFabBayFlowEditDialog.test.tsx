@@ -25,6 +25,8 @@ describe("StaticFabBayFlowEditDialog", () => {
 		expect(markup).toMatch(/data-testid="bay-flow-edit-cancel"[^>]*data-initial-focus="true"/);
 		expect(markup).toMatch(/data-testid="bay-flow-edit-apply"[^>]*disabled/);
 		expect(markup).not.toContain("autofocus");
+		expect(markup).not.toContain('data-testid="bay-flow-edit-retry"');
+		expect(markup).not.toMatch(/data-testid="bay-flow-edit-cancel"[^>]*disabled/);
 	});
 
 	it("shows a bounded exact replacement review and equal Worker topology", () => {
@@ -45,6 +47,7 @@ describe("StaticFabBayFlowEditDialog", () => {
 		expect(markup).toContain("레일·검증 세부 정보");
 		expect(markup).toContain("열린 끝점, 위험 분기, 잘못된 경로");
 		expect(markup).not.toMatch(/data-testid="bay-flow-edit-apply"[^>]*disabled/);
+		expect(markup).not.toContain('data-testid="bay-flow-edit-retry"');
 	});
 
 	it("does not certify partial evidence on a rejected command", () => {
@@ -64,7 +67,32 @@ describe("StaticFabBayFlowEditDialog", () => {
 		expect(markup).toContain("0 → 2");
 		expect(markup).not.toContain("변경 전후 개수 동일");
 		expect(markup).not.toContain("문제 0건");
+		expect(markup).not.toContain('data-testid="bay-flow-edit-apply"');
+		expect(markup).toContain('data-testid="bay-flow-edit-retry"');
+		expect(markup).not.toMatch(/data-testid="bay-flow-edit-retry"[^>]*disabled/);
+	});
+
+	it("keeps Cancel enabled while a rejected target starts a fresh review", () => {
+		const rejected = reduceStaticFabBayFlowEditSession(readySession(), {
+			type: "ANALYSIS_REJECTED",
+			requestSequence: 1,
+			reason: "A current-source review is required.",
+			review: reviewFixture(),
+			sourceEvidence: evidence(),
+			prospectiveEvidence: evidence(),
+			timings: null,
+		});
+		const retrying = reduceStaticFabBayFlowEditSession(rejected, {
+			type: "RETRY",
+			requestSequence: 2,
+		});
+		const markup = renderDialog(retrying);
+
+		expect(markup).toContain('data-phase="analyzing"');
+		expect(markup).not.toContain('data-testid="bay-flow-edit-retry"');
 		expect(markup).toMatch(/data-testid="bay-flow-edit-apply"[^>]*disabled/);
+		expect(markup).not.toMatch(/data-testid="bay-flow-edit-cancel"[^>]*disabled/);
+		expect(markup).toContain('data-target-pattern="co-rotating"');
 	});
 
 	it("bounds connector identity samples", () => {
@@ -94,6 +122,10 @@ describe("StaticFabBayFlowEditDialog", () => {
 
 		expect(renderDialog(rejected)).toContain('data-phase="rejected"');
 		expect(renderDialog(rejected)).toContain("변경할 수 없습니다");
+		expect(renderDialog(rejected)).toContain("다시 검토");
+		expect(renderDialog(rejected)).not.toMatch(/data-testid="bay-flow-edit-cancel"[^>]*disabled/);
+		expect(renderDialog(applying)).not.toContain('data-testid="bay-flow-edit-retry"');
+		expect(renderDialog(applying)).toMatch(/data-testid="bay-flow-edit-apply"[^>]*disabled/);
 		expect(renderDialog(applying)).toContain('data-phase="applying"');
 		expect(renderDialog(applying)).toContain('aria-busy="true"');
 		expect(renderDialog(applying)).toMatch(/data-testid="bay-flow-edit-cancel"[^>]*disabled/);
@@ -106,6 +138,7 @@ function renderDialog(session: StaticFabBayFlowEditSession): string {
 			session={session}
 			onAnalyze={vi.fn()}
 			onCancel={vi.fn()}
+			onRetry={vi.fn()}
 			onApply={vi.fn()}
 		/>,
 	);

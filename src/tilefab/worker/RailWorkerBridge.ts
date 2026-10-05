@@ -197,6 +197,8 @@ export interface RailWorkerBridgeHandle {
 		operationBudget?: number,
 	): Promise<RailPreparedStaticPatchLease>;
 	getState(): RailWorkerBridgeState;
+	/** Explicit terminal-error recovery; null means the attempt was not admitted. */
+	retryCurrentDocument(): Promise<RailWorkerBridgeState> | null;
 	prepareStaticFabAdditionPatchCooperatively?(
 		event: RailPatchEvent,
 		checkpoint: () => Promise<void>,
@@ -232,6 +234,7 @@ type RailWorkerReadyMode = "snapshot" | "authored" | "physical";
 interface RailWorkerReadyWaiter {
 	readonly expectation: RailWorkerReadyExpectation | RailWorkerAuthoredReadyExpectation;
 	readonly mode: RailWorkerReadyMode;
+	readonly retry?: object;
 	readonly resolve: (state: RailWorkerBridgeState) => void;
 	readonly reject: (error: Error) => void;
 	readonly signal?: AbortSignal;
@@ -409,6 +412,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 	private epoch = 0;
 	private automaticResyncs = 0;
 	private disposed = false;
+	private explicitRetry: object | null = null;
 	private readonly readyWaiters = new Set<RailWorkerReadyWaiter>();
 	private readonly admittingSnapshotCaptures = new Set<number>();
 	private readonly snapshotCaptureWaiters = new Map<number, RailWorkerSnapshotCaptureWaiter>();
@@ -463,6 +467,46 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 
 	getState(): RailWorkerBridgeState {
 		return this.state;
+	}
+
+	/** Restart the mirror over the same authored document without replacing its history owner. */
+	retryCurrentDocument(): Promise<RailWorkerBridgeState> | null {
+		if (this.disposed || this.state.status !== "error" || this.explicitRetry) return null;
+		const retry = {};
+		this.explicitRetry = retry;
+		this.preparedAuthoredPatches = new WeakMap();
+		const superseded = new Error("Rail worker synchronization was explicitly restarted.");
+		this.rejectSnapshotCaptures(superseded);
+		this.clearAbandonedSnapshotCaptures();
+		this.rejectOrganizationOutlineCaptures(superseded);
+		this.clearAbandonedOrganizationOutlineCaptures();
+		this.rejectReadyWaiters(superseded);
+		try {
+			this.replaceWorker();
+			this.syncCurrentDocument(undefined, undefined, retry);
+		} catch (error) {
+			this.update({ ...this.state, status: "error", message: errorMessage(error) });
+		}
+		// Own the existing deadline even when no Save/Checks consumer is waiting.
+		return this.waitForReady(
+			{
+				checksum: this.state.targetChecksum,
+				sequence: this.state.targetSequence,
+				revision: this.state.targetRevision,
+			},
+			"snapshot",
+			undefined,
+			retry,
+		)
+			.catch((error: unknown) => {
+				if (!this.disposed && this.explicitRetry === retry && this.state.status !== "error") {
+					this.update({ ...this.state, status: "error", message: errorMessage(error) });
+				}
+				throw error;
+			})
+			.finally(() => {
+				if (this.explicitRetry === retry) this.explicitRetry = null;
+			});
 	}
 
 	/** Prepare one exact unpublished reviewed-Apply packet without advancing bridge state. */
@@ -949,6 +993,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		expectation: RailWorkerReadyExpectation | RailWorkerAuthoredReadyExpectation,
 		mode: RailWorkerReadyMode,
 		signal?: AbortSignal,
+		retry?: object,
 	): Promise<RailWorkerBridgeState> {
 		if (this.disposed) {
 			return Promise.reject(new Error("Rail worker bridge is already disposed."));
@@ -978,6 +1023,7 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			const waiter: RailWorkerReadyWaiter = {
 				expectation,
 				mode,
+				retry,
 				resolve,
 				reject,
 				signal,
@@ -995,8 +1041,13 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 	private syncCurrentDocument(
 		initialSnapshot?: RailMirrorSnapshot,
 		initialSnapshotValidation?: RailWorkerInitialSnapshotValidation,
+		explicitRetry?: object,
 	): void {
-		if (this.disposed || this.state.status === "error") return;
+		if (
+			this.disposed ||
+			(this.state.status === "error" && (!explicitRetry || explicitRetry !== this.explicitRetry))
+		)
+			return;
 		this.preparedAuthoredPatches = new WeakMap();
 		const capture = initialSnapshot
 			? {
@@ -1592,6 +1643,12 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 		if (this.disposed) return;
 		if (this.state.status === "error") return;
 		this.preparedAuthoredPatches = new WeakMap();
+		// One explicit attempt has one readiness deadline; do not leave an unbounded resync
+		// running after that attempt rejects. Automatic recovery retains its existing limit.
+		if (this.explicitRetry) {
+			this.update({ ...this.state, status: "error", message });
+			return;
+		}
 		this.rejectSnapshotCaptures(new Error(`Rail snapshot capture failed: ${message}`));
 		this.clearAbandonedSnapshotCaptures();
 		this.rejectOrganizationOutlineCaptures(
@@ -1629,7 +1686,10 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 				return;
 			}
 		}
-		queueMicrotask(() => this.syncCurrentDocument());
+		const epoch = this.epoch;
+		queueMicrotask(() => {
+			if (this.epoch === epoch && this.state.status === "desynced") this.syncCurrentDocument();
+		});
 	}
 
 	private bindWorker(worker: RailWorkerPort): void {
@@ -1673,7 +1733,6 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 
 	private update(state: RailWorkerBridgeState): void {
 		this.state = state;
-		this.onState(state);
 		if (state.status === "ready") this.resolveReadyWaiters(state);
 		else if (state.status === "error") {
 			const error = new Error(state.message ?? "Rail worker synchronization failed.");
@@ -1683,6 +1742,8 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 			this.clearAbandonedOrganizationOutlineCaptures();
 			this.rejectReadyWaiters(error);
 		}
+		// Retire the previous state's waiters before a notification can admit a retry.
+		this.onState(state);
 	}
 
 	private releaseReadyWaiter(waiter: RailWorkerReadyWaiter): boolean {
@@ -1695,7 +1756,17 @@ export class RailWorkerBridge implements RailWorkerBridgeHandle {
 	private resolveReadyWaiters(state: RailWorkerBridgeState): void {
 		for (const waiter of this.readyWaiters) {
 			this.releaseReadyWaiter(waiter);
-			const error = readinessExpectationError(state, waiter.expectation, waiter.mode);
+			// An explicit recovery follows valid authored changes without restarting its timer.
+			// Ordinary capture/readiness callers still own one fixed source expectation.
+			const expectation =
+				waiter.retry && waiter.retry === this.explicitRetry
+					? {
+							checksum: this.expectedChecksum.digest(),
+							sequence: this.document.getPatchSequence(),
+							revision: this.document.map.getRevision(),
+						}
+					: waiter.expectation;
+			const error = readinessExpectationError(state, expectation, waiter.mode);
 			if (error) waiter.reject(new Error(error));
 			else waiter.resolve(state);
 		}

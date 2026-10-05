@@ -30,6 +30,7 @@ import {
 	type OpenFabStationProposalReviewBridgeEvaluation,
 	type OpenFabStationProposalReviewBridgeInput,
 	OpenFabStationProposalReviewCancelledError,
+	type OpenFabStationProposalReviewReadyInvalidationHandler,
 	type OpenFabStationProposalReviewWorkerPort,
 } from "./OpenFabStationProposalReviewBridge";
 import {
@@ -186,6 +187,108 @@ class ReentrantHandlerFailureWorker implements OpenFabStationProposalReviewWorke
 }
 
 describe("OpenFabStationProposalReviewBridge", () => {
+	it.each([
+		"native",
+		"decode",
+	] as const)("invalidates one settled READY evaluation after an idle %s fault", async (fault) => {
+		const fixture = reviewFixture("READY");
+		const before = captureDocumentIdentity(fixture.document);
+		const worker = new ControlledRuntimeWorker(true);
+		const invalidated = vi.fn<OpenFabStationProposalReviewReadyInvalidationHandler>();
+		const bridge = testBridge(() => worker, 30_000, steppingClock(), invalidated);
+		try {
+			const evaluation = await bridge.evaluate(fixture.input);
+			const retiredError = worker.onerror;
+			const retiredDecode = worker.onmessageerror;
+			if (fault === "native") worker.emitError();
+			else worker.emitMessageError();
+			expect(invalidated).toHaveBeenCalledTimes(1);
+			expect(invalidated.mock.calls[0]?.[0]).toBe(evaluation);
+			expect(invalidated.mock.calls[0]?.[1].message).toBe(
+				fault === "native"
+					? "Station proposal review Worker failed."
+					: "Station proposal review Worker response was unreadable.",
+			);
+			expect(worker.terminated).toBe(true);
+			expect(worker.onmessage).toBeNull();
+			expect(worker.onerror).toBeNull();
+			expect(worker.onmessageerror).toBeNull();
+			await expect(bridge.apply(evaluation)).rejects.toThrow(/not ready for Apply/i);
+			retiredError?.({ message: REDACTION_SENTINEL } as ErrorEvent);
+			retiredDecode?.({ data: REDACTION_SENTINEL } as MessageEvent<unknown>);
+			expect(invalidated).toHaveBeenCalledTimes(1);
+			expectDocumentIdentity(fixture.document, before);
+		} finally {
+			bridge.dispose();
+		}
+	});
+
+	it.each([
+		"cancel",
+		"dispose",
+	] as const)("does not notify an idle READY invalidation during %s", async (finish) => {
+		const worker = new ControlledRuntimeWorker(true);
+		const invalidated = vi.fn<OpenFabStationProposalReviewReadyInvalidationHandler>();
+		const bridge = testBridge(() => worker, 30_000, steppingClock(), invalidated);
+		await bridge.evaluate(reviewFixture("READY").input);
+		if (finish === "cancel") bridge.cancel();
+		else bridge.dispose();
+		expect(invalidated).not.toHaveBeenCalled();
+		expect(worker.terminated).toBe(true);
+		bridge.dispose();
+	});
+
+	it("does not notify an old READY owner when cleanup reentrantly starts a newer evaluation", async () => {
+		const first = new ControlledRuntimeWorker(true);
+		const second = new ControlledRuntimeWorker(true);
+		let created = 0;
+		const invalidated = vi.fn<OpenFabStationProposalReviewReadyInvalidationHandler>();
+		const bridge = testBridge(
+			() => (created++ === 0 ? first : second),
+			30_000,
+			steppingClock(),
+			invalidated,
+		);
+		let next: Promise<OpenFabStationProposalReviewBridgeEvaluation> | null = null;
+		try {
+			await bridge.evaluate(reviewFixture("READY").input);
+			const terminate = first.terminate.bind(first);
+			vi.spyOn(first, "terminate").mockImplementation(() => {
+				terminate();
+				next = bridge.evaluate(reviewFixture("READY", GENERATION + 1).input);
+			});
+			first.emitError();
+			if (!next) throw new Error("Expected a reentrant latest evaluation");
+			await expect(next).resolves.toMatchObject({ generation: GENERATION + 1, canApply: true });
+			expect(invalidated).not.toHaveBeenCalled();
+			expect(second.terminated).toBe(false);
+		} finally {
+			bridge.dispose();
+			vi.restoreAllMocks();
+		}
+	});
+
+	it("uses the existing Apply rejection instead of idle invalidation for a pending Apply fault", async () => {
+		const fixture = reviewFixture("READY");
+		const before = captureDocumentIdentity(fixture.document);
+		const worker = new ControlledRuntimeWorker();
+		const invalidated = vi.fn<OpenFabStationProposalReviewReadyInvalidationHandler>();
+		const bridge = testBridge(() => worker, 30_000, steppingClock(), invalidated);
+		try {
+			const pending = bridge.evaluate(fixture.input);
+			await waitForRequest(worker);
+			await worker.respond();
+			const evaluation = await pending;
+			const applied = bridge.apply(evaluation);
+			worker.emitError();
+			await expect(applied).rejects.toThrow("Station proposal review Worker failed.");
+			expect(invalidated).not.toHaveBeenCalled();
+			expectDocumentIdentity(fixture.document, before);
+		} finally {
+			bridge.dispose();
+		}
+	});
+
 	it("keeps READY Worker-owned, returns one opaque Apply, and never commits implicitly", async () => {
 		const fixture = reviewFixture("READY");
 		const worker = new ControlledRuntimeWorker(true);
@@ -1541,6 +1644,7 @@ function testBridge(
 	createWorker: () => OpenFabStationProposalReviewWorkerPort,
 	timeoutMilliseconds = 30_000,
 	now: () => number = steppingClock(),
+	onReadyInvalidated?: OpenFabStationProposalReviewReadyInvalidationHandler,
 ): OpenFabStationProposalReviewBridge {
 	return new OpenFabStationProposalReviewBridge(
 		createWorker,
@@ -1548,6 +1652,7 @@ function testBridge(
 		async () => {},
 		now,
 		1,
+		onReadyInvalidated,
 	);
 }
 

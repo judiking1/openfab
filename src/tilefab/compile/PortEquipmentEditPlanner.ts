@@ -92,13 +92,10 @@ export function planMoveOhbToSlot(
 	if (rowError) {
 		return invalid("edit-port-equipment", baseRevision, basePatchSequence, rowError);
 	}
-	const moved = portSlotRecord(
-		slots,
-		row,
-		source.port.id,
-		source.equipmentGroup.id,
-		source.port.barcode,
-	);
+	const moved = {
+		...portSlotRecord(slots, row, source.port.id, source.equipmentGroup.id, source.port.barcode),
+		direction: source.port.direction,
+	};
 	if (portRecordEquals(source.port, moved)) {
 		return invalid(
 			"edit-port-equipment",
@@ -144,7 +141,10 @@ export function planCopyOhbToSlot(
 	}
 	const portId = allocation.portIds[0] as number;
 	const equipmentGroupId = allocation.equipmentGroupIds[0] as number;
-	const copiedPort = portSlotRecord(slots, row, portId, equipmentGroupId, `OHB-${portId}`);
+	const copiedPort = {
+		...portSlotRecord(slots, row, portId, equipmentGroupId, `OHB-${portId}`),
+		direction: source.port.direction,
+	};
 	const copiedGroup = {
 		id: equipmentGroupId,
 		kind: source.equipmentGroup.kind,

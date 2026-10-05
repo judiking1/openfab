@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PortEquipmentState } from "../core/EquipmentGroup";
+import type { PortDirection } from "../core/PortRecord";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
@@ -13,8 +14,11 @@ import { planOhbPlacement } from "./PortPlacementPlanner";
 import { compilePortSlots, PORT_SLOT_STATUS, PortSlotAvailabilityIndex } from "./PortSlotCompiler";
 
 describe("PortEquipmentEditPlanner", () => {
-	it("moves one OHB while preserving stable IDs and barcode", () => {
-		const fixture = placedOhbFixture();
+	it.each([
+		"WITH_TRAVEL",
+		"AGAINST_TRAVEL",
+	] as const)("moves one %s OHB while preserving IDs, barcode and facing", (direction) => {
+		const fixture = placedOhbFixture(direction);
 		const source = resolvePortEquipmentSelection(fixture.document.portEquipment, 1);
 		expect(source?.equipmentGroup.id).toBe(1);
 		const targetRow = legalRows(fixture.slots).find(
@@ -41,18 +45,23 @@ describe("PortEquipmentEditPlanner", () => {
 			id: 1,
 			equipmentGroupId: 1,
 			barcode: "OHB-1",
+			direction,
 		});
 		expect(fixture.document.portEquipment.ports[0]?.route).not.toEqual(before?.route);
 		expect(fixture.document.undo()).toBe(true);
 		expect(fixture.document.portEquipment.ports[0]).toEqual(before);
 		expect(fixture.document.redo()).toBe(true);
+		expect(fixture.document.portEquipment.ports[0]?.direction).toBe(direction);
 		expect(fixture.document.portEquipment.ports[0]?.route).toEqual(
 			plan.portMutations[0]?.after?.route,
 		);
 	});
 
-	it("copies an OHB with new monotonic IDs and one Worker-visible command", () => {
-		const fixture = placedOhbFixture();
+	it.each([
+		"WITH_TRAVEL",
+		"AGAINST_TRAVEL",
+	] as const)("copies one %s OHB with fresh IDs and preserved facing", (direction) => {
+		const fixture = placedOhbFixture(direction);
 		const events: RailPatchEvent[] = [];
 		fixture.document.subscribe((event) => events.push(event));
 		const targetRow = legalRows(fixture.slots).find(
@@ -73,7 +82,10 @@ describe("PortEquipmentEditPlanner", () => {
 		expect(fixture.document.portEquipment).toMatchObject({
 			nextPortId: 3,
 			nextEquipmentGroupId: 3,
-			ports: [{ id: 1 }, { id: 2, equipmentGroupId: 2, barcode: "OHB-2" }],
+			ports: [
+				{ id: 1, direction },
+				{ id: 2, equipmentGroupId: 2, barcode: "OHB-2", direction },
+			],
 			equipmentGroups: [{ id: 1 }, { id: 2, kind: "OHB", portIds: [2] }],
 		});
 		expect(events).toHaveLength(1);
@@ -82,6 +94,10 @@ describe("PortEquipmentEditPlanner", () => {
 			portChanges: [{ id: 2 }],
 			equipmentGroupChanges: [{ id: 2 }],
 		});
+		expect(fixture.document.undo()).toBe(true);
+		expect(fixture.document.portEquipment.ports).toHaveLength(1);
+		expect(fixture.document.redo()).toBe(true);
+		expect(fixture.document.portEquipment.ports[1]?.direction).toBe(direction);
 	});
 
 	it("bulldozes the reciprocal group and all owned ports atomically", () => {
@@ -210,7 +226,7 @@ describe("PortEquipmentEditPlanner", () => {
 	});
 });
 
-function placedOhbFixture(): {
+function placedOhbFixture(direction: PortDirection = "WITH_TRAVEL"): {
 	document: RailDocument;
 	slots: ReturnType<typeof compilePortSlots>;
 	availability: PortSlotAvailabilityIndex;
@@ -232,7 +248,15 @@ function placedOhbFixture(): {
 		document.map.getRevision(),
 		document.getPatchSequence(),
 	);
-	expect(document.commitPortEquipment(placement)).toBe(true);
+	expect(
+		document.commitPortEquipment({
+			...placement,
+			portMutations: placement.portMutations.map((mutation) => ({
+				...mutation,
+				after: mutation.after ? { ...mutation.after, direction } : null,
+			})),
+		}),
+	).toBe(true);
 	return {
 		document,
 		slots,

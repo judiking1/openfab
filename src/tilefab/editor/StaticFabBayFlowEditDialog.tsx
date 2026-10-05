@@ -16,6 +16,7 @@ export interface StaticFabBayFlowEditDialogProps {
 	readonly returnFocus?: HTMLElement | null;
 	readonly onAnalyze: (requestSequence: number) => void;
 	readonly onCancel: () => void;
+	readonly onRetry: () => void;
 	readonly onApply: () => void;
 }
 
@@ -24,6 +25,7 @@ export function StaticFabBayFlowEditDialog({
 	returnFocus,
 	onAnalyze,
 	onCancel,
+	onRetry,
 	onApply,
 }: StaticFabBayFlowEditDialogProps): React.ReactElement {
 	const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -37,6 +39,7 @@ export function StaticFabBayFlowEditDialog({
 	const titleId = useId();
 	const descriptionId = useId();
 	const applying = session.phase === "applying";
+	const rejected = session.phase === "rejected";
 	const canApply = staticFabBayFlowEditSessionCanApply(session);
 
 	useEffect(() => {
@@ -105,6 +108,11 @@ export function StaticFabBayFlowEditDialog({
 		if (applying) return;
 		restoreLauncherOnUnmountRef.current = true;
 		onCancel();
+	};
+	const requestRetry = (): void => {
+		if (session.phase !== "rejected") return;
+		cancelRef.current?.focus({ preventScroll: true });
+		onRetry();
 	};
 	const content = (
 		<div
@@ -185,10 +193,14 @@ export function StaticFabBayFlowEditDialog({
 					</button>
 					<button
 						type="button"
-						className="tilefab-semantic-bay-apply"
-						data-testid="bay-flow-edit-apply"
-						disabled={!canApply}
+						className={rejected ? undefined : "tilefab-semantic-bay-apply"}
+						data-testid={rejected ? "bay-flow-edit-retry" : "bay-flow-edit-apply"}
+						disabled={!rejected && !canApply}
 						onClick={() => {
+							if (rejected) {
+								requestRetry();
+								return;
+							}
 							if (!canApply) return;
 							restoreLauncherOnUnmountRef.current = false;
 							onApply();
@@ -199,7 +211,7 @@ export function StaticFabBayFlowEditDialog({
 						) : (
 							<RefreshCw size={15} />
 						)}
-						{applying ? "적용 중" : "흐름 변경"}
+						{applying ? "적용 중" : rejected ? "다시 검토" : "흐름 변경"}
 					</button>
 				</footer>
 			</section>

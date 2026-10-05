@@ -607,6 +607,61 @@
 	outline-offset: 1px;
 }
 
+/* Recovery stays visible when the compact footer hides mirror diagnostics. */
+.tilefab-mirror-recovery {
+	position: absolute;
+	z-index: 74;
+	top: 12px;
+	left: 50%;
+	width: min(560px, calc(100% - 24px));
+	box-sizing: border-box;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+	padding: 14px;
+	border: 1px solid #d8a578;
+	border-radius: 10px;
+	color: #f7efe4;
+	background: #182326;
+	box-shadow: 0 6px 24px rgb(0 0 0 / 35%);
+	transform: translateX(-50%);
+}
+
+.tilefab-mirror-recovery > div {
+	flex: 1 1 220px;
+	min-width: 0;
+}
+
+.tilefab-mirror-recovery strong {
+	font-size: 13px;
+}
+
+.tilefab-mirror-recovery p {
+	margin: 6px 0 0;
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.tilefab-mirror-retry-button {
+	min-width: 44px;
+	min-height: 44px;
+	padding: 8px 12px;
+	border: 1px solid #8bbbc0;
+	border-radius: 7px;
+	color: #f3ffff;
+	background: #204b50;
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.tilefab-mirror-retry-button:disabled,
+.tilefab-mirror-retry-button[aria-disabled="true"] {
+	opacity: 0.65;
+	cursor: default;
+}
+
 .tilefab-startup {
 	position: absolute;
 	inset: 0;
@@ -10939,6 +10994,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-pattern-resize {
 	display: grid;
+	min-width: 0;
 	gap: 8px;
 	margin: 0 8px 8px;
 	padding: 10px;
@@ -10948,6 +11004,8 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-pattern-resize > header {
 	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 8px;
 	height: auto;
 	align-items: center;
 	justify-content: space-between;
@@ -10974,9 +11032,13 @@ button.tilefab-action-hint[data-guided-target="true"] {
 
 .tilefab-pattern-resize-parameters > div {
 	display: grid;
-	grid-template-columns: minmax(82px, 1fr) 40px 72px 40px 28px;
+	grid-template-columns: 40px minmax(0, 1fr) 40px 28px;
 	align-items: center;
 	gap: 4px;
+}
+
+.tilefab-pattern-resize-parameters label {
+	grid-column: 1 / -1;
 }
 
 .tilefab-pattern-resize-parameters label,
@@ -10998,6 +11060,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-pattern-resize-parameters input {
+	min-width: 0;
 	width: 100%;
 	padding: 0 6px;
 	font:
@@ -11031,6 +11094,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	background: #131a1b;
 	font-size: var(--tilefab-font-label);
 	line-height: 1.4;
+	overflow-wrap: anywhere;
 }
 
 .tilefab-pattern-resize > p[data-state="ready"] {

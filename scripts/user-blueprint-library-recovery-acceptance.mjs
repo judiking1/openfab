@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const artifactRoot = path.join(root, "artifacts", "user-blueprint-library-recovery");
+const artifactRoot = path.resolve(
+	process.env.OPENFAB_ACCEPTANCE_ARTIFACT_DIR ??
+		path.join(root, "artifacts", "user-blueprint-library-recovery"),
+);
 const port = Number(process.env.OPENFAB_LIBRARY_RECOVERY_PORT ?? 5503 + (process.pid % 977));
 const host = "127.0.0.1";
 const baseUrl = `http://${host}:${port}`;
@@ -187,7 +190,7 @@ async function installRestoreWorkerTelemetry(context) {
 async function exerciseMalformedRestore(activePage, malformedPath, baseline) {
 	const beforeWorker = await readRestoreWorkerTelemetry(activePage);
 	await chooseRestoreFile(activePage, malformedPath);
-	await waitForEditorStatus(activePage, "전체 라이브러리 백업을 읽지 못했습니다");
+	await waitForEditorStatus(activePage, "전체 라이브러리 복원을 준비하지 못했습니다");
 	await activePage
 		.getByRole("button", { name: "전체 청사진 라이브러리 백업 복원", exact: true })
 		.waitFor({ state: "visible" });
@@ -422,6 +425,11 @@ async function reloadAndOpenUserLibrary(activePage, expectedCount) {
 }
 
 async function openUserBlueprintLibrary(activePage) {
+	const startDialog = activePage.getByTestId("openfab-start-dialog");
+	if (await startDialog.isVisible()) {
+		await startDialog.getByRole("button", { name: /BLANK CANVAS/ }).click();
+		await startDialog.waitFor({ state: "hidden" });
+	}
 	const userTab = activePage.getByTestId("blueprint-user-tab");
 	if (!(await userTab.isVisible().catch(() => false))) {
 		await activateEditorActivity(activePage, "assemble");
