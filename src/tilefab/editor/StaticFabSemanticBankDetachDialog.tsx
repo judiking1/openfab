@@ -8,6 +8,7 @@ import {
 	type StaticFabSemanticBankDetachSession,
 	staticFabSemanticBankDetachSessionCanApply,
 } from "./StaticFabSemanticBankDetachSession";
+import { StaticFabSemanticImpactReview } from "./StaticFabSemanticImpactReview";
 import "./StaticFabSemanticBankDetachDialog.css";
 
 export interface StaticFabSemanticBankDetachDialogProps {
@@ -154,10 +155,28 @@ export function StaticFabSemanticBankDetachDialog({
 						레일·장비·Port는 보존합니다.
 					</p>
 					{session.review ? (
-						<div className="tilefab-bank-detach-impact">
-							<ImpactColumn title="보존" rows={session.review.preserved} />
-							<ImpactColumn title="제거" rows={session.review.removed} />
-						</div>
+						<>
+							<StaticFabSemanticImpactReview
+								mode="detach"
+								removed={session.review.removed}
+								preserved={session.review.preserved}
+								organizationLabels={session.review.organizationLabels}
+								connection={{
+									parentId: session.review.parentFabOrganizationId,
+									bankId: session.review.bankOrganizationId,
+								}}
+							/>
+							<details
+								className="tilefab-review-technical-details"
+								data-testid="semantic-review-technical-details"
+							>
+								<summary>수량·ID·좌표 상세</summary>
+								<div className="tilefab-bank-detach-impact">
+									<ImpactColumn title="제거" rows={session.review.removed} />
+									<ImpactColumn title="보존" rows={session.review.preserved} />
+								</div>
+							</details>
+						</>
 					) : null}
 					<p
 						className="tilefab-bank-detach-status"
@@ -248,7 +267,10 @@ function ImpactColumn({
 	rows: readonly StaticFabSemanticBankDetachImpactRow[];
 }>): React.ReactElement {
 	return (
-		<section className="tilefab-bank-detach-impact-column">
+		<section
+			className="tilefab-bank-detach-impact-column"
+			data-impact={title === "보존" ? "preserved" : "removed"}
+		>
 			<h3>{title}</h3>
 			<dl>
 				{rows.map((row) => {

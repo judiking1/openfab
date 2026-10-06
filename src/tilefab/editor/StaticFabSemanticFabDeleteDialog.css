@@ -117,7 +117,7 @@
 	background: #13201c;
 }
 
-.tilefab-fab-delete-impact-column:last-child {
+.tilefab-fab-delete-impact-column[data-impact="removed"] {
 	border-color: #825349;
 	background: #291b17;
 }

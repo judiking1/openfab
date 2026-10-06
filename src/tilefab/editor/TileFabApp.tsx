@@ -1143,6 +1143,7 @@ import { StaticFabSemanticBayMutationBridge } from "./StaticFabSemanticBayMutati
 import type { StaticFabSemanticBankDetachPlan } from "../core/StaticFabSemanticBankDetach";
 import { staticFabSemanticBankDetachPlanFingerprint } from "../core/StaticFabSemanticBankDetachCertification";
 import { StaticFabSemanticBankDetachBridge, type StaticFabSemanticBankDetachLiveState } from "./StaticFabSemanticBankDetachBridge";
+import { captureStaticFabReviewOrganizationLabels } from "./StaticFabSemanticImpactReviewLabels";
 import { StaticFabSemanticBankDetachDialog } from "./StaticFabSemanticBankDetachDialog";
 import {
 	createStaticFabSemanticBankDetachSession,
@@ -12410,8 +12411,7 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 		pendingConnectedFabHandoffFocusRef.current = restoreFabLoopReview;
 		pendingResilientFabChecksHandoffFocusRef.current = false;
-		syncModelUi(hierarchyCommandFeedbackRef.current?.document === railDocument
-			? rememberHierarchyCommandFeedback("마지막 편집을 되돌렸습니다") : "마지막 편집을 되돌렸습니다");
+		syncModelUi(rememberHierarchyCommandFeedback("마지막 편집을 되돌렸습니다"));
 		if (retained) refreshRepeatPlacementAfterHistory(retained);
 		return true;
 	};
@@ -12649,8 +12649,7 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 		pendingConnectedFabHandoffFocusRef.current = restoreConnectorFab;
 		pendingResilientFabChecksHandoffFocusRef.current = restoreFabLoop;
-		syncModelUi(hierarchyCommandFeedbackRef.current?.document === railDocument
-			? rememberHierarchyCommandFeedback("편집을 다시 실행했습니다") : "편집을 다시 실행했습니다");
+		syncModelUi(rememberHierarchyCommandFeedback("편집을 다시 실행했습니다"));
 		if (restoredPlacedAssemblyRoot) {
 			if (restoredDuplicateSourceAssemblyRoot) {
 				selectStaticFabOrganization(restoredPlacedAssemblyRoot, true);
@@ -12664,6 +12663,7 @@ export default function TileFabApp(): React.ReactElement {
 			} else {
 				selectStaticFabOrganization(restoredPlacedAssemblyRoot);
 			}
+			setStatus(rememberHierarchyCommandFeedback("편집을 다시 실행했습니다"));
 		}
 		if (retained) refreshRepeatPlacementAfterHistory(retained);
 	};
@@ -25886,6 +25886,7 @@ export default function TileFabApp(): React.ReactElement {
 					type: "ANALYSIS_READY", requestSequence, reason: "현재 Bank와 남는 FAB의 검증을 마쳤습니다. 변경 내용을 확인하고 적용하세요.",
 					review: { bankOrganizationId: review.bankOrganizationId, parentFabOrganizationId: review.fabOrganizationId,
 						planFingerprint: staticFabSemanticBankDetachPlanFingerprint(plan),
+						organizationLabels: captureStaticFabReviewOrganizationLabels(source.document, currentBankDetachSource().document, plan),
 						preserved: [
 							{ label: "Bank·하위 조직", count: review.preservedOrganizationCount, samples: review.preservedOrganizationIdSample },
 							{ label: "Bay", count: review.preservedBayCount, samples: review.preservedBayIdSample },
@@ -26084,7 +26085,8 @@ export default function TileFabApp(): React.ReactElement {
 					type: "ANALYSIS_READY", requestSequence,
 					reason: "삭제 범위와 보존할 레일·장비·Port 검증을 마쳤습니다. 수량과 표본을 확인한 뒤 삭제하세요.",
 					review: { action: "DELETE", bankOrganizationId: review.bankOrganizationId, parentFabOrganizationId: review.parentFabOrganizationId,
-						planFingerprint: staticFabSemanticBankDeletePlanFingerprint(plan), preserved: impactRows(review.preserved), removed: impactRows(review.removed) },
+						planFingerprint: staticFabSemanticBankDeletePlanFingerprint(plan),
+						organizationLabels: captureStaticFabReviewOrganizationLabels(source.document, currentBankDeleteSource().document, plan), preserved: impactRows(review.preserved), removed: impactRows(review.removed) },
 					evidence: {
 						checks: [
 							{ label: "삭제할 Bank", value: "독립 순환 경로 확인" },
@@ -26267,7 +26269,8 @@ export default function TileFabApp(): React.ReactElement {
 					type: "ANALYSIS_READY", requestSequence,
 					reason: "삭제 범위와 보존할 레일·장비·Port 검증을 마쳤습니다. 수량과 표본을 확인한 뒤 삭제하세요.",
 					review: { action: "DELETE", targetRole: "FAB", fabOrganizationId: review.fabOrganizationId,
-						planFingerprint: staticFabSemanticFabDeletePlanFingerprint(plan), preserved: impactRows(review.preserved), removed: impactRows(review.removed) },
+						planFingerprint: staticFabSemanticFabDeletePlanFingerprint(plan),
+						organizationLabels: captureStaticFabReviewOrganizationLabels(source.document, currentFabDeleteSource().document, plan), preserved: impactRows(review.preserved), removed: impactRows(review.removed) },
 					evidence: {
 						checks: [
 							{ label: "삭제할 FAB", value: "독점 소유 순환 경로 확인" },

@@ -8,6 +8,7 @@ import {
 	type StaticFabSemanticFabDeleteSession,
 	staticFabSemanticFabDeleteSessionCanApply,
 } from "./StaticFabSemanticFabDeleteSession";
+import { StaticFabSemanticImpactReview } from "./StaticFabSemanticImpactReview";
 import "./StaticFabSemanticFabDeleteDialog.css";
 
 export interface StaticFabSemanticFabDeleteDialogProps {
@@ -157,10 +158,24 @@ export function StaticFabSemanticFabDeleteDialog({
 						<p>삭제 후 캔버스에 남는 조직·레일·장비·Port가 없습니다.</p>
 					) : null}
 					{session.review ? (
-						<div className="tilefab-fab-delete-impact">
-							<ImpactColumn title="보존" rows={session.review.preserved} />
-							<ImpactColumn title="삭제 예정" rows={session.review.removed} />
-						</div>
+						<>
+							<StaticFabSemanticImpactReview
+								mode="delete"
+								removed={session.review.removed}
+								preserved={session.review.preserved}
+								organizationLabels={session.review.organizationLabels}
+							/>
+							<details
+								className="tilefab-review-technical-details"
+								data-testid="semantic-review-technical-details"
+							>
+								<summary>수량·ID·좌표 상세</summary>
+								<div className="tilefab-fab-delete-impact">
+									<ImpactColumn title="삭제 예정" rows={session.review.removed} />
+									<ImpactColumn title="보존" rows={session.review.preserved} />
+								</div>
+							</details>
+						</>
 					) : null}
 					<p
 						className="tilefab-fab-delete-status"
@@ -252,7 +267,10 @@ function ImpactColumn({
 	rows: readonly StaticFabSemanticFabDeleteImpactRow[];
 }>): React.ReactElement {
 	return (
-		<section className="tilefab-fab-delete-impact-column">
+		<section
+			className="tilefab-fab-delete-impact-column"
+			data-impact={title === "보존" ? "preserved" : "removed"}
+		>
 			<h3>{title}</h3>
 			<dl>
 				{rows.map((row) => {

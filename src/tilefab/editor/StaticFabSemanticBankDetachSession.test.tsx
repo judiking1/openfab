@@ -1,5 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import {
+	copyStaticFabOrganizationRecord,
+	type StaticFabOrganizationKind,
+} from "../core/StaticFabOrganization";
+import { TileMap } from "../core/TileMap";
 import { StaticFabSemanticBankDetachDialog } from "./StaticFabSemanticBankDetachDialog";
 import {
 	createStaticFabSemanticBankDetachSession,
@@ -9,6 +14,10 @@ import {
 	type StaticFabSemanticBankDetachSessionAction,
 	staticFabSemanticBankDetachSessionCanApply,
 } from "./StaticFabSemanticBankDetachSession";
+import {
+	captureStaticFabReviewOrganizationLabels,
+	staticFabReviewOrganizationLabel,
+} from "./StaticFabSemanticImpactReviewLabels";
 
 const start = (): StaticFabSemanticBankDetachSession =>
 	createStaticFabSemanticBankDetachSession({
@@ -176,5 +185,112 @@ describe("Bank detach review dialog", () => {
 		expect(markup).toContain("제거할 연결에 Port가 있습니다.");
 		expect(markup).toContain('data-testid="bank-detach-retry"');
 		expect(markup).toMatch(/data-testid="bank-detach-apply"[^>]*disabled/);
+	});
+});
+
+describe("named impact summary", () => {
+	it("puts the changed impact first and keeps bounded raw evidence in closed details", () => {
+		const action = readyAction();
+		const session = reduceStaticFabSemanticBankDetachSession(start(), {
+			...action,
+			review: {
+				...action.review,
+				organizationLabels: { 1: "FAB North", 3: "Bank Etch", 4: "Bay Clean" },
+			},
+		});
+		const html = render(session);
+		const technical = html.indexOf('data-testid="semantic-review-technical-details"');
+		const summary = html.slice(
+			html.indexOf('data-testid="semantic-review-impact-summary"'),
+			technical,
+		);
+		expect(summary).toContain("분리되는 항목 · 연결 제거");
+		expect(summary.indexOf('data-impact="removed"')).toBeLessThan(
+			summary.indexOf('data-impact="preserved"'),
+		);
+		expect(summary).toContain("Bank Etch");
+		expect(summary).toContain("조직 20개");
+		expect(summary).toContain("Port 6개");
+		expect(summary).not.toContain("3, 4, 5, 6");
+		expect(html).toMatch(
+			/<details[^>]*data-testid="semantic-review-technical-details"[^>]*><summary>수량·ID·좌표 상세/,
+		);
+		expect(
+			html.slice(html.lastIndexOf("<details", technical), html.indexOf(">", technical)),
+		).not.toContain("open=");
+		expect(html.slice(technical)).toContain("3, 4, 5, 6");
+		expect(html.slice(technical)).toContain("외 16개");
+		expect(summary).toContain("FAB North ↔ Bank Etch");
+		expect(summary).toContain("Bank Etch 내부 구성 유지");
+		expect(staticFabSemanticBankDetachSessionCanApply(session)).toBe(true);
+	});
+});
+
+describe("review revision name snapshot", () => {
+	const fixture = () => {
+		const record = (id: number, kind: StaticFabOrganizationKind, name: string, parentId?: number) =>
+			copyStaticFabOrganizationRecord({
+				id,
+				kind,
+				name,
+				parentOrganizationIds: parentId === undefined ? [] : [parentId],
+				membership: {
+					railEdges: [{ from: { x: id * 2, y: 0 }, to: { x: id * 2 + 1, y: 0 } }],
+					advancedSwitchIds: [],
+					equipmentGroupIds: [],
+				},
+			});
+		return {
+			map: new TileMap(),
+			getPatchSequence: () => 7,
+			organizations: {
+				nextOrganizationId: 7,
+				records: [
+					record(1, "AREA", "North"),
+					record(2, "AREA", "Etch", 1),
+					record(3, "BAY", "Clean", 2),
+					record(4, "AISLE", "Loop A", 3),
+					record(5, "AISLE", "Loop  A", 3),
+					{ ...record(6, "AREA", "Placeholder"), name: "" },
+				],
+			},
+		};
+	};
+	it("captures user names and semantic kinds, disambiguates duplicates and missing targets", () => {
+		const source = fixture();
+		const labels = captureStaticFabReviewOrganizationLabels(source, source, {
+			baseRevision: source.map.getRevision(),
+			basePatchSequence: 7,
+		});
+		expect(labels).toEqual({
+			1: "FAB North",
+			2: "Bank Etch",
+			3: "Bay Clean",
+			4: "Loop Loop A (ID 4)",
+			5: "Loop Loop A (ID 5)",
+			6: "AREA 이름 없음 (ID 6)",
+		});
+		expect(Object.isFrozen(labels)).toBe(true);
+		expect(staticFabReviewOrganizationLabel(labels, 99)).toBe("조직 ID 99 (대상 없음)");
+		source.organizations = {
+			...source.organizations,
+			records: source.organizations.records.map((r) => ({ ...r, name: "Renamed" })),
+		};
+		expect(labels?.[2]).toBe("Bank Etch");
+	});
+	it("does not resolve names from another document, revision or patch sequence", () => {
+		const source = fixture(),
+			plan = { baseRevision: source.map.getRevision(), basePatchSequence: 7 };
+		expect(captureStaticFabReviewOrganizationLabels(source, fixture(), plan)).toBeNull();
+		expect(
+			captureStaticFabReviewOrganizationLabels(source, source, {
+				...plan,
+				baseRevision: plan.baseRevision + 1,
+			}),
+		).toBeNull();
+		expect(
+			captureStaticFabReviewOrganizationLabels(source, source, { ...plan, basePatchSequence: 8 }),
+		).toBeNull();
+		expect(staticFabReviewOrganizationLabel(null, 2)).toBe("조직 ID 2 (검토 시점 이름 확인 불가)");
 	});
 });

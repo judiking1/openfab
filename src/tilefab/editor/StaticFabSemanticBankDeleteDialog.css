@@ -102,7 +102,7 @@
 	background: #13201c;
 }
 
-.tilefab-bank-delete-impact-column:last-child {
+.tilefab-bank-delete-impact-column[data-impact="removed"] {
 	border-color: #825349;
 	background: #291b17;
 }

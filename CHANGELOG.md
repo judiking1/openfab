@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.66] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Lead Bank detach/delete and FAB deletion reviews with named removal and preservation summaries.
+  Resolve organization names from the reviewed document revision, disambiguate duplicate names
+  with IDs, and retain certified counts and technical samples in collapsed details.
+- Keep successful Undo/Redo feedback visible after synchronization even if a new selection cleared
+  the preceding command result. New selections and actions continue to show their own guidance.
+
 ## [0.1.65] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

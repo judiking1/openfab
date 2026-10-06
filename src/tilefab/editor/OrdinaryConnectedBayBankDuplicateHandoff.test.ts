@@ -151,6 +151,27 @@ describe("ordinaryConnectedBayBankDuplicateHandoff", () => {
 
 describe("ordinaryHierarchyCommandFeedbackIsCurrent", () => {
 	it.each([
+		"마지막 편집을 되돌렸습니다",
+		"편집을 다시 실행했습니다",
+	])("retains the history command's own %s receipt after a new selection cleared its predecessor", (message) => {
+		const document = {};
+		expect(ordinaryHierarchyCommandFeedbackIsCurrent(null, document, message)).toBe(false);
+		const feedback = { document, message };
+		expect(ordinaryHierarchyCommandFeedbackIsCurrent(feedback, document, message)).toBe(true);
+		expect(
+			ordinaryHierarchyCommandFeedbackIsCurrent(
+				feedback,
+				document,
+				`${message} · 대형 맵 파생 데이터를 Worker에서 준비합니다`,
+			),
+		).toBe(true);
+		expect(
+			ordinaryHierarchyCommandFeedbackIsCurrent(feedback, document, "다른 Bank를 선택했습니다"),
+		).toBe(false);
+		expect(ordinaryHierarchyCommandFeedbackIsCurrent(feedback, {}, message)).toBe(false);
+	});
+
+	it.each([
 		"Bank 분리 완료",
 		"Bank 삭제 완료",
 		"Fab 삭제 완료",

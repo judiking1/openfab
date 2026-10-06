@@ -2,6 +2,7 @@ import type {
 	StaticFabSemanticBankDetachRegionEvidence,
 	StaticFabSemanticBankDetachTopologyEvidence,
 } from "../compile/StaticFabSemanticBankDetachProspective";
+import type { StaticFabReviewOrganizationLabels } from "./StaticFabSemanticImpactReviewLabels";
 
 export const STATIC_FAB_SEMANTIC_BANK_DETACH_SAMPLE_LIMIT = 4;
 
@@ -16,6 +17,7 @@ export interface StaticFabSemanticBankDetachReviewView {
 	readonly bankOrganizationId: number;
 	readonly parentFabOrganizationId: number;
 	readonly planFingerprint: string;
+	readonly organizationLabels?: StaticFabReviewOrganizationLabels | null;
 	readonly preserved: readonly StaticFabSemanticBankDetachImpactRow[];
 	readonly removed: readonly StaticFabSemanticBankDetachImpactRow[];
 }

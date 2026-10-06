@@ -187,3 +187,41 @@ describe("Fab delete review dialog", () => {
 		expect(markup).toMatch(/data-testid="fab-delete-apply"[^>]*disabled/);
 	});
 });
+
+describe("named impact summary", () => {
+	it("puts the changed impact first and keeps bounded raw evidence in closed details", () => {
+		const action = readyAction();
+		const session = reduceStaticFabSemanticFabDeleteSession(start(), {
+			...action,
+			review: {
+				...action.review,
+				organizationLabels: { 1: "FAB North", 3: "FAB Etch", 4: "Bay Clean" },
+			},
+		});
+		const html = render(session);
+		const technical = html.indexOf('data-testid="semantic-review-technical-details"');
+		const summary = html.slice(
+			html.indexOf('data-testid="semantic-review-impact-summary"'),
+			technical,
+		);
+		expect(summary).toContain("삭제되는 항목");
+		expect(summary.indexOf('data-impact="removed"')).toBeLessThan(
+			summary.indexOf('data-impact="preserved"'),
+		);
+		expect(summary).toContain("FAB Etch");
+		expect(summary).toContain("조직 20개");
+		expect(summary).toContain("Port 6개");
+		expect(summary).not.toContain("3, 4, 5, 6");
+		expect(html).toMatch(
+			/<details[^>]*data-testid="semantic-review-technical-details"[^>]*><summary>수량·ID·좌표 상세/,
+		);
+		expect(
+			html.slice(html.lastIndexOf("<details", technical), html.indexOf(">", technical)),
+		).not.toContain("open=");
+		expect(html.slice(technical)).toContain("3, 4, 5, 6");
+		expect(html.slice(technical)).toContain("외 16개");
+		expect(summary).toContain("Bay Clean");
+		expect(summary).toContain("외 18개 조직");
+		expect(staticFabSemanticFabDeleteSessionCanApply(session)).toBe(true);
+	});
+});

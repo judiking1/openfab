@@ -1,3 +1,5 @@
+import type { StaticFabReviewOrganizationLabels } from "./StaticFabSemanticImpactReviewLabels";
+
 export const STATIC_FAB_SEMANTIC_FAB_DELETE_SAMPLE_LIMIT = 4;
 
 /** Presentation only. Delete authority remains in its separate certified plan and bridge. */
@@ -12,6 +14,7 @@ export interface StaticFabSemanticFabDeleteReviewView {
 	readonly targetRole: "FAB";
 	readonly fabOrganizationId: number;
 	readonly planFingerprint: string;
+	readonly organizationLabels?: StaticFabReviewOrganizationLabels | null;
 	readonly preserved: readonly StaticFabSemanticFabDeleteImpactRow[];
 	readonly removed: readonly StaticFabSemanticFabDeleteImpactRow[];
 }

@@ -117,7 +117,7 @@
 	background: #13201c;
 }
 
-.tilefab-bank-detach-impact-column:last-child {
+.tilefab-bank-detach-impact-column[data-impact="removed"] {
 	border-color: #665c3c;
 	background: #201e15;
 }

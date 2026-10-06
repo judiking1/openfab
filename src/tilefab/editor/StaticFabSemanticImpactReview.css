@@ -1,0 +1,41 @@
+.tilefab-review-impact-summary {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 10px;
+	margin: 12px 0;
+}
+
+.tilefab-review-summary-group {
+	min-width: 0;
+	padding: 10px 12px;
+	border: 1px solid #38584c;
+	border-radius: 6px;
+	background: #13201c;
+}
+
+.tilefab-review-summary-group[data-impact="removed"] {
+	border-color: #825349;
+	background: #291b17;
+}
+
+.tilefab-review-summary-group p {
+	margin: 4px 0 0;
+	overflow-wrap: anywhere;
+}
+
+.tilefab-review-summary-names {
+	color: #f1eee2;
+	font-weight: 600;
+}
+
+.tilefab-review-technical-details > summary {
+	min-height: 44px;
+	padding: 10px 0;
+	cursor: pointer;
+}
+
+@media (max-width: 560px) {
+	.tilefab-review-impact-summary {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
