@@ -71,6 +71,8 @@ export interface StaticFabAssembleMenuProps {
 export interface StaticFabAssembleActionAvailability {
 	readonly state: "ready" | "blocked";
 	readonly reason: string;
+	/** Display guidance only; does not change action admission. */
+	readonly supportNotice?: "non-detachable-bank";
 }
 
 export function StaticFabAssembleMenu({
@@ -274,6 +276,27 @@ export function StaticFabAssembleMenu({
 						<strong data-testid="assemble-selected-bank-heading" tabIndex={-1}>
 							선택한 Bank
 						</strong>
+						{(bankDetach?.availability.state === "blocked" &&
+							bankDetach.availability.supportNotice === "non-detachable-bank") ||
+						(bankDelete?.availability.state === "blocked" &&
+							bankDelete.availability.supportNotice === "non-detachable-bank") ? (
+							<div
+								className="tilefab-bank-editing-support"
+								data-testid="assemble-bank-editing-support"
+							>
+								<p>
+									이 구성은 Bank 단독 분리·삭제를 지원하지 않습니다. 구조 복제는 위의 ‘선택한 구조
+									복제’를 이용하세요. Bank 분리·삭제는 새 FAB의 기본 구성에서 시작할 수 있습니다.
+								</p>
+								<button
+									type="button"
+									data-testid="assemble-new-fab-for-bank-editing"
+									onClick={onNewFab}
+								>
+									<Factory size={15} /> Bank 편집용 새 FAB 만들기
+								</button>
+							</div>
+						) : null}
 						{bankDetach ? (
 							<>
 								<button

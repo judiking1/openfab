@@ -368,3 +368,49 @@ describe("StaticFabAssembleMenu", () => {
 		expect(markup).toContain("Choose one runtime-recognized Twin Bay.");
 	});
 });
+
+describe("non-detachable Bank support guidance", () => {
+	it("keeps both commands blocked and offers the existing New Fab route once", () => {
+		const availability = {
+			state: "blocked",
+			reason: "이 구성의 Bank 연결은 개별 분리를 지원하지 않습니다",
+			supportNotice: "non-detachable-bank",
+		} as const;
+		const markup = renderToStaticMarkup(
+			<StaticFabAssembleMenu
+				{...props({
+					selectionCount: 1,
+					selectedBankCount: 1,
+					bankDetach: { availability, onDetach: vi.fn() },
+					bankDelete: { availability, onDelete: vi.fn() },
+				})}
+			/>,
+		);
+		expect(markup).toMatch(/data-testid="assemble-detach-selected-bank"[^>]*disabled/);
+		expect(markup).toMatch(/data-testid="assemble-delete-selected-bank"[^>]*disabled/);
+		expect(markup.match(/data-testid="assemble-bank-editing-support"/g)).toHaveLength(1);
+		expect(markup).toContain("Bank 단독 분리·삭제를 지원하지 않습니다");
+		expect(markup).toContain("선택한 구조 복제");
+		expect(markup).toContain("새 FAB의 기본 구성");
+		expect(markup).toContain('data-testid="assemble-new-fab-for-bank-editing"');
+	});
+	it.each([
+		"ready",
+		"blocked",
+	] as const)("adds no support notice for an unrelated %s state", (state) => {
+		const markup = renderToStaticMarkup(
+			<StaticFabAssembleMenu
+				{...props({
+					selectionCount: 1,
+					selectedBankCount: 1,
+					bankDetach: {
+						availability: { state, reason: "현재 문서 동기화 상태" },
+						onDetach: vi.fn(),
+					},
+				})}
+			/>,
+		);
+		expect(markup).not.toContain('data-testid="assemble-bank-editing-support"');
+		expect(markup).not.toContain('data-testid="assemble-new-fab-for-bank-editing"');
+	});
+});

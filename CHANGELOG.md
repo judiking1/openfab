@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.67] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Explain when a preset Bank connection does not support individual detach/delete and provide
+  the existing New Fab entry for supported Bank editing. Preserve the connection policy and guards.
+- Bring the selected Bank command block, including refusal reasons, into view on compact screens.
+
 ## [0.1.66] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

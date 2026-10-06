@@ -1022,6 +1022,7 @@ import { DeferredStaticFabArrangementBridge as StaticFabArrangementBridge } from
 import {
 	STATIC_FAB_ASSEMBLE_DUPLICATE_CAPTURE_MODE,
 	StaticFabAssembleMenu,
+	type StaticFabAssembleActionAvailability,
 } from "./StaticFabAssembleMenu";
 import { StaticFabAuthoredStructurePanel } from "./StaticFabAuthoredStructurePanel";
 import {
@@ -25761,7 +25762,7 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedSemanticBankOrganization = organizationMultiSelection.selectedOrganizationIds.length === 1 &&
 		selectedAssemblySemanticRole === "BAY_BANK"
 		? organizationRecordsById.get(organizationMultiSelection.selectedOrganizationIds[0] as number) ?? null : null;
-	const resolveBankDetachAvailability = (retrying?: StaticFabSemanticBankDetachSession): Readonly<{ state: "ready" | "blocked"; reason: string }> => {
+	const resolveBankDetachAvailability = (retrying?: StaticFabSemanticBankDetachSession): StaticFabAssembleActionAvailability => {
 		const blocked = (reason: string) => ({ state: "blocked" as const, reason });
 		const bank = selectedSemanticBankOrganization;
 		if (!bank || organizationMultiSelectionRef.current.selectedOrganizationIds.length !== 1 ||
@@ -25790,7 +25791,12 @@ export default function TileFabApp(): React.ReactElement {
 		const relationship = relationships[0];
 		if (relationships.length !== 1 || !relationship || relationship.managedChildOrganizationIds.length !== 1) return blocked("다른 Bank와 소속 관계를 공유하여 단독 분리할 수 없습니다");
 		if (relationship.parentOrganizationId !== parents[0] || relationship.hierarchyRole !== "BANK_TO_FAB" ||
-			relationship.purpose !== "HIERARCHY_LINK" || relationship.reviewPolicy !== "REVIEW_REQUIRED") return blocked("이 연결 관계는 현재 Bank 분리 범위에 해당하지 않습니다");
+			relationship.purpose !== "HIERARCHY_LINK") return blocked("이 연결 관계는 현재 Bank 분리 범위에 해당하지 않습니다");
+		if (relationship.reviewPolicy === "AUTHORING_NON_DETACHABLE") return {
+			state: "blocked", reason: "이 구성의 Bank 연결은 개별 분리를 지원하지 않습니다",
+			supportNotice: "non-detachable-bank",
+		};
+		if (relationship.reviewPolicy !== "REVIEW_REQUIRED") return blocked("이 연결 관계는 현재 Bank 분리 범위에 해당하지 않습니다");
 		return { state: "ready", reason: "Bank 내부 구성을 보존하고 FAB 연결 제거를 검토합니다" };
 	};
 	const bankDetachAvailability = resolveBankDetachAvailability();
@@ -25945,7 +25951,7 @@ export default function TileFabApp(): React.ReactElement {
 		document: editorModelRef.current.document,
 		scope: { projectId: projectSessionRef.current.manifest.id, projectGeneration: editorModelRef.current.generation },
 	});
-	const resolveBankDeleteAvailability = (retrying?: StaticFabSemanticBankDeleteSession): Readonly<{ state: "ready" | "blocked"; reason: string }> => {
+	const resolveBankDeleteAvailability = (retrying?: StaticFabSemanticBankDeleteSession): StaticFabAssembleActionAvailability => {
 		const blocked = (reason: string) => ({ state: "blocked" as const, reason });
 		const bank = selectedSemanticBankOrganization;
 		if (!bank || organizationMultiSelectionRef.current.selectedOrganizationIds.length !== 1 ||
@@ -25975,7 +25981,12 @@ export default function TileFabApp(): React.ReactElement {
 		const relationship = relationships[0];
 		if (relationships.length !== 1 || !relationship || relationship.managedChildOrganizationIds.length !== 1) return blocked("다른 Bank와 소속 관계를 공유하여 단독 삭제할 수 없습니다");
 		if (relationship.parentOrganizationId !== parents[0] || relationship.hierarchyRole !== "BANK_TO_FAB" ||
-			relationship.purpose !== "HIERARCHY_LINK" || relationship.reviewPolicy !== "REVIEW_REQUIRED") return blocked("이 연결 관계는 현재 Bank 삭제 범위에 해당하지 않습니다");
+			relationship.purpose !== "HIERARCHY_LINK") return blocked("이 연결 관계는 현재 Bank 삭제 범위에 해당하지 않습니다");
+		if (relationship.reviewPolicy === "AUTHORING_NON_DETACHABLE") return {
+			state: "blocked", reason: "이 구성의 Bank 연결은 개별 삭제를 지원하지 않습니다",
+			supportNotice: "non-detachable-bank",
+		};
+		if (relationship.reviewPolicy !== "REVIEW_REQUIRED") return blocked("이 연결 관계는 현재 Bank 삭제 범위에 해당하지 않습니다");
 		return { state: "ready", reason: "FAB 연결과 Bank 하위 구성의 삭제 범위를 함께 검토합니다" };
 	};
 	const bankDeleteAvailability = resolveBankDeleteAvailability();
@@ -31988,7 +31999,10 @@ export default function TileFabApp(): React.ReactElement {
 					'[data-testid="pattern-configurator"] button, [data-testid="pattern-configurator"] input',
 				)
 			: palette?.querySelector<HTMLButtonElement>('[data-testid="fab-preset-browser"]'));
-		if (structureHeading) structureHeading.scrollIntoView({ block: "nearest" });
+		if (structureHeading) {
+			// The Bank heading alone can leave both disabled commands and their reasons clipped.
+			(structureHeading.closest(".tilefab-assemble-semantic-bank") ?? structureHeading).scrollIntoView({ block: "nearest" });
+		}
 		target?.focus();
 	}, [templatePaletteOpen]);
 	const openActiveTemplateConfiguration = (returnFocusTarget?: HTMLButtonElement | null): void =>
