@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.68] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Restore the previous editor tool and activity when organization blueprint placement ends,
+  including copied Process Loops and Recent placement. Keep placement history and repeat behavior.
+- Add an explicit placement Apply button using the existing validated command. On compact screens,
+  prioritize mode/apply/exit controls, compact the tool rail and keep recovery clear of placement.
+
 ## [0.1.67] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

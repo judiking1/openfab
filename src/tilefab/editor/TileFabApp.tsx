@@ -2712,6 +2712,11 @@ export default function TileFabApp(): React.ReactElement {
 	const areaStampRotationPivotRef = useRef<BlueprintPlacementRotationPivot | null>(null);
 	const organizationBundlePlacementSessionRef =
 		useRef<StaticFabOrganizationBundlePlacementSession | null>(null);
+	const organizationPlacementReturnContextRef = useRef<{
+		document: RailDocument;
+		activity: EditorActivity;
+		tool: EditorTool;
+	} | null>(null);
 	const organizationBundlePlacementInitialAccessibilityRef =
 		useRef<StaticFabOrganizationBundlePlacementSession | null>(null);
 	const organizationBundlePlacementCommittedCountRef = useRef(0);
@@ -5383,6 +5388,7 @@ export default function TileFabApp(): React.ReactElement {
 				areaStampSessionRef.current = null;
 				areaStampCommittedCountRef.current = 0;
 				organizationBundlePlacementSessionRef.current = null;
+				organizationPlacementReturnContextRef.current = null;
 				organizationBundlePlacementCommittedCountRef.current = 0;
 				ordinaryDuplicatedAssemblyPlacementReceiptRef.current = null;
 				organizationBundlePlacementPreviewArtifactRef.current = null;
@@ -6371,6 +6377,13 @@ export default function TileFabApp(): React.ReactElement {
 				: null
 			: null;
 		if (!next) {
+			const returnContext = organizationPlacementReturnContextRef.current;
+			organizationPlacementReturnContextRef.current = null;
+			if (current && returnContext?.document === editorModelRef.current.document) {
+				toolRef.current = returnContext.tool;
+				setTool(returnContext.tool);
+				updateEditorActivity(returnContext.activity);
+			}
 			organizationBundlePlacementInitialAccessibilityRef.current = null;
 			if (canvasRef.current) {
 				canvasRef.current.dataset.organizationBundleInitialAccessibility = "";
@@ -19978,6 +19991,7 @@ export default function TileFabApp(): React.ReactElement {
 		areaStampSessionRef.current = null;
 		areaStampCommittedCountRef.current = 0;
 		organizationBundlePlacementSessionRef.current = null;
+		organizationPlacementReturnContextRef.current = null;
 		organizationBundlePlacementCommittedCountRef.current = 0;
 		ordinaryDuplicatedAssemblyPlacementReceiptRef.current = null;
 		organizationBundlePlacementPreviewArtifactRef.current = null;
@@ -23196,6 +23210,11 @@ export default function TileFabApp(): React.ReactElement {
 		sourceRootOrganizationIds: readonly number[] = Object.freeze([]),
 	): void => {
 		clearTransientConstruction();
+		const returnContext = guidedBuildExperienceActive ? null : {
+			document: editorModelRef.current.document,
+			activity: editorActivityRef.current,
+			tool: toolRef.current,
+		};
 		if (blueprintPlacementCapturesRecent(origin)) {
 			publishRailClipboard(Object.freeze({ kind: "organization", bundle, label }));
 		}
@@ -23210,6 +23229,7 @@ export default function TileFabApp(): React.ReactElement {
 			canvasRef.current.dataset.organizationBundleInitialAccessibility = "pending";
 		}
 		updateOrganizationBundlePlacementSession(session);
+		organizationPlacementReturnContextRef.current = returnContext;
 		buildModeRef.current = "route";
 		setBuildMode("route");
 		setTemplatePaletteOpen(false);
@@ -32919,6 +32939,9 @@ export default function TileFabApp(): React.ReactElement {
 	});
 	const editorToolDescriptionConstraint =
 		editorToolDensity.hardConstraint ??
+		(organizationBundlePlacementSession && compactNavigatorViewport
+			? "조직 복제 배치 중에는 캔버스 공간을 확보합니다"
+			: null) ??
 		(equipmentWorkspaceActive && compactNavigatorViewport
 			? "장비 배치 중에는 캔버스 공간을 확보합니다"
 			: null);
@@ -38444,10 +38467,24 @@ export default function TileFabApp(): React.ReactElement {
 										</button>
 									) : null}
 								</fieldset>
+								<div className="tilefab-organization-placement-actions">
+									<button
+										type="button"
+										className="tilefab-placement-apply"
+										data-testid="organization-bundle-apply"
+										disabled={blueprintPlacementPending || modelSyncPending || projectBusy || projectSourceOperationPending}
+										onClick={(event) => {
+											applyBlueprintPlacementKeyboard(event.shiftKey);
+											canvasRef.current?.focus({ preventScroll: true });
+										}}
+									>
+										<Check size={14} /> {blueprintPlacementPending ? "배치 검사 중…" : "현재 위치에 적용"}
+									</button>
+									{!duplicatedTwinBayConnectorHandoff && !duplicatedBayBankConnectorHandoff
+										? organizationBundlePlacementExitAction
+										: null}
+								</div>
 								{heldBlueprintSaveAction}
-								{!duplicatedTwinBayConnectorHandoff && !duplicatedBayBankConnectorHandoff
-									? organizationBundlePlacementExitAction
-									: null}
 							</>
 						) : areaStampSession ? (
 							<>
