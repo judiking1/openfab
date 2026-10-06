@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
+import type { PortEquipmentGroupEditPlan } from "../compile/PortEquipmentGroupEditPlanner";
+import { compilePortSlotPreparedArtifactCatalog } from "../compile/PortSlotPreparedArtifacts";
 import type { StkDraftSelection } from "../compile/StkDraftSelector";
+import { createInvalidPortEquipmentMutationPlan } from "../core/PortEquipmentPlan";
+import { TileMap } from "../core/TileMap";
 import {
+	portEquipmentGroupEditFeedback,
 	portEquipmentReasonLabel,
 	stkDraftAuthoringInstruction,
 	stkDraftKeyboardTargetLabel,
@@ -12,6 +18,45 @@ import {
 } from "./StkDraftPresentation";
 
 describe("StkDraftPresentation", () => {
+	it("keeps both failed and conflicting Port IDs and avoids invented coordinates", () => {
+		expect(portEquipmentReasonLabel("PORT-12 maps to an unsafe rail slot.")).toBe(
+			"PORT-12 · 그룹의 일부 포트가 안전 영역을 벗어납니다",
+		);
+		expect(portEquipmentReasonLabel("PORT-12 conflicts with PORT-7.")).toBe(
+			"PORT-12 · PORT-7이 대상 슬롯을 이미 사용하고 있습니다",
+		);
+		const slots = compilePortSlotPreparedArtifactCatalog(compilePhysicalRail(new TileMap())).EQ
+			.slots;
+		const plan: PortEquipmentGroupEditPlan = {
+			...createInvalidPortEquipmentMutationPlan(
+				"edit-port-equipment",
+				slots.revision,
+				0,
+				"PORT-12 has no matching rail slot after transformation.",
+			),
+			groupEdit: {
+				mode: "move",
+				sourceEquipmentGroupId: 1,
+				targetEquipmentGroupId: 1,
+				sourceAnchorPortId: 11,
+				targetAnchorRow: 0,
+				quarterTurns: 0,
+				portTargets: [],
+			},
+		};
+		const missing = portEquipmentGroupEditFeedback(plan, slots);
+		expect(missing.reason).toContain("PORT-12");
+		expect(missing.location).toBeNull();
+		expect(missing.recovery).toContain("다른 직선 슬롯");
+		const unknown = portEquipmentGroupEditFeedback(
+			{ ...plan, reason: "선택한 Loop 밖으로 이동할 수 없습니다" },
+			slots,
+		);
+		expect(unknown.location).toBeNull();
+		expect(unknown.summary).toContain("선택한 Loop 밖");
+		expect(unknown.summary).toContain("Esc로 취소");
+	});
+
 	it("keeps a rejected click visible even when the retained draft was complete", () => {
 		const presentation = stkDraftStatusPresentation(
 			selection({
@@ -49,7 +94,7 @@ describe("StkDraftPresentation", () => {
 			"이미 Port #7이 이 슬롯을 사용하고 있습니다",
 		);
 		expect(portEquipmentReasonLabel("PORT-3 conflicts with PORT-9.")).toBe(
-			"PORT-9이 대상 슬롯을 이미 사용하고 있습니다",
+			"PORT-3 · PORT-9이 대상 슬롯을 이미 사용하고 있습니다",
 		);
 		expect(portEquipmentReasonLabel("STK body span overlaps equipment group 4.")).toBe(
 			"STK 본체 영역이 장비 그룹 4와 겹칩니다",

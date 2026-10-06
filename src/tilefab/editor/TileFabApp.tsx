@@ -1172,6 +1172,7 @@ import {
 	type StaticFabSemanticBayMutationSession,
 } from "./StaticFabSemanticBayMutationSession";
 import {
+	portEquipmentGroupEditFeedback,
 	portEquipmentReasonLabel,
 	stkDraftKeyboardTargetLabel,
 	stkDraftReasonLabel,
@@ -16523,7 +16524,7 @@ export default function TileFabApp(): React.ReactElement {
 				? "empty"
 				: plan?.valid
 					? `valid:${session.eligibleProcessLoopIds?.join(",") ?? ""}`
-					: "invalid";
+					: `invalid:${plan?.reason ?? ""}`;
 		const loopSummary = plan?.valid
 			? session.preservesLoopOwnership
 				? " · 현재 Loop 소속 유지 · 모든 Port가 같은 Loop 안에 있습니다"
@@ -16534,7 +16535,7 @@ export default function TileFabApp(): React.ReactElement {
 		const summary =
 			row === null
 				? "기준 Port 슬롯을 선택하세요."
-				: `대상 X ${session.slots.routeXs[row]}미터 · Z ${session.slots.routeZs[row]}미터 · ${plan?.valid ? `배치 가능 · Enter로 적용${loopSummary}` : `배치 불가 · ${portEquipmentReasonLabel(plan?.reason ?? "다른 슬롯을 선택하세요")}`}`;
+				: `대상 X ${session.slots.routeXs[row]}미터 · Z ${session.slots.routeZs[row]}미터 · ${plan?.valid ? `배치 가능 · Enter로 적용${loopSummary}` : `배치 불가 · ${plan ? portEquipmentGroupEditFeedback(plan, session.slots).summary : "다른 슬롯을 선택하세요"}`}`;
 		setPortEquipmentGroupEditAccessibilitySummary(summary);
 		if (portEquipmentGroupEditReadoutRef.current) {
 			portEquipmentGroupEditReadoutRef.current.textContent = summary;
@@ -16641,7 +16642,7 @@ export default function TileFabApp(): React.ReactElement {
 			previewReadoutRef.current.textContent = session.plan
 				? session.plan.valid
 					? `${session.portType} ${session.mode === "move" ? "그룹 이동" : "그룹 복제"} · ${session.plan.groupEdit.portTargets.length} PORT`
-					: portEquipmentReasonLabel(session.plan.reason)
+					: portEquipmentGroupEditFeedback(session.plan, session.slots).summary
 				: "";
 		}
 		publishPortEquipmentGroupEditAccessibility(
@@ -16668,7 +16669,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (!previewPlan.valid) {
-			setStatus(portEquipmentReasonLabel(previewPlan.reason));
+			setStatus(portEquipmentGroupEditFeedback(previewPlan, session.slots).summary);
 			scheduleRender();
 			return;
 		}
@@ -16689,7 +16690,8 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		session.plan = plan;
 		if (!plan.valid) {
-			setStatus(portEquipmentReasonLabel(plan.reason));
+			publishPortEquipmentGroupEditAccessibility(session);
+			setStatus(portEquipmentGroupEditFeedback(plan, session.slots).summary);
 			scheduleRender();
 			return;
 		}
@@ -16795,7 +16797,7 @@ export default function TileFabApp(): React.ReactElement {
 		const feedback = plan
 			? plan.valid
 				? `${session.portType} 그룹 ${session.mode === "move" ? "이동" : "복제"} 가능 · Enter로 확정`
-				: portEquipmentReasonLabel(plan.reason)
+				: portEquipmentGroupEditFeedback(plan, session.slots).summary
 			: `${session.portType} 기준 포트를 선택하세요`;
 		session.feedbackKey = plan?.valid ? "valid" : `keyboard:${plan?.reason ?? "empty"}`;
 		setStatus(feedback);
@@ -18738,9 +18740,13 @@ export default function TileFabApp(): React.ReactElement {
 				const feedback = plan
 					? plan.valid
 						? `${groupEditSession.portType} 그룹 ${groupEditSession.mode === "move" ? "이동" : "복제"} 가능 · 클릭하여 확정`
-						: portEquipmentReasonLabel(plan.reason)
+						: portEquipmentGroupEditFeedback(plan, groupEditSession.slots).summary
 					: `${groupEditSession.portType} 기준 포트를 놓을 슬롯을 선택하세요`;
-				const feedbackKey = plan ? (plan.valid ? "valid" : `invalid:${plan.reason}`) : "empty";
+				const feedbackKey = plan
+					? plan.valid
+						? "valid"
+						: `invalid:${nextPortSlot}:${plan.reason}`
+					: "empty";
 				if (groupEditSession.feedbackKey !== feedbackKey) {
 					groupEditSession.feedbackKey = feedbackKey;
 					setStatus(feedback);
@@ -34407,7 +34413,7 @@ export default function TileFabApp(): React.ReactElement {
 				{portEquipmentGroupEditSession ? (
 					<>
 						<p id="tilefab-port-equipment-group-edit-description" className="tilefab-sr-only">
-							{portEquipmentGroupEditSession.portType} 장비 그룹 전체를 {portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"}하는 단계입니다. 방향키 또는 WASD로 기준 Port 슬롯을 이동하고 Enter로 적용하세요. Escape로 취소할 수 있습니다.
+							{portEquipmentGroupEditSession.portType} 장비 그룹 전체를 {portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"}하는 단계입니다. 방향키 또는 WASD로 기준 Port 슬롯을 이동하고 Enter 또는 클릭으로 적용하세요. Space를 누른 채 드래그하면 화면만 이동합니다. Escape로 취소할 수 있습니다.
 						</p>
 						<p
 							id="tilefab-port-equipment-group-edit-readout"

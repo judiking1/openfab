@@ -71,6 +71,52 @@ export interface PortEquipmentGroupEditPlan extends PortEquipmentMutationPlan {
 	readonly groupEdit: PortEquipmentGroupEditMetadata;
 }
 
+export type PortEquipmentGroupEditFailure =
+	| Readonly<{ kind: "port"; sourcePortId: number; targetRow: number | null }>
+	| Readonly<{ kind: "body"; conflictingEquipmentGroupId: number }>;
+
+/** Locate only a rejection named by this plan. This is presentation evidence, never admission. */
+export function describePortEquipmentGroupEditFailure(
+	plan: Pick<PortEquipmentGroupEditPlan, "valid" | "reason" | "groupEdit" | "baseRevision">,
+	slots: Pick<CompiledPortSlots, "revision" | "count" | "worldPositions">,
+): PortEquipmentGroupEditFailure | null {
+	if (plan.valid || plan.baseRevision !== slots.revision) return null;
+	const portFailure = plan.reason.match(
+		/^PORT-(\d+) (?:has no matching rail slot after transformation|maps to an unsafe rail slot|conflicts with (?:PORT-\d+|equipment group \d+|the static clearance envelope))\.$/,
+	);
+	if (portFailure) {
+		const sourcePortId = Number(portFailure[1]);
+		const target = plan.groupEdit.portTargets.find((port) => port.sourcePortId === sourcePortId);
+		const row = target?.row;
+		return {
+			kind: "port",
+			sourcePortId,
+			targetRow:
+				row !== undefined &&
+				Number.isInteger(row) &&
+				row >= 0 &&
+				row < slots.count &&
+				Number.isFinite(slots.worldPositions[row * 2]) &&
+				Number.isFinite(slots.worldPositions[row * 2 + 1])
+					? row
+					: null,
+		};
+	}
+	const stkBody = plan.reason.match(/^STK body span overlaps equipment group (\d+)\.$/);
+	if (stkBody) return { kind: "body", conflictingEquipmentGroupId: Number(stkBody[1]) };
+	const eqBody = plan.reason.match(
+		/^(?:Port equipment layout is invalid: )?EQ (\d+) 몸체가 (?:OHB|EQ|STK) (\d+) 몸체와 겹칩니다 ·/,
+	);
+	if (eqBody) {
+		const first = Number(eqBody[1]),
+			second = Number(eqBody[2]);
+		const target = plan.groupEdit.targetEquipmentGroupId;
+		if (first === target || second === target)
+			return { kind: "body", conflictingEquipmentGroupId: first === target ? second : first };
+	}
+	return null;
+}
+
 /** Revision-bound lookup that keeps pointer-move placement O(group port count). */
 export class PortEquipmentGroupSlotIndex {
 	readonly revision: number;

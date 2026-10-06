@@ -4,16 +4,19 @@ import type {
 	PortEquipmentGroupEditMode,
 	PortEquipmentGroupEditPlan,
 } from "../compile/PortEquipmentGroupEditPlanner";
+import type { CompiledPortSlots } from "../compile/PortSlotCompiler";
 import type { EquipmentGroupRecord } from "../core/EquipmentGroup";
-import { portEquipmentReasonLabel } from "./StkDraftPresentation";
+import { portEquipmentGroupEditFeedback } from "./StkDraftPresentation";
 
 export interface PortEquipmentGroupTransformBarProps {
 	readonly exitPortEquipmentGroupEditToInspect: (message: string) => void;
 	readonly portEquipmentGroupEditSession: Readonly<{
 		mode: PortEquipmentGroupEditMode;
+		preservesLoopOwnership: boolean;
 		portType: "EQ" | "STK";
 		sourceEquipmentGroupId: number;
-		plan: Pick<PortEquipmentGroupEditPlan, "valid" | "reason"> | null;
+		plan: PortEquipmentGroupEditPlan | null;
+		slots: CompiledPortSlots;
 		eligibleProcessLoopIds: readonly number[] | null;
 	}>;
 	readonly portEquipmentGroupEditSource: Pick<EquipmentGroupRecord, "portIds"> | null | undefined;
@@ -26,6 +29,11 @@ export function PortEquipmentGroupTransformBar({
 	portEquipmentGroupEditSource,
 	portEquipmentGroupEditState,
 }: PortEquipmentGroupTransformBarProps): ReactNode {
+	const plan = portEquipmentGroupEditSession.plan;
+	const feedback =
+		plan && !plan.valid
+			? portEquipmentGroupEditFeedback(plan, portEquipmentGroupEditSession.slots)
+			: null;
 	return (
 		<div
 			className="tilefab-buildbar tilefab-equipment-transformbar tilefab-equipment-group-transformbar"
@@ -50,10 +58,26 @@ export function PortEquipmentGroupTransformBar({
 				{portEquipmentGroupEditState === "valid"
 					? "ENTER / LMB 배치 · 방향키 / WASD"
 					: portEquipmentGroupEditState === "invalid"
-						? portEquipmentReasonLabel(
-								portEquipmentGroupEditSession.plan?.reason ?? "배치할 수 없습니다",
-							)
+						? (feedback?.reason ?? "배치할 수 없습니다")
 						: "방향키 / WASD로 기준 슬롯 선택"}
+				{feedback ? (
+					<small
+						className="tilefab-equipment-group-loop-preview"
+						data-testid="equipment-group-edit-failure"
+					>
+						{feedback.location ? (
+							<>
+								<span data-testid="equipment-group-edit-failure-location">{feedback.location}</span>
+								<br />
+							</>
+						) : null}
+						{feedback.recovery}
+					</small>
+				) : (
+					<small className="tilefab-equipment-group-loop-preview">
+						Enter/클릭 적용 · Space+드래그 화면 이동
+					</small>
+				)}
 				{portEquipmentGroupEditSession.plan?.valid ? (
 					<small
 						className="tilefab-equipment-group-loop-preview"
@@ -62,11 +86,17 @@ export function PortEquipmentGroupTransformBar({
 							portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? "eligible" : "none"
 						}
 					>
-						{portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? (
+						{portEquipmentGroupEditSession.preservesLoopOwnership ? (
+							<>
+								현재 Loop 소속 유지
+								<br />
+								모든 Port가 같은 Loop 안에 있습니다
+							</>
+						) : portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? (
 							<>
 								{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능
 								<br />
-								소속은 배치 후 별도 지정
+								소속이 없는 장비는 배치 후 Loop를 별도 지정
 							</>
 						) : (
 							<>

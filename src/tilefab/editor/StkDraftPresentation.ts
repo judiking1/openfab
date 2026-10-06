@@ -1,3 +1,8 @@
+import {
+	describePortEquipmentGroupEditFailure,
+	type PortEquipmentGroupEditPlan,
+} from "../compile/PortEquipmentGroupEditPlanner";
+import type { CompiledPortSlots } from "../compile/PortSlotCompiler";
 import type { StkDraftSelection } from "../compile/StkDraftSelector";
 import {
 	STK_MAXIMUM_BACK_TO_BACK_LANE_SEPARATION_CELLS,
@@ -200,10 +205,12 @@ export function stkDraftReasonLabel(reason: string): string {
 }
 
 export function portEquipmentReasonLabel(reason: string): string {
+	const source = reason.match(/^PORT-(\d+) /);
+	const prefix = source ? `PORT-${source[1]} · ` : "";
 	const portConflict = reason.match(/conflicts with PORT-(\d+)/);
-	if (portConflict) return `PORT-${portConflict[1]}이 대상 슬롯을 이미 사용하고 있습니다`;
+	if (portConflict) return `${prefix}PORT-${portConflict[1]}이 대상 슬롯을 이미 사용하고 있습니다`;
 	const groupConflict = reason.match(/conflicts with equipment group (\d+)/);
-	if (groupConflict) return `장비 그룹 ${groupConflict[1]}의 안전 영역과 겹칩니다`;
+	if (groupConflict) return `${prefix}장비 그룹 ${groupConflict[1]}의 안전 영역과 겹칩니다`;
 	const stkBodyConflict = reason.match(/STK body span overlaps equipment group (\d+)/);
 	if (stkBodyConflict) return `STK 본체 영역이 장비 그룹 ${stkBodyConflict[1]}와 겹칩니다`;
 	const translations: readonly (readonly [string, string])[] = [
@@ -223,7 +230,37 @@ export function portEquipmentReasonLabel(reason: string): string {
 		["no longer exists", "선택한 장비 그룹이 더 이상 존재하지 않습니다"],
 	];
 	for (const [fragment, translation] of translations) {
-		if (reason.includes(fragment)) return translation;
+		if (reason.includes(fragment)) return prefix + translation;
 	}
 	return reason;
+}
+
+/** Preserve the planner's failed identity without inventing a point for an unlocated rejection. */
+export function portEquipmentGroupEditFeedback(
+	plan: PortEquipmentGroupEditPlan,
+	slots: CompiledPortSlots,
+): Readonly<{ reason: string; location: string | null; recovery: string; summary: string }> {
+	const failure = describePortEquipmentGroupEditFailure(plan, slots);
+	const reason = portEquipmentReasonLabel(plan.reason);
+	const coordinate = (value: number): string => String(Number(value.toFixed(2)));
+	const location =
+		failure?.kind === "port" && failure.targetRow !== null
+			? `PORT-${failure.sourcePortId} 대상 · X ${coordinate(slots.worldPositions[failure.targetRow * 2] as number)} m · Z ${coordinate(slots.worldPositions[failure.targetRow * 2 + 1] as number)} m`
+			: failure?.kind === "body"
+				? `대상 본체와 장비 ${failure.conflictingEquipmentGroupId}의 본체 범위 확인`
+				: null;
+	const recovery =
+		plan.baseRevision !== slots.revision
+			? "Esc로 취소한 뒤 이동을 다시 시작하세요"
+			: failure?.kind === "body"
+				? "겹친 몸체에서 떨어진 위치로 이동하세요 · Esc 취소"
+				: failure?.kind === "port"
+					? "방향키/WASD로 전체 Port가 놓일 다른 직선 슬롯을 고르세요 · Esc 취소"
+					: "다른 위치를 선택하거나 Esc로 취소하세요 · 원본은 유지됩니다";
+	return {
+		reason,
+		location,
+		recovery,
+		summary: [reason, location, recovery].filter(Boolean).join(" · "),
+	};
 }

@@ -25,7 +25,10 @@ import {
 	compilePhysicalModuleSelection,
 } from "../compile/PhysicalPathSelection";
 import { PhysicalPathSpatialIndex } from "../compile/PhysicalPathSpatialIndex";
-import type { PortEquipmentGroupEditPlan } from "../compile/PortEquipmentGroupEditPlanner";
+import {
+	describePortEquipmentGroupEditFailure,
+	type PortEquipmentGroupEditPlan,
+} from "../compile/PortEquipmentGroupEditPlanner";
 import {
 	type CompiledPortEquipmentPresentation,
 	equipmentGroupPresentationRow,
@@ -2374,6 +2377,7 @@ export class TileRenderer {
 			!plan ||
 			!presentation ||
 			preview.slots.revision !== input.map.getRevision() ||
+			plan.baseRevision !== input.map.getRevision() ||
 			presentation.revision !== input.map.getRevision()
 		) {
 			return;
@@ -2410,6 +2414,7 @@ export class TileRenderer {
 			return { x: targetAnchor.x + relative.x, y: targetAnchor.y + relative.y };
 		};
 		const valid = plan.valid;
+		const failure = describePortEquipmentGroupEditFailure(plan, slots);
 		const stroke = valid ? "#96f2dc" : "#ff8d94";
 		const fill = valid ? "rgba(73, 213, 181, 0.24)" : "rgba(240, 92, 101, 0.2)";
 		ctx.save();
@@ -2480,8 +2485,8 @@ export class TileRenderer {
 				Math.atan2(targetTangentTip.y - targetCenter.y, targetTangentTip.x - targetCenter.x),
 			);
 			ctx.fillStyle = fill;
-			ctx.strokeStyle = stroke;
-			ctx.lineWidth = valid ? 2.2 : 2.6;
+			ctx.strokeStyle = failure?.kind === "body" ? "#ffd479" : stroke;
+			ctx.lineWidth = failure?.kind === "body" ? 3.5 : valid ? 2.2 : 2.6;
 			ctx.setLineDash(valid ? [] : [7, 5]);
 			roundRect(ctx, -width / 2, -height / 2, width, height, Math.min(7, height * 0.22));
 			ctx.fill();
@@ -2524,10 +2529,88 @@ export class TileRenderer {
 			ctx.textBaseline = "middle";
 			ctx.fillText(index === 0 ? "A" : String(index + 1), point.x, point.y + 0.5);
 		}
+		// The slot is named by the rejected plan; unknown/missing targets get no guessed marker.
+		if (failure?.kind === "port" && failure.targetRow !== null) {
+			const failedPoint = this.worldToScreen(
+				{
+					x: slots.worldPositions[failure.targetRow * 2] as number,
+					y: slots.worldPositions[failure.targetRow * 2 + 1] as number,
+				},
+				input.camera,
+			);
+			if (
+				failedPoint.x >= 0 &&
+				failedPoint.x <= input.width &&
+				failedPoint.y >= 0 &&
+				failedPoint.y <= input.height
+			) {
+				ctx.beginPath();
+				ctx.arc(failedPoint.x, failedPoint.y, radius + 6, 0, Math.PI * 2);
+				ctx.strokeStyle = "#ffd479";
+				ctx.lineWidth = 3;
+				ctx.setLineDash([]);
+				ctx.stroke();
+				ctx.beginPath();
+				ctx.moveTo(failedPoint.x - 5, failedPoint.y - 5);
+				ctx.lineTo(failedPoint.x + 5, failedPoint.y + 5);
+				ctx.moveTo(failedPoint.x + 5, failedPoint.y - 5);
+				ctx.lineTo(failedPoint.x - 5, failedPoint.y + 5);
+				ctx.strokeStyle = "#fff7db";
+				ctx.stroke();
+				const text = `PORT-${failure.sourcePortId} !`;
+				ctx.font = "800 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+				const width = ctx.measureText(text).width;
+				const x = clamp(failedPoint.x + radius + 12, 8, Math.max(8, input.width - width - 12));
+				const y = clamp(failedPoint.y + radius + 22, 20, Math.max(20, input.height - 8));
+				ctx.fillStyle = "rgba(48, 16, 20, 0.97)";
+				roundRect(ctx, x - 5, y - 13, width + 10, 19, 3);
+				ctx.fill();
+				ctx.fillStyle = "#ffd479";
+				ctx.textAlign = "left";
+				ctx.textBaseline = "alphabetic";
+				ctx.fillText(text, x, y);
+			}
+		} else if (failure?.kind === "body") {
+			const conflictRow = equipmentGroupPresentationRow(
+				presentation,
+				failure.conflictingEquipmentGroupId,
+			);
+			if (conflictRow !== null) {
+				const start = presentation.groupBodySectionOffsets[conflictRow] as number;
+				const end = presentation.groupBodySectionOffsets[conflictRow + 1] as number;
+				for (let row = start; row < end; row++) {
+					const world = {
+						x: presentation.bodySectionCenters[row * 2] as number,
+						y: presentation.bodySectionCenters[row * 2 + 1] as number,
+					};
+					const center = this.worldToScreen(world, input.camera);
+					const tip = this.worldToScreen(
+						{
+							x: world.x + (presentation.bodySectionTangents[row * 2] as number),
+							y: world.y + (presentation.bodySectionTangents[row * 2 + 1] as number),
+						},
+						input.camera,
+					);
+					const width =
+						(presentation.bodySectionHalfExtents[row * 2] as number) * 2 * input.camera.zoom;
+					const height =
+						(presentation.bodySectionHalfExtents[row * 2 + 1] as number) * 2 * input.camera.zoom;
+					ctx.save();
+					ctx.translate(center.x, center.y);
+					ctx.rotate(Math.atan2(tip.y - center.y, tip.x - center.x));
+					ctx.strokeStyle = "#ffd479";
+					ctx.lineWidth = 3;
+					ctx.setLineDash([4, 3]);
+					roundRect(ctx, -width / 2, -height / 2, width, height, Math.min(7, height * 0.22));
+					ctx.stroke();
+					ctx.restore();
+				}
+			}
+		}
 		const anchor = points[0] as ScreenPoint;
 		const label = `${plan.groupEdit.mode === "move" ? "MOVE" : "COPY"} ${slots.portType} · ${
 			points.length
-		} PORT`;
+		} PORT${failure?.kind === "body" ? ` · BODY ↔ ${failure.conflictingEquipmentGroupId}` : ""}`;
 		ctx.font = "800 11px Inter, system-ui, sans-serif";
 		const labelWidth = ctx.measureText(label).width;
 		const labelX = clamp(anchor.x + 14, 8, Math.max(8, input.width - labelWidth - 18));

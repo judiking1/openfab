@@ -5,9 +5,19 @@ import { PATH_KIND, samplePhysicalPath } from "../compile/PhysicalPathCompiler";
 import { physicalPathIdentity } from "../compile/PhysicalPathIdentity";
 import { PhysicalPathIdentityIndex } from "../compile/PhysicalPathLookup";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
-import { compilePortEquipmentPresentation } from "../compile/PortEquipmentPresentation";
-import { PORT_SLOT_STATUS, portSlotRecord } from "../compile/PortSlotCompiler";
 import {
+	PortEquipmentGroupSlotIndex,
+	planPortEquipmentGroupEdit,
+} from "../compile/PortEquipmentGroupEditPlanner";
+import { compilePortEquipmentPresentation } from "../compile/PortEquipmentPresentation";
+import { planEqRowPlacement } from "../compile/PortPlacementPlanner";
+import {
+	PORT_SLOT_STATUS,
+	PortSlotAvailabilityIndex,
+	portSlotRecord,
+} from "../compile/PortSlotCompiler";
+import {
+	compilePortSlotPreparedArtifactCatalog,
 	compilePortSlotPreparedArtifacts,
 	createPreparedPortSlotAvailabilityIndex,
 } from "../compile/PortSlotPreparedArtifacts";
@@ -110,6 +120,103 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("TileRenderer camera transforms", () => {
+	it.each([
+		"located",
+		"unknown",
+		"stale",
+	] as const)("marks only the documented failed target Port: %s", (caseKind) => {
+		const document = new RailDocument();
+		for (const [start, end] of [
+			[
+				{ x: 0, y: 0 },
+				{ x: 13, y: 0 },
+			],
+			[
+				{ x: 13, y: 0 },
+				{ x: 13, y: 4 },
+			],
+			[
+				{ x: 13, y: 4 },
+				{ x: 0, y: 4 },
+			],
+			[
+				{ x: 0, y: 4 },
+				{ x: 0, y: 0 },
+			],
+		])
+			expect(document.commit(planRailConstruction(document.map, start, end))).toBe(true);
+		const physical = compilePhysicalRail(document.map),
+			slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const rowAt = (x: number): number =>
+			Array.from(slots.routeXs).findIndex((value, row) => value === x && slots.routeZs[row] === 0);
+		const placement = planEqRowPlacement(
+			slots,
+			[2, 3, 4].map(rowAt),
+			new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+			document.portEquipment,
+			1000,
+			null,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+		);
+		expect(document.commitPortEquipment(placement)).toBe(true);
+		const source = document.portEquipment,
+			sequence = document.getPatchSequence();
+		const rejected = planPortEquipmentGroupEdit(
+			document.map,
+			slots,
+			new PortEquipmentGroupSlotIndex(slots),
+			new PortSlotAvailabilityIndex(physical, source, "EQ"),
+			source,
+			1,
+			1,
+			rowAt(11),
+			"move",
+			document.map.getRevision(),
+			sequence,
+			"preview",
+		);
+		const plan =
+			caseKind === "unknown"
+				? { ...rejected, reason: "The group cannot be transformed." }
+				: caseKind === "stale"
+					? { ...rejected, baseRevision: rejected.baseRevision + 1 }
+					: rejected;
+		const overlay = createRecordingContext();
+		const arcs: number[][] = [];
+		overlay.context.arc = (x, y, radius) => {
+			arcs.push([x, y, radius]);
+		};
+		const camera = { offsetX: 50, offsetY: 100, zoom: 20, rotation: 0 as const };
+		const renderer = new TileRenderer();
+		renderer.render(createRecordingContext().context, overlay.context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			portEquipmentPresentation: compilePortEquipmentPresentation(physical, source),
+			portEquipmentGroupEditPreview: { slots, plan },
+			ghost: null,
+			camera,
+			width: 640,
+			height: 400,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+		if (caseKind === "located") {
+			expect(overlay.labels).toContain("PORT-2 !");
+			const row = rowAt(12),
+				point = renderer.worldToScreen(
+					{ x: slots.worldPositions[row * 2], y: slots.worldPositions[row * 2 + 1] },
+					camera,
+				);
+			expect(arcs).toContainEqual([point.x, point.y, 14]);
+		} else expect(overlay.labels).not.toContain("PORT-2 !");
+		expect(document.portEquipment).toBe(source);
+		expect(document.getPatchSequence()).toBe(sequence);
+	});
+
 	it("uses larger nearest-station pick targets for EQ and STK authoring", () => {
 		expect(portSlotPickRadiusMeters("OHB", 40)).toBeCloseTo(0.35);
 		expect(portSlotPickRadiusMeters("EQ", 40)).toBeCloseTo(0.5);

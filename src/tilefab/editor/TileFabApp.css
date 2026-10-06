@@ -9923,6 +9923,15 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	max-height: 132px;
 }
 
+.tilefab-equipment-group-transformbar[data-state="invalid"] {
+	max-height: min(220px, calc(100dvh - 180px));
+	overflow-y: auto;
+}
+
+.tilefab-equipment-group-transformbar[data-state="invalid"] .tilefab-equipment-group-loop-preview {
+	color: #ffe0b0;
+}
+
 .tilefab-equipment-group-transformbar .tilefab-placement-exit {
 	min-width: 44px;
 	height: 44px;

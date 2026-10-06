@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.64] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Identify a rejected equipment move/copy by its failed Port and known target position. Highlight
+  the named Port or conflicting body extents, preserve the original equipment, and explain how to
+  choose another target or cancel. Unlocated failures keep their reason without a guessed marker.
+- Match movement hints to Enter/click apply and Space-drag camera movement. Explain that moving
+  equipment already owned by a Process Loop preserves that ownership.
+
 ## [0.1.63] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

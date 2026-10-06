@@ -5,6 +5,7 @@ import { TileMap } from "../core/TileMap";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { planResizeEqBody } from "./PortEquipmentEditPlanner";
 import {
+	describePortEquipmentGroupEditFailure,
 	PortEquipmentGroupSlotIndex,
 	planPortEquipmentGroupEdit,
 	portEquipmentGroupSlotIndexFor,
@@ -14,6 +15,69 @@ import { PortSlotAvailabilityIndex } from "./PortSlotCompiler";
 import { compilePortSlotPreparedArtifactCatalog } from "./PortSlotPreparedArtifacts";
 
 describe("PortEquipmentGroupEditPlanner", () => {
+	it("locates a named rejected Port without giving invalid previews mutation authority", () => {
+		const document = closedLoopDocument(13, 4);
+		const physical = compilePhysicalRail(document.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const placement = planEqRowPlacement(
+			slots,
+			[2, 3, 4].map((x) => rowAt(slots, x, 0)),
+			new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+			document.portEquipment,
+			1_000,
+			null,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+		);
+		expect(document.commitPortEquipment(placement)).toBe(true);
+		const source = document.portEquipment,
+			sequence = document.getPatchSequence();
+		const plan = planPortEquipmentGroupEdit(
+			document.map,
+			slots,
+			new PortEquipmentGroupSlotIndex(slots),
+			new PortSlotAvailabilityIndex(physical, source, "EQ"),
+			source,
+			1,
+			1,
+			rowAt(slots, 11, 0),
+			"move",
+			document.map.getRevision(),
+			sequence,
+			"preview",
+		);
+		expect(plan.reason).toBe("PORT-2 maps to an unsafe rail slot.");
+		expect(describePortEquipmentGroupEditFailure(plan, slots)).toEqual({
+			kind: "port",
+			sourcePortId: 2,
+			targetRow: rowAt(slots, 12, 0),
+		});
+		expect(plan.portMutations).toHaveLength(0);
+		expect(plan.equipmentGroupMutations).toHaveLength(0);
+		expect(document.commitPortEquipment(plan)).toBe(false);
+		expect(document.portEquipment).toBe(source);
+		expect(document.getPatchSequence()).toBe(sequence);
+		expect(
+			describePortEquipmentGroupEditFailure(
+				{ ...plan, reason: "PORT-3 has no matching rail slot after transformation." },
+				slots,
+			),
+		).toEqual({ kind: "port", sourcePortId: 3, targetRow: null });
+		for (const reason of [
+			"Port slot data is stale.",
+			"PORT-2 cannot be transformed.",
+			"EQ 8 몸체가 EQ 9 몸체와 겹칩니다 · 별도 오류",
+		])
+			expect(describePortEquipmentGroupEditFailure({ ...plan, reason }, slots)).toBeNull();
+		expect(
+			describePortEquipmentGroupEditFailure(
+				{ ...plan, baseRevision: plan.baseRevision + 1 },
+				slots,
+			),
+		).toBeNull();
+		expect(describePortEquipmentGroupEditFailure({ ...plan, valid: true }, slots)).toBeNull();
+	});
+
 	it.each([
 		"move",
 		"copy",
@@ -70,6 +134,9 @@ describe("PortEquipmentGroupEditPlanner", () => {
 			const rejected = planAt(8, 0, validation);
 			expect(rejected.valid, rejected.reason).toBe(false);
 			expect(rejected.reason).toContain("겹칩니다");
+			expect(describePortEquipmentGroupEditFailure(rejected, slots)).toMatchObject({
+				kind: "body",
+			});
 			const accepted = planAt(15, 4, validation);
 			expect(accepted.valid, accepted.reason).toBe(true);
 		}
