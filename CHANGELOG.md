@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.65] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Keep Bank/FAB command results visible when Worker synchronization restores the same selection.
+  Resume selection guidance on a new user action instead of replacing a completed detach with copy advice.
+- Expose Redo in the project menu for compact screens using the existing history command.
+- Open the existing FAB deletion review entry from the selected FAB's structure details, matching
+  the Bank command shortcut while preserving explicit review and cancellation.
+
 ## [0.1.64] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

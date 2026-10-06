@@ -250,7 +250,9 @@ export function StaticFabAssembleMenu({
 				</div>
 				{selectionCount === 1 && selectedFabCount === 1 && fabDelete ? (
 					<section className="tilefab-assemble-semantic-fab" aria-label="선택한 FAB 명령">
-						<strong>선택한 FAB</strong>
+						<strong data-testid="assemble-selected-fab-heading" tabIndex={-1}>
+							선택한 FAB
+						</strong>
 						<button
 							type="button"
 							className="tilefab-assemble-fab-delete"

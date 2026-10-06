@@ -10,6 +10,7 @@ import {
 	appliedConnectedBayBankEvidenceIsCurrent,
 	connectedBayBankUndoProjectionExists,
 	ordinaryConnectedBayBankDuplicateHandoff,
+	ordinaryHierarchyCommandFeedbackIsCurrent,
 } from "./OrdinaryConnectedBayBankDuplicateHandoff";
 
 describe("appliedConnectedBayBankEvidence", () => {
@@ -145,6 +146,34 @@ describe("ordinaryConnectedBayBankDuplicateHandoff", () => {
 		["while mutation is unavailable", { readyForMutation: false }],
 	] as const)("stays absent %s", (_label, override) => {
 		expect(ordinaryConnectedBayBankDuplicateHandoff({ ...READY_CONTEXT, ...override })).toBeNull();
+	});
+});
+
+describe("ordinaryHierarchyCommandFeedbackIsCurrent", () => {
+	it.each([
+		"Bank 분리 완료",
+		"Bank 삭제 완료",
+		"Fab 삭제 완료",
+		"현재 Bank는 분리할 수 없습니다",
+	])("keeps %s across passive readiness and releases for a new action or document", (message) => {
+		const document = {};
+		const feedback = { document, message };
+		expect(ordinaryHierarchyCommandFeedbackIsCurrent(feedback, document, message)).toBe(true);
+		expect(
+			ordinaryHierarchyCommandFeedbackIsCurrent(
+				feedback,
+				document,
+				`${message} · 대형 맵 파생 데이터를 Worker에서 준비합니다`,
+			),
+		).toBe(true);
+		expect(
+			ordinaryHierarchyCommandFeedbackIsCurrent(feedback, document, "마지막 편집을 되돌렸습니다"),
+		).toBe(false);
+		expect(
+			ordinaryHierarchyCommandFeedbackIsCurrent(feedback, document, "다른 Bank를 선택했습니다"),
+		).toBe(false);
+		expect(ordinaryHierarchyCommandFeedbackIsCurrent(feedback, {}, message)).toBe(false);
+		expect(ordinaryHierarchyCommandFeedbackIsCurrent(null, document, message)).toBe(false);
 	});
 });
 

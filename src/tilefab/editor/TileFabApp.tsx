@@ -701,6 +701,8 @@ import {
 	type AppliedConnectedBayBankEvidence,
 	connectedBayBankUndoProjectionExists,
 	ordinaryConnectedBayBankDuplicateHandoff,
+	ordinaryHierarchyCommandFeedbackIsCurrent,
+	type OrdinaryHierarchyCommandFeedback,
 } from "./OrdinaryConnectedBayBankDuplicateHandoff";
 import {
 	appliedConnectedFabEvidence,
@@ -3384,6 +3386,11 @@ export default function TileFabApp(): React.ReactElement {
 			? `${scaleProbeCellCount.toLocaleString()}셀 맵을 Worker에서 준비합니다`
 			: DEFAULT_RAIL_BUILD_STATUS,
 	);
+	const hierarchyCommandFeedbackRef = useRef<OrdinaryHierarchyCommandFeedback | null>(null);
+	const rememberHierarchyCommandFeedback = (message: string): string => {
+		hierarchyCommandFeedbackRef.current = { document: editorModelRef.current.document, message };
+		return message;
+	};
 	const [buildAnchor, setBuildAnchorState] = useState<Cell | null>(null);
 	const [selected, setSelected] = useState<Cell | null>(null);
 	const [selectedModuleKey, setSelectedModuleKey] = useState<string | null>(null);
@@ -5138,7 +5145,7 @@ export default function TileFabApp(): React.ReactElement {
 	const assembleLauncherRef = useRef<HTMLButtonElement>(null);
 	const assembleBottomLauncherRef = useRef<HTMLButtonElement>(null);
 	const assemblePaletteRef = useRef<HTMLElement>(null);
-	const assembleBankCommandFocusRef = useRef<number | null>(null);
+	const assembleStructureCommandFocusRef = useRef<number | null>(null);
 	const assemblePaletteReturnFocusRef = useRef<HTMLButtonElement | null>(null);
 	const newFabProfileWizardReturnFocusRef = useRef<HTMLElement | null>(null);
 	const productionBayLauncherRef = useRef<HTMLButtonElement>(null);
@@ -7245,6 +7252,7 @@ export default function TileFabApp(): React.ReactElement {
 			portDerivedArtifacts.presentation,
 		);
 		if (previousModel.document !== nextModel.document) {
+			hierarchyCommandFeedbackRef.current = null;
 			clearAreaStampPlacementFailure();
 			setOrganizationBundlePublicationNotice(null);
 		}
@@ -12402,7 +12410,8 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 		pendingConnectedFabHandoffFocusRef.current = restoreFabLoopReview;
 		pendingResilientFabChecksHandoffFocusRef.current = false;
-		syncModelUi("마지막 편집을 되돌렸습니다");
+		syncModelUi(hierarchyCommandFeedbackRef.current?.document === railDocument
+			? rememberHierarchyCommandFeedback("마지막 편집을 되돌렸습니다") : "마지막 편집을 되돌렸습니다");
 		if (retained) refreshRepeatPlacementAfterHistory(retained);
 		return true;
 	};
@@ -12640,7 +12649,8 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 		pendingConnectedFabHandoffFocusRef.current = restoreConnectorFab;
 		pendingResilientFabChecksHandoffFocusRef.current = restoreFabLoop;
-		syncModelUi("편집을 다시 실행했습니다");
+		syncModelUi(hierarchyCommandFeedbackRef.current?.document === railDocument
+			? rememberHierarchyCommandFeedback("편집을 다시 실행했습니다") : "편집을 다시 실행했습니다");
 		if (restoredPlacedAssemblyRoot) {
 			if (restoredDuplicateSourceAssemblyRoot) {
 				selectStaticFabOrganization(restoredPlacedAssemblyRoot, true);
@@ -19973,6 +19983,7 @@ export default function TileFabApp(): React.ReactElement {
 		organizationBundlePlacementPreviewRef.current = null;
 		organizationBundlePlacementPreviewPendingAnchorRef.current = null;
 		rendererRef.current.releaseOrganizationBundlePlacementPreview();
+		hierarchyCommandFeedbackRef.current = null;
 		organizationMultiSelectionRef.current = createStaticFabOrganizationMultiSelection();
 		templateSessionRef.current = null;
 		templatePreviewAnchorRef.current = null;
@@ -24584,6 +24595,7 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus(reason);
 			return false;
 		}
+		hierarchyCommandFeedbackRef.current = null;
 		// Explicit organization selection owns the Inspector. Retaining a previously inspected
 		// Port would put its sheet over the newly selected organization's rail sheet on close.
 		clearPortEquipmentSelection();
@@ -25800,7 +25812,7 @@ export default function TileFabApp(): React.ReactElement {
 		publishBankDetach(null);
 		const launcher = staticFabSemanticBankDetachReturnFocusRef.current;
 		staticFabSemanticBankDetachReturnFocusRef.current = null;
-		if (message) setStatus(message);
+		if (message) setStatus(rememberHierarchyCommandFeedback(message));
 		if (restoreFocus) requestAnimationFrame(() => (launcher?.isConnected ? launcher : canvasRef.current)?.focus({ preventScroll: true }));
 	};
 	cancelStaticFabSemanticBankDetachRef.current = cancelBankDetach;
@@ -25808,6 +25820,7 @@ export default function TileFabApp(): React.ReactElement {
 		const active = staticFabSemanticBankDetachUiRef.current;
 		if (!active || active.requestSequence !== requestSequence || staticFabSemanticBankDetachRequestRef.current !== requestSequence) return;
 		releaseBankDetachAnalysis();
+		setStatus(rememberHierarchyCommandFeedback(reason));
 		publishBankDetach(reduceStaticFabSemanticBankDetachSession(active, active.phase === "applying"
 			? { type: "APPLICATION_REJECTED", reason }
 			: { type: "ANALYSIS_REJECTED", requestSequence, reason }));
@@ -25815,7 +25828,7 @@ export default function TileFabApp(): React.ReactElement {
 	const startBankDetach = (launcher: HTMLButtonElement): void => {
 		const availability = resolveBankDetachAvailability();
 		const bank = selectedSemanticBankOrganization;
-		if (availability.state !== "ready" || !bank) { setStatus(availability.reason); return; }
+		if (availability.state !== "ready" || !bank) { setStatus(rememberHierarchyCommandFeedback(availability.reason)); return; }
 		clearTransientConstruction(undefined, { scheduleCanvas: false });
 		staticFabSemanticBankDetachReturnFocusRef.current = launcher;
 		const requestSequence = staticFabSemanticBankDetachRequestRef.current + 1;
@@ -25924,7 +25937,7 @@ export default function TileFabApp(): React.ReactElement {
 		cancelBankDetach(undefined, false);
 		setTemplatePaletteOpen(false);
 		assemblePaletteReturnFocusRef.current = null;
-		syncModelUi(`${active.bankName} 분리 완료 · 내부 구성 유지 · 한 번의 실행 취소로 복원할 수 있습니다`);
+		syncModelUi(rememberHierarchyCommandFeedback(`${active.bankName} 분리 완료 · 내부 구성 유지 · 한 번의 실행 취소로 복원할 수 있습니다`));
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const currentBankDeleteSource = (): StaticFabSemanticBankDeleteLiveState => ({
@@ -25983,7 +25996,7 @@ export default function TileFabApp(): React.ReactElement {
 		publishBankDelete(null);
 		const launcher = staticFabSemanticBankDeleteReturnFocusRef.current;
 		staticFabSemanticBankDeleteReturnFocusRef.current = null;
-		if (message) setStatus(message);
+		if (message) setStatus(rememberHierarchyCommandFeedback(message));
 		if (restoreFocus) requestAnimationFrame(() => (launcher?.isConnected ? launcher : canvasRef.current)?.focus({ preventScroll: true }));
 	};
 	cancelStaticFabSemanticBankDeleteRef.current = cancelBankDelete;
@@ -25991,6 +26004,7 @@ export default function TileFabApp(): React.ReactElement {
 		const active = staticFabSemanticBankDeleteUiRef.current;
 		if (!active || active.requestSequence !== requestSequence || staticFabSemanticBankDeleteRequestRef.current !== requestSequence) return;
 		releaseBankDeleteAnalysis();
+		setStatus(rememberHierarchyCommandFeedback(reason));
 		publishBankDelete(reduceStaticFabSemanticBankDeleteSession(active, active.phase === "applying"
 			? { type: "APPLICATION_REJECTED", reason }
 			: { type: "ANALYSIS_REJECTED", requestSequence, reason }));
@@ -25998,7 +26012,7 @@ export default function TileFabApp(): React.ReactElement {
 	const startBankDelete = (launcher: HTMLButtonElement): void => {
 		const availability = resolveBankDeleteAvailability();
 		const bank = selectedSemanticBankOrganization;
-		if (availability.state !== "ready" || !bank) { setStatus(availability.reason); return; }
+		if (availability.state !== "ready" || !bank) { setStatus(rememberHierarchyCommandFeedback(availability.reason)); return; }
 		clearTransientConstruction(undefined, { scheduleCanvas: false });
 		staticFabSemanticBankDeleteReturnFocusRef.current = launcher;
 		const requestSequence = staticFabSemanticBankDeleteRequestRef.current + 1;
@@ -26111,7 +26125,7 @@ export default function TileFabApp(): React.ReactElement {
 		clearStaticFabOrganizationDetails();
 		setTemplatePaletteOpen(false);
 		assemblePaletteReturnFocusRef.current = null;
-		syncModelUi(`${active.bankName} 삭제 완료 · 조직 ${plan.review.removed.organizations.count}개, 레일 모듈 ${plan.review.removed.railModules.count}개, 장비 ${plan.review.removed.equipmentGroups.count}개, Port ${plan.review.removed.ports.count}개 · 한 번의 실행 취소로 복원할 수 있습니다`);
+		syncModelUi(rememberHierarchyCommandFeedback(`${active.bankName} 삭제 완료 · 조직 ${plan.review.removed.organizations.count}개, 레일 모듈 ${plan.review.removed.railModules.count}개, 장비 ${plan.review.removed.equipmentGroups.count}개, Port ${plan.review.removed.ports.count}개 · 한 번의 실행 취소로 복원할 수 있습니다`));
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const selectedSemanticFabOrganization = organizationMultiSelection.selectedOrganizationIds.length === 1 &&
@@ -26165,7 +26179,7 @@ export default function TileFabApp(): React.ReactElement {
 		publishFabDelete(null);
 		const launcher = staticFabSemanticFabDeleteReturnFocusRef.current;
 		staticFabSemanticFabDeleteReturnFocusRef.current = null;
-		if (message) setStatus(message);
+		if (message) setStatus(rememberHierarchyCommandFeedback(message));
 		if (restoreFocus) requestAnimationFrame(() => (launcher?.isConnected ? launcher : canvasRef.current)?.focus({ preventScroll: true }));
 	};
 	cancelStaticFabSemanticFabDeleteRef.current = cancelFabDelete;
@@ -26173,6 +26187,7 @@ export default function TileFabApp(): React.ReactElement {
 		const active = staticFabSemanticFabDeleteUiRef.current;
 		if (!active || active.requestSequence !== requestSequence || staticFabSemanticFabDeleteRequestRef.current !== requestSequence) return;
 		releaseFabDeleteAnalysis();
+		setStatus(rememberHierarchyCommandFeedback(reason));
 		publishFabDelete(reduceStaticFabSemanticFabDeleteSession(active, active.phase === "applying"
 			? { type: "APPLICATION_REJECTED", reason }
 			: { type: "ANALYSIS_REJECTED", requestSequence, reason }));
@@ -26180,7 +26195,7 @@ export default function TileFabApp(): React.ReactElement {
 	const startFabDelete = (launcher: HTMLButtonElement): void => {
 		const availability = resolveFabDeleteAvailability();
 		const fab = selectedSemanticFabOrganization;
-		if (availability.state !== "ready" || !fab) { setStatus(availability.reason); return; }
+		if (availability.state !== "ready" || !fab) { setStatus(rememberHierarchyCommandFeedback(availability.reason)); return; }
 		clearTransientConstruction(undefined, { scheduleCanvas: false });
 		staticFabSemanticFabDeleteReturnFocusRef.current = launcher;
 		const requestSequence = staticFabSemanticFabDeleteRequestRef.current + 1;
@@ -26292,7 +26307,7 @@ export default function TileFabApp(): React.ReactElement {
 		clearStaticFabOrganizationDetails();
 		setTemplatePaletteOpen(false);
 		assemblePaletteReturnFocusRef.current = null;
-		syncModelUi(`${active.fabName} 삭제 완료 · 조직 ${plan.review.removed.organizations.count}개, 레일 모듈 ${plan.review.removed.railModules.count}개, 장비 ${plan.review.removed.equipmentGroups.count}개, Port ${plan.review.removed.ports.count}개 · 한 번의 실행 취소로 복원할 수 있습니다`);
+		syncModelUi(rememberHierarchyCommandFeedback(`${active.fabName} 삭제 완료 · 조직 ${plan.review.removed.organizations.count}개, 레일 모듈 ${plan.review.removed.railModules.count}개, 장비 ${plan.review.removed.equipmentGroups.count}개, Port ${plan.review.removed.ports.count}개 · 한 번의 실행 취소로 복원할 수 있습니다`));
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const cancelStaticFabSemanticBayMutation = (message?: string, restoreFocus = true): void => {
@@ -29563,6 +29578,9 @@ export default function TileFabApp(): React.ReactElement {
 		organizationRecordsById,
 		organizationSemanticRoles,
 	]);
+	const hierarchyCommandFeedbackActive = ordinaryHierarchyCommandFeedbackIsCurrent(
+		hierarchyCommandFeedbackRef.current, railDocument, status,
+	);
 	const connectedBayBankDuplicateHandoff = useMemo(
 		() =>
 			ordinaryConnectedBayBankDuplicateHandoff({
@@ -29825,7 +29843,7 @@ export default function TileFabApp(): React.ReactElement {
 		organizationBundlePublicationNotice.patchSequence === railDocument.getPatchSequence() &&
 		organizationBundlePublicationNotice.message === status
 		? organizationBundlePublicationNotice.message : null;
-	const taskHandoffLiveStatus = currentPublicationWarning ?? currentAreaStampPlacementFailure ?? (organizationBundlePlacementSession && organizationBundlePlacementFailure
+	const taskHandoffLiveStatus = hierarchyCommandFeedbackActive ? presentedStatus : currentPublicationWarning ?? currentAreaStampPlacementFailure ?? (organizationBundlePlacementSession && organizationBundlePlacementFailure
 		? organizationBundlePlacementFailure
 		: ordinaryStaticFabIssueRecheckContext
 		? presentedStatus
@@ -31870,7 +31888,7 @@ export default function TileFabApp(): React.ReactElement {
 	const openStaticFabAssemblePalette = (
 		returnFocusTarget?: HTMLButtonElement | null,
 		preserveConstruction = editorActivityRef.current === "assemble",
-		focusBankOrganizationId: number | null = null,
+		focusStructureOrganizationId: number | null = null,
 	): void => {
 		if (!prepareEditorActivityTransition("assemble")) return;
 		if (!preserveConstruction) chooseTool("build", "preserve-context");
@@ -31880,14 +31898,14 @@ export default function TileFabApp(): React.ReactElement {
 			(document.activeElement instanceof HTMLButtonElement
 				? document.activeElement
 				: assembleLauncherRef.current);
-		assembleBankCommandFocusRef.current = focusBankOrganizationId;
+		assembleStructureCommandFocusRef.current = focusStructureOrganizationId;
 		setTemplatePaletteOpen(true);
 	};
-	const openSelectedBankCommands = (organizationId: number): void => {
+	const openSelectedStructureCommands = (organizationId: number): void => {
 		const selection = organizationMultiSelectionRef.current.selectedOrganizationIds;
 		if (selection.length !== 1 || selection[0] !== organizationId ||
-			selectedSemanticBankOrganization?.id !== organizationId) {
-			setStatus("편집할 Bank 하나를 다시 선택하세요");
+			(selectedSemanticBankOrganization?.id !== organizationId && selectedSemanticFabOrganization?.id !== organizationId)) {
+			setStatus("검토할 FAB 또는 Bank 하나를 다시 선택하세요");
 			return;
 		}
 		openStaticFabAssemblePalette(assembleLauncherRef.current, false, organizationId);
@@ -31957,17 +31975,17 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		if (!templatePaletteOpen) return;
 		const palette = assemblePaletteRef.current;
-		const bankId = assembleBankCommandFocusRef.current;
-		assembleBankCommandFocusRef.current = null;
+		const organizationId = assembleStructureCommandFocusRef.current;
+		assembleStructureCommandFocusRef.current = null;
 		const selectedIds = organizationMultiSelectionRef.current.selectedOrganizationIds;
-		const bankHeading = bankId !== null && selectedIds.length === 1 && selectedIds[0] === bankId
-			? palette?.querySelector<HTMLElement>('[data-testid="assemble-selected-bank-heading"]') : null;
-		const target = bankHeading ?? (templateSessionRef.current
+		const structureHeading = organizationId !== null && selectedIds.length === 1 && selectedIds[0] === organizationId
+			? palette?.querySelector<HTMLElement>('[data-testid="assemble-selected-fab-heading"], [data-testid="assemble-selected-bank-heading"]') : null;
+		const target = structureHeading ?? (templateSessionRef.current
 			? palette?.querySelector<HTMLButtonElement>(
 					'[data-testid="pattern-configurator"] button, [data-testid="pattern-configurator"] input',
 				)
 			: palette?.querySelector<HTMLButtonElement>('[data-testid="fab-preset-browser"]'));
-		if (bankHeading) bankHeading.scrollIntoView({ block: "nearest" });
+		if (structureHeading) structureHeading.scrollIntoView({ block: "nearest" });
 		target?.focus();
 	}, [templatePaletteOpen]);
 	const openActiveTemplateConfiguration = (returnFocusTarget?: HTMLButtonElement | null): void =>
@@ -33247,7 +33265,7 @@ export default function TileFabApp(): React.ReactElement {
 			</button>
 		</>
 	) : null;
-	const connectedBayBankDuplicateHandoffAction = connectedBayBankDuplicateHandoff ? (
+	const connectedBayBankDuplicateHandoffAction = connectedBayBankDuplicateHandoff && !hierarchyCommandFeedbackActive ? (
 		<>
 			<span
 				id="tilefab-connected-bay-bank-duplicate-handoff-description"
@@ -33336,7 +33354,8 @@ export default function TileFabApp(): React.ReactElement {
 			<Save size={14} aria-hidden="true" /> 청사진으로 저장
 		</button>
 	);
-	const hierarchyHandoffDock = ordinaryStaticFabIssueRecheckContext
+	// Retain selection-derived capabilities; only the automatic next-task presentation yields.
+	const hierarchyHandoffDock = hierarchyCommandFeedbackActive ? null : ordinaryStaticFabIssueRecheckContext
 		? ordinaryStaticFabIssueRecheck
 			? (
 				<fieldset
@@ -33871,6 +33890,11 @@ export default function TileFabApp(): React.ReactElement {
 									onClick={() => void handleSaveProject(true)}
 								>
 									<SaveAll size={14} /> 다른 이름으로 파일 저장
+								</button>
+								<button type="button" data-testid="project-redo"
+									disabled={viewMode === "3d" || !startupReady || modelSyncPending || !history.canRedo || staticFabExclusiveCommandActive}
+									onClick={() => { setProjectMenuOpen(false); void handleRedo(); }}>
+									<Redo2 size={14} /> 다시 실행 (Redo)
 								</button>
 								<button type="button" data-testid="project-open-file-input"
 									disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
@@ -38801,7 +38825,7 @@ export default function TileFabApp(): React.ReactElement {
 
 				{organizationLibraryOpen && !readinessOpen ? (
 					<StaticFabOrganizationLibrary
-						openSelectedBankCommands={openSelectedBankCommands}
+						openSelectedStructureCommands={openSelectedStructureCommands}
 						assemblyConnectorAvailability={assemblyConnectorAvailability}
 						assemblyConnectorHierarchyRole={assemblyConnectorHierarchyRole}
 						assemblyConnectorPurpose={assemblyConnectorPurpose}

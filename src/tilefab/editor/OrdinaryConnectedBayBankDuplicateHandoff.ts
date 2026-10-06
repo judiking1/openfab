@@ -156,6 +156,23 @@ export interface OrdinaryConnectedBayBankDuplicateHandoffContext {
 	readonly readyForMutation: boolean;
 }
 
+export interface OrdinaryHierarchyCommandFeedback {
+	readonly document: object;
+	readonly message: string;
+}
+
+/** Worker readiness and selection re-materialization do not consume a command result. */
+export function ordinaryHierarchyCommandFeedbackIsCurrent(
+	feedback: OrdinaryHierarchyCommandFeedback | null,
+	document: object,
+	status: string,
+): boolean {
+	return (
+		feedback?.document === document &&
+		(status === feedback.message || status.startsWith(`${feedback.message} ·`))
+	);
+}
+
 export interface OrdinaryConnectedBayBankDuplicateHandoffPresentation {
 	readonly action: "duplicate-recognized-bay-bank";
 	readonly label: "다음 · Bay Bank 전체 복제";
