@@ -14013,6 +14013,12 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	white-space: normal;
 }
 @media (max-width: 860px) {
+	.tilefab-inspector[data-compact-layout="bottom-sheet"][data-compact-expanded="true"]:has(
+			.tilefab-selection-loop-entry
+		) {
+		grid-template-rows: 64px auto minmax(0, 1fr);
+	}
+
 	.tilefab-inspector[data-compact-layout="bottom-sheet"][data-compact-expanded="false"]:has(
 			.tilefab-selection-loop-entry
 		) {

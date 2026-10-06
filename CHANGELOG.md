@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.69] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Allow selection inspectors and explicit Loop registration while Guided Build is minimized,
+  keeping the current Guide available to resume.
+- Describe closed-rail practice as rail closure, with Process Loop organization registration separate.
+- Keep a visible registration entry above compact selection details and focus the next required
+  rail-only selection or name field. Atomic registration and equipment membership remain unchanged.
+
 ## [0.1.68] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

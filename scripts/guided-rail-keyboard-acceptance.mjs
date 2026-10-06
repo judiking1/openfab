@@ -377,7 +377,10 @@ async function runKeyboardAuthoringFlow(activeBrowser, viewport) {
 			"quick-start",
 			`${label} chapter checkpoint`,
 		);
-		if (!metrics.statusText.includes("Process Loop 완료")) {
+		if (
+			!metrics.statusText.includes("레일 폐합 완료") ||
+			!metrics.statusText.includes("조직 등록은 별도")
+		) {
 			throw new Error(`${label} stale completion status: ${JSON.stringify(metrics.statusText)}.`);
 		}
 		await assertNoHorizontalOverflow(page, `${label} completed loop`);

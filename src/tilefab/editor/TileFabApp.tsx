@@ -4227,7 +4227,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (!guidedBuildChapterCheckpoint) return;
 		setStatus(
 			guidedBuildChapterCheckpoint === "quick-start"
-				? "Process Loop 완료 · 열린 종단 0 · 다음 장비 배치 과정을 선택하세요"
+				? "레일 폐합 완료 · 열린 종단 0 · Process Loop 조직 등록은 별도입니다"
 				: "과정을 완료했습니다 · 다음 과정을 선택하세요",
 		);
 	}, [guidedBuildChapterCheckpoint]);
@@ -5111,7 +5111,7 @@ export default function TileFabApp(): React.ReactElement {
 	const guidedBuildOrganizationSelectionConstructionBarHidden =
 		guidedBuildHidesOrganizationSelectionConstructionBar(guidedBuildEvaluation);
 	const guidedBuildExpertSelectionInspectorsHidden = guidedBuildHidesExpertSelectionInspectors(
-		guidedBuildExperienceActive,
+		guidedBuildOpen && guidedBuildExperienceActive,
 		guidedBuildEvaluation.currentMissionId,
 	);
 	const guidedBuildEraseRevealed = guidedBuildRevealsErase(guidedBuildEvaluation);
@@ -10640,7 +10640,7 @@ export default function TileFabApp(): React.ReactElement {
 			guidedBuildEvaluation.currentMissionId !== "process-loop";
 		clearTransientConstruction(
 			completedProcessLoop
-				? "Process Loop 완료 · 열린 종단 0 · 다음 장비 배치 과정으로 넘어갈 준비가 됐습니다"
+				? "레일 폐합 완료 · 열린 종단 0 · Process Loop 조직 등록은 별도입니다"
 				: staleBinding
 					? "프로젝트 또는 FAB가 변경되어 키보드 레일 미리보기를 취소했습니다"
 				: undefined,
@@ -39039,12 +39039,14 @@ export default function TileFabApp(): React.ReactElement {
 								</button>
 							</div>
 						</header>
-						{areaSelectionProvenance === "ad-hoc" && compactInspectorSheetActive && !compactInspectorExpanded ? (
+						{areaSelectionProvenance === "ad-hoc" && compactInspectorSheetActive ? (
 							<button type="button" className="tilefab-selection-loop-entry" data-testid="start-process-loop-registration"
+								aria-controls="rail-area-selection-inspector-content"
 								onClick={() => { setCompactInspectorExpanded(true); requestAnimationFrame(() => {
-									const input = document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
-									input?.scrollIntoView({ block: "nearest" }); input?.focus({ preventScroll: true });
-								}); }}>선택한 레일을 작업 루프로 등록</button>
+									const target = document.querySelector<HTMLElement>('[data-testid="process-loop-select-rail-only"]') ??
+										document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
+									target?.scrollIntoView({ block: "nearest" }); target?.focus({ preventScroll: true });
+								}); }}>작업 루프 등록 열기{staticFabEquipmentGroupCount > 0 ? " · 레일만 선택" : ""}</button>
 						) : null}
 						<div
 							id="rail-area-selection-inspector-content"
