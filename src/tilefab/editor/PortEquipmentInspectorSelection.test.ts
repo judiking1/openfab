@@ -367,6 +367,10 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 			'disabled=""',
 		);
 		expect(markup).toContain("소속을 유지하며 같은 Process Loop 안에서");
+		expect(markup).toContain(
+			"다른 Loop로 소속을 바꾸거나 철거하려면 아래에서 소속을 먼저 분리하세요.",
+		);
+		expect(markup).not.toContain("아래 소속을 먼저 분리하세요.");
 		expect(markup).toContain(actions.delete.reason);
 		if (kind === "EQ") {
 			expect(markup).toContain('data-testid="eq-body-length"');
@@ -499,7 +503,11 @@ describe("PortEquipmentInspector action explanations", () => {
 			}),
 		);
 		expect(markup).toContain(actions.move.reason);
-		expect(markup).toContain(outsideLoop ? "FAB 구조에서 소속을" : "아래 소속을");
+		expect(markup).toContain(
+			outsideLoop
+				? "이동·Port 편집·철거 전에 FAB 구조에서 소속을 정리하세요."
+				: "다른 Loop로 소속을 바꾸거나 철거하려면 아래에서 소속을 먼저 분리하세요.",
+		);
 		expect(markup).toContain("복제는 계속할 수 있습니다.");
 		for (const id of [
 			"move-port-equipment-group",

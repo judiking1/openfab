@@ -907,6 +907,16 @@
 	font-size: 9px;
 }
 
+.tilefab-project-download-notice {
+	display: grid;
+	gap: 4px;
+	padding: 10px;
+	border-top: 1px solid #303b3d;
+	color: #b9d7d8;
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+
 .tilefab-project-menu-commands {
 	display: grid;
 	grid-template-columns: 1fr 1fr;

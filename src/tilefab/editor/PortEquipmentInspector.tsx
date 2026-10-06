@@ -484,8 +484,8 @@ export function PortEquipmentInspector({
 										: null}
 									{actions.move.reason ?? actions.delete.reason}.{" "}
 									{selectedEquipmentOwnedOutsideProcessLoop
-										? "FAB 구조에서 소속을 먼저 정리하세요."
-										: "아래 소속을 먼저 분리하세요."}
+										? "이동·Port 편집·철거 전에 FAB 구조에서 소속을 정리하세요."
+										: "다른 Loop로 소속을 바꾸거나 철거하려면 아래에서 소속을 먼저 분리하세요."}
 									{actions.copy.allowed ? " 복제는 계속할 수 있습니다." : null}
 								</p>
 							) : null}

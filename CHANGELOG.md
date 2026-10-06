@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.70] - 2026-10-06
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Keep the latest project download request visible with filename and time in the Project menu.
+  Preserve true save status, dirty state and file reference; clear stale feedback on project reopen.
+- Explain that changing Loop ownership or demolishing owned equipment requires detachment,
+  while valid same-Loop movement and Port editing remain available.
+
 ## [0.1.69] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

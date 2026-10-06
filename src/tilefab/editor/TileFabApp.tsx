@@ -3492,6 +3492,12 @@ export default function TileFabApp(): React.ReactElement {
 	});
 	const projectSessionRef = useRef(projectSession);
 	const projectGenerationRef = useRef(0);
+	const [lastProjectDownloadRequest, setLastProjectDownloadRequest] = useState<Readonly<{
+		projectId: string;
+		projectGeneration: number;
+		fileName: string;
+		requestedAt: string;
+	}> | null>(null);
 	const setProjectSession = useCallback(
 		(update: Parameters<typeof setProjectSessionState>[0]): void => {
 			const next = typeof update === "function" ? update(projectSessionRef.current) : update;
@@ -20648,6 +20654,12 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			if (transaction.status === "download-requested") {
 				if (ownsOperation()) {
+					setLastProjectDownloadRequest({
+						projectId: context.manifest.id,
+						projectGeneration: context.projectGeneration,
+						fileName: transaction.reference.name,
+						requestedAt: projectIdentity.now(),
+					});
 					setProjectOperation("idle");
 					setStatus("다운로드를 요청했습니다 · 다운로드한 파일을 확인하세요 · 현재 프로젝트와 변경 사항을 유지합니다");
 				}
@@ -20660,6 +20672,7 @@ export default function TileFabApp(): React.ReactElement {
 			const isSavedSourceCurrent = (): boolean => source.isCurrent() && !controller.signal.aborted;
 			const publishSavedSession = (): void => {
 				if (!ownsOperation() || !source.isProjectCurrent()) return;
+				setLastProjectDownloadRequest(null);
 				const clean = isSavedSourceCurrent();
 				setProjectSession({
 					manifest,
@@ -30524,6 +30537,14 @@ export default function TileFabApp(): React.ReactElement {
 		editorModel.document.portEquipment.equipmentGroups.length === 0 &&
 		editorModel.document.organizations.records.length === 0 &&
 		projectBlueprints.records.length === 0;
+	const currentProjectDownloadRequest =
+		lastProjectDownloadRequest?.projectId === projectSession.manifest.id &&
+		lastProjectDownloadRequest.projectGeneration === projectGenerationRef.current
+			? lastProjectDownloadRequest
+			: null;
+	const projectDownloadRequestSummary = currentProjectDownloadRequest
+		? `최근 다운로드 요청 · ${currentProjectDownloadRequest.fileName} · ${formatRecoveryProjectTimestamp(currentProjectDownloadRequest.requestedAt)}`
+		: null;
 	const projectSaveStatusLabel =
 		projectSession.operation === "saving"
 			? "저장 중"
@@ -33842,9 +33863,10 @@ export default function TileFabApp(): React.ReactElement {
 						ref={projectMenuTriggerRef}
 						data-dirty={projectDirty}
 						data-save-status={projectSaveStatusLabel}
+						title={projectDownloadRequestSummary ?? undefined}
 						aria-label={`프로젝트 메뉴 · ${projectSession.manifest.name} · ${
 							projectSession.fileReference?.name ?? "저장되지 않음"
-						} · ${projectSaveStatusLabel}`}
+						} · ${projectSaveStatusLabel}${projectDownloadRequestSummary ? ` · ${projectDownloadRequestSummary}` : ""}`}
 						aria-expanded={projectMenuOpen}
 						aria-controls="tilefab-project-menu"
 						onClick={() => setProjectMenuOpen((open) => !open)}
@@ -33859,10 +33881,12 @@ export default function TileFabApp(): React.ReactElement {
 									<span className="tilefab-project-file-name">{projectSession.fileReference.name}</span>
 								) : null}
 								<span className="tilefab-project-save-state" data-testid="project-save-status">
-									<span className="tilefab-project-save-state-full">{projectSaveStatusLabel}</span>
-									{projectSaveStatusCompactLabel ? (
-										<span className="tilefab-project-save-state-short">{projectSaveStatusCompactLabel}</span>
-									) : null}
+									{currentProjectDownloadRequest && !projectBusy ? "다운로드 요청" : <>
+										<span className="tilefab-project-save-state-full">{projectSaveStatusLabel}</span>
+										{projectSaveStatusCompactLabel ? (
+											<span className="tilefab-project-save-state-short">{projectSaveStatusCompactLabel}</span>
+										) : null}
+									</>}
 								</span>
 							</small>
 						</span>
@@ -33887,6 +33911,14 @@ export default function TileFabApp(): React.ReactElement {
 									</small>
 								</span>
 							</header>
+							{currentProjectDownloadRequest ? (
+								<div className="tilefab-project-download-notice" data-testid="project-download-request" role="status">
+									<strong>최근 다운로드 요청</strong>
+									<span>{currentProjectDownloadRequest.fileName}</span>
+									<time dateTime={currentProjectDownloadRequest.requestedAt}>{formatRecoveryProjectTimestamp(currentProjectDownloadRequest.requestedAt)}</time>
+									<small>다운로드 목록에서 파일을 확인하세요.</small>
+								</div>
+							) : null}
 							<div className="tilefab-project-menu-commands">
 								<button
 									type="button"
