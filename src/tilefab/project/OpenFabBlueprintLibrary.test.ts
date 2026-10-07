@@ -23,6 +23,36 @@ import {
 } from "./OpenFabBlueprintLibrary";
 
 describe("OpenFabBlueprintLibrary", () => {
+	it("renames every project blueprint kind while preserving identity, favorite and complete payload", () => {
+		const metadata = {
+			id: "blueprint-rename",
+			name: "Original",
+			folder: "Process/Photo",
+			favorite: true,
+			createdAt: "2026-07-22T00:00:00.000Z",
+		};
+		const records = [
+			createOpenFabRailAreaBlueprint(TEMPLATE, metadata),
+			createOpenFabStaticFabBlueprint(STATIC_FAB_TEMPLATE, metadata),
+			createOpenFabStaticFabOrganizationBlueprint(organizationBundleFixture(), metadata),
+		];
+		for (const record of records) {
+			const original = JSON.stringify(record);
+			const changes = { name: "Renamed", updatedAt: "2026-07-22T01:00:00.000Z" };
+			const renamed = updateOpenFabProjectBlueprint(record, changes);
+			expect(renamed).toEqual({ ...record, ...changes });
+			expect(renamed.edges).toBe(record.edges);
+			if (record.kind === "STATIC_FAB" && renamed.kind === "STATIC_FAB") {
+				expect(renamed.ports).toBe(record.ports);
+				expect(renamed.equipmentGroups).toBe(record.equipmentGroups);
+			}
+			if (record.kind === "STATIC_FAB_ORGANIZATION" && renamed.kind === "STATIC_FAB_ORGANIZATION") {
+				expect(renamed.bundle).toBe(record.bundle);
+			}
+			expect(JSON.stringify(record)).toBe(original);
+		}
+	});
+
 	it("drops revision-bound selection identity and restores portable relative geometry", () => {
 		const blueprint = createOpenFabRailAreaBlueprint(TEMPLATE, {
 			id: "blueprint-1",

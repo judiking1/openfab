@@ -27,6 +27,7 @@ import {
 	type KeyboardEvent as ReactKeyboardEvent,
 	type RefObject,
 	type SetStateAction,
+	useId,
 	useMemo,
 	useRef,
 } from "react";
@@ -45,6 +46,7 @@ import type {
 	BlueprintLibraryTab,
 	ContextualBlueprintSaveRequest,
 	PendingUserBlueprintImport,
+	ProjectBlueprintNameDraft,
 	RailClipboardHistoryEntry,
 	UserBlueprintMetadataDraft,
 } from "./BlueprintLibraryTypes";
@@ -54,6 +56,7 @@ import {
 	type BlueprintRecordContextState,
 	type BlueprintRecordContextView,
 	filterProjectBlueprintRecords,
+	projectBlueprintRenameError,
 	type UserBlueprintOrganizationTarget,
 } from "./BlueprintRecordContext";
 import { BlueprintRecordContextTray, RailBlueprintMiniature } from "./BlueprintRecordPresentation";
@@ -61,6 +64,11 @@ import type { ContextualBlueprintSaveDestination } from "./ContextualBlueprintSa
 import type { UserBlueprintLibraryCrossTabRefreshState } from "./UserBlueprintLibraryCrossTabRefreshController";
 
 interface BlueprintLibraryPanelProps {
+	readonly projectBlueprintNameDraft: ProjectBlueprintNameDraft | null;
+	readonly projectBlueprintNameRef: RefObject<HTMLInputElement | null>;
+	readonly setProjectBlueprintNameDraft: Dispatch<SetStateAction<ProjectBlueprintNameDraft | null>>;
+	readonly cancelProjectBlueprintRename: () => void;
+	readonly saveProjectBlueprintName: () => void;
 	readonly areaStampSelectionValid: boolean;
 	readonly backupUserBlueprintLibrary: () => Promise<boolean>;
 	readonly beginUserBlueprintDrag: (
@@ -212,6 +220,11 @@ interface BlueprintLibraryPanelProps {
 }
 
 export function BlueprintLibraryPanel({
+	projectBlueprintNameDraft,
+	projectBlueprintNameRef,
+	setProjectBlueprintNameDraft,
+	cancelProjectBlueprintRename,
+	saveProjectBlueprintName,
 	areaStampSelectionValid,
 	backupUserBlueprintLibrary,
 	beginUserBlueprintDrag,
@@ -552,73 +565,99 @@ export function BlueprintLibraryPanel({
 									if (trigger) openBlueprintRecordContext("project", record.id, trigger);
 								}}
 							>
-								<button
-									type="button"
-									className="tilefab-blueprint-place"
-									data-testid="blueprint-place"
-									disabled={projectBusy}
-									onClick={() => placeProjectBlueprint(record)}
-									title={`${record.name} 배치`}
-								>
-									<RailBlueprintMiniature record={record} />
-									<span>
-										<strong>{record.name}</strong>
-										<small>
-											{record.folder || "PROJECT"} · {record.widthMeters}×{record.heightMeters} m
-										</small>
-										<small className="tilefab-blueprint-kind">
-											{record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
-												? `STATIC FAB · ${record.equipmentGroups.length} GROUPS · ${record.ports.length} PORTS`
-												: record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION
-													? `ORGANIZED FAB · ${record.bundle.organizations.length} ORGANIZATIONS · ${record.bundle.equipmentGroups.length} GROUPS`
-													: `RAIL ONLY · ${record.sourceModuleCount} MODULES`}
-										</small>
-									</span>
-								</button>
-								<div className="tilefab-blueprint-record-tools">
-									<button
-										ref={(element) => {
-											const key = blueprintRecordContextKey("project", record.id);
-											if (element) blueprintRecordContextTriggerRefs.current.set(key, element);
-											else blueprintRecordContextTriggerRefs.current.delete(key);
-										}}
-										type="button"
-										data-testid="blueprint-record-menu"
+								{projectBlueprintNameDraft?.record.id === record.id ? (
+									<BlueprintMetadataEditor
+										record={record}
+										name={projectBlueprintNameDraft.name}
+										nameRef={projectBlueprintNameRef}
+										onNameChange={(name) =>
+											setProjectBlueprintNameDraft((current) =>
+												current ? Object.freeze({ ...current, name }) : null,
+											)
+										}
+										error={projectBlueprintRenameError(
+											record,
+											normalizeBlueprintName(projectBlueprintNameDraft.name),
+											orderedProjectBlueprints,
+										)}
 										disabled={projectBusy || userBlueprintLibraryBusy !== null}
-										aria-label={`${record.name} 청사진 메뉴`}
-										aria-haspopup="menu"
-										aria-expanded={
-											blueprintRecordContext?.scope === "project" &&
-											blueprintRecordContext.recordId === record.id
-										}
-										aria-controls={`tilefab-blueprint-context-project-${record.id}`}
-										title="청사진 명령"
-										onClick={(event) =>
-											openBlueprintRecordContext("project", record.id, event.currentTarget)
-										}
-									>
-										<EllipsisVertical size={17} />
-									</button>
-								</div>
-								{blueprintRecordContext?.scope === "project" &&
-								blueprintRecordContext.recordId === record.id ? (
-									<BlueprintRecordContextTray
-										state={blueprintRecordContext}
-										recordName={record.name}
-										favorite={record.favorite}
-										quickSlot={null}
-										quickSlots={USER_BLUEPRINT_QUICK_SLOTS}
-										quickSlotOwners={userBlueprintQuickSlotOwners}
-										busy={projectBusy || userBlueprintLibraryBusy !== null}
-										deleteConfirmation={false}
-										contextRef={blueprintRecordContextRef}
-										onCommand={(commandId) => runProjectBlueprintRecordCommand(commandId, record)}
-										onQuickSlot={() => undefined}
-										onBack={() => undefined}
-										onClose={() => closeBlueprintRecordContext()}
-										onKeyDown={handleBlueprintRecordContextKeyDown}
+										onCancel={cancelProjectBlueprintRename}
+										onSave={saveProjectBlueprintName}
 									/>
-								) : null}
+								) : (
+									<>
+										<button
+											type="button"
+											className="tilefab-blueprint-place"
+											data-testid="blueprint-place"
+											disabled={projectBusy}
+											onClick={() => placeProjectBlueprint(record)}
+											title={`${record.name} 배치`}
+										>
+											<RailBlueprintMiniature record={record} />
+											<span>
+												<strong>{record.name}</strong>
+												<small>
+													{record.folder || "PROJECT"} · {record.widthMeters}×{record.heightMeters}{" "}
+													m
+												</small>
+												<small className="tilefab-blueprint-kind">
+													{record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB
+														? `STATIC FAB · ${record.equipmentGroups.length} GROUPS · ${record.ports.length} PORTS`
+														: record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION
+															? `ORGANIZED FAB · ${record.bundle.organizations.length} ORGANIZATIONS · ${record.bundle.equipmentGroups.length} GROUPS`
+															: `RAIL ONLY · ${record.sourceModuleCount} MODULES`}
+												</small>
+											</span>
+										</button>
+										<div className="tilefab-blueprint-record-tools">
+											<button
+												ref={(element) => {
+													const key = blueprintRecordContextKey("project", record.id);
+													if (element) blueprintRecordContextTriggerRefs.current.set(key, element);
+													else blueprintRecordContextTriggerRefs.current.delete(key);
+												}}
+												type="button"
+												data-testid="blueprint-record-menu"
+												disabled={projectBusy || userBlueprintLibraryBusy !== null}
+												aria-label={`${record.name} 청사진 메뉴`}
+												aria-haspopup="menu"
+												aria-expanded={
+													blueprintRecordContext?.scope === "project" &&
+													blueprintRecordContext.recordId === record.id
+												}
+												aria-controls={`tilefab-blueprint-context-project-${record.id}`}
+												title="청사진 명령"
+												onClick={(event) =>
+													openBlueprintRecordContext("project", record.id, event.currentTarget)
+												}
+											>
+												<EllipsisVertical size={17} />
+											</button>
+										</div>
+										{blueprintRecordContext?.scope === "project" &&
+										blueprintRecordContext.recordId === record.id ? (
+											<BlueprintRecordContextTray
+												state={blueprintRecordContext}
+												recordName={record.name}
+												favorite={record.favorite}
+												quickSlot={null}
+												quickSlots={USER_BLUEPRINT_QUICK_SLOTS}
+												quickSlotOwners={userBlueprintQuickSlotOwners}
+												busy={projectBusy || userBlueprintLibraryBusy !== null}
+												deleteConfirmation={false}
+												contextRef={blueprintRecordContextRef}
+												onCommand={(commandId) =>
+													runProjectBlueprintRecordCommand(commandId, record)
+												}
+												onQuickSlot={() => undefined}
+												onBack={() => undefined}
+												onClose={() => closeBlueprintRecordContext()}
+												onKeyDown={handleBlueprintRecordContextKeyDown}
+											/>
+										) : null}
+									</>
+								)}
 							</article>
 						))
 					)}
@@ -1131,71 +1170,29 @@ export function BlueprintLibraryPanel({
 										}}
 									>
 										{userBlueprintMetadataDraft?.id === entry.id ? (
-											<form
-												className="tilefab-user-blueprint-metadata-editor"
-												onSubmit={(event) => {
-													event.preventDefault();
-													void saveUserBlueprintMetadata();
+											<BlueprintMetadataEditor
+												record={record}
+												name={userBlueprintMetadataDraft.name}
+												nameRef={userBlueprintMetadataNameRef}
+												onNameChange={(name) =>
+													setUserBlueprintMetadataDraft((current) =>
+														current ? Object.freeze({ ...current, name }) : null,
+													)
+												}
+												folder={{
+													value: userBlueprintMetadataDraft.folder,
+													onChange: (folder) =>
+														setUserBlueprintMetadataDraft((current) =>
+															current ? Object.freeze({ ...current, folder }) : null,
+														),
 												}}
-											>
-												<RailBlueprintMiniature record={record} />
-												<div className="tilefab-user-blueprint-metadata-fields">
-													<label>
-														<span>NAME</span>
-														<input
-															ref={userBlueprintMetadataNameRef}
-															value={userBlueprintMetadataDraft.name}
-															aria-label={`${record.name} 새 이름`}
-															onChange={(event) => {
-																const name = event.currentTarget.value;
-																setUserBlueprintMetadataDraft((current) =>
-																	current
-																		? Object.freeze({
-																				...current,
-																				name,
-																			})
-																		: null,
-																);
-															}}
-														/>
-													</label>
-													<label>
-														<span>FOLDER · UP TO 4 LEVELS</span>
-														<input
-															value={userBlueprintMetadataDraft.folder}
-															aria-label={`${record.name} 새 폴더`}
-															placeholder="Process/Photo"
-															onChange={(event) => {
-																const folder = event.currentTarget.value;
-																setUserBlueprintMetadataDraft((current) =>
-																	current
-																		? Object.freeze({
-																				...current,
-																				folder,
-																			})
-																		: null,
-																);
-															}}
-														/>
-													</label>
-												</div>
-												<footer>
-													<button type="button" onClick={cancelUserBlueprintMetadataEdit}>
-														<X size={14} />
-														CANCEL
-													</button>
-													<button
-														type="submit"
-														disabled={
-															!normalizeBlueprintName(userBlueprintMetadataDraft.name) ||
-															userBlueprintLibraryBusy !== null
-														}
-													>
-														<Check size={14} />
-														SAVE
-													</button>
-												</footer>
-											</form>
+												disabled={
+													!normalizeBlueprintName(userBlueprintMetadataDraft.name) ||
+													userBlueprintLibraryBusy !== null
+												}
+												onCancel={cancelUserBlueprintMetadataEdit}
+												onSave={() => void saveUserBlueprintMetadata()}
+											/>
 										) : (
 											<>
 												<button
@@ -1455,5 +1452,91 @@ export function BlueprintLibraryPanel({
 				</section>
 			)}
 		</aside>
+	);
+}
+
+function BlueprintMetadataEditor({
+	record,
+	name,
+	nameRef,
+	onNameChange,
+	folder,
+	error,
+	disabled,
+	onCancel,
+	onSave,
+}: Readonly<{
+	record: OpenFabProjectBlueprint;
+	name: string;
+	nameRef: RefObject<HTMLInputElement | null>;
+	onNameChange: (name: string) => void;
+	folder?: Readonly<{ value: string; onChange: (folder: string) => void }>;
+	error?: string | null;
+	disabled: boolean;
+	onCancel: () => void;
+	onSave: () => void;
+}>): ReactElement {
+	const errorId = useId();
+	return (
+		<form
+			className="tilefab-user-blueprint-metadata-editor"
+			data-testid={folder ? "user-blueprint-metadata-editor" : "project-blueprint-name-editor"}
+			onKeyDown={(event) => {
+				if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+					if (event.key === "Enter") event.preventDefault();
+					return;
+				}
+				if (event.key === "Escape") {
+					event.preventDefault();
+					event.stopPropagation();
+					onCancel();
+				}
+			}}
+			onSubmit={(event) => {
+				event.preventDefault();
+				if (!disabled && !error) onSave();
+			}}
+		>
+			<RailBlueprintMiniature record={record} />
+			<div className="tilefab-user-blueprint-metadata-fields">
+				<label>
+					<span>NAME</span>
+					<input
+						ref={nameRef}
+						value={name}
+						aria-label={`${record.name} 새 이름`}
+						aria-invalid={!!error}
+						aria-describedby={error ? errorId : undefined}
+						onChange={(event) => onNameChange(event.currentTarget.value)}
+					/>
+				</label>
+				{folder ? (
+					<label>
+						<span>FOLDER · UP TO 4 LEVELS</span>
+						<input
+							value={folder.value}
+							aria-label={`${record.name} 새 폴더`}
+							placeholder="Process/Photo"
+							onChange={(event) => folder.onChange(event.currentTarget.value)}
+						/>
+					</label>
+				) : null}
+			</div>
+			{error ? (
+				<p id={errorId} className="tilefab-blueprint-name-error" role="alert">
+					{error}
+				</p>
+			) : null}
+			<footer>
+				<button type="button" onClick={onCancel}>
+					<X size={14} />
+					{folder ? "CANCEL" : "취소"}
+				</button>
+				<button type="submit" disabled={disabled || !!error}>
+					<Check size={14} />
+					{folder ? "SAVE" : "적용"}
+				</button>
+			</footer>
+		</form>
 	);
 }

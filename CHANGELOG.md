@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.81] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Rename a project blueprint in place while preserving its identity, favorite and complete content.
+  Apply or cancel in the shared library editor; empty and duplicate names are rejected before saving.
+- Discard outdated rename drafts when projects change, and keep the renamed item reachable after search.
+
 ## [0.1.80] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

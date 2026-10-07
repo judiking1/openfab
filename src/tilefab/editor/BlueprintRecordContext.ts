@@ -31,6 +31,7 @@ export interface BlueprintRecordContextState {
 }
 
 export type BlueprintRecordCommandId =
+	| "rename-project"
 	| "save-to-user-library"
 	| "toggle-favorite"
 	| "delete-project"
@@ -54,6 +55,7 @@ export function blueprintRecordCommands(input: {
 }): readonly BlueprintRecordCommand[] {
 	if (input.scope === "project") {
 		return Object.freeze([
+			command("rename-project", "RENAME"),
 			command("save-to-user-library", "SAVE TO MY LIBRARY", "accent"),
 			command("toggle-favorite", input.favorite ? "REMOVE FAVORITE" : "ADD FAVORITE"),
 			command("delete-project", "DELETE FROM PROJECT", "danger"),
@@ -76,6 +78,25 @@ export function blueprintRecordCommands(input: {
 			"danger",
 		),
 	]);
+}
+
+/** The caller supplies the same normalized name used by project blueprint capture. */
+export function projectBlueprintRenameError(
+	record: Pick<OpenFabProjectBlueprint, "id" | "folder">,
+	name: string,
+	records: readonly Pick<OpenFabProjectBlueprint, "id" | "folder" | "name">[],
+): string | null {
+	if (!name) return "청사진 이름을 입력하세요";
+	if (
+		records.some(
+			(candidate) =>
+				candidate.id !== record.id &&
+				candidate.folder.toLocaleLowerCase("en-US") === record.folder.toLocaleLowerCase("en-US") &&
+				candidate.name.toLocaleLowerCase("en-US") === name.toLocaleLowerCase("en-US"),
+		)
+	)
+		return "같은 폴더에 같은 이름의 청사진이 있습니다 · 다른 이름을 입력하세요";
+	return null;
 }
 
 export function nextBlueprintRecordMenuIndex(input: {

@@ -613,6 +613,7 @@ import type {
 	BlueprintLibraryTab,
 	ContextualBlueprintSaveRequest,
 	PendingUserBlueprintImport,
+	ProjectBlueprintNameDraft,
 	RailClipboard,
 	RailClipboardHistoryEntry,
 	UserBlueprintMetadataDraft,
@@ -630,6 +631,7 @@ import {
 	filterProjectBlueprintRecords,
 	nextBlueprintRecordMenuIndex,
 	planUserBlueprintOrganization,
+	projectBlueprintRenameError,
 	type UserBlueprintOrganizationTarget,
 } from "./BlueprintRecordContext";
 import {
@@ -3404,6 +3406,10 @@ export default function TileFabApp(): React.ReactElement {
 	const [pendingUserBlueprintDeleteId, setPendingUserBlueprintDeleteId] = useState<string | null>(
 		null,
 	);
+	const [projectBlueprintNameDraft, setProjectBlueprintNameDraft] =
+		useState<ProjectBlueprintNameDraft | null>(null);
+	const projectBlueprintNameRef = useRef<HTMLInputElement | null>(null);
+	const projectBlueprintNameDraftId = projectBlueprintNameDraft?.record.id ?? null;
 	const [userBlueprintMetadataDraft, setUserBlueprintMetadataDraft] =
 		useState<UserBlueprintMetadataDraft | null>(null);
 	const [pendingUserBlueprintImport, setPendingUserBlueprintImport] =
@@ -5722,6 +5728,11 @@ export default function TileFabApp(): React.ReactElement {
 		if (!pendingUserBlueprintImportId) return;
 		userBlueprintImportNameRef.current?.focus();
 	}, [pendingUserBlueprintImportId]);
+
+	useLayoutEffect(() => {
+		if (!projectBlueprintNameDraftId) return;
+		projectBlueprintNameRef.current?.focus();
+	}, [projectBlueprintNameDraftId]);
 
 	useLayoutEffect(() => {
 		if (!userBlueprintMetadataDraftId) return;
@@ -20143,6 +20154,7 @@ export default function TileFabApp(): React.ReactElement {
 			activationReadyMilliseconds: null,
 		});
 		projectGenerationRef.current += 1;
+		setProjectBlueprintNameDraft(null);
 		setProjectSession({
 			manifest: prepared.metadata.manifest,
 			fileReference,
@@ -27756,6 +27768,7 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => blueprintLibraryTabRef(tab)?.focus());
 	};
 	const closeBlueprintLibrary = (restoreFocus = true): void => {
+		setProjectBlueprintNameDraft(null);
 		setBlueprintLibraryOpen(false);
 		setBlueprintRecordContext(null);
 		setPendingUserBlueprintDeleteId(null);
@@ -27769,6 +27782,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	};
 	const chooseBlueprintLibraryTab = (tab: BlueprintLibraryTab): void => {
+		setProjectBlueprintNameDraft(null);
 		syncBlueprintSaveDestinationForTab(tab);
 		setBlueprintLibraryTab(tab);
 		setBlueprintRecordContext(null);
@@ -27887,6 +27901,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		setPendingUserBlueprintDeleteId(null);
 		setUserBlueprintMetadataDraft(null);
+		setProjectBlueprintNameDraft(null);
 		setBlueprintRecordContext(Object.freeze({ scope, recordId, view }));
 		focusBlueprintRecordContextFirstCommand();
 	};
@@ -28471,6 +28486,47 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(
 			`${blueprintPlacementStatusPrefix(origin)}${record.name} · R 회전 · F 흐름 반전 · 빈 공간 또는 호환 레일 클릭`,
 		);
+	};
+	const cancelProjectBlueprintRename = (): void => {
+		const draft = projectBlueprintNameDraft;
+		setProjectBlueprintNameDraft(null);
+		if (draft && draft.projectGeneration === projectGenerationRef.current) {
+			focusBlueprintRecordContextTrigger("project", draft.record.id, blueprintSavedTabRef.current);
+		}
+	};
+	const saveProjectBlueprintName = (): void => {
+		const draft = projectBlueprintNameDraft;
+		if (!draft) return;
+		const records = projectBlueprintsRef.current.records;
+		const record = records.find((candidate) => candidate.id === draft.record.id);
+		if (draft.projectGeneration !== projectGenerationRef.current || record !== draft.record) {
+			setProjectBlueprintNameDraft(null);
+			setStatus("프로젝트 또는 청사진이 변경되었습니다 · 현재 항목에서 다시 이름을 편집하세요");
+			return;
+		}
+		if (projectSessionRef.current.operation !== "idle" || userBlueprintLibraryBusyRef.current !== null) {
+			return;
+		}
+		const name = normalizeBlueprintName(draft.name);
+		const error = projectBlueprintRenameError(record, name, records);
+		if (error) {
+			setStatus(error);
+			return;
+		}
+		if (name !== record.name) {
+			const updated = updateOpenFabProjectBlueprint(record, {
+				name,
+				updatedAt: latestCanonicalTimestamp(projectIdentity.now(), record.updatedAt),
+			});
+			replaceProjectBlueprints(
+				records.map((candidate) => candidate.id === record.id ? updated : candidate),
+				`${name} · 청사진 이름을 변경했습니다 · 프로젝트 파일 저장 시 함께 보관됩니다`,
+			);
+			if (filterProjectBlueprintRecords([updated], projectBlueprintSearch).length === 0) {
+				setProjectBlueprintSearch("");
+			}
+		}
+		cancelProjectBlueprintRename();
 	};
 	const toggleProjectBlueprintFavorite = (record: OpenFabProjectBlueprint): void => {
 		const updated = updateOpenFabProjectBlueprint(record, {
@@ -29301,6 +29357,18 @@ export default function TileFabApp(): React.ReactElement {
 		commandId: BlueprintRecordCommandId,
 		record: OpenFabProjectBlueprint,
 	): void => {
+		if (commandId === "rename-project") {
+			if (projectSessionRef.current.operation !== "idle" || userBlueprintLibraryBusyRef.current !== null) {
+				return;
+			}
+			closeBlueprintRecordContext(false);
+			setProjectBlueprintNameDraft(Object.freeze({
+				record,
+				name: record.name,
+				projectGeneration: projectGenerationRef.current,
+			}));
+			return;
+		}
 		if (commandId === "save-to-user-library") {
 			closeBlueprintRecordContext();
 			void promoteProjectBlueprintToUserLibrary(record);
@@ -37355,6 +37423,11 @@ export default function TileFabApp(): React.ReactElement {
 
 				{blueprintLibraryOpen ? (
 					<BlueprintLibraryPanel
+						projectBlueprintNameDraft={projectBlueprintNameDraft}
+						projectBlueprintNameRef={projectBlueprintNameRef}
+						setProjectBlueprintNameDraft={setProjectBlueprintNameDraft}
+						cancelProjectBlueprintRename={cancelProjectBlueprintRename}
+						saveProjectBlueprintName={saveProjectBlueprintName}
 						areaStampSelectionValid={areaStampEligibility?.valid === true}
 						backupUserBlueprintLibrary={backupUserBlueprintLibrary}
 						beginUserBlueprintDrag={beginUserBlueprintDrag}

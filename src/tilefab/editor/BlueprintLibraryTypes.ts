@@ -2,6 +2,7 @@ import type { RailAreaStampTemplate } from "../core/RailAreaStamp";
 import type { RailModuleStampTemplate } from "../core/RailModuleStamp";
 import type { StaticFabBlueprintTemplate } from "../core/StaticFabBlueprint";
 import type { StaticFabOrganizationBundle } from "../core/StaticFabOrganizationBundle";
+import type { OpenFabProjectBlueprint } from "../project/OpenFabBlueprintLibrary";
 import type { OpenFabUserBlueprintRecord } from "../project/OpenFabUserBlueprintLibrary";
 
 export type RailClipboard =
@@ -23,6 +24,12 @@ export interface RailClipboardHistoryEntry {
 }
 
 export type BlueprintLibraryTab = "saved" | "user" | "recent";
+
+export interface ProjectBlueprintNameDraft {
+	readonly record: OpenFabProjectBlueprint;
+	readonly projectGeneration: number;
+	readonly name: string;
+}
 
 export interface UserBlueprintMetadataDraft {
 	readonly id: string;

@@ -4,6 +4,7 @@ import {
 	filterProjectBlueprintRecords,
 	nextBlueprintRecordMenuIndex,
 	planUserBlueprintOrganization,
+	projectBlueprintRenameError,
 } from "./BlueprintRecordContext";
 
 describe("BlueprintRecordContext", () => {
@@ -64,6 +65,7 @@ describe("BlueprintRecordContext", () => {
 				label,
 			})),
 		).toEqual([
+			{ id: "rename-project", label: "RENAME" },
 			{ id: "save-to-user-library", label: "SAVE TO MY LIBRARY" },
 			{ id: "toggle-favorite", label: "REMOVE FAVORITE" },
 			{ id: "delete-project", label: "DELETE FROM PROJECT" },
@@ -81,6 +83,23 @@ describe("BlueprintRecordContext", () => {
 			{ id: "save-to-project", label: "COPY TO PROJECT" },
 			{ id: "delete-user-blueprint", label: "CONFIRM DELETE" },
 		]);
+	});
+
+	it("rejects an empty project name and a case-insensitive duplicate in the same folder", () => {
+		const record = { id: "a", folder: "Process/Photo", name: "Original" };
+		const records = [record, { id: "b", folder: "process/photo", name: "Taken" }];
+		expect(projectBlueprintRenameError(record, "", records)).toBe("청사진 이름을 입력하세요");
+		expect(projectBlueprintRenameError(record, "TAKEN", records)).toContain("같은 이름");
+		expect(record.name).toBe("Original");
+	});
+
+	it("allows its own name, a case-only rename, and a name used only in another folder", () => {
+		const record = { id: "a", folder: "Photo", name: "Original" };
+		const records = [record, { id: "b", folder: "Etch", name: "Taken" }];
+		for (const name of ["Original", "ORIGINAL", "Taken", "New name"]) {
+			expect(projectBlueprintRenameError(record, name, records)).toBeNull();
+		}
+		expect(records.map(({ name }) => name)).toEqual(["Original", "Taken"]);
 	});
 
 	it("wraps menu navigation and supports Home and End", () => {

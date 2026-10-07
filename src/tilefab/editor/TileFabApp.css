@@ -7493,6 +7493,18 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	padding: 7px;
 }
 
+.tilefab-user-blueprint-metadata-editor input {
+	min-height: 44px;
+}
+
+.tilefab-blueprint-name-error {
+	grid-column: 1 / -1;
+	margin: 0;
+	color: #efc58c;
+	font-size: 11px;
+	overflow-wrap: anywhere;
+}
+
 .tilefab-user-blueprint-metadata-fields {
 	display: grid;
 	min-width: 0;

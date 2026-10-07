@@ -192,7 +192,7 @@ function blueprintRecordCommandIcon(
 	if (commandId === "toggle-favorite") {
 		return <Star size={16} fill={favorite ? "currentColor" : "none"} />;
 	}
-	if (commandId === "edit-metadata") return <Pencil size={16} />;
+	if (commandId === "edit-metadata" || commandId === "rename-project") return <Pencil size={16} />;
 	if (commandId === "choose-quick-slot") return <Grid3X3 size={16} />;
 	if (commandId === "export-user-blueprint") return <Download size={16} />;
 	return <Trash2 size={16} />;
@@ -204,6 +204,7 @@ function blueprintRecordCommandAriaLabel(
 	favorite: boolean,
 	deleteConfirmation: boolean,
 ): string {
+	if (commandId === "rename-project") return `${recordName} 이름 변경`;
 	if (commandId === "save-to-user-library") return `${recordName} 내 라이브러리에 저장`;
 	if (commandId === "toggle-favorite") {
 		return `${recordName} 즐겨찾기 ${favorite ? "해제" : "추가"}`;
