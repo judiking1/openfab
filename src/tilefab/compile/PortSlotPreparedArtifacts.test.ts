@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { copyPortEquipmentState } from "../core/EquipmentGroup";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument } from "../core/RailDocument";
 import { DIR_E, DIR_W } from "../core/railShape";
@@ -13,6 +14,7 @@ import {
 	PORT_SLOT_STATUS,
 	PortSlotAvailabilityIndex,
 	PortSlotSpatialIndex,
+	portSlotRecord,
 } from "./PortSlotCompiler";
 import {
 	adoptAndValidatePortSlotPreparedArtifactCatalogCooperatively,
@@ -80,6 +82,13 @@ describe("PortSlotPreparedArtifacts", () => {
 		);
 		expect(availability.matchesPreparedArtifacts(artifacts)).toBe(true);
 		expect(availability.statusFor(slots, row).status).toBe(PORT_SLOT_STATUS.LEGAL);
+		const assertBatchMatches = () => {
+			const rows = [row, row, ...Array.from({ length: slots.count }, (_, index) => index)];
+			expect(availability.statusesForRows(slots, rows)).toEqual(
+				rows.map((candidate) => availability.statusFor(slots, candidate)),
+			);
+		};
+		assertBatchMatches();
 
 		const sourcePathIndex = slots.sourcePathIndices[row] as number;
 		const mutations: ReadonlyArray<readonly [string, () => () => void]> = [
@@ -175,6 +184,7 @@ describe("PortSlotPreparedArtifacts", () => {
 		];
 		for (const [label, mutate] of mutations) {
 			const restore = mutate();
+			assertBatchMatches();
 			expect(availability.statusFor(slots, row).status, label).toBe(
 				PORT_SLOT_STATUS.ATTACHMENT_INVALID,
 			);
@@ -182,6 +192,7 @@ describe("PortSlotPreparedArtifacts", () => {
 				PORT_SLOT_STATUS.ATTACHMENT_INVALID,
 			);
 			restore();
+			assertBatchMatches();
 			expect(availability.statusFor(slots, row).status, `${label} restore`).toBe(
 				PORT_SLOT_STATUS.LEGAL,
 			);
@@ -194,7 +205,9 @@ describe("PortSlotPreparedArtifacts", () => {
 			(layout.pathIntervalRemap.sourcePathCells[sourceCellOffset] as number) + 1,
 		);
 		expect(availability.statusFor(slots, row).status).toBe(PORT_SLOT_STATUS.ATTACHMENT_INVALID);
+		assertBatchMatches();
 		restorePhysicalSource();
+		assertBatchMatches();
 		expect(availability.statusFor(slots, row).status).toBe(PORT_SLOT_STATUS.LEGAL);
 
 		const mappingRow = layout.pathIntervalRemap.sourcePathOffsets[sourcePathIndex] as number;
@@ -204,7 +217,9 @@ describe("PortSlotPreparedArtifacts", () => {
 			PATH_INTERVAL_MAPPING_KIND.UNMAPPABLE,
 		);
 		expect(availability.statusFor(slots, row).status).toBe(PORT_SLOT_STATUS.ATTACHMENT_INVALID);
+		assertBatchMatches();
 		restoreMapping();
+		assertBatchMatches();
 		expect(availability.statusFor(slots, row).status).toBe(PORT_SLOT_STATUS.LEGAL);
 
 		const finalPathIndex = slots.finalPathIndices[row] as number;
@@ -215,10 +230,15 @@ describe("PortSlotPreparedArtifacts", () => {
 			(layout.paths.positions[finalPoint * 2] as number) + 0.25,
 		);
 		expect(availability.statusFor(slots, row).status).toBe(PORT_SLOT_STATUS.ATTACHMENT_INVALID);
+		assertBatchMatches();
 		restoreFinalGeometry();
+		assertBatchMatches();
 		expect(availability.statusFor(slots, row).status).toBe(PORT_SLOT_STATUS.LEGAL);
 
 		const foreignArtifacts = compilePortSlotPreparedArtifacts(layout, "OHB");
+		expect(availability.statusesForRows(foreignArtifacts.slots, [row])).toEqual([
+			availability.statusFor(foreignArtifacts.slots, row),
+		]);
 		expect(availability.statusFor(foreignArtifacts.slots, row).status).toBe(
 			PORT_SLOT_STATUS.ATTACHMENT_INVALID,
 		);
@@ -229,6 +249,286 @@ describe("PortSlotPreparedArtifacts", () => {
 				document.portEquipment,
 			),
 		).toThrow("physical-layout identity");
+	});
+
+	it("reuses the exact common binding only within a synchronous batch", () => {
+		const document = straightDocument();
+		const layout = compilePhysicalRail(document.map);
+		const artifacts = compilePortSlotPreparedArtifacts(layout);
+		const availability = createPreparedPortSlotAvailabilityIndex(
+			layout,
+			artifacts,
+			document.portEquipment,
+		);
+		const rows = Array.from({ length: artifacts.slotCount }, (_, row) => row);
+		const scalar = rows.map((row) => availability.statusFor(artifacts.slots, row));
+		const descriptor = vi.spyOn(Object, "getOwnPropertyDescriptor");
+		try {
+			expect(availability.statusesForRows(artifacts.slots, rows)).toEqual(scalar);
+			expect(
+				descriptor.mock.calls.filter(
+					([owner, key]) => owner === layout && key === "pathIntervalRemap",
+				),
+			).toHaveLength(1);
+			expect(availability.statusesForRows(artifacts.slots, rows)).toEqual(scalar);
+			expect(
+				descriptor.mock.calls.filter(
+					([owner, key]) => owner === layout && key === "pathIntervalRemap",
+				),
+			).toHaveLength(2);
+		} finally {
+			descriptor.mockRestore();
+		}
+		for (const key of ["pathIntervalRemap", "paths"] as const) {
+			const original = layout[key];
+			Object.defineProperty(layout, key, { value: { ...original } });
+			expect(availability.statusesForRows(artifacts.slots, rows)).toEqual(
+				rows.map((row) => availability.statusFor(artifacts.slots, row)),
+			);
+			expect(
+				availability
+					.statusesForRows(artifacts.slots, rows)
+					.every((result) => result.status === PORT_SLOT_STATUS.ATTACHMENT_INVALID),
+			).toBe(true);
+			Object.defineProperty(layout, key, { value: original });
+			expect(availability.statusesForRows(artifacts.slots, rows)).toEqual(scalar);
+		}
+		const positions = layout.paths.positions;
+		layout.paths.positions = positions.slice();
+		expect(availability.statusesForRows(artifacts.slots, rows)).toEqual(
+			rows.map((row) => availability.statusFor(artifacts.slots, row)),
+		);
+		layout.paths.positions = positions;
+		expect(availability.statusesForRows(artifacts.slots, rows)).toEqual(scalar);
+		for (const invalidRow of [-1, artifacts.slotCount, 0.5, Number.NaN]) {
+			expect(() => availability.statusesForRows(artifacts.slots, [rows[0], invalidRow])).toThrow(
+				RangeError,
+			);
+		}
+		expect(availability.statusesForRows(artifacts.slots, [])).toEqual([]);
+	});
+
+	it("keeps occupancy and ignored IDs scoped to each batch and exact document", () => {
+		const document = straightDocument();
+		const layout = compilePhysicalRail(document.map);
+		for (const portType of ["OHB", "EQ", "STK"] as const) {
+			const artifacts = compilePortSlotPreparedArtifacts(layout, portType);
+			const slots = artifacts.slots;
+			const rows = Array.from({ length: slots.count }, (_, row) => row);
+			const empty = createPreparedPortSlotAvailabilityIndex(
+				layout,
+				artifacts,
+				document.portEquipment,
+			);
+			const row = slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL);
+			const port = portSlotRecord(slots, row, 1, 1, `${portType}-1`);
+			const ports =
+				portType === "EQ"
+					? [
+							port,
+							portSlotRecord(
+								slots,
+								slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL, row + 1),
+								2,
+								1,
+								"EQ-2",
+							),
+						]
+					: [port];
+			const occupiedState = copyPortEquipmentState({
+				nextPortId: ports.length + 1,
+				nextEquipmentGroupId: 2,
+				ports,
+				equipmentGroups: [
+					portType === "EQ"
+						? { id: 1, kind: "EQ", pitchMillimeters: 1_000, recipe: null, portIds: [1, 2] }
+						: portType === "STK"
+							? { id: 1, kind: "STK", template: "CUSTOM", portIds: [1] }
+							: { id: 1, kind: "OHB", template: "SINGLE", portIds: [1] },
+				],
+			});
+			const occupied = createPreparedPortSlotAvailabilityIndex(layout, artifacts, occupiedState);
+			expect(empty.statusesForRows(slots, [row])[0].status).toBe(PORT_SLOT_STATUS.LEGAL);
+			expect(occupied.statusesForRows(slots, [row])[0].status).toBe(PORT_SLOT_STATUS.PORT_OCCUPIED);
+			for (const [ignoredPortId, ignoredGroupId] of [
+				[0, 0],
+				[1, 0],
+				[0, 1],
+				[0, 0],
+			]) {
+				expect(occupied.statusesForRows(slots, rows, ignoredPortId, ignoredGroupId)).toEqual(
+					rows.map((candidate) =>
+						occupied.statusFor(slots, candidate, ignoredPortId, ignoredGroupId),
+					),
+				);
+			}
+			const replacementLayout = compilePhysicalRail(straightDocument().map);
+			const replacement = compilePortSlotPreparedArtifacts(replacementLayout, portType);
+			expect(empty.statusesForRows(replacement.slots, [row])[0].status).toBe(
+				PORT_SLOT_STATUS.ATTACHMENT_INVALID,
+			);
+			expect(
+				createPreparedPortSlotAvailabilityIndex(
+					replacementLayout,
+					replacement,
+					document.portEquipment,
+				).statusesForRows(replacement.slots, rows),
+			).toEqual(empty.statusesForRows(slots, rows));
+		}
+	});
+
+	it("falls back for row getters, mutable occupancy, and overridden queries before reusing proof", () => {
+		const document = straightDocument();
+		const layout = compilePhysicalRail(document.map);
+		const artifacts = compilePortSlotPreparedArtifacts(layout);
+		const slots = artifacts.slots;
+		const availability = createPreparedPortSlotAvailabilityIndex(
+			layout,
+			artifacts,
+			document.portEquipment,
+		);
+		const row = slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL);
+		const routeX = slots.routeXs[row];
+		const rows = [row, row];
+		const getter = vi.fn(() => {
+			slots.routeXs[row] = routeX + 1;
+			return row;
+		});
+		Object.defineProperty(rows, "1", { get: getter });
+		expect(availability.statusesForRows(slots, rows).map((result) => result.status)).toEqual([
+			PORT_SLOT_STATUS.LEGAL,
+			PORT_SLOT_STATUS.ATTACHMENT_INVALID,
+		]);
+		expect(getter).toHaveBeenCalledTimes(1);
+		slots.routeXs[row] = routeX;
+		const scalar = availability.statusFor.bind(availability);
+		const override = vi.spyOn(availability, "statusFor").mockImplementation((...args) => {
+			const result = scalar(...args);
+			slots.routeXs[row] = routeX + 1;
+			return result;
+		});
+		try {
+			expect(
+				availability.statusesForRows(slots, [row, row]).map((result) => result.status),
+			).toEqual([PORT_SLOT_STATUS.LEGAL, PORT_SLOT_STATUS.ATTACHMENT_INVALID]);
+			expect(override).toHaveBeenCalledTimes(2);
+		} finally {
+			override.mockRestore();
+			slots.routeXs[row] = routeX;
+		}
+		const mutable = createPreparedPortSlotAvailabilityIndex(layout, artifacts, {
+			...document.portEquipment,
+			ports: [],
+			equipmentGroups: [],
+		});
+		const descriptor = vi.spyOn(Object, "getOwnPropertyDescriptor");
+		try {
+			mutable.statusesForRows(slots, [row, row]);
+			expect(
+				descriptor.mock.calls.filter(
+					([owner, key]) => owner === layout && key === "pathIntervalRemap",
+				),
+			).toHaveLength(2);
+		} finally {
+			descriptor.mockRestore();
+		}
+	});
+
+	it.each([
+		["statusFor", "value"],
+		["statusForAdvisoryDiscovery", "value"],
+		["statusFor", "getter"],
+		["statusForAdvisoryDiscovery", "getter"],
+	] as const)("falls back when a physical binding descriptor trap replaces %s with a %s", (query, replacement) => {
+		const document = straightDocument();
+		let onBindingRead: () => void = () => undefined;
+		const layout = new Proxy(compilePhysicalRail(document.map), {
+			getOwnPropertyDescriptor(target, key) {
+				if (key === "pathIntervalRemap") onBindingRead();
+				return Reflect.getOwnPropertyDescriptor(target, key);
+			},
+		});
+		const artifacts = compilePortSlotPreparedArtifacts(layout);
+		const availability = createPreparedPortSlotAvailabilityIndex(
+			layout,
+			artifacts,
+			document.portEquipment,
+		);
+		const row = artifacts.slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL);
+		expect(availability.statusFor(artifacts.slots, row).status).toBe(PORT_SLOT_STATUS.LEGAL);
+		const invalidQuery = () => ({
+			status: PORT_SLOT_STATUS.ATTACHMENT_INVALID,
+			conflictingPortId: 0,
+			conflictingEquipmentGroupId: 0,
+		});
+		const getter = vi.fn(() => invalidQuery);
+		onBindingRead = () => {
+			Object.defineProperty(availability, query, {
+				configurable: true,
+				...(replacement === "getter" ? { get: getter } : { value: invalidQuery }),
+			});
+		};
+		const batch = availability.statusesForRows(artifacts.slots, [row]);
+		const scalar = availability.statusFor(artifacts.slots, row);
+		expect(scalar.status).toBe(PORT_SLOT_STATUS.ATTACHMENT_INVALID);
+		expect(batch).toEqual([scalar]);
+		// Only the two scalar queries may invoke the replacement getter, never the batch guard.
+		expect(getter).toHaveBeenCalledTimes(replacement === "getter" ? 2 : 0);
+	});
+
+	it("rechecks accessor, shared, resizable, and detached physical buffers on each batch", () => {
+		const document = straightDocument();
+		const layout = compilePhysicalRail(document.map);
+		const artifacts = compilePortSlotPreparedArtifacts(layout);
+		const slots = artifacts.slots;
+		const availability = createPreparedPortSlotAvailabilityIndex(
+			layout,
+			artifacts,
+			document.portEquipment,
+		);
+		const row = slots.statuses.indexOf(PORT_SLOT_STATUS.LEGAL);
+		const rows = [row, row];
+		const positions = layout.paths.positions;
+		const getter = vi.fn(() => positions);
+		Object.defineProperty(layout.paths, "positions", { get: getter, configurable: true });
+		expect(availability.statusesForRows(slots, rows)).toEqual(
+			rows.map((candidate) => availability.statusFor(slots, candidate)),
+		);
+		expect(getter).not.toHaveBeenCalled();
+		Object.defineProperty(layout.paths, "positions", {
+			value: positions,
+			writable: true,
+			configurable: true,
+		});
+		const buffers: ArrayBufferLike[] = [new SharedArrayBuffer(positions.byteLength)];
+		if (Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "resizable")) {
+			buffers.push(
+				Reflect.construct(ArrayBuffer, [
+					positions.byteLength,
+					{ maxByteLength: positions.byteLength * 2 },
+				]),
+			);
+		}
+		for (const buffer of buffers) {
+			layout.paths.positions = new Float32Array(buffer);
+			layout.paths.positions.set(positions);
+			expect(availability.statusesForRows(slots, rows)).toEqual(
+				rows.map((candidate) => availability.statusFor(slots, candidate)),
+			);
+			expect(availability.statusesForRows(slots, rows)[0].status).toBe(
+				PORT_SLOT_STATUS.ATTACHMENT_INVALID,
+			);
+		}
+		layout.paths.positions = positions;
+		expect(availability.statusesForRows(slots, rows)[0].status).toBe(PORT_SLOT_STATUS.LEGAL);
+		// No contents cache survives detaching the original, otherwise-identical view.
+		structuredClone(positions, { transfer: [positions.buffer] });
+		expect(availability.statusesForRows(slots, rows)).toEqual(
+			rows.map((candidate) => availability.statusFor(slots, candidate)),
+		);
+		expect(availability.statusesForRows(slots, rows)[0].status).toBe(
+			PORT_SLOT_STATUS.ATTACHMENT_INVALID,
+		);
 	});
 
 	it("reuses exact resolved port positions through an unforgeable source capability", () => {
@@ -405,6 +705,21 @@ describe("PortSlotPreparedArtifacts", () => {
 
 		expect(checkpointCount).toBeGreaterThan(0);
 		expect(adopted.OHB.slots.statuses[unsafeRow]).toBe(PORT_SLOT_STATUS.UNSAFE_APPROACH);
+		for (const portType of ["OHB", "EQ", "STK"] as const) {
+			const artifacts = adopted[portType];
+			const availability = createPreparedPortSlotAvailabilityIndex(
+				layout,
+				artifacts,
+				straightDocument().portEquipment,
+			);
+			const rows = Array.from({ length: artifacts.slotCount }, (_, row) => row);
+			expect(availability.statusesForRows(artifacts.slots, rows)).toEqual(
+				rows.map((row) => availability.statusFor(artifacts.slots, row)),
+			);
+			expect(availability.statusesForRows(source[portType].slots, [0])[0].status).toBe(
+				PORT_SLOT_STATUS.ATTACHMENT_INVALID,
+			);
+		}
 		expect(Object.isExtensible(adopted.OHB.slots.statuses)).toBe(false);
 		expect(portSlotPreparedArtifactsHaveExactSourceLayout(adopted.OHB, layout)).toBe(true);
 	});

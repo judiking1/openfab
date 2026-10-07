@@ -1,4 +1,4 @@
-import type { PortEquipmentState } from "../core/EquipmentGroup";
+import { isCanonicalPortEquipmentState, type PortEquipmentState } from "../core/EquipmentGroup";
 import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import { PORT_DIRECTIONS, PORT_SIDES, PORT_TYPES, type PortType } from "../core/PortRecord";
 import type { Direction } from "../core/railShape";
@@ -49,6 +49,12 @@ interface PortSlotSemanticValidationPreparation {
 export interface PreparedPortSlotAvailabilityIndex extends PortSlotAvailabilityIndex {
 	readonly kind: "prepared-port-slot-availability-index";
 	matchesPreparedArtifacts(artifacts: PortSlotPreparedArtifacts): boolean;
+	statusesForRows(
+		slots: CompiledPortSlots,
+		rows: readonly number[],
+		ignoredPortId?: number,
+		ignoredEquipmentGroupId?: number,
+	): readonly PortSlotAvailabilityResult[];
 }
 
 const sourceLayoutsByPreparedArtifacts = new WeakMap<object, CompiledPhysicalLayout>();
@@ -216,6 +222,8 @@ const INVALID_PREPARED_PORT_SLOT_AVAILABILITY = Object.freeze({
 	conflictingPortId: 0,
 	conflictingEquipmentGroupId: 0,
 }) satisfies PortSlotAvailabilityResult;
+const BASE_ADVISORY_STATUS_FOR = PortSlotAvailabilityIndex.prototype.statusForAdvisoryDiscovery;
+const BASE_STATUS_FOR = PortSlotAvailabilityIndex.prototype.statusFor;
 
 class BoundPreparedPortSlotAvailabilityIndex
 	extends PortSlotAvailabilityIndex
@@ -223,6 +231,7 @@ class BoundPreparedPortSlotAvailabilityIndex
 {
 	readonly kind = "prepared-port-slot-availability-index" as const;
 	private readonly artifacts: PortSlotPreparedArtifacts;
+	readonly #canonicalState: boolean;
 
 	constructor(
 		layout: CompiledPhysicalLayout,
@@ -232,6 +241,7 @@ class BoundPreparedPortSlotAvailabilityIndex
 	) {
 		super(layout, state, artifacts.portType, resolvedPositions);
 		this.artifacts = artifacts;
+		this.#canonicalState = isCanonicalPortEquipmentState(state);
 	}
 
 	matchesPreparedArtifacts(artifacts: PortSlotPreparedArtifacts): boolean {
@@ -256,6 +266,81 @@ class BoundPreparedPortSlotAvailabilityIndex
 		return super.statusFor(slots, row, ignoredPortId, ignoredEquipmentGroupId);
 	}
 
+	/** One synchronous render query; no proof or result is retained across calls. */
+	statusesForRows(
+		slots: CompiledPortSlots,
+		rows: readonly number[],
+		ignoredPortId = 0,
+		ignoredEquipmentGroupId = 0,
+	): readonly PortSlotAvailabilityResult[] {
+		const availabilityFields =
+			#canonicalState in this && this.#canonicalState
+				? captureClosedAvailabilityFields(this)
+				: null;
+		const batch =
+			availabilityFields !== null &&
+			slots === this.artifacts.slots &&
+			Number.isInteger(ignoredPortId) &&
+			Number.isInteger(ignoredEquipmentGroupId)
+				? capturePreparedAvailabilityBatch(this.artifacts, rows)
+				: null;
+		if (batch === null) {
+			return rows.map((row) => this.statusFor(slots, row, ignoredPortId, ignoredEquipmentGroupId));
+		}
+		const results: PortSlotAvailabilityResult[] = [];
+		// Captured records have only data fields and fixed, unshared native views. Canonical
+		// occupancy contains no user callbacks. Keep Canvas/predicates outside this boundary.
+		const bindingValid =
+			physicalSourceProofHasExactIdentities(
+				batch.sourceLayout,
+				batch.validated.physicalSourceRows,
+			) &&
+			physicalSourceProofFieldsHaveExactIdentities(
+				batch.layout.pathIntervalRemap,
+				batch.layout.paths,
+				batch.validated.physicalSourceRows,
+			);
+		// Descriptor traps on a nonstandard physical owner can run during binding capture.
+		// Recheck views, queries and the exact availability fields after the last such read.
+		// Inspect method descriptors instead of invoking a newly installed getter here.
+		const currentFields = captureClosedAvailabilityFields(this);
+		if (
+			!batch.views.every(batchViewHasNoExternalReads) ||
+			availabilityFields === null ||
+			currentFields === null ||
+			Object.keys(currentFields).length !== Object.keys(availabilityFields).length ||
+			Object.keys(availabilityFields).some(
+				(key) => currentFields[key]?.value !== availabilityFields[key]?.value,
+			)
+		) {
+			return rows.map((row) => this.statusFor(slots, row, ignoredPortId, ignoredEquipmentGroupId));
+		}
+		for (const row of batch.rows) {
+			if (!Number.isInteger(row) || row < 0 || row >= this.artifacts.slotCount) {
+				throw new RangeError(`Port slot row ${row} is outside the compiled slot buffer.`);
+			}
+			results.push(
+				bindingValid &&
+					preparedRowHasValidatedAvailabilityInputs(
+						batch.artifacts,
+						row,
+						batch.layout,
+						batch.validated,
+						true,
+					)
+					? BASE_ADVISORY_STATUS_FOR.call(
+							this,
+							batch.artifacts.slots,
+							row,
+							ignoredPortId,
+							ignoredEquipmentGroupId,
+						)
+					: INVALID_PREPARED_PORT_SLOT_AVAILABILITY,
+			);
+		}
+		return results;
+	}
+
 	override conflictingEquipmentGroupForStkRows(
 		slots: CompiledPortSlots,
 		rows: readonly number[],
@@ -276,6 +361,106 @@ class BoundPreparedPortSlotAvailabilityIndex
 		}
 		return super.conflictingEquipmentGroupForStkRows(slots, rows, ignoredEquipmentGroupId);
 	}
+}
+
+const PREPARED_STATUS_FOR = BoundPreparedPortSlotAvailabilityIndex.prototype.statusFor;
+
+/** Capture a genuine index's data fields and native query methods without running getters. */
+function captureClosedAvailabilityFields(
+	availability: BoundPreparedPortSlotAvailabilityIndex,
+): Readonly<Record<string, PropertyDescriptor>> | null {
+	const prototype = BoundPreparedPortSlotAvailabilityIndex.prototype;
+	if (
+		Object.getPrototypeOf(availability) !== prototype ||
+		Object.getPrototypeOf(prototype) !== PortSlotAvailabilityIndex.prototype ||
+		Object.getOwnPropertyDescriptor(PortSlotAvailabilityIndex.prototype, "statusFor")?.value !==
+			BASE_STATUS_FOR
+	)
+		return null;
+	const fields = Object.getOwnPropertyDescriptors(availability);
+	if (Object.values(fields).some((field) => !("value" in field))) return null;
+	const statusFor = fields.statusFor ?? Object.getOwnPropertyDescriptor(prototype, "statusFor");
+	const advisory =
+		fields.statusForAdvisoryDiscovery ??
+		Object.getOwnPropertyDescriptor(prototype, "statusForAdvisoryDiscovery") ??
+		Object.getOwnPropertyDescriptor(
+			PortSlotAvailabilityIndex.prototype,
+			"statusForAdvisoryDiscovery",
+		);
+	if (statusFor?.value !== PREPARED_STATUS_FOR || advisory?.value !== BASE_ADVISORY_STATUS_FOR)
+		return null;
+	return fields;
+}
+
+function capturePreparedAvailabilityBatch(
+	artifacts: PortSlotPreparedArtifacts,
+	rows: readonly number[],
+): {
+	artifacts: PortSlotPreparedArtifacts;
+	rows: readonly number[];
+	sourceLayout: CompiledPhysicalLayout;
+	layout: CompiledPhysicalLayout;
+	validated: ValidatedPortSlotRowIntegrity;
+	views: readonly ArrayBufferView[];
+} | null {
+	const validated = validatedRowsByPreparedArtifacts.get(artifacts);
+	const sourceLayout = sourceLayoutsByPreparedArtifacts.get(artifacts);
+	if (validated === undefined || sourceLayout === undefined) return null;
+	try {
+		// Capture row descriptors before the binding check: an accessor/Proxy must never run
+		// inside the region that reuses that check. Do not trust a caller-owned iterator.
+		const length = exactOwnDataValue(rows, "length", "batch row count");
+		if (!Array.isArray(rows) || !Number.isSafeInteger(length) || (length as number) < 0)
+			return null;
+		const capturedRows: number[] = [];
+		for (let index = 0; index < (length as number); index++) {
+			const row = exactOwnDataValue(rows, String(index), "batch row");
+			if (typeof row !== "number") return null;
+			capturedRows.push(row);
+		}
+		const slots = captureExactOwnDataRecord(artifacts.slots, PORT_SLOT_SLOT_KEYS, "batch slots");
+		const proof = validated.physicalSourceRows;
+		const remap = captureExactOwnDataRecord(proof.remap, Object.keys(proof.remap), "batch remap");
+		const paths = captureExactOwnDataRecord(proof.paths, Object.keys(proof.paths), "batch paths");
+		const views: ArrayBufferView[] = [];
+		for (const record of [slots, remap, paths]) {
+			for (const value of Object.values(record)) {
+				if (typeof value === "number" || typeof value === "string") continue;
+				if (!batchViewHasNoExternalReads(value)) return null;
+				views.push(value as ArrayBufferView);
+			}
+		}
+		return {
+			artifacts: { ...artifacts, slots: slots as unknown as CompiledPortSlots },
+			rows: capturedRows,
+			sourceLayout,
+			// Attachment resolution reads only these two records. Their captured data fields
+			// retain the exact original views; every row still checks their current values.
+			layout: { pathIntervalRemap: remap, paths } as unknown as CompiledPhysicalLayout,
+			validated,
+			views,
+		};
+	} catch {
+		return null;
+	}
+}
+
+function batchViewHasNoExternalReads(value: unknown): boolean {
+	if (!ArrayBuffer.isView(value)) return false;
+	const prototype = Object.getPrototypeOf(value);
+	if (
+		prototype !== Int32Array.prototype &&
+		prototype !== Uint32Array.prototype &&
+		prototype !== Uint16Array.prototype &&
+		prototype !== Uint8Array.prototype &&
+		prototype !== Float32Array.prototype
+	)
+		return false;
+	for (const key of ["buffer", "byteOffset", "byteLength", "length"]) {
+		if (Object.getOwnPropertyDescriptor(value, key) !== undefined) return false;
+	}
+	const state = intrinsicPortSlotTypedArrayState(value);
+	return state !== null && state.buffer instanceof ArrayBuffer && arrayBufferIsFixed(state.buffer);
 }
 
 /** Worker-prepared immutable slot geometry; live port occupancy is a separate derived index. */
@@ -352,6 +537,16 @@ export function portSlotPreparedArtifactRowHasValidatedAvailabilityInputs(
 ): boolean {
 	const validated = validatedRowsByPreparedArtifacts.get(artifacts);
 	const layout = sourceLayoutsByPreparedArtifacts.get(artifacts);
+	return preparedRowHasValidatedAvailabilityInputs(artifacts, row, layout, validated, false);
+}
+
+function preparedRowHasValidatedAvailabilityInputs(
+	artifacts: PortSlotPreparedArtifacts,
+	row: number,
+	layout: CompiledPhysicalLayout | undefined,
+	validated: ValidatedPortSlotRowIntegrity | undefined,
+	bindingAlreadyValidated: boolean,
+): boolean {
 	const slots = artifacts.slots;
 	if (
 		validated === undefined ||
@@ -375,7 +570,9 @@ export function portSlotPreparedArtifactRowHasValidatedAvailabilityInputs(
 	const sourcePathIndex = validated.sourcePathIndices[row] as number;
 	if (
 		sourcePathIndex !== (slots.sourcePathIndices[row] as number) ||
-		!physicalSourceRowMatchesValidation(layout, validated.physicalSourceRows, sourcePathIndex)
+		!(bindingAlreadyValidated
+			? physicalSourceRowValuesMatchValidation(validated.physicalSourceRows, sourcePathIndex)
+			: physicalSourceRowMatchesValidation(layout, validated.physicalSourceRows, sourcePathIndex))
 	) {
 		return false;
 	}
@@ -1062,56 +1259,58 @@ function physicalSourceProofHasExactIdentities(
 		return (
 			exactOwnDataValue(layout, "pathIntervalRemap", "physical layout remap") === proof.remap &&
 			exactOwnDataValue(layout, "paths", "physical final paths") === proof.paths &&
-			exactOwnDataValue(proof.remap, "sourcePathCount", "physical source path count") ===
+			physicalSourceProofFieldsHaveExactIdentities(proof.remap, proof.paths, proof)
+		);
+	} catch {
+		return false;
+	}
+}
+
+function physicalSourceProofFieldsHaveExactIdentities(
+	remap: CompiledPhysicalLayout["pathIntervalRemap"],
+	paths: CompiledPhysicalLayout["paths"],
+	proof: ValidatedPhysicalSourceRows,
+): boolean {
+	try {
+		return (
+			exactOwnDataValue(remap, "sourcePathCount", "physical source path count") ===
 				proof.sourcePathCount &&
-			exactOwnDataValue(proof.remap, "count", "physical interval count") ===
-				proof.sourceStarts.length &&
-			exactOwnDataValue(proof.remap, "sourcePathCells", "physical sourcePathCells") ===
+			exactOwnDataValue(remap, "count", "physical interval count") === proof.sourceStarts.length &&
+			exactOwnDataValue(remap, "sourcePathCells", "physical sourcePathCells") ===
 				proof.sourcePathCells &&
-			exactOwnDataValue(proof.remap, "sourcePathKinds", "physical sourcePathKinds") ===
+			exactOwnDataValue(remap, "sourcePathKinds", "physical sourcePathKinds") ===
 				proof.sourcePathKinds &&
-			exactOwnDataValue(
-				proof.remap,
-				"sourcePathFromDirections",
-				"physical sourcePathFromDirections",
-			) === proof.sourcePathFromDirections &&
-			exactOwnDataValue(
-				proof.remap,
-				"sourcePathToDirections",
-				"physical sourcePathToDirections",
-			) === proof.sourcePathToDirections &&
-			exactOwnDataValue(proof.remap, "sourceIdentityKinds", "physical sourceIdentityKinds") ===
+			exactOwnDataValue(remap, "sourcePathFromDirections", "physical sourcePathFromDirections") ===
+				proof.sourcePathFromDirections &&
+			exactOwnDataValue(remap, "sourcePathToDirections", "physical sourcePathToDirections") ===
+				proof.sourcePathToDirections &&
+			exactOwnDataValue(remap, "sourceIdentityKinds", "physical sourceIdentityKinds") ===
 				proof.sourceIdentityKinds &&
 			exactOwnDataValue(
-				proof.remap,
+				remap,
 				"sourcePathCanonicalStarts",
 				"physical sourcePathCanonicalStarts",
 			) === proof.sourcePathCanonicalStarts &&
-			exactOwnDataValue(proof.remap, "sourcePathLengths", "physical sourcePathLengths") ===
+			exactOwnDataValue(remap, "sourcePathLengths", "physical sourcePathLengths") ===
 				proof.sourcePathLengths &&
-			exactOwnDataValue(proof.remap, "sourcePathOffsets", "physical sourcePathOffsets") ===
+			exactOwnDataValue(remap, "sourcePathOffsets", "physical sourcePathOffsets") ===
 				proof.sourcePathOffsets &&
-			exactOwnDataValue(proof.remap, "sourceStarts", "physical sourceStarts") ===
-				proof.sourceStarts &&
-			exactOwnDataValue(proof.remap, "sourceEnds", "physical sourceEnds") === proof.sourceEnds &&
-			exactOwnDataValue(proof.remap, "targetPathIndices", "physical targetPathIndices") ===
+			exactOwnDataValue(remap, "sourceStarts", "physical sourceStarts") === proof.sourceStarts &&
+			exactOwnDataValue(remap, "sourceEnds", "physical sourceEnds") === proof.sourceEnds &&
+			exactOwnDataValue(remap, "targetPathIndices", "physical targetPathIndices") ===
 				proof.targetPathIndices &&
-			exactOwnDataValue(proof.remap, "targetStarts", "physical targetStarts") ===
-				proof.targetStarts &&
-			exactOwnDataValue(proof.remap, "targetEnds", "physical targetEnds") === proof.targetEnds &&
-			exactOwnDataValue(proof.remap, "mappingKinds", "physical mappingKinds") ===
-				proof.mappingKinds &&
-			exactOwnDataValue(proof.paths, "positions", "physical path positions") ===
-				proof.pathPositions &&
-			exactOwnDataValue(proof.paths, "tangents", "physical path tangents") === proof.pathTangents &&
-			exactOwnDataValue(proof.paths, "distances", "physical path distances") ===
-				proof.pathDistances &&
-			exactOwnDataValue(proof.paths, "offsets", "physical path offsets") === proof.pathOffsets &&
-			exactOwnDataValue(proof.paths, "kinds", "physical path kinds") === proof.pathKinds &&
-			exactOwnDataValue(proof.paths, "lengths", "physical path lengths") === proof.pathLengths &&
-			exactOwnDataValue(proof.paths, "pathCount", "physical final path count") ===
+			exactOwnDataValue(remap, "targetStarts", "physical targetStarts") === proof.targetStarts &&
+			exactOwnDataValue(remap, "targetEnds", "physical targetEnds") === proof.targetEnds &&
+			exactOwnDataValue(remap, "mappingKinds", "physical mappingKinds") === proof.mappingKinds &&
+			exactOwnDataValue(paths, "positions", "physical path positions") === proof.pathPositions &&
+			exactOwnDataValue(paths, "tangents", "physical path tangents") === proof.pathTangents &&
+			exactOwnDataValue(paths, "distances", "physical path distances") === proof.pathDistances &&
+			exactOwnDataValue(paths, "offsets", "physical path offsets") === proof.pathOffsets &&
+			exactOwnDataValue(paths, "kinds", "physical path kinds") === proof.pathKinds &&
+			exactOwnDataValue(paths, "lengths", "physical path lengths") === proof.pathLengths &&
+			exactOwnDataValue(paths, "pathCount", "physical final path count") ===
 				proof.pathKinds.length &&
-			exactOwnDataValue(proof.paths, "pointCount", "physical final point count") ===
+			exactOwnDataValue(paths, "pointCount", "physical final point count") ===
 				proof.pathDistances.length
 		);
 	} catch {

@@ -1881,6 +1881,33 @@ describe("port slot rendering", () => {
 		).toBe(beforeLegalMarkers - 1);
 		expect(reboundRenderer.hitTestPortSlot(slots, world, TEST_CAMERA.zoom)).toBeNull();
 		slots.routeXs[row] = routeX;
+		const restored = createRecordingContext();
+		reboundRenderer.render(restored.context, createRecordingContext().context, {
+			...input,
+			camera: { ...TEST_CAMERA, offsetX: TEST_CAMERA.offsetX + 1 },
+		});
+		expect(
+			restored.strokes.filter((stroke) => stroke.style === "rgba(91, 221, 227, 0.68)"),
+		).toHaveLength(beforeLegalMarkers);
+		expect(reboundRenderer.hitTestPortSlot(slots, world, TEST_CAMERA.zoom)).toBe(row);
+
+		// Guided scope predicates run before the batch; their side effects cannot reuse proof
+		// from the previous pan or advertise an invalid row through the drawing query.
+		const predicate = vi.fn(() => {
+			slots.routeXs[row] = routeX + 1;
+			return true;
+		});
+		const guided = createRecordingContext();
+		reboundRenderer.render(guided.context, createRecordingContext().context, {
+			...input,
+			guidedPortPlacement: { label: "Port", instruction: "선택", scopeIncludesRow: predicate },
+		});
+		expect(predicate).toHaveBeenCalled();
+		expect(
+			reboundRenderer.getGuidedCanvasActionMarkers().some((marker) => marker.portSlotRow === row),
+		).toBe(false);
+		expect(reboundRenderer.hitTestPortSlot(slots, world, TEST_CAMERA.zoom)).toBeNull();
+		slots.routeXs[row] = routeX;
 	});
 
 	it("redraws legal port slots when a moved port becomes the ignored occupant", () => {
@@ -2099,7 +2126,9 @@ describe("port slot rendering", () => {
 		};
 		const renderer = new TileRenderer();
 		const overviewStatic = createRecordingContext();
+		const batches = vi.spyOn(input.portSlotAvailability, "statusesForRows");
 		renderer.render(overviewStatic.context, createRecordingContext().context, input);
+		expect(batches).toHaveBeenCalledTimes(1);
 		expect(renderer.getStats().visiblePortSlotCandidates).toBeGreaterThan(0);
 		expect(renderer.getStats().suppressedPassivePortSlotMarkers).toBeGreaterThan(0);
 		expect(renderer.getStats()).toMatchObject({
@@ -2119,6 +2148,7 @@ describe("port slot rendering", () => {
 
 		const hoverOverlay = createRecordingContext();
 		renderer.render(overviewStatic.context, hoverOverlay.context, { ...input, hoverPortSlot: row });
+		expect(batches).toHaveBeenCalledTimes(1);
 		expect(hoverOverlay.strokes.some((stroke) => stroke.style === "#d8ffff")).toBe(true);
 
 		const guidedStatic = createRecordingContext();
@@ -2139,6 +2169,8 @@ describe("port slot rendering", () => {
 			portSlotPresentationLod: "detail",
 		});
 		expect(renderer.getStats().renderedPassivePortSlotMarkers).toBeGreaterThan(0);
+		expect(batches).toHaveBeenCalledTimes(3);
+		batches.mockRestore();
 	});
 
 	it("keeps STK accumulation overlay-only and selects the derived committed group body", () => {

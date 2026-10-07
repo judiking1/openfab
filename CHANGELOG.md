@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.77] - 2026-10-07
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Reuse common prepared Port-slot binding checks within each synchronous drawing query, reducing
+  repeated work while panning large FABs. Keep mutable row geometry and live occupancy checks,
+  fall back to individual queries for unsupported or changed inputs, and retain independent
+  hit-test and authored-action validation.
+
 ## [0.1.76] - 2026-10-07
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

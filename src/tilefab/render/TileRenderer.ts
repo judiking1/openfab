@@ -1685,8 +1685,17 @@ export class TileRenderer {
 				}),
 			]);
 		}
-		for (const row of this.visiblePortSlotBuffer) {
-			const status = this.portSlotStatus(input, row);
+		// Complete the closed validation query after guided predicates and before Canvas calls.
+		// The results belong only to this draw; hit testing and authored actions use statusFor.
+		const availability = input.portSlotAvailability?.statusesForRows(
+			slots,
+			this.visiblePortSlotBuffer,
+			input.ignoredPortIdForPortSlots ?? 0,
+			input.ignoredEquipmentGroupIdForPortSlots ?? 0,
+		);
+		for (let index = 0; index < this.visiblePortSlotBuffer.length; index++) {
+			const row = this.visiblePortSlotBuffer[index] as number;
+			const status = availability?.[index]?.status ?? slots.statuses[row];
 			const legal = status === PORT_SLOT_STATUS.LEGAL;
 			const dynamicConflict = isDynamicPortSlotConflict(status);
 			const showStaticConflict = input.portEquipmentGroupEditPreview !== null;
