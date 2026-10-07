@@ -6,6 +6,18 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.75] - 2026-10-07
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Focus the 3D Canvas after the deferred module and scene are ready, so first-entry keyboard camera
+  controls and Escape work. Cancel the pending focus transfer when the user focuses another control,
+  exits the view, changes project or encounters a loading failure.
+- Fit the full scene around the retained 2D camera target, keeping short off-center rails inside the
+  initial 3D viewport while preserving the chosen focus and close-up zoom limit.
+- Refresh camera clipping when zooming or panning and before rendering, preventing an old fit's
+  near/far planes from cutting visible rail geometry at another permitted camera distance.
+
 ## [0.1.74] - 2026-10-07
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

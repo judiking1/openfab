@@ -54,14 +54,17 @@ export function fitStaticFabInspectionCamera(
 	const spanX = Math.max(0.1, bounds.maxX - bounds.minX);
 	const spanY = Math.max(0.1, bounds.maxY - bounds.minY);
 	const spanZ = Math.max(0.1, bounds.maxZ - bounds.minZ);
-	const radius = Math.max(0.5, Math.hypot(spanX, spanY, spanZ) / 2);
+	const targetX = focus?.x ?? (bounds.minX + bounds.maxX) / 2;
+	const targetY = (bounds.minY + bounds.maxY) / 2;
+	const targetZ = focus?.z ?? (bounds.minZ + bounds.maxZ) / 2;
+	const sceneRadius = Math.max(0.5, Math.hypot(spanX, spanY, spanZ) / 2);
+	// The enclosing sphere must be centered on the actual orbit target, including a retained 2D focus.
+	const target = { x: targetX, y: targetY, z: targetZ };
+	const radius = cameraBoundsRadius(bounds, target);
 	const verticalHalfFov = (verticalFieldOfViewDegrees * Math.PI) / 360;
 	const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * aspect);
 	const limitingHalfFov = Math.max(0.05, Math.min(verticalHalfFov, horizontalHalfFov));
 	const distance = (radius / Math.sin(limitingHalfFov)) * FIT_PADDING;
-	const targetX = focus?.x ?? (bounds.minX + bounds.maxX) / 2;
-	const targetY = (bounds.minY + bounds.maxY) / 2;
-	const targetZ = focus?.z ?? (bounds.minZ + bounds.maxZ) / 2;
 	const elevation = preset === "top" ? TOP_ELEVATION_RADIANS : DEFAULT_ELEVATION_RADIANS;
 	const azimuth = preset === "top" ? -Math.PI / 2 : DEFAULT_AZIMUTH_RADIANS;
 	const horizontalDistance = Math.cos(elevation) * distance;
@@ -76,11 +79,41 @@ export function fitStaticFabInspectionCamera(
 		positionY,
 		positionZ,
 		distance,
-		near: Math.max(0.02, distance - radius * 2.5),
-		far: Math.max(100, distance + radius * 4),
-		minimumDistance: Math.max(0.5, radius * 0.08),
+		...staticFabInspectionCameraClipping(bounds, target, distance),
+		minimumDistance: Math.max(0.5, sceneRadius * 0.08),
 		maximumDistance: Math.max(25, radius * 18),
 	});
+}
+
+/** Re-evaluated for the current orbit target/distance, including zoom and screen-space pan. */
+export function staticFabInspectionCameraClipping(
+	bounds: StaticFabInspectionBounds3D,
+	target: Readonly<{ x: number; y: number; z: number }>,
+	distance: number,
+): Readonly<{ near: number; far: number }> {
+	assertFiniteBounds(bounds);
+	if (![target.x, target.y, target.z, distance].every(Number.isFinite) || distance <= 0) {
+		throw new RangeError("3D clipping target and positive distance must be finite.");
+	}
+	const radius = cameraBoundsRadius(bounds, target);
+	return {
+		near: Math.max(0.02, distance - radius * 2.5),
+		far: Math.max(100, distance + radius * 4),
+	};
+}
+
+function cameraBoundsRadius(
+	bounds: StaticFabInspectionBounds3D,
+	target: Readonly<{ x: number; y: number; z: number }>,
+): number {
+	return Math.max(
+		0.5,
+		Math.hypot(
+			Math.max(0.05, Math.abs(bounds.minX - target.x), Math.abs(bounds.maxX - target.x)),
+			Math.max(0.05, Math.abs(bounds.minY - target.y), Math.abs(bounds.maxY - target.y)),
+			Math.max(0.05, Math.abs(bounds.minZ - target.z), Math.abs(bounds.maxZ - target.z)),
+		),
+	);
 }
 
 export function bounds3DFromArray(bounds: ArrayLike<number>): StaticFabInspectionBounds3D {

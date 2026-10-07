@@ -40,6 +40,7 @@ export interface StaticFabInspection3DViewportProps {
 	readonly onExit: () => void;
 	readonly onFocusChange: (focus: Readonly<{ x: number; z: number }>) => void;
 	readonly onFailure: (message: string) => void;
+	readonly onReady?: (canvas: HTMLCanvasElement) => void;
 }
 
 interface PointerOrigin {
@@ -65,6 +66,7 @@ export default function StaticFabInspection3DViewport({
 	onExit,
 	onFocusChange,
 	onFailure,
+	onReady,
 }: StaticFabInspection3DViewportProps): React.ReactElement {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -77,6 +79,7 @@ export default function StaticFabInspection3DViewport({
 		onClearSelection,
 		onFocusChange,
 		onFailure,
+		onReady,
 	});
 
 	useEffect(() => {
@@ -86,8 +89,9 @@ export default function StaticFabInspection3DViewport({
 			onClearSelection,
 			onFocusChange,
 			onFailure,
+			onReady,
 		};
-	}, [onClearSelection, onFailure, onFocusChange, onPortEquipmentPick, onRailPick]);
+	}, [onClearSelection, onFailure, onFocusChange, onPortEquipmentPick, onRailPick, onReady]);
 	useEffect(() => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
@@ -191,6 +195,7 @@ export default function StaticFabInspection3DViewport({
 			scene.setContent(artifact, equipment);
 			scene.fitAll("isometric", initialFocus);
 			publishSceneStats(canvas, scene);
+			callbacksRef.current.onReady?.(canvas);
 		} catch (error) {
 			callbacksRef.current.onFailure(normalizeFailure(error, "3D 렌더 데이터를 열지 못했습니다"));
 		}
@@ -346,6 +351,10 @@ function publishSceneStats(canvas: HTMLCanvasElement, scene: StaticFabInspection
 	canvas.dataset.sceneContentBuilds = String(stats.contentBuildCount);
 	canvas.dataset.sceneSelectionApplies = String(stats.selectionApplyCount);
 	canvas.dataset.sceneCameraDistance = stats.cameraDistance.toFixed(3);
+	canvas.dataset.sceneCameraNear = scene.camera.near.toFixed(3);
+	canvas.dataset.sceneCameraFar = scene.camera.far.toFixed(3);
+	canvas.dataset.sceneCameraMinimumDistance = scene.controls.minDistance.toFixed(3);
+	canvas.dataset.sceneCameraMaximumDistance = scene.controls.maxDistance.toFixed(3);
 	canvas.dataset.sceneCameraTargetX = stats.cameraTargetX.toFixed(3);
 	canvas.dataset.sceneCameraTargetZ = stats.cameraTargetZ.toFixed(3);
 	canvas.dataset.sceneFrameScope = stats.frameScope;

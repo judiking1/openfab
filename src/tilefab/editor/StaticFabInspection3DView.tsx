@@ -33,6 +33,7 @@ export interface StaticFabInspection3DViewProps {
 	readonly onExit: () => void;
 	readonly onFocusChange: (focus: Readonly<{ x: number; z: number }>) => void;
 	readonly onFailure: (message: string) => void;
+	readonly onReady?: (canvas: HTMLCanvasElement) => void;
 }
 
 const RAIL_ARTIFACT_CACHE = new WeakMap<

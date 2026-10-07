@@ -34,6 +34,7 @@ import {
 	fitStaticFabInspectionCamera,
 	type StaticFabInspectionBounds3D,
 	type StaticFabInspectionCameraPreset,
+	staticFabInspectionCameraClipping,
 	staticFabInspectionRailPickThreshold,
 } from "./StaticFabInspectionCamera";
 import {
@@ -352,7 +353,7 @@ export class StaticFabInspection3DScene {
 		this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
 		this.controls.touches.ONE = THREE.TOUCH.ROTATE;
 		this.controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
-		this.controls.addEventListener("change", this.requestRender);
+		this.controls.addEventListener("change", this.handleCameraChange);
 		this.controls.addEventListener("end", this.publishFocus);
 
 		this.runtimeContent.name = "openfab-3d-live-simulation-runtime";
@@ -746,7 +747,7 @@ export class StaticFabInspection3DScene {
 		this.disposed = true;
 		if (this.animationFrame !== 0) cancelAnimationFrame(this.animationFrame);
 		this.animationFrame = 0;
-		this.controls.removeEventListener("change", this.requestRender);
+		this.controls.removeEventListener("change", this.handleCameraChange);
 		this.controls.removeEventListener("end", this.publishFocus);
 		this.controls.dispose();
 		this.clearContent();
@@ -755,12 +756,31 @@ export class StaticFabInspection3DScene {
 		this.renderer.dispose();
 	}
 
+	private readonly handleCameraChange = (): void => {
+		this.updateCameraClipping();
+		this.requestRender();
+	};
+
+	private updateCameraClipping(): void {
+		if (!this.contentBounds || this.disposed) return;
+		const clip = staticFabInspectionCameraClipping(
+			this.contentBounds,
+			this.controls.target,
+			this.camera.position.distanceTo(this.controls.target),
+		);
+		if (clip.near === this.camera.near && clip.far === this.camera.far) return;
+		this.camera.near = clip.near;
+		this.camera.far = clip.far;
+		this.camera.updateProjectionMatrix();
+	}
+
 	private readonly requestRender = (): void => {
 		if (this.disposed || this.animationFrame !== 0) return;
 		this.animationFrame = requestAnimationFrame(() => {
 			this.animationFrame = 0;
 			if (this.disposed) return;
 			const renderStartedAt = performance.now();
+			this.updateCameraClipping();
 			const chunkUpdateStartedAt = renderStartedAt;
 			this.updateRailChunkResidency();
 			const chunkUpdateMilliseconds = Math.max(0, performance.now() - chunkUpdateStartedAt);

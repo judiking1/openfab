@@ -1228,6 +1228,11 @@ const StaticFabInspection3DView = OPENFAB_RELEASE_CAPABILITIES.derived3D
 	: null;
 
 type EditorViewMode = "2d" | "3d";
+
+interface Inspection3DEntryFocusRequest {
+	readonly origin: Element | null;
+	readonly dispose: () => void;
+}
 type ReshapeKind = "corner" | "endpoint" | "straight";
 type RailBuildMode = RailConstructionCatalogId;
 
@@ -2495,6 +2500,12 @@ export default function TileFabApp(): React.ReactElement {
 		rotation: 0,
 	});
 	const editorViewModeRef = useRef<EditorViewMode>("2d");
+	const inspection3DEntryFocusRef = useRef<Inspection3DEntryFocusRequest | null>(null);
+	const cancelInspection3DEntryFocus = useCallback((): void => {
+		inspection3DEntryFocusRef.current?.dispose();
+		inspection3DEntryFocusRef.current = null;
+	}, []);
+	useEffect(() => cancelInspection3DEntryFocus, [cancelInspection3DEntryFocus]);
 	const inspection3DFocusRef = useRef<Readonly<{ x: number; z: number }>>({
 		x: 0,
 		z: 0,
@@ -5236,10 +5247,11 @@ export default function TileFabApp(): React.ReactElement {
 		if (inspectionProjectIdRef.current === projectSession.manifest.id) return;
 		inspectionProjectIdRef.current = projectSession.manifest.id;
 		if (editorViewModeRef.current !== "3d") return;
+		cancelInspection3DEntryFocus();
 		editorViewModeRef.current = "2d";
 		setViewMode("2d");
 		setInspection3DCommand(null);
-	}, [projectSession.manifest.id]);
+	}, [cancelInspection3DEntryFocus, projectSession.manifest.id]);
 
 	useEffect(
 		() => () => {
@@ -31951,15 +31963,23 @@ export default function TileFabApp(): React.ReactElement {
 			setInspection3DInitialFocus(focus);
 			chooseTool("inspect", "preserve-area");
 			updateEditorActivity("inspect");
+			cancelInspection3DEntryFocus();
+			const origin = document.activeElement;
+			const cancelOnFocusMove = (event: FocusEvent): void => {
+				if (event.target !== origin) cancelInspection3DEntryFocus();
+			};
+			inspection3DEntryFocusRef.current = {
+				origin,
+				dispose: () => document.removeEventListener("focusin", cancelOnFocusMove, true),
+			};
+			document.addEventListener("focusin", cancelOnFocusMove, true);
 			editorViewModeRef.current = "3d";
 			setInspection3DVisibilityMenuOpen(false);
 			setViewMode("3d");
 			setStatus("검증된 정적 FAB를 읽기 전용 3D로 검사합니다");
-			requestAnimationFrame(() =>
-				document.querySelector<HTMLCanvasElement>(".tilefab-inspection-3d-canvas")?.focus(),
-			);
 			return;
 		}
+		cancelInspection3DEntryFocus();
 		editorViewModeRef.current = "2d";
 		setInspection3DVisibilityMenuOpen(false);
 		setViewMode("2d");
@@ -32032,6 +32052,7 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(`PORT-${selection.portId} · 3D에서 선택`);
 	};
 	const handleInspection3DFailure = (message: string): void => {
+		cancelInspection3DEntryFocus();
 		setStatus(`${message} · 2D 편집 뷰로 복귀했습니다`);
 		if (editorViewModeRef.current !== "3d") return;
 		editorViewModeRef.current = "2d";
@@ -33211,6 +33232,7 @@ export default function TileFabApp(): React.ReactElement {
 		exitInspection3DRef.current = () => switchEditorView("2d");
 	});
 	const inspection3DTransitionBlock = viewMode === "2d" ? inspectionViewTransitionReason() : null;
+	const inspection3DEntryFocusRequest = inspection3DEntryFocusRef.current;
 	const recoveryReplacesCurrentProject =
 		recoveryProject !== null && recoveryProject.projectId !== projectSession.manifest.id;
 	const recoveryOfferDetail = recoveryProject
@@ -35257,7 +35279,10 @@ export default function TileFabApp(): React.ReactElement {
 				{viewMode === "3d" && inspectionRailPresentation && StaticFabInspection3DView ? (
 					<StaticFabInspection3DErrorBoundary
 						onExit={() => switchEditorView("2d")}
-						onFailure={() => setStatus("정적 3D 검사를 불러오지 못했습니다 · 2D로 돌아가 편집을 계속할 수 있습니다")}
+						onFailure={() => {
+							cancelInspection3DEntryFocus();
+							setStatus("정적 3D 검사를 불러오지 못했습니다 · 2D로 돌아가 편집을 계속할 수 있습니다");
+						}}
 					>
 						<Suspense
 							fallback={
@@ -35270,6 +35295,14 @@ export default function TileFabApp(): React.ReactElement {
 						>
 							<StaticFabInspection3DView
 								generation={editorModel.generation}
+								onReady={(canvas) => {
+									const request = inspection3DEntryFocusRequest;
+									if (!request || request !== inspection3DEntryFocusRef.current ||
+										editorViewModeRef.current !== "3d" || !canvas.isConnected) return;
+									const shouldFocus = document.activeElement === request.origin;
+									cancelInspection3DEntryFocus();
+									if (shouldFocus) canvas.focus({ preventScroll: true });
+								}}
 								presentation={inspectionRailPresentation}
 								equipment={activePortEquipmentPresentation}
 								selectedPathIndices={selectedInspectionPaths?.pathIndices ?? null}

@@ -19,6 +19,7 @@ const certifiedPresetActivationMaximumLongTaskCount = 0;
 const certifiedPresetActivationTotalLongTaskMilliseconds = 0;
 const profileCertifiedPreset = process.env.OPENFAB_PROFILE_CERTIFIED_PRESET === "1";
 const importFailureOnly = process.env.OPENFAB_3D_IMPORT_FAILURE_ONLY === "1";
+const keyboardFocusOnly = process.env.OPENFAB_3D_KEYBOARD_FOCUS_ONLY === "1";
 const chromePath = await resolveChromePath();
 const server = startPreviewServer();
 let browser;
@@ -26,7 +27,12 @@ let page;
 let context;
 const result = {
 	status: "FAIL",
-	scope: importFailureOnly ? "import-failure-only" : "full",
+	scope: keyboardFocusOnly
+		? "keyboard-focus-only"
+		: importFailureOnly
+			? "import-failure-only"
+			: "full",
+	keyboardFocus: null,
 	importFailure: null,
 	failure: null,
 	certifiedPresetTimings: null,
@@ -75,6 +81,12 @@ async function runAcceptance() {
 	await mkdir(artifactRoot, { recursive: true });
 	await waitForServer(`${baseUrl}/`);
 	browser = await chromium.launch({ executablePath: chromePath, headless: true });
+	if (!importFailureOnly) result.keyboardFocus = await checkInspectionKeyboardFocus(browser);
+	if (keyboardFocusOnly) {
+		result.status = "PASS";
+		console.log("PASS Static FAB 3D keyboard focus | cold entry, user focus and cancelled entry");
+		return;
+	}
 	result.importFailure = await checkInspectionImportFailure(browser);
 	if (importFailureOnly) {
 		result.status = "PASS";
@@ -1453,6 +1465,186 @@ async function runAcceptance() {
 	);
 }
 
+async function checkInspectionKeyboardFocus(activeBrowser) {
+	const cases = [];
+	for (const width of [1440, 390]) {
+		for (const mode of ["entry", "focus-moved", "exit-before-ready"]) {
+			const isolated = await activeBrowser.newContext({ viewport: { width, height: 844 } });
+			try {
+				const activePage = await isolated.newPage();
+				activePage.setDefaultTimeout(15_000);
+				const errors = [];
+				activePage.on("pageerror", (error) => errors.push(error.message));
+				activePage.on("console", (message) => {
+					if (message.type() === "error") errors.push(message.text());
+				});
+				let captureImport;
+				const intercepted = new Promise((resolve) => {
+					captureImport = resolve;
+				});
+				await activePage.route(/\/StaticFabInspection3DView-[^/?]+\.js(?:\?|$)/, (route) =>
+					captureImport(route),
+				);
+				await activePage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+				await waitForReady(activePage, 0, 60_000);
+				await chooseBlankCanvasForFirstRun(activePage);
+				await activePage.getByTestId("ordinary-rail-keyboard-start").click();
+				await activePage.waitForFunction(
+					() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+				);
+				for (const key of ["Enter", "Shift+ArrowRight", "Enter"])
+					await activePage.keyboard.press(key);
+				await waitForMirrorIdle(activePage, 1);
+				await activePage.keyboard.press("Escape");
+				const before = await readCanonicalIdentity(activePage);
+				const source = await readInspectionFailureSource(activePage);
+				const tabToEntry = async () => {
+					for (let count = 0; count < 50; count++) {
+						if (
+							await activePage.evaluate(
+								() => document.activeElement?.getAttribute("aria-label") === "3D 검사 뷰",
+							)
+						)
+							return;
+						await activePage.keyboard.press("Tab");
+					}
+					throw new Error("3D entry was not reachable by Tab");
+				};
+				await tabToEntry();
+				await activePage.keyboard.press("Enter");
+				const route = await intercepted;
+				await activePage.getByText("3D 렌더러 불러오는 중", { exact: true }).waitFor();
+				await activePage.evaluate(
+					() =>
+						new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+				);
+				const view = activePage.getByTestId("static-fab-inspection-3d-canvas");
+				assertEqual(await view.count(), 0, "cold entry still waits for its module");
+				if (mode === "focus-moved") {
+					await activePage.keyboard.press("Tab");
+					assertEqual(
+						await activePage.evaluate(
+							() => document.activeElement?.getAttribute("aria-label") === "3D 검사 뷰",
+						),
+						false,
+						"user moved focus away",
+					);
+					await activePage.keyboard.press("Shift+Tab");
+					assertEqual(
+						await activePage.evaluate(() => document.activeElement?.getAttribute("aria-label")),
+						"3D 검사 뷰",
+						"user returned to the origin before load",
+					);
+				} else if (mode === "exit-before-ready") {
+					await activePage.keyboard.press("Shift+Tab");
+					assertEqual(
+						await activePage.evaluate(() => document.activeElement?.getAttribute("aria-label")),
+						"2D 편집 뷰",
+						"2D exit is keyboard reachable while loading",
+					);
+					await activePage.keyboard.press("Enter");
+					await waitForView(activePage, "2d");
+				}
+				await route.continue();
+				await activePage.unroute(/\/StaticFabInspection3DView-[^/?]+\.js(?:\?|$)/);
+				if (mode === "exit-before-ready") {
+					await activePage.waitForTimeout(150);
+					assertEqual(await view.count(), 0, "late import does not remount a cancelled view");
+					assertEqual(
+						await activePage.evaluate(() => document.activeElement?.getAttribute("data-testid")),
+						"rail-canvas",
+						"cancelled entry retains 2D focus",
+					);
+					await tabToEntry();
+					await activePage.keyboard.press("Enter");
+				}
+				await view.waitFor();
+				await activePage.waitForFunction(
+					() =>
+						Number(
+							document.querySelector('[data-testid="static-fab-inspection-3d-canvas"]')?.dataset
+								.sceneRenderFrames,
+						) > 0,
+				);
+				if (mode === "focus-moved") {
+					assertEqual(
+						await activePage.evaluate(() => document.activeElement?.getAttribute("aria-label")),
+						"3D 검사 뷰",
+						"ready Canvas does not reclaim user focus, even back at origin",
+					);
+					await activePage.keyboard.press("Shift+Tab");
+					await activePage.keyboard.press("Enter");
+				} else {
+					assertEqual(
+						await view.evaluate((canvas) => canvas === document.activeElement),
+						true,
+						"ready Canvas receives first-entry focus without test focus calls",
+					);
+					const cameraBefore = await readSceneStats(view);
+					await activePage.keyboard.press("ArrowRight");
+					await activePage.waitForFunction(
+						(x) =>
+							Number(
+								document.querySelector('[data-testid="static-fab-inspection-3d-canvas"]')?.dataset
+									.sceneCameraTargetX,
+							) !== x,
+						cameraBefore.cameraTargetX,
+					);
+					const arrow = await readSceneStats(view);
+					await activePage.keyboard.press("w");
+					await activePage.waitForFunction(
+						(z) =>
+							Number(
+								document.querySelector('[data-testid="static-fab-inspection-3d-canvas"]')?.dataset
+									.sceneCameraTargetZ,
+							) !== z,
+						arrow.cameraTargetZ,
+					);
+					await activePage.keyboard.press("Home");
+					await activePage.keyboard.press("f");
+					assertEqual(
+						await view.evaluate((canvas) => canvas === document.activeElement),
+						true,
+						"camera commands retain Canvas focus",
+					);
+					await activePage.keyboard.press("Escape");
+				}
+				await waitForView(activePage, "2d");
+				await activePage.waitForFunction(
+					() => document.activeElement?.getAttribute("data-testid") === "rail-canvas",
+				);
+				assertIdentityEqual(
+					await readCanonicalIdentity(activePage),
+					before,
+					"keyboard inspection preserves canonical identity",
+				);
+				assertEqual(
+					await readInspectionFailureSource(activePage),
+					source,
+					"keyboard inspection preserves source",
+				);
+				await activePage.keyboard.press("ControlOrMeta+z");
+				await waitForMirrorIdle(activePage, 2);
+				await activePage.keyboard.press("ControlOrMeta+Shift+z");
+				await waitForMirrorIdle(activePage, 3);
+				assertEqual(
+					await readInspectionFailureSource(activePage),
+					source,
+					"keyboard return keeps Undo/Redo usable",
+				);
+				assertEqual(errors.length, 0, "keyboard focus journey has no browser errors");
+				await activePage.screenshot({
+					path: path.join(artifactRoot, `keyboard-focus-${width}-${mode}.png`),
+				});
+				cases.push({ width, mode, before, after: await readCanonicalIdentity(activePage), errors });
+			} finally {
+				await closeBrowserResource(isolated, "keyboard focus context");
+			}
+		}
+	}
+	return cases;
+}
+
 async function checkInspectionImportFailure(activeBrowser) {
 	const cases = [];
 	for (const width of [1440, 390]) {
@@ -2443,15 +2635,7 @@ function startPreviewServer() {
 	const vite = path.join(root, "node_modules", "vite", "bin", "vite.js");
 	const child = spawn(
 		process.execPath,
-		[
-			vite,
-			"preview",
-			"--host",
-			host,
-			"--port",
-			String(port),
-			"--strictPort",
-		],
+		[vite, "preview", "--host", host, "--port", String(port), "--strictPort"],
 		{ cwd: root, stdio: ["ignore", "ignore", "pipe"] },
 	);
 	child.stderr.on("data", (chunk) => process.stderr.write(chunk));
