@@ -2029,7 +2029,7 @@ class UserBlueprintNameConflictError extends Error {
 
 interface OrganizationHistoryContext {
 	readonly organizationId: number;
-	readonly renameDraft: string;
+	readonly renameDraft: string | null;
 	readonly multiSelection: StaticFabOrganizationMultiSelectionState;
 	readonly detailsDraft: Readonly<{
 		readonly parentOrganizationIds: readonly number[];
@@ -2050,6 +2050,7 @@ interface BayFlowDetailReturnContext {
 interface PendingOrganizationHistoryContext {
 	readonly document: RailDocument;
 	readonly patchSequence: number;
+	readonly interaction: object;
 	readonly context: OrganizationHistoryContext;
 }
 const ORGANIZATION_DETAIL_TABS = ["overview", "relations", "properties"] as const;
@@ -2640,6 +2641,10 @@ export default function TileFabApp(): React.ReactElement {
 	const pendingOrganizationHistoryContextRef = useRef<PendingOrganizationHistoryContext | null>(
 		null,
 	);
+	const currentOrganizationHistoryContextRef = useRef<Readonly<{
+		interaction: object;
+		context: OrganizationHistoryContext | null;
+	}> | null>(null);
 	const portDerivedArtifactsRef = useRef<PortDerivedArtifactBundle | null>(null);
 	const portSlotsRef = useMemo(
 		() => ({
@@ -3286,6 +3291,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	}, [readinessOpen]);
 	const [organizationSearch, setOrganizationSearch] = useState("");
+	const [organizationPage, setOrganizationPage] = useState(0);
 	const [organizationParentSearch, setOrganizationParentSearch] = useState("");
 	const [processLoopOperation, setProcessLoopOperation] = useState<string | null>(null);
 	const [processLoopRailEditFeedback, setProcessLoopRailEditFeedback] = useState<string | null>(null);
@@ -3337,6 +3343,21 @@ export default function TileFabApp(): React.ReactElement {
 		useState<StaticFabOrganizationColor>("TEAL");
 	const [organizationDetailsError, setOrganizationDetailsError] = useState<string | null>(null);
 	const [organizationDetailsStale, setOrganizationDetailsStale] = useState(false);
+	const organizationHistoryInteraction = useMemo(() => ({
+		selectedOrganizationId,
+		organizationMultiSelection,
+		organizationRenameDraft,
+		organizationParentIdsDraft,
+		organizationDescriptionDraft,
+		organizationColorDraft,
+	}), [
+		selectedOrganizationId,
+		organizationMultiSelection,
+		organizationRenameDraft,
+		organizationParentIdsDraft,
+		organizationDescriptionDraft,
+		organizationColorDraft,
+	]);
 	const [projectBlueprints, setProjectBlueprintsState] = useState<OpenFabProjectBlueprintSection>(
 		createEmptyOpenFabProjectBlueprintSection,
 	);
@@ -4515,17 +4536,24 @@ export default function TileFabApp(): React.ReactElement {
 			),
 		);
 	}, [activeOrganizations, organizationFilter, organizationSearch]);
-	const filteredStaticFabOrganizations = useMemo(() => {
-		const visible = matchingStaticFabOrganizations.slice(0, ORGANIZATION_LIBRARY_RESULT_LIMIT);
-		if (
-			selectedStaticFabOrganization &&
-			matchingStaticFabOrganizations.includes(selectedStaticFabOrganization) &&
-			!visible.includes(selectedStaticFabOrganization)
-		) {
-			visible[visible.length - 1] = selectedStaticFabOrganization;
-		}
-		return Object.freeze(visible);
-	}, [matchingStaticFabOrganizations, selectedStaticFabOrganization]);
+	const organizationPageCount = Math.max(
+		1,
+		Math.ceil(matchingStaticFabOrganizations.length / ORGANIZATION_LIBRARY_RESULT_LIMIT),
+	);
+	const currentOrganizationPage = Math.min(organizationPage, organizationPageCount - 1);
+	const organizationPageStart = currentOrganizationPage * ORGANIZATION_LIBRARY_RESULT_LIMIT;
+	const filteredStaticFabOrganizations = useMemo(
+		() => Object.freeze(matchingStaticFabOrganizations.slice(
+			organizationPageStart,
+			organizationPageStart + ORGANIZATION_LIBRARY_RESULT_LIMIT,
+		)),
+		[matchingStaticFabOrganizations, organizationPageStart],
+	);
+	useLayoutEffect(() => {
+		if (!organizationLibraryOpen || organizationLibraryView !== "list") return;
+		const index = matchingStaticFabOrganizations.findIndex((record) => record.id === selectedOrganizationId);
+		if (index >= 0) setOrganizationPage(Math.floor(index / ORGANIZATION_LIBRARY_RESULT_LIMIT));
+	}, [matchingStaticFabOrganizations, organizationLibraryOpen, organizationLibraryView, selectedOrganizationId]);
 	const guidedBuildCompactOrganizationPicker = guidedBuildUsesCompactOrganizationPicker(
 		guidedBuildExperienceActive,
 		guidedBuildEvaluation.currentMissionId,
@@ -7451,10 +7479,13 @@ export default function TileFabApp(): React.ReactElement {
 				pendingOrganizationHistoryContext.document === document &&
 				pendingOrganizationHistoryContext.patchSequence === document.getPatchSequence()
 			) {
-				if (restoreOrganizationHistoryContext(pendingOrganizationHistoryContext.context)) {
+				const current = currentOrganizationHistoryContextRef.current;
+				const context = current?.interaction === pendingOrganizationHistoryContext.interaction
+					? pendingOrganizationHistoryContext.context : current?.context;
+				if (context && restoreOrganizationHistoryContext(context)) {
 					removedOrganizationContextRef.current = null;
-				} else {
-					removedOrganizationContextRef.current = pendingOrganizationHistoryContext.context;
+				} else if (context) {
+					removedOrganizationContextRef.current = context;
 					setSelectedOrganizationId(null);
 					setOrganizationRenameDraft("");
 				}
@@ -12210,7 +12241,10 @@ export default function TileFabApp(): React.ReactElement {
 	): OrganizationHistoryContext =>
 		Object.freeze({
 			organizationId,
-			renameDraft,
+			renameDraft:
+				renameDraft.trim() === editorModelRef.current.document.organizations.records.find(
+					(record) => record.id === organizationId,
+				)?.name ? null : renameDraft,
 			multiSelection: organizationMultiSelectionRef.current,
 			detailsDraft: preserveDetailsDraft
 				? Object.freeze({
@@ -12228,8 +12262,8 @@ export default function TileFabApp(): React.ReactElement {
 			setOrganizationColorDraft(context.detailsDraft.color);
 		}
 		const restored = restoreStaticFabOrganizationContext(context.organizationId, {
-			preserveRenameDraft: true,
-			renameDraft: context.renameDraft,
+			preserveRenameDraft: context.renameDraft !== null,
+			renameDraft: context.renameDraft ?? undefined,
 			preserveDetailsDraft: context.detailsDraft !== null,
 			preserveMultiSelection: true,
 		});
@@ -12418,7 +12452,7 @@ export default function TileFabApp(): React.ReactElement {
 		const duplicatedAssemblySourceContext = duplicatedAssemblySourceAfterUndo
 			? Object.freeze({
 					organizationId: duplicatedAssemblySourceAfterUndo.id,
-					renameDraft: duplicatedAssemblySourceAfterUndo.name,
+					renameDraft: null,
 					multiSelection: createStaticFabOrganizationMultiSelection(
 						[duplicatedAssemblySourceAfterUndo.id],
 						duplicatedAssemblySourceAfterUndo.id,
@@ -12435,6 +12469,7 @@ export default function TileFabApp(): React.ReactElement {
 			? Object.freeze({
 					document: railDocument,
 					patchSequence: railDocument.getPatchSequence(),
+					interaction: organizationHistoryInteraction,
 					context: pendingOrganizationHistoryContext,
 				})
 			: null;
@@ -12653,7 +12688,7 @@ export default function TileFabApp(): React.ReactElement {
 		const duplicatedAssemblyRedoContext = duplicatedAssemblyRedoProjection
 			? Object.freeze({
 					organizationId: duplicatedAssemblyRedoProjection.placedRoot.id,
-					renameDraft: duplicatedAssemblyRedoProjection.placedRoot.name,
+					renameDraft: null,
 					multiSelection: createStaticFabOrganizationMultiSelection(
 						[
 							duplicatedAssemblyRedoProjection.sourceRoot.id,
@@ -12673,6 +12708,7 @@ export default function TileFabApp(): React.ReactElement {
 			? Object.freeze({
 					document: railDocument,
 					patchSequence: railDocument.getPatchSequence(),
+					interaction: organizationHistoryInteraction,
 					context: pendingOrganizationHistoryContext,
 				})
 			: null;
@@ -24795,11 +24831,17 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			updateOrganizationMultiSelection(result.state);
 			if (selectedOrganizationId === record.id) {
-				const fallback = filteredStaticFabOrganizations.find((candidate) =>
-					result.state.selectedOrganizationIds.includes(candidate.id),
-				);
-				if (fallback) selectStaticFabOrganization(fallback, true);
-				else clearStaticFabOrganizationDetails();
+				const fallbackId = result.state.selectedOrganizationIds[0];
+				const fallback =
+					fallbackId === undefined ? undefined : organizationRecordsById.get(fallbackId);
+				if (fallback) {
+					selectStaticFabOrganization(fallback, true);
+					requestAnimationFrame(() => {
+						organizationListRef.current
+							?.querySelector<HTMLButtonElement>(`[data-organization-id="${fallback.id}"]`)
+							?.focus();
+					});
+				} else clearStaticFabOrganizationDetails();
 			}
 			setStatus(
 				result.state.selectedOrganizationIds.length > 0
@@ -25237,7 +25279,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		removedOrganizationContextRef.current = Object.freeze({
 			organizationId: record.id,
-			renameDraft: organizationRenameDraft,
+			renameDraft: organizationRenameDraft.trim() === record.name ? null : organizationRenameDraft,
 			multiSelection: organizationMultiSelectionRef.current,
 			detailsDraft: null,
 		});
@@ -25476,6 +25518,15 @@ export default function TileFabApp(): React.ReactElement {
 	);
 	const organizationEditorDirty = organizationDetailsDirty || organizationRenameDirty;
 	organizationEditorDirtyRef.current = organizationEditorDirty;
+	// Worker completion may outlive the selection or input captured before Undo/Redo.
+	currentOrganizationHistoryContextRef.current = {
+		interaction: organizationHistoryInteraction,
+		context: selectedOrganizationId === null ? null : captureOrganizationHistoryContext(
+			selectedOrganizationId,
+			organizationRenameDraft,
+			organizationDetailsDirty || organizationDetailsStale,
+		),
+	};
 	const assemblyConnectorAvailability = (() => {
 		if (staticFabBayFlowEdit !== null) {
 			return Object.freeze({
@@ -27209,6 +27260,26 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		setOrganizationSearch(value);
+		setOrganizationPage(0);
+	};
+	const changeStaticFabOrganizationPage = (direction: -1 | 1): void => {
+		const reason = "현재 조직의 저장되지 않은 편집을 저장하거나 되돌린 뒤 목록을 넘기세요";
+		if (organizationEditorDirtyRef.current || organizationDetailsStale) {
+			setOrganizationDetailsError(reason);
+			setStatus(reason);
+			return;
+		}
+		const nextPage = Math.max(0, Math.min(organizationPageCount - 1, currentOrganizationPage + direction));
+		if (nextPage === currentOrganizationPage) return;
+		setOrganizationPage(nextPage);
+		setOrganizationDetailsError((current) => current === reason ? null : current);
+		setStatus((current) => current === reason ? `조직 목록 ${nextPage + 1} / ${organizationPageCount} 페이지` : current);
+		requestAnimationFrame(() => {
+			const list = organizationListRef.current;
+			if (!list) return;
+			list.scrollTop = 0;
+			list.querySelector<HTMLButtonElement>('[role="option"]')?.focus({ preventScroll: true });
+		});
 	};
 	const organizationRelationshipBlockedIds = new Set(selectedStaticFabOrganizationDescendantIds);
 	const selectedStaticFabOrganizationChildCount = selectedStaticFabOrganization
@@ -27337,7 +27408,8 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		setOrganizationFilter(kind);
-		clearStaticFabOrganizationDetails();
+		setOrganizationPage(0);
+		setOrganizationLibraryView("list");
 	};
 	const handleStaticFabOrganizationFilterKeyDown = (
 		event: ReactKeyboardEvent<HTMLButtonElement>,
@@ -27370,6 +27442,7 @@ export default function TileFabApp(): React.ReactElement {
 		setOrganizationLibraryOpen(false);
 		setOrganizationSearch("");
 		bayStructureDetailOriginRef.current = null;
+		setOrganizationPage(0);
 		staticFabBayFlowEditDetailOriginRef.current = null;
 		setOrganizationLibraryView("list");
 		setSelectedOrganizationId(null);
@@ -39206,6 +39279,9 @@ export default function TileFabApp(): React.ReactElement {
 						currentStaticFabInspectionPending={currentStaticFabInspectionPending}
 						equipmentGroupCount={activePortEquipment.equipmentGroups.length}
 						filteredStaticFabOrganizations={filteredStaticFabOrganizations}
+						organizationPageStart={organizationPageStart}
+						organizationMatchCount={matchingStaticFabOrganizations.length}
+						onChangeOrganizationPage={changeStaticFabOrganizationPage}
 						fitMap={fitMap}
 						focusedIssueId={readinessIssueId ?? staticFabProjectIssueId}
 						getNavigatorViewportBounds={getNavigatorViewportBounds}

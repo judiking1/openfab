@@ -2063,6 +2063,13 @@ try {
 		"true",
 		"renamed AREA remains selected",
 	);
+	await exerciseOrganizationRenameHistory(
+		desktopPage,
+		areaLibrary,
+		"Acceptance Main FAB",
+		"Acceptance North Production Hall",
+	);
+	await exerciseOrganizationFilterSelection(desktopPage, areaLibrary, "Acceptance North Production Hall");
 	const areaRemoveStartedAt = performance.now();
 	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "REMOVE METADATA", exact: true }).click();
@@ -52062,6 +52069,74 @@ async function showOrganizationDetails(library) {
 	if ((await library.getAttribute("data-view")) !== "detail") {
 		await library.getByRole("button", { name: "세부 편집", exact: true }).click();
 	}
+}
+
+async function exerciseOrganizationRenameHistory(page, library, previousName, appliedName) {
+	await showOrganizationDetails(library);
+	const input = page.getByRole("textbox", { name: "선택한 FAB 조직 이름" });
+	const rename = library.getByRole("button", { name: "RENAME", exact: true });
+	const organizationId = Number(await page.locator(".tilefab-app").getAttribute("data-organization-selection-ids"));
+	const applied = await readStandaloneLoopAuthoringContract(page);
+	const undone = structuredClone(applied);
+	const record = undone.organizations.records.find((candidate) => candidate.id === organizationId);
+	if (!record || record.name !== appliedName) throw new Error("Expected one applied organization rename.");
+	record.name = previousName;
+	const replay = async (direction) => {
+		const sequence = await page.evaluate(() => window.__tileFab.getDocument().getPatchSequence());
+		const canvas = page.getByTestId("rail-canvas");
+		await canvas.focus();
+		await canvas.press(direction === "undo" ? "ControlOrMeta+z" : "ControlOrMeta+Shift+z");
+		await page.waitForFunction((expected) => {
+			const canvas = document.querySelector('[data-testid="rail-canvas"]');
+			return window.__tileFab.getDocument().getPatchSequence() === expected &&
+				canvas?.dataset.workerSequence === String(expected) &&
+				canvas.dataset.workerStatus === "ready" && canvas.dataset.modelSyncPending === "false";
+		}, sequence + 1);
+		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), direction === "undo" ? undone : applied), true, `organization rename ${direction} exact source`);
+	};
+	for (const direction of ["undo", "redo"]) {
+		await replay(direction);
+		assertEqual(await input.inputValue(), direction === "undo" ? previousName : appliedName, `applied rename ${direction} follows source`);
+		assertEqual(await rename.isDisabled(), true, `applied rename ${direction} has no invented draft`);
+		assertEqual(await library.locator(".tilefab-organization-editor").getAttribute("data-dirty"), "false", `applied rename ${direction} stays saved`);
+	}
+	for (const draft of ["Unapplied organization name", ""]) {
+		await input.fill(draft);
+		for (const direction of ["undo", "redo"]) {
+			await replay(direction);
+			assertEqual(await input.inputValue(), draft, `unapplied rename ${direction} retains exact input`);
+			assertEqual(await library.locator(".tilefab-organization-editor").getAttribute("data-dirty"), "true", `unapplied rename ${direction} stays dirty`);
+		}
+	}
+	await input.fill(appliedName);
+	assertEqual(await rename.isDisabled(), true, "restoring the applied name clears the draft");
+}
+
+async function exerciseOrganizationFilterSelection(page, library, selectedName) {
+	await showOrganizationList(library);
+	const selection = await page.locator(".tilefab-app").getAttribute("data-organization-selection-ids");
+	const before = await readStandaloneLoopAuthoringContract(page);
+	const record = before.organizations.records.find((candidate) => candidate.id === Number(selection));
+	if (!record || record.name !== selectedName) throw new Error("Expected one selected organization.");
+	const excludedKind = record.kind === "AREA" ? "BAY" : "AREA";
+	const search = page.getByRole("textbox", { name: "저장된 FAB 조직 검색" });
+	const assertSelection = async () => {
+		assertEqual(await page.locator(".tilefab-app").getAttribute("data-organization-selection-ids"), selection, "filter preserves selected IDs");
+		assertEqual(await page.getByTestId("static-fab-organization-selection-summary").locator("strong").innerText(), selectedName, "filter preserves selected name");
+		assertEqual(await library.getByRole("button", { name: "세부 편집", exact: true }).isVisible(), true, "filter preserves detail entry");
+		assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), before), true, "filter preserves exact source");
+	};
+	await search.fill(selectedName);
+	await library.getByRole("tab", { name: new RegExp(`^${excludedKind} `) }).click();
+	await assertSelection();
+	await search.fill("");
+	await assertSelection();
+	await library.getByRole("tab", { name: /^ALL / }).click();
+	await assertSelection();
+	assertEqual(await library.locator(`[data-organization-id="${record.id}"]`).getAttribute("aria-selected"), "true", "filter return reveals selected row");
+	await showOrganizationDetails(library);
+	assertEqual(await page.getByRole("textbox", { name: "선택한 FAB 조직 이름" }).inputValue(), selectedName, "filter return opens selected detail");
 }
 
 async function showOrganizationReuse(library) {

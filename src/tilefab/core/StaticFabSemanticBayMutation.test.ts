@@ -12,7 +12,11 @@ import { analyzeRailNetwork } from "./network";
 import type { CardinalPortRoute, PortRecord } from "./PortRecord";
 import { planRailConstruction } from "./paint";
 import { RailDocument } from "./RailDocument";
-import { buildRailModuleOwnershipIndex, type RailModuleOwnership } from "./RailModuleOwnership";
+import {
+	buildRailModuleOwnershipIndex,
+	type DirectedRailEdge,
+	type RailModuleOwnership,
+} from "./RailModuleOwnership";
 import {
 	ALL_DIRECTIONS,
 	bitCount,
@@ -81,6 +85,23 @@ const DEFAULT_RETURN_CONNECTOR_EDGE_KEYS = Object.freeze([
 	"40:33>40:34",
 	"40:34>40:35",
 	"40:35>40:36",
+]);
+
+const DEFAULT_BAY_SUPPORT_SEAM_EDGE_KEYS = Object.freeze([
+	"40:36>40:37",
+	"40:37>40:38",
+	"50:37>50:36",
+	"50:38>50:37",
+	"50:39>50:38",
+]);
+
+// Independent default-profile paths: (32,24) -> (32,16) -> (4,16), then
+// (4,34) -> (32,34) -> (32,26). Composer v2 assigns these 72 edges to FAB.
+const DEFAULT_BANK_TO_FAB_GATEWAY_EDGE_KEYS = Object.freeze([
+	...Array.from({ length: 8 }, (_, index) => `32:${24 - index}>32:${23 - index}`),
+	...Array.from({ length: 28 }, (_, index) => `${32 - index}:16>${31 - index}:16`),
+	...Array.from({ length: 28 }, (_, index) => `${4 + index}:34>${5 + index}:34`),
+	...Array.from({ length: 8 }, (_, index) => `32:${34 - index}>32:${33 - index}`),
 ]);
 
 interface DefaultFabFixture {
@@ -206,6 +227,11 @@ describe("StaticFabSemanticBayMutation", () => {
 	it("disconnects one exact paired connector while preserving the detached Bay subtree", () => {
 		const { document, bay, bank, processLoop, disconnect } = fixture;
 		const prospective = requireProspective(disconnect);
+		const expectedRemainingBankEdgeCount = assertDefaultBankEdgePartition(
+			fixture,
+			prospective,
+			"DISCONNECT",
+		);
 
 		expect(disconnect.plan).toMatchObject({
 			kind: STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND,
@@ -232,7 +258,7 @@ describe("StaticFabSemanticBayMutation", () => {
 				equipmentGroupIds: [],
 				portCount: 0,
 				portIds: [],
-				remainingBankDirectedEdgeCount: 959,
+				remainingBankDirectedEdgeCount: expectedRemainingBankEdgeCount,
 				retainedCirculationCandidatePresent: true,
 				circulationCertification: "PENDING_WORKER_CERTIFICATION",
 				issueCode: null,
@@ -287,6 +313,7 @@ describe("StaticFabSemanticBayMutation", () => {
 		const supportSeamEdgeKeys = detachedCoverage.effective.railEdges
 			.map(staticFabOrganizationEdgeKey)
 			.filter((edgeKey) => sourceBankEdgeKeys.has(edgeKey) && !sourceBayEdgeKeys.has(edgeKey));
+		expect([...supportSeamEdgeKeys].sort()).toEqual(DEFAULT_BAY_SUPPORT_SEAM_EDGE_KEYS);
 		expect(supportSeamEdgeKeys.length).toBeGreaterThan(0);
 		expect(supportSeamEdgeKeys.length).toBeLessThanOrEqual(
 			STATIC_FAB_SEMANTIC_BAY_SUPPORT_SEAM_EDGE_LIMIT,
@@ -329,6 +356,11 @@ describe("StaticFabSemanticBayMutation", () => {
 	it("deletes the Bay, its Process Loop, and connector as one source-to-final patch", () => {
 		const { document, bay, bank, processLoop, delete: deleteResult } = fixture;
 		const prospective = requireProspective(deleteResult);
+		const expectedRemainingBankEdgeCount = assertDefaultBankEdgePartition(
+			fixture,
+			prospective,
+			"DELETE",
+		);
 
 		expect(deleteResult.plan).toMatchObject({
 			kind: STATIC_FAB_SEMANTIC_BAY_DELETE_KIND,
@@ -356,7 +388,7 @@ describe("StaticFabSemanticBayMutation", () => {
 				equipmentGroupIds: [],
 				portCount: 0,
 				portIds: [],
-				remainingBankDirectedEdgeCount: 959,
+				remainingBankDirectedEdgeCount: expectedRemainingBankEdgeCount,
 				retainedCirculationCandidatePresent: true,
 				circulationCertification: "PENDING_WORKER_CERTIFICATION",
 				issueCode: null,
@@ -1344,6 +1376,98 @@ describe("StaticFabSemanticBayMutation", () => {
 		expect(authoredChecksum(fixture.document)).toBe(fixture.sourceChecksum);
 	}
 });
+
+function assertDefaultBankEdgePartition(
+	fixture: DefaultFabFixture,
+	prospective: ReturnType<typeof requireProspective>,
+	action: StaticFabSemanticBayMutationIntent["action"],
+): number {
+	const { document, fab, bank, bay } = fixture;
+	const sourceBankEdges = new Map(
+		bank.membership.railEdges.map((edge) => [staticFabOrganizationEdgeKey(edge), edge]),
+	);
+	const connectorKeys = new Set([
+		...DEFAULT_OUTBOUND_CONNECTOR_EDGE_KEYS,
+		...DEFAULT_RETURN_CONNECTOR_EDGE_KEYS,
+	]);
+	const seamKeys = new Set(DEFAULT_BAY_SUPPORT_SEAM_EDGE_KEYS);
+	const removedBankKeys = new Set([...connectorKeys, ...seamKeys]);
+	expect(sourceBankEdges.size).toBe(916);
+	expect(connectorKeys.size).toBe(24);
+	expect(seamKeys.size).toBe(5);
+	expect(removedBankKeys.size).toBe(29);
+	for (const key of removedBankKeys) {
+		const edge = sourceBankEdges.get(key);
+		if (!edge) throw new Error(`Expected Bank-owned connector/support edge ${key}.`);
+		assertOwnedPhysicalEdge(document.map, document.organizations, edge, bank.id);
+		assertOwnedPhysicalEdge(
+			prospective.map,
+			prospective.organizations,
+			edge,
+			action === "DISCONNECT" && seamKeys.has(key) ? bay.id : null,
+		);
+	}
+	// Expected membership comes from the source and fixed cut/seam sets, not the review count.
+	const expectedBankKeys = [...sourceBankEdges.keys()]
+		.filter((key) => !removedBankKeys.has(key))
+		.sort();
+	expect(expectedBankKeys).toHaveLength(916 - 24 - 5);
+	const retainedBank = requireRecord(
+		prospective.organizations.records.find((record) => record.id === bank.id),
+		"retained Bank",
+	);
+	expect(retainedBank.membership.railEdges.map(staticFabOrganizationEdgeKey).sort()).toEqual(
+		expectedBankKeys,
+	);
+
+	const relationship = document.relationships.records.find(
+		(record) =>
+			record.hierarchyRole === "BANK_TO_FAB" &&
+			record.parentOrganizationId === fab.id &&
+			record.managedChildOrganizationIds.includes(bank.id),
+	);
+	if (!relationship) throw new Error("Expected the selected Bank's declared Fab attachment.");
+	const legs = relationship.connectionGroups.flatMap((group) => group.legs);
+	expect(legs.map((leg) => leg.exclusiveCutEdges.length)).toEqual([36, 36]);
+	const gatewayEdges = legs.flatMap((leg) => leg.exclusiveCutEdges);
+	expect(gatewayEdges.map(({ edge }) => staticFabOrganizationEdgeKey(edge)).sort()).toEqual(
+		[...DEFAULT_BANK_TO_FAB_GATEWAY_EDGE_KEYS].sort(),
+	);
+	for (const { edge, scope } of gatewayEdges) {
+		expect(scope).toEqual({ kind: "PARENT_DIRECT" });
+		assertOwnedPhysicalEdge(document.map, document.organizations, edge, fab.id);
+		assertOwnedPhysicalEdge(prospective.map, prospective.organizations, edge, fab.id);
+	}
+	expect(prospective.relationships).toEqual(document.relationships);
+	expect(prospective.organizations.records.find((record) => record.id === fab.id)).toEqual(fab);
+	return expectedBankKeys.length;
+}
+
+function assertOwnedPhysicalEdge(
+	map: TileMap,
+	organizations: StaticFabOrganizationState,
+	edge: DirectedRailEdge,
+	ownerId: number | null,
+): void {
+	const key = staticFabOrganizationEdgeKey(edge);
+	const owners = organizations.records
+		.filter((record) =>
+			record.membership.railEdges.some(
+				(candidate) => staticFabOrganizationEdgeKey(candidate) === key,
+			),
+		)
+		.map((record) => record.id);
+	expect(owners, key).toEqual(ownerId === null ? [] : [ownerId]);
+	const direction = directionBetween(edge.from, edge.to);
+	if (direction === null) throw new Error(`Expected cardinal edge ${key}.`);
+	expect(map.getEncoded(edge.from.x, edge.from.y) & (direction << 4), key).toBe(
+		ownerId === null ? 0 : direction << 4,
+	);
+	const incoming = oppositeDirection(direction);
+	expect(map.getEncoded(edge.to.x, edge.to.y) & incoming, key).toBe(
+		ownerId === null ? 0 : incoming,
+	);
+}
 
 function semanticIntent(
 	action: StaticFabSemanticBayMutationIntent["action"],

@@ -74,6 +74,9 @@ interface StaticFabOrganizationLibraryProps {
 	readonly currentStaticFabInspectionPending: boolean;
 	readonly equipmentGroupCount: number;
 	readonly filteredStaticFabOrganizations: readonly StaticFabOrganizationRecord[];
+	readonly organizationPageStart: number;
+	readonly organizationMatchCount: number;
+	readonly onChangeOrganizationPage: (direction: -1 | 1) => void;
 	readonly fitMap: () => void;
 	readonly focusedIssueId: string | null;
 	readonly getNavigatorViewportBounds: () => StaticFabMinimapWorldBounds | null;
@@ -206,6 +209,9 @@ export function StaticFabOrganizationLibrary({
 	currentStaticFabInspectionPending,
 	equipmentGroupCount,
 	filteredStaticFabOrganizations,
+	organizationPageStart,
+	organizationMatchCount,
+	onChangeOrganizationPage,
 	fitMap,
 	focusedIssueId,
 	getNavigatorViewportBounds,
@@ -508,7 +514,7 @@ export function StaticFabOrganizationLibrary({
 										: `선택 조직 ${organizationSelectionCount.toLocaleString()}개`}
 								</strong>
 								<span>{organizationDetailsError ?? organizationSelectionGuidance}</span>
-								{selectedStaticFabOrganization && selectedStaticFabOrganizationVisible ? (
+								{selectedStaticFabOrganization ? (
 									<button
 										type="button"
 										className="tilefab-organization-detail-jump"
@@ -520,6 +526,36 @@ export function StaticFabOrganizationLibrary({
 							</div>
 							{organizationSelectionCount > 0 ? reuseActions : null}
 						</section>
+						{organizationMatchCount > filteredStaticFabOrganizations.length ? (
+							<nav className="tilefab-organization-pagination" aria-label="조직 목록 페이지">
+								<span className="tilefab-organization-page-range" role="status">
+									{(organizationPageStart + 1).toLocaleString()}–
+									{(organizationPageStart + filteredStaticFabOrganizations.length).toLocaleString()}{" "}
+									/ {organizationMatchCount.toLocaleString()}개
+								</span>
+								<button
+									type="button"
+									aria-label="이전 조직 목록"
+									className="tilefab-organization-page-button"
+									disabled={organizationPageStart === 0}
+									onClick={() => onChangeOrganizationPage(-1)}
+								>
+									<ArrowLeft size={14} aria-hidden="true" /> 이전
+								</button>
+								<button
+									type="button"
+									aria-label="다음 조직 목록"
+									className="tilefab-organization-page-button"
+									disabled={
+										organizationPageStart + filteredStaticFabOrganizations.length >=
+										organizationMatchCount
+									}
+									onClick={() => onChangeOrganizationPage(1)}
+								>
+									다음 <ChevronRight size={14} aria-hidden="true" />
+								</button>
+							</nav>
+						) : null}
 						<div
 							id="tilefab-organization-list"
 							ref={organizationListRef}

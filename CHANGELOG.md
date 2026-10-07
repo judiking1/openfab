@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.80] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Reach all saved organizations through paged lists, with selection, detail return and pending
+  edits preserved across pages and search filters.
+- Keep applied organization names synchronized with Undo/Redo while retaining unapplied drafts.
+  Preserve newer input and selection when a pending history operation finishes.
+- Clear an obsolete page-navigation warning after the pending draft is resolved and navigation succeeds.
+
 ## [0.1.79] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
