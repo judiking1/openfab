@@ -13,7 +13,7 @@ export function deriveOpenFabReleaseCapabilities(
 	environment: OpenFabReleaseCapabilityEnvironment,
 ): OpenFabReleaseCapabilities {
 	return Object.freeze({
-		derived3D: environment.development || environment.derived3D === "1",
+		derived3D: environment.derived3D !== "0",
 		simulation: environment.development || environment.simulation === "1",
 	});
 }

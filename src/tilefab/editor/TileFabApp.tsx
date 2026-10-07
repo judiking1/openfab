@@ -114,6 +114,7 @@ import {
 import {
 	type PortEquipmentMembershipEditPlan,
 	planPortEquipmentMembershipEdit,
+	reviewPortEquipmentMembershipEdit,
 } from "../compile/PortEquipmentMembershipEditPlanner";
 import {
 	type CompiledPortEquipmentPresentation,
@@ -625,6 +626,7 @@ import {
 	type BlueprintRecordCommandId,
 	type BlueprintRecordContextScope,
 	type BlueprintRecordContextState,
+	filterProjectBlueprintRecords,
 	nextBlueprintRecordMenuIndex,
 	planUserBlueprintOrganization,
 	type UserBlueprintOrganizationTarget,
@@ -1103,6 +1105,7 @@ import {
 	StaticFabOrganizationLibrary,
 	type OrganizationDetailTab,
 } from "./StaticFabOrganizationLibrary";
+import { StaticFabInspection3DErrorBoundary } from "./StaticFabInspection3DErrorBoundary";
 import type { StaticFabInspection3DCommand } from "./StaticFabInspection3DViewport";
 import {
 	DEFAULT_STATIC_FAB_INSPECTION_3D_VISIBILITY,
@@ -3346,6 +3349,13 @@ export default function TileFabApp(): React.ReactElement {
 	const [userBlueprintRejectedDiagnostics, setUserBlueprintRejectedDiagnostics] = useState<
 		readonly OpenFabUserBlueprintRejectedDiagnostic[]
 	>(Object.freeze([]));
+	const [eqBodyDraftPending, setEqBodyDraftPending] = useState(false);
+	const eqBodyDraftPendingRef = useRef(false);
+	const handleEqBodyDraftChange = useCallback((hasDraft: boolean): void => {
+		eqBodyDraftPendingRef.current = hasDraft;
+		setEqBodyDraftPending(hasDraft);
+	}, []);
+	const [projectBlueprintSearch, setProjectBlueprintSearch] = useState("");
 	const [userBlueprintSearch, setUserBlueprintSearch] = useState("");
 	const [userBlueprintFolderPath, setUserBlueprintFolderPath] = useState<readonly string[]>(
 		Object.freeze([]),
@@ -16823,37 +16833,17 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		const slots = session.slots;
-		const currentX = slots.routeXs[currentRow] as number;
-		const currentZ = slots.routeZs[currentRow] as number;
-		const worldX = slots.worldPositions[currentRow * 2] as number;
-		const worldZ = slots.worldPositions[currentRow * 2 + 1] as number;
-		const candidates = rendererRef.current.queryPortSlots(
+		const { row: nextRow } = progressiveDirectionalPortEquipmentSlotRow({
 			slots,
-			{
-				minX: worldX - 16,
-				minZ: worldZ - 16,
-				maxX: worldX + 16,
-				maxZ: worldZ + 16,
-			},
-			groupEditCandidateBufferRef.current,
-		);
-		let nextRow: number | null = null;
-		let nextScore = Number.POSITIVE_INFINITY;
-		for (const row of candidates) {
-			if (row === currentRow) continue;
-			const offsetX = (slots.routeXs[row] as number) - currentX;
-			const offsetZ = (slots.routeZs[row] as number) - currentZ;
-			const primary = offsetX * deltaX + offsetZ * deltaZ;
-			if (primary <= 0) continue;
-			const secondary = Math.abs(offsetX * deltaZ - offsetZ * deltaX);
-			const score = secondary * 1_000 + primary * 10 + row / Math.max(1, slots.count);
-			if (score < nextScore) {
-				nextScore = score;
-				nextRow = row;
-			}
-		}
+			currentRow,
+			deltaX,
+			deltaZ,
+			scope: "nearby",
+			target: groupEditCandidateBufferRef.current,
+			query: (bounds, target) => rendererRef.current.queryPortSlots(slots, bounds, target),
+		});
 		if (nextRow === null) {
-			setStatus("해당 방향 16 m 안에 다음 장비 슬롯이 없습니다");
+			setStatus("해당 방향에 다음 장비 CENTER 슬롯이 없습니다");
 			return;
 		}
 		hoverPortSlotRef.current = nextRow;
@@ -20118,6 +20108,7 @@ export default function TileFabApp(): React.ReactElement {
 			setGuidedBuildLastOpenedProject(null);
 		}
 		setProjectBlueprints(prepared.metadata.blueprints);
+		setProjectBlueprintSearch("");
 		applyProjectView(
 			prepared.metadata.view,
 			nextModel.map,
@@ -22889,6 +22880,10 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startPatternResize = (candidate: RailPatternCandidate): void => {
+		if (editorViewModeRef.current !== "2d") {
+			setStatus("2D 편집 뷰에서 패턴 크기를 편집하세요");
+			return;
+		}
 		if (railTemplateCatalogItem(candidate.templateId).anchorRequirement !== "free-closed") {
 			startRecognizedRailTemplate(candidate);
 			return;
@@ -22960,6 +22955,10 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const applyPatternResize = (): void => {
+		if (editorViewModeRef.current !== "2d") {
+			setStatus("2D 편집 뷰에서 패턴 크기를 적용하세요");
+			return;
+		}
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
@@ -28313,6 +28312,7 @@ export default function TileFabApp(): React.ReactElement {
 					[...projectBlueprints.records, record],
 					`${validation.folder ? `${validation.folder} / ` : ""}${name} 청사진을 프로젝트에 저장했습니다`,
 				);
+				setProjectBlueprintSearch("");
 				setBlueprintNameDraft(nextBlueprintName([...projectBlueprints.records, record]));
 				closeContextualBlueprintSave();
 				return;
@@ -28456,6 +28456,7 @@ export default function TileFabApp(): React.ReactElement {
 			[...projectBlueprints.records, imported],
 			`${name} 청사진을 현재 프로젝트에 추가했습니다`,
 		);
+		setProjectBlueprintSearch("");
 	};
 	const chooseUserBlueprintFolder = (folderPath: readonly string[]): void => {
 		setUserBlueprintFolderPath(Object.freeze([...folderPath]));
@@ -29215,9 +29216,10 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (commandId !== "delete-project") return;
-		const index = orderedProjectBlueprints.findIndex(({ id }) => id === record.id);
+		const visibleRecords = filterProjectBlueprintRecords(orderedProjectBlueprints, projectBlueprintSearch);
+		const index = visibleRecords.findIndex(({ id }) => id === record.id);
 		const focusAfterRemoval =
-			orderedProjectBlueprints[index + 1]?.id ?? orderedProjectBlueprints[index - 1]?.id ?? null;
+			visibleRecords[index + 1]?.id ?? visibleRecords[index - 1]?.id ?? null;
 		closeBlueprintRecordContext(false);
 		deleteProjectBlueprint(record);
 		if (focusAfterRemoval) {
@@ -30715,6 +30717,37 @@ export default function TileFabApp(): React.ReactElement {
 		: portEquipmentGroupEditSession.plan.valid
 			? "valid"
 			: "invalid";
+	const membershipReviewDocument = portEquipmentMembershipEditSession?.document;
+	const membershipReviewSlots = portEquipmentMembershipEditSession?.slots;
+	const membershipReviewIndex = portEquipmentMembershipEditSession?.slotIndex;
+	const membershipReviewAvailability = portEquipmentMembershipEditSession?.availability;
+	const membershipReviewGroupId = portEquipmentMembershipEditSession?.sourceEquipmentGroupId;
+	const membershipReviewRows = portEquipmentMembershipEditSession?.selection.rows;
+	const membershipReviewRevision = portEquipmentMembershipEditSession?.baseRevision;
+	const membershipReviewSequence = portEquipmentMembershipEditSession?.basePatchSequence;
+	const portEquipmentMembershipReview = useMemo(() => {
+		if (!membershipReviewDocument || !membershipReviewSlots || !membershipReviewIndex ||
+			!membershipReviewAvailability || membershipReviewGroupId === undefined || !membershipReviewRows ||
+			membershipReviewRevision === undefined || membershipReviewSequence === undefined) return null;
+		if (membershipReviewDocument !== railDocument || membershipReviewSequence !== navigatorSourceSequence) {
+			return Object.freeze({ valid: false, reason: "정적 FAB가 변경되었습니다 · 포트 구성을 다시 편집하세요" });
+		}
+		return reviewPortEquipmentMembershipEdit(
+			membershipReviewDocument.map,
+			membershipReviewSlots,
+			membershipReviewIndex,
+			membershipReviewAvailability,
+			activePortEquipment,
+			membershipReviewGroupId,
+			membershipReviewRows,
+			membershipReviewRevision,
+			membershipReviewSequence,
+			activeOrganizations,
+		);
+	}, [membershipReviewDocument, membershipReviewSlots, membershipReviewIndex,
+		membershipReviewAvailability, membershipReviewGroupId, membershipReviewRows,
+		membershipReviewRevision, membershipReviewSequence, railDocument, navigatorSourceSequence,
+		activePortEquipment, activeOrganizations]);
 	const portEquipmentMembershipSummary = useMemo(() => {
 		const session = portEquipmentMembershipEditSession;
 		if (!session) return null;
@@ -30737,15 +30770,18 @@ export default function TileFabApp(): React.ReactElement {
 			added,
 			removed,
 			dirty: added > 0 || removed > 0,
-			canComplete: structurallyReady && (added > 0 || removed > 0) && session.plan?.valid !== false,
+			canComplete: structurallyReady && (added > 0 || removed > 0) &&
+				portEquipmentMembershipReview?.valid === true && session.plan?.valid !== false,
 			reason:
 				session.plan?.valid === false
 					? portEquipmentReasonLabel(session.plan.reason)
-					: session.preservesLoopOwnership
+					: structurallyReady && (added > 0 || removed > 0) && portEquipmentMembershipReview?.valid === false
+						? portEquipmentReasonLabel(portEquipmentMembershipReview.reason)
+						: session.preservesLoopOwnership
 						? `현재 Loop 소속 유지 · ${draftReason}`
 						: draftReason,
 		});
-	}, [portEquipmentMembershipEditSession]);
+	}, [portEquipmentMembershipEditSession, portEquipmentMembershipReview]);
 	const ordinaryPortGroupCounts = useMemo(
 		() =>
 			activePortEquipment.equipmentGroups.reduce(
@@ -31820,11 +31856,22 @@ export default function TileFabApp(): React.ReactElement {
 	}, []);
 	const inspectionRailPresentation = editorModel.renderArtifacts?.presentation ?? null;
 	const inspectionViewTransitionReason = (): string | null => {
+		if (
+			staticFabExclusiveCommandActive ||
+			processLoopOperationRef.current ||
+			staticFabMutationHistoryRef.current ||
+			stationProposalReviewUiRef.current
+		) {
+			return "현재 검토나 편집 처리를 완료하거나 취소한 뒤 3D 검사를 여세요";
+		}
 		if (guidedBuildExperienceActive && !guidedBuildEvaluation.complete) {
 			return "Guided Build의 레일·Port 작업을 2D에서 완료하거나 가이드를 종료한 뒤 3D 검사를 여세요";
 		}
 		if (!startupReady || projectBusy || modelSyncPendingRef.current) {
 			return "프로젝트와 Worker 동기화가 끝난 뒤 3D 검사를 여세요";
+		}
+		if (eqBodyDraftPendingRef.current || eqBodyDraftPending) {
+			return "EQ 몸체 크기 입력을 적용하거나 입력 취소한 뒤 3D 검사를 여세요";
 		}
 		if (!editorModelRef.current.renderArtifacts) {
 			return "검증된 물리 레일 표현을 준비하고 있습니다";
@@ -31832,6 +31879,9 @@ export default function TileFabApp(): React.ReactElement {
 		if (
 			dragRef.current ||
 			anchorRef.current ||
+			patternResizeDraftRef.current ||
+			reshapeRef.current ||
+			ohbPlacementIntentRef.current ||
 			portRowDragRef.current ||
 			stkDraftSessionRef.current ||
 			portEquipmentGroupEditSessionRef.current ||
@@ -31854,7 +31904,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (next === editorViewModeRef.current) return;
 		if (next === "3d") {
 			if (!OPENFAB_RELEASE_CAPABILITIES.derived3D) {
-				setStatus("3D 검사는 OpenFab Twin View 2.x에서 제공됩니다");
+				setStatus("이 빌드에서는 3D 검사를 사용할 수 없습니다");
 				return;
 			}
 			const blocked = inspectionViewTransitionReason();
@@ -32800,6 +32850,7 @@ export default function TileFabApp(): React.ReactElement {
 					: "FAB 배치를 적용하거나 Esc로 취소한 뒤 활동을 바꾸세요"
 		: editorActivityTransitionBlockedReason();
 	const railAreaSelectionInspectorVisible = Boolean(
+		viewMode === "2d" &&
 		areaSelection &&
 			(!ordinaryHierarchyTaskHandoffActive ||
 				areaSelectionProvenance === "organization-inspect") &&
@@ -35204,38 +35255,43 @@ export default function TileFabApp(): React.ReactElement {
 				) : null}
 
 				{viewMode === "3d" && inspectionRailPresentation && StaticFabInspection3DView ? (
-					<Suspense
-						fallback={
-							<div className="tilefab-inspection-3d tilefab-inspection-3d--loading" role="status">
-								<span className="tilefab-startup-indicator" aria-hidden="true" />
-								<strong>3D 렌더러 불러오는 중</strong>
-								<small>2D 편집 번들과 분리된 검사 모듈을 준비합니다</small>
-							</div>
-						}
+					<StaticFabInspection3DErrorBoundary
+						onExit={() => switchEditorView("2d")}
+						onFailure={() => setStatus("정적 3D 검사를 불러오지 못했습니다 · 2D로 돌아가 편집을 계속할 수 있습니다")}
 					>
-						<StaticFabInspection3DView
-							generation={editorModel.generation}
-							presentation={inspectionRailPresentation}
-							equipment={activePortEquipmentPresentation}
-							selectedPathIndices={selectedInspectionPaths?.pathIndices ?? null}
-							selectedPortEquipment={selectedPortEquipment}
-							initialFocus={inspection3DInitialFocus}
-							command={inspection3DCommand}
-							visibility={inspection3DVisibility}
-							runtimeView={simulationRuntimePresentationRouter}
-							onRailPick={handleInspection3DRailPick}
-							onPortEquipmentPick={handleInspection3DPortPick}
-							onClearSelection={() => {
-								clearPortEquipmentSelection();
-								clearRailSelection();
-							}}
-							onExit={() => switchEditorView("2d")}
-							onFocusChange={(focus) => {
-								inspection3DFocusRef.current = focus;
-							}}
-							onFailure={handleInspection3DFailure}
-						/>
-					</Suspense>
+						<Suspense
+							fallback={
+								<div className="tilefab-inspection-3d tilefab-inspection-3d--loading" role="status">
+									<span className="tilefab-startup-indicator" aria-hidden="true" />
+									<strong>3D 렌더러 불러오는 중</strong>
+									<small>2D 편집 번들과 분리된 검사 모듈을 준비합니다</small>
+								</div>
+							}
+						>
+							<StaticFabInspection3DView
+								generation={editorModel.generation}
+								presentation={inspectionRailPresentation}
+								equipment={activePortEquipmentPresentation}
+								selectedPathIndices={selectedInspectionPaths?.pathIndices ?? null}
+								selectedPortEquipment={selectedPortEquipment}
+								initialFocus={inspection3DInitialFocus}
+								command={inspection3DCommand}
+								visibility={inspection3DVisibility}
+								runtimeView={simulationRuntimePresentationRouter}
+								onRailPick={handleInspection3DRailPick}
+								onPortEquipmentPick={handleInspection3DPortPick}
+								onClearSelection={() => {
+									clearPortEquipmentSelection();
+									clearRailSelection();
+								}}
+								onExit={() => switchEditorView("2d")}
+								onFocusChange={(focus) => {
+									inspection3DFocusRef.current = focus;
+								}}
+								onFailure={handleInspection3DFailure}
+							/>
+						</Suspense>
+					</StaticFabInspection3DErrorBoundary>
 				) : null}
 
 				{recoveryProject && !openFabStartDialogOpen ? (
@@ -37223,6 +37279,11 @@ export default function TileFabApp(): React.ReactElement {
 						pendingUserBlueprintImportPreview={pendingUserBlueprintImportPreview}
 						placeProjectBlueprint={placeProjectBlueprint}
 						projectBlueprintCount={projectBlueprints.records.length}
+						projectBlueprintSearch={projectBlueprintSearch}
+						onProjectBlueprintSearchChange={(query) => {
+							setProjectBlueprintSearch(query);
+							if (blueprintRecordContext?.scope === "project") closeBlueprintRecordContext(false);
+						}}
 						projectBusy={projectBusy}
 						recentRailClipboardActiveIndex={recentRailClipboardActiveIndex}
 						recentRailClipboards={recentRailClipboards}
@@ -39773,6 +39834,7 @@ export default function TileFabApp(): React.ReactElement {
 
 				{selectedPortDetails && selectedEquipmentGroup && portEquipmentInspectorVisible ? (
 					<PortEquipmentInspector
+						onEqBodyDraftChange={handleEqBodyDraftChange}
 						key={editorModel.generation}
 						commitSelectedEqBodyDimensions={commitSelectedEqBodyDimensions}
 						organizations={activeOrganizations}

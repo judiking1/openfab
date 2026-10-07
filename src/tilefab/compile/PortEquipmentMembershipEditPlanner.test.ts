@@ -1,17 +1,248 @@
 import { describe, expect, it } from "vitest";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
+import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
+import { compareDirectedRailEdges } from "../core/StaticFabOrganization";
+import { checksumRailMap } from "../worker/RailMirrorChecksum";
+import { selectEqRowDraft } from "./EqRowDraftSelector";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
+import { planResizeEqBody } from "./PortEquipmentEditPlanner";
 import {
 	PortEquipmentGroupSlotIndex,
 	portEquipmentGroupSlotIndexFor,
 } from "./PortEquipmentGroupEditPlanner";
-import { planPortEquipmentMembershipEdit } from "./PortEquipmentMembershipEditPlanner";
+import {
+	planPortEquipmentMembershipEdit,
+	reviewPortEquipmentMembershipEdit,
+} from "./PortEquipmentMembershipEditPlanner";
 import { planEqRowPlacement, planStkPlacement } from "./PortPlacementPlanner";
 import { PortSlotAvailabilityIndex } from "./PortSlotCompiler";
 import { compilePortSlotPreparedArtifactCatalog } from "./PortSlotPreparedArtifacts";
 
 describe("PortEquipmentMembershipEditPlanner", () => {
+	it("rejects a slot-valid three-Port draft when the authored EQ body only fits two Ports", () => {
+		const document = closedLoopDocument(14, 4);
+		const physical = compilePhysicalRail(document.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const rows = [2, 3, 4].map((x) => rowAt(slots, x, 0));
+		expect(
+			document.commitPortEquipment(
+				planEqRowPlacement(
+					slots,
+					rows.slice(0, 2),
+					new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+					document.portEquipment,
+					1_000,
+					null,
+					document.map.getRevision(),
+					document.getPatchSequence(),
+				),
+			),
+		).toBe(true);
+		expect(
+			document.commitPortEquipment(
+				planResizeEqBody(
+					document.map,
+					document.portEquipment,
+					{ portId: 1, equipmentGroupId: 1 },
+					{ lengthMillimeters: 2_000, widthMillimeters: 900 },
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					document.organizations,
+				),
+			),
+		).toBe(true);
+		const availability = new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ");
+		const draft = selectEqRowDraft(
+			slots,
+			availability,
+			rows[0] as number,
+			rows[2] as number,
+			rows,
+			1_000,
+			1,
+		);
+		expect(draft.valid, draft.reason).toBe(true);
+		const args = [
+			document.map,
+			slots,
+			portEquipmentGroupSlotIndexFor(slots),
+			availability,
+			document.portEquipment,
+			1,
+			draft.rows,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		] as const;
+		const source = document.portEquipment;
+		const checksum = checksumRailMap(document.map, source, document.organizations);
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		const review = reviewPortEquipmentMembershipEdit(...args);
+		const plan = planPortEquipmentMembershipEdit(...args);
+		expect(review).toEqual({ valid: plan.valid, reason: plan.reason });
+		expect(review).toMatchObject({
+			valid: false,
+			reason: expect.stringMatching(/2000.*3 Port.*3000/),
+		});
+		expect(Object.keys(review).sort()).toEqual(["reason", "valid"]);
+		expect(Object.isFrozen(review)).toBe(true);
+		expect(plan.portMutations).toEqual([]);
+		expect(plan.equipmentGroupMutations).toEqual([]);
+		expect(document.portEquipment).toBe(source);
+		expect(document.getPatchSequence()).toBe(args[8]);
+		expect(checksumRailMap(document.map, source, document.organizations)).toBe(checksum);
+		expect(events).toEqual([]);
+	});
+
+	it("reviews and commits an owned EQ draft with sufficient authored dimensions without changing identity or ownership", () => {
+		const source = closedLoopDocument(14, 4);
+		const physical = compilePhysicalRail(source.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const initialRows = [2, 3].map((x) => rowAt(slots, x, 0));
+		expect(
+			source.commitPortEquipment(
+				planEqRowPlacement(
+					slots,
+					initialRows,
+					new PortSlotAvailabilityIndex(physical, source.portEquipment, "EQ"),
+					source.portEquipment,
+					1_000,
+					"PHOTO",
+					source.map.getRevision(),
+					source.getPatchSequence(),
+				),
+			),
+		).toBe(true);
+		const dimensions = { lengthMillimeters: 4_000, widthMillimeters: 1_000 };
+		expect(
+			source.commitPortEquipment(
+				planResizeEqBody(
+					source.map,
+					source.portEquipment,
+					{ portId: 1, equipmentGroupId: 1 },
+					dimensions,
+					source.map.getRevision(),
+					source.getPatchSequence(),
+					source.organizations,
+				),
+			),
+		).toBe(true);
+		const document = ownedEquipmentDocument(source);
+		const equipment = document.portEquipment;
+		const organizations = document.organizations;
+		const args = [
+			document.map,
+			slots,
+			portEquipmentGroupSlotIndexFor(slots),
+			new PortSlotAvailabilityIndex(physical, equipment, "EQ"),
+			equipment,
+			1,
+			[...initialRows, rowAt(slots, 4, 0)],
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			organizations,
+		] as const;
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => events.push(event));
+		expect(reviewPortEquipmentMembershipEdit(...args).valid).toBe(true);
+		expect(reviewPortEquipmentMembershipEdit(...args).valid).toBe(true);
+		expect(events).toEqual([]);
+		expect(document.portEquipment).toBe(equipment);
+		expect(document.getPatchSequence()).toBe(args[8]);
+		const plan = planPortEquipmentMembershipEdit(...args);
+		expect(plan.membershipEdit).toMatchObject({
+			retainedPortIds: [1, 2],
+			addedPortIds: [3],
+			removedPortIds: [],
+		});
+		expect(document.commitPortEquipment(plan), document.getLastCommandError() ?? plan.reason).toBe(
+			true,
+		);
+		expect(events).toHaveLength(1);
+		expect(document.portEquipment.equipmentGroups[0]).toEqual({
+			...equipment.equipmentGroups[0],
+			portIds: [1, 2, 3],
+		});
+		expect(document.portEquipment.equipmentGroups[0]).toMatchObject({
+			id: 1,
+			kind: "EQ",
+			bodyDimensions: dimensions,
+			recipe: "PHOTO",
+			pitchMillimeters: 1_000,
+		});
+		expect(document.portEquipment.ports.slice(0, 2)).toEqual(equipment.ports);
+		expect(document.portEquipment.nextPortId).toBe(4);
+		expect(document.portEquipment.nextEquipmentGroupId).toBe(equipment.nextEquipmentGroupId);
+		expect(document.organizations).toBe(organizations);
+		const edited = document.portEquipment;
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment).toEqual({ ...equipment, nextPortId: edited.nextPortId });
+		expect(document.redo()).toBe(true);
+		expect(document.portEquipment).toEqual(edited);
+		expect(document.organizations).toBe(organizations);
+		expect(
+			reviewPortEquipmentMembershipEdit(
+				document.map,
+				slots,
+				args[2],
+				args[3],
+				document.portEquipment,
+				1,
+				args[6],
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.organizations,
+			),
+		).toMatchObject({ valid: false, reason: expect.stringMatching(/stale/) });
+	});
+
+	it("rejects a draft's new FLEX Port outside its owning Loop before committing", () => {
+		const source = closedLoopDocument(14, 4);
+		expect(source.commit(planRailConstruction(source.map, { x: 20, y: 0 }, { x: 35, y: 0 }))).toBe(
+			true,
+		);
+		const physical = compilePhysicalRail(source.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).STK.slots;
+		expect(
+			source.commitPortEquipment(
+				planStkPlacement(
+					slots,
+					[2, 3].map((x) => rowAt(slots, x, 0)),
+					new PortSlotAvailabilityIndex(physical, source.portEquipment, "STK"),
+					source.portEquipment,
+					"FLEX",
+					source.map.getRevision(),
+					source.getPatchSequence(),
+				),
+			),
+		).toBe(true);
+		const document = ownedEquipmentDocument(source);
+		const args = [
+			document.map,
+			slots,
+			portEquipmentGroupSlotIndexFor(slots),
+			new PortSlotAvailabilityIndex(physical, document.portEquipment, "STK"),
+			document.portEquipment,
+			1,
+			[2, 23].map((x) => rowAt(slots, x, 0)),
+			document.map.getRevision(),
+			document.getPatchSequence(),
+		] as const;
+		expect(planPortEquipmentMembershipEdit(...args).valid).toBe(true);
+		const review = reviewPortEquipmentMembershipEdit(...args, document.organizations);
+		const plan = planPortEquipmentMembershipEdit(...args, document.organizations);
+		expect(review).toEqual({ valid: plan.valid, reason: plan.reason });
+		expect(review).toMatchObject({
+			valid: false,
+			reason: expect.stringMatching(/PORT-3.*Synthetic Loop.*밖/),
+		});
+		expect(document.portEquipment).toBe(args[4]);
+		expect(document.portEquipment.nextPortId).toBe(3);
+		expect(document.getPatchSequence()).toBe(args[8]);
+	});
+
 	it("adds and removes EQ stations atomically while retaining existing IDs and barcodes", () => {
 		const document = closedLoopDocument(14, 4);
 		const physical = compilePhysicalRail(document.map);
@@ -354,6 +585,28 @@ describe("PortEquipmentMembershipEditPlanner", () => {
 		});
 	});
 });
+
+function ownedEquipmentDocument(source: RailDocument): RailDocument {
+	return RailDocument.fromLoadedMap(source.map, source.getPatchSequence(), source.portEquipment, {
+		nextOrganizationId: 2,
+		records: [
+			{
+				id: 1,
+				kind: "AISLE",
+				declaredSemanticRole: "PROCESS_LOOP",
+				name: "Synthetic Loop",
+				membership: {
+					railEdges: buildRailModuleOwnershipIndex(source.map)
+						.modules.flatMap((module) => module.eraseEdges)
+						.filter((edge) => edge.from.x < 20 && edge.to.x < 20)
+						.sort(compareDirectedRailEdges),
+					advancedSwitchIds: [],
+					equipmentGroupIds: [1],
+				},
+			},
+		],
+	});
+}
 
 function closedLoopDocument(width: number, depth: number): RailDocument {
 	const document = new RailDocument();

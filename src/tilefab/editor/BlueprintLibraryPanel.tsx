@@ -27,6 +27,8 @@ import {
 	type KeyboardEvent as ReactKeyboardEvent,
 	type RefObject,
 	type SetStateAction,
+	useMemo,
+	useRef,
 } from "react";
 import {
 	OPENFAB_BLUEPRINT_KIND_STATIC_FAB,
@@ -46,12 +48,13 @@ import type {
 	RailClipboardHistoryEntry,
 	UserBlueprintMetadataDraft,
 } from "./BlueprintLibraryTypes";
-import type {
-	BlueprintRecordCommandId,
-	BlueprintRecordContextScope,
-	BlueprintRecordContextState,
-	BlueprintRecordContextView,
-	UserBlueprintOrganizationTarget,
+import {
+	type BlueprintRecordCommandId,
+	type BlueprintRecordContextScope,
+	type BlueprintRecordContextState,
+	type BlueprintRecordContextView,
+	filterProjectBlueprintRecords,
+	type UserBlueprintOrganizationTarget,
 } from "./BlueprintRecordContext";
 import { BlueprintRecordContextTray, RailBlueprintMiniature } from "./BlueprintRecordPresentation";
 import type { ContextualBlueprintSaveDestination } from "./ContextualBlueprintSave";
@@ -107,6 +110,7 @@ interface BlueprintLibraryPanelProps {
 	readonly leaveUserBlueprintOrganizationTarget: (event: ReactDragEvent<HTMLElement>) => void;
 	readonly modelSyncPending: boolean;
 	readonly normalizeBlueprintName: (value: string) => string;
+	readonly onProjectBlueprintSearchChange: (query: string) => void;
 	readonly openBlueprintRecordContext: (
 		scope: BlueprintRecordContextScope,
 		recordId: string,
@@ -127,6 +131,7 @@ interface BlueprintLibraryPanelProps {
 		origin?: Extract<BlueprintPlacementOrigin, "library" | "favorite">,
 	) => void;
 	readonly projectBlueprintCount: number;
+	readonly projectBlueprintSearch: string;
 	readonly projectBusy: boolean;
 	readonly recentRailClipboardActiveIndex: number;
 	readonly recentRailClipboards: readonly RailClipboardHistoryEntry[];
@@ -242,6 +247,7 @@ export function BlueprintLibraryPanel({
 	leaveUserBlueprintOrganizationTarget,
 	modelSyncPending,
 	normalizeBlueprintName,
+	onProjectBlueprintSearchChange,
 	openBlueprintRecordContext,
 	orderedProjectBlueprints,
 	pendingUserBlueprintDeleteId,
@@ -249,6 +255,7 @@ export function BlueprintLibraryPanel({
 	pendingUserBlueprintImportPreview,
 	placeProjectBlueprint,
 	projectBlueprintCount,
+	projectBlueprintSearch,
 	projectBusy,
 	recentRailClipboardActiveIndex,
 	recentRailClipboards,
@@ -297,6 +304,11 @@ export function BlueprintLibraryPanel({
 	visibleUserBlueprints,
 	wholeMapBlueprintAvailable,
 }: BlueprintLibraryPanelProps): ReactElement {
+	const projectBlueprintSearchRef = useRef<HTMLInputElement>(null);
+	const visibleProjectBlueprints = useMemo(
+		() => filterProjectBlueprintRecords(orderedProjectBlueprints, projectBlueprintSearch),
+		[orderedProjectBlueprints, projectBlueprintSearch],
+	);
 	return (
 		<aside
 			id="tilefab-blueprint-library"
@@ -384,6 +396,13 @@ export function BlueprintLibraryPanel({
 					<small>{recentRailClipboards.length}</small>
 				</button>
 			</div>
+			<p className="tilefab-blueprint-storage-note" data-testid="blueprint-storage-note">
+				{blueprintLibraryTab === "saved"
+					? "PROJECT · 프로젝트 저장 시 .openfab 파일에 포함됩니다"
+					: blueprintLibraryTab === "user"
+						? "BROWSER LOCAL · 이 브라우저에 별도 보관 · 프로젝트 파일에는 포함되지 않습니다"
+						: "RECENT · 이번 세션의 복사 기록 · 파일에 저장되지 않습니다"}
+			</p>
 			<section
 				className="tilefab-blueprint-save"
 				data-ready={areaStampSelectionValid || selectedOrganizationCount > 0}
@@ -445,14 +464,57 @@ export function BlueprintLibraryPanel({
 					role="tabpanel"
 					aria-labelledby="tilefab-blueprint-tab-saved"
 				>
-					{orderedProjectBlueprints.length === 0 ? (
+					<div className="tilefab-blueprint-project-toolbar">
+						<label className="tilefab-blueprint-user-search tilefab-blueprint-project-search">
+							<Search size={14} aria-hidden="true" />
+							<input
+								ref={projectBlueprintSearchRef}
+								type="search"
+								value={projectBlueprintSearch}
+								aria-label="프로젝트 청사진 검색"
+								placeholder="이름·폴더·종류 검색"
+								data-testid="project-blueprint-search"
+								onChange={(event) => onProjectBlueprintSearchChange(event.currentTarget.value)}
+							/>
+						</label>
+						<button
+							type="button"
+							className="tilefab-blueprint-project-search-clear"
+							aria-label="프로젝트 청사진 검색 지우기"
+							data-testid="project-blueprint-search-clear"
+							disabled={projectBlueprintSearch.length === 0}
+							onClick={() => {
+								onProjectBlueprintSearchChange("");
+								projectBlueprintSearchRef.current?.focus();
+							}}
+						>
+							<X size={16} aria-hidden="true" />
+						</button>
+					</div>
+					<p
+						className="tilefab-blueprint-search-result"
+						data-testid="project-blueprint-search-result"
+						role="status"
+						aria-atomic="true"
+					>
+						{projectBlueprintSearch.trim()
+							? `검색 결과 ${visibleProjectBlueprints.length} / 전체 ${orderedProjectBlueprints.length}`
+							: `전체 ${orderedProjectBlueprints.length}개`}
+					</p>
+					{visibleProjectBlueprints.length === 0 ? (
 						<div className="tilefab-blueprint-empty">
 							<LibraryBig size={24} />
-							<strong>NO SAVED BLUEPRINTS</strong>
-							<small>SHIFT + DRAG → CTRL + S</small>
+							<strong>
+								{orderedProjectBlueprints.length === 0 ? "NO SAVED BLUEPRINTS" : "NO MATCHES"}
+							</strong>
+							<small>
+								{orderedProjectBlueprints.length === 0
+									? "레일·장비 또는 조직을 선택한 뒤 ‘선택을 청사진으로 저장’을 누르세요"
+									: "검색어를 바꾸거나 지워 전체 청사진을 확인하세요"}
+							</small>
 						</div>
 					) : (
-						orderedProjectBlueprints.map((record) => (
+						visibleProjectBlueprints.map((record) => (
 							<article
 								key={record.id}
 								data-testid="blueprint-record"
@@ -1387,7 +1449,7 @@ export function BlueprintLibraryPanel({
 						<div className="tilefab-blueprint-empty">
 							<FolderClock size={24} />
 							<strong>NO RECENT BLUEPRINT</strong>
-							<small>SHIFT + DRAG → CTRL + C OR CTRL + S</small>
+							<small>레일·장비 또는 조직을 선택한 뒤 ⌘/Ctrl+C로 복사하세요</small>
 						</div>
 					)}
 				</section>

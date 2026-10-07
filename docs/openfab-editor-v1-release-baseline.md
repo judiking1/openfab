@@ -17,8 +17,12 @@ The release has one primary promise:
 > A first-time user can build, organize, equip, validate, save, reopen, and continue editing a
 > synthetic FAB through one guided 2D journey.
 
-Existing advanced authoring, derived 3D, readiness, and simulation work stays preserved. Later-stage
-capability does not justify exposing it in the default v1 journey before the editor promise passes.
+Existing advanced authoring, derived 3D, readiness, and simulation work stays preserved.
+**Owner exception, 2026-10-07:** the preview may expose the existing read-only 3D inspector through
+an explicit 2D/3D switch while V1 authoring continues. It consumes the same canonical document and
+compiled geometry, blocks unfinished edits, and returns safely to 2D on failure. This bounded helper
+is not a V1 completion decision, a Twin View series release, a second editor, or simulation approval.
+The guided 2D promise and remaining authoring work retain priority.
 
 Reference study supports native modular construction rules, port-derived equipment orientation and
 later comparison playback. CAD import is outside the product plan; CAD export is only an optional
@@ -224,8 +228,8 @@ review-only input files, absolute private paths, credentials, diagnostic dumps, 
   a live-demo path are ready for the clean public repository;
 - the ordinary static Rail mirror continues to publish `simulationReady=false`.
 
-Derived 3D and simulation may exist in the private incubator while v1 is prepared. Their presence
-does not waive this acceptance and they are not part of the default v1 promise.
+The owner-approved read-only 3D preview helper in §1 does not waive this acceptance. Simulation
+remains outside the default preview, and the main v1 promise remains the complete 2D journey.
 
 ## 10. Delivery sequence
 

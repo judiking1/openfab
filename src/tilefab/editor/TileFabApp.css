@@ -7000,6 +7000,52 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	font-size: 12px;
 }
 
+.tilefab-blueprint-project-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.tilefab-blueprint-project-search {
+	min-width: 0;
+	flex: 1;
+}
+
+.tilefab-blueprint-project-search input {
+	width: 100%;
+}
+
+.tilefab-blueprint-project-search-clear {
+	display: grid;
+	width: 44px;
+	min-width: 44px;
+	height: 44px;
+	place-items: center;
+	border: 1px solid #354144;
+	border-radius: 3px;
+	color: #dce6e6;
+	background: #0d1314;
+	cursor: pointer;
+}
+
+.tilefab-blueprint-project-search-clear:disabled {
+	color: #59686b;
+	cursor: default;
+}
+
+.tilefab-blueprint-project-search-clear:focus-visible {
+	outline: 2px solid #67cbd2;
+	outline-offset: 2px;
+}
+
+.tilefab-blueprint-storage-note,
+.tilefab-blueprint-search-result {
+	margin: 0;
+	color: #a1b1b3;
+	font-size: 11px;
+	line-height: 1.5;
+}
+
 .tilefab-blueprint-folder-breadcrumb {
 	display: flex;
 	min-height: 48px;
@@ -7784,6 +7830,35 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	font-size: 11px;
 }
 
+.tilefab-inspection-3d--failed {
+	display: grid;
+	grid-template-columns: minmax(0, 420px);
+	align-content: center;
+	justify-content: center;
+	gap: 12px;
+	padding: 24px;
+	color: #d9e9e8;
+}
+
+.tilefab-inspection-3d--failed p {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.6;
+}
+
+.tilefab-inspection-3d-return {
+	min-height: 44px;
+	border: 1px solid #62a2a6;
+	border-radius: 6px;
+	background: #15383b;
+	color: #d9e9e8;
+}
+
+.tilefab-inspection-3d-return:focus-visible {
+	outline: 2px solid #8de3ea;
+	outline-offset: 3px;
+}
+
 .tilefab-inspection-3d-status {
 	position: absolute;
 	z-index: 2;
@@ -7914,7 +7989,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 		padding: 0;
 	}
 
-	.tilefab-view-switch button span {
+	.tilefab-view-switch button svg {
 		display: none;
 	}
 

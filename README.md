@@ -86,7 +86,7 @@ Changelog product identity.
 tabular, model, image, or other data-bearing files. Final human originality review is still required.
 
 `check:live-demo` mounts the default production build under an isolated repository-style subpath and
-verifies portable asset URLs, first-run Guided entry, the 2D-only Builder capability surface, the
+verifies portable asset URLs, first-run Guided entry, the Builder 2D entry and read-only 3D switch, the
 static simulation gate, responsive desktop/mobile layout, and zero console/page/network/HTTP
 failures. Its owned static server deliberately sends no cross-origin isolation headers, proving the
 Builder release does not depend on simulation-only hosting configuration. It also locks the

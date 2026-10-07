@@ -1,3 +1,25 @@
+import type { OpenFabProjectBlueprint } from "../project/OpenFabBlueprintLibrary";
+
+export function filterProjectBlueprintRecords<
+	T extends Pick<OpenFabProjectBlueprint, "name" | "folder" | "kind">,
+>(records: readonly T[], search: string): readonly T[] {
+	const query = search.trim().toLocaleLowerCase("en-US");
+	if (!query) return records;
+	return Object.freeze(
+		records.filter((record) => {
+			const kindLabel =
+				record.kind === "RAIL_AREA"
+					? "RAIL ONLY"
+					: record.kind === "STATIC_FAB"
+						? "STATIC FAB"
+						: "ORGANIZED FAB";
+			return `${record.name} ${record.folder} ${record.kind} ${kindLabel}`
+				.toLocaleLowerCase("en-US")
+				.includes(query);
+		}),
+	);
+}
+
 export type BlueprintRecordContextScope = "project" | "user";
 
 export type BlueprintRecordContextView = "commands" | "quick-slot";

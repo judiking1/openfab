@@ -938,9 +938,17 @@ button {
 }
 
 @media (max-width: 700px) {
-	/* Keep the experimental two-view switch and the sole in-project preset launcher reachable. */
-	.tilefab-commands:has(.tilefab-view-switch[data-derived-3d="true"])
-	button[aria-label="프로젝트 저장"] {
+	/* Keep the two-view switch and the sole in-project preset launcher reachable. */
+	.tilefab-app[data-guided-build-active="false"] .tilefab-commands:has(
+			.tilefab-view-switch[data-derived-3d="true"]
+		)
+		button[aria-label="프로젝트 저장"] {
 		display: none;
+	}
+
+	/* Guided Build hides 3D, so its remaining view slot must not displace Save. */
+	.tilefab-app[data-guided-build-active="true"] .tilefab-view-switch[data-derived-3d="true"] {
+		min-width: 50px;
+		flex-basis: 50px;
 	}
 }

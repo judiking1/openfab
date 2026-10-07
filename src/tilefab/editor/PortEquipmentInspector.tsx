@@ -19,6 +19,7 @@ import {
 	type ReactNode,
 	type RefObject,
 	type SetStateAction,
+	useEffect,
 	useState,
 } from "react";
 import type { PortEquipmentGroupEditMode } from "../compile/PortEquipmentGroupEditPlanner";
@@ -64,6 +65,7 @@ import {
 } from "./PortEquipmentInspectorSelection";
 
 export interface PortEquipmentInspectorProps {
+	readonly onEqBodyDraftChange: (hasDraft: boolean) => void;
 	readonly commitSelectedEqBodyDimensions: (
 		dimensions: EqBodyDimensions | null,
 		expectedSelection: PortEquipmentSelectionIdentity,
@@ -130,6 +132,7 @@ export interface PortEquipmentInspectorProps {
 }
 
 export function PortEquipmentInspector({
+	onEqBodyDraftChange,
 	commitSelectedEqBodyDimensions,
 	organizations,
 	activePortEquipment,
@@ -515,6 +518,7 @@ export function PortEquipmentInspector({
 						</div>
 						{selectedEquipmentGroup.kind === "EQ" && selectedPortEquipment ? (
 							<EqBodyDimensionsEditor
+								onDraftChange={onEqBodyDraftChange}
 								key={`${selectedEquipmentGroup.id}:${selectedPortEquipment.portId}:${selectedEquipmentGroup.bodyDimensions?.lengthMillimeters ?? "auto"}:${selectedEquipmentGroup.bodyDimensions?.widthMillimeters ?? "auto"}`}
 								group={selectedEquipmentGroup}
 								selection={selectedPortEquipment}
@@ -867,12 +871,14 @@ export function PortEquipmentInspector({
 }
 
 function EqBodyDimensionsEditor({
+	onDraftChange,
 	group,
 	selection,
 	disabled,
 	reason,
 	commit,
 }: {
+	readonly onDraftChange: (hasDraft: boolean) => void;
 	readonly group: EqEquipmentGroup;
 	readonly selection: PortEquipmentSelectionIdentity;
 	readonly disabled: boolean;
@@ -890,6 +896,10 @@ function EqBodyDimensionsEditor({
 	const [width, setWidth] = useState(currentWidth);
 	const [failure, setFailure] = useState<string | null>(null);
 	const hasDraft = length !== currentLength || width !== currentWidth;
+	useEffect(() => {
+		onDraftChange(hasDraft);
+		return () => onDraftChange(false);
+	}, [hasDraft, onDraftChange]);
 	return (
 		<details
 			className="tilefab-equipment-more-actions"

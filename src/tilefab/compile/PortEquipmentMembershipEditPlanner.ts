@@ -1,7 +1,9 @@
 import {
 	applyPortEquipmentMutations,
+	defaultEqBodyDimensions,
 	type EquipmentGroupRecord,
 	equipmentGroupEquals,
+	equipmentGroupError,
 	type PortEquipmentState,
 } from "../core/EquipmentGroup";
 import {
@@ -40,6 +42,24 @@ export interface PortEquipmentMembershipEditMetadata {
 
 export interface PortEquipmentMembershipEditPlan extends PortEquipmentMutationPlan {
 	readonly membershipEdit: PortEquipmentMembershipEditMetadata;
+}
+
+export interface PortEquipmentMembershipEditReview {
+	readonly valid: boolean;
+	readonly reason: string;
+}
+
+/**
+ * Read-only draft admission through the exact final planner, including body and Loop constraints.
+ * This runs prospective validation; callers should memoize stable draft/source inputs, not run it
+ * on every paint. It neither reserves authored IDs nor returns a plan to commit. Apply must replan
+ * against the live source, including its organizations, even after a successful review.
+ */
+export function reviewPortEquipmentMembershipEdit(
+	...args: Parameters<typeof planPortEquipmentMembershipEdit>
+): PortEquipmentMembershipEditReview {
+	const { valid, reason } = planPortEquipmentMembershipEdit(...args);
+	return Object.freeze({ valid, reason });
 }
 
 /**
@@ -280,6 +300,20 @@ export function planPortEquipmentMembershipEdit(
 			),
 			error instanceof Error ? error.message : "Equipment membership is not structurally valid.",
 		);
+	}
+
+	const targetGroupError = equipmentGroupError(targetGroup);
+	if (targetGroupError) {
+		const minimumLength =
+			targetGroup.kind === "EQ" ? defaultEqBodyDimensions(targetGroup).lengthMillimeters : null;
+		const reason =
+			targetGroup.kind === "EQ" &&
+			targetGroup.bodyDimensions &&
+			minimumLength !== null &&
+			targetGroup.bodyDimensions.lengthMillimeters < minimumLength
+				? `${targetGroupError} · 현재 몸체 ${targetGroup.bodyDimensions.lengthMillimeters} mm / ${targetGroup.portIds.length} Port 최소 ${minimumLength} mm · 몸체 크기를 먼저 변경하거나 Port 수를 줄이세요`
+				: targetGroupError;
+		return invalid(baseRevision, basePatchSequence, emptyMetadata, reason);
 	}
 
 	if (organizations) {

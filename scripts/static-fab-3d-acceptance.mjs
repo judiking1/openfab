@@ -18,6 +18,7 @@ const certifiedPresetActivationMaximumLongTaskMilliseconds = 50;
 const certifiedPresetActivationMaximumLongTaskCount = 0;
 const certifiedPresetActivationTotalLongTaskMilliseconds = 0;
 const profileCertifiedPreset = process.env.OPENFAB_PROFILE_CERTIFIED_PRESET === "1";
+const importFailureOnly = process.env.OPENFAB_3D_IMPORT_FAILURE_ONLY === "1";
 const chromePath = await resolveChromePath();
 const server = startPreviewServer();
 let browser;
@@ -25,6 +26,8 @@ let page;
 let context;
 const result = {
 	status: "FAIL",
+	scope: importFailureOnly ? "import-failure-only" : "full",
+	importFailure: null,
 	failure: null,
 	certifiedPresetTimings: null,
 	certifiedPresetStages: null,
@@ -46,9 +49,38 @@ const result = {
 };
 
 try {
+	await runAcceptance();
+} catch (error) {
+	result.failure = error instanceof Error ? (error.stack ?? error.message) : String(error);
+	throw error;
+} finally {
+	if (page) {
+		await page.screenshot({ path: path.join(artifactRoot, "final.png") }).catch(() => undefined);
+		await closeBrowserResource(page, "page");
+		page = null;
+	}
+	await closeBrowserResource(context, "browser context");
+	context = null;
+	await writeFile(
+		path.join(artifactRoot, "result.json"),
+		`${JSON.stringify(result, null, 2)}\n`,
+	).catch(() => undefined);
+	await closeBrowserResource(browser, "browser");
+	server.kill("SIGTERM");
+}
+
+process.exit(result.status === "PASS" ? 0 : 1);
+
+async function runAcceptance() {
 	await mkdir(artifactRoot, { recursive: true });
 	await waitForServer(`${baseUrl}/`);
 	browser = await chromium.launch({ executablePath: chromePath, headless: true });
+	result.importFailure = await checkInspectionImportFailure(browser);
+	if (importFailureOnly) {
+		result.status = "PASS";
+		console.log("PASS Static FAB 3D import failure | 2D session and history preserved");
+		return;
+	}
 	context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 	await context.addInitScript(() => {
 		const NativeWorker = globalThis.Worker;
@@ -1419,26 +1451,166 @@ try {
 	console.log(
 		`PASS Static FAB 3D | ${result.scene.triangles} triangles | ${result.scene.pickSegments} pick segments | ${result.selectedModuleId}`,
 	);
-} catch (error) {
-	result.failure = error instanceof Error ? (error.stack ?? error.message) : String(error);
-	throw error;
-} finally {
-	if (page) {
-		await page.screenshot({ path: path.join(artifactRoot, "final.png") }).catch(() => undefined);
-		await closeBrowserResource(page, "page");
-		page = null;
-	}
-	await closeBrowserResource(context, "browser context");
-	context = null;
-	await writeFile(
-		path.join(artifactRoot, "result.json"),
-		`${JSON.stringify(result, null, 2)}\n`,
-	).catch(() => undefined);
-	await closeBrowserResource(browser, "browser");
-	server.kill("SIGTERM");
 }
 
-process.exit(result.status === "PASS" ? 0 : 1);
+async function checkInspectionImportFailure(activeBrowser) {
+	const cases = [];
+	for (const width of [1440, 390]) {
+		const isolated = await activeBrowser.newContext({ viewport: { width, height: 844 } });
+		try {
+			const activePage = await isolated.newPage();
+			const pageErrors = [];
+			const expectedFailureConsoleErrors = [];
+			activePage.on("pageerror", (error) => pageErrors.push(error.message));
+			activePage.on("console", (message) => {
+				if (message.type() === "error") expectedFailureConsoleErrors.push(message.text());
+			});
+			let interceptedImports = 0;
+			let captureImport;
+			const intercepted = new Promise((resolve) => {
+				captureImport = resolve;
+			});
+			await activePage.route(
+				/\/StaticFabInspection3DView(?:-[^/?]+\.js|\.tsx)(?:\?|$)/,
+				(route) => {
+					interceptedImports++;
+					captureImport(route);
+				},
+			);
+			await activePage.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+			await waitForReady(activePage, 0, 60_000);
+			await chooseBlankCanvasForFirstRun(activePage);
+			const canvas = activePage.getByTestId("rail-canvas");
+			const app = activePage.getByTestId("tilefab-app");
+			const entry = activePage.getByRole("button", { name: "3D 검사 뷰", exact: true });
+			await activePage.getByTestId("ordinary-rail-keyboard-start").click();
+			await canvas.press("Enter");
+			await canvas.press("Shift+ArrowRight");
+			await canvas.press("Enter");
+			await waitForMirrorIdle(activePage, 1);
+			await canvas.press("Escape");
+			const before = await readCanonicalIdentity(activePage);
+			const sourceBefore = await readInspectionFailureSource(activePage);
+			const historyBefore = await app.getAttribute("data-history-can-undo");
+			assertEqual(before.projectDirty, "true", "failure fixture is unsaved");
+			assertEqual(historyBefore, "true", "failure fixture has an Undo entry");
+			await activePage.getByTestId("editor-activity-build").click();
+			await canvas.press("Enter");
+			await canvas.press("Enter");
+			assertEqual(await entry.isDisabled(), true, "unfinished edit still blocks 3D entry");
+			assertEqual(interceptedImports, 0, "blocked entry requests no 3D module");
+			await canvas.press("Escape");
+			assertEqual(await entry.isEnabled(), true, "cancelled edit permits 3D entry");
+			await entry.click();
+			await activePage.getByText("3D 렌더러 불러오는 중", { exact: true }).waitFor();
+			const route = await intercepted;
+			await route.abort("failed");
+			const failure = activePage.getByTestId("static-fab-inspection-3d-failure");
+			await failure.waitFor();
+			assertEqual(
+				(await failure.innerText()).includes("현재 프로젝트를 파일로 저장하고 확인한 뒤"),
+				true,
+				"safe retry guidance",
+			);
+			const exit = failure.getByRole("button", { name: "2D 편집으로 돌아가기", exact: true });
+			assertEqual(
+				await exit.evaluate((button) => button === document.activeElement),
+				true,
+				"failure focuses 2D return",
+			);
+			await assertMinimumTargetSize(
+				activePage,
+				'[data-testid="static-fab-inspection-3d-failure"] button',
+				44,
+				"2D return",
+			);
+			assertIdentityEqual(
+				await readCanonicalIdentity(activePage),
+				before,
+				"failed import keeps canonical identity",
+			);
+			assertEqual(
+				await readInspectionFailureSource(activePage),
+				sourceBefore,
+				"failed import keeps exact authored source",
+			);
+			await activePage.screenshot({ path: path.join(artifactRoot, `import-failure-${width}.png`) });
+			await exit.click();
+			await waitForView(activePage, "2d");
+			assertEqual(await failure.count(), 0, "2D return unmounts failed inspector");
+			assertIdentityEqual(
+				await readCanonicalIdentity(activePage),
+				before,
+				"2D return keeps canonical identity",
+			);
+			assertEqual(
+				await app.getAttribute("data-history-can-undo"),
+				historyBefore,
+				"2D return keeps history",
+			);
+			await canvas.press("ControlOrMeta+z");
+			await waitForMirrorIdle(activePage, Number(before.workerSequence) + 1);
+			assertEqual(
+				await canvas.getAttribute("data-authored-edges"),
+				"0",
+				"Undo remains usable after import failure",
+			);
+			await canvas.press("ControlOrMeta+Shift+z");
+			await waitForMirrorIdle(activePage, Number(before.workerSequence) + 2);
+			assertEqual(
+				await readInspectionFailureSource(activePage),
+				sourceBefore,
+				"Redo restores exact source",
+			);
+			assertEqual(
+				await canvas.getAttribute("data-project-dirty"),
+				"true",
+				"history keeps unsaved project dirty",
+			);
+			assertEqual(
+				await canvas.getAttribute("data-worker-simulation-ready"),
+				"false",
+				"simulation gate unchanged",
+			);
+			assertEqual(pageErrors.length, 0, "failed import does not escape the React boundary");
+			assertEqual(
+				expectedFailureConsoleErrors.every((message) =>
+					/Failed to load resource: net::ERR_FAILED|Failed to fetch dynamically imported module/.test(
+						message,
+					),
+				),
+				true,
+				"only the injected module failure is logged",
+			);
+			assertEqual(interceptedImports, 1, "one explicit module request");
+			cases.push({
+				width,
+				before,
+				after: await readCanonicalIdentity(activePage),
+				interceptedImports,
+				pageErrors,
+				expectedFailureConsoleErrors,
+			});
+		} finally {
+			await closeBrowserResource(isolated, "import failure context");
+		}
+	}
+	return cases;
+}
+
+async function readInspectionFailureSource(activePage) {
+	return activePage.evaluate(() => {
+		const document = globalThis.__tileFab.getDocument();
+		const cells = [];
+		document.map.forEachRail((x, z, _rail, value) => cells.push([x, z, value]));
+		return JSON.stringify({
+			cells: cells.sort((left, right) => left[1] - right[1] || left[0] - right[0]),
+			ports: document.portEquipment,
+			organizations: document.organizations,
+			relationships: document.relationships,
+		});
+	});
+}
 
 async function chooseBlankCanvasForFirstRun(activePage) {
 	const dialog = activePage.getByTestId("openfab-start-dialog");
@@ -1824,7 +1996,7 @@ async function selectScaleEquipmentTargetIn2D(activePage, target) {
 	if ((await inspectActivity.getAttribute("aria-pressed")) !== "true") {
 		await inspectActivity.click();
 	}
-	const inspectCommand = activePage.getByRole("button", { name: "선택 및 정보", exact: true });
+	const inspectCommand = activePage.getByRole("button", { name: "선택·편집 및 정보", exact: true });
 	await inspectCommand.waitFor({ state: "visible" });
 	await inspectCommand.click();
 	const canvas = activePage.getByTestId("rail-canvas");
@@ -2271,7 +2443,15 @@ function startPreviewServer() {
 	const vite = path.join(root, "node_modules", "vite", "bin", "vite.js");
 	const child = spawn(
 		process.execPath,
-		[vite, "preview", "--host", host, "--port", String(port), "--strictPort"],
+		[
+			vite,
+			"preview",
+			"--host",
+			host,
+			"--port",
+			String(port),
+			"--strictPort",
+		],
 		{ cwd: root, stdio: ["ignore", "ignore", "pipe"] },
 	);
 	child.stderr.on("data", (chunk) => process.stderr.write(chunk));

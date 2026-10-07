@@ -24380,8 +24380,8 @@ async function exerciseExpertBuildReleaseSurface(page) {
 	const responsive = [];
 	assertEqual(
 		await page.getByRole("button", { name: "3D 검사 뷰", exact: true }).count(),
-		0,
-		"Editor v1 defers the Twin View entry",
+		1,
+		"Builder exposes the read-only same-source inspection entry",
 	);
 	await page.getByTestId("rail-readiness-toggle").click();
 	const readinessPanel = page.getByTestId("rail-readiness-panel");

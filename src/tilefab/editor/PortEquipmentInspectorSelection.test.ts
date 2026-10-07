@@ -15,7 +15,7 @@ import {
 
 vi.mock("react", async (importOriginal) => {
 	const actual = await importOriginal<typeof React>();
-	return { ...actual, useState: vi.fn(actual.useState) };
+	return { ...actual, useState: vi.fn(actual.useState), useEffect: vi.fn(actual.useEffect) };
 });
 
 describe("PortEquipmentInspectorSelection", () => {
@@ -264,10 +264,12 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 		if (!selected) throw new Error("Expected an editable EQ selection.");
 		const commit = vi.fn();
 		const clearSelection = vi.fn();
+		const onDraftChange = vi.fn();
 		const props = {
 			...inspectorProps(state, selected),
 			commitSelectedEqBodyDimensions: commit,
 			clearPortEquipmentSelection: clearSelection,
+			onEqBodyDraftChange: onDraftChange,
 		};
 		const markup = renderToStaticMarkup(createElement(PortEquipmentInspector, props));
 		expect(markup).toContain('role="status" data-testid="eq-body-draft-status"');
@@ -295,10 +297,15 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 			.mockReturnValueOnce(["5.5", setLength])
 			.mockReturnValueOnce(["", setWidth])
 			.mockReturnValueOnce(["겹침으로 적용할 수 없습니다", setFailure]);
+		const cleanup: { current: ReturnType<React.EffectCallback> } = { current: undefined };
+		const useEffect = vi.mocked(React.useEffect).mockImplementationOnce((effect) => {
+			cleanup.current = effect();
+		});
 		const sourceBefore = JSON.stringify(state);
 		try {
 			const renderEditor = editor.type as (props: Record<string, unknown>) => ReactNode;
 			const draft = renderEditor(editor.props);
+			expect(onDraftChange).toHaveBeenLastCalledWith(true);
 			const draftMarkup = renderToStaticMarkup(draft);
 			expect(draftMarkup).toContain("겹침으로 적용할 수 없습니다");
 			expect(draftMarkup).toContain('role="alert" data-testid="eq-body-draft-status"');
@@ -318,7 +325,10 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 			expect(clearSelection).not.toHaveBeenCalled();
 			expect(JSON.stringify(state)).toBe(sourceBefore);
 			expect(props.selectedPortEquipment).toEqual(selection());
+			if (typeof cleanup.current === "function") cleanup.current();
+			expect(onDraftChange).toHaveBeenLastCalledWith(false);
 		} finally {
+			useEffect.mockRestore();
 			useState.mockRestore();
 		}
 	});
@@ -338,6 +348,9 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 		const renderEditor = editor.type as (props: Record<string, unknown>) => ReactNode;
 		const setFailure = vi.fn();
 		const useState = vi.mocked(React.useState);
+		const useEffect = vi.mocked(React.useEffect).mockImplementation((effect) => {
+			effect();
+		});
 		const renderDraft = (error: string | null) => {
 			useState
 				.mockReturnValueOnce(["4.5", vi.fn()])
@@ -399,6 +412,7 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 			expect(setFailure).toHaveBeenLastCalledWith(null);
 			expect(JSON.stringify(state)).toBe(sourceBefore);
 		} finally {
+			useEffect.mockRestore();
 			useState.mockRestore();
 		}
 	});
@@ -734,6 +748,7 @@ function inspectorProps(
 	const noop = (): void => undefined;
 	return {
 		activePortEquipment: state,
+		onEqBodyDraftChange: noop,
 		bindCompactInspectorDisclosure: noop,
 		canvasRef: { current: null },
 		chooseGuidedEquipmentTool: () => false,

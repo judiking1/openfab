@@ -151,7 +151,12 @@ try {
 	assertEqual(
 		await page.getByRole("button", { name: "3D 검사 뷰", exact: true }).count(),
 		0,
-		"Builder deferred Twin View count",
+		"Guided Build keeps the unfinished 2D journey focused",
+	);
+	assertEqual(
+		await page.locator('button[aria-label="3D 검사 뷰"]').isDisabled(),
+		true,
+		"Guided Build blocks 3D until the pending journey is completed or exited",
 	);
 	assertEqual(
 		await page
@@ -641,9 +646,17 @@ async function readHeaderEvidence(activePage, label) {
 		await projectTrigger.click();
 		await projectMenu.waitFor({ state: "hidden" });
 	} else {
-		const requiredCommands = ["FAB 프리셋", "실행 취소", "다시 실행", "전체 보기", "도움말·가이드"];
+		const requiredCommands = [
+			"FAB 프리셋",
+			"실행 취소",
+			"다시 실행",
+			"전체 보기",
+			"2D 편집 뷰",
+			"3D 검사 뷰",
+			"도움말·가이드",
+		];
 		if (label === "medium") requiredCommands.splice(1, 0, "프로젝트 저장");
-		else requiredCommands.splice(1, 0, "프로젝트 열기", "프로젝트 저장", "2D 편집 뷰");
+		else requiredCommands.splice(1, 0, "프로젝트 열기", "프로젝트 저장");
 		for (const command of requiredCommands) {
 			if (!evidence.commands.includes(command)) {
 				throw new Error(`${label}: required topbar command is hidden: ${command}`);
@@ -663,7 +676,7 @@ async function readHeaderEvidence(activePage, label) {
 			"물리 레일 외형",
 			"전체 삭제",
 		];
-		if (label === "medium") duplicateCommands.push("프로젝트 열기", "2D 편집 뷰");
+		if (label === "medium") duplicateCommands.push("프로젝트 열기");
 		for (const command of duplicateCommands) {
 			if (evidence.commands.includes(command)) {
 				throw new Error(`${label}: duplicate topbar command is still visible: ${command}`);

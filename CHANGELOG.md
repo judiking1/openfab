@@ -6,6 +6,19 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.74] - 2026-10-07
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Connect a read-only 3D inspection view to the same authored document with a compact 2D/3D switch.
+  Keep pending edits in 2D and provide a safe return when the deferred inspector fails to load.
+- Search project blueprints by name, folder and kind; distinguish storage locations and empty results,
+  retain placement commands and clear the query after adding a blueprint or opening another project.
+- Review Port draft completion against the final body-size and Loop rules before enabling Apply;
+  keep the draft and show the existing rejection reason without enlarging equipment automatically.
+- Reuse progressive indexed keyboard navigation for whole-equipment movement and copying, including
+  compatible destination rails beyond the former 16 m search window. Retain destination validation.
+
 ## [0.1.73] - 2026-10-07
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

@@ -741,6 +741,7 @@
 	overflow-y: auto;
 }
 .tilefab-app .tilefab-equipment-membershipbar .tilefab-equipment-transform-state {
+	height: auto;
 	white-space: normal;
 	overflow: visible;
 }
