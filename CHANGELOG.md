@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.78] - 2026-10-07
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Keep rejected rail reshapes visible with short Korean clearance guidance, highlighted conflict
+  cells and the diagnosed contact point. Preserve the existing clearance and shape rules.
+- Add a visible cancel action for corner, straight and endpoint movement, restoring the original
+  selection without changing authored data or history.
+- Keep compact camera controls clear of open Blueprint Library and FAB Assemble close buttons
+  when a selected rail's Inspector remains open.
+
 ## [0.1.77] - 2026-10-07
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

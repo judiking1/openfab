@@ -46,8 +46,10 @@ import {
 	type PortSlotSpatialIndexSnapshot,
 } from "../compile/PortSlotCompiler";
 import type { PreparedPortSlotAvailabilityIndex } from "../compile/PortSlotPreparedArtifacts";
+import { RAIL_CLEARANCE_ISSUE_CODE } from "../compile/RailClearanceValidator";
 import {
 	compileAdvancedSwitchPreviewLayout,
+	type RailDraftClearanceIssue,
 	type RailDraftEvaluation,
 } from "../compile/RailDraftEvaluator";
 import {
@@ -187,6 +189,42 @@ const STATIC_FAB_ORGANIZATION_OUTLINE_PASSIVE_ROLE_ORDER = [
 Object.freeze(STATIC_FAB_ARRANGEMENT_SOURCE_DASH);
 Object.freeze(STATIC_FAB_ARRANGEMENT_PLANNING_DASH);
 Object.freeze(EMPTY_LINE_DASH);
+
+function reshapeClearanceIssue(evaluation: RailDraftEvaluation): RailDraftClearanceIssue | null {
+	const issue = evaluation.issues[0];
+	if (
+		evaluation.plan.kind !== "edit" ||
+		evaluation.valid ||
+		evaluation.stale ||
+		evaluation.failureCode !== null ||
+		!evaluation.topologyValid ||
+		!issue ||
+		evaluation.reason !== issue.message
+	)
+		return null;
+	return issue;
+}
+
+/** Translate only the current primary reshape diagnosis; keep planner evidence unchanged. */
+export function railDraftDisplayReason(evaluation: RailDraftEvaluation): string {
+	const issue = reshapeClearanceIssue(evaluation);
+	if (!issue) return evaluation.reason;
+	let reason: string;
+	switch (issue.code) {
+		case RAIL_CLEARANCE_ISSUE_CODE.BEAM_INTRUSION:
+			reason = "레일 형상이 겹칩니다";
+			break;
+		case RAIL_CLEARANCE_ISSUE_CODE.OHT_SWEEP_INTRUSION:
+			reason = "OHT 통과 공간이 부족합니다";
+			break;
+		case RAIL_CLEARANCE_ISSUE_CODE.INSTALLATION_CLEARANCE:
+			reason = "레일 설치 간격이 부족합니다";
+			break;
+		default:
+			return evaluation.reason;
+	}
+	return evaluation.conflictCells.length > 0 ? `${reason} · 빨간 표시를 피해 이동하세요` : reason;
+}
 
 /** Keep an 8 px magnet margin outside the target cell while respecting the metric safety bound. */
 export function closureSnapRadiusMetersForZoom(zoomPixelsPerMeter: number): number {
@@ -5201,6 +5239,31 @@ export class TileRenderer {
 		if (ghost.mode === "build" && conflictKeys.size > 0) {
 			this.drawGhostConflictCells(ctx, highlightedCells, conflictKeys, camera);
 		}
+		if (
+			ghost.mode === "build" &&
+			ghost.evaluation.plan === ghost.plan &&
+			ghost.evaluation.baseRevision === input.map.getRevision() &&
+			ghost.evaluation.committedRevision === input.map.getRevision()
+		) {
+			const issue = reshapeClearanceIssue(ghost.evaluation);
+			if (issue && Number.isFinite(issue.contactPoint.x) && Number.isFinite(issue.contactPoint.y)) {
+				const point = this.worldToScreen(issue.contactPoint, camera);
+				ctx.save();
+				ctx.fillStyle = "#12191b";
+				ctx.strokeStyle = COLORS.invalid;
+				ctx.lineWidth = 2;
+				ctx.beginPath();
+				ctx.arc(point.x, point.y, 9, 0, Math.PI * 2);
+				ctx.fill();
+				ctx.stroke();
+				ctx.fillStyle = "#ffffff";
+				ctx.font = "700 12px Inter, system-ui, sans-serif";
+				ctx.textAlign = "center";
+				ctx.textBaseline = "middle";
+				ctx.fillText("!", point.x, point.y);
+				ctx.restore();
+			}
+		}
 	}
 
 	private drawLargeAreaStampGhost(
@@ -6371,7 +6434,8 @@ export class TileRenderer {
 				? metric.primaryLabel
 				: `${ghost.plan.cells.length} module`;
 		const geometry = networkLinkRejected ? "" : (metric?.geometryLabel ?? "");
-		const secondary = ghost.mode === "build" ? ghost.evaluation.reason : ghost.plan.reason;
+		const secondary =
+			ghost.mode === "build" ? railDraftDisplayReason(ghost.evaluation) : ghost.plan.reason;
 		ctx.font = "650 12px Inter, system-ui, sans-serif";
 		const primaryWidth = ctx.measureText(primary).width;
 		ctx.font = "550 10px ui-monospace, SFMono-Regular, Menlo, monospace";

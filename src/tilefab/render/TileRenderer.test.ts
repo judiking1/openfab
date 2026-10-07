@@ -39,6 +39,7 @@ import {
 	planAdvancedSwitchReshape,
 } from "../core/AdvancedSwitchPlanner";
 import { emptyPortEquipmentState, type PortEquipmentState } from "../core/EquipmentGroup";
+import { planMoveCorner } from "../core/edit";
 import type { CardinalPortRoute, PortRecord } from "../core/PortRecord";
 import { planRailConstruction, planRailPath, type RailConstructionPlan } from "../core/paint";
 import { createRailAreaSelection } from "../core/RailAreaSelection";
@@ -112,6 +113,7 @@ import {
 	passivePortSlotVisualsVisible,
 	physicalFlowMarkerStride,
 	portSlotPickRadiusMeters,
+	railDraftDisplayReason,
 	STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM,
 	TileRenderer,
 	touchPortSlotPickRadiusMeters,
@@ -4217,6 +4219,128 @@ describe("advanced switch rendering", () => {
 });
 
 describe("draft clearance rendering", () => {
+	function cornerFixture() {
+		const document = new RailDocument();
+		expect(
+			document.commit(
+				planRailConstruction(document.map, { x: 2, y: -2 }, { x: 12, y: 8 }, "horizontal-first"),
+			),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const plan = planMoveCorner(document.map, { x: 12, y: -2 }, { x: 11, y: -1 });
+		const evaluation = new RailDraftEvaluator().evaluate(document.map, physical, plan);
+		expect(plan.valid).toBe(true);
+		expect(evaluation.valid).toBe(false);
+		expect(evaluation.reason).toBe(
+			"Rail installation-clearance envelopes overlap an unrelated rail path.",
+		);
+		return { document, physical, plan, evaluation };
+	}
+
+	it.each([
+		1440, 390,
+	])("shows the diagnosed corner contact and short Korean reason at %ipx", (width) => {
+		const { document, physical, plan, evaluation } = cornerFixture();
+		const sequence = document.getPatchSequence();
+		const history = document.captureRailMirrorHistoryLedger();
+		const overlay = createRecordingContext();
+		const arcs: number[][] = [];
+		overlay.context.arc = (x, y, radius) => {
+			arcs.push([x, y, radius]);
+		};
+		const renderer = new TileRenderer();
+		const camera = { offsetX: -100, offsetY: 100, zoom: 25, rotation: 0 as const };
+		renderer.render(createRecordingContext().context, overlay.context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			ghost: { mode: "build", plan, evaluation },
+			camera,
+			width,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+		const point = renderer.worldToScreen(evaluation.issues[0].contactPoint, camera);
+		expect(arcs).toContainEqual([point.x, point.y, 9]);
+		expect(overlay.labels).toContain("!");
+		expect(overlay.labels.join(" ")).toContain("레일 설치 간격이 부족합니다");
+		expect(overlay.labels.join(" ")).not.toContain("envelopes");
+		expect(
+			overlay.fillRectStyles.filter((style) => style === "rgba(255, 69, 82, 0.22)"),
+		).toHaveLength(evaluation.conflictCells.length);
+		expect(document.getPatchSequence()).toBe(sequence);
+		expect(document.captureRailMirrorHistoryLedger()).toEqual(history);
+		expect(evaluation.reason).toContain("installation-clearance");
+	});
+
+	it.each([
+		"missing",
+		"nonfinite",
+		"stale",
+		"primary-port",
+	] as const)("does not invent a corner contact for %s diagnostics", (kind) => {
+		const { document, physical, plan, evaluation } = cornerFixture();
+		const changed =
+			kind === "missing"
+				? { ...evaluation, issues: [] }
+				: kind === "nonfinite"
+					? {
+							...evaluation,
+							issues: [{ ...evaluation.issues[0], contactPoint: { x: Number.NaN, y: 0 } }],
+						}
+					: kind === "stale"
+						? { ...evaluation, stale: true }
+						: {
+								...evaluation,
+								reason: "PORT-1의 레일 연결을 끊는 편집입니다",
+								topologyValid: false,
+								invalidatedPortIds: [1],
+							};
+		const overlay = createRecordingContext();
+		new TileRenderer().render(createRecordingContext().context, overlay.context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			ghost: { mode: "build", plan, evaluation: changed },
+			camera: TEST_CAMERA,
+			width: 960,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+		expect(overlay.labels).not.toContain("!");
+		if (kind !== "nonfinite") expect(railDraftDisplayReason(changed)).toBe(changed.reason);
+	});
+
+	it("keeps the outward corner route admissible without collision markers", () => {
+		const { document, physical } = cornerFixture();
+		const plan = planMoveCorner(document.map, { x: 12, y: -2 }, { x: 14, y: -4 });
+		const evaluation = new RailDraftEvaluator().evaluate(document.map, physical, plan);
+		expect(evaluation.valid, evaluation.reason).toBe(true);
+		expect(evaluation.issues).toHaveLength(0);
+		expect(railDraftDisplayReason(evaluation)).toBe(evaluation.reason);
+		const overlay = createRecordingContext();
+		new TileRenderer().render(createRecordingContext().context, overlay.context, {
+			map: document.map,
+			physicalPaths: physical.paths,
+			ghost: { mode: "build", plan, evaluation },
+			camera: TEST_CAMERA,
+			width: 960,
+			height: 640,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		});
+		expect(overlay.labels).not.toContain("!");
+	});
+
 	it("separates template reservation cells, physical clearance, and terminal handles", () => {
 		const document = new RailDocument();
 		expect(

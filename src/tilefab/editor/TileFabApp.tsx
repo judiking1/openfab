@@ -568,6 +568,7 @@ import {
 	closureSnapRadiusMetersForZoom,
 	type GhostState,
 	type GuidedCanvasActionMarker,
+	railDraftDisplayReason,
 	type RailPresentationMode,
 	type StaticFabAssemblyConnectorOverlay,
 	TileRenderer,
@@ -7209,7 +7210,7 @@ export default function TileFabApp(): React.ReactElement {
 						? evaluation.validationLevel === "topology-only"
 							? "배치 후보 · 클릭 시 최종 검사"
 							: "배치 가능"
-						: evaluation.reason
+						: railDraftDisplayReason(evaluation)
 				}`;
 				previewReadoutRef.current.textContent = guidedFirstRailStatus ?? (networkLinkPlan
 					? evaluation.valid
@@ -7253,7 +7254,7 @@ export default function TileFabApp(): React.ReactElement {
 		) {
 			return { committed: false, evaluation, reason: "변경을 적용하지 않았습니다 · 초안 이후 레일이 변경되었습니다 · 현재 레일을 다시 선택해 초안을 준비하세요" };
 		}
-		if (!evaluation.valid) return { committed: false, evaluation, reason: evaluation.reason };
+		if (!evaluation.valid) return { committed: false, evaluation, reason: railDraftDisplayReason(evaluation) };
 		const committed = isStaticFabMutationPlan(evaluation.plan)
 			? activeDocument.commitStaticFab(evaluation.plan)
 			: activeDocument.commit(evaluation.plan);
@@ -19385,7 +19386,7 @@ export default function TileFabApp(): React.ReactElement {
 		const commitResult: RailPlanCommitResult = finalPlan ? commitPlan(finalPlan) : { committed: false, evaluation: null, reason: "배치를 적용하지 않았습니다 · 유효한 초안이 없습니다 · 시작점과 끝점을 다시 선택하세요" };
 		if (!commitResult.committed) {
 			if (
-				drag.tool === "build" &&
+				(drag.tool === "build" || drag.tool === "reshape") &&
 				finalPlan &&
 				finalPlan.kind !== "erase" &&
 				commitResult.evaluation &&
@@ -38471,6 +38472,19 @@ export default function TileFabApp(): React.ReactElement {
 												? "MODULE STAMP"
 												: "RAIL CONSTRUCTION"}
 						</span>
+						{tool === "reshape" ? (
+							<button
+								type="button"
+								className="tilefab-placement-exit"
+								data-testid="rail-reshape-cancel"
+								onClick={() => {
+									clearTransientConstruction("레일 이동을 취소했습니다 · 선택으로 돌아왔습니다");
+									canvasRef.current?.focus({ preventScroll: true });
+								}}
+							>
+								<X size={14} aria-hidden="true" /> 이동 취소
+							</button>
+						) : null}
 						{tool === "build" &&
 						!templateSession &&
 						!areaStampSession &&
