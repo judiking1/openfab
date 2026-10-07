@@ -6,6 +6,21 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.71] - 2026-10-07
+
+Builder preview candidate; V1 remains incomplete and simulation stays disabled.
+
+- Show the current equipment placement step, Port summary and explicit EQ/group Apply actions.
+  Keep recovery notices clear of mobile placement and copy controls.
+- Put selected-equipment editing, copying and body dimensions before ownership details and next tasks.
+  Keep EQ dimensions and their Apply/Cancel controls together on compact screens.
+- Default mobile navigation to icons with names and collapse rail settings to the current mode.
+  Name the selection activity explicitly and show unassigned Loop status in neutral colors.
+- Show rejected EQ body-size changes beside Apply and clear stale feedback when editing or changing selection.
+  Keep expanded recovery lists collapsible after recovery leaves one entry, preserving remaining data.
+- Use concise activity/tool labels and expandable Guide/keyboard help while retaining error reasons,
+  accessible commands and the existing atomic editing, history and project contracts.
+
 ## [0.1.70] - 2026-10-06
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

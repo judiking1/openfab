@@ -94,7 +94,7 @@ export function EditorActivityRail({
 						</span>
 						<span className="tilefab-editor-activity-copy">
 							<strong>{definition.label}</strong>
-							<small>{status}</small>
+							{blocked ? <small>{status}</small> : null}
 						</span>
 					</button>
 				);

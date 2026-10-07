@@ -53,6 +53,67 @@
 	color: #e8f4f3;
 }
 
+.tilefab-equipment-steps {
+	display: flex;
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.tilefab-equipment-steps li {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: 6px;
+	padding: 8px;
+	border-bottom: 2px solid #344446;
+	color: #93a6a8;
+	font-size: 12px;
+}
+.tilefab-equipment-steps li[aria-current="step"] {
+	border-color: #83d3ce;
+	color: #e7f8f5;
+	font-weight: 700;
+}
+.tilefab-equipment-steps li > span {
+	display: grid;
+	width: 20px;
+	height: 20px;
+	place-items: center;
+	border: 1px solid currentColor;
+	border-radius: 50%;
+}
+.tilefab-equipment-help {
+	width: 100%;
+	color: #a5b8ba;
+	font-weight: 400;
+}
+.tilefab-equipment-help summary {
+	display: list-item;
+	min-height: 44px;
+	box-sizing: border-box;
+	padding: 12px 0;
+	cursor: pointer;
+}
+.tilefab-equipment-help summary:focus-visible {
+	outline: 2px solid #99e4e2;
+	outline-offset: 2px;
+}
+.tilefab-equipment-workspace .tilefab-equipment-confirm {
+	flex: 1;
+	min-height: 44px;
+	justify-content: center;
+	border: 1px solid #83d3ce;
+	background: #235a56;
+	color: #f0fffb;
+	font-size: 13px;
+	font-weight: 800;
+}
+.tilefab-equipment-actions {
+	padding-top: 8px;
+	border-top: 1px solid #344446;
+}
+
 .tilefab-equipment-selection {
 	display: grid;
 	gap: 6px;
@@ -68,7 +129,7 @@
 
 .tilefab-equipment-process-loop-target {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(140px, 1.4fr) 86px;
+	grid-template-columns: minmax(0, 1fr) minmax(140px, 1.4fr);
 	align-items: center;
 	gap: 6px 10px;
 	min-width: 0;
@@ -144,7 +205,7 @@
 
 @media (max-width: 520px) {
 	.tilefab-equipment-process-loop-target {
-		grid-template-columns: auto minmax(0, 1fr) 86px;
+		grid-template-columns: auto minmax(0, 1fr);
 	}
 	.tilefab-equipment-process-loop-label-full {
 		display: none;
@@ -194,12 +255,15 @@
 	color: #e3fcfa;
 }
 
-.tilefab-equipment-workspace .tilefab-port-authoring-instruction {
+.tilefab-equipment-workspace[data-port-type] .tilefab-port-authoring-instruction {
+	order: 0;
 	width: 100%;
 	min-width: 0;
 	max-width: none;
-	min-height: 44px;
-	padding: 10px;
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
 	box-sizing: border-box;
 	font-size: 12px;
 	line-height: 1.5;
@@ -302,9 +366,6 @@
 	.tilefab-equipment-heading {
 		gap: 8px;
 	}
-	.tilefab-equipment-workspace .tilefab-port-authoring-instruction {
-		padding: 8px;
-	}
 }
 
 .tilefab-equipment-selection-readout {
@@ -329,9 +390,9 @@
 /* Hover feedback must not move the dock over an ordinary EQ endpoint. */
 .tilefab-equipment-selection-readout[data-reserve-feedback="true"] {
 	box-sizing: border-box;
-	height: calc(4.2em + 16px);
-	min-height: calc(4.2em + 16px);
-	max-height: calc(4.2em + 16px);
+	height: calc(2.8em + 16px);
+	min-height: calc(2.8em + 16px);
+	max-height: calc(2.8em + 16px);
 	overflow: auto;
 	overscroll-behavior: contain;
 	overflow-wrap: anywhere;
@@ -345,7 +406,9 @@
 	display: none;
 }
 
-.tilefab-workspace:has(.tilefab-equipment-workspace):not(:has(.tilefab-blueprint-favorite-tray))
+.tilefab-workspace:has(.tilefab-equipment-workspace, .tilefab-equipment-transformbar):not(
+		:has(.tilefab-blueprint-favorite-tray)
+	)
 	.tilefab-recovery:not([data-guided-build="true"]) {
 	bottom: var(--tilefab-port-dock-clearance, 280px);
 }
@@ -501,7 +564,8 @@
 	display: none;
 }
 @media (max-width: 760px) {
-	.tilefab-workspace:has(.tilefab-equipment-workspace) .tilefab-recovery {
+	.tilefab-workspace:has(.tilefab-equipment-workspace, .tilefab-equipment-transformbar)
+		.tilefab-recovery {
 		width: auto;
 		box-sizing: border-box;
 		left: 72px;
@@ -561,10 +625,13 @@
 	display: none;
 }
 .tilefab-equipment-workspace .tilefab-equipment-view-actions > button {
-	flex: 1 1 120px;
+	flex: 0 1 auto;
 	width: auto;
 	min-width: 0;
 	min-height: 44px;
+	border-color: transparent;
+	background: transparent;
+	color: #a9bfc0;
 }
 
 /* Range review keeps the active caption without covering adjacent one-metre Ports. */
@@ -578,4 +645,107 @@
 
 .tilefab-guided-canvas-marker--ordinary-port[data-selection-review="true"]::before {
 	display: none;
+}
+
+.tilefab-equipment-transform-actions {
+	display: flex;
+	gap: 8px;
+	grid-column: 1 / -1;
+	flex: 1 0 100%;
+	justify-content: flex-end;
+	padding-top: 8px;
+	border-top: 1px solid #344446;
+}
+.tilefab-equipment-transformbar .tilefab-equipment-transform-actions > button {
+	display: flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 8px 12px;
+	font-size: 13px;
+}
+.tilefab-equipment-transform-actions > :is(.tilefab-placement-apply, .tilefab-inspector-primary) {
+	flex: 1;
+	order: 1;
+	border: 1px solid #83d3ce;
+	background: #235a56;
+	color: #f0fffb;
+}
+.tilefab-app .tilefab-buildbar.tilefab-equipment-transformbar.tilefab-equipment-group-transformbar {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 8px;
+	max-height: min(360px, calc(100dvh - 180px));
+	padding: 10px;
+	overflow-y: auto;
+}
+.tilefab-equipment-group-transformbar .tilefab-equipment-transform-state {
+	grid-column: 1 / -1;
+	font-size: 13px;
+}
+.tilefab-equipment-group-transformbar .tilefab-equipment-transform-actions {
+	order: 20;
+}
+.tilefab-equipment-group-transformbar .tilefab-equipment-group-loop-preview[data-state="none"] {
+	color: #a5b8ba;
+}
+@media (max-width: 760px) {
+	.tilefab-app .tilefab-buildbar.tilefab-equipment-group-transformbar .tilefab-buildbar-title {
+		display: flex;
+	}
+	.tilefab-app .tilefab-buildbar.tilefab-equipment-transformbar {
+		left: 72px;
+	}
+	.tilefab-buildbar.tilefab-equipment-transformbar.tilefab-equipment-membershipbar {
+		max-height: min(280px, calc(100dvh - 180px));
+	}
+}
+
+.tilefab-equipment-options[open] {
+	display: grid;
+	gap: 8px;
+}
+.tilefab-equipment-options .tilefab-port-authoring-detail {
+	color: #9fb3b5;
+	font-size: 11px;
+	line-height: 1.5;
+}
+.tilefab-equipment-process-loop-start {
+	grid-column: 1 / -1;
+}
+
+.tilefab-equipment-membershipbar .tilefab-equipment-transform-state {
+	order: 0;
+	flex-basis: 100%;
+}
+.tilefab-equipment-membershipbar .tilefab-equipment-help {
+	order: 10;
+	flex-basis: 100%;
+}
+.tilefab-equipment-membershipbar .tilefab-equipment-transform-actions {
+	position: sticky;
+	bottom: -8px;
+	order: 20;
+	padding-bottom: 8px;
+	background: #101819;
+}
+
+.tilefab-app .tilefab-buildbar.tilefab-equipment-membershipbar {
+	height: auto;
+	min-width: 0;
+	max-height: min(320px, calc(100dvh - 180px));
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 10px;
+	overflow-y: auto;
+}
+.tilefab-app .tilefab-equipment-membershipbar .tilefab-equipment-transform-state {
+	white-space: normal;
+	overflow: visible;
+}
+@media (min-width: 761px) {
+	.tilefab-app .tilefab-buildbar.tilefab-equipment-membershipbar {
+		width: min(620px, calc(100% - 202px));
+	}
 }

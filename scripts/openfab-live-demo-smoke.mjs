@@ -224,7 +224,7 @@ async function exerciseProductionNavigatorSurface(activePage, label) {
 				.querySelector('[data-testid="tilefab-app"]')
 				?.getAttribute("data-editor-activity") === "inspect",
 	);
-	const launcher = activePage.getByRole("button", { name: "FAB 내비게이터", exact: true });
+	const launcher = activePage.getByRole("button", { name: "구조 · FAB 내비게이터", exact: true });
 	await launcher.waitFor({ state: "visible" });
 	assertEqual(
 		await activePage.locator('.tilefab-commands button[aria-label="FAB 전체 지도"]').count(),
@@ -270,7 +270,7 @@ async function exerciseProductionNavigatorSurface(activePage, label) {
 		.click();
 	await organizationLibrary.waitFor({ state: "hidden" });
 	await activePage.waitForFunction(
-		() => document.activeElement?.getAttribute("aria-label") === "FAB 내비게이터",
+		() => document.activeElement?.getAttribute("aria-label") === "구조 · FAB 내비게이터",
 		undefined,
 		{ timeout: 10_000 },
 	);
@@ -296,7 +296,7 @@ async function readProductionNavigatorSurface(activePage) {
 			navigatorTab: app?.getAttribute("data-navigator-tab"),
 			guidedActive: app?.getAttribute("data-guided-build-active"),
 			active: document.activeElement?.outerHTML.slice(0, 1_500),
-			launcher: document.querySelector('[aria-label="FAB 내비게이터"]')?.outerHTML,
+			launcher: document.querySelector('[aria-label="구조 · FAB 내비게이터"]')?.outerHTML,
 			panel: document
 				.querySelector('[data-testid="static-fab-navigator-panel"]')
 				?.outerHTML.slice(0, 2_000),

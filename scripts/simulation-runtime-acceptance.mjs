@@ -542,7 +542,7 @@ async function configureStorageGroup(
 }
 
 async function selectPublicInteractionPort(activePage, ports) {
-	await clickActivityCommand(activePage, "inspect", "선택 및 정보");
+	await clickActivityCommand(activePage, "inspect", "선택·편집 및 정보");
 	await centerWorld(activePage, ports.serviceWorld);
 	const point = await screenPointForWorld(activePage, ports.serviceWorld);
 	await activePage.mouse.click(point.x, point.y);
@@ -1056,7 +1056,7 @@ async function read3DFrame(canvas) {
 }
 
 async function selectPortEquipmentIn2D(activePage, portId, equipmentGroupId, world) {
-	await clickActivityCommand(activePage, "inspect", "선택 및 정보");
+	await clickActivityCommand(activePage, "inspect", "선택·편집 및 정보");
 	await centerWorld(activePage, world);
 	for (let attempt = 0; attempt < 6; attempt++) {
 		const point = await screenPointForWorld(activePage, world);

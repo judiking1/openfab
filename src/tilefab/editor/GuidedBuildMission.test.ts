@@ -671,7 +671,7 @@ describe("GuidedBuildMission", () => {
 				"이 미션은 Port까지 보존하는 닫힌 Loop 전체 복제를 연습합니다. 일반 편집에서는 드래그 상자에 닿은 일부 레일 모듈도 닫히지 않아도 그대로 복제할 수 있습니다.",
 			primaryCommandId: "selection.inspect-target",
 			suggestedAction: "inspect",
-			suggestedActionLabel: "검사 · Port 포함 Loop 탭",
+			suggestedActionLabel: "선택 · Port 포함 Loop 탭",
 		});
 		expect(
 			selectConnected.missions.find((mission) => mission.definition.id === "reuse-loop")?.prompt,

@@ -29,8 +29,8 @@ export function ordinaryRailCommitStatus(legalOhbSlotCount: number): string {
 		throw new RangeError("Ordinary Rail OHB slot count must be a non-negative safe integer.");
 	}
 	return legalOhbSlotCount > 0
-		? "레일 구간을 건설했습니다 · 다음 레일은 빈 곳 어디서든 · Port는 장비 메뉴 · 선택·복제는 검사 메뉴"
-		: "레일 구간을 건설했습니다 · 다음 레일은 빈 곳 어디서든 · OHB Port용 내부 직선 슬롯이 없습니다 · 양끝 터미널 안전 구간을 제외할 수 있도록 직선을 더 늘리세요 · 선택·복제는 검사 메뉴";
+		? "레일 구간을 건설했습니다 · 다음 레일은 빈 곳 어디서든 · Port는 장비 메뉴 · 선택·복제는 선택 메뉴"
+		: "레일 구간을 건설했습니다 · 다음 레일은 빈 곳 어디서든 · OHB Port용 내부 직선 슬롯이 없습니다 · 양끝 터미널 안전 구간을 제외할 수 있도록 직선을 더 늘리세요 · 선택·복제는 선택 메뉴";
 }
 
 const FIRST_PORT_HANDOFF = Object.freeze({

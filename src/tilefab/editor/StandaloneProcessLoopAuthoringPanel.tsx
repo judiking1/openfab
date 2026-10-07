@@ -77,7 +77,8 @@ export function StandaloneProcessLoopRegistrationForm({
 			</button>
 			<small data-testid="standalone-process-loop-selection-help">
 				{!selectionAvailable
-					? (selectionUnavailableReason ?? "검사에서 폐쇄 레일 전체를 선택한 뒤 여기서 등록하세요.")
+					? (selectionUnavailableReason ??
+						"선택 메뉴에서 폐쇄 레일 전체를 선택한 뒤 여기서 등록하세요.")
 					: "등록 시 폐합과 기존 소속을 검사합니다. 실패하면 레일과 선택이 유지됩니다."}
 			</small>
 		</section>

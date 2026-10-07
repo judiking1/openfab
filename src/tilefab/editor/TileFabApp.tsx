@@ -21,6 +21,7 @@ import {
 	GraduationCap,
 	Grid3X3,
 	Home,
+	Keyboard,
 	Layers3,
 	LayoutTemplate,
 	LibraryBig,
@@ -1215,6 +1216,7 @@ import { useEditorNavigationScroll } from "./useEditorNavigationScroll";
 import { useEquipmentWorkspaceFraming } from "./useEquipmentWorkspaceFraming";
 import "./EquipmentAuthoringWorkspace.css";
 import "./EquipmentInspector.css";
+import { observePortDockClearance } from "./observePortDockClearance";
 
 const StaticFabInspection3DView = OPENFAB_RELEASE_CAPABILITIES.derived3D
 	? lazy(() => import("./StaticFabInspection3DView"))
@@ -2284,6 +2286,16 @@ function useEditorSurfaceRestoration({
 	]);
 }
 
+const INTERACTIVE_EDITOR_ACTION_HINTS = new Set([
+	"build-track",
+	"rail-keyboard-apply",
+	"rail-keyboard-cancel",
+	"connected-selection",
+	"clone-selection",
+	"clone-module",
+	"select-partial-area",
+]);
+
 export default function TileFabApp(): React.ReactElement {
 	const reactRenderSequenceRef = useRef(0);
 	reactRenderSequenceRef.current += 1;
@@ -3014,7 +3026,6 @@ export default function TileFabApp(): React.ReactElement {
 	>("auto");
 	const [compactPortToolDescriptionsExpanded, setCompactPortToolDescriptionsExpanded] =
 		useState(false);
-	const shortBuildViewport = useViewportMedia("(max-width: 520px) and (max-height: 780px)");
 	const compactEditorViewport = useViewportMedia("(max-width: 430px)");
 	const compactInspectorCollisionViewport = useViewportMedia("(max-width: 520px)");
 	const compactNavigatorViewport = useViewportMedia("(max-width: 760px)");
@@ -3492,6 +3503,8 @@ export default function TileFabApp(): React.ReactElement {
 	});
 	const projectSessionRef = useRef(projectSession);
 	const projectGenerationRef = useRef(0);
+	const [railOptionsExpanded, setRailOptionsExpanded] = useState(false);
+	const [expandedActionHintContext, setExpandedActionHintContext] = useState<string | null>(null);
 	const [lastProjectDownloadRequest, setLastProjectDownloadRequest] = useState<Readonly<{
 		projectId: string;
 		projectGeneration: number;
@@ -12865,7 +12878,7 @@ export default function TileFabApp(): React.ReactElement {
 				) {
 					clearTransientConstruction(
 						reshapeRef.current
-							? "레일 이동을 취소했습니다 · 검사로 돌아왔습니다"
+							? "레일 이동을 취소했습니다 · 선택으로 돌아왔습니다"
 							: portEquipmentMembershipEditSessionRef.current
 							? `${portEquipmentMembershipEditSessionRef.current.portType} 포트 편집을 취소했습니다`
 							: portEquipmentGroupEditSessionRef.current
@@ -13688,7 +13701,7 @@ export default function TileFabApp(): React.ReactElement {
 					? anchored
 						? "시작점 선택됨 · 같은 직선의 끝점을 선택하세요"
 						: selection.valid && currentDraft?.portType === "EQ"
-							? `EQ 장비 1개 · Port ${selection.rows.length}개 · 간격 ${currentDraft.pitchMillimeters / 1_000} m`
+							? `${selection.rows.length} Port · ${currentDraft.pitchMillimeters / 1_000} m 간격`
 							: portEquipmentReasonLabel(selection.reason)
 					: rejectedTarget?.reason ?? "";
 				if (equipmentReadout.textContent !== message) equipmentReadout.textContent = message;
@@ -16560,7 +16573,7 @@ export default function TileFabApp(): React.ReactElement {
 				? " · 현재 Loop 소속 유지 · 모든 Port가 같은 Loop 안에 있습니다"
 				: session.eligibleProcessLoopIds?.length
 				? ` · ${session.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능 · 소속은 배치 후 별도로 지정하세요`
-				: " · 모든 Port를 포함하는 Loop 없음 · 다른 위치 또는 Port 구성을 확인하세요"
+				: " · 소속 미지정으로 배치 · 소속은 장비 속성에서 별도로 지정할 수 있습니다"
 			: "";
 		const summary =
 			row === null
@@ -19113,7 +19126,7 @@ export default function TileFabApp(): React.ReactElement {
 					const portType = portRowDragRef.current?.portType ?? portTypeForTool(toolRef.current);
 					clearTransientConstruction(
 						reshapeRef.current
-							? "레일 이동을 취소했습니다 · 검사로 돌아왔습니다"
+							? "레일 이동을 취소했습니다 · 선택으로 돌아왔습니다"
 							: portType
 							? `${portType} 배치를 취소했습니다`
 							: organizationBundlePlacementSessionRef.current
@@ -22190,7 +22203,7 @@ export default function TileFabApp(): React.ReactElement {
 	const commitSelectedEqBodyDimensions = (
 		dimensions: EqBodyDimensions | null,
 		expectedSelection: PortEquipmentSelectionIdentity,
-	): void => {
+	): string | void => {
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorActivityTransitionBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
@@ -22216,13 +22229,14 @@ export default function TileFabApp(): React.ReactElement {
 			activeDocument.organizations,
 		);
 		if (!activeDocument.commitPortEquipment(plan)) {
-			setStatus(portEquipmentReasonLabel(
+			const reason = portEquipmentReasonLabel(
 				plan.valid
 					? (activeDocument.getLastCommandError() ?? "EQ 몸체 편집 조건이 변경되었습니다 · 크기를 다시 확인하세요")
 					: plan.reason,
-			));
+			);
+			setStatus(reason);
 			scheduleRender();
-			return;
+			return reason.replace(/^Port equipment layout is invalid:\s*/, "");
 		}
 		clearTransientConstruction();
 		setPortEquipmentSelection(expectedSelection);
@@ -23797,7 +23811,7 @@ export default function TileFabApp(): React.ReactElement {
 			startSelectedPortEquipmentGroupEdit("copy");
 			return;
 		}
-		setStatus("검사 메뉴에서 클릭 또는 드래그로 일부 레일 선택 · 닫힌 Loop 불필요");
+		setStatus("선택 메뉴에서 클릭 또는 드래그로 일부 레일 선택 · 닫힌 Loop 불필요");
 		scheduleRender();
 	};
 	const copyActionHintSelectionToRailClipboard = (): void => {
@@ -23936,7 +23950,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (selectedPortEquipmentRef.current) {
 			setStatus("장비만 잘라내려면 드래그로 지지 레일까지 함께 영역 선택하세요");
 		} else {
-			setStatus("검사 메뉴에서 클릭 또는 드래그로 잘라낼 레일을 선택하세요");
+			setStatus("선택 메뉴에서 클릭 또는 드래그로 잘라낼 레일을 선택하세요");
 		}
 		scheduleRender();
 	};
@@ -24067,7 +24081,7 @@ export default function TileFabApp(): React.ReactElement {
 		setOrganizationLibraryOpen(true);
 		setStatus(
 			activeOrganizations.records.length === 0
-				? "검사 메뉴에서 드래그로 레일과 장비를 선택한 뒤 FAB 조직으로 분류하세요"
+				? "선택 메뉴에서 드래그로 레일과 장비를 선택한 뒤 FAB 조직으로 분류하세요"
 				: `${activeOrganizations.records.length}개 정적 FAB 조직`,
 		);
 	};
@@ -24526,7 +24540,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (modelSyncPendingRef.current) return;
 		const selection = staticFabSelectionRef.current;
 		if (!selection || selection.rail !== areaSelectionRef.current) {
-			setStatus("검사 메뉴에서 드래그로 조직에 포함할 레일과 장비를 선택하세요");
+			setStatus("선택 메뉴에서 드래그로 조직에 포함할 레일과 장비를 선택하세요");
 			return;
 		}
 		const name = organizationNameDraft.trim();
@@ -25527,7 +25541,7 @@ export default function TileFabApp(): React.ReactElement {
 			return Object.freeze({
 				state: "blocked" as const,
 				reason:
-					"복제할 Fab, Bank, 또는 Bay 조직 하나만 선택하세요 · Rail 조각은 검사 메뉴에서 선택·복제하세요",
+					"복제할 Fab, Bank, 또는 Bay 조직 하나만 선택하세요 · Rail 조각은 선택 메뉴에서 선택·복제하세요",
 			});
 		}
 		if (organizationEditorDirty || organizationDetailsStale) {
@@ -28104,7 +28118,7 @@ export default function TileFabApp(): React.ReactElement {
 		const selectedArea = areaSelectionRef.current;
 		if (request === "area" || (request === "context" && selectedArea)) {
 			if (!selectedArea) {
-				setStatus("검사 메뉴에서 드래그로 저장할 레일과 장비를 선택하세요");
+				setStatus("선택 메뉴에서 드래그로 저장할 레일과 장비를 선택하세요");
 				return null;
 			}
 			const prepared = prepareAreaStampTemplate(selectedArea);
@@ -29978,8 +29992,9 @@ export default function TileFabApp(): React.ReactElement {
 	useLayoutEffect(() => {
 		if (recentPlacedOhbFocusPendingRef.current) {
 			recentPlacedOhbFocusPendingRef.current = false;
-			(processLoopPrimaryActionRef.current ?? processLoopPrimaryStatusRef.current ?? compactInspectorCloseRef.current)
-				?.focus({ preventScroll: true });
+			const target = processLoopPrimaryActionRef.current ?? processLoopPrimaryStatusRef.current ?? compactInspectorCloseRef.current;
+			target?.scrollIntoView({ block: "nearest" });
+			target?.focus({ preventScroll: true });
 			return;
 		}
 		if (!nextPortEquipmentFocusPendingRef.current) return;
@@ -30066,7 +30081,7 @@ export default function TileFabApp(): React.ReactElement {
 			: null);
 	const selectedEquipmentNoProcessLoopHint =
 		equipmentProcessLoopChoices.length === 0
-			? "검사에서 폐쇄 레일 등록"
+			? "선택에서 폐쇄 레일 등록"
 			: selectedEquipmentGroup && selectedEquipmentGroup.portIds.length > 1
 				? "모든 Port를 같은 Loop로 이동"
 				: "Port를 Loop 직접 레일로 이동";
@@ -32189,6 +32204,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (!chooseExplicitEditorTool("inspect")) return;
 		recentPlacedOhbFocusPendingRef.current = true;
+		setCompactInspectorExpanded(true);
 		setRecentPlacedOhb(null);
 		setPortEquipmentSelection(recent.selection);
 		setStatus(`OHB-${recent.selection.equipmentGroupId} 속성 · Process Loop 소속을 확인하세요`);
@@ -32975,7 +32991,7 @@ export default function TileFabApp(): React.ReactElement {
 			: guidedBuildExperienceActive ||
 				editorToolDescriptionPreference === "expanded" ||
 				(editorToolDescriptionPreference === "auto" &&
-					!(editorActivity === "build" && shortBuildViewport));
+					!compactNavigatorViewport);
 	useEditorNavigationScroll(editorNavigationRef, editorActivity, editorToolDescriptionsExpanded);
 	useLayoutEffect(() => {
 		if (!compactPortToolContextActive && compactPortToolDescriptionsExpanded) {
@@ -35104,13 +35120,18 @@ export default function TileFabApp(): React.ReactElement {
 							>
 								복구본 삭제
 							</button>
-							{recoveryInventory.totalCount > 1 ? (
+							{recoveryInventoryOpen || recoveryInventory.totalCount > 1 ? (
 								<button
 									type="button"
 									className="tilefab-recovery-list-trigger"
 									aria-expanded={recoveryInventoryOpen}
 									aria-controls="tilefab-recovery-inventory"
-									onClick={() => setRecoveryInventoryOpen((open) => !open)}
+									onClick={() => {
+										setRecoveryInventoryOpen((open) => !open);
+										if (recoveryInventoryOpen && recoveryInventory.totalCount <= 1) {
+											requestAnimationFrame(() => recoveryRestoreButtonRef.current?.focus({ preventScroll: true }));
+										}
+									}}
 								>
 									{recoveryInventoryOpen
 										? "목록 닫기"
@@ -37716,6 +37737,7 @@ export default function TileFabApp(): React.ReactElement {
 				!staticFabBayFlowEdit &&
 				!ordinaryStaticFabIssueRecheck &&
 				!portEquipmentGroupEditSession &&
+				!portEquipmentMembershipEditSession &&
 				!resilientFabChecksHandoff &&
 				!connectedFabLoopHandoff &&
 				!connectedCopyTwinBayHandoff &&
@@ -37746,6 +37768,7 @@ export default function TileFabApp(): React.ReactElement {
 						<fieldset
 							className="tilefab-action-hints"
 							data-testid="editor-action-hints"
+							data-help-expanded={expandedActionHintContext === actionHintContext}
 							data-context={actionHintContext}
 							data-presentation={
 								guidedSelectionCommandHintId ? "guided-command" : undefined
@@ -37756,6 +37779,7 @@ export default function TileFabApp(): React.ReactElement {
 							aria-label="현재 편집 조작"
 						>
 							{presentedActionHints.map((hint, index) => {
+							if (index > 0 && !INTERACTIVE_EDITOR_ACTION_HINTS.has(hint.id) && expandedActionHintContext !== actionHintContext) return null;
 							const content = (
 								<>
 									<span className="tilefab-action-hint-input" data-pointer={hint.pointer}>
@@ -37921,6 +37945,13 @@ export default function TileFabApp(): React.ReactElement {
 								</span>
 							);
 							})}
+							{presentedActionHints.some((hint, index) => index > 0 && !INTERACTIVE_EDITOR_ACTION_HINTS.has(hint.id)) ? (
+								<button type="button" className="tilefab-action-hint-help" aria-label="현재 작업 단축키 더 보기"
+									aria-expanded={expandedActionHintContext === actionHintContext}
+									onClick={() => setExpandedActionHintContext(expandedActionHintContext === actionHintContext ? null : actionHintContext)}>
+									<Keyboard size={14} /> {expandedActionHintContext === actionHintContext ? "접기" : "단축키"}
+								</button>
+							) : null}
 						</fieldset>
 					</>
 				) : null}
@@ -38180,6 +38211,12 @@ export default function TileFabApp(): React.ReactElement {
 					<div
 						className="tilefab-buildbar"
 						data-testid="rail-buildbar"
+						ref={observePortDockClearance}
+						data-compact-rail={
+							compactNavigatorViewport && !guidedBuildExperienceActive && tool === "build" &&
+							!templateSession && !areaStampSession && !organizationBundlePlacementSession && !stampSession
+						}
+						data-options-expanded={railOptionsExpanded}
 						data-switch-tool-active={activeCatalogItem.planner === "advanced-switch"}
 						data-catalog-id={activeCatalogItem.id}
 						data-catalog-state={activeCatalogApplicability.state}
@@ -38190,6 +38227,19 @@ export default function TileFabApp(): React.ReactElement {
 						data-area-stamp-label={areaStampSession?.label ?? ""}
 						data-organization-bundle={organizationBundlePlacementSession?.label ?? ""}
 					>
+						<button
+							type="button"
+							className="tilefab-rail-options-toggle"
+							data-testid="rail-options-toggle"
+							aria-label={railOptionsExpanded ? "레일 설정 접기" : "레일 설정 펼치기"}
+							aria-expanded={railOptionsExpanded}
+							onClick={() => setRailOptionsExpanded((expanded) => !expanded)}
+						>
+							{constructionCatalogIcon(activeCatalogItem.icon)}
+							<strong>{activeCatalogItem.label}</strong>
+							<span className="tilefab-rail-options-label">{railOptionsExpanded ? "접기" : "설정"}</span>
+							<ChevronDown size={15} aria-hidden="true" />
+						</button>
 						<span className="tilefab-buildbar-title">
 							{templateSession ? (
 								<LayoutTemplate size={15} />
@@ -38298,7 +38348,13 @@ export default function TileFabApp(): React.ReactElement {
 													? "tilefab-guided-primary-target-description"
 													: undefined
 											}
-											onClick={() => chooseBuildMode(item.id)}
+											onClick={() => {
+												chooseBuildMode(item.id);
+												setRailOptionsExpanded(false);
+												if (compactNavigatorViewport && !guidedBuildExperienceActive) {
+													requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+												}
+											}}
 											title={`${item.title} · ${applicability.reason}`}
 										>
 											{constructionCatalogIcon(item.icon)}
@@ -38840,6 +38896,8 @@ export default function TileFabApp(): React.ReactElement {
 					/>
 				) : !staticFabExclusiveCommandActive && portEquipmentGroupEditSession ? (
 					<PortEquipmentGroupTransformBar
+						onApply={() => commitPortEquipmentGroupEditRef.current()}
+						busy={editorMutationWaitActive || modelSyncPending || projectBusy}
 						exitPortEquipmentGroupEditToInspect={exitPortEquipmentGroupEditToInspect}
 						portEquipmentGroupEditSession={portEquipmentGroupEditSession}
 						portEquipmentGroupEditSource={portEquipmentGroupEditSource}
@@ -38847,6 +38905,7 @@ export default function TileFabApp(): React.ReactElement {
 					/>
 				) : equipmentWorkspaceActive && activePortAuthoringType && activePortAuthoringPresentation ? (
 					<PortEquipmentPlacementWorkspace
+						applyGuidedPortKeyboard={applyGuidedPortKeyboard}
 						key={tool}
 						activeMap={activeMap}
 						activePortAuthoringInstruction={activePortAuthoringInstruction}
@@ -39757,7 +39816,7 @@ export default function TileFabApp(): React.ReactElement {
 						`Rail ${workerState.checksum} · physical ${workerState.physicalFingerprint} · ${workerState.physicalPathCount} paths · migration ${workerState.migrationRowCount} rows`
 					}
 				>
-					<i /> MIRROR {workerState.status.toUpperCase()}
+					<i /> {workerState.status === "ready" ? <span className="tilefab-sr-only">편집 준비됨</span> : workerState.status.toUpperCase()}
 				</span>
 				<span ref={cursorReadoutRef} data-testid="rail-cursor-readout">
 					X 0 m · Z 0 m

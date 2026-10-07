@@ -224,7 +224,7 @@ function resolveReuseSelectionTarget(
 			kind: "activity",
 			activity: "inspect",
 			instruction:
-				"왼쪽에서 검사 · 검토를 선택하세요. 선택 도구와 원본 Loop 위치가 Canvas에 이어서 표시됩니다.",
+				"왼쪽 선택 메뉴를 누르세요. 선택 도구와 원본 Loop 위치가 Canvas에 이어서 표시됩니다.",
 		});
 	}
 	if (context.reuseSelectionObstructionOpen) {
@@ -239,7 +239,7 @@ function resolveReuseSelectionTarget(
 		return Object.freeze({
 			id: "tool:inspect",
 			kind: "inspect-tool",
-			instruction: "검사 메뉴에서 강조된 선택 및 정보를 선택하세요.",
+			instruction: "선택 메뉴에서 강조된 선택 및 정보를 선택하세요.",
 		});
 	}
 	if (!context.reuseSelectionCanvasActionable) return null;

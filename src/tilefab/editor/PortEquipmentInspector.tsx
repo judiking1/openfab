@@ -67,7 +67,7 @@ export interface PortEquipmentInspectorProps {
 	readonly commitSelectedEqBodyDimensions: (
 		dimensions: EqBodyDimensions | null,
 		expectedSelection: PortEquipmentSelectionIdentity,
-	) => void;
+	) => string | void;
 	readonly organizations?: StaticFabOrganizationState;
 	readonly activePortEquipment: Pick<PortEquipmentState, "equipmentGroups">;
 	readonly bindCompactInspectorDisclosure: (node: HTMLButtonElement | null) => void;
@@ -185,11 +185,149 @@ export function PortEquipmentInspector({
 		directlyOwned: selectedEquipmentDirectlyOwned,
 		organizations,
 	});
+	const ownershipNotice =
+		actions.delete.code === "DIRECTLY_OWNED" ? (
+			<p
+				className="tilefab-inspector-notice"
+				id="tilefab-equipment-organization-mutation-note"
+				data-testid="equipment-organization-mutation-note"
+			>
+				{actions.move.allowed
+					? `소속을 유지하며 같은 Process Loop 안에서 ${actions.editMembership.allowed ? "이동·Port 편집" : "이동"}할 수 있습니다. `
+					: null}
+				{actions.move.reason ?? actions.delete.reason}.{" "}
+				{selectedEquipmentOwnedOutsideProcessLoop
+					? "이동·Port 편집·철거 전에 FAB 구조에서 소속을 정리하세요."
+					: "다른 Loop로 소속을 바꾸거나 철거하려면 Process Loop 소속에서 먼저 분리하세요."}
+				{actions.copy.allowed ? " 복제는 계속할 수 있습니다." : null}
+			</p>
+		) : null;
+
+	const primaryProcessLoopAction =
+		selectedEquipmentPrimaryProcessLoopId !== null ? (
+			<div className="tilefab-equipment-process-loop-primary">
+				<button
+					ref={processLoopPrimaryActionRef}
+					type="button"
+					data-testid="attach-equipment-process-loop-primary"
+					data-process-loop-id={selectedEquipmentPrimaryProcessLoopId}
+					aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}을(를) ${organizationRecordsById.get(selectedEquipmentPrimaryProcessLoopId)?.name ?? `Process Loop ${selectedEquipmentPrimaryProcessLoopId}`}에 소속시키기`}
+					disabled={modelSyncPending || workerState.status !== "ready"}
+					onClick={() =>
+						commitSelectedEquipmentProcessLoopMembership(
+							"attach",
+							selectedEquipmentPrimaryProcessLoopId,
+							{
+								portId: selectedPortDetails.port.id,
+								equipmentGroupId: selectedEquipmentGroup.id,
+							},
+							"primary",
+						)
+					}
+				>
+					<Plus
+						className="tilefab-equipment-process-loop-primary-icon"
+						size={15}
+						aria-hidden="true"
+					/>
+					<span className="tilefab-equipment-process-loop-primary-copy">
+						<strong className="tilefab-equipment-process-loop-primary-title">
+							이 Process Loop에 소속
+						</strong>
+						<small className="tilefab-equipment-process-loop-primary-name">
+							{organizationRecordsById.get(selectedEquipmentPrimaryProcessLoopId)?.name ??
+								`Process Loop ${selectedEquipmentPrimaryProcessLoopId}`}
+						</small>
+					</span>
+				</button>
+			</div>
+		) : selectedEquipmentDirectlyOwned && selectedEquipmentProcessLoopMembership ? (
+			<div className="tilefab-equipment-process-loop-primary">
+				<div
+					ref={processLoopPrimaryStatusRef}
+					className="tilefab-equipment-process-loop-primary-owned"
+					data-testid="equipment-process-loop-primary-status"
+					data-process-loop-id={selectedEquipmentOwnedProcessLoopId ?? undefined}
+					role="status"
+					tabIndex={-1}
+				>
+					<Check
+						className="tilefab-equipment-process-loop-primary-icon"
+						size={15}
+						aria-hidden="true"
+					/>
+					<span className="tilefab-equipment-process-loop-primary-copy">
+						<strong className="tilefab-equipment-process-loop-primary-title">
+							{selectedEquipmentOwnedOutsideProcessLoop
+								? "FAB 조직 소속"
+								: "Process Loop 소속 완료"}
+						</strong>
+						<small className="tilefab-equipment-process-loop-primary-name">
+							{selectedEquipmentProcessLoopMembership.ownerOrganizationIds
+								.map((id) => organizationRecordsById.get(id)?.name ?? `조직 ${id}`)
+								.join(", ")}
+						</small>
+					</span>
+				</div>
+			</div>
+		) : selectedEquipmentNeedsGroupMoveForProcessLoop ? (
+			<div className="tilefab-equipment-process-loop-primary">
+				<button
+					ref={processLoopPrimaryActionRef}
+					type="button"
+					data-testid="move-port-equipment-group-primary"
+					aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 장비 전체 이동을 시작하고 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
+					disabled={modelSyncPending || workerState.status !== "ready" || !actions.move.allowed}
+					aria-describedby={equipmentActionDescriptionId(actions.move)}
+					onClick={() => startSelectedPortEquipmentGroupEdit("move")}
+				>
+					<Move
+						className="tilefab-equipment-process-loop-primary-icon"
+						size={15}
+						aria-hidden="true"
+					/>
+					<span className="tilefab-equipment-process-loop-primary-copy">
+						<strong className="tilefab-equipment-process-loop-primary-title">
+							연결할 Loop 없음 · 전체 이동
+						</strong>
+						<small className="tilefab-equipment-process-loop-primary-name">
+							이동 미리보기에서 Loop 소속 확인
+						</small>
+					</span>
+				</button>
+			</div>
+		) : selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 ? (
+			<div className="tilefab-equipment-process-loop-primary">
+				<div
+					ref={processLoopPrimaryStatusRef}
+					className="tilefab-equipment-process-loop-primary-owned tilefab-equipment-process-loop-primary-unavailable"
+					data-testid="equipment-process-loop-unavailable"
+					role="status"
+					aria-label={`Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
+					title={selectedEquipmentUnownedProcessLoopMembership?.reason ?? undefined}
+					tabIndex={-1}
+				>
+					<Layers3
+						className="tilefab-equipment-process-loop-primary-icon"
+						size={15}
+						aria-hidden="true"
+					/>
+					<span className="tilefab-equipment-process-loop-primary-copy">
+						<strong className="tilefab-equipment-process-loop-primary-title">Loop 없음</strong>
+						<small className="tilefab-equipment-process-loop-primary-name">
+							{selectedEquipmentNoProcessLoopHint}
+						</small>
+					</span>
+				</div>
+			</div>
+		) : null;
+
 	return (
 		<aside
 			className="tilefab-inspector tilefab-equipment-inspector"
 			aria-label={`${selectedEquipmentGroup.kind} 장비 속성`}
 			data-testid="port-equipment-inspector"
+			data-view-mode={viewMode}
 			data-port-id={selectedPortDetails.port.id}
 			data-equipment-group-id={selectedEquipmentGroup.id}
 			data-editable={selectedPortEditableDetails !== null}
@@ -269,123 +407,7 @@ export function PortEquipmentInspector({
 					</button>
 				</div>
 			</header>
-			{selectedEquipmentPrimaryProcessLoopId !== null ? (
-				<div className="tilefab-equipment-process-loop-primary">
-					<button
-						ref={processLoopPrimaryActionRef}
-						type="button"
-						data-testid="attach-equipment-process-loop-primary"
-						data-process-loop-id={selectedEquipmentPrimaryProcessLoopId}
-						aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}을(를) ${organizationRecordsById.get(selectedEquipmentPrimaryProcessLoopId)?.name ?? `Process Loop ${selectedEquipmentPrimaryProcessLoopId}`}에 소속시키기`}
-						disabled={modelSyncPending || workerState.status !== "ready"}
-						onClick={() =>
-							commitSelectedEquipmentProcessLoopMembership(
-								"attach",
-								selectedEquipmentPrimaryProcessLoopId,
-								{
-									portId: selectedPortDetails.port.id,
-									equipmentGroupId: selectedEquipmentGroup.id,
-								},
-								"primary",
-							)
-						}
-					>
-						<Plus
-							className="tilefab-equipment-process-loop-primary-icon"
-							size={15}
-							aria-hidden="true"
-						/>
-						<span className="tilefab-equipment-process-loop-primary-copy">
-							<strong className="tilefab-equipment-process-loop-primary-title">
-								이 Process Loop에 소속
-							</strong>
-							<small className="tilefab-equipment-process-loop-primary-name">
-								{organizationRecordsById.get(selectedEquipmentPrimaryProcessLoopId)?.name ??
-									`Process Loop ${selectedEquipmentPrimaryProcessLoopId}`}
-							</small>
-						</span>
-					</button>
-				</div>
-			) : selectedEquipmentDirectlyOwned && selectedEquipmentProcessLoopMembership ? (
-				<div className="tilefab-equipment-process-loop-primary">
-					<div
-						ref={processLoopPrimaryStatusRef}
-						className="tilefab-equipment-process-loop-primary-owned"
-						data-testid="equipment-process-loop-primary-status"
-						data-process-loop-id={selectedEquipmentOwnedProcessLoopId ?? undefined}
-						role="status"
-						tabIndex={-1}
-					>
-						<Check
-							className="tilefab-equipment-process-loop-primary-icon"
-							size={15}
-							aria-hidden="true"
-						/>
-						<span className="tilefab-equipment-process-loop-primary-copy">
-							<strong className="tilefab-equipment-process-loop-primary-title">
-								{selectedEquipmentOwnedOutsideProcessLoop
-									? "FAB 조직 소속"
-									: "Process Loop 소속 완료"}
-							</strong>
-							<small className="tilefab-equipment-process-loop-primary-name">
-								{selectedEquipmentProcessLoopMembership.ownerOrganizationIds
-									.map((id) => organizationRecordsById.get(id)?.name ?? `조직 ${id}`)
-									.join(", ")}
-							</small>
-						</span>
-					</div>
-				</div>
-			) : selectedEquipmentNeedsGroupMoveForProcessLoop ? (
-				<div className="tilefab-equipment-process-loop-primary">
-					<button
-						ref={processLoopPrimaryActionRef}
-						type="button"
-						data-testid="move-port-equipment-group-primary"
-						aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 장비 전체 이동을 시작하고 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
-						disabled={modelSyncPending || workerState.status !== "ready" || !actions.move.allowed}
-						aria-describedby={equipmentActionDescriptionId(actions.move)}
-						onClick={() => startSelectedPortEquipmentGroupEdit("move")}
-					>
-						<Move
-							className="tilefab-equipment-process-loop-primary-icon"
-							size={15}
-							aria-hidden="true"
-						/>
-						<span className="tilefab-equipment-process-loop-primary-copy">
-							<strong className="tilefab-equipment-process-loop-primary-title">
-								연결할 Loop 없음 · 전체 이동
-							</strong>
-							<small className="tilefab-equipment-process-loop-primary-name">
-								이동 미리보기에서 Loop 소속 확인
-							</small>
-						</span>
-					</button>
-				</div>
-			) : selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 ? (
-				<div className="tilefab-equipment-process-loop-primary">
-					<div
-						ref={processLoopPrimaryStatusRef}
-						className="tilefab-equipment-process-loop-primary-owned tilefab-equipment-process-loop-primary-unavailable"
-						data-testid="equipment-process-loop-unavailable"
-						role="status"
-						aria-label={`Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
-						title={selectedEquipmentUnownedProcessLoopMembership?.reason ?? undefined}
-						tabIndex={-1}
-					>
-						<AlertTriangle
-							className="tilefab-equipment-process-loop-primary-icon"
-							size={15}
-							aria-hidden="true"
-						/>
-						<span className="tilefab-equipment-process-loop-primary-copy">
-							<strong className="tilefab-equipment-process-loop-primary-title">Loop 없음</strong>
-							<small className="tilefab-equipment-process-loop-primary-name">
-								{selectedEquipmentNoProcessLoopHint}
-							</small>
-						</span>
-					</div>
-				</div>
-			) : null}
+			{viewMode === "3d" ? primaryProcessLoopAction : null}
 			<div
 				id="port-equipment-inspector-content"
 				className="tilefab-contextual-inspector-content"
@@ -410,85 +432,8 @@ export function PortEquipmentInspector({
 
 				{viewMode === "2d" ? (
 					<>
-						{completedModuleHandoff ? (
-							<>
-								<span id="tilefab-completed-module-handoff-description" className="tilefab-sr-only">
-									{completedModuleHandoff.description}
-								</span>
-								<button
-									type="button"
-									className="tilefab-equipment-next-kind tilefab-completed-module-handoff"
-									data-testid="ordinary-completed-module-handoff"
-									data-action={completedModuleHandoff.action}
-									aria-label={completedModuleHandoff.ariaLabel}
-									aria-describedby="tilefab-completed-module-handoff-description"
-									aria-keyshortcuts={editorCommandAriaKeyShortcuts(["selection.connected"])}
-									onClick={selectConnectedAuthoredComponent}
-									onKeyDown={(event) => {
-										if (
-											!editorCommandMatchesKeyboard("selection.connected", event.nativeEvent, {
-												context: "selection",
-											})
-										) {
-											return;
-										}
-										event.preventDefault();
-										event.stopPropagation();
-										selectConnectedAuthoredComponent();
-									}}
-								>
-									<Layers3 size={15} aria-hidden="true" />
-									<span className="tilefab-next-port-handoff-copy">
-										<strong>{completedModuleHandoff.label}</strong>
-										<small>{completedModuleHandoff.instruction}</small>
-									</span>
-									<ChevronRight size={15} aria-hidden="true" />
-								</button>
-							</>
-						) : null}
-						{eqToStkHandoff ? (
-							<>
-								<span id="tilefab-eq-to-stk-handoff-description" className="tilefab-sr-only">
-									{eqToStkHandoff.description}
-								</span>
-								<button
-									type="button"
-									className="tilefab-equipment-next-kind"
-									data-testid="ordinary-next-stk-handoff"
-									aria-label={eqToStkHandoff.ariaLabel}
-									aria-describedby="tilefab-eq-to-stk-handoff-description"
-									onClick={() => {
-										if (chooseGuidedEquipmentTool("stk", selectedPortEquipment)) {
-											setStatus(ORDINARY_STK_HANDOFF_ENTRY_STATUS);
-										}
-									}}
-								>
-									<Warehouse size={15} aria-hidden="true" />
-									<span className="tilefab-next-port-handoff-copy">
-										<strong>{eqToStkHandoff.label}</strong>
-										<small>{eqToStkHandoff.instruction}</small>
-									</span>
-									<ChevronRight size={15} aria-hidden="true" />
-								</button>
-							</>
-						) : null}
 						<div className="tilefab-device-actions">
-							{actions.delete.code === "DIRECTLY_OWNED" ? (
-								<p
-									className="tilefab-inspector-notice"
-									id="tilefab-equipment-organization-mutation-note"
-									data-testid="equipment-organization-mutation-note"
-								>
-									{actions.move.allowed
-										? `소속을 유지하며 같은 Process Loop 안에서 ${actions.editMembership.allowed ? "이동·Port 편집" : "이동"}할 수 있습니다. `
-										: null}
-									{actions.move.reason ?? actions.delete.reason}.{" "}
-									{selectedEquipmentOwnedOutsideProcessLoop
-										? "이동·Port 편집·철거 전에 FAB 구조에서 소속을 정리하세요."
-										: "다른 Loop로 소속을 바꾸거나 철거하려면 아래에서 소속을 먼저 분리하세요."}
-									{actions.copy.allowed ? " 복제는 계속할 수 있습니다." : null}
-								</p>
-							) : null}
+							{!actions.move.allowed ? ownershipNotice : null}
 							{selectedEquipmentGroup.kind === "OHB" ? (
 								<button
 									type="button"
@@ -526,6 +471,29 @@ export function PortEquipmentInspector({
 									) : null}
 								</>
 							)}
+							{selectedEquipmentGroup.kind === "OHB" ? (
+								<button
+									type="button"
+									className="tilefab-inspector-primary"
+									data-testid="copy-ohb-port"
+									disabled={!actions.copy.allowed}
+									aria-describedby={equipmentActionDescriptionId(actions.copy)}
+									onClick={() => startSelectedOhbPlacementIntent("copy")}
+								>
+									<Copy size={15} /> OHB 복제
+								</button>
+							) : (
+								<button
+									type="button"
+									className="tilefab-inspector-primary"
+									data-testid="copy-port-equipment-group"
+									disabled={!actions.copy.allowed}
+									aria-describedby={equipmentActionDescriptionId(actions.copy)}
+									onClick={() => startSelectedPortEquipmentGroupEdit("copy")}
+								>
+									<Copy size={15} /> 장비 복제
+								</button>
+							)}
 							<button
 								type="button"
 								className="tilefab-inspector-primary"
@@ -547,7 +515,7 @@ export function PortEquipmentInspector({
 						</div>
 						{selectedEquipmentGroup.kind === "EQ" && selectedPortEquipment ? (
 							<EqBodyDimensionsEditor
-								key={`${selectedEquipmentGroup.id}:${selectedEquipmentGroup.bodyDimensions?.lengthMillimeters ?? "auto"}:${selectedEquipmentGroup.bodyDimensions?.widthMillimeters ?? "auto"}`}
+								key={`${selectedEquipmentGroup.id}:${selectedPortEquipment.portId}:${selectedEquipmentGroup.bodyDimensions?.lengthMillimeters ?? "auto"}:${selectedEquipmentGroup.bodyDimensions?.widthMillimeters ?? "auto"}`}
 								group={selectedEquipmentGroup}
 								selection={selectedPortEquipment}
 								disabled={
@@ -557,25 +525,7 @@ export function PortEquipmentInspector({
 								commit={commitSelectedEqBodyDimensions}
 							/>
 						) : null}
-						<button
-							type="button"
-							className="tilefab-inspector-primary tilefab-equipment-repeat"
-							data-testid="repeat-port-equipment-authoring"
-							onClick={() =>
-								startEquipmentAuthoringContinuation(
-									equipmentAuthoringContinuation(selectedEquipmentGroup),
-									selectedPortEquipment,
-								)
-							}
-						>
-							<Plus size={15} />{" "}
-							{equipmentAuthoringContinuation(selectedEquipmentGroup).buttonLabel}
-						</button>
-						<p className="tilefab-equipment-repeat-explanation">
-							{equipmentAuthoringContinuationExplanation(
-								equipmentAuthoringContinuation(selectedEquipmentGroup),
-							)}
-						</p>
+						{primaryProcessLoopAction}
 						{selectedEquipmentProcessLoopMembership ? (
 							<details
 								key={`process-loop-${selectedEquipmentGroup.id}`}
@@ -715,33 +665,11 @@ export function PortEquipmentInspector({
 						onToggle={(event) => scrollFocusedInspectorDisclosure(event.currentTarget)}
 					>
 						<summary>
-							<span>복제·철거</span>
+							<span>철거</span>
 							<ChevronDown size={15} aria-hidden="true" />
 						</summary>
 						<div className="tilefab-equipment-more-actions-body">
-							{selectedEquipmentGroup.kind === "OHB" ? (
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									data-testid="copy-ohb-port"
-									disabled={!actions.copy.allowed}
-									aria-describedby={equipmentActionDescriptionId(actions.copy)}
-									onClick={() => startSelectedOhbPlacementIntent("copy")}
-								>
-									<Copy size={15} /> OHB 복제
-								</button>
-							) : (
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									data-testid="copy-port-equipment-group"
-									disabled={!actions.copy.allowed}
-									aria-describedby={equipmentActionDescriptionId(actions.copy)}
-									onClick={() => startSelectedPortEquipmentGroupEdit("copy")}
-								>
-									<Copy size={15} /> 장비 복제
-								</button>
-							)}
+							{actions.move.allowed ? ownershipNotice : null}
 							<button
 								type="button"
 								className="tilefab-inspector-danger"
@@ -776,6 +704,101 @@ export function PortEquipmentInspector({
 							</div>
 						) : null}
 					</dl>
+				) : null}
+
+				{viewMode === "2d" ? (
+					<details className="tilefab-equipment-more-actions" data-testid="equipment-next-actions">
+						<summary>
+							<span>다음 작업</span>
+							<ChevronDown size={15} aria-hidden="true" />
+						</summary>
+						<div className="tilefab-equipment-more-actions-body">
+							{completedModuleHandoff ? (
+								<>
+									<span
+										id="tilefab-completed-module-handoff-description"
+										className="tilefab-sr-only"
+									>
+										{completedModuleHandoff.description}
+									</span>
+									<button
+										type="button"
+										className="tilefab-equipment-next-kind tilefab-completed-module-handoff"
+										data-testid="ordinary-completed-module-handoff"
+										data-action={completedModuleHandoff.action}
+										aria-label={completedModuleHandoff.ariaLabel}
+										aria-describedby="tilefab-completed-module-handoff-description"
+										aria-keyshortcuts={editorCommandAriaKeyShortcuts(["selection.connected"])}
+										onClick={selectConnectedAuthoredComponent}
+										onKeyDown={(event) => {
+											if (
+												!editorCommandMatchesKeyboard("selection.connected", event.nativeEvent, {
+													context: "selection",
+												})
+											) {
+												return;
+											}
+											event.preventDefault();
+											event.stopPropagation();
+											selectConnectedAuthoredComponent();
+										}}
+									>
+										<Layers3 size={15} aria-hidden="true" />
+										<span className="tilefab-next-port-handoff-copy">
+											<strong>{completedModuleHandoff.label}</strong>
+											<small>{completedModuleHandoff.instruction}</small>
+										</span>
+										<ChevronRight size={15} aria-hidden="true" />
+									</button>
+								</>
+							) : null}
+							{eqToStkHandoff ? (
+								<>
+									<span id="tilefab-eq-to-stk-handoff-description" className="tilefab-sr-only">
+										{eqToStkHandoff.description}
+									</span>
+									<button
+										type="button"
+										className="tilefab-equipment-next-kind"
+										data-testid="ordinary-next-stk-handoff"
+										aria-label={eqToStkHandoff.ariaLabel}
+										aria-describedby="tilefab-eq-to-stk-handoff-description"
+										onClick={() => {
+											if (chooseGuidedEquipmentTool("stk", selectedPortEquipment)) {
+												setStatus(ORDINARY_STK_HANDOFF_ENTRY_STATUS);
+											}
+										}}
+									>
+										<Warehouse size={15} aria-hidden="true" />
+										<span className="tilefab-next-port-handoff-copy">
+											<strong>{eqToStkHandoff.label}</strong>
+											<small>{eqToStkHandoff.instruction}</small>
+										</span>
+										<ChevronRight size={15} aria-hidden="true" />
+									</button>
+								</>
+							) : null}
+							<button
+								type="button"
+								className="tilefab-inspector-primary tilefab-equipment-repeat"
+								data-testid="repeat-port-equipment-authoring"
+								onClick={() =>
+									startEquipmentAuthoringContinuation(
+										equipmentAuthoringContinuation(selectedEquipmentGroup),
+										selectedPortEquipment,
+									)
+								}
+							>
+								<Plus size={15} />{" "}
+								{equipmentAuthoringContinuation(selectedEquipmentGroup).buttonLabel}
+							</button>
+							<p className="tilefab-equipment-repeat-explanation">
+								{equipmentAuthoringContinuationExplanation(
+									equipmentAuthoringContinuation(selectedEquipmentGroup),
+								)}
+							</p>
+						</div>
+					</details>
 				) : null}
 
 				{viewMode === "2d" ? (
@@ -857,7 +880,7 @@ function EqBodyDimensionsEditor({
 	readonly commit: (
 		dimensions: EqBodyDimensions | null,
 		expectedSelection: PortEquipmentSelectionIdentity,
-	) => void;
+	) => string | void;
 }): ReactNode {
 	const current = resolveEqBodyDimensions(group);
 	const minimum = defaultEqBodyDimensions(group);
@@ -865,9 +888,28 @@ function EqBodyDimensionsEditor({
 	const currentWidth = String(current.widthMillimeters / 1_000);
 	const [length, setLength] = useState(currentLength);
 	const [width, setWidth] = useState(currentWidth);
+	const [failure, setFailure] = useState<string | null>(null);
 	const hasDraft = length !== currentLength || width !== currentWidth;
 	return (
-		<details className="tilefab-equipment-more-actions" data-testid="eq-body-dimensions">
+		<details
+			className="tilefab-equipment-more-actions"
+			data-testid="eq-body-dimensions"
+			onToggle={(event) => {
+				const details = event.currentTarget;
+				if (event.target !== details) return;
+				const summary = details.querySelector(":scope > summary");
+				const focused = details.ownerDocument.activeElement;
+				if (
+					details.open &&
+					(focused === summary ||
+						focused?.matches('[data-testid="eq-body-length"], [data-testid="eq-body-width"]'))
+				) {
+					details
+						.querySelector(".tilefab-equipment-form-actions")
+						?.scrollIntoView({ block: "nearest" });
+				} else scrollFocusedInspectorDisclosure(details);
+			}}
+		>
 			<summary>
 				<span>
 					몸체 크기 · {current.lengthMillimeters / 1_000} × {current.widthMillimeters / 1_000} m
@@ -875,20 +917,26 @@ function EqBodyDimensionsEditor({
 				<ChevronDown size={15} aria-hidden="true" />
 			</summary>
 			<form
-				className="tilefab-equipment-more-actions-body"
+				className="tilefab-equipment-more-actions-body tilefab-equipment-dimensions-form"
 				onSubmit={(event) => {
 					event.preventDefault();
 					if (!disabled)
-						commit(
-							{
-								lengthMillimeters: Math.round(Number(length) * 1_000),
-								widthMillimeters: Math.round(Number(width) * 1_000),
-							},
-							selection,
+						setFailure(
+							commit(
+								{
+									lengthMillimeters: Math.round(Number(length) * 1_000),
+									widthMillimeters: Math.round(Number(width) * 1_000),
+								},
+								selection,
+							) ?? null,
 						);
 				}}
 			>
-				<p>Port 위치와 방향을 유지하며 EQ 몸체만 변경합니다.</p>
+				{reason ? (
+					<p className="tilefab-equipment-dimension-error" role="status">
+						{reason}
+					</p>
+				) : null}
 				<label>
 					길이 (m)
 					<input
@@ -900,7 +948,12 @@ function EqBodyDimensionsEditor({
 						max={EQ_MAXIMUM_BODY_DIMENSION_MILLIMETERS / 1_000}
 						value={length}
 						disabled={disabled}
-						onChange={(event) => setLength(event.currentTarget.value)}
+						aria-invalid={failure ? true : undefined}
+						aria-describedby={failure ? "eq-body-apply-feedback" : undefined}
+						onChange={(event) => {
+							setLength(event.currentTarget.value);
+							setFailure(null);
+						}}
 					/>
 				</label>
 				<label>
@@ -914,47 +967,66 @@ function EqBodyDimensionsEditor({
 						max={EQ_MAXIMUM_BODY_DIMENSION_MILLIMETERS / 1_000}
 						value={width}
 						disabled={disabled}
-						onChange={(event) => setWidth(event.currentTarget.value)}
+						aria-invalid={failure ? true : undefined}
+						aria-describedby={failure ? "eq-body-apply-feedback" : undefined}
+						onChange={(event) => {
+							setWidth(event.currentTarget.value);
+							setFailure(null);
+						}}
 					/>
 				</label>
-				<p>
-					{reason ??
-						`최소 ${minimum.lengthMillimeters / 1_000} × ${minimum.widthMillimeters / 1_000} m · 편집기 한도 각각 316 m`}
-				</p>
-				<p role="status" data-testid="eq-body-draft-status">
-					{hasDraft
-						? "미적용 입력이 있습니다. 크기 적용으로 반영하거나 입력 취소로 되돌리세요."
-						: "현재 적용된 크기입니다."}
-				</p>
-				<button
-					type="submit"
-					className="tilefab-inspector-primary"
-					data-testid="apply-eq-body-dimensions"
-					disabled={disabled}
-				>
-					<Check size={15} /> 크기 적용
-				</button>
-				<button
-					type="button"
-					className="tilefab-inspector-primary"
-					data-testid="cancel-eq-body-dimensions"
-					disabled={!hasDraft}
-					onClick={() => {
-						setLength(currentLength);
-						setWidth(currentWidth);
+
+				<div className="tilefab-equipment-form-actions">
+					<button
+						type="submit"
+						className="tilefab-inspector-primary"
+						data-testid="apply-eq-body-dimensions"
+						disabled={disabled}
+					>
+						<Check size={15} /> 크기 적용
+					</button>
+					<button
+						type="button"
+						className="tilefab-inspector-primary"
+						data-testid="cancel-eq-body-dimensions"
+						disabled={!hasDraft && failure === null}
+						onClick={() => {
+							setLength(currentLength);
+							setWidth(currentWidth);
+							setFailure(null);
+						}}
+					>
+						<X size={15} /> 입력 취소
+					</button>
+				</div>
+				<p
+					role={failure ? "alert" : "status"}
+					data-testid="eq-body-draft-status"
+					id="eq-body-apply-feedback"
+					className={failure ? "tilefab-equipment-dimension-error" : undefined}
+					ref={(node) => {
+						if (failure && node?.closest("form")?.contains(node.ownerDocument.activeElement)) {
+							node.scrollIntoView({ block: "nearest" });
+						}
 					}}
 				>
-					<X size={15} /> 입력 취소
-				</button>
-				<button
-					type="button"
-					className="tilefab-inspector-primary"
-					data-testid="reset-eq-body-dimensions"
-					disabled={disabled || group.bodyDimensions === undefined}
-					onClick={() => commit(null, selection)}
-				>
-					Port 기준 기본 크기
-				</button>
+					{failure ?? (hasDraft ? "미적용 입력이 있습니다." : "현재 적용된 크기입니다.")}
+				</p>
+				<details className="tilefab-equipment-dimension-details">
+					<summary>크기 기준 · 기본값</summary>
+					<p>Port 위치와 방향을 유지하며 EQ 몸체만 변경합니다.</p>
+					<p>{`최소 ${minimum.lengthMillimeters / 1_000} × ${minimum.widthMillimeters / 1_000} m · 편집기 한도 각각 316 m`}</p>
+
+					<button
+						type="button"
+						className="tilefab-inspector-primary"
+						data-testid="reset-eq-body-dimensions"
+						disabled={disabled || group.bodyDimensions === undefined}
+						onClick={() => setFailure(commit(null, selection) ?? null)}
+					>
+						Port 기준 기본 크기
+					</button>
+				</details>
 			</form>
 		</details>
 	);

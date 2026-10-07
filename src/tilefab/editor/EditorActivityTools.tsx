@@ -89,6 +89,7 @@ export function EditorActivityTools({
 							active={tool === "build"}
 							disabled={staticFabExclusiveCommandActive}
 							caption="레일 건설"
+							compactCaption="건설"
 							captionDescription="끌어서 Smart Route"
 							guidedCaption={
 								guidedBuildPrimaryTarget?.kind === "rail-tool"
@@ -114,6 +115,7 @@ export function EditorActivityTools({
 							disabled={staticFabExclusiveCommandActive}
 							tone="danger"
 							caption="모듈 철거"
+							compactCaption="철거"
 							captionDescription="클릭 또는 드래그"
 							onClick={() => chooseExplicitEditorTool("erase")}
 						>
@@ -128,6 +130,7 @@ export function EditorActivityTools({
 					active={blueprintLibraryOpen}
 					disabled={staticFabExclusiveCommandActive}
 					caption="내 청사진"
+					compactCaption="청사진"
 					captionDescription="저장·배치·관리"
 					controls="tilefab-blueprint-library"
 					expanded={blueprintLibraryOpen}
@@ -249,8 +252,9 @@ export function EditorActivityTools({
 			{editorActivity === "inspect" ? (
 				<>
 					<ToolButton
-						label="FAB 내비게이터"
+						label="구조 · FAB 내비게이터"
 						caption="FAB 내비게이터"
+						compactCaption="구조"
 						captionDescription="문제 · 구조 · 장비"
 						active={staticFabNavigatorOpen}
 						disclosure
@@ -267,8 +271,9 @@ export function EditorActivityTools({
 						<MapIcon size={18} />
 					</ToolButton>
 					<ToolButton
-						label="선택 및 정보"
-						caption="선택 및 정보"
+						label="선택·편집 및 정보"
+						caption="선택·편집"
+						compactCaption="편집"
 						captionDescription="Canvas에서 항목 선택"
 						active={!staticFabNavigatorOpen && (tool === "inspect" || tool === "reshape")}
 						disabled={staticFabExclusiveCommandActive || editorMutationWaitActive}
@@ -286,6 +291,7 @@ export function EditorActivityTools({
 					<ToolButton
 						label="상황별 편집 명령"
 						caption="상황별 편집"
+						compactCaption="명령"
 						captionDescription="선택 항목의 다음 작업"
 						active={contextPaletteOpen}
 						disabled={staticFabExclusiveCommandActive}
@@ -339,7 +345,7 @@ function ToolButton({
 	onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 	children: React.ReactNode;
 }): React.ReactElement {
-	const visibleCaption = guidedCaption ?? caption;
+	const visibleCaption = compactCaption ?? caption ?? guidedCaption;
 	return (
 		<button
 			type="button"
@@ -356,7 +362,7 @@ function ToolButton({
 			aria-controls={controls}
 			aria-expanded={expanded}
 			aria-keyshortcuts={keyShortcuts}
-			title={label}
+			title={captionDescription ? `${label} · ${captionDescription}` : label}
 			onClick={onClick}
 		>
 			<span className="tilefab-tool-button-icon" aria-hidden="true">
@@ -370,15 +376,9 @@ function ToolButton({
 			{visibleCaption ? (
 				<span className="tilefab-tool-button-caption">
 					<strong>{visibleCaption}</strong>
-					<small>
-						{guidedCaption
-							? guidedSelected
-								? "선택됨 · 캔버스에서 진행"
-								: guidedTarget
-									? "다음 단계 도구"
-									: "완료한 도구"
-							: captionDescription}
-					</small>
+					{guidedCaption && (guidedSelected || guidedTarget) ? (
+						<small>{guidedSelected ? "선택됨" : "다음"}</small>
+					) : null}
 				</span>
 			) : null}
 		</button>

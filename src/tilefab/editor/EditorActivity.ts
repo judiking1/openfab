@@ -40,7 +40,7 @@ export const EDITOR_ACTIVITY_DEFINITIONS = [
 	},
 	{
 		id: "inspect",
-		label: "검사",
+		label: "선택",
 		description: "선택·편집·검사",
 	},
 ] as const satisfies readonly EditorActivityDefinition[];

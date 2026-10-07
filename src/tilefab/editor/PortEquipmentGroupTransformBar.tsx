@@ -1,4 +1,4 @@
-import { Copy, Move, X } from "lucide-react";
+import { Check, Copy, Move, X } from "lucide-react";
 import type { ReactNode } from "react";
 import type {
 	PortEquipmentGroupEditMode,
@@ -6,9 +6,12 @@ import type {
 } from "../compile/PortEquipmentGroupEditPlanner";
 import type { CompiledPortSlots } from "../compile/PortSlotCompiler";
 import type { EquipmentGroupRecord } from "../core/EquipmentGroup";
+import { observePortDockClearance } from "./observePortDockClearance";
 import { portEquipmentGroupEditFeedback } from "./StkDraftPresentation";
 
 export interface PortEquipmentGroupTransformBarProps {
+	readonly onApply: () => void;
+	readonly busy: boolean;
 	readonly exitPortEquipmentGroupEditToInspect: (message: string) => void;
 	readonly portEquipmentGroupEditSession: Readonly<{
 		mode: PortEquipmentGroupEditMode;
@@ -24,6 +27,8 @@ export interface PortEquipmentGroupTransformBarProps {
 }
 
 export function PortEquipmentGroupTransformBar({
+	onApply,
+	busy,
 	exitPortEquipmentGroupEditToInspect,
 	portEquipmentGroupEditSession,
 	portEquipmentGroupEditSource,
@@ -36,6 +41,7 @@ export function PortEquipmentGroupTransformBar({
 			: null;
 	return (
 		<div
+			ref={observePortDockClearance}
 			className="tilefab-buildbar tilefab-equipment-transformbar tilefab-equipment-group-transformbar"
 			data-testid="port-equipment-group-transformbar"
 			data-port-type={portEquipmentGroupEditSession.portType}
@@ -51,15 +57,15 @@ export function PortEquipmentGroupTransformBar({
 				{portEquipmentGroupEditSession.sourceEquipmentGroupId}
 			</span>
 			<strong>
-				{portEquipmentGroupEditSession.mode === "move" ? "MOVE" : "COPY"} ·{" "}
-				{portEquipmentGroupEditSource?.portIds.length ?? 0} PORTS
+				{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} ·{" "}
+				{portEquipmentGroupEditSource?.portIds.length ?? 0} Port
 			</strong>
-			<span className="tilefab-equipment-transform-state">
+			<div className="tilefab-equipment-transform-state">
 				{portEquipmentGroupEditState === "valid"
-					? "ENTER / LMB 배치 · 방향키 / WASD"
+					? "배치 가능"
 					: portEquipmentGroupEditState === "invalid"
 						? (feedback?.reason ?? "배치할 수 없습니다")
-						: "방향키 / WASD로 기준 슬롯 선택"}
+						: "대상 위치 선택"}
 				{feedback ? (
 					<small
 						className="tilefab-equipment-group-loop-preview"
@@ -73,50 +79,65 @@ export function PortEquipmentGroupTransformBar({
 						) : null}
 						{feedback.recovery}
 					</small>
-				) : (
-					<small className="tilefab-equipment-group-loop-preview">
-						Enter/클릭 적용 · Space+드래그 화면 이동
-					</small>
-				)}
-				{portEquipmentGroupEditSession.plan?.valid ? (
-					<small
-						className="tilefab-equipment-group-loop-preview"
-						data-testid="equipment-group-loop-preview"
-						data-state={
-							portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? "eligible" : "none"
-						}
-					>
-						{portEquipmentGroupEditSession.preservesLoopOwnership ? (
-							<>
-								현재 Loop 소속 유지
-								<br />
-								모든 Port가 같은 Loop 안에 있습니다
-							</>
-						) : portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? (
-							<>
-								{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능
-								<br />
-								소속이 없는 장비는 배치 후 Loop를 별도 지정
-							</>
-						) : (
-							<>
-								모든 Port를 포함하는 Loop 없음
-								<br />
-								다른 위치 또는 Port 구성 확인
-							</>
-						)}
-					</small>
 				) : null}
-			</span>
-			<button
-				type="button"
-				className="tilefab-placement-exit"
-				onClick={() => {
-					exitPortEquipmentGroupEditToInspect("장비 그룹 편집을 취소했습니다");
-				}}
-			>
-				<X size={14} /> ESC
-			</button>
+				{portEquipmentGroupEditSession.plan?.valid ? (
+					<details className="tilefab-equipment-help">
+						<summary>소속 정보</summary>
+						<small
+							className="tilefab-equipment-group-loop-preview"
+							data-testid="equipment-group-loop-preview"
+							data-state={
+								portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? "eligible" : "none"
+							}
+						>
+							{portEquipmentGroupEditSession.preservesLoopOwnership ? (
+								<>
+									현재 Loop 소속 유지
+									<br />
+									모든 Port가 같은 Loop 안에 있습니다
+								</>
+							) : portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? (
+								<>
+									{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} 후 Loop 소속
+									가능
+									<br />
+									소속이 없는 장비는 배치 후 Loop를 별도 지정
+								</>
+							) : (
+								<>
+									소속 미지정으로 배치
+									<br />
+									소속은 장비 속성에서 별도로 지정할 수 있습니다
+								</>
+							)}
+						</small>
+					</details>
+				) : null}
+			</div>
+			<div className="tilefab-equipment-transform-actions">
+				<button
+					type="button"
+					className="tilefab-placement-exit"
+					aria-label="장비 이동·복제 취소"
+					aria-keyshortcuts="Escape"
+					onClick={() => {
+						exitPortEquipmentGroupEditToInspect("장비 그룹 편집을 취소했습니다");
+					}}
+				>
+					<X size={14} /> 취소
+				</button>
+				<button
+					type="button"
+					className="tilefab-placement-apply"
+					data-testid="apply-port-equipment-group"
+					disabled={busy || portEquipmentGroupEditState !== "valid"}
+					aria-keyshortcuts="Enter"
+					onClick={onApply}
+				>
+					<Check size={14} />{" "}
+					{portEquipmentGroupEditSession.mode === "move" ? "이동 적용" : "복제 배치"}
+				</button>
+			</div>
 		</div>
 	);
 }

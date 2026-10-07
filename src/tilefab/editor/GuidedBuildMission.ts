@@ -122,7 +122,7 @@ export const GUIDED_BUILD_FOUNDATION_MISSIONS = Object.freeze([
 		objective:
 			"레일을 계속 연결해 열린 끝이 없는 하나의 닫힌 방향성 회로를 만드세요. 편집·실행 취소로 열린 회로는 이 단계에서 이어갑니다.",
 		rationale:
-			"이 단계는 레일 폐합 실습입니다. Process Loop 소속 등록은 검사에서 닫힌 레일 전체를 선택한 뒤 별도로 확정합니다.",
+			"이 단계는 레일 폐합 실습입니다. Process Loop 소속 등록은 선택 메뉴에서 닫힌 레일 전체를 선택한 뒤 별도로 확정합니다.",
 		primaryCommandId: "canvas.primary-drag",
 	}),
 	Object.freeze({
@@ -801,7 +801,7 @@ function guidedBuildMissionPrompt(
 					: "inspect",
 				suggestedActionLabel: evidence.reuseGuidance.selectionAnchorReady
 					? "SELECT · 선택한 Port 포함 Loop 전체"
-					: "검사 · Port 포함 Loop 탭",
+					: "선택 · Port 포함 Loop 탭",
 			});
 		}
 		if (evidence.reuseGuidance.placementActive) {
@@ -842,7 +842,7 @@ function guidedBuildMissionPrompt(
 			suggestedAction: evidence.reuseGuidance.selectionAnchorReady ? "select-connected" : "inspect",
 			suggestedActionLabel: evidence.reuseGuidance.selectionAnchorReady
 				? "SELECT · Port 포함 Loop 전체"
-				: "검사 · Port 포함 Loop 탭",
+				: "선택 · Port 포함 Loop 탭",
 		});
 	}
 	if (!guidedBuildIsEquipmentMission(definition.id))

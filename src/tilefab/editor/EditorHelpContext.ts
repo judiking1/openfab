@@ -76,7 +76,7 @@ const ACTIVITY_HELP_CONTEXTS = Object.freeze({
 			["2 · 방향", "Q/E로 방향과 코너를 바꾸고 화살표로 단방향 흐름을 확인합니다."],
 			[
 				"3 · 재사용",
-				"검사 메뉴에서 드래그로 상자에 닿은 레일 모듈과 장비 그룹 전체를 선택한 뒤 복제하거나 청사진으로 저장합니다.",
+				"선택 메뉴에서 드래그로 상자에 닿은 레일 모듈과 장비 그룹 전체를 선택한 뒤 복제하거나 청사진으로 저장합니다.",
 			],
 		],
 	),
@@ -110,7 +110,7 @@ const ACTIVITY_HELP_CONTEXTS = Object.freeze({
 		],
 	),
 	inspect: helpContext(
-		"검사 · SELECT",
+		"선택 · SELECT",
 		"필요한 부분을 선택하고 검증하기",
 		"레일, 장비 또는 FAB 조직을 선택하면 지금 실행할 수 있는 작업만 가까운 패널에 나타납니다.",
 		[
@@ -151,7 +151,7 @@ export function deriveEditorHelpContext(input: EditorHelpContextInput): EditorHe
 				? "1개를 선택했습니다. 같은 종류의 Bay나 Bank를 하나 더 고르면 연결과 정렬이 열립니다."
 				: `${selectedCount.toLocaleString()}개를 선택했습니다. 포함 범위를 확인한 뒤 필요한 작업을 실행하세요.`;
 	return helpContext(
-		"검사 · FAB ORGANIZATION",
+		"선택 · FAB ORGANIZATION",
 		"Fab, Bank, Bay를 선택하고 재사용하기",
 		summary,
 		[

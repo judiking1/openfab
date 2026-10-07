@@ -1389,7 +1389,7 @@ try {
 	const organizationNavigatorLauncher = await activityCommandButton(
 		desktopPage,
 		"inspect",
-		"FAB 내비게이터",
+		"구조 · FAB 내비게이터",
 	);
 	const assembleMenu = desktopPage.getByTestId("static-fab-assemble-menu");
 	await assertEditorActivityRailLayout(desktopPage, "desktop");
@@ -7864,6 +7864,9 @@ async function selectStkGroupRecoveryAnchor(page, fixture, label) {
 		`${label} primary recovery available`,
 	);
 	const move = inspector.getByTestId("move-port-equipment-group-primary");
+	const disclosure = inspector.getByTestId("compact-inspector-disclosure");
+	if ((await disclosure.count()) && (await disclosure.getAttribute("aria-expanded")) !== "true") await disclosure.click();
+	await move.scrollIntoViewIfNeeded();
 	await assertLocatorOwnsHitArea(move, `${label} whole-group Move`);
 	assertIncludes(await move.innerText(), "미리보기", `${label} recovery explains preview`);
 	assertIncludes(
@@ -7903,6 +7906,8 @@ async function hoverStkGroupRecoveryPreview(
 	const bar = page.getByTestId("port-equipment-group-transformbar");
 	assertEqual(await bar.getAttribute("data-port-type"), "STK", `${label} Stocker transform`);
 	assertEqual(await bar.getAttribute("data-mode"), mode, `${label} whole-group ${mode} mode`);
+	const membershipHelp = bar.locator(".tilefab-equipment-help");
+	if ((await membershipHelp.getAttribute("open")) === null) await membershipHelp.locator("summary").click();
 	const preview = bar.getByTestId("equipment-group-loop-preview");
 	assertEqual(
 		await preview.getAttribute("data-state"),
@@ -7911,7 +7916,7 @@ async function hoverStkGroupRecoveryPreview(
 	);
 	const message = eligibleIds.length
 		? `${mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능`
-		: "모든 Port를 포함하는 Loop 없음";
+		: "소속 미지정으로 배치";
 	assertIncludes(await preview.innerText(), message, `${label} visible Loop guidance`);
 	assertIncludes(
 		await page.getByTestId("port-equipment-group-edit-readout").textContent(),
@@ -7939,7 +7944,7 @@ async function hoverStkGroupRecoveryPreview(
 	);
 	await assertLocatorInsideViewport(page, bar);
 	await assertLocatorInsideViewport(page, preview);
-	const exit = bar.getByRole("button", { name: "ESC", exact: true });
+	const exit = bar.getByRole("button", { name: "장비 이동·복제 취소", exact: true });
 	await assertLocatorOwnsHitArea(exit, `${label} visible ESC cancel`);
 	const exitBounds = await exit.boundingBox();
 	assertAtLeast(exitBounds?.width ?? 0, 44, `${label} ESC target width`);
@@ -8035,7 +8040,7 @@ async function exerciseStkGroupRecoveryCopy(page, fixture, dimensions, savedCont
 	);
 	if (dimensions === "390x600") {
 		const cancel = page.getByTestId("port-equipment-group-transformbar")
-			.getByRole("button", { name: "ESC", exact: true });
+			.getByRole("button", { name: "장비 이동·복제 취소", exact: true });
 		await cancel.focus();
 		assertEqual(await cancel.evaluate((button) => button === document.activeElement),
 			true, `${label} native Copy Cancel owns focus`);
@@ -8262,7 +8267,7 @@ async function exerciseStkGroupLoopRecovery(browserInstance) {
 				if (name === "impossible") {
 					if (viewport.width === 390) {
 						const cancel = page.getByTestId("port-equipment-group-transformbar")
-							.getByRole("button", { name: "ESC", exact: true });
+							.getByRole("button", { name: "장비 이동·복제 취소", exact: true });
 						const readout = page.getByTestId("port-equipment-group-edit-readout");
 						const targetBeforeArrow = await readout.textContent();
 						await cancel.focus();
@@ -11384,7 +11389,7 @@ async function assertRailReshapeHintCancellation(page, world, kind, command, lab
 	const before = await readMetrics(page);
 	const source = await readStandaloneLoopAuthoringContract(page);
 	await page.getByTestId("rail-canvas").press("Escape");
-	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 	await revealOrdinaryEquipmentSlot(page, world, `${label} ${kind} rail selection`);
 	await clickWorld(page, world, false);
 	await clickActivityCommand(page, "inspect", "상황별 편집 명령");
@@ -11475,7 +11480,7 @@ async function assertOwnedEquipmentContextActions(page, targets, label) {
 	const before = await readMetrics(page);
 	const source = await readStandaloneLoopAuthoringContract(page);
 	for (const target of targets) {
-		await clickActivityCommand(page, "inspect", "선택 및 정보");
+		await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 		await revealOrdinaryEquipmentSlot(page, target.world, `${label} owned ${target.kind}`);
 		await clickWorld(page, target.world, false);
 		await page.waitForFunction((id) => document.querySelector('[data-testid="tilefab-app"]')?.dataset.selectedEquipmentGroupId === String(id), target.id);
@@ -11516,7 +11521,7 @@ async function assertOwnedLegacyStockerMenuFocus(page, savedPath, groupId, world
 	await waitForWorker(page, (metrics) => metrics.equipmentGroups === "3");
 	const before = await readMetrics(page);
 	const source = await readStandaloneLoopAuthoringContract(page);
-	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 	await revealOrdinaryEquipmentSlot(page, world, `${label} owned CUSTOM Stocker`);
 	await clickWorld(page, world, false);
 	await page.waitForFunction((id) => document.querySelector('[data-testid="tilefab-app"]')?.dataset.selectedEquipmentGroupId === String(id), groupId);
@@ -17303,7 +17308,7 @@ async function exerciseGuidedPortHandoffRegression(
 					cause: error,
 				});
 			});
-		await page.getByRole("button", { name: "FAB 내비게이터", exact: true }).click();
+		await page.getByRole("button", { name: "구조 · FAB 내비게이터", exact: true }).click();
 		const reuseNavigatorClose = await assertGuidedPrimaryTarget(
 			page,
 			"navigator:close",
@@ -17488,7 +17493,7 @@ async function exerciseGuidedPortHandoffRegression(
 		}
 		await assertGuidedSelectionCommandMediaTarget(page, "Guided Reuse connected selection command");
 		await page.setViewportSize({ width: 1440, height: 900 });
-		await page.getByRole("button", { name: "FAB 내비게이터", exact: true }).click();
+		await page.getByRole("button", { name: "구조 · FAB 내비게이터", exact: true }).click();
 		const connectedNavigatorClose = await assertGuidedPrimaryTarget(
 			page,
 			"navigator:close",
@@ -17849,7 +17854,7 @@ async function exerciseGuidedPortHandoffRegression(
 			"Guided Reuse copy selection command",
 			"copy-selection-command",
 		);
-		await page.getByRole("button", { name: "FAB 내비게이터", exact: true }).click();
+		await page.getByRole("button", { name: "구조 · FAB 내비게이터", exact: true }).click();
 		const copyNavigatorClose = await assertGuidedPrimaryTarget(
 			page,
 			"navigator:close",
@@ -21884,7 +21889,7 @@ async function exerciseGuidedPortHandoffRegression(
 		);
 		assertEqual(
 			await page
-				.getByRole("button", { name: "선택 및 정보", exact: true })
+				.getByRole("button", { name: "선택·편집 및 정보", exact: true })
 				.getAttribute("aria-pressed"),
 			"true",
 			"Guided completion Inspect tool state",
@@ -24194,7 +24199,7 @@ async function exerciseGuidedPortHandoffRegression(
 		}
 		const ordinaryPortRedone = await commitOrdinaryOhbForCompletedModule(page, canvas);
 		const navigatorLaunchers = page.getByRole("button", {
-			name: "FAB 내비게이터",
+			name: "구조 · FAB 내비게이터",
 			exact: true,
 		});
 		assertEqual(await navigatorLaunchers.count(), 1, "single FAB Navigator launcher");
@@ -24650,13 +24655,18 @@ async function exerciseExpertBuildReleaseSurface(page) {
 				assertAtLeast(bounds.height, 44, `Expert compact header command ${index} height`);
 			}
 		}
+		const railOptions = page.getByTestId("rail-options-toggle");
+		if (await railOptions.isVisible()) await railOptions.click();
 		const railControls = page.locator('[aria-label="레일 건설 모듈"] > button:visible');
+		assertAtLeast(await railControls.count(), 4, `Expert ${viewport.width}px available rail controls`);
 		for (let index = 0; index < (await railControls.count()); index += 1) {
 			const bounds = await railControls.nth(index).boundingBox();
 			if (!bounds) throw new Error(`Expert rail control ${index} has no bounds.`);
 			assertAtLeast(bounds.width, 44, `Expert ${viewport.width}px rail control ${index} width`);
 			assertAtLeast(bounds.height, 44, `Expert ${viewport.width}px rail control ${index} height`);
 		}
+
+		if (await railOptions.isVisible()) await railOptions.click();
 
 		await projectTrigger.focus();
 		await projectTrigger.press("Enter");
@@ -24867,7 +24877,7 @@ async function placePattern(page, templateId, anchor) {
 async function startPattern(page, templateId, contextCell = null) {
 	await page.keyboard.press("Escape");
 	if (contextCell) {
-		await clickActivityCommand(page, "inspect", "선택 및 정보");
+		await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 		await clickWorld(page, offsetCellCenter(contextCell), false);
 		await clickActivityCommand(page, "inspect", "상황별 편집 명령");
 		const palette = page.getByTestId("context-construction-palette");
@@ -26023,7 +26033,7 @@ async function exerciseCurrentLargeFabEquipmentAndBlueprint(page) {
 			metrics.workerChecksum === selectedEq.workerChecksum,
 	);
 	await clickActivityCommand(page, "build", "레일 건설");
-	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 	assertEqual(
 		(await page.locator(".tilefab-statusbar > [role='status']").innerText()).trim(),
 		"탭/클릭은 한 항목 · 드래그는 닿은 일부 레일 선택",
@@ -28398,7 +28408,7 @@ async function exerciseCurrentLargeFabOrganizationArrangement(
 	await contextualHelp.waitFor({ state: "visible" });
 	const organizationHelp = contextualHelp.getByTestId("editor-help-context");
 	assertEqual(
-		await organizationHelp.getByText("검사 · FAB ORGANIZATION", { exact: true }).count(),
+		await organizationHelp.getByText("선택 · FAB ORGANIZATION", { exact: true }).count(),
 		1,
 		"Help identifies the open Organization task",
 	);
@@ -29936,7 +29946,7 @@ async function selectWorldArea(page, bounds, { modifier = "shift" } = {}) {
 	if (modifier !== "shift" && modifier !== "none") {
 		throw new Error(`Unsupported area-selection modifier ${modifier}.`);
 	}
-	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 	await fitAndZoomOut(page, 1);
 	await centerWorld(page, {
 		x: (bounds.minX + bounds.maxX) / 2,
@@ -30438,7 +30448,7 @@ async function exerciseAtomicCut(page, bounds) {
 
 async function exerciseShapezDiscoveryShortcuts(page, ohbWorld) {
 	await page.keyboard.press("Escape");
-	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 	const canvas = page.getByTestId("rail-canvas");
 	const railWorld = { x: 16.5, y: 0.5 };
 	await centerWorld(page, railWorld);
@@ -30512,7 +30522,7 @@ async function exerciseShapezDiscoveryShortcuts(page, ohbWorld) {
 	);
 	await page.keyboard.press("Escape");
 	await assertBuildSnapDoesNotMoveAreaSelection(page);
-	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 
 	await moveToWorld(page, railWorld);
 	await canvas.focus();
@@ -30546,7 +30556,7 @@ async function exerciseShapezDiscoveryShortcuts(page, ohbWorld) {
 	assertExactStaticFabModelIdentity(cloned, beforeClone, "C hover clone world isolation");
 
 	await page.keyboard.press("Escape");
-	await clickActivityCommand(page, "inspect", "선택 및 정보");
+	await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 	await moveToWorld(page, railWorld);
 	await canvas.focus();
 	await page.keyboard.press("o");
@@ -36427,7 +36437,7 @@ async function exerciseCompactLayout(page) {
 			"equip",
 			["Station proposal 가져오기", "OHB 포트 배치", "EQ 포트 행 배치", "Stocker 포트 그룹 배치"],
 		],
-		["inspect", ["FAB 내비게이터", "선택 및 정보", "상황별 편집 명령"]],
+		["inspect", ["구조 · FAB 내비게이터", "선택·편집 및 정보", "상황별 편집 명령"]],
 	]) {
 		const activityButton = await activateEditorActivity(page, activity);
 		await assertLocatorInsideViewport(page, activityButton);
@@ -42300,6 +42310,14 @@ async function assertInspectorDisclosureKeepsNewFocus(page, disclosure, label) {
 	await assertLocatorOwnsHitArea(continuation, `${label} newer target remains usable`);
 }
 
+async function openEquipmentNextActions(page) {
+ const details = page.getByTestId("equipment-next-actions");
+ const compact = page.getByTestId("compact-inspector-disclosure");
+ if ((await compact.count()) && (await compact.getAttribute("aria-expanded")) !== "true") await compact.click();
+ if ((await details.getAttribute("open")) === null) await details.locator(":scope > summary").click();
+ return details;
+}
+
 async function openPortEquipmentMoreActions(page) {
 	const details = page.getByTestId("port-equipment-more-actions");
 	await details.waitFor({ state: "visible" });
@@ -42378,8 +42396,8 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			`ordinary ${portType} short Inspector starts without scrolling`,
 		);
 		for (const action of [
-			continuation,
-			...(portType === "EQ" && !existingStocker ? [stkRecommendation] : []),
+			page.getByTestId("edit-port-equipment-membership"),
+			page.getByTestId("copy-port-equipment-group"),
 		]) {
 			await assertLocatorInsideViewport(page, action);
 			await assertLocatorOwnsHitArea(action, `ordinary ${portType} initial short Inspector action`);
@@ -42387,6 +42405,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		}
 		const unavailableLoop = page.getByTestId("equipment-process-loop-unavailable");
 		if (await unavailableLoop.count()) {
+			await unavailableLoop.scrollIntoViewIfNeeded();
 			await assertLocatorInsideViewport(page, unavailableLoop);
 			assertEqual(
 				await inspector.getAttribute("data-primary-process-loop-availability"),
@@ -42499,7 +42518,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		0,
 		`ordinary ${portType} has no duplicate Move action ${viewportLabel}`,
 	);
-	for (const id of ["edit-port-equipment-membership", moveActionId]) {
+	for (const id of ["edit-port-equipment-membership", moveActionId, "copy-port-equipment-group"]) {
 		const action = inspector.getByTestId(id);
 		assertEqual(
 			await action.isVisible(),
@@ -42511,6 +42530,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			0,
 			`ordinary ${portType} primary ${id} has one owner outside secondary menu ${viewportLabel}`,
 		);
+		await action.scrollIntoViewIfNeeded();
 		await assertLocatorInsideViewport(page, action);
 		await assertLocatorOwnsHitArea(action, `ordinary ${portType} primary ${id} ${viewportLabel}`);
 		if (id === "move-port-equipment-group-primary") {
@@ -42626,6 +42646,9 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		"가려진 장비를 순서대로 선택",
 		`ordinary ${portType} next selection guidance ${viewportLabel}`,
 	);
+	const nextActions = page.getByTestId("equipment-next-actions");
+	assertEqual(await nextActions.getAttribute("open"), null, `ordinary ${portType} continuation starts secondary`);
+	await openEquipmentNextActions(page);
 	for (const expected of ["같은 설정으로", "새 Port를 선택해 배치"]) {
 		assertIncludes(
 			await continuationExplanation.innerText(),
@@ -42673,6 +42696,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 			true,
 			`ordinary EQ next Stocker precedes repeated EQ placement ${viewportLabel}`,
 		);
+		await stkRecommendation.scrollIntoViewIfNeeded();
 		await assertLocatorInsideViewport(page, stkRecommendation);
 		await assertLocatorOwnsHitArea(
 			stkRecommendation,
@@ -42701,7 +42725,6 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 				animationName: style.animationName,
 				initiallyVisible:
 					scrollport instanceof HTMLElement &&
-					Math.abs(scrollport.scrollTop) < 1 &&
 					clip !== undefined &&
 					target.top >= clip.top - 0.5 &&
 					target.bottom <= clip.bottom + 0.5,
@@ -42715,20 +42738,22 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		assertEqual(
 			visualRole.initiallyVisible,
 			true,
-			`ordinary EQ contextual STK recommendation is initially visible ${viewportLabel}`,
+			`ordinary EQ disclosed STK recommendation is visible ${viewportLabel}`,
 		);
 		const edit = inspector.getByTestId("edit-port-equipment-membership");
 		const move = inspector.getByTestId("move-port-equipment-group");
-		await stkRecommendation.focus();
-		for (const target of [edit, move, continuation]) {
+		const copy = inspector.getByTestId("copy-port-equipment-group");
+		const reverse = inspector.getByTestId("reverse-port-equipment-service-direction");
+		await edit.focus();
+		for (const target of [move, copy, reverse]) {
 			await page.keyboard.press("Tab");
 			assertEqual(
 				await target.evaluate((element) => document.activeElement === element),
 				true,
-				`ordinary EQ next/edit/move/repeat Tab order ${viewportLabel}`,
+				`ordinary EQ edit/move/copy/reverse Tab order ${viewportLabel}`,
 			);
 		}
-		for (const target of [move, edit, stkRecommendation]) {
+		for (const target of [copy, move, edit]) {
 			await page.keyboard.press("Shift+Tab");
 			assertEqual(
 				await target.evaluate((element) => document.activeElement === element),
@@ -42750,7 +42775,7 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		await page.getByTestId("rail-canvas").focus();
 	}
 	for (const target of [continuation, nextEquipment, moreActionsSummary, closeInspector]) {
-		if (target === moreActionsSummary || target === nextEquipment) {
+		if (target !== closeInspector) {
 			await target.scrollIntoViewIfNeeded();
 		}
 		await assertLocatorInsideViewport(page, target);
@@ -42779,6 +42804,8 @@ async function assertOrdinaryEquipmentCompletionOwnsInspect(
 		"equipment",
 		`ordinary ${portType} completion identifies equipment selection ${viewportLabel}`,
 	);
+	const shortcutHelp = page.getByRole("button", { name: "현재 작업 단축키 더 보기", exact: true });
+	if ((await shortcutHelp.getAttribute("aria-expanded")) !== "true") await shortcutHelp.click();
 	const equipmentSelectionHintIds = await page
 		.getByTestId("editor-action-hints")
 		.locator(":scope > .tilefab-action-hint")
@@ -43274,6 +43301,7 @@ async function commitOrdinaryOhbForCompletedModule(page, canvas) {
 }
 
 async function exerciseOrdinaryCompletedModuleHandoff(page, completionBaseline, viewportLabel) {
+	await openEquipmentNextActions(page);
 	const handoff = page.getByTestId("ordinary-completed-module-handoff");
 	if ((await handoff.count()) === 0) {
 		const diagnostics = await page.getByTestId("tilefab-app").evaluate((app) => ({
@@ -49697,7 +49725,9 @@ async function exerciseCompactInspectorDensityPreference(
 }
 
 async function exerciseSelectedEquipmentRepeatEntry(page, portType, viewportLabel, baseline) {
+	await openEquipmentNextActions(page);
 	const repeat = page.getByTestId("repeat-port-equipment-authoring");
+	await repeat.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, repeat);
 	const bounds = await repeat.boundingBox();
 	if (!bounds)
@@ -49821,6 +49851,7 @@ async function exerciseEqToStkRecommendedEntry(
 	baseline,
 	expectCompletedModuleHandoff = false,
 ) {
+	await openEquipmentNextActions(page);
 	const recommendation = page.getByTestId("ordinary-next-stk-handoff");
 	const directStkTool = page.getByRole("button", { name: "Stocker 포트 그룹 배치", exact: true });
 	const pointerJourney = ["390x844", "760x900", "1024x900", "1440x900"].includes(viewportLabel);
@@ -50361,7 +50392,7 @@ async function assertExpandedToolDescriptions(page, label) {
 
 async function exerciseStaticFabNavigator(page) {
 	const before = await readMetrics(page);
-	const launcher = await activityCommandButton(page, "inspect", "FAB 내비게이터");
+	const launcher = await activityCommandButton(page, "inspect", "구조 · FAB 내비게이터");
 	const launcherCaption = launcher.locator(".tilefab-tool-button-caption");
 	for (const viewport of [
 		{ width: 390, height: 844 },
@@ -50808,7 +50839,7 @@ async function exerciseStaticFabNavigator(page) {
 		.click();
 	await readinessPanel.waitFor({ state: "hidden" });
 	await page.waitForFunction(
-		() => document.activeElement?.getAttribute("aria-label") === "FAB 내비게이터",
+		() => document.activeElement?.getAttribute("aria-label") === "구조 · FAB 내비게이터",
 	);
 	assertEqual(
 		await launcher.getAttribute("aria-expanded"),
@@ -52135,7 +52166,7 @@ async function openStaticFabNavigatorTab(page, tab) {
 		throw new Error(`Unknown FAB Navigator tab: ${String(tab)}.`);
 	}
 	const app = page.getByTestId("tilefab-app");
-	const launcher = await activityCommandButton(page, "inspect", "FAB 내비게이터");
+	const launcher = await activityCommandButton(page, "inspect", "구조 · FAB 내비게이터");
 	if ((await app.getAttribute("data-navigator-tab")) === "") {
 		await launcher.click();
 		await page.locator("#tilefab-fab-navigator").waitFor({ state: "visible" });
@@ -52274,6 +52305,8 @@ async function assertRaisedCompactInspectorCanvasOwnership(page, inspectorTestId
 		before,
 		`${label} manual Fit isolation`,
 	);
+	const railOptions = page.getByTestId("rail-options-toggle");
+	if (await railOptions.isVisible()) await railOptions.click();
 	const loopConnect = page.getByRole("button", { name: /LOOP CONNECT/ });
 	await loopConnect.waitFor({ state: "visible", timeout: 10_000 });
 	await loopConnect.click();
@@ -52321,6 +52354,7 @@ async function assertRaisedCompactInspectorCanvasOwnership(page, inspectorTestId
 	await assertLocatorOwnsHitArea(networkDisclosure, `${label} Network Link peek disclosure`);
 	await assertLocatorOwnsHitArea(networkClose, `${label} Network Link peek close`);
 	await networkDisclosure.click();
+	if (await railOptions.isVisible()) await railOptions.click();
 	await page.getByRole("button", { name: "SMART ROUTE", exact: true }).click();
 	await page.waitForFunction(
 		() =>
@@ -52351,8 +52385,9 @@ async function assertCompactContextualInspectorSheet(page, inspectorTestId, labe
 	const primaryLoopAvailability = await inspector.getAttribute(
 		"data-primary-process-loop-availability",
 	);
-	const expectedPeekHeight =
-		primaryLoopAvailability === "none" ? 88 : primaryLoopVisible === "true" ? 116 : 64;
+	const expectedPeekHeight = (await inspector.getAttribute("data-view-mode")) === "3d"
+  ? (primaryLoopAvailability === "none" ? 88 : primaryLoopVisible === "true" ? 116 : 64)
+  : 64;
 	assertEqual(
 		await inspector.getAttribute("data-compact-layout"),
 		"bottom-sheet",
@@ -56609,6 +56644,8 @@ async function exerciseOrdinaryRailPointerAcceptance(activeBrowser) {
 					await assertLocatorInsideViewport(page, control);
 					await assertLocatorOwnsHitArea(control, "short expanded activity/camera control");
 				}
+				const shortcutHelp = page.getByRole("button", { name: "현재 작업 단축키 더 보기", exact: true });
+				if ((await shortcutHelp.getAttribute("aria-expanded")) !== "true") await shortcutHelp.click();
 				for (const id of ["build-track", "rotate-build"]) {
 					const hint = page.locator(`.tilefab-action-hint[data-hint-id="${id}"]`);
 					await assertLocatorInsideViewport(page, hint);
@@ -58187,7 +58224,7 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 		for (const phrase of [
 			"다음 레일은 빈 곳 어디서든",
 			"Port는 장비 메뉴",
-			"선택·복제는 검사 메뉴",
+			"선택·복제는 선택 메뉴",
 		]) {
 			assertIncludes(firstRailStatus, phrase, `first ordinary Rail handoff ${phrase}`);
 		}
@@ -58305,7 +58342,7 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 		);
 		assertIncludes(
 			(await assembleMenu.getByTestId("assemble-duplicate-status").innerText()) ?? "",
-			"Rail 조각은 검사 메뉴에서 선택·복제",
+			"Rail 조각은 선택 메뉴에서 선택·복제",
 			"Assemble redirects Rail copy to Inspect",
 		);
 		await page.keyboard.press("Escape");
@@ -58745,7 +58782,7 @@ async function exerciseOpenFragmentCopy(activeBrowser) {
 			"Recent area single Undo",
 		);
 
-		await clickActivityCommand(page, "inspect", "선택 및 정보");
+		await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
 		const moduleSourceWorld = { x: 4.5, y: 0.5 };
 		await centerWorld(page, moduleSourceWorld);
 		await moveToWorld(page, moduleSourceWorld);

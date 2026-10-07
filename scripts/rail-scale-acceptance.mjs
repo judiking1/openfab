@@ -9763,7 +9763,7 @@ async function openStaticFabNavigatorTab(page, tab) {
 		throw new Error(`Unknown FAB Navigator tab: ${String(tab)}.`);
 	}
 	const app = page.getByTestId("tilefab-app");
-	const launcher = await activityCommandButton(page, "inspect", "FAB 내비게이터");
+	const launcher = await activityCommandButton(page, "inspect", "구조 · FAB 내비게이터");
 	if ((await app.getAttribute("data-navigator-tab")) === "") {
 		await launcher.click();
 		await page.locator("#tilefab-fab-navigator").waitFor({ state: "visible" });

@@ -4715,6 +4715,26 @@ button.tilefab-action-hint[aria-disabled="true"] {
 	animation: none;
 }
 
+.tilefab-action-hint-help {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	min-height: 44px;
+	padding: 6px 10px;
+	border: 0;
+	border-left: 1px solid #344446;
+	background: transparent;
+	color: #a5b8ba;
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+.tilefab-action-hint-help:focus-visible {
+	outline: 2px solid #99e4e2;
+	outline-offset: -2px;
+}
+
 .tilefab-action-hint:last-child {
 	border-right: 0;
 }
@@ -8331,7 +8351,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-tools[data-tool-density="compact"] .tilefab-tool-button[data-compact-caption] {
-	grid-template-rows: 19px 9px;
+	grid-template-rows: 19px 11px;
 	align-content: center;
 	gap: 2px;
 }
@@ -8342,10 +8362,10 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	max-width: 38px;
 	overflow: hidden;
 	color: #8da0a2;
-	font-size: 7px;
+	font-size: 9px;
 	font-weight: 820;
 	letter-spacing: -0.02em;
-	line-height: 9px;
+	line-height: 11px;
 	text-overflow: clip;
 	white-space: nowrap;
 }
@@ -8390,7 +8410,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	.tilefab-editor-activity-tools
 	> .tilefab-tool-button {
 	height: auto;
-	min-height: 60px;
+	min-height: 44px;
 	grid-template-columns: 24px minmax(0, 1fr);
 	gap: 8px;
 	padding: 8px;
@@ -14242,5 +14262,60 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	.tilefab-workspace:has(.tilefab-tools[data-tool-density="expanded"])
 		.tilefab-action-hints[data-context="build"][data-raised="true"] {
 		left: 252px;
+	}
+}
+
+.tilefab-rail-options-toggle {
+	display: none;
+}
+@media (max-width: 760px) {
+	.tilefab-app .tilefab-buildbar[data-compact-rail="true"] {
+		left: var(--tilefab-compact-rail-safe-left);
+		right: 10px;
+		bottom: 10px;
+		width: auto;
+		min-width: 0;
+		max-width: none;
+		height: auto;
+		min-height: 58px;
+		max-height: min(360px, calc(100% - 100px));
+		box-sizing: border-box;
+		flex-wrap: wrap;
+		gap: 6px;
+		padding: 6px;
+		overflow-y: auto;
+		transform: none;
+	}
+	.tilefab-app
+		.tilefab-buildbar[data-compact-rail="true"][data-options-expanded="false"]
+		> :not(.tilefab-rail-options-toggle):not(.tilefab-network-link-steps) {
+		display: none;
+	}
+	.tilefab-buildbar[data-compact-rail="true"] > .tilefab-rail-options-toggle {
+		display: flex;
+		flex: 1 0 100%;
+		min-height: 44px;
+		align-items: center;
+		gap: 8px;
+		padding: 8px;
+		border: 1px solid #425b5d;
+		border-radius: 4px;
+		background: #192b2c;
+		color: #d9eeee;
+		font-size: 12px;
+	}
+	.tilefab-rail-options-toggle strong {
+		flex: 1;
+		text-align: left;
+	}
+	.tilefab-rail-options-label {
+		color: #a3babb;
+	}
+	.tilefab-workspace:has(.tilefab-buildbar[data-compact-rail="true"])
+		.tilefab-action-hints[data-raised="true"] {
+		bottom: var(--tilefab-port-dock-clearance, 80px);
+	}
+	.tilefab-workspace:has(.tilefab-buildbar[data-compact-rail="true"]) .tilefab-recovery {
+		bottom: calc(var(--tilefab-port-dock-clearance, 80px) + 58px);
 	}
 }

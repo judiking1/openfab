@@ -443,17 +443,20 @@ export function GuidedBuildPanel({
 			evaluation.missions.some(
 				(mission) => mission.definition.id === "process-loop" && mission.status === "complete",
 			) ? (
-				<p
+				<div
 					className="tilefab-guided-build-progress-cue"
 					data-testid="guided-loop-registration-note"
 				>
 					<strong>레일 폐합 실습 완료 · Process Loop 미등록</strong>
-					<span>
-						소속이 필요하면 Guide를 접고 검사에서 레일을 선택한 뒤 O로 연결 전체를 선택하세요. 선택
-						패널에서 장비가 있으면 ‘레일만 선택’을 누르고, 이름을 입력해 ‘작업 루프로 등록’을
-						확정하세요.
-					</span>
-				</p>
+					<details>
+						<summary>Loop 등록 방법</summary>
+						<span>
+							소속이 필요하면 Guide를 접고 선택에서 레일을 선택한 뒤 O로 연결 전체를 선택하세요.
+							선택 패널에서 장비가 있으면 ‘레일만 선택’을 누르고, 이름을 입력해 ‘작업 루프로 등록’을
+							확정하세요.
+						</span>
+					</details>
+				</div>
 			) : null}
 			{chapterCheckpoint && nextChapter ? (
 				<GuidedBuildChapterCheckpoint
@@ -504,7 +507,12 @@ export function GuidedBuildPanel({
 					{missionDetail ? (
 						<small data-testid="guided-build-mission-detail">{missionDetail}</small>
 					) : null}
-					<p>{prompt.objective}</p>
+					{!equipmentWorkspaceOwnsInput &&
+					!primaryTargetManaged &&
+					!keyboardRailActive &&
+					!keyboardPortActive ? (
+						<p>{prompt.objective}</p>
+					) : null}
 					{practiceGraduated && definition.id === "bay" ? (
 						<p
 							className="tilefab-guided-build-project-scope"

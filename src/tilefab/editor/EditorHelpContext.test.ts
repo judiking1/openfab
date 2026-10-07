@@ -81,7 +81,7 @@ describe("deriveEditorHelpContext", () => {
 			organizationSelectionCount: 1,
 		});
 
-		expect(context.eyebrow).toBe("검사 · FAB ORGANIZATION");
+		expect(context.eyebrow).toBe("선택 · FAB ORGANIZATION");
 		expect(context.summary).toContain("같은 종류의 Bay나 Bank");
 		expect(context.steps[0]?.description).toContain("⌘/Ctrl+클릭");
 		expect(context.steps[1]?.description).toContain("선택 조직만");
@@ -178,6 +178,6 @@ describe("deriveEditorHelpContext", () => {
 			organizationSelectionCount: 0,
 			equipmentEdit: { equipmentType: "OHB", mode: "move" },
 		});
-		expect(context.eyebrow).toBe("검사 · SELECT");
+		expect(context.eyebrow).toBe("선택 · SELECT");
 	});
 });

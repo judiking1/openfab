@@ -38,6 +38,7 @@ import { PORT_EQUIPMENT_NEXT_CANDIDATE_RADIUS_METERS } from "./PortEquipmentKeyb
 import { stkTemplatePresentation } from "./StkDraftPresentation";
 
 export interface PortEquipmentPlacementWorkspaceProps {
+	readonly applyGuidedPortKeyboard: () => void;
 	readonly activeMap: Readonly<{ size: number }>;
 	readonly activePortAuthoringInstruction: string;
 	readonly activePortAuthoringPresentation: PortAuthoringSurfacePresentation;
@@ -125,6 +126,7 @@ export interface PortEquipmentPlacementWorkspaceProps {
 }
 
 export function PortEquipmentPlacementWorkspace({
+	applyGuidedPortKeyboard,
 	activeMap,
 	activePortAuthoringInstruction,
 	activePortAuthoringPresentation,
@@ -210,6 +212,7 @@ export function PortEquipmentPlacementWorkspace({
 									: "Stocker · 보관 장비"}
 				</span>
 			}
+			exitInActions={tool === "eq" && activePortAuthoringPresentation.configurationAvailable}
 			exit={
 				!guidedBuildExperienceActive || ordinaryEqRowExit ? (
 					<button
@@ -252,88 +255,42 @@ export function PortEquipmentPlacementWorkspace({
 			}
 			selection={
 				<>
-					{!guidedBuildExperienceActive &&
-					!ohbPlacementIntent &&
-					equipmentProcessLoopChoices.length > 0 ? (
-						<div className="tilefab-equipment-process-loop-target">
-							<label htmlFor="tilefab-ordinary-port-process-loop-target">
-								<span className="tilefab-equipment-process-loop-label-full">Port 배치 범위</span>
-								<span className="tilefab-equipment-process-loop-label-compact">Port 범위</span>
-							</label>
-							<select
-								id="tilefab-ordinary-port-process-loop-target"
-								aria-label="Port 배치 범위 (Process Loop)"
-								data-testid="ordinary-port-process-loop-target"
-								value={ordinaryPortProcessLoopTargetId ?? ""}
-								onChange={(event) =>
-									chooseOrdinaryPortProcessLoop(
-										event.currentTarget.value === "" ? null : Number(event.currentTarget.value),
-									)
+					{activePortAuthoringPresentation.configurationAvailable ? (
+						<ol className="tilefab-equipment-steps" aria-label="배치 단계">
+							<li
+								aria-current={
+									tool === "stk"
+										? stkDraftReady
+											? undefined
+											: "step"
+										: tool !== "eq" ||
+												(!portRowDragActive && guidedPortKeyboard?.phase !== "choose-end")
+											? "step"
+											: undefined
 								}
 							>
-								<option value="">전체 Port 슬롯</option>
-								{equipmentProcessLoopChoices.map((choice) => (
-									<option key={choice.id} value={choice.id}>
-										{choice.label}
-									</option>
-								))}
-							</select>
-							<button
-								type="button"
-								className="tilefab-equipment-process-loop-start"
-								data-testid="ordinary-port-process-loop-start"
-								disabled={
-									ordinaryPortProcessLoopTargetId !== null &&
-									!selectedEquipmentProcessLoopScope?.eligibleCount
-								}
-								onClick={() => {
-									setOrdinaryPortProcessLoopFeedback(null);
-									if (!guidedPortKeyboardSessionRef.current && activePortAuthoringType) {
-										startOrdinaryPortKeyboard(activePortAuthoringType);
-									} else canvasRef.current?.focus({ preventScroll: true });
-								}}
-							>
-								배치 시작
-							</button>
-							{ordinaryPortProcessLoopTargetId !== null || ordinaryPortProcessLoopFeedback ? (
-								<small data-testid="ordinary-port-process-loop-target-count">
-									{ordinaryPortProcessLoopTargetId !== null &&
-									selectedEquipmentProcessLoopChoice ? (
-										<span
-											className="tilefab-equipment-process-loop-selected-name"
-											data-testid="ordinary-port-process-loop-selected-name"
-										>
-											{selectedEquipmentProcessLoopChoice.label}
-											{" · "}{" "}
-										</span>
-									) : null}
-									{ordinaryPortProcessLoopTargetId !== null ? (
-										<>
-											직접 연결된 {activePortAuthoringType} 슬롯{" "}
-											{selectedEquipmentProcessLoopScope?.eligibleCount ?? 0}개
-											{selectedEquipmentProcessLoopScope?.eligibleCount
-												? " · 생성 뒤 장비 속성에서 소속 확정"
-												: null}
-										</>
-									) : null}
-									{ordinaryPortProcessLoopFeedback ? (
-										<span
-											ref={ordinaryPortProcessLoopFeedbackRef}
-											className="tilefab-equipment-process-loop-feedback"
-											data-testid="ordinary-port-process-loop-feedback"
-											role="note"
-										>
-											{ordinaryPortProcessLoopFeedback.message}
-										</span>
-									) : null}
-								</small>
+								<span>1</span> {tool === "eq" ? "시작점" : "위치 선택"}
+							</li>
+							{tool === "eq" ? (
+								<li
+									aria-current={
+										portRowDragActive || guidedPortKeyboard?.phase === "choose-end"
+											? "step"
+											: undefined
+									}
+								>
+									<span>2</span> 끝점 · 배치
+								</li>
 							) : null}
-						</div>
+							{tool === "stk" ? (
+								<li aria-current={stkDraftReady ? "step" : undefined}>
+									<span>2</span> Stocker 생성
+								</li>
+							) : null}
+						</ol>
 					) : null}
-					{(guidedBuildExperienceActive ||
-						ohbPlacementIntent ||
-						equipmentProcessLoopChoices.length === 0) &&
-					ordinaryPortProcessLoopFeedback ? (
+
+					{ordinaryPortProcessLoopFeedback ? (
 						<small
 							ref={ordinaryPortProcessLoopFeedbackRef}
 							className="tilefab-equipment-process-loop-feedback tilefab-equipment-process-loop-feedback-standalone"
@@ -348,27 +305,34 @@ export function PortEquipmentPlacementWorkspace({
 						className="tilefab-port-authoring-instruction"
 						data-state={tool === "stk" && stkDraftReview.issue ? "blocked" : "ready"}
 					>
-						<span
-							role={guidedPortKeyboard ? undefined : "status"}
-							aria-live={guidedPortKeyboard ? "off" : "polite"}
-						>
-							{tool === "stk" ? (
-								<span className="tilefab-stk-review" data-testid="stk-draft-review">
-									<strong>{stkDraftReview.title}</strong>
-									<span>{basePortAuthoringInstruction}</span>
-									{stkDraftReview.issue ? (
-										<span className="tilefab-stk-review-issue">{stkDraftReview.issue}</span>
-									) : null}
-								</span>
-							) : null}
-							{tool !== "stk" ? (
-								<span className="tilefab-port-authoring-detail">
-									{ohbPlacementIntent
-										? `PORT-${ohbPlacementIntent.portId} · 방향키/WASD로 대상 이동 · Enter 또는 클릭으로 ${ohbPlacementIntent.kind === "move" ? "이동" : "복제"} · Esc 취소`
+						{tool === "stk" ? (
+							<span
+								className="tilefab-stk-review"
+								data-testid="stk-draft-review"
+								role={guidedPortKeyboard ? undefined : "status"}
+							>
+								<strong>{stkDraftReview.title}</strong>
+								{stkDraftReview.issue ? (
+									<span className="tilefab-stk-review-issue">{stkDraftReview.issue}</span>
+								) : null}
+							</span>
+						) : null}
+						{!activePortAuthoringPresentation.configurationAvailable ||
+						(ordinaryPortProcessLoopTargetId !== null &&
+							!selectedEquipmentProcessLoopScope?.eligibleCount) ? (
+							<span className="tilefab-port-authoring-detail" role="status">
+								{activePortAuthoringInstruction}
+							</span>
+						) : (
+							<span className="tilefab-sr-only">
+								{ohbPlacementIntent
+									? `PORT-${ohbPlacementIntent.portId} · 방향키/WASD로 대상 이동 · Enter 또는 클릭으로 ${ohbPlacementIntent.kind === "move" ? "이동" : "복제"} · Esc 취소`
+									: tool === "stk"
+										? basePortAuthoringInstruction
 										: activePortAuthoringInstruction}
-								</span>
-							) : null}
-						</span>
+							</span>
+						)}
+
 						<span className="tilefab-equipment-view-actions">
 							{guidedBuildPortPlacementCoach ? (
 								<button
@@ -529,7 +493,22 @@ export function PortEquipmentPlacementWorkspace({
 				) : null
 			}
 			actions={
-				tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
+				tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
+					<button
+						type="button"
+						className="tilefab-equipment-confirm"
+						data-testid="eq-placement-confirm"
+						disabled={editorMutationWaitActive || !guidedPortKeyboard}
+						aria-keyshortcuts="Enter"
+						onClick={() => {
+							applyGuidedPortKeyboard();
+							canvasRef.current?.focus({ preventScroll: true });
+						}}
+					>
+						<Check size={15} />{" "}
+						{guidedPortKeyboard?.phase === "choose-end" ? "EQ 배치" : "시작점 선택"}
+					</button>
+				) : tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
 					<fieldset
 						className="tilefab-segmented tilefab-stk-actions"
 						aria-label="Stocker 포트 선택 작업"
@@ -660,18 +639,98 @@ export function PortEquipmentPlacementWorkspace({
 				) : null
 			}
 			optionalSettings={
-				tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
-					<label className="tilefab-eq-recipe">
-						<span>공정 Recipe</span>
-						<input
-							type="text"
-							value={eqRecipe}
-							maxLength={120}
-							placeholder="선택 사항"
-							onChange={(event) => setEqRecipe(event.currentTarget.value)}
-						/>
-					</label>
-				) : null
+				<>
+					{!guidedBuildExperienceActive &&
+					!ohbPlacementIntent &&
+					equipmentProcessLoopChoices.length > 0 ? (
+						<div className="tilefab-equipment-process-loop-target">
+							<label htmlFor="tilefab-ordinary-port-process-loop-target">
+								<span className="tilefab-equipment-process-loop-label-full">Port 배치 범위</span>
+								<span className="tilefab-equipment-process-loop-label-compact">Port 범위</span>
+							</label>
+							<select
+								id="tilefab-ordinary-port-process-loop-target"
+								aria-label="Port 배치 범위 (Process Loop)"
+								data-testid="ordinary-port-process-loop-target"
+								value={ordinaryPortProcessLoopTargetId ?? ""}
+								onChange={(event) =>
+									chooseOrdinaryPortProcessLoop(
+										event.currentTarget.value === "" ? null : Number(event.currentTarget.value),
+									)
+								}
+							>
+								<option value="">전체 Port 슬롯</option>
+								{equipmentProcessLoopChoices.map((choice) => (
+									<option key={choice.id} value={choice.id}>
+										{choice.label}
+									</option>
+								))}
+							</select>
+							{!guidedPortKeyboard ? (
+								<button
+									type="button"
+									className="tilefab-equipment-process-loop-start"
+									data-testid="ordinary-port-process-loop-start"
+									disabled={
+										ordinaryPortProcessLoopTargetId !== null &&
+										!selectedEquipmentProcessLoopScope?.eligibleCount
+									}
+									onClick={() => {
+										setOrdinaryPortProcessLoopFeedback(null);
+										if (!guidedPortKeyboardSessionRef.current && activePortAuthoringType) {
+											startOrdinaryPortKeyboard(activePortAuthoringType);
+										} else canvasRef.current?.focus({ preventScroll: true });
+									}}
+								>
+									배치 시작
+								</button>
+							) : null}
+							{ordinaryPortProcessLoopTargetId !== null || ordinaryPortProcessLoopFeedback ? (
+								<small data-testid="ordinary-port-process-loop-target-count">
+									{ordinaryPortProcessLoopTargetId !== null &&
+									selectedEquipmentProcessLoopChoice ? (
+										<span
+											className="tilefab-equipment-process-loop-selected-name"
+											data-testid="ordinary-port-process-loop-selected-name"
+										>
+											{selectedEquipmentProcessLoopChoice.label}
+											{" · "}{" "}
+										</span>
+									) : null}
+									{ordinaryPortProcessLoopTargetId !== null ? (
+										<>
+											직접 연결된 {activePortAuthoringType} 슬롯{" "}
+											{selectedEquipmentProcessLoopScope?.eligibleCount ?? 0}개
+											{selectedEquipmentProcessLoopScope?.eligibleCount
+												? " · 생성 뒤 장비 속성에서 소속 확정"
+												: null}
+										</>
+									) : null}
+								</small>
+							) : null}
+						</div>
+					) : null}
+
+					<span className="tilefab-port-authoring-detail">
+						{ohbPlacementIntent
+							? `PORT-${ohbPlacementIntent.portId} · 방향키/WASD로 대상 이동 · Enter 또는 클릭으로 ${ohbPlacementIntent.kind === "move" ? "이동" : "복제"} · Esc 취소`
+							: tool === "stk"
+								? basePortAuthoringInstruction
+								: activePortAuthoringInstruction}
+					</span>
+					{tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
+						<label className="tilefab-eq-recipe">
+							<span>공정 Recipe</span>
+							<input
+								type="text"
+								value={eqRecipe}
+								maxLength={120}
+								placeholder="선택 사항"
+								onChange={(event) => setEqRecipe(event.currentTarget.value)}
+							/>
+						</label>
+					) : null}
+				</>
 			}
 		/>
 	);

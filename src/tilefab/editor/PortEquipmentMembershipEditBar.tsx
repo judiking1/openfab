@@ -2,6 +2,8 @@ import { ArrowLeftRight, Check, Crosshair, MousePointer2, Search, X } from "luci
 import type { ReactNode } from "react";
 import type { CompiledPortSlots } from "../compile/PortSlotCompiler";
 
+import { observePortDockClearance } from "./observePortDockClearance";
+
 export interface PortEquipmentMembershipEditBarProps {
 	readonly clearTransientConstruction: (message?: string) => void;
 	readonly completePortEquipmentMembershipEdit: () => void;
@@ -36,6 +38,7 @@ export function PortEquipmentMembershipEditBar({
 }: PortEquipmentMembershipEditBarProps): ReactNode {
 	return (
 		<div
+			ref={observePortDockClearance}
 			className="tilefab-buildbar tilefab-equipment-transformbar tilefab-equipment-membershipbar"
 			data-testid="port-equipment-membership-editbar"
 			data-port-type={portEquipmentMembershipEditSession.portType}
@@ -126,26 +129,38 @@ export function PortEquipmentMembershipEditBar({
 					<Search size={14} aria-hidden="true" /> 선택 범위 보기
 				</button>
 			) : null}
-			<button
-				type="button"
-				className="tilefab-inspector-primary"
-				data-testid="complete-port-equipment-membership"
-				disabled={!portEquipmentMembershipSummary?.canComplete}
-				onClick={completePortEquipmentMembershipEdit}
-				aria-keyshortcuts="Enter"
-			>
-				<Check size={14} /> 완료
-			</button>
-			<button
-				type="button"
-				className="tilefab-placement-exit"
-				data-testid="cancel-port-equipment-membership"
-				aria-keyshortcuts="Escape"
-				aria-label="포트 구성 편집 취소"
-				onClick={() => clearTransientConstruction("포트 구성 편집을 취소했습니다")}
-			>
-				<X size={14} /> ESC
-			</button>
+			<details className="tilefab-equipment-help">
+				<summary>조작 방법</summary>
+				<p>
+					{portEquipmentMembershipEditSession.portType === "EQ"
+						? "방향키로 끝점 이동 · Q/E로 반대 끝점 선택"
+						: "방향키로 커서 이동 · Space로 Port 추가·제거"}
+					<br />
+					Enter 완료 · Esc 취소
+				</p>
+			</details>
+			<div className="tilefab-equipment-transform-actions">
+				<button
+					type="button"
+					className="tilefab-inspector-primary"
+					data-testid="complete-port-equipment-membership"
+					disabled={!portEquipmentMembershipSummary?.canComplete}
+					onClick={completePortEquipmentMembershipEdit}
+					aria-keyshortcuts="Enter"
+				>
+					<Check size={14} /> 완료
+				</button>
+				<button
+					type="button"
+					className="tilefab-placement-exit"
+					data-testid="cancel-port-equipment-membership"
+					aria-keyshortcuts="Escape"
+					aria-label="포트 구성 편집 취소"
+					onClick={() => clearTransientConstruction("포트 구성 편집을 취소했습니다")}
+				>
+					<X size={14} /> 취소
+				</button>
+			</div>
 		</div>
 	);
 }

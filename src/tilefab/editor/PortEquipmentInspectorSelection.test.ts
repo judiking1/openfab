@@ -289,16 +289,19 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 		if (!editor || typeof editor.type !== "function") throw new Error("Expected EQ size editor.");
 		const setLength = vi.fn();
 		const setWidth = vi.fn();
+		const setFailure = vi.fn();
 		const useState = vi
 			.mocked(React.useState)
 			.mockReturnValueOnce(["5.5", setLength])
-			.mockReturnValueOnce(["", setWidth]);
+			.mockReturnValueOnce(["", setWidth])
+			.mockReturnValueOnce(["겹침으로 적용할 수 없습니다", setFailure]);
 		const sourceBefore = JSON.stringify(state);
 		try {
 			const renderEditor = editor.type as (props: Record<string, unknown>) => ReactNode;
 			const draft = renderEditor(editor.props);
 			const draftMarkup = renderToStaticMarkup(draft);
-			expect(draftMarkup).toContain("미적용 입력이 있습니다.");
+			expect(draftMarkup).toContain("겹침으로 적용할 수 없습니다");
+			expect(draftMarkup).toContain('role="alert" data-testid="eq-body-draft-status"');
 			expect(inspectorActionButton(draftMarkup, "apply-eq-body-dimensions")).toContain(
 				'disabled=""',
 			);
@@ -310,10 +313,91 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 			(cancelDraft?.props.onClick as () => void)();
 			expect(setLength).toHaveBeenCalledExactlyOnceWith(bodyDimensions ? "4" : "2");
 			expect(setWidth).toHaveBeenCalledExactlyOnceWith(bodyDimensions ? "1.2" : "0.9");
+			expect(setFailure).toHaveBeenCalledExactlyOnceWith(null);
 			expect(commit).not.toHaveBeenCalled();
 			expect(clearSelection).not.toHaveBeenCalled();
 			expect(JSON.stringify(state)).toBe(sourceBefore);
 			expect(props.selectedPortEquipment).toEqual(selection());
+		} finally {
+			useState.mockRestore();
+		}
+	});
+
+	it("keeps EQ apply failure local to its draft and clears it on correction or success", () => {
+		const state = eqState();
+		const selected = resolveEditablePortEquipmentSelection(state, selection());
+		if (!selected) throw new Error("Expected an editable EQ selection.");
+		const failure = "EQ-1 몸체가 EQ-2 몸체와 겹칩니다.";
+		const commit = vi.fn().mockReturnValueOnce(failure).mockReturnValueOnce(undefined);
+		const props = { ...inspectorProps(state, selected), commitSelectedEqBodyDimensions: commit };
+		const editor = findInspectorElement(
+			PortEquipmentInspector(props),
+			(element) => element.props.group === selected.equipmentGroup,
+		);
+		if (!editor || typeof editor.type !== "function") throw new Error("Expected EQ size editor.");
+		const renderEditor = editor.type as (props: Record<string, unknown>) => ReactNode;
+		const setFailure = vi.fn();
+		const useState = vi.mocked(React.useState);
+		const renderDraft = (error: string | null) => {
+			useState
+				.mockReturnValueOnce(["4.5", vi.fn()])
+				.mockReturnValueOnce(["3", vi.fn()])
+				.mockReturnValueOnce([error, setFailure]);
+			return renderEditor(editor.props);
+		};
+		const sourceBefore = JSON.stringify(state);
+		try {
+			const draft = renderDraft(null);
+			const form = findInspectorElement(draft, (element) => element.type === "form");
+			const submit = form?.props.onSubmit as (event: { preventDefault: () => void }) => void;
+			submit({ preventDefault: vi.fn() });
+			expect(commit).toHaveBeenLastCalledWith(
+				{ lengthMillimeters: 4500, widthMillimeters: 3000 },
+				selection(),
+			);
+			expect(setFailure).toHaveBeenLastCalledWith(failure);
+			const failed = renderDraft(failure);
+			const markup = renderToStaticMarkup(failed);
+			expect(markup).toContain('role="alert" data-testid="eq-body-draft-status"');
+			expect(markup).toContain(failure);
+			expect(markup).not.toContain("미적용 입력이 있습니다.");
+			expect(markup.match(/aria-describedby="eq-body-apply-feedback"/g)).toHaveLength(2);
+			const length = findInspectorElement(
+				failed,
+				(element) => element.props["data-testid"] === "eq-body-length",
+			);
+			(length?.props.onChange as (event: { currentTarget: { value: string } }) => void)({
+				currentTarget: { value: "4" },
+			});
+			expect(setFailure).toHaveBeenLastCalledWith(null);
+			const width = findInspectorElement(
+				failed,
+				(element) => element.props["data-testid"] === "eq-body-width",
+			);
+			(width?.props.onChange as (event: { currentTarget: { value: string } }) => void)({
+				currentTarget: { value: "2" },
+			});
+			expect(setFailure).toHaveBeenLastCalledWith(null);
+			submit({ preventDefault: vi.fn() });
+			expect(setFailure).toHaveBeenLastCalledWith(null);
+			const alternatePort = findInspectorElement(
+				PortEquipmentInspector({ ...props, selectedPortEquipment: { ...selection(), portId: 2 } }),
+				(element) => element.props.group === selected.equipmentGroup,
+			);
+			expect(alternatePort?.key).not.toBe(editor.key);
+			useState
+				.mockReturnValueOnce(["2", vi.fn()])
+				.mockReturnValueOnce(["0.9", vi.fn()])
+				.mockReturnValueOnce([failure, setFailure]);
+			const unchangedDraft = renderEditor(editor.props);
+			const dismissFailure = findInspectorElement(
+				unchangedDraft,
+				(element) => element.props["data-testid"] === "cancel-eq-body-dimensions",
+			);
+			expect(dismissFailure?.props.disabled).toBe(false);
+			(dismissFailure?.props.onClick as () => void)();
+			expect(setFailure).toHaveBeenLastCalledWith(null);
+			expect(JSON.stringify(state)).toBe(sourceBefore);
 		} finally {
 			useState.mockRestore();
 		}
@@ -368,7 +452,7 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 		);
 		expect(markup).toContain("소속을 유지하며 같은 Process Loop 안에서");
 		expect(markup).toContain(
-			"다른 Loop로 소속을 바꾸거나 철거하려면 아래에서 소속을 먼저 분리하세요.",
+			"다른 Loop로 소속을 바꾸거나 철거하려면 Process Loop 소속에서 먼저 분리하세요.",
 		);
 		expect(markup).not.toContain("아래 소속을 먼저 분리하세요.");
 		expect(markup).toContain(actions.delete.reason);
@@ -506,7 +590,7 @@ describe("PortEquipmentInspector action explanations", () => {
 		expect(markup).toContain(
 			outsideLoop
 				? "이동·Port 편집·철거 전에 FAB 구조에서 소속을 정리하세요."
-				: "다른 Loop로 소속을 바꾸거나 철거하려면 아래에서 소속을 먼저 분리하세요.",
+				: "다른 Loop로 소속을 바꾸거나 철거하려면 Process Loop 소속에서 먼저 분리하세요.",
 		);
 		expect(markup).toContain("복제는 계속할 수 있습니다.");
 		for (const id of [
