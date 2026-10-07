@@ -152,6 +152,8 @@ export default function StaticFabInspection3DViewport({
 					),
 				onClearSelection: () => callbacksRef.current.onClearSelection(),
 				onFocusChange: (focus) => callbacksRef.current.onFocusChange(focus),
+				onFailure: (error) =>
+					callbacksRef.current.onFailure(normalizeFailure(error, "3D 뷰를 표시하지 못했습니다")),
 				onStatsChange: () => publishSceneStats(canvas, scene),
 				onPickStatsChange: (stats) => publishScenePickStats(canvas, stats),
 			});
@@ -175,8 +177,13 @@ export default function StaticFabInspection3DViewport({
 		return () => {
 			resizeObserver.disconnect();
 			canvas.removeEventListener("webglcontextlost", handleContextLoss);
-			scene.dispose();
-			if (sceneRef.current === scene) sceneRef.current = null;
+			try {
+				scene.dispose();
+			} catch (error) {
+				callbacksRef.current.onFailure(normalizeFailure(error, "3D 뷰 자원을 정리하지 못했습니다"));
+			} finally {
+				if (sceneRef.current === scene) sceneRef.current = null;
+			}
 		};
 	}, []);
 	useEffect(() => {

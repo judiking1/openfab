@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.82] - 2026-10-08
+
+Builder preview; this correction does not declare V1 complete and simulation stays disabled.
+
+- Release keyboard listeners and renderer-owned texture resources when leaving 3D inspection,
+  including repeated visits, a held Control key and another active renderer sharing the texture.
+- Clean up the remaining resources after a rendering or disposal failure and return safely to
+  2D while preserving the authored project and history.
+
 ## [0.1.81] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

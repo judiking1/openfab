@@ -113,6 +113,7 @@ export interface StaticFabInspection3DSceneCallbacks {
 	) => void;
 	readonly onClearSelection: () => void;
 	readonly onFocusChange: (focus: Readonly<{ x: number; z: number }>) => void;
+	readonly onFailure: (error: unknown) => void;
 	readonly onStatsChange?: () => void;
 	readonly onPickStatsChange?: (stats: StaticFabInspection3DPickStats) => void;
 }
@@ -262,11 +263,99 @@ export function staticFabInspectionPortBodySectionBounds(
 	});
 }
 
+/** Dispose against the root used at connection, even after React has detached the canvas. */
+export function disposeStaticFabInspectionOrbitControls(
+	controls: OrbitControls,
+	connectedRoot: EventTarget,
+): void {
+	// Three r185 re-reads getRootNode() during disconnect and leaves a pending Control keyup.
+	// These bound callbacks are version-sensitive; lifetime tests use the installed OrbitControls.
+	const callbacks = controls as unknown as {
+		readonly _interceptControlDown: EventListener;
+		readonly _interceptControlUp: EventListener;
+	};
+	connectedRoot.removeEventListener("keydown", callbacks._interceptControlDown, { capture: true });
+	connectedRoot.removeEventListener("keyup", callbacks._interceptControlUp, { capture: true });
+	controls.dispose();
+}
+
+type TextureDisposeListener = (event: THREE.Event<"dispose", THREE.Texture>) => void;
+
+function inspectionCleanupErrors(actions: readonly (() => void)[]): unknown[] {
+	const errors: unknown[] = [];
+	for (const action of actions) {
+		try {
+			action();
+		} catch (error) {
+			errors.push(error);
+		}
+	}
+	return errors;
+}
+
+/** Release only this renderer's allocation of the DFG LUT actually used by a drawn material. */
+export function captureStaticFabInspectionDfgRelease(
+	renderer: Pick<THREE.WebGLRenderer, "properties" | "initTexture">,
+	material: THREE.Material,
+): (() => void) | null {
+	const properties = renderer.properties.get(material) as {
+		uniforms?: { dfgLUT?: { value?: unknown } };
+	};
+	const texture = properties.uniforms?.dfgLUT?.value;
+	if (!(texture instanceof THREE.Texture) || !renderer.properties.has(texture)) return null;
+	const textureProperties = renderer.properties.get(texture) as { __webglInit?: boolean };
+	if (textureProperties.__webglInit !== true) return null;
+
+	// r185 shares the LUT but registers one onTextureDispose closure per renderer. Observe that
+	// exact closure on an exclusively owned probe; never dispatch dispose on the shared LUT.
+	const probe: THREE.Texture = new THREE.DataTexture(new Uint8Array(4), 1, 1);
+	probe.needsUpdate = true;
+	const listeners: TextureDisposeListener[] = [];
+	const addEventListener = probe.addEventListener;
+	probe.addEventListener = (type, listener): void => {
+		if (type === "dispose") listeners.push(listener as TextureDisposeListener);
+		addEventListener.call(probe, type, listener as TextureDisposeListener);
+	};
+	const release = (): void => {
+		// Run while renderer properties/source refcounts still exist, before clearContent/dispose.
+		const errors = inspectionCleanupErrors(
+			listeners.map((listener) => () => {
+				if (!texture.hasEventListener("dispose", listener)) return;
+				try {
+					listener.call(texture, { type: "dispose", target: texture });
+				} finally {
+					// Even a failed native deallocation must not retain this renderer through the singleton.
+					texture.removeEventListener("dispose", listener);
+				}
+			}),
+		);
+		if (errors.length > 0) throw new AggregateError(errors, "3D 텍스처 자원을 정리하지 못했습니다");
+	};
+	const errors = inspectionCleanupErrors([
+		() => renderer.initTexture(probe),
+		() => probe.dispose(),
+	]);
+	const listener = listeners[0];
+	if (listeners.length !== 1 || !listener || !texture.hasEventListener("dispose", listener)) {
+		errors.push(
+			new Error("Cannot identify the inspection renderer's DFG texture disposal callback."),
+		);
+	}
+	if (errors.length > 0) {
+		// The owning callback can already be registered when initialization or probe disposal throws.
+		errors.push(...inspectionCleanupErrors([release]));
+		throw new AggregateError(errors, "3D 텍스처 자원을 준비하지 못했습니다");
+	}
+	return release;
+}
+
 /** Disposable imperative Three.js boundary. It never owns authored or semantic editor state. */
 export class StaticFabInspection3DScene {
 	readonly renderer: THREE.WebGLRenderer;
 	readonly camera: THREE.PerspectiveCamera;
 	readonly controls: OrbitControls;
+	private readonly controlsRoot: EventTarget;
+	private releaseDfgTexture: (() => void) | null = null;
 
 	private readonly scene = new THREE.Scene();
 	private readonly content = new THREE.Group();
@@ -341,6 +430,7 @@ export class StaticFabInspection3DScene {
 		this.camera = new THREE.PerspectiveCamera(38, 1, 0.02, 10_000);
 		this.camera.layers.set(0);
 		this.camera.up.set(0, 1, 0);
+		this.controlsRoot = canvas.getRootNode();
 		this.controls = new OrbitControls(this.camera, canvas);
 		// The static inspection surface renders only on state changes. Damping would keep scheduling
 		// full-FAB frames after every pointer gesture and starve editor/browser work on large maps.
@@ -749,11 +839,17 @@ export class StaticFabInspection3DScene {
 		this.animationFrame = 0;
 		this.controls.removeEventListener("change", this.handleCameraChange);
 		this.controls.removeEventListener("end", this.publishFocus);
-		this.controls.dispose();
-		this.clearContent();
-		this.clearRuntimeVehicleMesh();
+		const releaseDfgTexture = this.releaseDfgTexture;
+		this.releaseDfgTexture = null;
 		this.simulationRuntime = null;
-		this.renderer.dispose();
+		const errors = inspectionCleanupErrors([
+			() => disposeStaticFabInspectionOrbitControls(this.controls, this.controlsRoot),
+			() => releaseDfgTexture?.(),
+			() => this.clearContent(),
+			() => this.clearRuntimeVehicleMesh(),
+			() => this.renderer.dispose(),
+		]);
+		if (errors.length > 0) throw new AggregateError(errors, "3D 뷰 자원을 정리하지 못했습니다");
 	}
 
 	private readonly handleCameraChange = (): void => {
@@ -778,13 +874,29 @@ export class StaticFabInspection3DScene {
 		if (this.disposed || this.animationFrame !== 0) return;
 		this.animationFrame = requestAnimationFrame(() => {
 			this.animationFrame = 0;
-			if (this.disposed) return;
+			this.renderFrame();
+		});
+	};
+
+	private renderFrame(): void {
+		if (this.disposed) return;
+		try {
 			const renderStartedAt = performance.now();
 			this.updateCameraClipping();
 			const chunkUpdateStartedAt = renderStartedAt;
 			this.updateRailChunkResidency();
 			const chunkUpdateMilliseconds = Math.max(0, performance.now() - chunkUpdateStartedAt);
 			this.renderer.render(this.scene, this.camera);
+			if (!this.releaseDfgTexture) {
+				this.content.traverse((object) => {
+					if (this.releaseDfgTexture || !(object instanceof THREE.Mesh)) return;
+					const materials = Array.isArray(object.material) ? object.material : [object.material];
+					for (const material of materials) {
+						this.releaseDfgTexture = captureStaticFabInspectionDfgRelease(this.renderer, material);
+						if (this.releaseDfgTexture) break;
+					}
+				});
+			}
 			const renderMilliseconds = Math.max(0, performance.now() - renderStartedAt);
 			this.renderFrameCount++;
 			this.renderMainThreadTotalMilliseconds += renderMilliseconds;
@@ -798,8 +910,15 @@ export class StaticFabInspection3DScene {
 				chunkUpdateMilliseconds,
 			);
 			this.callback.onStatsChange?.();
-		});
-	};
+		} catch (error) {
+			const cleanupErrors = inspectionCleanupErrors([() => this.dispose()]);
+			this.callback.onFailure(
+				cleanupErrors.length > 0
+					? new AggregateError([error, ...cleanupErrors], "3D 뷰를 표시하지 못했습니다")
+					: error,
+			);
+		}
+	}
 
 	private readonly publishFocus = (): void => {
 		this.callback.onFocusChange(

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { describe, expect, it } from "vitest";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import {
@@ -17,7 +18,10 @@ import {
 import type { DeterministicResidentRuntimePublication } from "../simulation/DeterministicResidentRuntimePublisher";
 import type { DeterministicScenarioRuntimePublication } from "../simulation/DeterministicScenarioRuntimePublisher";
 import {
+	captureStaticFabInspectionDfgRelease,
+	disposeStaticFabInspectionOrbitControls,
 	resolveStaticFabInspectionEquipmentBodyPick,
+	StaticFabInspection3DScene,
 	staticFabInspectionPortBodySectionBounds,
 	staticFabInspectionSampledInstanceRow,
 	writeAdvancedSwitchActuatorMatrix,
@@ -32,6 +36,320 @@ import {
 	writeSimulationRuntimeVehiclePresentationMatrices,
 	writeSupportInstanceMatrix,
 } from "./StaticFabInspection3DScene";
+
+describe("StaticFabInspection3DScene shared DFG texture lifetime", () => {
+	it("releases one renderer's allocation without dispatching shared texture disposal", () => {
+		const shared = new THREE.Texture();
+		const material = new THREE.MeshStandardMaterial();
+		const first = textureRendererFixture(material, shared);
+		const second = textureRendererFixture(material, shared);
+		let unrelatedDisposals = 0;
+		shared.addEventListener("dispose", () => unrelatedDisposals++);
+		const releaseFirst = captureStaticFabInspectionDfgRelease(first.renderer, material);
+		const releaseSecond = captureStaticFabInspectionDfgRelease(second.renderer, material);
+		expect(releaseFirst).not.toBeNull();
+		expect(releaseSecond).not.toBeNull();
+		// Identifying the owner must free its temporary probe immediately.
+		expect([...first.allocations]).toEqual([shared]);
+		expect([...second.allocations]).toEqual([shared]);
+		const secondAllocation = second.renderer.properties.get(shared);
+		releaseFirst?.();
+		releaseFirst?.();
+		expect(first.allocations.size).toBe(0);
+		expect(first.renderer.properties.has(shared)).toBe(false);
+		expect(shared.hasEventListener("dispose", first.onDispose)).toBe(false);
+		expect(shared.hasEventListener("dispose", second.onDispose)).toBe(true);
+		expect(second.renderer.properties.get(shared)).toBe(secondAllocation);
+		expect([...second.allocations]).toEqual([shared]);
+		expect(unrelatedDisposals).toBe(0);
+		releaseSecond?.();
+		releaseSecond?.();
+		expect(second.allocations.size).toBe(0);
+		expect(unrelatedDisposals).toBe(0);
+	});
+
+	it("does nothing for a material or texture not uploaded by this renderer", () => {
+		const texture = new THREE.Texture();
+		const material = new THREE.MeshStandardMaterial();
+		const owner = textureRendererFixture(material, texture);
+		expect(
+			captureStaticFabInspectionDfgRelease(owner.renderer, new THREE.MeshBasicMaterial()),
+		).toBeNull();
+		owner.renderer.properties.remove(texture);
+		expect(captureStaticFabInspectionDfgRelease(owner.renderer, material)).toBeNull();
+		expect(owner.allocations.size).toBe(1);
+	});
+
+	it("does not repeat native deallocation after external texture disposal", () => {
+		const texture = new THREE.Texture();
+		const material = new THREE.MeshStandardMaterial();
+		const owner = textureRendererFixture(material, texture);
+		const release = captureStaticFabInspectionDfgRelease(owner.renderer, material);
+		texture.dispose();
+		expect(() => release?.()).not.toThrow();
+		expect(owner.allocations.size).toBe(0);
+	});
+
+	it("rolls back the actual LUT after probe registration succeeds and initialization throws", () => {
+		const texture = new THREE.Texture();
+		const material = new THREE.MeshStandardMaterial();
+		const owner = textureRendererFixture(material, texture);
+		const other = textureRendererFixture(material, texture);
+		const initialize = owner.renderer.initTexture;
+		const failure = new Error("probe initialization failed after registration");
+		owner.renderer.initTexture = (probe) => {
+			initialize(probe);
+			throw failure;
+		};
+		try {
+			captureStaticFabInspectionDfgRelease(owner.renderer, material);
+			throw new Error("Expected initialization failure");
+		} catch (error) {
+			expect(error).toBeInstanceOf(AggregateError);
+			expect((error as AggregateError).errors).toContain(failure);
+		}
+		expect(owner.allocations.size).toBe(0);
+		expect(texture.hasEventListener("dispose", owner.onDispose)).toBe(false);
+		expect(texture.hasEventListener("dispose", other.onDispose)).toBe(true);
+		expect([...other.allocations]).toEqual([texture]);
+	});
+
+	it("rolls back the actual LUT when probe disposal throws", () => {
+		const texture = new THREE.Texture();
+		const material = new THREE.MeshStandardMaterial();
+		const owner = textureRendererFixture(material, texture);
+		const initialize = owner.renderer.initTexture;
+		owner.renderer.initTexture = (probe) => {
+			initialize(probe);
+			probe.addEventListener("dispose", () => {
+				throw new Error("probe disposal failed");
+			});
+		};
+		expect(() => captureStaticFabInspectionDfgRelease(owner.renderer, material)).toThrow(
+			AggregateError,
+		);
+		expect(owner.allocations.size).toBe(0);
+		expect(texture.hasEventListener("dispose", owner.onDispose)).toBe(false);
+	});
+
+	it("removes only the owning LUT callback even when native deallocation throws", () => {
+		const texture = new THREE.Texture();
+		const material = new THREE.MeshStandardMaterial();
+		const owner = textureRendererFixture(material, texture, (target) => {
+			if (target === texture) throw new Error("native release failed");
+		});
+		const other = textureRendererFixture(material, texture);
+		const release = captureStaticFabInspectionDfgRelease(owner.renderer, material);
+		expect(() => release?.()).toThrow(AggregateError);
+		expect(texture.hasEventListener("dispose", owner.onDispose)).toBe(false);
+		expect(texture.hasEventListener("dispose", other.onDispose)).toBe(true);
+		expect([...other.allocations]).toEqual([texture]);
+		expect(() => release?.()).not.toThrow();
+	});
+});
+
+describe("StaticFabInspection3DScene exception cleanup", () => {
+	it("continues content, runtime and renderer disposal after DFG release throws", () => {
+		const fixture = sceneExceptionFixture();
+		expect(() => fixture.scene.dispose()).toThrow(AggregateError);
+		expect(fixture.order).toEqual(["dfg", "content", "runtime", "renderer"]);
+		expect(fixture.controls.root.count("keydown", true)).toBe(0);
+		expect(() => fixture.scene.dispose()).not.toThrow();
+		expect(fixture.order).toHaveLength(4);
+	});
+
+	it("reports frame and cleanup errors once through the failure callback after cleanup", () => {
+		const fixture = sceneExceptionFixture();
+		const renderFrame = Reflect.get(
+			StaticFabInspection3DScene.prototype,
+			"renderFrame",
+		) as () => void;
+		expect(() => renderFrame.call(fixture.scene)).not.toThrow();
+		expect(fixture.order).toEqual(["dfg", "content", "runtime", "renderer", "failure"]);
+		expect(fixture.failures).toHaveLength(1);
+		expect((fixture.failures[0] as AggregateError).errors[0]).toBe(fixture.renderFailure);
+		renderFrame.call(fixture.scene);
+		expect(fixture.failures).toHaveLength(1);
+	});
+});
+
+function sceneExceptionFixture() {
+	const controls = controlsLifetimeFixture();
+	const order: string[] = [];
+	const failures: unknown[] = [];
+	const renderFailure = new Error("frame failure");
+	const scene = Object.assign(Object.create(StaticFabInspection3DScene.prototype), {
+		disposed: false,
+		animationFrame: 0,
+		controls: controls.controls,
+		controlsRoot: controls.root,
+		releaseDfgTexture: () => {
+			order.push("dfg");
+			throw new Error("DFG failure");
+		},
+		clearContent: () => order.push("content"),
+		clearRuntimeVehicleMesh: () => order.push("runtime"),
+		updateCameraClipping: () => undefined,
+		updateRailChunkResidency: () => undefined,
+		renderer: {
+			render: () => {
+				throw renderFailure;
+			},
+			dispose: () => order.push("renderer"),
+		},
+		callback: {
+			onFailure: (error: unknown) => {
+				order.push("failure");
+				failures.push(error);
+			},
+		},
+	}) as StaticFabInspection3DScene;
+	return { scene, order, failures, renderFailure, controls };
+}
+
+function textureRendererFixture(
+	material: THREE.Material,
+	texture: THREE.Texture,
+	beforeDispose?: (target: THREE.Texture) => void,
+) {
+	const records = new Map<unknown, Record<string, unknown>>();
+	const allocations = new Set<THREE.Texture>();
+	const onDispose = (event: THREE.Event<"dispose", THREE.Texture>): void => {
+		beforeDispose?.(event.target);
+		event.target.removeEventListener("dispose", onDispose);
+		// A renderer's native callback needs its allocation metadata until deallocation completes.
+		expect(records.get(event.target)?.__webglInit).toBe(true);
+		expect(allocations.delete(event.target)).toBe(true);
+		records.delete(event.target);
+	};
+	const renderer: Pick<THREE.WebGLRenderer, "properties" | "initTexture"> = {
+		properties: {
+			has: (object) => records.has(object),
+			get: (object) => records.get(object) ?? {},
+			remove: (object) => {
+				records.delete(object);
+			},
+			update: (object, key, value) => {
+				const record = records.get(object);
+				if (record) record[String(key)] = value;
+			},
+			dispose: () => records.clear(),
+		},
+		initTexture: (item) => {
+			if (item !== texture) expect(item.version).toBeGreaterThan(0);
+			allocations.add(item);
+			records.set(item, { __webglInit: true });
+			item.addEventListener("dispose", onDispose);
+		},
+	};
+	renderer.initTexture(texture);
+	records.set(material, { uniforms: { dfgLUT: { value: texture } } });
+	return { renderer, allocations, onDispose };
+}
+
+describe("StaticFabInspection3DScene controls lifetime", () => {
+	it("removes connected root and canvas listeners through normal disposal", () => {
+		const fixture = controlsLifetimeFixture();
+		expect(fixture.root.count("keydown", true)).toBe(1);
+		expect(fixture.canvas.count("pointerdown")).toBe(1);
+		disposeStaticFabInspectionOrbitControls(fixture.controls, fixture.root);
+		expect(fixture.root.count("keydown", true)).toBe(0);
+		expect(fixture.canvas.count("pointerdown")).toBe(0);
+		expect(fixture.canvas.style.touchAction).toBe("");
+	});
+
+	it.each([
+		false,
+		true,
+	])("releases the original root after detachment (Control held: %s)", (held) => {
+		const fixture = controlsLifetimeFixture();
+		const unrelated = (): void => undefined;
+		fixture.root.addEventListener("keydown", unrelated, { capture: true });
+		if (held) fixture.root.dispatchEvent(Object.assign(new Event("keydown"), { key: "Control" }));
+		expect(fixture.root.count("keyup", true)).toBe(held ? 1 : 0);
+		fixture.detach();
+		disposeStaticFabInspectionOrbitControls(fixture.controls, fixture.root);
+		disposeStaticFabInspectionOrbitControls(fixture.controls, fixture.root);
+		expect(fixture.root.count("keydown", true)).toBe(1);
+		expect(fixture.root.count("keyup", true)).toBe(0);
+		expect(fixture.detachedRoot.count("keydown", true)).toBe(0);
+		expect(fixture.canvas.count("pointerdown")).toBe(0);
+		// An old controls callback must not reactivate a keyup listener after disposal.
+		fixture.root.dispatchEvent(Object.assign(new Event("keydown"), { key: "Control" }));
+		expect(fixture.root.count("keyup", true)).toBe(0);
+		fixture.root.removeEventListener("keydown", unrelated, { capture: true });
+		expect(fixture.root.count("keydown", true)).toBe(0);
+	});
+
+	it("cleans the connection root rather than assuming ownerDocument across 17 lifetimes", () => {
+		const root = new ControlsEventTarget();
+		for (let round = 0; round < 17; round++) {
+			const fixture = controlsLifetimeFixture(root);
+			expect(fixture.canvas.ownerDocument).not.toBe(root);
+			expect(root.count("keydown", true)).toBe(1);
+			root.dispatchEvent(Object.assign(new Event("keydown"), { key: "Control" }));
+			root.dispatchEvent(Object.assign(new Event("keyup"), { key: "Control" }));
+			expect(root.count("keyup", true)).toBe(0);
+			fixture.detach();
+			disposeStaticFabInspectionOrbitControls(fixture.controls, root);
+			expect(root.count("keydown", true)).toBe(0);
+		}
+	});
+});
+
+class ControlsEventTarget extends EventTarget {
+	private readonly tracked = new Map<string, Set<EventListenerOrEventListenerObject>>();
+	override addEventListener(
+		type: string,
+		callback: EventListenerOrEventListenerObject | null,
+		options?: AddEventListenerOptions | boolean,
+	): void {
+		const key = this.key(type, options);
+		if (callback) {
+			const listeners = this.tracked.get(key) ?? new Set<EventListenerOrEventListenerObject>();
+			listeners.add(callback);
+			this.tracked.set(key, listeners);
+		}
+		super.addEventListener(type, callback, options);
+	}
+	override removeEventListener(
+		type: string,
+		callback: EventListenerOrEventListenerObject | null,
+		options?: EventListenerOptions | boolean,
+	): void {
+		if (callback) this.tracked.get(this.key(type, options))?.delete(callback);
+		super.removeEventListener(type, callback, options);
+	}
+	count(type: string, capture = false): number {
+		return this.tracked.get(this.key(type, capture))?.size ?? 0;
+	}
+	private key(type: string, options?: EventListenerOptions | boolean): string {
+		return `${type}:${typeof options === "boolean" ? options : options?.capture === true}`;
+	}
+}
+
+function controlsLifetimeFixture(root = new ControlsEventTarget()) {
+	const detachedRoot = new ControlsEventTarget();
+	let currentRoot = root;
+	const canvas = Object.assign(new ControlsEventTarget(), {
+		style: { touchAction: "" },
+		ownerDocument: new ControlsEventTarget(),
+		getRootNode: () => currentRoot,
+	});
+	const controls = new OrbitControls(
+		new THREE.PerspectiveCamera(),
+		canvas as unknown as HTMLCanvasElement,
+	);
+	return {
+		controls,
+		canvas,
+		root,
+		detachedRoot,
+		detach: () => {
+			currentRoot = detachedRoot;
+		},
+	};
+}
 
 describe("StaticFabInspection3DScene instance matrices", () => {
 	it("writes profile-aware rigid switch housing plus centered actuator and pick transforms", () => {
