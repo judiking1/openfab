@@ -1,6 +1,20 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import {
+	defaultSyntheticFabStarterRequest,
+	type SyntheticFabStarterRequest,
+} from "../compile/SyntheticFabStarter";
+import { deriveStaticFabOrganizationSemanticRoles } from "../core/StaticFabOrganization";
+import { staticFabSemanticBayConnectionEligibility } from "../core/StaticFabSemanticBayMutation";
+import centralSpineSource from "../generated/synthetic-fab-presets/central-spine-fab-24.default.v10.json?raw";
+import fullFabSource from "../generated/synthetic-fab-presets/full-fab-52.default.v10.json?raw";
+import pairedSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v11.json?raw";
+import parallelHallSource from "../generated/synthetic-fab-presets/parallel-hall-fab-12.default.v10.json?raw";
+import productionSource from "../generated/synthetic-fab-presets/production-fab-60.default.v10.json?raw";
+import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
 import { StaticFabAssembleMenu, type StaticFabAssembleMenuProps } from "./StaticFabAssembleMenu";
+import { staticFabBayStructureSupport } from "./StaticFabBayStructureSupport";
+import { hydrateSyntheticFabStarterCertifiedArtifact } from "./SyntheticFabStarterCertifiedArtifact";
 
 function props(overrides: Partial<StaticFabAssembleMenuProps> = {}): StaticFabAssembleMenuProps {
 	return {
@@ -412,5 +426,63 @@ describe("non-detachable Bank support guidance", () => {
 		);
 		expect(markup).not.toContain('data-testid="assemble-bank-editing-support"');
 		expect(markup).not.toContain('data-testid="assemble-new-fab-for-bank-editing"');
+	});
+});
+
+describe("Bay structural entry support", () => {
+	it.each([
+		["parallel-hall-fab-12", parallelHallSource, 12, "AMBIGUOUS_CONNECTOR"],
+		["full-fab-52", fullFabSource, 52, "AMBIGUOUS_CONNECTOR"],
+		["production-fab-60", productionSource, 60, "AMBIGUOUS_CONNECTOR"],
+		["central-spine-fab-24", centralSpineSource, 24, "RELATIONSHIP_NOT_DETACHABLE"],
+		["paired-circulation-fab-52", pairedSource, 52, "RELATIONSHIP_NOT_DETACHABLE"],
+	] as const)("keeps %s's existing connection restriction ahead of flow review", (id, source, expectedCount, issueCode) => {
+		const request = defaultSyntheticFabStarterRequest(id as SyntheticFabStarterRequest["id"]);
+		const hydrated = hydrateSyntheticFabStarterCertifiedArtifact(JSON.parse(source), request);
+		if (!hydrated) throw new Error("Expected the shipped synthetic artifact.");
+		const document = hydrateRailMirrorSnapshotDocument(hydrated.prepared.snapshot);
+		const roles = deriveStaticFabOrganizationSemanticRoles(document.organizations);
+		const bays = document.organizations.records.filter((record) => roles.get(record.id) === "BAY");
+		expect(bays).toHaveLength(expectedCount);
+		const clone = vi.spyOn(document.map, "clone").mockImplementation(() => {
+			throw new Error("entry must not clone the map");
+		});
+		const scan = vi.spyOn(document.map, "forEachRail").mockImplementation(() => {
+			throw new Error("entry must not scan every rail");
+		});
+		try {
+			for (const bay of bays) {
+				const eligibility = staticFabSemanticBayConnectionEligibility(
+					document.map,
+					document.organizations,
+					document.relationships,
+					bay.id,
+				);
+				expect(eligibility, bay.name).toMatchObject({ valid: false, issueCode });
+				if (issueCode === "AMBIGUOUS_CONNECTOR")
+					expect(eligibility.reason).toMatch(/branch 3개 · merge 3개/);
+				const support = staticFabBayStructureSupport(
+					document.map,
+					document.organizations,
+					document.relationships,
+					bay.id,
+				);
+				expect(support.state).toBe("blocked");
+				expect(support.reason).toContain("흐름 변경 미지원");
+				const markup = renderToStaticMarkup(
+					<StaticFabAssembleMenu
+						{...props({ selectionCount: 1, selectedBayCount: 1, editFlowAvailability: support })}
+					/>,
+				);
+				expect(markup).toContain(support.reason);
+				expect(markup).toMatch(/data-testid="assemble-edit-selected-bay-alternating"[^>]*disabled/);
+				expect(markup).toMatch(/data-testid="assemble-edit-selected-bay-co-rotating"[^>]*disabled/);
+			}
+			expect(clone).not.toHaveBeenCalled();
+			expect(scan).not.toHaveBeenCalled();
+		} finally {
+			clone.mockRestore();
+			scan.mockRestore();
+		}
 	});
 });

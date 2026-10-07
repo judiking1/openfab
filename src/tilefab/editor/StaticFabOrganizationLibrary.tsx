@@ -38,8 +38,10 @@ import type { StaticFabOrganizationSelectionMode } from "../core/StaticFabOrgani
 import type { StaticFabMinimapWorldBounds } from "../render/StaticFabMinimapGeometry";
 import type { ContextualBlueprintSaveRequest } from "./BlueprintLibraryTypes";
 import type { ContextualBlueprintSaveDestination } from "./ContextualBlueprintSave";
+import { EditorInfoPopover } from "./EditorInfoPopover";
 import type { StaticFabAssembleActionAvailability } from "./StaticFabAssembleMenu";
 import type { StaticFabBankStructureSupport } from "./StaticFabBankStructureSupport";
+import type { StaticFabBayStructureSupport } from "./StaticFabBayStructureSupport";
 import {
 	StaticFabNavigator,
 	type StaticFabNavigatorIssueMarker,
@@ -53,6 +55,7 @@ interface StaticFabOrganizationLibraryProps {
 	readonly view: "list" | "detail";
 	readonly onOpenDetails: () => void;
 	readonly onShowList: () => void;
+	readonly bayFlowSupport: StaticFabBayStructureSupport | null;
 	readonly bankDetachSupport: StaticFabBankStructureSupport | null;
 	readonly bankDeleteSupport: StaticFabBankStructureSupport | null;
 	readonly assemblyConnectorAvailability: StaticFabAssembleActionAvailability;
@@ -187,6 +190,7 @@ export function StaticFabOrganizationLibrary({
 	view,
 	onOpenDetails,
 	onShowList,
+	bayFlowSupport,
 	bankDetachSupport,
 	bankDeleteSupport,
 	assemblyConnectorAvailability,
@@ -702,7 +706,13 @@ export function StaticFabOrganizationLibrary({
 												staticFabExclusiveCommandActive ||
 												organizationEditorDirty ||
 												organizationDetailsStale ||
-												bankReviewBlocked
+												bankReviewBlocked ||
+												bayFlowSupport?.state === "blocked"
+											}
+											aria-describedby={
+												bayFlowSupport?.state === "blocked"
+													? "organization-bay-flow-support"
+													: undefined
 											}
 											onClick={() =>
 												openSelectedStructureCommands(selectedStaticFabOrganization.id)
@@ -713,10 +723,48 @@ export function StaticFabOrganizationLibrary({
 												: organizationSemanticRoles.get(selectedStaticFabOrganization.id) ===
 														"BAY_BANK"
 													? "Bank 분리·삭제 검토"
-													: "Bay 흐름·연결 편집"}{" "}
+													: "Bay 흐름 편집"}{" "}
 											<ChevronRight size={14} />
 										</button>
 									</div>
+								) : null}
+								{bayFlowSupport ? (
+									<>
+										{bayFlowSupport.state === "blocked" ? (
+											<div
+												className="tilefab-organization-support tilefab-organization-support-with-info"
+												data-testid="organization-bay-flow-support"
+												id="organization-bay-flow-support"
+											>
+												<p>{bayFlowSupport.reason}</p>
+												{bayFlowSupport.detail ? (
+													<EditorInfoPopover
+														key={selectedStaticFabOrganization.id}
+														label="흐름 변경 지원 안내"
+														text={bayFlowSupport.detail}
+													/>
+												) : null}
+											</div>
+										) : null}
+										<div className="tilefab-organization-editor-actions">
+											<button
+												type="button"
+												data-testid="organization-open-bay-connection-commands"
+												disabled={
+													projectBusy ||
+													modelSyncPending ||
+													staticFabExclusiveCommandActive ||
+													organizationEditorDirty ||
+													organizationDetailsStale
+												}
+												onClick={() =>
+													openSelectedStructureCommands(selectedStaticFabOrganization.id)
+												}
+											>
+												Bay 연결·삭제 검토 <ChevronRight size={14} />
+											</button>
+										</div>
+									</>
 								) : null}
 								{bankReviewBlocked ? (
 									<p

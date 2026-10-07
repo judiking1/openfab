@@ -33,7 +33,10 @@ import {
 	type StaticFabAssemblyRelationshipStateV1,
 	staticFabAssemblyRelationshipStateSourceError,
 } from "./StaticFabAssemblyRelationship";
-import { reviewStaticFabBayRelationshipDisconnection } from "./StaticFabBayRelationshipDisconnection";
+import {
+	reviewStaticFabBayRelationshipDisconnection,
+	staticFabBayRelationshipDisconnectionStructure,
+} from "./StaticFabBayRelationshipDisconnection";
 import {
 	applyStaticFabOrganizationMutations,
 	compareDirectedRailEdges,
@@ -217,6 +220,59 @@ export function staticFabSemanticBayMutationIntentError(value: unknown): string 
 		return "Semantic Bay organization id is invalid.";
 	}
 	return null;
+}
+
+export type StaticFabSemanticBayConnectionEligibility = Readonly<
+	| { valid: true; issueCode: null; reason: string }
+	| { valid: false; issueCode: StaticFabSemanticBayMutationIssueCode; reason: string }
+>;
+
+/**
+ * Read-only entry restrictions from the same declared-policy and legacy connector recognizers.
+ * Success means review may proceed, not that disconnect or Bay flow is certified. This never
+ * clones the map, indexes every rail module, or plans a prospective mutation.
+ */
+export function staticFabSemanticBayConnectionEligibility(
+	map: TileMap,
+	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+	bayOrganizationId: number,
+): StaticFabSemanticBayConnectionEligibility {
+	const declared = staticFabBayRelationshipDisconnectionStructure(
+		organizations,
+		relationships,
+		bayOrganizationId,
+	);
+	if (declared.kind === "rejected") {
+		return Object.freeze({ valid: false, issueCode: declared.issueCode, reason: declared.reason });
+	}
+	const source = resolveSemanticBaySource(
+		organizations,
+		bayOrganizationId,
+		declared.kind === "eligible",
+	);
+	if (source instanceof PlanningFailure) {
+		return Object.freeze({ valid: false, issueCode: source.code, reason: source.message });
+	}
+	try {
+		// Declared cuts must follow their exact authored relationship in the full planner. Do not
+		// reinterpret their geometry with the legacy connector recognizer, or infer a missing cut.
+		if (source.bank && declared.kind === "absent") {
+			const coverage = resolveStaticFabOrganizationCoverage(organizations, source.bay.id);
+			if (!coverage) throw new Error("선택한 Bay의 effective membership을 찾을 수 없습니다");
+			assertNoSharedSourceBankBayContentOwnership(source, coverage.effective);
+			const connector = recognizeIncidentConnector(map, source, coverage.effective);
+			assertNoSharedConnectorOwnership(organizations, source, connector);
+		}
+		return Object.freeze({
+			valid: true,
+			issueCode: null,
+			reason: "현재 연결 구조의 검토를 진행할 수 있습니다",
+		});
+	} catch (error) {
+		const failure = planningFailure(error);
+		return Object.freeze({ valid: false, issueCode: failure.code, reason: failure.message });
+	}
 }
 
 export function planStaticFabSemanticBayMutation(

@@ -39,27 +39,16 @@ export type StaticFabBayRelationshipDisconnection =
 			edges: readonly DirectedRailEdge[];
 	  }>;
 
-/** Exact authored cut identity only. This never certifies a mutation or grants commit authority. */
-export function reviewStaticFabBayRelationshipDisconnection(
-	map: TileMap,
+export type StaticFabBayRelationshipDisconnectionStructure =
+	| Exclude<StaticFabBayRelationshipDisconnection, { kind: "candidate" }>
+	| Readonly<{ kind: "eligible"; relationship: StaticFabAssemblyRelationshipRecordV1 }>;
+
+/** Necessary declared-relationship restrictions only; no geometry scan or mutation authority. */
+export function staticFabBayRelationshipDisconnectionStructure(
 	organizations: StaticFabOrganizationState,
 	relationships: StaticFabAssemblyRelationshipStateV1,
 	bayId: number,
-	maximumCutEdges: number,
-): StaticFabBayRelationshipDisconnection {
-	const shapeError = staticFabAssemblyRelationshipStateShapeError(relationships);
-	if (shapeError)
-		return rejected("INVALID_SOURCE", `조립 관계 형식이 유효하지 않습니다 · ${shapeError}`);
-	if (relationships.records.length === 0) return Object.freeze({ kind: "absent" });
-	const ownership = buildRailModuleOwnershipIndex(map);
-	const sourceError = staticFabAssemblyRelationshipStateSourceError(
-		map,
-		organizations,
-		relationships,
-		ownership,
-	);
-	if (sourceError)
-		return rejected("INVALID_SOURCE", `조립 관계 원본이 유효하지 않습니다 · ${sourceError}`);
+): StaticFabBayRelationshipDisconnectionStructure {
 	const subtree = new Set([
 		bayId,
 		...(resolveStaticFabOrganizationDescendantIds(organizations, bayId) ?? []),
@@ -130,6 +119,37 @@ export function reviewStaticFabBayRelationshipDisconnection(
 			"현재는 명시적으로 연결한 두 Bay 사이의 단일 왕복 연결만 해제할 수 있습니다",
 		);
 	}
+	return Object.freeze({ kind: "eligible", relationship: record });
+}
+
+/** Exact authored cut identity only. This never certifies a mutation or grants commit authority. */
+export function reviewStaticFabBayRelationshipDisconnection(
+	map: TileMap,
+	organizations: StaticFabOrganizationState,
+	relationships: StaticFabAssemblyRelationshipStateV1,
+	bayId: number,
+	maximumCutEdges: number,
+): StaticFabBayRelationshipDisconnection {
+	const shapeError = staticFabAssemblyRelationshipStateShapeError(relationships);
+	if (shapeError)
+		return rejected("INVALID_SOURCE", `조립 관계 형식이 유효하지 않습니다 · ${shapeError}`);
+	if (relationships.records.length === 0) return Object.freeze({ kind: "absent" });
+	const ownership = buildRailModuleOwnershipIndex(map);
+	const sourceError = staticFabAssemblyRelationshipStateSourceError(
+		map,
+		organizations,
+		relationships,
+		ownership,
+	);
+	if (sourceError)
+		return rejected("INVALID_SOURCE", `조립 관계 원본이 유효하지 않습니다 · ${sourceError}`);
+	const structure = staticFabBayRelationshipDisconnectionStructure(
+		organizations,
+		relationships,
+		bayId,
+	);
+	if (structure.kind !== "eligible") return structure;
+	const record = structure.relationship;
 	const legs = record.connectionGroups[0].legs;
 	const outboundRole = record.participantOrganizationIds[0] === bayId ? "OUTBOUND" : "RETURN";
 	const outbound = legs.find((leg) => leg.directionRole === outboundRole);
@@ -237,6 +257,6 @@ function* scopedEdges(
 function rejected(
 	issueCode: StaticFabBayRelationshipDisconnectionIssue,
 	reason: string,
-): StaticFabBayRelationshipDisconnection {
+): Extract<StaticFabBayRelationshipDisconnection, { kind: "rejected" }> {
 	return Object.freeze({ kind: "rejected", issueCode, reason });
 }

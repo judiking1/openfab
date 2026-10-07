@@ -1097,6 +1097,7 @@ import {
 } from "./StaticFabBayFlowEditSession";
 import { staticFabCheckEntryPresentation } from "./StaticFabCheckEntryPresentation";
 import { staticFabBankStructureSupport } from "./StaticFabBankStructureSupport";
+import { staticFabBayStructureSupport } from "./StaticFabBayStructureSupport";
 import { StaticFabChecksSummary } from "./StaticFabChecksSummary";
 import {
 	StaticFabOrganizationLibrary,
@@ -25596,6 +25597,16 @@ export default function TileFabApp(): React.ReactElement {
 		if (organizationSemanticRoles.get(organizationId) !== "BAY") return null;
 		return organizationRecordsById.get(organizationId) ?? null;
 	})();
+	const selectedBayStructureId = selectedSemanticBayOrganization?.id ?? null;
+	const selectedBayStructureSequence = railDocument.getPatchSequence();
+	const selectedBayStructureRevision = railDocument.map.getRevision();
+	const selectedBayFlowSupport = useMemo(
+		() => selectedBayStructureId === null ? null : {
+			document: railDocument, patchSequence: selectedBayStructureSequence, revision: selectedBayStructureRevision,
+			...staticFabBayStructureSupport(railDocument.map, activeOrganizations, railDocument.relationships, selectedBayStructureId),
+		},
+		[railDocument, activeOrganizations, selectedBayStructureId, selectedBayStructureSequence, selectedBayStructureRevision],
+	);
 	const resolveStaticFabSemanticBayMutationAvailability = (
 		action: StaticFabSemanticBayMutationAction,
 	): Readonly<{ state: "ready" | "blocked"; reason: string }> => {
@@ -25812,6 +25823,8 @@ export default function TileFabApp(): React.ReactElement {
 				reason: hierarchyEligibility.reason,
 			});
 		}
+		if (selectedBayFlowSupport?.state === "blocked" && selectedBayFlowSupport.document === railDocument &&
+			selectedBayFlowSupport.patchSequence === railDocument.getPatchSequence() && selectedBayFlowSupport.revision === railDocument.map.getRevision()) return selectedBayFlowSupport;
 		return Object.freeze({
 			state: "ready" as const,
 			reason: "Alternating 또는 Co-rotating 목표를 명시하고 Worker에서 폐회로를 검토",
@@ -39058,6 +39071,7 @@ export default function TileFabApp(): React.ReactElement {
 						view={organizationLibraryView}
 						onOpenDetails={() => setOrganizationLibraryView("detail")}
 						onShowList={() => setOrganizationLibraryView("list")}
+						bayFlowSupport={selectedBayFlowSupport}
 						bankDetachSupport={selectedBankDetachSupport}
 						bankDeleteSupport={selectedBankDeleteSupport}
 						openSelectedStructureCommands={openSelectedStructureCommands}

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	type CertifiedOpenFabFabComposition,
 	composeOpenFabFab,
@@ -33,6 +33,7 @@ import {
 	staticFabOrganizationParentIds,
 	staticFabOrganizationStateError,
 } from "./StaticFabOrganization";
+import { staticFabSemanticBayConnectionEligibility } from "./StaticFabSemanticBayMutation";
 import { decodeRailCell, encodeRailCell } from "./TileMap";
 
 const MINIMUM_TWIN_PROFILE = Object.freeze({
@@ -53,6 +54,43 @@ describe("StaticFabBayFlowEdit", () => {
 		composition = composeOpenFabFab(MINIMUM_TWIN_PROFILE);
 		balancedComposition = composeOpenFabFab(defaultOpenFabFabProfile());
 	}, 120_000);
+
+	it("keeps every generated Twin Bay eligible without scanning or cloning the full map", () => {
+		const document = hydrateRailMirrorSnapshotDocument(composition.roundTrippedSnapshot);
+		const before = authoredChecksum(document);
+		const sequence = document.getPatchSequence();
+		const roles = deriveStaticFabOrganizationSemanticRoles(document.organizations);
+		const bays = document.organizations.records.filter((record) => roles.get(record.id) === "BAY");
+		expect(bays.length).toBeGreaterThan(1);
+		const clone = vi.spyOn(document.map, "clone").mockImplementation(() => {
+			throw new Error("entry must not clone");
+		});
+		const scan = vi.spyOn(document.map, "forEachRail").mockImplementation(() => {
+			throw new Error("entry must not scan unrelated rails");
+		});
+		try {
+			for (const bay of bays) {
+				expect(staticFabBayFlowEditHierarchyEligibility(document.organizations, bay.id).valid).toBe(
+					true,
+				);
+				expect(
+					staticFabSemanticBayConnectionEligibility(
+						document.map,
+						document.organizations,
+						document.relationships,
+						bay.id,
+					),
+				).toMatchObject({ valid: true });
+			}
+			expect(clone).not.toHaveBeenCalled();
+			expect(scan).not.toHaveBeenCalled();
+		} finally {
+			clone.mockRestore();
+			scan.mockRestore();
+		}
+		expect(authoredChecksum(document)).toBe(before);
+		expect(document.getPatchSequence()).toBe(sequence);
+	});
 
 	it("accepts only one explicit versioned target pattern", () => {
 		expect(

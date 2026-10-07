@@ -1,0 +1,41 @@
+.tilefab-info-trigger {
+	display: inline-flex;
+	flex: 0 0 44px;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: #a8c9c9;
+	cursor: pointer;
+}
+.tilefab-info-trigger:hover,
+.tilefab-info-trigger[aria-expanded="true"] {
+	background: #263b3e;
+	color: #e7f4f4;
+}
+.tilefab-info-trigger:focus-visible {
+	outline: 2px solid #82d9d3;
+	outline-offset: -3px;
+}
+.tilefab-info-popover {
+	position: fixed;
+	z-index: 40;
+	box-sizing: border-box;
+	width: max-content;
+	max-width: 280px;
+	padding: 10px 12px;
+	border: 1px solid #526e72;
+	border-radius: 6px;
+	background: #18282c;
+	box-shadow: 0 4px 16px #0006;
+	color: #e0eeee;
+	font:
+		12px / 1.6 system-ui,
+		sans-serif;
+	overflow: auto;
+	overflow-wrap: anywhere;
+}

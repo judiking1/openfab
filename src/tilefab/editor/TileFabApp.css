@@ -14344,6 +14344,18 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	line-height: 1.5;
 	overflow-wrap: anywhere;
 }
+.tilefab-organization-support p {
+	margin: 0;
+}
+.tilefab-organization-support-with-info {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.tilefab-organization-support-with-info p {
+	flex: 1;
+	min-width: 0;
+}
 .tilefab-organization-reuse {
 	flex: 0 0 auto;
 	max-height: min(260px, 35vh);

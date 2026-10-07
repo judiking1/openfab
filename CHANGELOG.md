@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.73] - 2026-10-07
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Show existing Bay flow support limits beside its disabled detail action. Put short supplementary
+  help behind an information icon supporting hover, keyboard focus and touch tap; keep essential
+  reasons visible and connection/deletion review separately reachable.
+- Reuse declared-relationship restrictions and the existing legacy gateway recognizer before flow
+  review. Cache guidance by document, selected Bay and source revision; retain certified Apply.
+
 ## [0.1.72] - 2026-10-07
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
