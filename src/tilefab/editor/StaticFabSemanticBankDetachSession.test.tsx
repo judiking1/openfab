@@ -1,10 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import type { StaticFabAssemblyRelationshipRecordV1 } from "../core/StaticFabAssemblyRelationship";
 import {
 	copyStaticFabOrganizationRecord,
 	type StaticFabOrganizationKind,
 } from "../core/StaticFabOrganization";
 import { TileMap } from "../core/TileMap";
+import { staticFabBankStructureSupport } from "./StaticFabBankStructureSupport";
 import { StaticFabSemanticBankDetachDialog } from "./StaticFabSemanticBankDetachDialog";
 import {
 	createStaticFabSemanticBankDetachSession,
@@ -292,5 +294,81 @@ describe("review revision name snapshot", () => {
 			captureStaticFabReviewOrganizationLabels(source, source, { ...plan, basePatchSequence: 8 }),
 		).toBeNull();
 		expect(staticFabReviewOrganizationLabel(null, 2)).toBe("조직 ID 2 (검토 시점 이름 확인 불가)");
+	});
+});
+
+describe("Bank structural review entry", () => {
+	const bank = copyStaticFabOrganizationRecord({
+		id: 3,
+		kind: "AREA",
+		name: "Bank C",
+		parentOrganizationIds: [1],
+		membership: {
+			railEdges: [{ from: { x: 0, y: 0 }, to: { x: 1, y: 0 } }],
+			advancedSwitchIds: [],
+			equipmentGroupIds: [],
+		},
+	});
+	const roles = new Map([
+		[1, "FAB"],
+		[3, "BAY_BANK"],
+	] as const);
+	const relationship: StaticFabAssemblyRelationshipRecordV1 = {
+		id: 1,
+		hierarchyRole: "BANK_TO_FAB",
+		purpose: "HIERARCHY_LINK",
+		parentOrganizationId: 1,
+		participantOrganizationIds: [3],
+		managedChildOrganizationIds: [3],
+		reviewPolicy: "REVIEW_REQUIRED",
+		connectionGroups: [],
+	};
+	it("keeps an independent Bank deletable but never detachable", () => {
+		const detached = { ...bank, parentOrganizationIds: [] };
+		expect(staticFabBankStructureSupport("delete", detached, roles, []).state).toBe("ready");
+		expect(staticFabBankStructureSupport("detach", detached, roles, []).state).toBe("blocked");
+	});
+	it.each([
+		"detach",
+		"delete",
+	] as const)("does not infer missing or shared relationships for %s", (operation) => {
+		expect(staticFabBankStructureSupport(operation, bank, roles, []).reason).toContain(
+			"명시적 연결 관계가 없습니다",
+		);
+		expect(
+			staticFabBankStructureSupport(operation, bank, roles, [
+				relationship,
+				{ ...relationship, id: 2 },
+			]).state,
+		).toBe("blocked");
+		expect(
+			staticFabBankStructureSupport(operation, bank, roles, [
+				{ ...relationship, managedChildOrganizationIds: [3, 4] },
+			]).state,
+		).toBe("blocked");
+	});
+	it.each([
+		"detach",
+		"delete",
+	] as const)("exposes the existing %s capability without granting mutation", (operation) => {
+		expect(staticFabBankStructureSupport(operation, bank, roles, [relationship]).state).toBe(
+			"ready",
+		);
+		expect(
+			staticFabBankStructureSupport(operation, bank, roles, [
+				{ ...relationship, reviewPolicy: "AUTHORING_NON_DETACHABLE" },
+			]),
+		).toMatchObject({ state: "blocked", supportNotice: "non-detachable-bank" });
+	});
+	it.each([
+		"detach",
+		"delete",
+	] as const)("rejects a mismatching parent, purpose or hierarchy for %s", (operation) => {
+		for (const record of [
+			{ ...relationship, parentOrganizationId: 2 },
+			{ ...relationship, purpose: "FAB_LOOP" as const },
+			{ ...relationship, hierarchyRole: "BAY_TO_BANK" as const },
+		])
+			expect(staticFabBankStructureSupport(operation, bank, roles, [record]).state).toBe("blocked");
 	});
 });

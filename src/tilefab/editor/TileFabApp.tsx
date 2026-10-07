@@ -1096,6 +1096,7 @@ import {
 	type StaticFabBayFlowEditSession,
 } from "./StaticFabBayFlowEditSession";
 import { staticFabCheckEntryPresentation } from "./StaticFabCheckEntryPresentation";
+import { staticFabBankStructureSupport } from "./StaticFabBankStructureSupport";
 import { StaticFabChecksSummary } from "./StaticFabChecksSummary";
 import {
 	StaticFabOrganizationLibrary,
@@ -2027,6 +2028,15 @@ interface OrganizationHistoryContext {
 	}> | null;
 }
 
+interface BayFlowDetailReturnContext {
+	readonly document: RailDocument;
+	readonly patchSequence: number;
+	readonly organizationId: number;
+	readonly filter: StaticFabOrganizationKind | "ALL";
+	readonly search: string;
+	readonly detailTab: OrganizationDetailTab;
+}
+
 interface PendingOrganizationHistoryContext {
 	readonly document: RailDocument;
 	readonly patchSequence: number;
@@ -2464,7 +2474,9 @@ export default function TileFabApp(): React.ReactElement {
 	const staticFabBayFlowEditSnapshotControllerRef = useRef<AbortController | null>(null);
 	const staticFabBayFlowEditRequestRef = useRef(0);
 	const staticFabBayFlowEditReturnFocusRef = useRef<HTMLElement | null>(null);
-	const pendingStaticFabBayFlowEditSelectionRef = useRef<number | null>(null);
+	const bayStructureDetailOriginRef = useRef<BayFlowDetailReturnContext | null>(null);
+	const staticFabBayFlowEditDetailOriginRef = useRef<BayFlowDetailReturnContext | null>(null);
+	const pendingStaticFabBayFlowEditSelectionRef = useRef<Readonly<{ document: RailDocument; patchSequence: number; organizationId: number }> | null>(null);
 	const cancelStaticFabBayFlowEditRef = useRef<(message?: string, restoreFocus?: boolean) => void>(
 		() => undefined,
 	);
@@ -3190,6 +3202,7 @@ export default function TileFabApp(): React.ReactElement {
 	const [staticFabOrganizationOverviewPending, setStaticFabOrganizationOverviewPending] =
 		useState(false);
 	const organizationLibraryOpen = navigatorTab === "organizations";
+	const [organizationLibraryView, setOrganizationLibraryView] = useState<"list" | "detail">("list");
 	const navigatorMapOpen = navigatorTab === "map";
 	const readinessOpen = navigatorTab === "checks";
 	const staticFabNavigatorOpen = navigatorTab !== null;
@@ -7393,10 +7406,19 @@ export default function TileFabApp(): React.ReactElement {
 			pendingStaticFabSemanticBaySelectionRef.current = null;
 			restoreStaticFabOrganizationContext(pendingSemanticBayOrganizationId);
 		}
-		const pendingBayFlowEditOrganizationId = pendingStaticFabBayFlowEditSelectionRef.current;
-		if (pendingBayFlowEditOrganizationId !== null) {
+		const pendingBayFlowEdit = pendingStaticFabBayFlowEditSelectionRef.current;
+		if (pendingBayFlowEdit) {
 			pendingStaticFabBayFlowEditSelectionRef.current = null;
-			restoreStaticFabOrganizationContext(pendingBayFlowEditOrganizationId);
+			if (pendingBayFlowEdit.document === document && pendingBayFlowEdit.patchSequence === document.getPatchSequence() &&
+				restoreStaticFabOrganizationContext(pendingBayFlowEdit.organizationId)) {
+				chooseTool("inspect", "preserve-area");
+				updateEditorActivity("inspect");
+				setOrganizationSearch("");
+				setOrganizationFilter("ALL");
+				setOrganizationDetailTab("overview");
+				setOrganizationLibraryView("detail");
+				setOrganizationLibraryOpen(true);
+			}
 		}
 		const pendingOrganizationHistoryContext = pendingOrganizationHistoryContextRef.current;
 		if (pendingOrganizationHistoryContext) {
@@ -12821,7 +12843,7 @@ export default function TileFabApp(): React.ReactElement {
 					return;
 				}
 				if (staticFabBayFlowEditUiRef.current) {
-					cancelStaticFabBayFlowEdit("Bay 흐름 검토를 취소했습니다");
+					dismissStaticFabBayFlowEdit();
 					return;
 				}
 				const activeConnector = staticFabAssemblyConnectorUiRef.current;
@@ -21798,13 +21820,7 @@ export default function TileFabApp(): React.ReactElement {
 			setOrganizationSearch("");
 			setOrganizationFilter("ALL");
 			openOrganizationLibrary();
-			requestAnimationFrame(() => {
-				requestAnimationFrame(() => {
-					const target = document.getElementById(`static-fab-organization-${location.entityId}`);
-					target?.scrollIntoView({ block: "nearest" });
-					(target ?? organizationSearchInputRef.current ?? canvasRef.current)?.focus();
-				});
-			});
+			setOrganizationLibraryView("detail");
 			return;
 		}
 		chooseTool("inspect", "preserve-area");
@@ -24627,6 +24643,7 @@ export default function TileFabApp(): React.ReactElement {
 		openOrganizationLibrary();
 		syncModelUi(`${plan.reason} · 레일과 장비는 변경하지 않았습니다`);
 		restoreStaticFabOrganizationContext(assigned.id);
+		setOrganizationLibraryView("detail");
 	};
 
 	const selectStaticFabOrganization = (
@@ -24687,6 +24704,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const clearStaticFabOrganizationDetails = (): void => {
 		setSelectedOrganizationId(null);
+		setOrganizationLibraryView("list");
 		setOrganizationRenameDraft("");
 		setOrganizationParentIdsDraft([]);
 		setOrganizationDescriptionDraft("");
@@ -24957,6 +24975,11 @@ export default function TileFabApp(): React.ReactElement {
 	): void => {
 		const primaryModifier = event.metaKey || event.ctrlKey;
 		const shiftModifier = event.shiftKey;
+		if (!primaryModifier && !shiftModifier && !guidedBuildOrganizationPickerActive && !guidedBuildOpen) {
+			if (selectStaticFabOrganization(record)) setOrganizationLibraryView("detail");
+			else if (selectedOrganizationId !== null) setOrganizationLibraryView("detail");
+			return;
+		}
 		applyStaticFabOrganizationSelectionIntent(
 			record,
 			primaryModifier ||
@@ -25362,11 +25385,11 @@ export default function TileFabApp(): React.ReactElement {
 		selectedStaticFabOrganization !== null &&
 		filteredStaticFabOrganizations.some((record) => record.id === selectedStaticFabOrganization.id);
 	useLayoutEffect(() => {
-		if (!organizationLibraryOpen || !selectedStaticFabOrganizationVisible) return;
+		if (!organizationLibraryOpen || organizationLibraryView !== "list" || !selectedStaticFabOrganizationVisible) return;
 		organizationListRef.current
 			?.querySelector<HTMLElement>(`[data-organization-id="${selectedOrganizationId}"]`)
 			?.scrollIntoView({ block: "nearest" });
-	}, [organizationLibraryOpen, selectedOrganizationId, selectedStaticFabOrganizationVisible]);
+	}, [organizationLibraryOpen, organizationLibraryView, selectedOrganizationId, selectedStaticFabOrganizationVisible]);
 	const selectedStaticFabOrganizationDescendantIds = useMemo(
 		() =>
 			selectedStaticFabOrganization === null
@@ -25831,22 +25854,13 @@ export default function TileFabApp(): React.ReactElement {
 		if (workerBridgeDocumentRef.current !== railDocument || mirror?.status !== "ready" ||
 			mirror.sequence !== railDocument.getPatchSequence() || mirror.targetSequence !== railDocument.getPatchSequence() ||
 			mirror.revision !== railDocument.map.getRevision() || mirror.targetRevision !== railDocument.map.getRevision()) return blocked("현재 문서의 Rail mirror 동기화를 기다리세요");
-		const parents = staticFabOrganizationParentIds(bank);
-		if (parents.length !== 1 || organizationSemanticRoles.get(parents[0] as number) !== "FAB") return blocked("하나의 FAB에 속한 Bank만 분리할 수 있습니다");
-		const relationships = railDocument.relationships.records.filter((record) => record.managedChildOrganizationIds.includes(bank.id));
-		if (relationships.length === 0) return blocked("이 Bank를 추가한 명시적 연결 관계가 없습니다");
-		const relationship = relationships[0];
-		if (relationships.length !== 1 || !relationship || relationship.managedChildOrganizationIds.length !== 1) return blocked("다른 Bank와 소속 관계를 공유하여 단독 분리할 수 없습니다");
-		if (relationship.parentOrganizationId !== parents[0] || relationship.hierarchyRole !== "BANK_TO_FAB" ||
-			relationship.purpose !== "HIERARCHY_LINK") return blocked("이 연결 관계는 현재 Bank 분리 범위에 해당하지 않습니다");
-		if (relationship.reviewPolicy === "AUTHORING_NON_DETACHABLE") return {
-			state: "blocked", reason: "이 구성의 Bank 연결은 개별 분리를 지원하지 않습니다",
-			supportNotice: "non-detachable-bank",
-		};
-		if (relationship.reviewPolicy !== "REVIEW_REQUIRED") return blocked("이 연결 관계는 현재 Bank 분리 범위에 해당하지 않습니다");
-		return { state: "ready", reason: "Bank 내부 구성을 보존하고 FAB 연결 제거를 검토합니다" };
+		return staticFabBankStructureSupport("detach", bank, organizationSemanticRoles, railDocument.relationships.records);
 	};
 	const bankDetachAvailability = resolveBankDetachAvailability();
+	const selectedBankDetachSupport = selectedSemanticBankOrganization
+		? staticFabBankStructureSupport("detach", selectedSemanticBankOrganization, organizationSemanticRoles, railDocument.relationships.records) : null;
+	const selectedBankDeleteSupport = selectedSemanticBankOrganization
+		? staticFabBankStructureSupport("delete", selectedSemanticBankOrganization, organizationSemanticRoles, railDocument.relationships.records) : null;
 	const publishBankDetach = (next: StaticFabSemanticBankDetachSession | null): void => {
 		staticFabSemanticBankDetachUiRef.current = next;
 		setStaticFabSemanticBankDetach(next);
@@ -26020,21 +26034,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (workerBridgeDocumentRef.current !== railDocument || mirror?.status !== "ready" ||
 			mirror.sequence !== railDocument.getPatchSequence() || mirror.targetSequence !== railDocument.getPatchSequence() ||
 			mirror.revision !== railDocument.map.getRevision() || mirror.targetRevision !== railDocument.map.getRevision()) return blocked("현재 문서의 Rail mirror 동기화를 기다리세요");
-		const parents = staticFabOrganizationParentIds(bank);
-		if (parents.length > 1 || (parents.length === 1 && organizationSemanticRoles.get(parents[0] as number) !== "FAB")) return blocked("독립 Bank 또는 하나의 FAB에 속한 Bank만 삭제할 수 있습니다");
-		if (parents.length === 0) return { state: "ready", reason: "독점 소유한 Bank 하위 구성의 삭제 범위를 검토합니다" };
-		const relationships = railDocument.relationships.records.filter((record) => record.managedChildOrganizationIds.includes(bank.id));
-		if (relationships.length === 0) return blocked("이 Bank를 추가한 명시적 연결 관계가 없습니다");
-		const relationship = relationships[0];
-		if (relationships.length !== 1 || !relationship || relationship.managedChildOrganizationIds.length !== 1) return blocked("다른 Bank와 소속 관계를 공유하여 단독 삭제할 수 없습니다");
-		if (relationship.parentOrganizationId !== parents[0] || relationship.hierarchyRole !== "BANK_TO_FAB" ||
-			relationship.purpose !== "HIERARCHY_LINK") return blocked("이 연결 관계는 현재 Bank 삭제 범위에 해당하지 않습니다");
-		if (relationship.reviewPolicy === "AUTHORING_NON_DETACHABLE") return {
-			state: "blocked", reason: "이 구성의 Bank 연결은 개별 삭제를 지원하지 않습니다",
-			supportNotice: "non-detachable-bank",
-		};
-		if (relationship.reviewPolicy !== "REVIEW_REQUIRED") return blocked("이 연결 관계는 현재 Bank 삭제 범위에 해당하지 않습니다");
-		return { state: "ready", reason: "FAB 연결과 Bank 하위 구성의 삭제 범위를 함께 검토합니다" };
+		return staticFabBankStructureSupport("delete", bank, organizationSemanticRoles, railDocument.relationships.records);
 	};
 	const bankDeleteAvailability = resolveBankDeleteAvailability();
 	const publishBankDelete = (next: StaticFabSemanticBankDeleteSession | null): void => {
@@ -26754,6 +26754,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (resumeCanvas) scheduleRender();
 	};
 	const cancelStaticFabBayFlowEdit = (message?: string, restoreFocus = true): void => {
+		staticFabBayFlowEditDetailOriginRef.current = null;
 		const active = staticFabBayFlowEditUiRef.current;
 		const bridge = staticFabBayFlowEditBridgeRef.current;
 		const controller = staticFabBayFlowEditSnapshotControllerRef.current;
@@ -26778,6 +26779,34 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	};
 	cancelStaticFabBayFlowEditRef.current = cancelStaticFabBayFlowEdit;
+
+	const dismissStaticFabBayFlowEdit = (): void => {
+		const active = staticFabBayFlowEditUiRef.current;
+		if (!active || active.phase === "applying") return;
+		const origin = staticFabBayFlowEditDetailOriginRef.current;
+		cancelStaticFabBayFlowEdit(`${active.bayName} 흐름 검토를 취소했습니다`, false);
+		const currentDocument = editorModelRef.current.document;
+		if (!origin || origin.document !== currentDocument ||
+			origin.patchSequence !== currentDocument.getPatchSequence() ||
+			origin.organizationId !== active.bayOrganizationId ||
+			!restoreStaticFabOrganizationContext(origin.organizationId)) return;
+		setTemplatePaletteOpen(false);
+		assemblePaletteReturnFocusRef.current = null;
+		chooseTool("inspect", "preserve-area");
+		updateEditorActivity("inspect");
+		setOrganizationFilter(origin.filter);
+		setOrganizationSearch(origin.search);
+		setOrganizationDetailTab(origin.detailTab);
+		setOrganizationLibraryView("detail");
+		setOrganizationLibraryOpen(true);
+		// The dialog restores its old launcher only if it is still connected. This route
+		// unmounts that palette and focuses the recreated detail entry after modal cleanup.
+		requestAnimationFrame(() => requestAnimationFrame(() => {
+			if (editorModelRef.current.document !== origin.document ||
+				origin.document.getPatchSequence() !== origin.patchSequence) return;
+			organizationEditorRef.current?.querySelector<HTMLElement>('[data-testid="organization-open-bay-commands"]')?.focus({ preventScroll: true });
+		}));
+	};
 
 	const rejectStaticFabBayFlowEditAnalysis = (requestSequence: number, reason: string): void => {
 		const current = staticFabBayFlowEditUiRef.current;
@@ -27041,6 +27070,12 @@ export default function TileFabApp(): React.ReactElement {
 				? document.activeElement
 				: assembleLauncherRef.current);
 		staticFabBayFlowEditPlanRef.current = null;
+		const origin = bayStructureDetailOriginRef.current;
+		bayStructureDetailOriginRef.current = null;
+		staticFabBayFlowEditDetailOriginRef.current = origin &&
+			origin.document === editorModelRef.current.document &&
+			origin.patchSequence === origin.document.getPatchSequence() &&
+			origin.organizationId === selectedSemanticBayOrganization.id ? origin : null;
 		const session = createStaticFabBayFlowEditSession({
 			bayOrganizationId: selectedSemanticBayOrganization.id,
 			bayName: selectedSemanticBayOrganization.name,
@@ -27118,7 +27153,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const { bayOrganizationId, bayName, targetInternalFlowPattern } = current;
 		staticFabBayFlowEditPlanRef.current = null;
-		pendingStaticFabBayFlowEditSelectionRef.current = bayOrganizationId;
+		pendingStaticFabBayFlowEditSelectionRef.current = { document: model.document, patchSequence: model.document.getPatchSequence(), organizationId: bayOrganizationId };
 		cancelStaticFabBayFlowEdit(undefined, false);
 		if (appRootRef.current) appRootRef.current.dataset.bayFlowEditSnapshotStatus = "committed";
 		setTemplatePaletteOpen(false);
@@ -27126,7 +27161,6 @@ export default function TileFabApp(): React.ReactElement {
 		syncModelUi(
 			`${bayName}의 내부 흐름을 ${targetInternalFlowPattern} 목표로 변경했습니다 · Bank gateway와 조직·장비 정체성을 보존한 한 번의 실행 취소 가능한 명령입니다`,
 		);
-		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const updateStaticFabOrganizationSearch = (value: string): void => {
 		if (
@@ -27299,6 +27333,9 @@ export default function TileFabApp(): React.ReactElement {
 		removedOrganizationContextRef.current = null;
 		setOrganizationLibraryOpen(false);
 		setOrganizationSearch("");
+		bayStructureDetailOriginRef.current = null;
+		staticFabBayFlowEditDetailOriginRef.current = null;
+		setOrganizationLibraryView("list");
 		setSelectedOrganizationId(null);
 		setOrganizationRenameDraft("");
 		setOrganizationKindDraft("AREA");
@@ -27312,9 +27349,16 @@ export default function TileFabApp(): React.ReactElement {
 	}, [railDocument, setOrganizationLibraryOpen]);
 	useEffect(() => {
 		if (!organizationLibraryOpen || guidedBuildOrganizationPickerSurfaceOpen) return;
-		const frame = requestAnimationFrame(() => organizationSearchInputRef.current?.focus());
+		const frame = requestAnimationFrame(() => {
+			if (organizationLibraryView === "detail") {
+				organizationEditorRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+			} else {
+				const selected = organizationListRef.current?.querySelector<HTMLElement>('[data-active="true"]');
+				(selected ?? organizationSearchInputRef.current)?.focus();
+			}
+		});
 		return () => cancelAnimationFrame(frame);
-	}, [guidedBuildOrganizationPickerSurfaceOpen, organizationLibraryOpen]);
+	}, [guidedBuildOrganizationPickerSurfaceOpen, organizationLibraryOpen, organizationLibraryView]);
 	const areaSelectionCellCount = useMemo(
 		() => (areaSelection ? railAreaSelectionCellCount(areaSelection) : 0),
 		[areaSelection],
@@ -29904,7 +29948,7 @@ export default function TileFabApp(): React.ReactElement {
 		organizationBundlePublicationNotice.patchSequence === railDocument.getPatchSequence() &&
 		organizationBundlePublicationNotice.message === status
 		? organizationBundlePublicationNotice.message : null;
-	const taskHandoffLiveStatus = hierarchyCommandFeedbackActive ? presentedStatus : currentPublicationWarning ?? currentAreaStampPlacementFailure ?? (organizationBundlePlacementSession && organizationBundlePlacementFailure
+	const taskHandoffLiveStatus = hierarchyCommandFeedbackActive || organizationLibraryOpen ? presentedStatus : currentPublicationWarning ?? currentAreaStampPlacementFailure ?? (organizationBundlePlacementSession && organizationBundlePlacementFailure
 		? organizationBundlePlacementFailure
 		: ordinaryStaticFabIssueRecheckContext
 		? presentedStatus
@@ -31959,8 +32003,9 @@ export default function TileFabApp(): React.ReactElement {
 		returnFocusTarget?: HTMLButtonElement | null,
 		preserveConstruction = editorActivityRef.current === "assemble",
 		focusStructureOrganizationId: number | null = null,
-	): void => {
-		if (!prepareEditorActivityTransition("assemble")) return;
+	): boolean => {
+		if (!prepareEditorActivityTransition("assemble")) return false;
+		bayStructureDetailOriginRef.current = null;
 		if (!preserveConstruction) chooseTool("build", "preserve-context");
 		updateEditorActivity("assemble");
 		assemblePaletteReturnFocusRef.current =
@@ -31970,15 +32015,28 @@ export default function TileFabApp(): React.ReactElement {
 				: assembleLauncherRef.current);
 		assembleStructureCommandFocusRef.current = focusStructureOrganizationId;
 		setTemplatePaletteOpen(true);
+		return true;
 	};
 	const openSelectedStructureCommands = (organizationId: number): void => {
 		const selection = organizationMultiSelectionRef.current.selectedOrganizationIds;
 		if (selection.length !== 1 || selection[0] !== organizationId ||
-			(selectedSemanticBankOrganization?.id !== organizationId && selectedSemanticFabOrganization?.id !== organizationId)) {
-			setStatus("검토할 FAB 또는 Bank 하나를 다시 선택하세요");
+			(selectedSemanticBankOrganization?.id !== organizationId && selectedSemanticFabOrganization?.id !== organizationId && selectedSemanticBayOrganization?.id !== organizationId)) {
+			setStatus("검토할 FAB, Bank 또는 Bay 하나를 다시 선택하세요");
 			return;
 		}
-		openStaticFabAssemblePalette(assembleLauncherRef.current, false, organizationId);
+		if (selectedSemanticBankOrganization?.id === organizationId && selectedBankDetachSupport?.state === "blocked" && selectedBankDeleteSupport?.state === "blocked") {
+			setStatus(selectedBankDetachSupport.reason);
+			return;
+		}
+		const origin: BayFlowDetailReturnContext | null = selectedSemanticBayOrganization?.id === organizationId &&
+			organizationLibraryOpen && organizationLibraryView === "detail" ? {
+				document: editorModelRef.current.document,
+				patchSequence: editorModelRef.current.document.getPatchSequence(),
+				organizationId, filter: organizationFilter, search: organizationSearch, detailTab: organizationDetailTab,
+			} : null;
+		if (openStaticFabAssemblePalette(assembleLauncherRef.current, false, organizationId)) {
+			bayStructureDetailOriginRef.current = origin;
+		}
 	};
 	const startProductionBayPlacementFromContext = (showConfiguration = true): void => {
 		if (!prepareEditorActivityTransition("assemble")) return;
@@ -32035,6 +32093,7 @@ export default function TileFabApp(): React.ReactElement {
 		chooseStaticFabNavigatorTab("checks", resilientFabChecksHandoffRef.current);
 	};
 	const closeStaticFabAssemblePalette = (): void => {
+		bayStructureDetailOriginRef.current = null;
 		setTemplatePaletteOpen(false);
 		const returnTarget = assemblePaletteReturnFocusRef.current;
 		assemblePaletteReturnFocusRef.current = null;
@@ -32049,7 +32108,7 @@ export default function TileFabApp(): React.ReactElement {
 		assembleStructureCommandFocusRef.current = null;
 		const selectedIds = organizationMultiSelectionRef.current.selectedOrganizationIds;
 		const structureHeading = organizationId !== null && selectedIds.length === 1 && selectedIds[0] === organizationId
-			? palette?.querySelector<HTMLElement>('[data-testid="assemble-selected-fab-heading"], [data-testid="assemble-selected-bank-heading"]') : null;
+			? palette?.querySelector<HTMLElement>('[data-testid="assemble-selected-fab-heading"], [data-testid="assemble-selected-bank-heading"], [data-testid="assemble-selected-bay-heading"]') : null;
 		const target = structureHeading ?? (templateSessionRef.current
 			? palette?.querySelector<HTMLButtonElement>(
 					'[data-testid="pattern-configurator"] button, [data-testid="pattern-configurator"] input',
@@ -32057,12 +32116,12 @@ export default function TileFabApp(): React.ReactElement {
 			: palette?.querySelector<HTMLButtonElement>('[data-testid="fab-preset-browser"]'));
 		if (structureHeading) {
 			// The Bank heading alone can leave both disabled commands and their reasons clipped.
-			(structureHeading.closest(".tilefab-assemble-semantic-bank") ?? structureHeading).scrollIntoView({ block: "nearest" });
+			(structureHeading.closest(".tilefab-assemble-semantic-bank, .tilefab-assemble-semantic-bay") ?? structureHeading).scrollIntoView({ block: "nearest" });
 		}
 		target?.focus();
 	}, [templatePaletteOpen]);
 	const openActiveTemplateConfiguration = (returnFocusTarget?: HTMLButtonElement | null): void =>
-		openStaticFabAssemblePalette(returnFocusTarget, true);
+		void openStaticFabAssemblePalette(returnFocusTarget, true);
 	const chooseEditorActivity = (next: EditorActivity, trigger?: HTMLButtonElement): void => {
 		if (next === editorActivityRef.current) {
 			if (next === "assemble") {
@@ -33342,6 +33401,102 @@ export default function TileFabApp(): React.ReactElement {
 			</button>
 		</>
 	) : null;
+	const renderStaticFabCheckRows = (role: "primary" | "consequence"): React.ReactElement => (
+		<>
+			{displayedRailCheckIssues.some(
+				(issue) => railReadinessIssueGuide(readiness, issue).role === role,
+			) ? (
+				<div className="tilefab-readiness-domain-label">
+					<span>레일</span>
+					<small>
+						{
+							displayedRailCheckIssues.filter(
+								(issue) => railReadinessIssueGuide(readiness, issue).role === role,
+							).length
+						}
+					</small>
+				</div>
+			) : null}
+			{displayedRailCheckIssues.map((issue, index) => {
+				const guide = railReadinessIssueGuide(readiness, issue);
+				if (guide.role !== role) return null;
+				return (
+					<button
+						type="button"
+						key={issue.id}
+						data-testid={`rail-readiness-issue-${index}`}
+						data-code={issue.code}
+						data-role={guide.role}
+						data-active={issue.id === readinessIssueId}
+						aria-current={issue.id === readinessIssueId ? "true" : undefined}
+						aria-controls="rail-readiness-guide"
+						aria-expanded={issue.id === readinessIssueId}
+						disabled={staticFabExclusiveCommandActive}
+						onClick={() => {
+							if (blockStaticFabExclusiveCommand()) return;
+							focusReadinessIssue(issue);
+						}}
+					>
+						<AlertTriangle size={13} />
+						<span>
+							<strong>{guide.title}</strong>
+							<small>
+								{guide.metric} · {guide.technicalLabel}
+							</small>
+						</span>
+					</button>
+				);
+			})}
+			{displayedProjectCheckGroups.map((group) =>
+				group.issues.some((issue) => issue.role === role) ? (
+					<Fragment key={group.domain}>
+						<div className="tilefab-readiness-domain-label">
+							<span>{staticFabProjectCheckDomainLabel(group.domain)}</span>
+							<small>
+								{
+									staticFabProjectDisplayIssues.filter((issue) => issue.domain === group.domain && issue.role === role)
+										.length
+								}
+							</small>
+						</div>
+						{group.issues.map((issue, index) => {
+							if (issue.role !== role) return null;
+							const guide = staticFabProjectCheckGuide(
+								currentStaticFabProjectChecks as StaticFabProjectChecks,
+								issue,
+							);
+							return (
+								<button
+									type="button"
+									key={issue.id}
+									data-testid={`static-fab-project-issue-${group.domain}-${index}`}
+									data-code={issue.code}
+									data-role={guide.role}
+									data-active={issue.id === staticFabProjectIssueId}
+									aria-current={issue.id === staticFabProjectIssueId ? "true" : undefined}
+									aria-controls="static-fab-project-check-guide"
+									aria-expanded={issue.id === staticFabProjectIssueId}
+									disabled={staticFabExclusiveCommandActive}
+									onClick={() => {
+										if (blockStaticFabExclusiveCommand()) return;
+										focusStaticFabProjectIssue(issue);
+									}}
+								>
+									<AlertTriangle size={13} />
+									<span>
+										<strong>{guide.title}</strong>
+										<small>
+											{guide.metric} · {guide.technicalLabel}
+										</small>
+									</span>
+								</button>
+							);
+						})}
+					</Fragment>
+				) : null,
+			)}
+		</>
+	);
 	const connectedBayBankDuplicateHandoffAction = connectedBayBankDuplicateHandoff && !hierarchyCommandFeedbackActive ? (
 		<>
 			<span
@@ -33460,7 +33615,7 @@ export default function TileFabApp(): React.ReactElement {
 				</fieldset>
 			)
 			: null
-		: ordinaryStaticFabIssueRecheck ||
+		: organizationLibraryOpen ? null : ordinaryStaticFabIssueRecheck ||
 		resilientFabChecksHandoff ||
 		connectedFabLoopHandoff ||
 		duplicatedTwinBayConnectorHandoff ||
@@ -34410,7 +34565,7 @@ export default function TileFabApp(): React.ReactElement {
 						returnFocus={staticFabBayFlowEditReturnFocusRef.current}
 						onAnalyze={analyzeStaticFabBayFlowEdit}
 						onRetry={retryStaticFabBayFlowEdit}
-						onCancel={() => cancelStaticFabBayFlowEdit(undefined, false)}
+						onCancel={dismissStaticFabBayFlowEdit}
 						onApply={applyStaticFabBayFlowEdit}
 					/>
 				) : null}
@@ -36031,19 +36186,7 @@ export default function TileFabApp(): React.ReactElement {
 								</button>
 							</div>
 						) : null}
-						<StaticFabChecksSummary
-							readiness={readiness}
-							readinessActionCount={readinessActionCount}
-							projectSummary={currentStaticFabProjectChecks?.summary ?? null}
-							inspectionError={currentStaticFabInspectionError}
-							checkStatus={staticFabCheckStatus}
-							pendingLabel={staticFabPendingCheckLabel}
-						/>
-						{staticFabCheckStatus === "ready" && staticFabCheckIssueCount === 0 ? (
-							<p className="tilefab-readiness-checks-scroll-hint">
-								검사 목록을 스크롤해 장비·구조 결과도 확인하세요
-							</p>
-						) : null}
+
 						{OPENFAB_RELEASE_CAPABILITIES.simulation ? (
 							<>
 								<button
@@ -36145,15 +36288,7 @@ export default function TileFabApp(): React.ReactElement {
 								</header>
 								<h3 id="rail-readiness-guide-title">{activeReadinessGuide.title}</h3>
 								<p>{activeReadinessGuide.summary}</p>
-								<div className="tilefab-readiness-next-action">
-									<small>다음 작업</small>
-									<p>{activeReadinessGuide.action}</p>
-									{activeOneWayRepairBlocked ? (
-										<span className="tilefab-readiness-auto-blocked">
-											<AlertTriangle size={12} /> 자동 수정 불가 · {activeOneWayRepairBlockedReason}
-										</span>
-									) : null}
-								</div>
+
 								<footer>
 									{activeReadinessLocationCount > 0 ? (
 										<div className="tilefab-readiness-location-nav">
@@ -36188,25 +36323,11 @@ export default function TileFabApp(): React.ReactElement {
 											</button>
 										</div>
 									) : null}
-									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" &&
-										["OPEN_TERMINAL", "DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) ? (
-										<button type="button" className="tilefab-readiness-repair" data-testid="checks-choose-process-loop"
-											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending}
-											onClick={() => openStaticFabCheckRepairChooser("loop")}>
-											작업 루프를 골라 수정
-										</button>
-									) : null}
-									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" && ["DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) && readiness.summary.weakComponents > 1 ? (
-										<button type="button" className="tilefab-readiness-repair" data-testid="checks-choose-connector"
-											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending}
-											onClick={() => openStaticFabCheckRepairChooser("connector")}>
-											베이·뱅크를 골라 연결
-										</button>
-									) : null}
 									{activeReadinessGuide.repairTool && activeReadinessGuide.repairLabel ? (
 										<button
 											type="button"
 											className="tilefab-readiness-repair"
+											data-testid="checks-direct-repair"
 											disabled={staticFabExclusiveCommandActive}
 											onClick={() =>
 												activeOneWayRepairBlocked
@@ -36232,6 +36353,33 @@ export default function TileFabApp(): React.ReactElement {
 										</button>
 									) : null}
 								</footer>
+								<details className="tilefab-checks-secondary"><summary>수정 방법·다른 작업</summary>
+								<div className="tilefab-readiness-next-action">
+									<small>다음 작업</small>
+									<p>{activeReadinessGuide.action}</p>
+									{activeOneWayRepairBlocked ? (
+										<span className="tilefab-readiness-auto-blocked">
+											<AlertTriangle size={12} /> 자동 수정 불가 · {activeOneWayRepairBlockedReason}
+										</span>
+									) : null}
+								</div>
+									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" &&
+										["OPEN_TERMINAL", "DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) ? (
+										<button type="button" className="tilefab-readiness-repair" data-testid="checks-choose-process-loop"
+											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending}
+											onClick={() => openStaticFabCheckRepairChooser("loop")}>
+											작업 루프를 골라 수정
+										</button>
+									) : null}
+									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" && ["DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) && readiness.summary.weakComponents > 1 ? (
+										<button type="button" className="tilefab-readiness-repair" data-testid="checks-choose-connector"
+											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending}
+											onClick={() => openStaticFabCheckRepairChooser("connector")}>
+											베이·뱅크를 골라 연결
+										</button>
+									) : null}
+
+								</details>
 							</section>
 						) : null}
 						{activeStaticFabProjectIssue && activeStaticFabProjectGuide ? (
@@ -36253,10 +36401,7 @@ export default function TileFabApp(): React.ReactElement {
 									{activeStaticFabProjectGuide.title}
 								</h3>
 								<p>{activeStaticFabProjectGuide.summary}</p>
-								<div className="tilefab-readiness-next-action">
-									<small>다음 작업</small>
-									<p>{activeStaticFabProjectGuide.action}</p>
-								</div>
+
 								{activeStaticFabProjectIssue.locationCount > 0 ? (
 									<footer>
 										<div className="tilefab-readiness-location-nav">
@@ -36314,6 +36459,12 @@ export default function TileFabApp(): React.ReactElement {
 										) : null}
 									</footer>
 								) : null}
+								<details className="tilefab-checks-secondary"><summary>수정 방법</summary>
+								<div className="tilefab-readiness-next-action">
+									<small>다음 작업</small>
+									<p>{activeStaticFabProjectGuide.action}</p>
+								</div>
+								</details>
 							</section>
 						) : null}
 						{currentStaticFabInspectionError ? (
@@ -36386,87 +36537,11 @@ export default function TileFabApp(): React.ReactElement {
 										</div>
 									</>
 								) : null}
-								{displayedRailCheckIssues.length > 0 ? (
-									<div className="tilefab-readiness-domain-label">
-										<span>레일</span>
-										<small>{readiness.issues.length}</small>
-									</div>
-								) : null}
-								{displayedRailCheckIssues.map((issue, index) => {
-									const guide = railReadinessIssueGuide(readiness, issue);
-									return (
-										<button
-											type="button"
-											key={issue.id}
-											data-testid={`rail-readiness-issue-${index}`}
-											data-code={issue.code}
-											data-role={guide.role}
-											data-active={issue.id === readinessIssueId}
-											aria-current={issue.id === readinessIssueId ? "true" : undefined}
-											aria-controls="rail-readiness-guide"
-											aria-expanded={issue.id === readinessIssueId}
-											disabled={staticFabExclusiveCommandActive}
-											onClick={() => {
-												if (blockStaticFabExclusiveCommand()) return;
-												focusReadinessIssue(issue);
-											}}
-										>
-											<AlertTriangle size={13} />
-											<span>
-												<strong>{guide.title}</strong>
-												<small>
-													{guide.metric} · {guide.technicalLabel}
-												</small>
-											</span>
-										</button>
-									);
-								})}
-								{displayedProjectCheckGroups.map((group) => (
-									<Fragment key={group.domain}>
-										<div className="tilefab-readiness-domain-label">
-											<span>{staticFabProjectCheckDomainLabel(group.domain)}</span>
-											<small>
-												{
-													staticFabProjectDisplayIssues.filter(
-														(issue) => issue.domain === group.domain,
-													).length
-												}
-											</small>
-										</div>
-										{group.issues.map((issue, index) => {
-											const guide = staticFabProjectCheckGuide(
-												currentStaticFabProjectChecks as StaticFabProjectChecks,
-												issue,
-											);
-											return (
-												<button
-													type="button"
-													key={issue.id}
-													data-testid={`static-fab-project-issue-${group.domain}-${index}`}
-													data-code={issue.code}
-													data-role={guide.role}
-													data-active={issue.id === staticFabProjectIssueId}
-													aria-current={issue.id === staticFabProjectIssueId ? "true" : undefined}
-													aria-controls="static-fab-project-check-guide"
-													aria-expanded={issue.id === staticFabProjectIssueId}
-													disabled={staticFabExclusiveCommandActive}
-													onClick={() => {
-														if (blockStaticFabExclusiveCommand()) return;
-														focusStaticFabProjectIssue(issue);
-													}}
-												>
-													<AlertTriangle size={13} />
-													<span>
-														<strong>{guide.title}</strong>
-														<small>
-															{guide.metric} · {guide.technicalLabel}
-														</small>
-													</span>
-												</button>
-											);
-										})}
-									</Fragment>
-								))}
+								{renderStaticFabCheckRows("primary")}
+								{staticFabCheckFollowUpCount > 0 ? <details className="tilefab-checks-follow-up" open={activeReadinessGuide?.role === "consequence" || activeStaticFabProjectGuide?.role === "consequence" || undefined}>
+									<summary>후속 확인 {staticFabCheckFollowUpCount}건</summary>
+									<div className="tilefab-readiness-list">{renderStaticFabCheckRows("consequence")}</div>
+								</details> : null}
 								{staticFabCheckOverflowCount > 0 ? (
 									<small className="tilefab-readiness-overflow">
 										+{staticFabCheckOverflowCount} MORE
@@ -36474,6 +36549,16 @@ export default function TileFabApp(): React.ReactElement {
 								) : null}
 							</div>
 						</section>
+						<details className="tilefab-checks-results" data-testid="static-fab-checks-results"><summary>검사 항목별 결과</summary>
+						<StaticFabChecksSummary
+							readiness={readiness}
+							readinessActionCount={readinessActionCount}
+							projectSummary={currentStaticFabProjectChecks?.summary ?? null}
+							inspectionError={currentStaticFabInspectionError}
+							checkStatus={staticFabCheckStatus}
+							pendingLabel={staticFabPendingCheckLabel}
+						/>
+						</details>
 						</div>
 						</>
 						)}
@@ -38970,6 +39055,11 @@ export default function TileFabApp(): React.ReactElement {
 
 				{organizationLibraryOpen && !readinessOpen ? (
 					<StaticFabOrganizationLibrary
+						view={organizationLibraryView}
+						onOpenDetails={() => setOrganizationLibraryView("detail")}
+						onShowList={() => setOrganizationLibraryView("list")}
+						bankDetachSupport={selectedBankDetachSupport}
+						bankDeleteSupport={selectedBankDeleteSupport}
 						openSelectedStructureCommands={openSelectedStructureCommands}
 						assemblyConnectorAvailability={assemblyConnectorAvailability}
 						assemblyConnectorHierarchyRole={assemblyConnectorHierarchyRole}

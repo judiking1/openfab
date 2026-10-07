@@ -1,5 +1,6 @@
 import {
 	AlertTriangle,
+	ArrowLeft,
 	ArrowLeftRight,
 	Check,
 	ChevronRight,
@@ -38,6 +39,7 @@ import type { StaticFabMinimapWorldBounds } from "../render/StaticFabMinimapGeom
 import type { ContextualBlueprintSaveRequest } from "./BlueprintLibraryTypes";
 import type { ContextualBlueprintSaveDestination } from "./ContextualBlueprintSave";
 import type { StaticFabAssembleActionAvailability } from "./StaticFabAssembleMenu";
+import type { StaticFabBankStructureSupport } from "./StaticFabBankStructureSupport";
 import {
 	StaticFabNavigator,
 	type StaticFabNavigatorIssueMarker,
@@ -48,6 +50,11 @@ import {
 export type OrganizationDetailTab = "overview" | "relations" | "properties";
 
 interface StaticFabOrganizationLibraryProps {
+	readonly view: "list" | "detail";
+	readonly onOpenDetails: () => void;
+	readonly onShowList: () => void;
+	readonly bankDetachSupport: StaticFabBankStructureSupport | null;
+	readonly bankDeleteSupport: StaticFabBankStructureSupport | null;
 	readonly assemblyConnectorAvailability: StaticFabAssembleActionAvailability;
 	readonly assemblyConnectorHierarchyRole: StaticFabAssemblyConnectorHierarchyRole | null;
 	readonly assemblyConnectorPurpose: StaticFabAssemblyConnectorPurpose | null;
@@ -177,6 +184,11 @@ interface StaticFabOrganizationLibraryProps {
 }
 
 export function StaticFabOrganizationLibrary({
+	view,
+	onOpenDetails,
+	onShowList,
+	bankDetachSupport,
+	bankDeleteSupport,
 	assemblyConnectorAvailability,
 	assemblyConnectorHierarchyRole,
 	assemblyConnectorPurpose,
@@ -271,12 +283,116 @@ export function StaticFabOrganizationLibrary({
 	toggleStaticFabOrganizationParent,
 	updateStaticFabOrganizationSearch,
 }: StaticFabOrganizationLibraryProps): ReactElement {
+	const detailVisible =
+		view === "detail" && !!selectedStaticFabOrganization && !guidedBuildOrganizationPickerActive;
+	const bankReviewBlocked =
+		bankDetachSupport?.state === "blocked" && bankDeleteSupport?.state === "blocked";
+	const reuseActions = (
+		<details
+			className="tilefab-organization-reuse"
+			open={organizationSelectionCount > 1 || undefined}
+		>
+			<summary>복사·청사진 {organizationSelectionCount > 1 ? "· 연결·정렬" : ""}</summary>
+
+			<fieldset
+				className="tilefab-segmented tilefab-organization-selection-mode"
+				aria-label="조직 청사진 포함 범위"
+				aria-describedby="tilefab-organization-copy-scope-description"
+			>
+				<button
+					type="button"
+					data-active={organizationSelectionMode === "DIRECT"}
+					aria-pressed={organizationSelectionMode === "DIRECT"}
+					title="선택한 조직 자체만 포함"
+					onClick={() => chooseOrganizationSelectionMode("DIRECT")}
+				>
+					선택 조직만
+				</button>
+				<button
+					type="button"
+					data-active={organizationSelectionMode === "EFFECTIVE"}
+					aria-pressed={organizationSelectionMode === "EFFECTIVE"}
+					title="선택한 조직과 모든 하위 조직 포함"
+					onClick={() => chooseOrganizationSelectionMode("EFFECTIVE")}
+				>
+					하위 조직 포함
+				</button>
+			</fieldset>
+			<p
+				id="tilefab-organization-copy-scope-description"
+				className="tilefab-organization-scope-description"
+			>
+				{organizationSelectionMode === "DIRECT"
+					? "선택한 조직에 직접 속한 레일과 장비만 포함합니다."
+					: "하위 조직의 레일과 장비까지 함께 포함합니다."}
+			</p>
+			<div
+				className="tilefab-organization-selection-actions"
+				data-count={organizationSelectionCount}
+			>
+				<button
+					type="button"
+					onClick={() => showSelectedStaticFabOrganizationOnMap(organizationSelectionMode)}
+				>
+					<Crosshair size={15} /> 지도 보기
+				</button>
+
+				<button
+					type="button"
+					disabled={modelSyncPending || organizationEditorDirty || organizationDetailsStale}
+					className="tilefab-organization-copy"
+					onClick={copySelectionToRailClipboard}
+				>
+					<Copy size={15} /> 복사·배치
+				</button>
+				<button
+					type="button"
+					data-testid="save-organization-blueprint"
+					title="선택한 조직을 재사용 청사진으로 저장 · 전체 파일은 상단 프로젝트 저장 (.openfab)"
+					disabled={modelSyncPending || organizationEditorDirty || organizationDetailsStale}
+					onClick={(event) => requestContextualBlueprintSave("organization", event.currentTarget)}
+				>
+					<Save size={15} /> 청사진 저장
+				</button>
+				{organizationSelectionCount > 1 ? (
+					<div className="tilefab-organization-pair-actions">
+						<button
+							type="button"
+							data-testid="connect-static-fab-assemblies"
+							aria-keyshortcuts="J"
+							disabled={assemblyConnectorAvailability.state !== "ready"}
+							onClick={startStaticFabAssemblyConnector}
+							title={assemblyConnectorAvailability.reason}
+						>
+							<Link2 size={15} />{" "}
+							{assemblyConnectorPurpose === "FAB_LOOP"
+								? "ADD FAB LOOP"
+								: assemblyConnectorHierarchyRole === "BANK_TO_FAB"
+									? "CONNECT BANKS"
+									: "CONNECT BAYS"}
+						</button>
+						<button
+							type="button"
+							data-testid="arrange-static-fab-organizations"
+							aria-keyshortcuts="L"
+							disabled={modelSyncPending || organizationEditorDirty || organizationDetailsStale}
+							onClick={() => startStaticFabArrangement()}
+							title="선택한 조직 루트를 정렬하거나 균등 분배 · L"
+						>
+							<ArrowLeftRight size={15} /> ARRANGE
+						</button>
+					</div>
+				) : null}
+			</div>
+		</details>
+	);
 	return (
 		<aside
 			id="tilefab-fab-navigator"
 			className="tilefab-organization-library"
 			data-testid="static-fab-organization-library"
 			data-count={organizationCount}
+			data-view={detailVisible ? "detail" : "list"}
 			data-filter={organizationFilter}
 			data-guided-picker={guidedBuildOrganizationPickerActive ? "true" : undefined}
 			aria-label="저장된 정적 FAB 조직"
@@ -335,270 +451,177 @@ export function StaticFabOrganizationLibrary({
 				id="tilefab-fab-navigator-panel-organizations"
 				aria-labelledby="tilefab-fab-navigator-tab-organizations"
 			>
-				<div className="tilefab-organization-filters" role="tablist" aria-label="조직 종류">
-					{STATIC_FAB_ORGANIZATION_FILTERS.map((kind, index) => {
-						const count =
-							kind === "ALL" ? organizationCount : (organizationKindCounts.get(kind) ?? 0);
-						return (
-							<button
-								key={kind}
-								type="button"
-								role="tab"
-								id={`tilefab-organization-filter-${kind.toLocaleLowerCase("en-US")}`}
-								aria-label={`${staticFabOrganizationKindShortLabel(kind)} ${count}`}
-								aria-controls="tilefab-organization-list"
-								aria-selected={organizationFilter === kind}
-								data-active={organizationFilter === kind}
-								tabIndex={organizationFilter === kind ? 0 : -1}
-								title={staticFabOrganizationKindLabelForFilter(kind)}
-								onClick={() => chooseStaticFabOrganizationFilter(kind)}
-								onKeyDown={(event) => handleStaticFabOrganizationFilterKeyDown(event, index)}
-							>
-								<span>{staticFabOrganizationKindTabLabel(kind)}</span>
-								<small>{count}</small>
-							</button>
-						);
-					})}
-				</div>
-				<label className="tilefab-organization-search">
-					<Search size={14} />
-					<input
-						ref={organizationSearchInputRef}
-						value={organizationSearch}
-						placeholder="이름으로 조직 찾기"
-						aria-label="저장된 FAB 조직 검색"
-						onChange={(event) => updateStaticFabOrganizationSearch(event.currentTarget.value)}
-						onKeyDown={handleStaticFabOrganizationSearchKeyDown}
-					/>
-				</label>
-				<section
-					className="tilefab-organization-selection-toolbar"
-					data-count={organizationSelectionCount}
-					aria-label="선택한 FAB 조직 청사진 작업"
-				>
-					<div
-						className="tilefab-organization-selection-summary"
-						data-testid="static-fab-organization-selection-summary"
-					>
-						<strong>선택 조직 {organizationSelectionCount.toLocaleString()}개</strong>
-						<span>{organizationSelectionGuidance}</span>
-						{selectedStaticFabOrganization && selectedStaticFabOrganizationVisible ? (
-							<button
-								type="button"
-								className="tilefab-organization-detail-jump"
-								onClick={() => {
-									const editor = organizationEditorRef.current;
-									editor?.scrollIntoView({ block: "nearest" });
-									editor
-										?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
-										?.focus({ preventScroll: true });
-								}}
-							>
-								세부 편집
-							</button>
-						) : null}
-					</div>
-					{organizationSelectionCount > 0 ? (
-						<>
-							<fieldset
-								className="tilefab-segmented tilefab-organization-selection-mode"
-								aria-label="조직 청사진 포함 범위"
-								aria-describedby="tilefab-organization-copy-scope-description"
-							>
-								<button
-									type="button"
-									data-active={organizationSelectionMode === "DIRECT"}
-									aria-pressed={organizationSelectionMode === "DIRECT"}
-									title="선택한 조직 자체만 포함"
-									onClick={() => chooseOrganizationSelectionMode("DIRECT")}
-								>
-									선택 조직만
-								</button>
-								<button
-									type="button"
-									data-active={organizationSelectionMode === "EFFECTIVE"}
-									aria-pressed={organizationSelectionMode === "EFFECTIVE"}
-									title="선택한 조직과 모든 하위 조직 포함"
-									onClick={() => chooseOrganizationSelectionMode("EFFECTIVE")}
-								>
-									하위 조직 포함
-								</button>
-							</fieldset>
-							<p
-								id="tilefab-organization-copy-scope-description"
-								className="tilefab-organization-scope-description"
-							>
-								{organizationSelectionMode === "DIRECT"
-									? "선택한 조직에 직접 속한 레일과 장비만 포함합니다."
-									: "하위 조직의 레일과 장비까지 함께 포함합니다."}
-							</p>
+				{!detailVisible ? (
+					<div className="tilefab-organization-browser">
+						<div className="tilefab-organization-filters" role="tablist" aria-label="조직 종류">
+							{STATIC_FAB_ORGANIZATION_FILTERS.map((kind, index) => {
+								const count =
+									kind === "ALL" ? organizationCount : (organizationKindCounts.get(kind) ?? 0);
+								return (
+									<button
+										key={kind}
+										type="button"
+										role="tab"
+										id={`tilefab-organization-filter-${kind.toLocaleLowerCase("en-US")}`}
+										aria-label={`${staticFabOrganizationKindShortLabel(kind)} ${count}`}
+										aria-controls="tilefab-organization-list"
+										aria-selected={organizationFilter === kind}
+										data-active={organizationFilter === kind}
+										tabIndex={organizationFilter === kind ? 0 : -1}
+										title={staticFabOrganizationKindLabelForFilter(kind)}
+										onClick={() => chooseStaticFabOrganizationFilter(kind)}
+										onKeyDown={(event) => handleStaticFabOrganizationFilterKeyDown(event, index)}
+									>
+										<span>{staticFabOrganizationKindTabLabel(kind)}</span>
+										<small>{count}</small>
+									</button>
+								);
+							})}
+						</div>
+						<label className="tilefab-organization-search">
+							<Search size={14} />
+							<input
+								ref={organizationSearchInputRef}
+								value={organizationSearch}
+								placeholder="이름으로 조직 찾기"
+								aria-label="저장된 FAB 조직 검색"
+								onChange={(event) => updateStaticFabOrganizationSearch(event.currentTarget.value)}
+								onKeyDown={handleStaticFabOrganizationSearchKeyDown}
+							/>
+						</label>
+						<section
+							className="tilefab-organization-selection-toolbar"
+							data-count={organizationSelectionCount}
+							aria-label="선택한 FAB 조직 청사진 작업"
+						>
 							<div
-								className="tilefab-organization-selection-actions"
-								data-count={organizationSelectionCount}
+								className="tilefab-organization-selection-summary"
+								data-testid="static-fab-organization-selection-summary"
 							>
-								<button
-									type="button"
-									onClick={() => showSelectedStaticFabOrganizationOnMap(organizationSelectionMode)}
-								>
-									<Crosshair size={15} /> 지도 보기
-								</button>
-
-								<button
-									type="button"
-									disabled={modelSyncPending || organizationEditorDirty || organizationDetailsStale}
-									className="tilefab-organization-copy"
-									onClick={copySelectionToRailClipboard}
-								>
-									<Copy size={15} /> 복사·배치
-								</button>
-								<button
-									type="button"
-									data-testid="save-organization-blueprint"
-									title="선택한 조직을 재사용 청사진으로 저장 · 전체 파일은 상단 프로젝트 저장 (.openfab)"
-									disabled={modelSyncPending || organizationEditorDirty || organizationDetailsStale}
-									onClick={(event) =>
-										requestContextualBlueprintSave("organization", event.currentTarget)
-									}
-								>
-									<Save size={15} /> 청사진 저장
-								</button>
-								{organizationSelectionCount > 1 ? (
-									<div className="tilefab-organization-pair-actions">
-										<button
-											type="button"
-											data-testid="connect-static-fab-assemblies"
-											aria-keyshortcuts="J"
-											disabled={assemblyConnectorAvailability.state !== "ready"}
-											onClick={startStaticFabAssemblyConnector}
-											title={assemblyConnectorAvailability.reason}
-										>
-											<Link2 size={15} />{" "}
-											{assemblyConnectorPurpose === "FAB_LOOP"
-												? "ADD FAB LOOP"
-												: assemblyConnectorHierarchyRole === "BANK_TO_FAB"
-													? "CONNECT BANKS"
-													: "CONNECT BAYS"}
-										</button>
-										<button
-											type="button"
-											data-testid="arrange-static-fab-organizations"
-											aria-keyshortcuts="L"
-											disabled={
-												modelSyncPending || organizationEditorDirty || organizationDetailsStale
-											}
-											onClick={() => startStaticFabArrangement()}
-											title="선택한 조직 루트를 정렬하거나 균등 분배 · L"
-										>
-											<ArrowLeftRight size={15} /> ARRANGE
-										</button>
-									</div>
+								<strong>
+									{organizationSelectionCount === 1
+										? selectedStaticFabOrganization?.name
+										: `선택 조직 ${organizationSelectionCount.toLocaleString()}개`}
+								</strong>
+								<span>{organizationDetailsError ?? organizationSelectionGuidance}</span>
+								{selectedStaticFabOrganization && selectedStaticFabOrganizationVisible ? (
+									<button
+										type="button"
+										className="tilefab-organization-detail-jump"
+										onClick={onOpenDetails}
+									>
+										세부 편집
+									</button>
 								) : null}
 							</div>
-						</>
-					) : null}
-				</section>
-				<div
-					id="tilefab-organization-list"
-					ref={organizationListRef}
-					className="tilefab-organization-list"
-					role="listbox"
-					aria-multiselectable="true"
-					aria-label="FAB 조직 목록"
-				>
-					{filteredStaticFabOrganizations.length === 0 ? (
-						<div className="tilefab-organization-empty">
-							<MapPinned size={20} />
-							<strong>
-								{organizationCount === 0 ? "NO SAVED ORGANIZATION" : "NO MATCHING ORGANIZATION"}
-							</strong>
-							<small>
-								{organizationCount === 0
-									? "범위를 선택한 뒤 AREA, BAY, AISLE 또는 PROCESS FAMILY로 분류하세요."
-									: "필터나 검색어를 지우면 저장된 조직을 다시 볼 수 있습니다."}
-							</small>
-							<button
-								type="button"
-								onClick={() => {
-									if (organizationCount === 0) {
-										startStaticFabOrganizationSelection();
-									} else {
-										updateStaticFabOrganizationSearch("");
-										chooseStaticFabOrganizationFilter("ALL");
-										requestAnimationFrame(() => organizationSearchInputRef.current?.focus());
-									}
-								}}
-							>
-								{organizationCount === 0 ? "START ORGANIZATION SELECTION" : "SHOW ALL"}
-							</button>
+							{organizationSelectionCount > 0 ? reuseActions : null}
+						</section>
+						<div
+							id="tilefab-organization-list"
+							ref={organizationListRef}
+							className="tilefab-organization-list"
+							role="listbox"
+							aria-multiselectable="true"
+							aria-label="FAB 조직 목록"
+						>
+							{filteredStaticFabOrganizations.length === 0 ? (
+								<div className="tilefab-organization-empty">
+									<MapPinned size={20} />
+									<strong>
+										{organizationCount === 0 ? "NO SAVED ORGANIZATION" : "NO MATCHING ORGANIZATION"}
+									</strong>
+									<small>
+										{organizationCount === 0
+											? "범위를 선택한 뒤 AREA, BAY, AISLE 또는 PROCESS FAMILY로 분류하세요."
+											: "필터나 검색어를 지우면 저장된 조직을 다시 볼 수 있습니다."}
+									</small>
+									<button
+										type="button"
+										onClick={() => {
+											if (organizationCount === 0) {
+												startStaticFabOrganizationSelection();
+											} else {
+												updateStaticFabOrganizationSearch("");
+												chooseStaticFabOrganizationFilter("ALL");
+												requestAnimationFrame(() => organizationSearchInputRef.current?.focus());
+											}
+										}}
+									>
+										{organizationCount === 0 ? "START ORGANIZATION SELECTION" : "SHOW ALL"}
+									</button>
+								</div>
+							) : (
+								filteredStaticFabOrganizations.map((record, index) => {
+									const organizationSelected = selectedOrganizationIds.includes(record.id);
+									const guidedSelectionTarget =
+										guidedBuildOrganizationRowOwnsNextStep &&
+										guidedBuildOrganizationNextRecordId === record.id;
+									return (
+										<button
+											key={record.id}
+											type="button"
+											role="option"
+											id={`static-fab-organization-${record.id}`}
+											data-testid="static-fab-organization-item"
+											data-organization-id={record.id}
+											data-organization-name={record.name}
+											data-active={selectedOrganizationId === record.id}
+											data-selected={organizationSelected}
+											data-guided-target={guidedSelectionTarget || undefined}
+											data-guided-action-id={
+												guidedSelectionTarget
+													? (guidedBuildOrganizationRowTargetId ?? undefined)
+													: undefined
+											}
+											aria-selected={organizationSelected}
+											aria-describedby={
+												guidedSelectionTarget
+													? "tilefab-guided-primary-target-description"
+													: undefined
+											}
+											tabIndex={
+												guidedBuildOrganizationRowOwnsNextStep
+													? guidedSelectionTarget
+														? 0
+														: -1
+													: selectedOrganizationId === record.id ||
+															(!selectedStaticFabOrganizationVisible && index === 0)
+														? 0
+														: -1
+											}
+											onClick={(event) => handleStaticFabOrganizationClick(event, record)}
+											onKeyDown={(event) => handleStaticFabOrganizationOptionKeyDown(event, index)}
+										>
+											<StaticFabOrganizationKindIcon kind={record.kind} size={15} />
+											<span>
+												<strong>
+													<em>
+														{staticFabOrganizationSemanticRoleLabel(
+															organizationSemanticRoles.get(record.id),
+														) ?? staticFabOrganizationKindShortLabel(record.kind)}
+													</em>
+													{record.name}
+												</strong>
+												<small>
+													{record.membership.railEdges.length} EDGES ·{" "}
+													{record.membership.equipmentGroupIds.length} GROUPS
+												</small>
+											</span>
+											{organizationSelected ? (
+												<Check size={15} />
+											) : guidedBuildOrganizationPickerActive ? (
+												<Plus size={15} aria-hidden="true" />
+											) : (
+												<ChevronRight size={14} />
+											)}
+										</button>
+									);
+								})
+							)}
 						</div>
-					) : (
-						filteredStaticFabOrganizations.map((record, index) => {
-							const organizationSelected = selectedOrganizationIds.includes(record.id);
-							const guidedSelectionTarget =
-								guidedBuildOrganizationRowOwnsNextStep &&
-								guidedBuildOrganizationNextRecordId === record.id;
-							return (
-								<button
-									key={record.id}
-									type="button"
-									role="option"
-									id={`static-fab-organization-${record.id}`}
-									data-testid="static-fab-organization-item"
-									data-organization-id={record.id}
-									data-organization-name={record.name}
-									data-active={selectedOrganizationId === record.id}
-									data-selected={organizationSelected}
-									data-guided-target={guidedSelectionTarget || undefined}
-									data-guided-action-id={
-										guidedSelectionTarget
-											? (guidedBuildOrganizationRowTargetId ?? undefined)
-											: undefined
-									}
-									aria-selected={organizationSelected}
-									aria-describedby={
-										guidedSelectionTarget ? "tilefab-guided-primary-target-description" : undefined
-									}
-									tabIndex={
-										guidedBuildOrganizationRowOwnsNextStep
-											? guidedSelectionTarget
-												? 0
-												: -1
-											: selectedOrganizationId === record.id ||
-													(!selectedStaticFabOrganizationVisible && index === 0)
-												? 0
-												: -1
-									}
-									onClick={(event) => handleStaticFabOrganizationClick(event, record)}
-									onKeyDown={(event) => handleStaticFabOrganizationOptionKeyDown(event, index)}
-								>
-									<StaticFabOrganizationKindIcon kind={record.kind} size={15} />
-									<span>
-										<strong>
-											<em>
-												{staticFabOrganizationSemanticRoleLabel(
-													organizationSemanticRoles.get(record.id),
-												) ?? staticFabOrganizationKindShortLabel(record.kind)}
-											</em>
-											{record.name}
-										</strong>
-										<small>
-											{record.membership.railEdges.length} EDGES ·{" "}
-											{record.membership.equipmentGroupIds.length} GROUPS
-										</small>
-									</span>
-									{organizationSelected ? (
-										<Check size={15} />
-									) : guidedBuildOrganizationPickerActive ? (
-										<Plus size={15} aria-hidden="true" />
-									) : (
-										<ChevronRight size={14} />
-									)}
-								</button>
-							);
-						})
-					)}
-				</div>
-				{selectedStaticFabOrganization && selectedStaticFabOrganizationVisible ? (
+					</div>
+				) : null}
+				{detailVisible && selectedStaticFabOrganization ? (
 					<section
 						className="tilefab-organization-editor"
 						ref={organizationEditorRef}
@@ -606,20 +629,20 @@ export function StaticFabOrganizationLibrary({
 						data-dirty={organizationEditorDirty}
 					>
 						<header>
-							<span>
-								{organizationSemanticRoles.get(selectedStaticFabOrganization.id) === "PROCESS_LOOP"
-									? "작업 루프 · Process Loop"
-									: (staticFabOrganizationSemanticRoleLabel(
-											organizationSemanticRoles.get(selectedStaticFabOrganization.id),
-										) ?? selectedStaticFabOrganization.kind)}
-								-{selectedStaticFabOrganization.id}
+							<span className="tilefab-organization-detail-identity">
+								<strong>{selectedStaticFabOrganization.name}</strong>
+								<small>
+									{organizationSemanticRoles.get(selectedStaticFabOrganization.id) ===
+									"PROCESS_LOOP"
+										? "작업 루프 · Process Loop"
+										: (staticFabOrganizationSemanticRoleLabel(
+												organizationSemanticRoles.get(selectedStaticFabOrganization.id),
+											) ?? selectedStaticFabOrganization.kind)}
+									-{selectedStaticFabOrganization.id}
+								</small>
 							</span>
-							<button
-								type="button"
-								className="tilefab-organization-return"
-								onClick={() => organizationSearchInputRef.current?.focus()}
-							>
-								목록·복사
+							<button type="button" className="tilefab-organization-return" onClick={onShowList}>
+								<ArrowLeft size={14} /> 목록으로
 							</button>
 							<small>
 								{organizationDetailsStale ? "STALE" : organizationEditorDirty ? "UNSAVED" : "SAVED"}
@@ -658,6 +681,53 @@ export function StaticFabOrganizationLibrary({
 								id="organization-detail-panel-overview"
 								aria-labelledby="organization-detail-tab-overview"
 							>
+								{organizationSelectionCount === 1 &&
+								["BAY_BANK", "FAB", "BAY"].includes(
+									organizationSemanticRoles.get(selectedStaticFabOrganization.id) ?? "",
+								) ? (
+									<div className="tilefab-organization-editor-actions">
+										<button
+											type="button"
+											data-testid={
+												organizationSemanticRoles.get(selectedStaticFabOrganization.id) === "FAB"
+													? "organization-open-fab-commands"
+													: organizationSemanticRoles.get(selectedStaticFabOrganization.id) ===
+															"BAY_BANK"
+														? "organization-open-bank-commands"
+														: "organization-open-bay-commands"
+											}
+											disabled={
+												projectBusy ||
+												modelSyncPending ||
+												staticFabExclusiveCommandActive ||
+												organizationEditorDirty ||
+												organizationDetailsStale ||
+												bankReviewBlocked
+											}
+											onClick={() =>
+												openSelectedStructureCommands(selectedStaticFabOrganization.id)
+											}
+										>
+											{organizationSemanticRoles.get(selectedStaticFabOrganization.id) === "FAB"
+												? "FAB 삭제 검토"
+												: organizationSemanticRoles.get(selectedStaticFabOrganization.id) ===
+														"BAY_BANK"
+													? "Bank 분리·삭제 검토"
+													: "Bay 흐름·연결 편집"}{" "}
+											<ChevronRight size={14} />
+										</button>
+									</div>
+								) : null}
+								{bankReviewBlocked ? (
+									<p
+										className="tilefab-organization-support"
+										data-testid="organization-bank-editing-support"
+									>
+										{bankDetachSupport.reason}
+										<br />
+										{bankDeleteSupport.reason}
+									</p>
+								) : null}
 								<label className="tilefab-organization-field">
 									<span>NAME</span>
 									<input
@@ -694,36 +764,7 @@ export function StaticFabOrganizationLibrary({
 										<dd>조직 {selectedOrganizationDescendantCount + 1}개</dd>
 									</div>
 								</dl>
-								{organizationSelectionCount === 1 &&
-								["BAY_BANK", "FAB"].includes(
-									organizationSemanticRoles.get(selectedStaticFabOrganization.id) ?? "",
-								) ? (
-									<div className="tilefab-organization-editor-actions">
-										<button
-											type="button"
-											data-testid={
-												organizationSemanticRoles.get(selectedStaticFabOrganization.id) === "FAB"
-													? "organization-open-fab-commands"
-													: "organization-open-bank-commands"
-											}
-											disabled={
-												projectBusy ||
-												modelSyncPending ||
-												staticFabExclusiveCommandActive ||
-												organizationEditorDirty ||
-												organizationDetailsStale
-											}
-											onClick={() =>
-												openSelectedStructureCommands(selectedStaticFabOrganization.id)
-											}
-										>
-											{organizationSemanticRoles.get(selectedStaticFabOrganization.id) === "FAB"
-												? "FAB 삭제 검토"
-												: "Bank 분리·삭제 검토"}{" "}
-											<ChevronRight size={14} />
-										</button>
-									</div>
-								) : null}
+
 								<div className="tilefab-organization-editor-actions">
 									{selectedStaticFabOrganization.kind === "AISLE" &&
 									selectedStaticFabOrganization.declaredSemanticRole === "PROCESS_LOOP" &&
@@ -922,6 +963,7 @@ export function StaticFabOrganizationLibrary({
 									: "REMOVE METADATA"}
 							</button>
 						</div>
+						{reuseActions}
 					</section>
 				) : null}
 			</div>

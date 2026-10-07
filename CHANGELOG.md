@@ -6,6 +6,20 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.72] - 2026-10-07
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Open selected structures in a dedicated detail view with a return to the retained list and search.
+  Keep editing first, place copy/blueprint tools in a disclosure, and show existing Bank support limits.
+- Reduce New FAB to layout, production and review; retain all editable settings and show automatic
+  connection policies in the review disclosure.
+- Group the selected Checks cause, location and direct repair action before secondary repair choices,
+  follow-up issues and item summaries. Keep compact repair controls unobscured.
+- Return applied Bay flow edits to the same Bay detail with its atomic command and history intact.
+  Return cancelled reviews to their originating detail with search/filter context preserved, and
+  keep unverified change and preservation claims out of failed-review summaries.
+
 ## [0.1.71] - 2026-10-07
 
 Builder preview candidate; V1 remains incomplete and simulation stays disabled.

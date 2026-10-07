@@ -343,7 +343,9 @@ export function StaticFabAssembleMenu({
 				{selectionCount === 1 && selectedBayCount === 1 ? (
 					<section className="tilefab-assemble-semantic-bay" aria-label="Selected Bay commands">
 						<header>
-							<span>선택한 Bay</span>
+							<span data-testid="assemble-selected-bay-heading" tabIndex={-1}>
+								선택한 Bay
+							</span>
 							<small className="tilefab-assemble-semantic-bay-header-detail">흐름·연결·삭제</small>
 						</header>
 						<div className="tilefab-assemble-semantic-bay-actions">

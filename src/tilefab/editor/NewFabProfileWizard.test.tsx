@@ -21,7 +21,6 @@ describe("NewFabProfileWizard model", () => {
 		expect(NEW_FAB_PROFILE_WIZARD_STEPS.map((step) => step.label)).toEqual([
 			"배치",
 			"생산 구성",
-			"연결 방식",
 			"검토·생성",
 		]);
 		expect(review.derived.counts).toMatchObject({
@@ -135,7 +134,7 @@ describe("NewFabProfileWizard model", () => {
 });
 
 describe("NewFabProfileWizard static shell rendering", () => {
-	it("renders a modal four-step shell with only implemented Layout choices", () => {
+	it("renders a modal three-step shell with only implemented Layout choices", () => {
 		const markup = renderWizard();
 
 		expect(markup).toContain('role="dialog"');
@@ -143,7 +142,7 @@ describe("NewFabProfileWizard static shell rendering", () => {
 		expect(markup).toContain('data-step="layout"');
 		expect(markup).toContain("배치");
 		expect(markup).toContain("생산 구성");
-		expect(markup).toContain("연결 방식");
+		expect(markup).not.toContain("연결 방식");
 		expect(markup).toContain("검토·생성");
 		expect(markup).toContain("프로젝트 이름과 Bank를 배치할 구역·방향");
 		expect(markup).toContain("별도 편집 조직으로 저장하지 않습니다");

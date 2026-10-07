@@ -72,6 +72,35 @@ describe("StaticFabBayFlowEditDialog", () => {
 		expect(markup).not.toMatch(/data-testid="bay-flow-edit-retry"[^>]*disabled/);
 	});
 
+	it("does not claim preservation or a detached Bay when gateway recognition fails", () => {
+		const reason = "Attached Bay gateway could not be normalized: branch 3 · merge 3";
+		const rejected = reduceStaticFabBayFlowEditSession(analyzingSession(), {
+			type: "ANALYSIS_REJECTED",
+			requestSequence: 1,
+			reason,
+			review: reviewFixture({
+				issueCode: "SOURCE_NOT_RECOGNIZED",
+				sourceInternalFlowPattern: null,
+				incidentConnectorCount: 0,
+				removedDirectedEdgeCount: 0,
+				addedDirectedEdgeCount: 0,
+				changedCellCount: 0,
+				changedOrganizationIds: [],
+			}),
+			sourceEvidence: null,
+			prospectiveEvidence: null,
+			timings: null,
+		});
+		const markup = renderDialog(rejected);
+		expect(markup).toContain("변경은 적용되지 않았습니다");
+		expect(markup).toContain(reason);
+		expect(markup).not.toContain("독립 Bay · 외부 연결 없음");
+		expect(markup).not.toContain("유지하는 항목");
+		expect(markup).not.toContain("0개 제거");
+		expect(markup).not.toContain('data-testid="bay-flow-edit-apply"');
+		expect(markup).not.toMatch(/data-testid="bay-flow-edit-cancel"[^>]*disabled/);
+	});
+
 	it("keeps Cancel enabled while a rejected target starts a fresh review", () => {
 		const rejected = reduceStaticFabBayFlowEditSession(readySession(), {
 			type: "ANALYSIS_REJECTED",

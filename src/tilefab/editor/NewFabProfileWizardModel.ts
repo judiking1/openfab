@@ -8,7 +8,6 @@ import {
 export const NEW_FAB_PROFILE_WIZARD_STEPS = Object.freeze([
 	Object.freeze({ id: "layout" as const, label: "배치" }),
 	Object.freeze({ id: "production" as const, label: "생산 구성" }),
-	Object.freeze({ id: "circulation" as const, label: "연결 방식" }),
 	Object.freeze({ id: "review" as const, label: "검토·생성" }),
 ]);
 

@@ -1073,6 +1073,7 @@ try {
 	const renamedAreaOptionName = new RegExp(
 		`Acceptance North Production Hall ${largeFabEdgeCount} EDGES`,
 	);
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "PROPERTIES", exact: true }).click();
 	const creationHistoryDescription = areaLibrary.locator(
 		".tilefab-organization-detail-panel textarea",
@@ -1088,6 +1089,7 @@ try {
 		unsavedCreationHistoryDraft,
 		"unsaved organization details survive creation undo/redo",
 	);
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "RELOAD", exact: true }).click();
 	assertEqual(await creationHistoryDescription.inputValue(), "", "history draft explicit reload");
 	await areaLibrary.getByRole("button", { name: "FAB 조직 라이브러리 닫기" }).click();
@@ -1101,6 +1103,7 @@ try {
 	await desktopPage.getByTestId("save-static-fab-area").click();
 	await waitForWorker(desktopPage, (metrics) => metrics.staticFabOrganizations === "2");
 	await areaLibrary.waitFor({ state: "visible" });
+	await showOrganizationList(areaLibrary);
 	assertEqual(
 		await areaLibrary.getByRole("tab", { name: "ALL 2", exact: true }).count(),
 		1,
@@ -1127,7 +1130,9 @@ try {
 	await desktopPage.waitForTimeout(100);
 	const mainAreaOption = areaLibrary.getByRole("option", { name: mainAreaOptionName });
 	const mainBayOption = areaLibrary.getByRole("option", { name: mainBayOptionName });
+	await showOrganizationList(areaLibrary);
 	await mainBayOption.click();
+	await showOrganizationList(areaLibrary);
 	assertEqual(await areaLibrary.isVisible(), true, "organization selection keeps panel open");
 	assertEqual(
 		await mainBayOption.getAttribute("aria-selected"),
@@ -1136,6 +1141,7 @@ try {
 	);
 	await assertOrganizationEditorLayout(desktopPage, { width: 1280, height: 720 }, "overview");
 
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "RELATIONS", exact: true }).click();
 	const organizationRelationsScope = areaLibrary.getByTestId(
 		"organization-relations-metadata-scope",
@@ -1174,14 +1180,20 @@ try {
 	assertEqual(await saveOrganizationDetails.isDisabled(), true, "saved relationship is clean");
 	await assertWorkerMirrorReady(desktopPage, "relationship save");
 
+	await showOrganizationList(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "ALL 2", exact: true }).click();
+	await showOrganizationList(areaLibrary);
 	await mainBayOption.click();
+	await showOrganizationList(areaLibrary);
+	await showOrganizationList(areaLibrary);
 	await mainAreaOption.click({ modifiers: ["Meta"] });
+	await showOrganizationList(areaLibrary);
 	assertEqual(
 		await areaLibrary.getByRole("option", { selected: true }).count(),
 		2,
 		"organization Cmd-click multi-selection",
 	);
+	await showOrganizationReuse(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "하위 조직 포함", exact: true }).click();
 	assertEqual(
 		await areaLibrary
@@ -1383,8 +1395,11 @@ try {
 	await desktopPage.getByRole("button", { name: "청사진 라이브러리 닫기" }).click();
 	await openStaticFabNavigatorTab(desktopPage, "organizations");
 	await areaLibrary.waitFor({ state: "visible" });
+	await showOrganizationReuse(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "선택 조직만", exact: true }).click();
+	await showOrganizationList(areaLibrary);
 	await mainBayOption.click();
+	await showOrganizationList(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "FAB 조직 라이브러리 닫기" }).click();
 	const organizationNavigatorLauncher = await activityCommandButton(
 		desktopPage,
@@ -1519,9 +1534,15 @@ try {
 	await assembleMenu.waitFor({ state: "hidden" });
 	await openStaticFabNavigatorTab(desktopPage, "organizations");
 	await areaLibrary.waitFor({ state: "visible" });
+	await showOrganizationList(areaLibrary);
 	await mainBayOption.click();
+	await showOrganizationList(areaLibrary);
+	await showOrganizationList(areaLibrary);
 	await mainAreaOption.click({ modifiers: ["Meta"] });
+	await showOrganizationList(areaLibrary);
+	await showOrganizationReuse(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "하위 조직 포함", exact: true }).click();
+	await showOrganizationReuse(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "복사·배치", exact: true }).click();
 	await desktopPage.waitForFunction(
 		() =>
@@ -1825,8 +1846,11 @@ try {
 		"organization multi-selection survives placement cancel",
 	);
 
+	await showOrganizationList(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "ALL 2", exact: true }).click();
+	await showOrganizationList(areaLibrary);
 	await mainAreaOption.click();
+	await showOrganizationList(areaLibrary);
 	assertEqual(
 		await areaLibrary.isVisible(),
 		true,
@@ -1862,6 +1886,7 @@ try {
 		"effective organization selection modules",
 	);
 
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "PROPERTIES", exact: true }).click();
 	const organizationDescription = areaLibrary.locator(
 		".tilefab-organization-detail-panel textarea",
@@ -1934,19 +1959,26 @@ try {
 	);
 	await assertWorkerMirrorReady(desktopPage, "properties redo");
 
+	await showOrganizationList(areaLibrary);
 	await mainBayOption.click();
+	await showOrganizationList(areaLibrary);
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "RELATIONS", exact: true }).click();
 	assertEqual(
 		await mainAreaParentCheckbox.isChecked(),
 		true,
 		"parent relationship survives property history",
 	);
+	await showOrganizationList(areaLibrary);
 	await mainAreaOption.click();
+	await showOrganizationList(areaLibrary);
 	await desktopPage.setViewportSize({ width: 390, height: 844 });
 	await desktopPage.waitForTimeout(100);
 	await assertOrganizationEditorLayout(desktopPage, { width: 390, height: 844 }, "overview");
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "RELATIONS", exact: true }).click();
 	await assertOrganizationEditorLayout(desktopPage, { width: 390, height: 844 }, "relations");
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "PROPERTIES", exact: true }).click();
 	await assertOrganizationEditorLayout(desktopPage, { width: 390, height: 844 }, "properties");
 	assertEqual(
@@ -1959,6 +1991,7 @@ try {
 	recordStep("static-fab-organization-details", propertiesRedone);
 	recordPhase4Checkpoint("large-fab-organization-details", propertiesRedone);
 
+	await showOrganizationList(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "ALL 2", exact: true }).click();
 	await areaSearch.fill("Main FAB");
 	const filteredAreaOption = areaLibrary.getByRole("option", { name: mainAreaOptionName });
@@ -1974,14 +2007,20 @@ try {
 		"Tab enters the filtered organization list",
 	);
 	await areaSearch.fill("");
+	await showOrganizationList(areaLibrary);
 	await areaLibrary.getByRole("option", { name: mainBayOptionName }).click();
+	await showOrganizationList(areaLibrary);
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "REMOVE METADATA", exact: true }).click();
 	await waitForWorker(desktopPage, (metrics) => metrics.staticFabOrganizations === "1");
 	await desktopPage.waitForFunction(
 		() => document.activeElement?.getAttribute("aria-label") === "저장된 FAB 조직 검색",
 	);
+	await showOrganizationList(areaLibrary);
 	await areaLibrary.getByRole("tab", { name: "AREA 1", exact: true }).click();
+	await showOrganizationList(areaLibrary);
 	await areaLibrary.getByRole("option", { name: mainAreaOptionName }).click();
+	await showOrganizationList(areaLibrary);
 	assertEqual(
 		await areaLibrary
 			.getByRole("option", { name: mainAreaOptionName })
@@ -1998,9 +2037,12 @@ try {
 	const organizationRename = desktopPage.getByRole("textbox", {
 		name: "선택한 FAB 조직 이름",
 	});
+	await showOrganizationDetails(areaLibrary);
 	await organizationRename.fill("Acceptance North Production Hall");
 	const areaRenameStartedAt = performance.now();
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "RENAME", exact: true }).click();
+	await showOrganizationList(areaLibrary);
 	await desktopPage.waitForFunction(
 		() => (document.querySelector('input[aria-label="저장된 FAB 조직 검색"]')?.value ?? "") === "",
 	);
@@ -2022,6 +2064,7 @@ try {
 		"renamed AREA remains selected",
 	);
 	const areaRemoveStartedAt = performance.now();
+	await showOrganizationDetails(areaLibrary);
 	await areaLibrary.getByRole("button", { name: "REMOVE METADATA", exact: true }).click();
 	await waitForWorker(desktopPage, (metrics) => metrics.staticFabOrganizations === "0");
 	assertAtMost(
@@ -2045,6 +2088,7 @@ try {
 	);
 	await desktopPage.getByRole("button", { name: "실행 취소" }).click();
 	await waitForWorker(desktopPage, (metrics) => metrics.staticFabOrganizations === "1");
+	await showOrganizationList(areaLibrary);
 	assertEqual(
 		await areaLibrary
 			.getByRole("option", { name: renamedAreaOptionName })
@@ -10150,6 +10194,7 @@ async function exercisePendingLoopHistoryCommands(page, before, repaired, source
 			attempted.push(action);
 		};
 		assertEqual(await guide.locator(".tilefab-readiness-repair").count(), 2, `${label} both supported repair entries remain present`);
+		await guide.locator(".tilefab-checks-secondary > summary").click();
 		for (const [control, action] of [
 			[guide.getByTestId("checks-choose-process-loop"), "explicit Loop repair chooser"],
 			[guide.getByRole("button", { name: "레일 이어 만들기", exact: true }), "rail continuation repair CTA"],
@@ -10741,6 +10786,8 @@ async function checkRepairChooseIssue(page, code, label) {
 }
 
 async function checkRepairOpenChooser(page, kind, label) {
+	const help = page.getByTestId("rail-readiness-guide").locator(".tilefab-checks-secondary");
+	if ((await help.getAttribute("open")) === null) await help.locator("summary").click();
 	const entry = page.getByTestId(kind === "loop" ? "checks-choose-process-loop" : "checks-choose-connector");
 	await entry.scrollIntoViewIfNeeded();
 	await checkRepairAssertControl(page, entry, `${label} visible explicit chooser entry`);
@@ -28356,6 +28403,8 @@ async function exerciseCurrentLargeFabOrganizationArrangement(
 	const initialOrganizationId = await initialOption.getAttribute("data-organization-id");
 	if (!initialOrganizationId) throw new Error("Initial Organization option has no stable ID.");
 	await initialOption.click();
+	await showOrganizationList(organizationLibrary);
+	await showOrganizationReuse(organizationLibrary);
 	assertEqual(
 		await selectionSummary.isVisible(),
 		true,
@@ -28574,6 +28623,7 @@ async function exerciseCurrentLargeFabOrganizationArrangement(
 	await openStaticFabNavigatorTab(page, "organizations");
 	await organizationLibrary.waitFor({ state: "visible" });
 	await mainBayOption.click();
+	await showOrganizationList(organizationLibrary);
 	await mainAreaOption.click({ modifiers: ["Meta"] });
 	assertEqual(
 		await organizationLibrary.getByRole("option", { selected: true }).count(),
@@ -34543,6 +34593,9 @@ async function chooseDefaultTwinBayInOpenOrganizationBrowser(page, source) {
 async function chooseNamedBayInOpenOrganizationBrowser(page, source, organizationName) {
 	const organizationLibrary = page.getByTestId("static-fab-organization-library");
 	await organizationLibrary.waitFor({ state: "visible" });
+	if ((await organizationLibrary.getAttribute("data-view")) === "detail") {
+		await organizationLibrary.getByRole("button", { name: "목록으로", exact: true }).click();
+	}
 	await organizationLibrary
 		.getByRole("tab", { name: `ALL ${source.staticFabOrganizations}` })
 		.click();
@@ -34572,6 +34625,9 @@ async function selectOrganizationIdThroughBrowser(page, source, organizationId) 
 	await openStaticFabNavigatorTab(page, "organizations");
 	const organizationLibrary = page.getByTestId("static-fab-organization-library");
 	await organizationLibrary.waitFor({ state: "visible" });
+	if ((await organizationLibrary.getAttribute("data-view")) === "detail") {
+		await organizationLibrary.getByRole("button", { name: "목록으로", exact: true }).click();
+	}
 	await organizationLibrary
 		.getByRole("tab", { name: `ALL ${source.staticFabOrganizations}` })
 		.click();
@@ -35724,8 +35780,8 @@ async function openNewFabProfileWizard(page) {
 				.locator(".tilefab-new-fab-steps li strong")
 				.evaluateAll((labels) => labels.map((label) => label.textContent?.trim() ?? "")),
 		),
-		JSON.stringify(["배치", "생산 구성", "연결 방식", "검토·생성"]),
-		"New Fab four-step order",
+		JSON.stringify(["배치", "생산 구성", "검토·생성"]),
+		"New Fab three-step order",
 	);
 	assertEqual(
 		await wizard.locator(".tilefab-new-fab-name input").inputValue(),
@@ -35791,7 +35847,7 @@ async function exerciseNewFabProfileWizardChoices(page, wizard) {
 		await selectNewFabProfileRadio(wizard, name, value);
 	}
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "circulation", "연결 방식");
+	await assertNewFabProfileStep(page, wizard, "review", "검토·생성");
 	await assertNewFabProfileCirculationContract(wizard, "진입·진출 레일 자동 연결");
 	await wizard.getByTestId("new-fab-profile-back").click();
 	await assertNewFabProfileStep(page, wizard, "production", "생산 구성");
@@ -35844,10 +35900,8 @@ async function navigateDefaultNewFabProfileToReview(page, wizard) {
 	await assertNewFabProfileDefaultCounts(wizard);
 	await assertNewFabProfileCopy(wizard, "생산 구성");
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "circulation", "연결 방식");
-	await assertNewFabProfileCirculationContract(wizard);
-	await wizard.getByTestId("new-fab-profile-next").click();
 	await assertNewFabProfileStep(page, wizard, "review", "검토·생성");
+	await assertNewFabProfileCirculationContract(wizard);
 	await assertNewFabProfileReviewContract(wizard);
 }
 
@@ -35927,6 +35981,9 @@ async function assertNewFabProfileCirculationContract(
 	wizard,
 	interBlockConnector = "한 구역에서는 불필요",
 ) {
+	const policies = wizard.getByTestId("new-fab-profile-connection-details");
+	assertEqual(await policies.getAttribute("open"), null, "New Fab connection policies initially collapsed");
+	await policies.locator("summary").click();
 	await assertNewFabProfileCopy(wizard, "연결 방식");
 	const text = (
 		await wizard.evaluate((element) => element.innerText.replace(/\s+/g, " ").trim())
@@ -35941,6 +35998,8 @@ async function assertNewFabProfileCirculationContract(
 		assertIncludes(text, expected, `New Fab circulation policy ${expected}`);
 	}
 	if (/R600/i.test(text)) throw new Error("New Fab exposes unsupported R600 profile selection.");
+	assertEqual(await policies.locator("input, select, button").count(), 0, "New Fab policies are read-only");
+	await policies.locator("summary").click();
 }
 
 async function assertNewFabProfileReviewContract(wizard) {
@@ -36284,10 +36343,8 @@ async function navigateMaximumNewFabProfileToReview(page, wizard) {
 		await selectNewFabProfileRadio(wizard, name, value);
 	}
 	await wizard.getByTestId("new-fab-profile-next").click();
-	await assertNewFabProfileStep(page, wizard, "circulation", "연결 방식");
-	await assertNewFabProfileCirculationContract(wizard, "진입·진출 레일 자동 연결");
-	await wizard.getByTestId("new-fab-profile-next").click();
 	await assertNewFabProfileStep(page, wizard, "review", "검토·생성");
+	await assertNewFabProfileCirculationContract(wizard, "진입·진출 레일 자동 연결");
 }
 
 async function readDefaultNewFabOrganizationContract(page) {
@@ -38330,6 +38387,8 @@ async function frameVisibleProcessLoopFromOrganizations(page, label) {
 	await loop.scrollIntoViewIfNeeded();
 	await assertLocatorOwnsHitArea(loop, `${label} Process Loop organization row`);
 	if ((await loop.getAttribute("aria-selected")) !== "true") await loop.click();
+	await showOrganizationList(library);
+	await showOrganizationReuse(library);
 	assertEqual(
 		await loop.getAttribute("aria-selected"),
 		"true",
@@ -47551,6 +47610,7 @@ async function exerciseResilientFabCopyRejectionFeedback(page, savedPath, fabOrg
 		await openStaticFabNavigatorTab(page, "organizations");
 		const library = page.getByTestId("static-fab-organization-library");
 		await library.locator(`[role="option"][data-organization-id="${fabOrganizationId}"]`).click();
+		await showOrganizationReuse(library);
 		await library.getByRole("button", { name: "하위 조직 포함", exact: true }).click();
 		await library.getByRole("button", { name: "복사·배치", exact: true }).click();
 		await page.getByTestId("organization-bundle-summary").waitFor({ state: "visible" });
@@ -51881,6 +51941,23 @@ async function assertOrganizationPlacementToolbarLayout(page) {
 	assertProjectContentUnchanged(await readMetrics(page), before, "organization toolbar resize");
 }
 
+async function showOrganizationList(library) {
+	if ((await library.getAttribute("data-view")) === "detail") {
+		await library.getByRole("button", { name: "목록으로", exact: true }).click();
+	}
+}
+
+async function showOrganizationDetails(library) {
+	if ((await library.getAttribute("data-view")) !== "detail") {
+		await library.getByRole("button", { name: "세부 편집", exact: true }).click();
+	}
+}
+
+async function showOrganizationReuse(library) {
+	const disclosure = library.locator(".tilefab-organization-reuse");
+	if ((await disclosure.getAttribute("open")) === null) await disclosure.locator("summary").click();
+}
+
 async function assertOrganizationEditorLayout(page, expectedViewport, expectedTab) {
 	const viewport = page.viewportSize();
 	assertEqual(viewport?.width, expectedViewport.width, `${expectedTab} viewport width`);
@@ -51888,7 +51965,11 @@ async function assertOrganizationEditorLayout(page, expectedViewport, expectedTa
 	const library = page.getByTestId("static-fab-organization-library");
 	await library.waitFor({ state: "visible" });
 	await assertLocatorInsideViewport(page, library);
+	if ((await library.getAttribute("data-view")) === "detail") {
+		await library.getByRole("button", { name: "목록으로", exact: true }).click();
+	}
 	await library.getByRole("button", { name: "세부 편집", exact: true }).click();
+
 	assertEqual(
 		await library
 			.getByRole("tab", { name: expectedTab.toUpperCase(), exact: true })
@@ -52184,6 +52265,7 @@ async function openStaticFabNavigatorTab(page, tab) {
 	await page
 		.locator(`#tilefab-fab-navigator-panel-${tab}[role="tabpanel"]:not([hidden])`)
 		.waitFor({ state: "visible", timeout: 10_000 });
+	if (tab === "organizations") await showOrganizationList(page.getByTestId("static-fab-organization-library"));
 	return launcher;
 }
 

@@ -472,7 +472,6 @@ export function NewFabProfileWizard<TPreparedEvidence extends object>({
 								onProfile={updateProfile}
 							/>
 						) : null}
-						{step.id === "circulation" ? <CirculationStep review={review} /> : null}
 						{step.id === "review" ? (
 							<ReviewStep
 								review={review}
@@ -733,7 +732,7 @@ function ProductionStep({
 	);
 }
 
-function CirculationStep({
+function ConnectionPolicies({
 	review,
 }: Readonly<{ review: NewFabProfileWizardReview }>): ReactElement {
 	const connector =
@@ -741,7 +740,7 @@ function CirculationStep({
 			? "한 구역에서는 불필요"
 			: "진입·진출 레일 자동 연결";
 	return (
-		<div className="tilefab-new-fab-fields" data-testid="new-fab-circulation-step">
+		<div className="tilefab-new-fab-fields" data-testid="new-fab-connection-policies">
 			<div className="tilefab-new-fab-fixed-intro">
 				<Route size={19} aria-hidden="true" />
 				<span className="tilefab-new-fab-fixed-intro-copy">
@@ -850,6 +849,10 @@ function ReviewStep({
 			<p className="tilefab-new-fab-next-step">
 				생성 후 OHB·EQ·STK를 배치하고 포트 연결을 검사하세요. 시뮬레이션은 아직 제공하지 않습니다.
 			</p>
+			<details className="tilefab-new-fab-details" data-testid="new-fab-profile-connection-details">
+				<summary>자동 연결 규칙</summary>
+				<ConnectionPolicies review={review} />
+			</details>
 			<details className="tilefab-new-fab-details" data-testid="new-fab-profile-review-details">
 				<summary>배치 규격·연결 수 보기</summary>
 				<section className="tilefab-new-fab-review-section">
@@ -1138,8 +1141,6 @@ function stepDescription(step: (typeof NEW_FAB_PROFILE_WIZARD_STEPS)[number]["id
 	if (step === "layout") return "프로젝트 이름과 Bank를 배치할 구역·방향을 정하세요.";
 	if (step === "production")
 		return "Bank 수와 순환 레일 수, Bay 구성을 정하세요. 예상 개수가 구성 도식에 반영됩니다.";
-	if (step === "circulation")
-		return "Bay와 Bank를 연결할 레일 방식을 확인하세요. 현재는 아래 방식으로 자동 연결합니다.";
 	return "구성과 크기를 확인한 뒤 검증하세요. 검증이 끝나면 새 프로젝트를 만들 수 있습니다.";
 }
 

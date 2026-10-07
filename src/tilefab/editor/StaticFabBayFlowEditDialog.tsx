@@ -41,6 +41,7 @@ export function StaticFabBayFlowEditDialog({
 	const applying = session.phase === "applying";
 	const rejected = session.phase === "rejected";
 	const canApply = staticFabBayFlowEditSessionCanApply(session);
+	const verifiedReview = canApply || applying ? session.review : null;
 
 	useEffect(() => {
 		suppliedReturnFocusRef.current = returnFocus;
@@ -156,12 +157,12 @@ export function StaticFabBayFlowEditDialog({
 						순환을 <strong>{flowLabel(session.targetInternalFlowPattern)}</strong>으로 변경합니다.
 					</p>
 					<CommandStatus session={session} />
-					{session.review ? <FlowReview review={session.review} /> : null}
+					{verifiedReview ? <FlowReview review={verifiedReview} /> : null}
 					{session.review || session.sourceEvidence || session.timings ? (
 						<details className="tilefab-bay-flow-disclosure" data-testid="bay-flow-edit-details">
 							<summary>레일·검증 세부 정보</summary>
 							<div className="tilefab-bay-flow-disclosure-body">
-								{session.review ? <FlowIdentity review={session.review} /> : null}
+								{verifiedReview ? <FlowIdentity review={verifiedReview} /> : null}
 								{session.sourceEvidence && session.prospectiveEvidence ? (
 									<WorkerEvidence
 										source={session.sourceEvidence}
@@ -233,7 +234,9 @@ function CommandStatus({
 					: "흐름 변경을 적용하고 있습니다";
 	const description =
 		session.phase === "rejected"
-			? session.reason
+			? session.review?.issueCode === "SOURCE_NOT_RECOGNIZED"
+				? "현재 Bay의 레일·연결 구조를 지원되는 흐름 변경 구성으로 확인하지 못했습니다. 변경은 적용되지 않았습니다. 세부 진단을 확인하거나 취소해 이전 작업으로 돌아가세요."
+				: session.reason
 			: session.phase === "analyzing"
 				? "연결 레일과 장비를 유지할 수 있는지 확인합니다."
 				: session.phase === "ready"
