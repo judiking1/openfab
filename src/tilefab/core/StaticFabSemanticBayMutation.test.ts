@@ -13,7 +13,14 @@ import type { CardinalPortRoute, PortRecord } from "./PortRecord";
 import { planRailConstruction } from "./paint";
 import { RailDocument } from "./RailDocument";
 import { buildRailModuleOwnershipIndex, type RailModuleOwnership } from "./RailModuleOwnership";
-import { ALL_DIRECTIONS, bitCount, type Direction, moveCell } from "./railShape";
+import {
+	ALL_DIRECTIONS,
+	bitCount,
+	type Direction,
+	directionBetween,
+	moveCell,
+	oppositeDirection,
+} from "./railShape";
 import {
 	compareDirectedRailEdges,
 	deriveStaticFabOrganizationSemanticRoles,
@@ -392,6 +399,93 @@ describe("StaticFabSemanticBayMutation", () => {
 			prospective.map,
 			prospective.organizations,
 		);
+		assertSourceUnchanged();
+	});
+
+	it.each([
+		"DISCONNECT",
+		"DELETE",
+	] as const)("preserves the current composer's FAB-owned Bank attachment through Bay %s", (action) => {
+		const { document, fab, bank, bay, processLoop } = fixture;
+		const result = action === "DISCONNECT" ? fixture.disconnect : fixture.delete;
+		const prospective = requireProspective(result);
+		const relationship = document.relationships.records.find(
+			(record) =>
+				record.hierarchyRole === "BANK_TO_FAB" &&
+				record.parentOrganizationId === fab.id &&
+				record.managedChildOrganizationIds.includes(bank.id),
+		);
+		expect(relationship).toBeDefined();
+		if (!relationship) throw new Error("Expected the selected Bank's declared Fab attachment.");
+		const legs = relationship.connectionGroups.flatMap((group) => group.legs);
+		expect(legs.map((leg) => leg.exclusiveCutEdges.length)).toEqual([36, 36]);
+		const attachmentEdges = legs.flatMap((leg) => leg.exclusiveCutEdges);
+		const attachmentKeys = new Set(
+			attachmentEdges.map(({ edge }) => staticFabOrganizationEdgeKey(edge)),
+		);
+		expect(attachmentKeys).toHaveLength(72);
+		for (const { edge, scope } of attachmentEdges) {
+			expect(scope).toEqual({ kind: "PARENT_DIRECT" });
+			const direction = directionBetween(edge.from, edge.to);
+			expect(direction).not.toBeNull();
+			if (direction === null) throw new Error("Expected a cardinal Bank attachment edge.");
+			for (const state of [document, prospective]) {
+				const owners = state.organizations.records
+					.filter((record) =>
+						record.membership.railEdges.some(
+							(candidate) =>
+								staticFabOrganizationEdgeKey(candidate) === staticFabOrganizationEdgeKey(edge),
+						),
+					)
+					.map((record) => record.id);
+				expect(owners).toEqual([fab.id]);
+				expect(state.map.getEncoded(edge.from.x, edge.from.y) & (direction << 4)).toBe(
+					direction << 4,
+				);
+				const incoming = oppositeDirection(direction);
+				expect(state.map.getEncoded(edge.to.x, edge.to.y) & incoming).toBe(incoming);
+			}
+		}
+		expect(prospective.relationships).toEqual(document.relationships);
+		expect(prospective.organizations.records.find((record) => record.id === fab.id)).toEqual(fab);
+		const retainedBank = requireRecord(
+			prospective.organizations.records.find((record) => record.id === bank.id),
+			"retained Bank",
+		);
+		expect(result.plan.review.remainingBankDirectedEdgeCount).toBe(
+			retainedBank.membership.railEdges.length,
+		);
+		// Composer v2 gives the same 72 attachment edges to Fab instead of Bank.
+		expect(retainedBank.membership.railEdges.length + attachmentKeys.size).toBe(959);
+		expect(document.map.edgeCount - prospective.map.edgeCount).toBe(
+			action === "DISCONNECT" ? 24 : 268,
+		);
+		expect(analyzeRailNetwork(prospective.map)).toMatchObject({
+			edges: action === "DISCONNECT" ? 11_408 : 11_164,
+			components: action === "DISCONNECT" ? 2 : 1,
+			strongComponents: action === "DISCONNECT" ? 2 : 1,
+			openEnds: 0,
+			unsafeJunctions: 0,
+		});
+		expect(prospective.portEquipment).toEqual(document.portEquipment);
+		if (action === "DISCONNECT") {
+			const detachedBay = requireRecord(
+				prospective.organizations.records.find((record) => record.id === bay.id),
+				"detached Bay",
+			);
+			expect(staticFabOrganizationParentIds(detachedBay)).toEqual([]);
+			expect(
+				prospective.organizations.records.find((record) => record.id === processLoop.id),
+			).toEqual(processLoop);
+		} else {
+			expect(
+				prospective.organizations.records.some(
+					(record) => record.id === bay.id || record.id === processLoop.id,
+				),
+			).toBe(false);
+		}
+		assertExactDirectedEdgeOwnership(prospective.map, prospective.organizations);
+		assertSourceToProspectivePatch(document, result, prospective.map, prospective.organizations);
 		assertSourceUnchanged();
 	});
 

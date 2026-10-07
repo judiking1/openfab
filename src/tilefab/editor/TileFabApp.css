@@ -2267,6 +2267,21 @@
 	}
 }
 
+/* Checks uses a bottom panel throughout the compact Navigator layout. */
+@media (max-width: 760px) {
+	.tilefab-app[data-guided-build-active="false"][data-editor-activity="inspect"]
+		.tilefab-workspace:has(.tilefab-readiness):not(
+			:has(.tilefab-blueprint-library, .tilefab-pattern-browser)
+		)
+		.tilefab-camera-controls {
+		top: 10px;
+		right: 10px;
+		bottom: auto;
+		left: auto;
+		flex-direction: row;
+	}
+}
+
 @media (forced-colors: active) {
 	.tilefab-inspector .tilefab-inspector-disclosure[aria-expanded="true"] {
 		border: 2px solid Highlight;

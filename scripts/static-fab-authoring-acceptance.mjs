@@ -9009,6 +9009,7 @@ async function readDirectProcessLoopEquipmentEvidence(page, groupIds) {
 
 async function selectOrdinaryPortProcessLoop(page, loopId, label, verifyChangeFocus = false) {
 	const select = page.getByTestId("ordinary-port-process-loop-target");
+	await revealEquipmentOptionalSetting(select);
 	await select.waitFor({ state: "visible" });
 	await select.scrollIntoViewIfNeeded();
 	await assertLocatorInsideViewport(page, select);
@@ -9071,7 +9072,7 @@ async function selectOrdinaryPortProcessLoop(page, loopId, label, verifyChangeFo
 			before,
 			`${label} Loop selector change round trip`,
 		);
-		const start = page.getByTestId("ordinary-port-process-loop-start");
+		const start = await prepareOrdinaryPortPlacementStart(page, label);
 		await start.scrollIntoViewIfNeeded();
 		await assertLocatorInsideViewport(page, start);
 		if (label === "390x600") {
@@ -9107,7 +9108,7 @@ async function selectOrdinaryPortProcessLoop(page, loopId, label, verifyChangeFo
 		await page.waitForFunction((id) => document.querySelector('[data-testid="ordinary-port-process-loop-target"]')?.value === String(id), loopId);
 		assertEqual(await select.evaluate((element) => document.activeElement === element), true, `${label} keyboard selector retains focus`);
 		await assertOrdinaryPortProcessLoopIdentity(page, loopId, label);
-		const start = page.getByTestId("ordinary-port-process-loop-start");
+		const start = await prepareOrdinaryPortPlacementStart(page, label);
 		await assertLocatorInsideViewport(page, start);
 		await assertLocatorOwnsHitArea(start, `${label} placement start`);
 		assertAtLeast((await start.boundingBox())?.height ?? 0, 44, `${label} placement start target`);
@@ -9115,6 +9116,26 @@ async function selectOrdinaryPortProcessLoop(page, loopId, label, verifyChangeFo
 		await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "rail-canvas");
 		assertProjectUnchanged(await readMetrics(page), before, `${label} actual selector and start preserve source`);
 	}
+}
+
+async function prepareOrdinaryPortPlacementStart(page, label) {
+	const before = await readMetrics(page);
+	const { bounds } = await readRailGeometry(page);
+	if (!bounds) throw new Error(`${label} has no rail bounds for pointer-mode preparation.`);
+	// Scope selection now starts keyboard placement. Switch through normal empty Canvas
+	// input to exercise the existing idle placement-start action without changing source.
+	const empty = { x: bounds.minX - 8.5, y: bounds.minY - 8.5 };
+	if ((await page.getByTestId("rail-canvas").getAttribute("data-guided-port-keyboard")) === "STK") {
+		await shiftClickWorld(page, empty);
+	} else await clickWorld(page, empty);
+	await page.waitForFunction(
+		() => document.querySelector('[data-testid="rail-canvas"]')?.getAttribute("data-port-keyboard-scope") === "",
+	);
+	const start = page.getByTestId("ordinary-port-process-loop-start");
+	await revealEquipmentOptionalSetting(start);
+	await start.waitFor({ state: "visible" });
+	assertProjectUnchanged(await readMetrics(page), before, `${label} empty pointer input preserves source`);
+	return start;
 }
 
 async function assertOrdinaryPortProcessLoopIdentity(page, loopId, label) {
@@ -9373,7 +9394,10 @@ async function exerciseOrdinaryEqProcessLoopRecovery(page, selectedLoopId, alter
 				'[data-testid="ordinary-port-process-loop-feedback"]',
 			);
 			if (!(dock instanceof HTMLElement) || !(feedback instanceof HTMLElement)) return false;
-			dock.style.maxHeight = "260px";
+			// The warning now precedes optional settings. Use a smaller forced-clipping
+			// fixture so the existing repeated-feedback scroll assertion still runs.
+			dock.style.minHeight = "0";
+			dock.style.maxHeight = "64px";
 			dock.scrollTop = 0;
 			return feedback.getBoundingClientRect().bottom > dock.getBoundingClientRect().bottom;
 		});
@@ -9396,6 +9420,7 @@ async function exerciseOrdinaryEqProcessLoopRecovery(page, selectedLoopId, alter
 			const dock = document.querySelector(".tilefab-equipment-workspace");
 			if (!(dock instanceof HTMLElement)) return;
 			dock.style.removeProperty("max-height");
+			dock.style.removeProperty("min-height");
 			dock.scrollTop = 0;
 		});
 	}
@@ -9747,8 +9772,9 @@ async function attachOrdinaryEquipmentToDirectLoop(page, groupId, kind, loopId, 
 		assertEqual(
 			await disclosure.getAttribute("aria-expanded"),
 			"false",
-			`${label} ${kind} top action stays available with details collapsed`,
+			`${label} ${kind} inspector begins with details collapsed`,
 		);
+		await disclosure.click();
 	}
 	const membership = inspector.getByTestId("equipment-process-loop-membership");
 	assertEqual(
@@ -9758,6 +9784,7 @@ async function attachOrdinaryEquipmentToDirectLoop(page, groupId, kind, loopId, 
 	);
 	const attach = inspector.getByTestId("attach-equipment-process-loop-primary");
 	await attach.waitFor({ state: "visible" });
+	await attach.scrollIntoViewIfNeeded();
 	assertEqual(
 		await attach.getAttribute("data-process-loop-id"),
 		String(loopId),
@@ -11742,6 +11769,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 	const proofs = [];
 	const viewports = [
 		{ width: 390, height: 600 },
+		...(standalone ? [] : [{ width: 431, height: 600 }]),
 		{ width: 760, height: 900 },
 		{ width: 1440, height: 900 },
 	];
@@ -12142,12 +12170,14 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 			await page.screenshot({
 				path: path.join(artifactRoot, `ordinary-all-equipment-loop-membership-${label}.png`),
 			});
-			const savedPath = await saveProjectFromCompactRoute(page);
+			const savedPath = await downloadProjectFromMenu(page);
 			const saved = await readMetrics(page);
+			assertProjectUnchanged(saved, checked, `${label} explicit download preserves the session`);
 			const savedEquipment = await readPortEquipmentContract(page);
 			const reopenedContext = await browserInstance.newContext({ viewport, acceptDownloads: true });
 			const reopenedPage = await reopenedContext.newPage();
 			let reopened;
+			let continuedEditing;
 			let legacyMenuFocus = null;
 			try {
 				reopenedPage.on("console", (message) => {
@@ -12160,18 +12190,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 					.getByTestId("openfab-start-dialog")
 					.getByRole("button", { name: /BLANK CANVAS/ })
 					.click();
-				const chooserPromise = reopenedPage.waitForEvent("filechooser");
-				if (viewport.width <= 760) {
-					await reopenedPage.locator(".tilefab-project-trigger").click();
-					await reopenedPage
-						.locator(".tilefab-project-menu-commands")
-						.getByRole("button", { name: "열기", exact: true })
-						.click();
-				} else {
-					await reopenedPage.getByRole("button", { name: "프로젝트 열기" }).click();
-				}
-				const chooser = await chooserPromise;
-				await chooser.setFiles(savedPath);
+				await openProjectWithFileInput(reopenedPage, savedPath);
 				reopened = await waitForWorker(
 					reopenedPage,
 					(metrics) =>
@@ -12212,6 +12231,9 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 					true,
 					`${label} native reopen preserves three exact direct Loop owners`,
 				);
+				continuedEditing = await exerciseReopenedEquipmentDirectionEdit(
+					reopenedPage, eqId, eqPlan.start, label,
+				);
 				if (standalone) legacyMenuFocus = await assertOwnedLegacyStockerMenuFocus(reopenedPage, savedPath, stkId, stkPlan, label);
 			} finally {
 				await closeBrowserResource(reopenedPage, `${label} reopened all-equipment page`);
@@ -12239,14 +12261,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 				const beforeGeneration = Number(
 					await page.getByTestId("rail-canvas").getAttribute("data-model-generation"),
 				);
-				const sameProjectChooserPromise = page.waitForEvent("filechooser");
-				await page.locator(".tilefab-project-trigger").click();
-				await page
-					.locator(".tilefab-project-menu-commands")
-					.getByRole("button", { name: "열기", exact: true })
-					.click();
-				const sameProjectChooser = await sameProjectChooserPromise;
-				await sameProjectChooser.setFiles(savedPath);
+				await openProjectWithFileInput(page, savedPath);
 				await page.waitForFunction(
 					(generation) => {
 						const canvas = document.querySelector('[data-testid="rail-canvas"]');
@@ -12259,6 +12274,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 					beforeGeneration,
 					{ timeout: 30_000 },
 				);
+				await revealEquipmentOptionalSetting(scopedSelector);
 				await scopedSelector.waitFor({ state: "visible" });
 				await page.waitForFunction(
 					() =>
@@ -12325,6 +12341,7 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 				stkScopeRecovery,
 				checks: checked.staticFabCheckIssues,
 				checksum: reopened.modelChecksum,
+				continuedEditing,
 			});
 		} catch (error) {
 			await page
@@ -12339,6 +12356,60 @@ async function exerciseOrdinaryAllEquipmentLoopMembership(browserInstance, stand
 		}
 	}
 	return proofs;
+}
+
+async function exerciseReopenedEquipmentDirectionEdit(page, groupId, world, label) {
+	await clickActivityCommand(page, "inspect", "선택·편집 및 정보");
+	await revealOrdinaryEquipmentSlot(page, world, `${label} reopened EQ`);
+	await clickWorld(page, world, false);
+	const inspector = page.getByTestId("port-equipment-inspector");
+	await page.waitForFunction(
+		(id) => document.querySelector('[data-testid="port-equipment-inspector"]')?.getAttribute("data-equipment-group-id") === String(id),
+		groupId,
+	);
+	const disclosure = page.getByTestId("compact-inspector-disclosure");
+	if ((await disclosure.count()) > 0 && (await disclosure.getAttribute("aria-expanded")) === "false") {
+		await disclosure.click();
+	}
+	const command = inspector.getByTestId("reverse-port-equipment-service-direction");
+	await command.scrollIntoViewIfNeeded();
+	await assertLocatorOwnsHitArea(command, `${label} reopened service direction edit`);
+	const before = await readMetrics(page);
+	assertEqual(before.projectDirty, "false", `${label} reopened baseline is clean`);
+	const source = await readStandaloneLoopAuthoringContract(page);
+	const expected = structuredClone(source);
+	const readSwitches = () => page.evaluate(() => {
+		const map = window.__tileFab.getEditorModel().document.map;
+		const records = [];
+		map.forEachAdvancedSwitch((record) => records.push(record));
+		return { records, nextId: map.getAdvancedSwitchIdCursor() };
+	});
+	const switches = await readSwitches();
+	const ports = expected.equipment.ports.filter((port) => port.equipmentGroupId === groupId);
+	assertEqual(ports.length, 3, `${label} reopened complete EQ direction edit`);
+	for (const port of ports) port.direction = port.direction === "WITH_TRAVEL" ? "AGAINST_TRAVEL" : "WITH_TRAVEL";
+	await command.click();
+	const edited = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(before.workerTargetSequence) + 1);
+	assertSingleGuidedPortCommit(edited, before, `${label} reopened direction edit`);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), expected), true, `${label} edit changes only the three EQ service directions`);
+	assertEqual(isDeepStrictEqual(await readSwitches(), switches), true, `${label} edit preserves advanced switches and their ID cursor`);
+	assertEqual(edited.projectDirty, "true", `${label} continued editing becomes dirty`);
+	const canvas = page.getByTestId("rail-canvas");
+	await canvas.press("ControlOrMeta+z");
+	const undone = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(edited.workerTargetSequence) + 1);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), source), true, `${label} continued edit Undo restores exact reopened source`);
+	assertEqual(isDeepStrictEqual(await readSwitches(), switches), true, `${label} Undo preserves advanced switches and their ID cursor`);
+	assertEqual(undone.projectDirty, before.projectDirty, `${label} continued edit Undo restores dirty state`);
+	assertEqual(undone.workerChecksum, undone.modelChecksum, `${label} continued edit Undo Worker parity`);
+	await canvas.press("ControlOrMeta+Shift+z");
+	const redone = await waitForWorker(page, (metrics) => Number(metrics.workerTargetSequence) === Number(undone.workerTargetSequence) + 1);
+	assertEqual(isDeepStrictEqual(await readStandaloneLoopAuthoringContract(page), expected), true, `${label} continued edit Redo restores exact edited source`);
+	assertEqual(isDeepStrictEqual(await readSwitches(), switches), true, `${label} Redo preserves advanced switches and their ID cursor`);
+	assertEqual(redone.projectDirty, edited.projectDirty, `${label} continued edit Redo restores dirty state`);
+	assertEqual(redone.workerChecksum, redone.modelChecksum, `${label} continued edit Redo Worker parity`);
+	assertEqual(redone.workerSimulationReady, "false", `${label} continued editing keeps simulation gated`);
+	await page.screenshot({ path: path.join(artifactRoot, `${label}-reopened-direction-edit.png`) });
+	return { groupId, portCount: ports.length, sequence: redone.modelSequence, exactUndoRedo: true };
 }
 
 async function exerciseOrdinaryModuleHierarchyContinuation(browserInstance) {
@@ -32017,6 +32088,46 @@ async function saveProjectFromCompactRoute(page) {
 	if (!downloadPath) throw new Error("Compact project-menu Save has no readable download.");
 	await waitForProjectOperation(page, "idle");
 	return downloadPath;
+}
+
+async function downloadProjectFromMenu(page) {
+	await waitForProjectOperation(page, "idle");
+	const beforeFile = await page.getByTestId("rail-canvas").getAttribute("data-project-file");
+	await page.locator(".tilefab-project-trigger").click();
+	const command = page.getByRole("button", {
+		name: "프로젝트 파일 다운로드 (.openfab)",
+		exact: true,
+	});
+	await assertLocatorOwnsHitArea(command, "explicit project download");
+	const downloadPromise = page.waitForEvent("download");
+	await command.click();
+	const downloadPath = await (await downloadPromise).path();
+	if (!downloadPath) throw new Error("Explicit project download has no readable file.");
+	await waitForProjectOperation(page, "idle");
+	assertEqual(
+		await page.getByTestId("rail-canvas").getAttribute("data-project-file"),
+		beforeFile,
+		"explicit download preserves the current file reference",
+	);
+	return downloadPath;
+}
+
+async function openProjectWithFileInput(page, filePath) {
+	await waitForProjectOperation(page, "idle");
+	await page.locator(".tilefab-project-trigger").click();
+	const chooserPromise = page.waitForEvent("filechooser");
+	await page.getByRole("button", { name: "파일 선택으로 열기 (.openfab)", exact: true }).click();
+	const discard = page.getByRole("button", { name: "저장하지 않고 계속", exact: true });
+	// An empty starter can open directly even when its initial project is dirty.
+	const route = await Promise.race([
+		chooserPromise.then((chooser) => ({ chooser })),
+		discard.waitFor({ state: "visible" }).then(() => ({ chooser: null })),
+	]);
+	if (route.chooser) await route.chooser.setFiles(filePath);
+	else {
+		await discard.click();
+		await (await chooserPromise).setFiles(filePath);
+	}
 }
 
 async function putRawUserBlueprintRecord(page, value) {
@@ -60382,6 +60493,7 @@ async function resolveChromePath() {
 
 async function chooseStkTemplate(page, value, activation = "select") {
 	const control = page.getByTestId("stk-template-select");
+	await revealEquipmentOptionalSetting(control);
 	await control.focus();
 	// macOS headless Chrome does not operate its native popup with arrow keys (also on a plain select).
 	// Linux CI exercises native arrow selection; macOS uses Playwright's native select API.
@@ -60416,4 +60528,14 @@ async function chooseStkTemplate(page, value, activation = "select") {
 		{ timeout: 10000 },
 	);
 	await page.getByTestId("rail-canvas").focus();
+}
+
+async function revealEquipmentOptionalSetting(control) {
+	if (await control.isVisible()) return;
+	const options = control.locator("xpath=ancestor::details");
+	if ((await options.count()) !== 1 || (await options.getAttribute("open")) !== null) return;
+	const summary = options.locator("summary");
+	await summary.scrollIntoViewIfNeeded();
+	await assertLocatorOwnsHitArea(summary, "equipment optional settings disclosure");
+	await summary.click();
 }

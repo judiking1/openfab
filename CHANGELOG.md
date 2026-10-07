@@ -6,6 +6,13 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.79] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Keep compact camera controls clear of selection/edit commands while the FAB Checks panel
+  remains open, so inspection can continue after reopening a project.
+
 ## [0.1.78] - 2026-10-07
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
