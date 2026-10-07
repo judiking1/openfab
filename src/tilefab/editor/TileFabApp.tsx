@@ -19816,6 +19816,21 @@ export default function TileFabApp(): React.ReactElement {
 	const fitMap = (): void => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
+		const previousCamera = { ...cameraRef.current };
+		const finishFit = (): void => {
+			cameraReadyRef.current = true;
+			const camera = cameraRef.current;
+			// Repeated dock framing still updates overlays without redrawing an unchanged map.
+			if (
+				camera.offsetX !== previousCamera.offsetX ||
+				camera.offsetY !== previousCamera.offsetY ||
+				camera.zoom !== previousCamera.zoom ||
+				camera.rotation !== previousCamera.rotation
+			) {
+				rendererRef.current.invalidateStatic();
+			}
+			scheduleRender();
+		};
 		const baseInsets = fitMapInsets(canvas);
 		const placement = organizationBundlePlacementSessionRef.current;
 		const placementAnchor =
@@ -19832,11 +19847,9 @@ export default function TileFabApp(): React.ReactElement {
 				4,
 			);
 			cameraFitScopeRef.current = null;
-			cameraReadyRef.current = true;
 			delete canvas.dataset.fittedMapBounds;
 			delete canvas.dataset.fitPortTargetReframed;
-			rendererRef.current.invalidateStatic();
-			scheduleRender();
+			finishFit();
 			return;
 		}
 		const portKeyboardSession = guidedPortKeyboardSessionRef.current;
@@ -19877,9 +19890,7 @@ export default function TileFabApp(): React.ReactElement {
 			delete canvas.dataset.fittedMapBounds;
 			delete canvas.dataset.fitPortTargetReframed;
 		}
-		cameraReadyRef.current = true;
-		rendererRef.current.invalidateStatic();
-		scheduleRender();
+		finishFit();
 	};
 	fitMapRef.current = fitMap;
 

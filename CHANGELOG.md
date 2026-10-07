@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.76] - 2026-10-07
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Avoid redrawing the static FAB during repeated whole-map framing when the final camera is
+  unchanged. Keep Port draft overlays responsive and preserve fitting after actual camera,
+  viewport or equipment-panel size changes.
+
 ## [0.1.75] - 2026-10-07
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
