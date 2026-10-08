@@ -9,6 +9,7 @@ export type ContextualBlueprintSaveSourceKind =
 	| "organization-selection"
 	| "area-ghost"
 	| "organization-ghost"
+	| "recent"
 	| "whole-map";
 
 export interface ContextualBlueprintSaveSourceSummary {

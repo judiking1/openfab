@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.86] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Save a portable RECENT copy directly to Project or Browser Local from its own fixed payload.
+  Preserve copied rail, equipment, Ports and organizations even after the current selection changes.
+- Reuse existing blueprint names, duplicate checks and storage without entering placement mode.
+
 ## [0.1.85] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

@@ -28239,7 +28239,7 @@ export default function TileFabApp(): React.ReactElement {
 		staticFabTemplate: StaticFabBlueprintTemplate | null,
 		kind: Extract<
 			ContextualBlueprintSaveSourceSummary["kind"],
-			"area-selection" | "area-ghost" | "whole-map"
+			"area-selection" | "area-ghost" | "whole-map" | "recent"
 		>,
 		label: string,
 	): ContextualBlueprintSaveCapture =>
@@ -28261,7 +28261,7 @@ export default function TileFabApp(): React.ReactElement {
 		bundle: StaticFabOrganizationBundle,
 		kind: Extract<
 			ContextualBlueprintSaveSourceSummary["kind"],
-			"organization-selection" | "organization-ghost"
+			"organization-selection" | "organization-ghost" | "recent"
 		>,
 		label: string,
 	): ContextualBlueprintSaveCapture =>
@@ -28281,6 +28281,22 @@ export default function TileFabApp(): React.ReactElement {
 	const prepareContextualBlueprintSaveCapture = (
 		request: ContextualBlueprintSaveRequest,
 	): ContextualBlueprintSaveCapture | null => {
+		if (typeof request === "object") {
+			const { clipboard } = request.recentEntry;
+			if (clipboard.kind === "organization") {
+				return organizationContextualBlueprintCapture(clipboard.bundle, "recent", clipboard.label);
+			}
+			if (clipboard.kind === "area") {
+				return areaContextualBlueprintCapture(
+					clipboard.template,
+					clipboard.staticFabTemplate ?? null,
+					"recent",
+					"MY BLUEPRINT",
+				);
+			}
+			setStatus("단일 모듈 복사 기록의 청사진 보관은 아직 지원하지 않습니다");
+			return null;
+		}
 		const organizationGhost = organizationBundlePlacementSessionRef.current;
 		const areaGhost = areaStampSessionRef.current;
 		if (request === "context" && organizationGhost) {

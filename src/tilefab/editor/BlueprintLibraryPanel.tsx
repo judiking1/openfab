@@ -1440,6 +1440,33 @@ export function BlueprintLibraryPanel({
 										</small>
 									</span>
 								</button>
+								<div className="tilefab-blueprint-record-tools">
+									<button
+										type="button"
+										data-testid="save-recent-blueprint"
+										aria-label={`RECENT ${index + 1} 보관`}
+										title={
+											clipboard.kind === "module"
+												? "단일 모듈 복사 기록의 청사진 보관은 아직 지원하지 않습니다"
+												: "이 복사 기록을 청사진으로 보관"
+										}
+										disabled={
+											clipboard.kind === "module" ||
+											projectBusy ||
+											modelSyncPending ||
+											userBlueprintLibraryBusy !== null
+										}
+										onClick={(event) =>
+											requestContextualBlueprintSave(
+												{ recentEntry: { id, clipboard } },
+												event.currentTarget,
+												blueprintSaveDestination,
+											)
+										}
+									>
+										보관
+									</button>
+								</div>
 							</article>
 						))
 					) : (

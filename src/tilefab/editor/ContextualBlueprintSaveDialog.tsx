@@ -363,6 +363,7 @@ function DestinationOption({
 }
 
 function sourceKindLabel(kind: ContextualBlueprintSaveSourceSummary["kind"]): string {
+	if (kind === "recent") return "복사 기록";
 	if (kind === "area-selection") return "선택한 영역";
 	if (kind === "organization-selection") return "선택한 FAB 조직";
 	if (kind === "area-ghost") return "배치 중인 구조";

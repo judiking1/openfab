@@ -44,4 +44,9 @@ export interface PendingUserBlueprintImport {
 	readonly folder: string;
 }
 
-export type ContextualBlueprintSaveRequest = "context" | "area" | "organization" | "whole-map";
+export type ContextualBlueprintSaveRequest =
+	| "context"
+	| "area"
+	| "organization"
+	| "whole-map"
+	| Readonly<{ recentEntry: RailClipboardHistoryEntry }>;
