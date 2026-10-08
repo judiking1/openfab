@@ -245,7 +245,9 @@ export function PortEquipmentInspector({
 				</button>
 			</div>
 		) : selectedEquipmentDirectlyOwned && selectedEquipmentProcessLoopMembership ? (
-			<div className="tilefab-equipment-process-loop-primary">
+			<div
+				className={`tilefab-equipment-process-loop-primary${viewMode === "2d" ? " tilefab-equipment-process-loop-primary-with-management" : ""}`}
+			>
 				<div
 					ref={processLoopPrimaryStatusRef}
 					className="tilefab-equipment-process-loop-primary-owned"
@@ -272,6 +274,22 @@ export function PortEquipmentInspector({
 						</small>
 					</span>
 				</div>
+				{viewMode === "2d" ? (
+					<button
+						type="button"
+						data-testid="manage-equipment-process-loop"
+						onClick={() => {
+							const summary = processLoopMembershipDisclosureRef.current;
+							const disclosure = summary?.closest("details");
+							if (!summary || !disclosure) return;
+							disclosure.open = true;
+							summary.focus({ preventScroll: true });
+							disclosure.scrollIntoView({ block: "nearest" });
+						}}
+					>
+						소속 관리
+					</button>
+				) : null}
 			</div>
 		) : selectedEquipmentNeedsGroupMoveForProcessLoop ? (
 			<div className="tilefab-equipment-process-loop-primary">

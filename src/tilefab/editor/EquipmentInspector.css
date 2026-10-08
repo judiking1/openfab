@@ -68,6 +68,15 @@
 	min-width: 0;
 	padding: 4px 8px;
 }
+.tilefab-equipment-process-loop-primary-with-management {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: stretch;
+	gap: 6px;
+}
+.tilefab-equipment-process-loop-primary-with-management > button {
+	white-space: nowrap;
+}
 
 .tilefab-equipment-process-loop-primary > button,
 .tilefab-equipment-process-loop-primary-owned {
@@ -107,6 +116,7 @@
 }
 
 .tilefab-equipment-process-loop-primary-owned {
+	min-width: 0;
 	border-color: #5d9c79;
 	color: #dbf5e4;
 	background: #1b3a32;

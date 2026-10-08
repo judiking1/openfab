@@ -6,6 +6,13 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.85] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Add a direct ownership-management action beside an equipment group’s current owner.
+  Open and focus the existing membership controls without changing ownership or edit history.
+
 ## [0.1.84] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
