@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.91] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Return to the original rail selection and inspection tool when cancelling an unplaced module
+  copy with Escape, the cancel button or right-click.
+- Restore only a current source from the same document and edit sequence, preserving completed
+  copies, repeat placement and Undo/Redo.
+
 ## [0.1.90] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

@@ -1766,6 +1766,14 @@ interface RailStampSession {
 	readonly template: RailModuleStampTemplate;
 	readonly pose: RailModuleStampPose;
 	readonly origin: Extract<BlueprintPlacementOrigin, "selection-copy" | "recent">;
+	readonly returnContext?: Readonly<{
+		readonly document: RailDocument;
+		readonly patchSequence: number;
+		readonly activity: EditorActivity;
+		readonly tool: EditorTool;
+		readonly cell: Cell;
+		readonly moduleKey: string;
+	}>;
 }
 
 interface RailAreaStampSession {
@@ -8766,6 +8774,12 @@ export default function TileFabApp(): React.ReactElement {
 		assemblyReviewBoundsRef.current = null;
 		assemblyReviewClosedFrameRef.current = null;
 		let finalMessage = message;
+		const activeModuleStampSession = stampSessionRef.current;
+		const moduleStampReturnContext =
+			activeModuleStampSession?.origin === "selection-copy" &&
+			moduleStampCommittedCountRef.current === 0
+				? activeModuleStampSession.returnContext
+				: undefined;
 		const activeAreaStampSession = areaStampSessionRef.current;
 		const blueprintPlacementWasActive =
 			stampSessionRef.current !== null ||
@@ -8857,6 +8871,24 @@ export default function TileFabApp(): React.ReactElement {
 			setTool("inspect");
 			updateEditorActivity("inspect");
 			requestAnimationFrame(() => canvasRef.current?.focus());
+		}
+		if (
+			moduleStampReturnContext &&
+			moduleStampReturnContext.document === editorModelRef.current.document &&
+			moduleStampReturnContext.patchSequence === editorModelRef.current.document.getPatchSequence()
+		) {
+			const module = resolveRailSelectionOwnership(
+				editorModelRef.current.ownership,
+				moduleStampReturnContext.cell,
+				moduleStampReturnContext.moduleKey,
+			);
+			if (module?.key === moduleStampReturnContext.moduleKey) {
+				toolRef.current = moduleStampReturnContext.tool;
+				setTool(moduleStampReturnContext.tool);
+				updateEditorActivity(moduleStampReturnContext.activity);
+				setRailSelection(moduleStampReturnContext.cell, module);
+				finalMessage = "모듈 복제 배치를 취소했습니다 · 원본 선택으로 돌아왔습니다";
+			}
 		}
 		if (areaStampReturnContext) {
 			toolRef.current = areaStampReturnContext.tool;
@@ -23709,11 +23741,24 @@ export default function TileFabApp(): React.ReactElement {
 		template: RailModuleStampTemplate,
 		origin: Extract<BlueprintPlacementOrigin, "selection-copy" | "recent"> = "selection-copy",
 	): void => {
+		const selectedCell = selectedRef.current;
+		const returnContext =
+			origin === "selection-copy" && selectedCell && selectedModuleKeyRef.current === template.sourceKey
+				? Object.freeze({
+						document: editorModelRef.current.document,
+						patchSequence: editorModelRef.current.document.getPatchSequence(),
+						activity: editorActivityRef.current,
+						tool: toolRef.current,
+						cell: Object.freeze({ ...selectedCell }),
+						moduleKey: template.sourceKey,
+					})
+				: undefined;
 		clearTransientConstruction();
 		const session = {
 			template,
 			pose: initialRailModuleStampPose(template),
 			origin,
+			returnContext,
 		} satisfies RailStampSession;
 		updateStampSession(session);
 		buildModeRef.current = template.catalogId;
