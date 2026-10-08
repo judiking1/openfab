@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.95] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Keep touch rail reshape targets in preview until an explicit Apply. Straight, corner and
+  endpoint moves retain their target while reaching Apply or Cancel, with fresh validation
+  and one undoable edit on confirmation.
+- Return to Inspect when opening another project during a rail reshape, so the new project's
+  first Canvas input selects normally. Mouse and pen release behavior remains unchanged.
+
 ## [0.1.94] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

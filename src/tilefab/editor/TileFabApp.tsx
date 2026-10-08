@@ -1249,6 +1249,12 @@ interface ReshapeIntent {
 	kind: ReshapeKind;
 	origin: Cell;
 	rejectedStatus?: string;
+	touchDraft?: {
+		target: Cell;
+		modelGeneration: number;
+		baseRevision: number;
+		basePatchSequence: number;
+	};
 }
 
 interface DragState {
@@ -2754,6 +2760,7 @@ export default function TileFabApp(): React.ReactElement {
 	});
 	const readinessPathIdentityIndexRef = useRef<ReadinessPathIdentityIndexBinding | null>(null);
 	const reshapeRef = useRef<ReshapeIntent | null>(null);
+	const reshapeApplyButtonRef = useRef<HTMLButtonElement>(null);
 	const editorActivityRef = useRef<EditorActivity>("build");
 	const lastEquipmentToolRef = useRef<Extract<EditorTool, "ohb" | "eq" | "stk">>("ohb");
 	const toolRef = useRef<EditorTool>("build");
@@ -7239,7 +7246,7 @@ export default function TileFabApp(): React.ReactElement {
 				reshape.rejectedStatus = undefined;
 				setStatus((current) =>
 					reshapeRef.current === reshape && toolRef.current === "reshape" && current === rejectedStatus
-						? reshapeInstruction(reshape.kind)
+						? reshapeInstruction(reshape.kind, !!reshape.touchDraft)
 						: current,
 				);
 			}
@@ -9746,6 +9753,10 @@ export default function TileFabApp(): React.ReactElement {
 					: planReshape(activeMap, drag.reshape, drag.current, next);
 			drag.plan = plan;
 			publishBuildPreview(plan);
+		}
+		const reshape = reshapeRef.current;
+		if (!drag && toolRef.current === "reshape" && reshape?.touchDraft) {
+			publishBuildPreview(planReshape(editorModelRef.current.map, reshape, reshape.touchDraft.target, next));
 		}
 		scheduleRender();
 	};
@@ -13238,6 +13249,17 @@ export default function TileFabApp(): React.ReactElement {
 			) {
 				pendingDragCellRef.current = null;
 				recomputeDrag(drag, pendingCell, false);
+			}
+			const reshapeApply = reshapeApplyButtonRef.current;
+			if (reshapeApply) {
+				// Keep JSX disabled unset: React suppresses clicks using that prop even after a DOM update.
+				const draft = reshapeRef.current?.touchDraft;
+				const model = editorModelRef.current;
+				reshapeApply.hidden = !draft;
+				reshapeApply.disabled = !draft || !!drag || !!panRef.current || modelSyncPendingRef.current ||
+					draft.modelGeneration !== model.generation || draft.baseRevision !== model.map.getRevision() ||
+					draft.basePatchSequence !== model.document.getPatchSequence() ||
+					previewRef.current?.mode !== "build" || !previewRef.current.evaluation.valid;
 			}
 			const width = canvas.clientWidth;
 			const height = canvas.clientHeight;
@@ -18308,6 +18330,10 @@ export default function TileFabApp(): React.ReactElement {
 
 	const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>): void => {
 		if (startupState.status !== "ready") return;
+		if (event.pointerType === "touch" && !event.isPrimary && reshapeRef.current) {
+			clearTransientConstruction("여러 손가락 입력으로 레일 이동을 취소했습니다 · 선택으로 돌아왔습니다");
+			return;
+		}
 		const pointer = pointerPosition(event);
 		if (inspectAreaKeyboardSessionRef.current) {
 			clearInspectAreaKeyboardSession("포인터 부분 선택으로 전환했습니다");
@@ -18803,6 +18829,20 @@ export default function TileFabApp(): React.ReactElement {
 		event.currentTarget.setPointerCapture(event.pointerId);
 		const activeTool = toolRef.current as "build" | "erase" | "reshape";
 		const reshape = activeTool === "reshape" ? reshapeRef.current : null;
+		if (reshape) {
+			if (event.pointerType === "touch") {
+				const model = editorModelRef.current;
+				reshape.touchDraft ??= {
+					target: tile,
+					modelGeneration: model.generation,
+					baseRevision: model.map.getRevision(),
+					basePatchSequence: model.document.getPatchSequence(),
+				};
+				reshape.touchDraft.target = tile;
+			} else {
+				reshape.touchDraft = undefined;
+			}
+		}
 		const start = reshape
 			? reshape.origin
 			: activeTool === "build" &&
@@ -18865,6 +18905,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (modelSyncPendingRef.current) return;
 		if (blueprintPlacementPendingRef.current) return;
+		if (toolRef.current === "reshape" && reshapeRef.current?.touchDraft && !dragRef.current) return;
 
 		const pointer = pointerPosition(event);
 		const activeDrag = dragRef.current;
@@ -19493,6 +19534,27 @@ export default function TileFabApp(): React.ReactElement {
 		if (drag.current.x !== end.x || drag.current.y !== end.y || drag.plan === null) {
 			finalPlan = recomputeDrag(drag, end);
 		}
+		if (drag.tool === "reshape" && event.pointerType === "touch") {
+			dragRef.current = null;
+			releasePointerCapture(event.pointerId);
+			const reshape = drag.reshape;
+			if (reshape && reshapeRef.current === reshape && reshape.touchDraft && finalPlan?.kind === "edit") {
+				reshape.touchDraft.target = end;
+				const evaluation = publishBuildPreview(finalPlan);
+				if (!evaluation.valid) {
+					reshape.rejectedStatus = railDraftDisplayReason(evaluation);
+					setStatus(reshape.rejectedStatus);
+				} else {
+					setStatus(reshapeInstruction(reshape.kind, true));
+				}
+			}
+			scheduleRender();
+			return;
+		}
+		commitConstructionDrag(drag, end, finalPlan);
+	};
+
+	const commitConstructionDrag = (drag: DragState, end: Cell, finalPlan: DragState["plan"]): void => {
 		const activeAreaStamp = areaStampSessionRef.current;
 		const guidedSingleCommitAreaStamp = activeAreaStamp
 			? guidedBuildSelectionCopyPlacementIsSingleCommit(
@@ -19511,7 +19573,7 @@ export default function TileFabApp(): React.ReactElement {
 			pendingDragCellRef.current = null;
 			closureSnapRef.current = null;
 			compositionResolutionRef.current = null;
-			releasePointerCapture(event.pointerId);
+			releasePointerCapture(drag.pointerId);
 			void commitFactoryScaleBlueprint(
 				activeAreaStamp,
 				finalPlan.areaStamp.anchor,
@@ -19752,6 +19814,31 @@ export default function TileFabApp(): React.ReactElement {
 		);
 	};
 
+	const applyTouchReshape = (): void => {
+		const reshape = reshapeRef.current;
+		const draft = reshape?.touchDraft;
+		if (toolRef.current !== "reshape" || !reshape || !draft || dragRef.current || panRef.current) return;
+		const model = editorModelRef.current;
+		if (
+			draft.modelGeneration !== model.generation || draft.baseRevision !== model.map.getRevision() ||
+			draft.basePatchSequence !== model.document.getPatchSequence()
+		) {
+			clearTransientConstruction("레일이 변경되어 이동을 취소했습니다 · 현재 레일을 다시 선택하세요");
+			canvasRef.current?.focus({ preventScroll: true });
+			return;
+		}
+		const plan = planReshape(model.map, reshape, draft.target, bendRef.current);
+		commitConstructionDrag({
+			pointerId: -1,
+			tool: "reshape",
+			start: reshape.origin,
+			current: draft.target,
+			plan,
+			reshape,
+		}, draft.target, plan);
+		canvasRef.current?.focus({ preventScroll: true });
+	};
+
 	const handlePointerCancel = (event: React.PointerEvent<HTMLCanvasElement>): void => {
 		if (eqMembershipDragRef.current?.pointerId === event.pointerId) {
 			eqMembershipDragRef.current = null;
@@ -19765,7 +19852,9 @@ export default function TileFabApp(): React.ReactElement {
 			);
 		}
 		if (dragRef.current?.pointerId === event.pointerId) {
-			clearTransientConstruction("중단된 건설을 취소했습니다");
+			clearTransientConstruction(dragRef.current.tool === "reshape"
+				? "중단된 레일 이동을 취소했습니다 · 선택으로 돌아왔습니다"
+				: "중단된 건설을 취소했습니다");
 		}
 		if (inspectAreaDragRef.current?.pointerId === event.pointerId) {
 			inspectAreaDragRef.current = null;
@@ -19776,6 +19865,10 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handlePointerLeave = (): void => {
+		if (toolRef.current === "reshape" && reshapeRef.current?.touchDraft) {
+			scheduleRender();
+			return;
+		}
 		if (
 			dragRef.current ||
 			portRowDragRef.current ||
@@ -20234,6 +20327,10 @@ export default function TileFabApp(): React.ReactElement {
 		staticFabProjectIssueRef.current = null;
 		staticFabProjectIssueLocationRef.current = 0;
 		reshapeRef.current = null;
+		if (toolRef.current === "reshape") {
+			toolRef.current = "inspect";
+			setTool("inspect");
+		}
 		stampSessionRef.current = null;
 		moduleStampCommittedCountRef.current = 0;
 		areaStampSessionRef.current = null;
@@ -38871,6 +38968,17 @@ export default function TileFabApp(): React.ReactElement {
 												: "RAIL CONSTRUCTION"}
 						</span>
 						{tool === "reshape" ? (
+							<>
+							<button
+								ref={reshapeApplyButtonRef}
+								type="button"
+								className="tilefab-placement-exit tilefab-reshape-apply"
+								data-testid="rail-reshape-apply"
+								hidden
+								onClick={applyTouchReshape}
+							>
+								<Check size={14} aria-hidden="true" /> 이동 적용
+							</button>
 							<button
 								type="button"
 								className="tilefab-placement-exit"
@@ -38882,6 +38990,7 @@ export default function TileFabApp(): React.ReactElement {
 							>
 								<X size={14} aria-hidden="true" /> 이동 취소
 							</button>
+							</>
 						) : null}
 						{tool === "build" &&
 						!templateSession &&
@@ -41380,7 +41489,8 @@ function planReshape(
 	return planOffsetStraight(map, intent.origin, target);
 }
 
-function reshapeInstruction(kind?: ReshapeKind): string {
+function reshapeInstruction(kind?: ReshapeKind, touch = false): string {
+	if (touch) return "목표를 터치해 미리본 뒤 이동 적용을 누르세요";
 	if (kind === "endpoint") return "새 끝점 위치를 클릭하거나 드래그하세요";
 	if (kind === "straight") return "직선에 수직인 방향으로 드래그해 7 m 구간을 이동하세요";
 	return "새 코너 위치를 클릭하거나 드래그하세요";

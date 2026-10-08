@@ -5216,6 +5216,33 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	background: #20292a;
 }
 
+.tilefab-reshape-apply[hidden] {
+	display: none;
+}
+
+.tilefab-reshape-apply:not(:disabled) {
+	border-color: #4a8d8e;
+	color: #c9f2ef;
+	background: #153031;
+}
+
+.tilefab-reshape-apply:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+@media (max-width: 760px) {
+	.tilefab-buildbar:has(.tilefab-reshape-apply:not([hidden])) {
+		height: auto;
+		flex-wrap: wrap;
+		padding-block: 6px;
+	}
+
+	.tilefab-buildbar:has(.tilefab-reshape-apply:not([hidden])) > .tilefab-buildbar-title {
+		flex-basis: 100%;
+	}
+}
+
 .tilefab-buildbar::-webkit-scrollbar {
 	display: none;
 }
