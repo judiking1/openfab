@@ -687,6 +687,10 @@
 .tilefab-equipment-group-transformbar .tilefab-equipment-transform-actions {
 	order: 20;
 }
+.tilefab-equipment-group-transformbar > .tilefab-equipment-help {
+	grid-column: 1 / -1;
+	order: 30;
+}
 .tilefab-equipment-group-transformbar .tilefab-equipment-group-loop-preview[data-state="none"] {
 	color: #a5b8ba;
 }

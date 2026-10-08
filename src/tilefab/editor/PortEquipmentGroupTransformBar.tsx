@@ -1,5 +1,5 @@
 import { Check, Copy, Move, X } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import type {
 	PortEquipmentGroupEditMode,
 	PortEquipmentGroupEditPlan,
@@ -12,6 +12,7 @@ import { portEquipmentGroupEditFeedback } from "./StkDraftPresentation";
 export interface PortEquipmentGroupTransformBarProps {
 	readonly onApply: () => void;
 	readonly busy: boolean;
+	readonly cancelButtonRef: RefObject<HTMLButtonElement | null>;
 	readonly exitPortEquipmentGroupEditToInspect: (message: string) => void;
 	readonly portEquipmentGroupEditSession: Readonly<{
 		mode: PortEquipmentGroupEditMode;
@@ -29,6 +30,7 @@ export interface PortEquipmentGroupTransformBarProps {
 export function PortEquipmentGroupTransformBar({
 	onApply,
 	busy,
+	cancelButtonRef,
 	exitPortEquipmentGroupEditToInspect,
 	portEquipmentGroupEditSession,
 	portEquipmentGroupEditSource,
@@ -80,42 +82,10 @@ export function PortEquipmentGroupTransformBar({
 						{feedback.recovery}
 					</small>
 				) : null}
-				{portEquipmentGroupEditSession.plan?.valid ? (
-					<details className="tilefab-equipment-help">
-						<summary>소속 정보</summary>
-						<small
-							className="tilefab-equipment-group-loop-preview"
-							data-testid="equipment-group-loop-preview"
-							data-state={
-								portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? "eligible" : "none"
-							}
-						>
-							{portEquipmentGroupEditSession.preservesLoopOwnership ? (
-								<>
-									현재 Loop 소속 유지
-									<br />
-									모든 Port가 같은 Loop 안에 있습니다
-								</>
-							) : portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? (
-								<>
-									{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} 후 Loop 소속
-									가능
-									<br />
-									소속이 없는 장비는 배치 후 Loop를 별도 지정
-								</>
-							) : (
-								<>
-									소속 미지정으로 배치
-									<br />
-									소속은 장비 속성에서 별도로 지정할 수 있습니다
-								</>
-							)}
-						</small>
-					</details>
-				) : null}
 			</div>
 			<div className="tilefab-equipment-transform-actions">
 				<button
+					ref={cancelButtonRef}
 					type="button"
 					className="tilefab-placement-exit"
 					aria-label="장비 이동·복제 취소"
@@ -138,6 +108,38 @@ export function PortEquipmentGroupTransformBar({
 					{portEquipmentGroupEditSession.mode === "move" ? "이동 적용" : "복제 배치"}
 				</button>
 			</div>
+			{portEquipmentGroupEditSession.plan?.valid ? (
+				<details className="tilefab-equipment-help">
+					<summary>소속 정보</summary>
+					<small
+						className="tilefab-equipment-group-loop-preview"
+						data-testid="equipment-group-loop-preview"
+						data-state={
+							portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? "eligible" : "none"
+						}
+					>
+						{portEquipmentGroupEditSession.preservesLoopOwnership ? (
+							<>
+								현재 Loop 소속 유지
+								<br />
+								모든 Port가 같은 Loop 안에 있습니다
+							</>
+						) : portEquipmentGroupEditSession.eligibleProcessLoopIds?.length ? (
+							<>
+								{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능
+								<br />
+								소속이 없는 장비는 배치 후 Loop를 별도 지정
+							</>
+						) : (
+							<>
+								소속 미지정으로 배치
+								<br />
+								소속은 장비 속성에서 별도로 지정할 수 있습니다
+							</>
+						)}
+					</small>
+				</details>
+			) : null}
 		</div>
 	);
 }

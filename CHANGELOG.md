@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.90] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Reach equipment move/copy Cancel and Apply directly from Canvas with Tab, and return with
+  Shift+Tab from Cancel while preserving normal navigation outside the edit.
+- Keep ownership information keyboard-accessible after Apply, with native disclosure controls
+  and matching visual order. Disabled Apply remains skippable.
+
 ## [0.1.89] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

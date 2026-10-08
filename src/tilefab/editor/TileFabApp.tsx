@@ -2703,6 +2703,7 @@ export default function TileFabApp(): React.ReactElement {
 	const equipmentRepeatReturnSelectionRef = useRef<PortEquipmentSelection | null>(null);
 	const ohbPlacementIntentRef = useRef<OhbPlacementIntent | null>(null);
 	const portEquipmentGroupEditSessionRef = useRef<PortEquipmentGroupEditSession | null>(null);
+	const portEquipmentGroupEditCancelRef = useRef<HTMLButtonElement | null>(null);
 	const portEquipmentGroupEditReadoutRef = useRef<HTMLParagraphElement | null>(null);
 	const portEquipmentGroupEditAnnouncementRef = useRef<HTMLSpanElement | null>(null);
 	const portEquipmentGroupEditAnnouncementTimerRef = useRef<number | null>(null);
@@ -14388,8 +14389,23 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			if (event.defaultPrevented) return;
 			const target = event.target instanceof Element ? event.target : null;
+			const groupEditCancelHandoff =
+				event.code === "Tab" && !event.isComposing && event.keyCode !== 229 &&
+				editorViewModeRef.current === "2d" && portEquipmentGroupEditSessionRef.current &&
+				!document.querySelector('[aria-modal="true"]')
+					? portEquipmentGroupEditCancelRef.current
+					: null;
+			if (
+				groupEditCancelHandoff && target === groupEditCancelHandoff && event.shiftKey &&
+				!event.metaKey && !event.ctrlKey && !event.altKey
+			) {
+				event.preventDefault();
+				canvas.focus({ preventScroll: true });
+				return;
+			}
 			const issueRecheckHandoff = ordinaryStaticFabIssueRecheckRef.current;
 			const canvasForwardHandoff =
+				groupEditCancelHandoff ??
 				(issueRecheckHandoff?.disabled
 					? ordinaryStaticFabIssueRecheckCancelRef.current
 					: issueRecheckHandoff) ??
@@ -35043,7 +35059,7 @@ export default function TileFabApp(): React.ReactElement {
 				{portEquipmentGroupEditSession ? (
 					<>
 						<p id="tilefab-port-equipment-group-edit-description" className="tilefab-sr-only">
-							{portEquipmentGroupEditSession.portType} 장비 그룹 전체를 {portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"}하는 단계입니다. 방향키 또는 WASD로 기준 Port 슬롯을 이동하고 Enter 또는 클릭으로 적용하세요. Space를 누른 채 드래그하면 화면만 이동합니다. Escape로 취소할 수 있습니다.
+							{portEquipmentGroupEditSession.portType} 장비 그룹 전체를 {portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"}하는 단계입니다. 방향키 또는 WASD로 기준 Port 슬롯을 이동하고 Enter 또는 마우스 클릭으로 적용하세요. 터치는 대상을 미리 본 뒤 {portEquipmentGroupEditSession.mode === "move" ? "이동 적용" : "복제 배치"} 버튼으로 확정합니다. Canvas에서 Tab은 취소 버튼, 다음 Tab은 활성화된 적용 버튼으로 이동합니다. 취소에서 Shift+Tab은 Canvas로 돌아갑니다. Space를 누른 채 드래그하면 화면만 이동합니다. Escape로 취소할 수 있습니다.
 						</p>
 						<p
 							id="tilefab-port-equipment-group-edit-readout"
@@ -39385,6 +39401,7 @@ export default function TileFabApp(): React.ReactElement {
 					<PortEquipmentGroupTransformBar
 						onApply={() => commitPortEquipmentGroupEditRef.current()}
 						busy={editorMutationWaitActive || modelSyncPending || projectBusy}
+						cancelButtonRef={portEquipmentGroupEditCancelRef}
 						exitPortEquipmentGroupEditToInspect={exitPortEquipmentGroupEditToInspect}
 						portEquipmentGroupEditSession={portEquipmentGroupEditSession}
 						portEquipmentGroupEditSource={portEquipmentGroupEditSource}
