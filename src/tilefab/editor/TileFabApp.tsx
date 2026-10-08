@@ -16823,15 +16823,16 @@ export default function TileFabApp(): React.ReactElement {
 	): void => {
 		const plan = updatePortEquipmentGroupEditTarget(session, targetRow, { coalescedAnnouncement });
 		if (portEquipmentGroupEditSessionRef.current !== session) return;
-		const touchMove = pointerType === "touch" && session.mode === "move";
+		const touchPointer = pointerType === "touch";
+		const applyLabel = session.mode === "move" ? "이동 적용" : "복제 배치";
 		const feedback = plan
 			? plan.valid
-				? `${session.portType} 그룹 ${session.mode === "move" ? "이동" : "복제"} 가능 · ${touchMove ? "이동 적용 버튼으로 확정" : "클릭하여 확정"}`
+				? `${session.portType} 그룹 ${session.mode === "move" ? "이동" : "복제"} 가능 · ${touchPointer ? `${applyLabel} 버튼으로 확정` : "클릭하여 확정"}`
 				: portEquipmentGroupEditFeedback(plan, session.slots).summary
 			: `${session.portType} 기준 포트를 놓을 슬롯을 선택하세요`;
 		const feedbackKey = plan
 			? plan.valid
-				? touchMove ? "valid:touch-move" : "valid"
+				? touchPointer ? "valid:touch" : "valid"
 				: `invalid:${targetRow}:${plan.reason}`
 			: "empty";
 		if (session.feedbackKey !== feedbackKey) {
@@ -18478,7 +18479,7 @@ export default function TileFabApp(): React.ReactElement {
 
 		const groupEditSession = portEquipmentGroupEditSessionRef.current;
 		if (groupEditSession) {
-			if (event.pointerType === "touch" && groupEditSession.mode === "move") {
+			if (event.pointerType === "touch") {
 				previewPortEquipmentGroupEditAtPointer(groupEditSession, hoverPortSlotRef.current, event.pointerType);
 			} else {
 				commitPortEquipmentGroupEdit(groupEditSession, hoverPortSlotRef.current);

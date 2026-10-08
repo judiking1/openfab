@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.89] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Preview EQ/STK group copies on touch, then confirm with the existing Copy action or cancel.
+  Target taps and touch drags preserve original equipment and history until explicit placement.
+- Retain fresh copied IDs, Undo/Redo, mouse and keyboard confirmation, and separate OHB and
+  new-equipment placement behavior.
+
 ## [0.1.88] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
