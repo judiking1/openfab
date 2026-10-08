@@ -1249,8 +1249,9 @@ interface ReshapeIntent {
 	kind: ReshapeKind;
 	origin: Cell;
 	rejectedStatus?: string;
-	touchDraft?: {
+	retainedDraft?: {
 		target: Cell;
+		input: "touch" | "keyboard";
 		modelGeneration: number;
 		baseRevision: number;
 		basePatchSequence: number;
@@ -1986,6 +1987,8 @@ interface KeyboardActions {
 		repeat: boolean,
 	) => void;
 	applyGuidedRailKeyboard: () => void;
+	moveReshapeTarget: (deltaX: number, deltaZ: number) => void;
+	applyReshapeDraft: () => void;
 	moveGuidedPortKeyboard: (direction: GuidedPortKeyboardDirection, repeat: boolean) => void;
 	applyGuidedPortKeyboard: () => void;
 	navigateStaticFabOrganizationCanvas: (
@@ -2903,6 +2906,8 @@ export default function TileFabApp(): React.ReactElement {
 		startGuidedRailKeyboard: () => undefined,
 		moveGuidedRailKeyboard: () => undefined,
 		applyGuidedRailKeyboard: () => undefined,
+		moveReshapeTarget: () => undefined,
+		applyReshapeDraft: () => undefined,
 		moveGuidedPortKeyboard: () => undefined,
 		applyGuidedPortKeyboard: () => undefined,
 		navigateStaticFabOrganizationCanvas: () => undefined,
@@ -7246,7 +7251,7 @@ export default function TileFabApp(): React.ReactElement {
 				reshape.rejectedStatus = undefined;
 				setStatus((current) =>
 					reshapeRef.current === reshape && toolRef.current === "reshape" && current === rejectedStatus
-						? reshapeInstruction(reshape.kind, !!reshape.touchDraft)
+						? reshapeInstruction(reshape.kind, reshape.retainedDraft?.input)
 						: current,
 				);
 			}
@@ -9755,8 +9760,8 @@ export default function TileFabApp(): React.ReactElement {
 			publishBuildPreview(plan);
 		}
 		const reshape = reshapeRef.current;
-		if (!drag && toolRef.current === "reshape" && reshape?.touchDraft) {
-			publishBuildPreview(planReshape(editorModelRef.current.map, reshape, reshape.touchDraft.target, next));
+		if (!drag && toolRef.current === "reshape" && reshape?.retainedDraft) {
+			publishBuildPreview(planReshape(editorModelRef.current.map, reshape, reshape.retainedDraft.target, next));
 		}
 		scheduleRender();
 	};
@@ -13212,6 +13217,8 @@ export default function TileFabApp(): React.ReactElement {
 			startGuidedRailKeyboard,
 			moveGuidedRailKeyboard,
 			applyGuidedRailKeyboard,
+			moveReshapeTarget,
+			applyReshapeDraft,
 			moveGuidedPortKeyboard,
 			applyGuidedPortKeyboard,
 			navigateStaticFabOrganizationCanvas,
@@ -13253,7 +13260,7 @@ export default function TileFabApp(): React.ReactElement {
 			const reshapeApply = reshapeApplyButtonRef.current;
 			if (reshapeApply) {
 				// Keep JSX disabled unset: React suppresses clicks using that prop even after a DOM update.
-				const draft = reshapeRef.current?.touchDraft;
+				const draft = reshapeRef.current?.retainedDraft;
 				const model = editorModelRef.current;
 				reshapeApply.hidden = !draft;
 				reshapeApply.disabled = !draft || !!drag || !!panRef.current || modelSyncPendingRef.current ||
@@ -14483,6 +14490,7 @@ export default function TileFabApp(): React.ReactElement {
 				primaryModifierDownRef.current = true;
 			}
 			if (event.defaultPrevented) return;
+			if (toolRef.current === "reshape" && (event.isComposing || event.keyCode === 229)) return;
 			const target = event.target instanceof Element ? event.target : null;
 			const groupEditCancelHandoff =
 				event.code === "Tab" && !event.isComposing && event.keyCode !== 229 &&
@@ -14542,6 +14550,25 @@ export default function TileFabApp(): React.ReactElement {
 					exitInspection3DRef.current();
 				}
 				return;
+			}
+			if (toolRef.current === "reshape" && textEditingTarget && event.code === "Escape") return;
+			if (
+				toolRef.current === "reshape" && reshapeRef.current && target === canvas &&
+				!event.metaKey && !event.ctrlKey && !event.altKey
+			) {
+				if (commandMatches("reshape.navigate", "rail-reshape")) {
+					event.preventDefault();
+					keyboardActionsRef.current.moveReshapeTarget(
+						event.code === "ArrowLeft" ? -1 : event.code === "ArrowRight" ? 1 : 0,
+						event.code === "ArrowUp" ? -1 : event.code === "ArrowDown" ? 1 : 0,
+					);
+					return;
+				}
+				if (commandMatches("command.apply", "rail-reshape")) {
+					event.preventDefault();
+					keyboardActionsRef.current.applyReshapeDraft();
+					return;
+				}
 			}
 			const issueRecheckOwnsEscape =
 				ordinaryStaticFabIssueRecheckPresentationRef.current !== null &&
@@ -18832,15 +18859,17 @@ export default function TileFabApp(): React.ReactElement {
 		if (reshape) {
 			if (event.pointerType === "touch") {
 				const model = editorModelRef.current;
-				reshape.touchDraft ??= {
+				reshape.retainedDraft ??= {
 					target: tile,
+					input: "touch",
 					modelGeneration: model.generation,
 					baseRevision: model.map.getRevision(),
 					basePatchSequence: model.document.getPatchSequence(),
 				};
-				reshape.touchDraft.target = tile;
+				reshape.retainedDraft.target = tile;
+				reshape.retainedDraft.input = "touch";
 			} else {
-				reshape.touchDraft = undefined;
+				reshape.retainedDraft = undefined;
 			}
 		}
 		const start = reshape
@@ -18905,7 +18934,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (modelSyncPendingRef.current) return;
 		if (blueprintPlacementPendingRef.current) return;
-		if (toolRef.current === "reshape" && reshapeRef.current?.touchDraft && !dragRef.current) return;
+		if (toolRef.current === "reshape" && reshapeRef.current?.retainedDraft && !dragRef.current) return;
 
 		const pointer = pointerPosition(event);
 		const activeDrag = dragRef.current;
@@ -19538,14 +19567,14 @@ export default function TileFabApp(): React.ReactElement {
 			dragRef.current = null;
 			releasePointerCapture(event.pointerId);
 			const reshape = drag.reshape;
-			if (reshape && reshapeRef.current === reshape && reshape.touchDraft && finalPlan?.kind === "edit") {
-				reshape.touchDraft.target = end;
+			if (reshape && reshapeRef.current === reshape && reshape.retainedDraft && finalPlan?.kind === "edit") {
+				reshape.retainedDraft.target = end;
 				const evaluation = publishBuildPreview(finalPlan);
 				if (!evaluation.valid) {
 					reshape.rejectedStatus = railDraftDisplayReason(evaluation);
 					setStatus(reshape.rejectedStatus);
 				} else {
-					setStatus(reshapeInstruction(reshape.kind, true));
+					setStatus(reshapeInstruction(reshape.kind, "touch"));
 				}
 			}
 			scheduleRender();
@@ -19814,10 +19843,48 @@ export default function TileFabApp(): React.ReactElement {
 		);
 	};
 
-	const applyTouchReshape = (): void => {
+	const moveReshapeTarget = (deltaX: number, deltaZ: number): void => {
 		const reshape = reshapeRef.current;
-		const draft = reshape?.touchDraft;
-		if (toolRef.current !== "reshape" || !reshape || !draft || dragRef.current || panRef.current) return;
+		if (!reshape || toolRef.current !== "reshape" || dragRef.current || panRef.current || editorMutationWaitBlockedReason()) return;
+		const model = editorModelRef.current;
+		const draft = reshape.retainedDraft;
+		if (draft && (
+			draft.modelGeneration !== model.generation || draft.baseRevision !== model.map.getRevision() ||
+			draft.basePatchSequence !== model.document.getPatchSequence()
+		)) {
+			clearTransientConstruction("레일이 변경되어 이동을 취소했습니다 · 현재 레일을 다시 선택하세요");
+			return;
+		}
+		const previous = draft?.target ?? reshape.origin;
+		const target = { x: previous.x + deltaX, y: previous.y + deltaZ };
+		reshape.retainedDraft ??= {
+			target,
+			input: "keyboard",
+			modelGeneration: model.generation,
+			baseRevision: model.map.getRevision(),
+			basePatchSequence: model.document.getPatchSequence(),
+		};
+		reshape.retainedDraft.target = target;
+		reshape.retainedDraft.input = "keyboard";
+		updateCursor(target, { x: target.x + 0.5, y: target.y + 0.5 });
+		const evaluation = publishBuildPreview(planReshape(model.map, reshape, target, bendRef.current));
+		if (!evaluation.valid) {
+			reshape.rejectedStatus = railDraftDisplayReason(evaluation);
+			setStatus(reshape.rejectedStatus);
+		} else {
+			setStatus(reshapeInstruction(reshape.kind, "keyboard"));
+		}
+		scheduleRender();
+	};
+
+	const applyReshapeDraft = (): void => {
+		const reshape = reshapeRef.current;
+		const draft = reshape?.retainedDraft;
+		if (toolRef.current !== "reshape" || !reshape || dragRef.current || panRef.current) return;
+		if (!draft) {
+			setStatus("방향키로 이동할 목표를 먼저 선택하세요 · Esc 취소");
+			return;
+		}
 		const model = editorModelRef.current;
 		if (
 			draft.modelGeneration !== model.generation || draft.baseRevision !== model.map.getRevision() ||
@@ -19828,6 +19895,17 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		const plan = planReshape(model.map, reshape, draft.target, bendRef.current);
+		if (
+			draft.input === "keyboard" &&
+			draft.target.x === reshape.origin.x && draft.target.y === reshape.origin.y
+		) {
+			publishBuildPreview(plan);
+			reshape.rejectedStatus = reshapeInstruction(reshape.kind, "keyboard");
+			setStatus(reshape.rejectedStatus);
+			scheduleRender();
+			canvasRef.current?.focus({ preventScroll: true });
+			return;
+		}
 		commitConstructionDrag({
 			pointerId: -1,
 			tool: "reshape",
@@ -19865,7 +19943,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handlePointerLeave = (): void => {
-		if (toolRef.current === "reshape" && reshapeRef.current?.touchDraft) {
+		if (toolRef.current === "reshape" && reshapeRef.current?.retainedDraft) {
 			scheduleRender();
 			return;
 		}
@@ -22953,9 +23031,11 @@ export default function TileFabApp(): React.ReactElement {
 
 	const startReshape = (kind: ReshapeKind): void => {
 		if (modelSyncPendingRef.current || !selected) return;
+		const entryFocus = document.activeElement;
 		updateEditorActivity("inspect");
 		clearTransientConstruction();
-		reshapeRef.current = { kind, origin: selected };
+		const intent = { kind, origin: selected };
+		reshapeRef.current = intent;
 		setReshapeKind(kind);
 		selectedRef.current = selected;
 		setSelected(null);
@@ -22963,6 +23043,13 @@ export default function TileFabApp(): React.ReactElement {
 		setTool("reshape");
 		setStatus(reshapeInstruction(kind));
 		scheduleRender();
+		requestAnimationFrame(() => {
+			if (
+				reshapeRef.current === intent && toolRef.current === "reshape" &&
+				editorViewModeRef.current === "2d" && !document.querySelector('[aria-modal="true"]') &&
+				(document.activeElement === entryFocus || document.activeElement === document.body)
+			) canvasRef.current?.focus({ preventScroll: true });
+		});
 	};
 
 	const copyConstructionPreset = (preset: RailConstructionCopyPreset): void => {
@@ -31574,7 +31661,9 @@ export default function TileFabApp(): React.ReactElement {
 		: guidedBuildCommandsBlockedReason;
 	const copySelectionCommandBlocked = copySelectionCommandBlockedReason !== null;
 	const canvasAriaKeyShortcuts = editorCommandAriaKeyShortcuts(
-		guidedBuildPrimaryTarget?.id === "canvas:inspect"
+		tool === "reshape"
+			? ["reshape.navigate", "command.apply", "command.cancel", "help.open"]
+			: guidedBuildPrimaryTarget?.id === "canvas:inspect"
 			? ["selection.inspect-target", "command.cancel", "help.open"]
 			: inspectAreaKeyboard
 			? ["selection.area-navigate", "command.apply", "command.cancel", "help.open"]
@@ -38975,7 +39064,7 @@ export default function TileFabApp(): React.ReactElement {
 								className="tilefab-placement-exit tilefab-reshape-apply"
 								data-testid="rail-reshape-apply"
 								hidden
-								onClick={applyTouchReshape}
+								onClick={applyReshapeDraft}
 							>
 								<Check size={14} aria-hidden="true" /> 이동 적용
 							</button>
@@ -41489,8 +41578,9 @@ function planReshape(
 	return planOffsetStraight(map, intent.origin, target);
 }
 
-function reshapeInstruction(kind?: ReshapeKind, touch = false): string {
-	if (touch) return "목표를 터치해 미리본 뒤 이동 적용을 누르세요";
+function reshapeInstruction(kind?: ReshapeKind, input?: "touch" | "keyboard"): string {
+	if (input === "keyboard") return "방향키 1 m · Enter 적용 · Esc 취소";
+	if (input === "touch") return "목표를 터치해 미리본 뒤 이동 적용을 누르세요";
 	if (kind === "endpoint") return "새 끝점 위치를 클릭하거나 드래그하세요";
 	if (kind === "straight") return "직선에 수직인 방향으로 드래그해 7 m 구간을 이동하세요";
 	return "새 코너 위치를 클릭하거나 드래그하세요";

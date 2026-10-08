@@ -67,6 +67,11 @@ describe("reshape action hints", () => {
 		const hints = deriveEditorActionHints(input);
 		expect(hints[0]).toMatchObject({
 			action,
+			commandIds: ["reshape.navigate"],
+			inputs: ["← ↑ ↓ →"],
+		});
+		expect(hints.find((hint) => hint.id === "pointer-reshape")).toMatchObject({
+			action,
 			commandIds: ["canvas.primary-click", "canvas.primary-drag"],
 			inputs: ["LMB", "LMB DRAG"],
 			inputJoin: "or",
@@ -82,12 +87,66 @@ describe("reshape action hints", () => {
 			inputs: ["RMB DRAG"],
 		});
 		expect(hints.flatMap((hint) => hint.commandIds)).toEqual([
+			"reshape.navigate",
+			"command.apply",
 			"canvas.primary-click",
 			"canvas.primary-drag",
 			"command.cancel",
 			"camera.pan-pointer",
 		]);
 		expect(hints.map((hint) => hint.action)).not.toContain("레일 건설");
+	});
+
+	it("scopes reshape arrows and one-shot Enter without taking camera WASD or text input", () => {
+		for (const code of ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]) {
+			expect(
+				editorCommandMatchesKeyboard("reshape.navigate", keyboard(code, { repeat: true }), {
+					context: "rail-reshape",
+				}),
+			).toBe(true);
+			expect(
+				editorCommandMatchesKeyboard("reshape.navigate", keyboard(code), {
+					context: "rail-reshape",
+					textInput: true,
+				}),
+			).toBe(false);
+			for (const modifiers of [
+				{ ctrlKey: true },
+				{ metaKey: true },
+				{ altKey: true },
+				{ shiftKey: true },
+			]) {
+				expect(
+					editorCommandMatchesKeyboard("reshape.navigate", keyboard(code, modifiers), {
+						context: "rail-reshape",
+					}),
+				).toBe(false);
+			}
+		}
+		for (const code of ["KeyW", "KeyA", "KeyS", "KeyD"]) {
+			expect(
+				editorCommandMatchesKeyboard("reshape.navigate", keyboard(code), {
+					context: "rail-reshape",
+				}),
+			).toBe(false);
+		}
+		expect(
+			editorCommandMatchesKeyboard("reshape.navigate", keyboard("ArrowUp"), { context: "canvas" }),
+		).toBe(false);
+		expect(
+			editorCommandMatchesKeyboard("command.apply", keyboard("Enter"), { context: "rail-reshape" }),
+		).toBe(true);
+		expect(
+			editorCommandMatchesKeyboard("command.apply", keyboard("Enter", { repeat: true }), {
+				context: "rail-reshape",
+			}),
+		).toBe(false);
+		expect(
+			editorCommandMatchesKeyboard("command.apply", keyboard("Enter"), {
+				context: "rail-reshape",
+				textInput: true,
+			}),
+		).toBe(false);
 	});
 
 	it("keeps an active reshape ahead of retained rail selection", () => {

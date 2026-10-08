@@ -182,8 +182,10 @@ export function deriveEditorActionHints(
 						? "끝점 이동"
 						: "레일 위치 이동";
 		return Object.freeze([
+			editorActionHint("move-reshape", "reshape.navigate", action),
+			editorActionHint("apply-reshape", "command.apply", "이동 적용"),
 			editorActionHintAlternatives(
-				"move-reshape",
+				"pointer-reshape",
 				["canvas.primary-click", "canvas.primary-drag"],
 				action,
 			),

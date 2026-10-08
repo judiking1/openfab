@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.96] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Move straight, corner and endpoint reshape targets with arrow keys in 1 m steps, apply with
+  Enter, and cancel with Escape. Command entry restores Canvas focus and shows matching key hints.
+- Keep the rejected preview and keyboard guidance when applying a target at its original position,
+  so another arrow movement continues the same edit safely.
+
 ## [0.1.95] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

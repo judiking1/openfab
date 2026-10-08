@@ -12,6 +12,7 @@ export type EditorCommandContext =
 	| "canvas"
 	| "construction"
 	| "rail-keyboard"
+	| "rail-reshape"
 	| "guided-port-keyboard"
 	| "guided-reuse-inspect"
 	| "inspect-area-keyboard"
@@ -452,6 +453,16 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 		keywords: ["rail", "cursor", "endpoint", "keyboard", "레일", "끝점", "키보드"],
 	}),
 	command({
+		id: "reshape.navigate",
+		group: "construction",
+		contexts: ["rail-reshape"],
+		label: "레일 이동 목표 1 m 조정",
+		glyph: "move",
+		bindings: [key(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"], ["← ↑ ↓ →"])],
+		repeat: "allow",
+		textInput: "block",
+	}),
+	command({
 		id: "camera.pan-pointer",
 		group: "camera",
 		contexts: ["global"],
@@ -857,6 +868,7 @@ export const EDITOR_COMMAND_REGISTRY = Object.freeze([
 			"arrangement",
 			"assembly-connector",
 			"rail-keyboard",
+			"rail-reshape",
 			"guided-port-keyboard",
 			"inspect-area-keyboard",
 			"equipment-group-edit",
@@ -1003,6 +1015,7 @@ const EDITOR_COMMAND_CONTEXTS: readonly EditorCommandContext[] = Object.freeze([
 	"canvas",
 	"construction",
 	"rail-keyboard",
+	"rail-reshape",
 	"guided-port-keyboard",
 	"selection",
 	"placement",
