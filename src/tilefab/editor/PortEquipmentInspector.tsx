@@ -519,7 +519,7 @@ export function PortEquipmentInspector({
 						{selectedEquipmentGroup.kind === "EQ" && selectedPortEquipment ? (
 							<EqBodyDimensionsEditor
 								onDraftChange={onEqBodyDraftChange}
-								key={`${selectedEquipmentGroup.id}:${selectedPortEquipment.portId}:${selectedEquipmentGroup.bodyDimensions?.lengthMillimeters ?? "auto"}:${selectedEquipmentGroup.bodyDimensions?.widthMillimeters ?? "auto"}`}
+								key={`${selectedEquipmentGroup.id}:${selectedEquipmentGroup.bodyDimensions?.lengthMillimeters ?? "auto"}:${selectedEquipmentGroup.bodyDimensions?.widthMillimeters ?? "auto"}`}
 								group={selectedEquipmentGroup}
 								selection={selectedPortEquipment}
 								disabled={

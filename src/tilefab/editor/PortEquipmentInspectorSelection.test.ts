@@ -397,7 +397,24 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 				PortEquipmentInspector({ ...props, selectedPortEquipment: { ...selection(), portId: 2 } }),
 				(element) => element.props.group === selected.equipmentGroup,
 			);
-			expect(alternatePort?.key).not.toBe(editor.key);
+			expect(alternatePort?.key).toBe(editor.key);
+			if (!alternatePort) throw new Error("Expected EQ editor for the alternate Port.");
+			useState
+				.mockReturnValueOnce(["4.5", vi.fn()])
+				.mockReturnValueOnce(["3", vi.fn()])
+				.mockReturnValueOnce([null, setFailure]);
+			const alternateDraft = renderEditor(alternatePort.props);
+			const alternateForm = findInspectorElement(
+				alternateDraft,
+				(element) => element.type === "form",
+			);
+			(alternateForm?.props.onSubmit as (event: { preventDefault: () => void }) => void)({
+				preventDefault: vi.fn(),
+			});
+			expect(commit).toHaveBeenLastCalledWith(
+				{ lengthMillimeters: 4500, widthMillimeters: 3000 },
+				{ ...selection(), portId: 2 },
+			);
 			useState
 				.mockReturnValueOnce(["2", vi.fn()])
 				.mockReturnValueOnce(["0.9", vi.fn()])

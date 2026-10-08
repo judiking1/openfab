@@ -7033,6 +7033,21 @@ export default function TileFabApp(): React.ReactElement {
 		setStkDraftSelection(next?.selection ?? null);
 		rendererRef.current.invalidateStatic();
 	};
+	const blockEqBodyDraftSelectionChange = (nextEquipmentGroupId: number | null): boolean => {
+		if (!eqBodyDraftPendingRef.current ||
+			nextEquipmentGroupId === selectedPortEquipmentRef.current?.equipmentGroupId) return false;
+		setStatus("EQ 몸체 크기를 적용하거나 입력 취소한 뒤 다른 항목을 선택하세요");
+		setCompactInspectorExpanded(true);
+		requestAnimationFrame(() => {
+			const details = appRootRef.current?.querySelector<HTMLDetailsElement>('[data-testid="eq-body-dimensions"]');
+			if (!details) return;
+			details.open = true;
+			const apply = details.querySelector<HTMLButtonElement>('[data-testid="apply-eq-body-dimensions"]');
+			apply?.focus({ preventScroll: true });
+			apply?.scrollIntoView({ block: "nearest" });
+		});
+		return true;
+	};
 	const setPortEquipmentSelection = (next: PortEquipmentSelection | null): void => {
 		selectedPortEquipmentRef.current = next;
 		setSelectedPortEquipmentState(next);
@@ -13002,6 +13017,7 @@ export default function TileFabApp(): React.ReactElement {
 					return;
 				}
 				if (selectedPortEquipmentRef.current || selectedModuleRef.current) {
+					if (blockEqBodyDraftSelectionChange(null)) return;
 					const selectionKind = selectedPortEquipmentRef.current ? "Port" : "레일";
 					canvasRef.current?.focus({ preventScroll: true });
 					setRailSelection(null, null);
@@ -17622,11 +17638,12 @@ export default function TileFabApp(): React.ReactElement {
 		pointer: Readonly<{ cell: Cell; world: { x: number; y: number } }>,
 		tile: Cell,
 	): boolean => {
-		clearAreaSelection();
 		const activeModel = editorModelRef.current;
 		const guidedReuseAnchorTarget =
 			appRootRef.current?.dataset.guidedPrimaryTarget === "canvas:inspect";
 		const portHit = portEquipmentAtWorld(pointer.world);
+		if (blockEqBodyDraftSelectionChange(portHit?.equipmentGroupId ?? null)) return false;
+		clearAreaSelection();
 		if (portHit) {
 			if (guidedReuseAnchorTarget) guidedPrimaryFocusHandoffRef.current = true;
 			setPortEquipmentSelection({
@@ -17739,6 +17756,7 @@ export default function TileFabApp(): React.ReactElement {
 		pointer: Readonly<{ cell: Cell; world: { x: number; y: number } }>,
 		tile: Cell,
 	): void => {
+		if (blockEqBodyDraftSelectionChange(null)) return;
 		const incoming = staticFabSelectionAtInspectTarget(pointer, tile);
 		if (!incoming) {
 			setStatus("Ctrl/⌘+클릭 위치에 선택할 레일 모듈 또는 장비 그룹이 없습니다");
@@ -17940,6 +17958,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startInspectAreaKeyboardSession = (): void => {
+		if (blockEqBodyDraftSelectionChange(null)) return;
 		if (toolRef.current !== "inspect" || editorActivityRef.current !== "inspect") {
 			if (!chooseExplicitEditorTool("inspect")) return;
 		}
@@ -18377,6 +18396,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (event.shiftKey) {
+			if (blockEqBodyDraftSelectionChange(null)) return;
 			const selectionTile = pointer.cell;
 			clearTransientConstruction();
 			setTemplatePaletteOpen(false);
@@ -18771,6 +18791,11 @@ export default function TileFabApp(): React.ReactElement {
 					event.clientY - inspectDrag.startClientY,
 				) >= 3
 			) {
+				if (blockEqBodyDraftSelectionChange(null)) {
+					inspectAreaDragRef.current = null;
+					scheduleRender();
+					return;
+				}
 				inspectDrag.moved = true;
 				if (inspectDrag.operation === "toggle") {
 					setStatus("Ctrl/⌘ 선택 토글은 드래그하지 말고 레일 또는 장비를 클릭하세요");
@@ -20110,6 +20135,7 @@ export default function TileFabApp(): React.ReactElement {
 		setSelectedModuleKey(null);
 		setSelectedPortEquipmentState(null);
 		setEquipmentDeletionRecovery(null);
+		handleEqBodyDraftChange(false);
 		setOhbPlacementIntentState(null);
 		setPortEquipmentGroupEditSessionState(null);
 		setPortEquipmentMembershipEditSessionState(null);
@@ -22406,6 +22432,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startSelectedPortEquipmentGroupEdit = (mode: PortEquipmentGroupEditMode): void => {
+		if (blockEqBodyDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
@@ -22472,6 +22499,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startSelectedPortEquipmentMembershipEdit = (): void => {
+		if (blockEqBodyDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
@@ -24178,6 +24206,7 @@ export default function TileFabApp(): React.ReactElement {
 		tab: StaticFabNavigatorTab,
 		returnFocusTarget?: HTMLElement | null,
 	): void => {
+		if (blockEqBodyDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const transitionBlockedReason = editorActivityTransitionBlockedReason();
 		if (transitionBlockedReason) {
@@ -32213,6 +32242,7 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const prepareEditorActivityTransition = (next: EditorActivity): boolean => {
+		if (next !== editorActivityRef.current && blockEqBodyDraftSelectionChange(null)) return false;
 		if (blockStaticFabExclusiveCommand()) return false;
 		const blockedReason = editorActivityTransitionBlockedReason();
 		if (blockedReason) {
@@ -32650,6 +32680,7 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		const next = candidates[(Math.max(0, currentIndex) + 1) % candidates.length];
 		if (!next) return;
+		if (blockEqBodyDraftSelectionChange(next.equipmentGroupId)) return;
 		nextPortEquipmentFocusPendingRef.current = true;
 		setPortEquipmentSelection(next);
 		setStatus(`장비 ${next.equipmentGroupId} · PORT-${next.portId} 선택`);
@@ -40049,7 +40080,9 @@ export default function TileFabApp(): React.ReactElement {
 						bindCompactInspectorDisclosure={bindCompactInspectorDisclosure}
 						canvasRef={canvasRef}
 						chooseGuidedEquipmentTool={chooseGuidedEquipmentTool}
-						clearPortEquipmentSelection={clearPortEquipmentSelection}
+						clearPortEquipmentSelection={() => {
+							if (!blockEqBodyDraftSelectionChange(null)) clearPortEquipmentSelection();
+						}}
 						commitSelectedEquipmentProcessLoopMembership={commitSelectedEquipmentProcessLoopMembership}
 						compactInspectorCloseRef={compactInspectorCloseRef}
 						compactInspectorDisclosureFocusedRef={compactInspectorDisclosureFocusedRef}

@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.83] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Preserve unapplied EQ body dimensions when selecting another Port of the same equipment.
+- Ask users to apply or cancel pending dimensions before leaving the equipment inspector for
+  another selection, movement, Port configuration or FAB navigation. Applying dimensions and
+  Undo/Redo retain their existing validation and history behavior.
+- Clear obsolete dimension drafts when opening a different project.
+
 ## [0.1.82] - 2026-10-08
 
 Builder preview; this correction does not declare V1 complete and simulation stays disabled.
