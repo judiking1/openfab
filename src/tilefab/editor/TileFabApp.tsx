@@ -204,7 +204,7 @@ import {
 	deriveAdvancedSwitchGeometry,
 } from "../core/AdvancedSwitch";
 import { type AdvancedSwitchPlan, planAdvancedSwitchReshape } from "../core/AdvancedSwitchPlanner";
-import { createConnectedStaticFabSelection } from "../core/ConnectedStaticFabSelection";
+import { createConnectedStaticFabSelection, createEquipmentProcessLoopRailSelection } from "../core/ConnectedStaticFabSelection";
 import {
 	collectPortEquipmentIntegrityIssues,
 	EQ_MAXIMUM_PORT_COUNT,
@@ -24520,6 +24520,30 @@ export default function TileFabApp(): React.ReactElement {
 		return processLoopRailEditRef.current === context;
 	}
 
+	function selectEquipmentProcessLoopRailForRegistration(): void {
+		if (blockEqBodyDraftSelectionChange(null) || blockStaticFabExclusiveCommand()) return;
+		const blocked = editorActivityTransitionBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const model = editorModelRef.current;
+		const selected = selectedPortEquipmentRef.current;
+		if (!selected || !resolveEditablePortEquipmentSelection(model.document.portEquipment, selected)) return;
+		const result = createEquipmentProcessLoopRailSelection(model.map, model.ownership,
+			model.document.portEquipment, model.document.organizations, model.document.getPatchSequence(),
+			selected.equipmentGroupId);
+		if (!result.valid) { setStatus(result.reason); return; }
+		setRailSelection(null, null);
+		clearPortEquipmentSelection();
+		updateStaticFabSelection(result.selection);
+		setCompactInspectorExpanded(true);
+		setStatus("연결 레일만 선택했습니다 · 루프 등록 후 장비 소속은 별도로 지정하세요");
+		scheduleRender();
+		requestAnimationFrame(() => {
+			if (editorModelRef.current !== model || staticFabSelectionRef.current !== result.selection) return;
+			const input = document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
+			input?.scrollIntoView({ block: "nearest" }); input?.focus({ preventScroll: true });
+		});
+	}
+
 	function selectProcessLoopRailOnly(): void {
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
@@ -30355,6 +30379,15 @@ export default function TileFabApp(): React.ReactElement {
 		selectedEquipmentProcessLoopMembership?.ownerOrganizationIds.length === 0
 			? selectedEquipmentProcessLoopMembership
 			: null;
+	const selectedEquipmentProcessLoopRegistration = useMemo(
+		() => selectedEquipmentGroup && !modelSyncPending &&
+			selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
+			? createEquipmentProcessLoopRailSelection(editorModel.map, editorModel.ownership,
+					editorModel.portEquipment, editorModel.organizations, editorModel.document.getPatchSequence(),
+					selectedEquipmentGroup.id)
+			: null,
+		[editorModel, selectedEquipmentGroup, selectedEquipmentUnownedProcessLoopMembership, modelSyncPending],
+	);
 	const selectedEquipmentScopedProcessLoopId =
 		selectedEquipmentProcessLoopChoice &&
 		ordinaryPortProcessLoopTargetRef.current?.projectId === projectSession.manifest.id &&
@@ -30370,13 +30403,16 @@ export default function TileFabApp(): React.ReactElement {
 			? selectedEquipmentUnownedProcessLoopMembership.eligibleProcessLoopIds[0] ?? null
 			: null);
 	const selectedEquipmentNoProcessLoopHint =
-		equipmentProcessLoopChoices.length === 0
+		selectedEquipmentProcessLoopRegistration && !selectedEquipmentProcessLoopRegistration.valid
+			? selectedEquipmentProcessLoopRegistration.reason
+			: equipmentProcessLoopChoices.length === 0
 			? "선택에서 폐쇄 레일 등록"
 			: selectedEquipmentGroup && selectedEquipmentGroup.portIds.length > 1
 				? "모든 Port를 같은 Loop로 이동"
 				: "Port를 Loop 직접 레일로 이동";
 	const selectedEquipmentNeedsGroupMoveForProcessLoop =
 		selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 &&
+		!selectedEquipmentProcessLoopRegistration?.valid &&
 		selectedEquipmentGroup?.kind === "STK" &&
 		selectedEquipmentGroup.template !== "CUSTOM" &&
 		selectedEquipmentGroup.portIds.length > 1 &&
@@ -40146,6 +40182,8 @@ export default function TileFabApp(): React.ReactElement {
 						reverseSelectedPortEquipmentServiceDirection={reverseSelectedPortEquipmentServiceDirection}
 						scheduleRender={scheduleRender}
 						selectConnectedAuthoredComponent={selectConnectedAuthoredComponent}
+						selectEquipmentProcessLoopRailForRegistration={selectEquipmentProcessLoopRailForRegistration}
+						selectedEquipmentProcessLoopRegistrationAvailable={selectedEquipmentProcessLoopRegistration?.valid ?? false}
 						selectNextPortEquipmentGroup={selectNextPortEquipmentGroup}
 						selectedEquipmentDirectlyOwned={selectedEquipmentDirectlyOwned}
 						selectedEquipmentGroup={selectedEquipmentGroup}

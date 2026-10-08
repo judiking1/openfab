@@ -19,6 +19,28 @@ vi.mock("react", async (importOriginal) => {
 });
 
 describe("PortEquipmentInspectorSelection", () => {
+	it.each([
+		"2d",
+		"3d",
+	] as const)("restricts Loop registration entry to 2D when rendering %s", (viewMode) => {
+		const state = eqState();
+		const selected = resolveEditablePortEquipmentSelection(state, selection());
+		if (!selected) throw new Error("Expected an editable EQ selection.");
+		const markup = renderToStaticMarkup(
+			createElement(PortEquipmentInspector, {
+				...inspectorProps(state, selected),
+				selectedEquipmentProcessLoopRegistrationAvailable: true,
+				viewMode,
+			}),
+		);
+		expect(markup.includes('data-testid="select-equipment-process-loop-rail"')).toBe(
+			viewMode === "2d",
+		);
+		expect(markup.includes('data-primary-process-loop-availability="register"')).toBe(
+			viewMode === "2d",
+		);
+	});
+
 	it.each<{
 		name: string;
 		group: EquipmentGroupRecord;
@@ -791,6 +813,8 @@ function inspectorProps(
 		reverseSelectedPortEquipmentServiceDirection: noop,
 		scheduleRender: noop,
 		selectConnectedAuthoredComponent: noop,
+		selectEquipmentProcessLoopRailForRegistration: noop,
+		selectedEquipmentProcessLoopRegistrationAvailable: false,
 		selectNextPortEquipmentGroup: noop,
 		selectedEquipmentDirectlyOwned: false,
 		selectedEquipmentGroup: selected.equipmentGroup,

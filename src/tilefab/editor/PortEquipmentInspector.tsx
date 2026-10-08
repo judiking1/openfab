@@ -104,6 +104,8 @@ export interface PortEquipmentInspectorProps {
 	readonly reverseSelectedPortEquipmentServiceDirection: () => void;
 	readonly scheduleRender: () => void;
 	readonly selectConnectedAuthoredComponent: () => void;
+	readonly selectEquipmentProcessLoopRailForRegistration: () => void;
+	readonly selectedEquipmentProcessLoopRegistrationAvailable: boolean;
 	readonly selectNextPortEquipmentGroup: () => void;
 	readonly selectedEquipmentDirectlyOwned: boolean;
 	readonly selectedEquipmentGroup: EquipmentGroupRecord;
@@ -160,6 +162,8 @@ export function PortEquipmentInspector({
 	reverseSelectedPortEquipmentServiceDirection,
 	scheduleRender,
 	selectConnectedAuthoredComponent,
+	selectEquipmentProcessLoopRailForRegistration,
+	selectedEquipmentProcessLoopRegistrationAvailable,
 	selectNextPortEquipmentGroup,
 	selectedEquipmentDirectlyOwned,
 	selectedEquipmentGroup,
@@ -291,6 +295,30 @@ export function PortEquipmentInspector({
 					</button>
 				) : null}
 			</div>
+		) : viewMode === "2d" && selectedEquipmentProcessLoopRegistrationAvailable ? (
+			<div className="tilefab-equipment-process-loop-primary">
+				<button
+					ref={processLoopPrimaryActionRef}
+					type="button"
+					data-testid="select-equipment-process-loop-rail"
+					disabled={modelSyncPending || workerState.status !== "ready"}
+					onClick={selectEquipmentProcessLoopRailForRegistration}
+				>
+					<Layers3
+						className="tilefab-equipment-process-loop-primary-icon"
+						size={15}
+						aria-hidden="true"
+					/>
+					<span className="tilefab-equipment-process-loop-primary-copy">
+						<strong className="tilefab-equipment-process-loop-primary-title">
+							Loop 없음 · 등록 열기
+						</strong>
+						<small className="tilefab-equipment-process-loop-primary-name">
+							현재 연결 레일만 선택
+						</small>
+					</span>
+				</button>
+			</div>
 		) : selectedEquipmentNeedsGroupMoveForProcessLoop ? (
 			<div className="tilefab-equipment-process-loop-primary">
 				<button
@@ -358,11 +386,13 @@ export function PortEquipmentInspector({
 				selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
 			}
 			data-primary-process-loop-availability={
-				selectedEquipmentNeedsGroupMoveForProcessLoop
-					? "move"
-					: selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
-						? "none"
-						: undefined
+				viewMode === "2d" && selectedEquipmentProcessLoopRegistrationAvailable
+					? "register"
+					: selectedEquipmentNeedsGroupMoveForProcessLoop
+						? "move"
+						: selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
+							? "none"
+							: undefined
 			}
 			data-compact-layout={compactInspectorSheetActive ? "bottom-sheet" : "side-panel"}
 			data-compact-obstruction="equipment"

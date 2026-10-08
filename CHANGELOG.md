@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.87] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Open existing Loop registration directly from unowned equipment on one closed rail component.
+  Select only that rail, preserve equipment and pending dimensions, and assign membership separately.
+- Follow all Ports of the selected equipment without crossing other equipment to unrelated loops.
+  Keep registration entry in 2D and retain ordinary whole-connected selection behavior.
+
 ## [0.1.86] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

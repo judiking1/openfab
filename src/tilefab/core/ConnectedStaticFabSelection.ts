@@ -1,14 +1,21 @@
 import type { EquipmentGroupRecord, PortEquipmentState } from "./EquipmentGroup";
+import { analyzeRailNetwork } from "./network";
 import type { PortRecord } from "./PortRecord";
 import { createRailAreaSelectionFromOwnerships, type RailAreaSelection } from "./RailAreaSelection";
 import type { RailModuleOwnership, RailModuleOwnershipIndex } from "./RailModuleOwnership";
 import { ALL_DIRECTIONS, moveCell, oppositeDirection } from "./railShape";
+import {
+	type StaticFabOrganizationState,
+	staticFabOrganizationEdgeKey,
+} from "./StaticFabOrganization";
 import { createStaticFabSelection, type StaticFabSelection } from "./StaticFabSelection";
-import { type Cell, cellKey, type TileMap } from "./TileMap";
+import { type Cell, cellKey, TileMap } from "./TileMap";
 
 export interface ConnectedStaticFabSelectionSeed {
 	readonly railModuleKeys?: readonly string[];
 	readonly equipmentGroupIds?: readonly number[];
+	/** Defaults to true. Explicit equipment seeds always include all their Port support rails. */
+	readonly followEquipmentConnections?: boolean;
 }
 
 export type ConnectedStaticFabSelectionResult =
@@ -24,10 +31,75 @@ export type ConnectedStaticFabSelectionResult =
 			reason: string;
 	  }>;
 
+/** Discovery only: select an exact unowned cardinal component, never grant registration authority. */
+export function createEquipmentProcessLoopRailSelection(
+	map: TileMap,
+	ownership: RailModuleOwnershipIndex,
+	portEquipment: PortEquipmentState,
+	organizations: StaticFabOrganizationState,
+	basePatchSequence: number,
+	equipmentGroupId: number,
+): ConnectedStaticFabSelectionResult {
+	if (
+		organizations.records.some((record) =>
+			record.membership.equipmentGroupIds.includes(equipmentGroupId),
+		)
+	) {
+		return invalid("장비가 이미 조직에 속해 있습니다");
+	}
+	const connected = createConnectedStaticFabSelection(
+		map,
+		ownership,
+		portEquipment,
+		basePatchSequence,
+		{
+			equipmentGroupIds: [equipmentGroupId],
+			followEquipmentConnections: false,
+		},
+	);
+	if (!connected.valid) return invalid("장비의 연결 레일을 다시 확인하세요");
+	const modules = connected.selection.rail.ownerships;
+	if (modules.some((module) => module.advancedSwitchId !== null)) {
+		return invalid("고급 스위치는 선택 메뉴에서 직접 등록하세요");
+	}
+	const edges = new Set(
+		modules.flatMap((module) => module.eraseEdges.map(staticFabOrganizationEdgeKey)),
+	);
+	if (
+		organizations.records.some((record) =>
+			record.membership.railEdges.some((edge) => edges.has(staticFabOrganizationEdgeKey(edge))),
+		)
+	) {
+		return invalid("이미 조직에 속한 레일입니다");
+	}
+	const component = new TileMap();
+	for (const module of modules) {
+		for (const edge of module.eraseEdges) {
+			for (const cell of [edge.from, edge.to]) {
+				component.setEncoded(cell.x, cell.y, map.getEncoded(cell.x, cell.y));
+			}
+		}
+	}
+	const analysis = analyzeRailNetwork(component);
+	if (analysis.components !== 1) return invalid("Port가 여러 연결 레일에 걸쳐 있습니다");
+	if (analysis.status !== "closed") return invalid("연결 레일을 먼저 폐쇄하세요");
+	return Object.freeze({
+		valid: true,
+		selection: createStaticFabSelection(
+			connected.selection.rail,
+			portEquipment,
+			basePatchSequence,
+			[],
+		),
+		railCellCount: connected.railCellCount,
+	});
+}
+
 /**
  * Expand an authored seed through exact weak rail adjacency and complete equipment groups.
- * Equipment is a semantic bridge: selecting one support rail includes the whole reciprocal group
- * and every other rail component supporting that group.
+ * By default equipment is a semantic bridge: selecting one support rail includes the whole
+ * reciprocal group and every other rail component supporting that group. Loop discovery disables
+ * that expansion after seeding all Ports of the explicitly selected equipment.
  */
 export function createConnectedStaticFabSelection(
 	map: TileMap,
@@ -139,9 +211,11 @@ export function createConnectedStaticFabSelection(
 				((rail.incoming & direction) !== 0 && (neighborRail.outgoing & opposite) !== 0);
 			if (reciprocal) enqueueRail(neighbor);
 		}
-		for (const groupId of groupsBySupportCell.get(cellKey(cell.x, cell.y)) ?? []) {
-			const reason = enqueueEquipmentGroup(groupId);
-			if (reason) return invalid(reason);
+		if (seed.followEquipmentConnections !== false) {
+			for (const groupId of groupsBySupportCell.get(cellKey(cell.x, cell.y)) ?? []) {
+				const reason = enqueueEquipmentGroup(groupId);
+				if (reason) return invalid(reason);
+			}
 		}
 	}
 
