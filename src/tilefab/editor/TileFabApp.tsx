@@ -16815,6 +16815,32 @@ export default function TileFabApp(): React.ReactElement {
 		return session.plan;
 	};
 
+	const previewPortEquipmentGroupEditAtPointer = (
+		session: PortEquipmentGroupEditSession,
+		targetRow: number | null,
+		pointerType: string,
+		coalescedAnnouncement = false,
+	): void => {
+		const plan = updatePortEquipmentGroupEditTarget(session, targetRow, { coalescedAnnouncement });
+		if (portEquipmentGroupEditSessionRef.current !== session) return;
+		const touchMove = pointerType === "touch" && session.mode === "move";
+		const feedback = plan
+			? plan.valid
+				? `${session.portType} 그룹 ${session.mode === "move" ? "이동" : "복제"} 가능 · ${touchMove ? "이동 적용 버튼으로 확정" : "클릭하여 확정"}`
+				: portEquipmentGroupEditFeedback(plan, session.slots).summary
+			: `${session.portType} 기준 포트를 놓을 슬롯을 선택하세요`;
+		const feedbackKey = plan
+			? plan.valid
+				? touchMove ? "valid:touch-move" : "valid"
+				: `invalid:${targetRow}:${plan.reason}`
+			: "empty";
+		if (session.feedbackKey !== feedbackKey) {
+			session.feedbackKey = feedbackKey;
+			setStatus(feedback);
+		}
+		scheduleRender();
+	};
+
 	const commitPortEquipmentGroupEdit = (
 		session: PortEquipmentGroupEditSession,
 		targetRow: number | null,
@@ -18452,7 +18478,11 @@ export default function TileFabApp(): React.ReactElement {
 
 		const groupEditSession = portEquipmentGroupEditSessionRef.current;
 		if (groupEditSession) {
-			commitPortEquipmentGroupEdit(groupEditSession, hoverPortSlotRef.current);
+			if (event.pointerType === "touch" && groupEditSession.mode === "move") {
+				previewPortEquipmentGroupEditAtPointer(groupEditSession, hoverPortSlotRef.current, event.pointerType);
+			} else {
+				commitPortEquipmentGroupEdit(groupEditSession, hoverPortSlotRef.current);
+			}
 			return;
 		}
 		const membershipEditSession = portEquipmentMembershipEditSessionRef.current;
@@ -18886,24 +18916,7 @@ export default function TileFabApp(): React.ReactElement {
 				groupEditSession.targetRow !== nextPortSlot
 			) {
 				hoverPortSlotRef.current = nextPortSlot;
-				const plan = updatePortEquipmentGroupEditTarget(groupEditSession, nextPortSlot, {
-					coalescedAnnouncement: true,
-				});
-				const feedback = plan
-					? plan.valid
-						? `${groupEditSession.portType} 그룹 ${groupEditSession.mode === "move" ? "이동" : "복제"} 가능 · 클릭하여 확정`
-						: portEquipmentGroupEditFeedback(plan, groupEditSession.slots).summary
-					: `${groupEditSession.portType} 기준 포트를 놓을 슬롯을 선택하세요`;
-				const feedbackKey = plan
-					? plan.valid
-						? "valid"
-						: `invalid:${nextPortSlot}:${plan.reason}`
-					: "empty";
-				if (groupEditSession.feedbackKey !== feedbackKey) {
-					groupEditSession.feedbackKey = feedbackKey;
-					setStatus(feedback);
-				}
-				scheduleRender();
+				previewPortEquipmentGroupEditAtPointer(groupEditSession, nextPortSlot, event.pointerType, true);
 			}
 			return;
 		}

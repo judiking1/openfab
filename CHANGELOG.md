@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.88] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Preview EQ/STK group moves on touch, then confirm with the existing Apply action or cancel.
+  Repeated target taps preserve equipment and history until an explicit application.
+- Retain mouse, keyboard, copy and separate OHB movement behavior.
+
 ## [0.1.87] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
