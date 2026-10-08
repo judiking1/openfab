@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.92] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Cancelling an uncommitted PROJECT blueprint placement restores the previous area selection
+  when its document, edit sequence and selected members are still current. Assemble mode,
+  library search and Canvas focus retain their existing behavior.
+- Confirmed placements keep their edits; cancellation after an intervening edit or project
+  replacement cannot restore a stale selection.
+
 ## [0.1.91] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

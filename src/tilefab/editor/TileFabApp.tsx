@@ -8786,6 +8786,10 @@ export default function TileFabApp(): React.ReactElement {
 			activeAreaStampSession !== null ||
 			organizationBundlePlacementSessionRef.current !== null;
 		const areaStampReturnContext = activeAreaStampSession?.returnContext ?? null;
+		const uncommittedLibrarySelectionReturn =
+			activeAreaStampSession?.origin === "library" &&
+			areaStampCommittedCountRef.current === 0 &&
+			areaStampReturnContext !== null;
 		const guidedSelectionCopy =
 			activeAreaStampSession !== null &&
 			areaStampReturnContext !== null &&
@@ -8890,7 +8894,7 @@ export default function TileFabApp(): React.ReactElement {
 				finalMessage = "모듈 복제 배치를 취소했습니다 · 원본 선택으로 돌아왔습니다";
 			}
 		}
-		if (areaStampReturnContext) {
+		if (areaStampReturnContext && activeAreaStampSession?.origin === "selection-copy") {
 			toolRef.current = areaStampReturnContext.tool;
 			setTool(areaStampReturnContext.tool);
 			updateEditorActivity(areaStampReturnContext.activity);
@@ -8930,7 +8934,30 @@ export default function TileFabApp(): React.ReactElement {
 				requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 			}
 		}
-		if (blueprintPlacementWasActive && !areaStampReturnContext) {
+		if (
+			uncommittedLibrarySelectionReturn &&
+			activeAreaStampSession.document === editorModelRef.current.document &&
+			areaStampReturnContext.patchSequence === editorModelRef.current.document.getPatchSequence()
+		) {
+			const selection = areaStampReturnContext.staticFabSelection;
+			const model = editorModelRef.current;
+			if (
+				selection &&
+				!staticFabSelectionStaleReason(
+					model.document.map,
+					model.ownership,
+					model.document.portEquipment,
+					model.document.getPatchSequence(),
+					selection,
+				)
+			) {
+				updateStaticFabSelection(selection);
+			}
+		}
+		if (
+			blueprintPlacementWasActive &&
+			(!areaStampReturnContext || activeAreaStampSession?.origin === "library")
+		) {
 			const focusOwner = document.activeElement;
 			requestAnimationFrame(() => {
 				// Keyboard navigation can finish before this frame. Preserve its new target;
@@ -23325,14 +23352,15 @@ export default function TileFabApp(): React.ReactElement {
 		}> = {
 			label: "MY BLUEPRINT",
 		},
+		libraryReturnSelection?: StaticFabSelection,
 	): void => {
 		const returnContext =
-			origin === "selection-copy"
+			origin === "selection-copy" || (origin === "library" && libraryReturnSelection)
 				? Object.freeze({
 						activity: editorActivityRef.current,
 						tool: toolRef.current,
 						patchSequence: editorModelRef.current.document.getPatchSequence(),
-						staticFabSelection: staticFabSelectionRef.current,
+						staticFabSelection: libraryReturnSelection ?? staticFabSelectionRef.current,
 						guidedCopySource: captureGuidedBuildCopySource({
 							document: editorModelRef.current.document,
 							patchSequence: editorModelRef.current.document.getPatchSequence(),
@@ -28627,6 +28655,7 @@ export default function TileFabApp(): React.ReactElement {
 	const placeProjectBlueprint = (
 		record: OpenFabProjectBlueprint,
 		origin: Extract<BlueprintPlacementOrigin, "library" | "favorite"> = "library",
+		fromProjectLibrary = false,
 	): void => {
 		if (record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION) {
 			closeBlueprintLibrary(false);
@@ -28643,11 +28672,21 @@ export default function TileFabApp(): React.ReactElement {
 				: railAreaStampTemplateFromOpenFabBlueprint(record);
 		if (!template) return;
 		closeBlueprintLibrary(false);
-		activateAreaStamp(template, origin, staticFabTemplate, {
-			label: record.name,
-			primeAtCanvasCenter: true,
-			fitAtCanvasCenter: true,
-		});
+		activateAreaStamp(
+			template,
+			origin,
+			staticFabTemplate,
+			{
+				label: record.name,
+				primeAtCanvasCenter: true,
+				fitAtCanvasCenter: true,
+			},
+			fromProjectLibrary && origin === "library" &&
+				projectBlueprintsRef.current.records.includes(record) &&
+				areaSelectionProvenanceRef.current === "ad-hoc"
+				? staticFabSelectionRef.current ?? undefined
+				: undefined,
+		);
 		setStatus(
 			`${blueprintPlacementStatusPrefix(origin)}${record.name} · R 회전 · F 흐름 반전 · 빈 공간 또는 호환 레일 클릭`,
 		);
@@ -37653,7 +37692,9 @@ export default function TileFabApp(): React.ReactElement {
 						pendingUserBlueprintDeleteId={pendingUserBlueprintDeleteId}
 						pendingUserBlueprintImport={pendingUserBlueprintImport}
 						pendingUserBlueprintImportPreview={pendingUserBlueprintImportPreview}
-						placeProjectBlueprint={placeProjectBlueprint}
+						placeProjectBlueprint={(record, origin) =>
+							placeProjectBlueprint(record, origin, blueprintLibraryTab === "saved")
+						}
 						projectBlueprintCount={projectBlueprints.records.length}
 						projectBlueprintSearch={projectBlueprintSearch}
 						onProjectBlueprintSearchChange={(query) => {
