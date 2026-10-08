@@ -137,6 +137,7 @@ interface BlueprintLibraryPanelProps {
 	readonly placeProjectBlueprint: (
 		record: OpenFabProjectBlueprint,
 		origin?: Extract<BlueprintPlacementOrigin, "library" | "favorite">,
+		fromUserLibraryRecord?: boolean,
 	) => void;
 	readonly projectBlueprintCount: number;
 	readonly projectBlueprintSearch: string;
@@ -1199,7 +1200,7 @@ export function BlueprintLibraryPanel({
 													type="button"
 													className="tilefab-blueprint-place"
 													disabled={projectBusy || userBlueprintLibraryBusy !== null}
-													onClick={() => placeProjectBlueprint(record)}
+													onClick={() => placeProjectBlueprint(record, "library", true)}
 													title={`${record.name} 배치`}
 												>
 													<RailBlueprintMiniature record={record} />

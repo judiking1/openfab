@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.93] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Cancelling an uncommitted BROWSER LOCAL blueprint card placement restores the previous
+  area selection, matching PROJECT behavior while preserving the current mode, search and focus.
+- Reuse the existing document, edit-sequence and membership guards so confirmed placements and
+  intervening edits cannot restore an outdated selection.
+
 ## [0.1.92] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

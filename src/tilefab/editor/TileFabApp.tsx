@@ -28655,7 +28655,7 @@ export default function TileFabApp(): React.ReactElement {
 	const placeProjectBlueprint = (
 		record: OpenFabProjectBlueprint,
 		origin: Extract<BlueprintPlacementOrigin, "library" | "favorite"> = "library",
-		fromProjectLibrary = false,
+		fromLibraryRecord = false,
 	): void => {
 		if (record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION) {
 			closeBlueprintLibrary(false);
@@ -28681,8 +28681,9 @@ export default function TileFabApp(): React.ReactElement {
 				primeAtCanvasCenter: true,
 				fitAtCanvasCenter: true,
 			},
-			fromProjectLibrary && origin === "library" &&
-				projectBlueprintsRef.current.records.includes(record) &&
+			fromLibraryRecord && origin === "library" &&
+				(projectBlueprintsRef.current.records.includes(record) ||
+					userBlueprintsRef.current.some((entry) => entry.blueprint === record)) &&
 				areaSelectionProvenanceRef.current === "ad-hoc"
 				? staticFabSelectionRef.current ?? undefined
 				: undefined,
@@ -37692,8 +37693,13 @@ export default function TileFabApp(): React.ReactElement {
 						pendingUserBlueprintDeleteId={pendingUserBlueprintDeleteId}
 						pendingUserBlueprintImport={pendingUserBlueprintImport}
 						pendingUserBlueprintImportPreview={pendingUserBlueprintImportPreview}
-						placeProjectBlueprint={(record, origin) =>
-							placeProjectBlueprint(record, origin, blueprintLibraryTab === "saved")
+						placeProjectBlueprint={(record, origin, fromUserLibraryRecord) =>
+							placeProjectBlueprint(
+								record,
+								origin,
+								blueprintLibraryTab === "saved" ||
+									(blueprintLibraryTab === "user" && fromUserLibraryRecord === true),
+							)
 						}
 						projectBlueprintCount={projectBlueprints.records.length}
 						projectBlueprintSearch={projectBlueprintSearch}
