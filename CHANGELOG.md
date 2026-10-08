@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.94] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Restore the current rail reshape guidance after correcting a rejected target, including
+  returning to Canvas after the preview disappears. Clear only that reshape's failure once,
+  preserving other task messages and completed edits.
+
 ## [0.1.93] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

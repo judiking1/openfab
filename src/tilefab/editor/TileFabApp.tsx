@@ -1248,6 +1248,7 @@ const editorActivityForExplicitTool = (tool: EditorTool): Exclude<EditorActivity
 interface ReshapeIntent {
 	kind: ReshapeKind;
 	origin: Cell;
+	rejectedStatus?: string;
 }
 
 interface DragState {
@@ -7229,6 +7230,19 @@ export default function TileFabApp(): React.ReactElement {
 			const evaluation = isRailAreaStampPreviewPlan(plan)
 				? createTopologyOnlyRailDraftPreview(editorModelRef.current.map, plan)
 				: evaluateBuildPlan(plan);
+			const reshape = reshapeRef.current;
+			if (
+				toolRef.current === "reshape" && reshape?.rejectedStatus &&
+				plan.kind === "edit" && evaluation.valid
+			) {
+				const rejectedStatus = reshape.rejectedStatus;
+				reshape.rejectedStatus = undefined;
+				setStatus((current) =>
+					reshapeRef.current === reshape && toolRef.current === "reshape" && current === rejectedStatus
+						? reshapeInstruction(reshape.kind)
+						: current,
+				);
+			}
 			if (isRailNetworkLinkPlan(plan)) {
 				networkLinkPreviewTargetRef.current = plan.networkLink.targetAnchor;
 				networkLinkStepStateRef.current = evaluation.valid ? "valid" : "invalid";
@@ -19593,6 +19607,12 @@ export default function TileFabApp(): React.ReactElement {
 				}
 			}
 			const failureMessage = commitResult.reason;
+			if (
+				drag.tool === "reshape" && drag.reshape && reshapeRef.current === drag.reshape &&
+				commitResult.evaluation && !commitResult.evaluation.valid
+			) {
+				drag.reshape.rejectedStatus = failureMessage;
+			}
 			if (activeAreaStamp) showAreaStampPlacementFailure(failureMessage);
 			else setStatus(failureMessage);
 			scheduleRender();
