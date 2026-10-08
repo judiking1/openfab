@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.84] - 2026-10-08
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Offer explicit project download and file-input open in the Guided save/reopen steps, alongside
+  native file actions. A download request keeps current changes and waits for the actual file to
+  be reopened and checked before completing the journey.
+- Show the completed FAB chapter as 8/8 while retaining the overall 13/13 result.
+
 ## [0.1.83] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

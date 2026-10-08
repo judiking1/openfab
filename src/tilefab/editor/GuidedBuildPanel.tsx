@@ -229,6 +229,7 @@ export function GuidedBuildPanel({
 	const reopenFinalCheck = !reviewing && prompt?.progressPresentation === "reopen-final-check";
 	const presentedCurrentSequence = reopenFinalCheck ? missionCount : currentSequence;
 	const suggestedAction = prompt?.suggestedAction ?? null;
+	const alternativeAction = prompt?.alternativeAction;
 	const showSuggestedAction =
 		!reviewing &&
 		suggestedAction !== null &&
@@ -428,7 +429,8 @@ export function GuidedBuildPanel({
 				</span>
 				<span aria-hidden="true">
 					<strong>{presentedChapter?.definition.label ?? "FAB 완성"}</strong> ·{" "}
-					{presentedChapterState} {presentedChapterStep}/{presentedChapter?.missionCount ?? 7} ·{" "}
+					{presentedChapterState} {presentedChapterStep}/
+					{presentedChapter?.missionCount ?? GUIDED_BUILD_CHAPTERS.at(-1)?.missionIds.length ?? 1} ·{" "}
 					{presentedOverallState}
 				</span>
 				<progress
@@ -682,6 +684,15 @@ export function GuidedBuildPanel({
 								onClick={() => onActivateSuggestedAction(suggestedAction)}
 							>
 								{prompt.suggestedActionLabel}
+							</button>
+						) : null}
+						{showSuggestedAction && alternativeAction ? (
+							<button
+								type="button"
+								data-testid="guided-build-alternative-action"
+								onClick={() => onActivateSuggestedAction(alternativeAction.action)}
+							>
+								{alternativeAction.label}
 							</button>
 						) : null}
 						{definition.id === "orient" ? (

@@ -1463,6 +1463,76 @@ describe("GuidedBuildMission", () => {
 		expect(reopened.currentMissionId).toBeNull();
 	});
 
+	it("keeps a download request at Save until the exact file is reopened", () => {
+		const base = completedThroughChecks();
+		const request = projectPersistenceEvidence({
+			downloadRequestCurrent: true,
+			reopenExpectationProjectId: "project-a",
+			reopenExpectationChecksum: "checksum-a",
+			reopenExpectationSequence: 1,
+		});
+		const pending = evaluateGuidedBuildFoundation(
+			evidence({ ...base, projectPersistence: request }),
+		);
+		expect(pending.currentMissionId).toBe("project-save");
+		expect(pending.complete).toBe(false);
+		expect(pending.missions.at(-2)?.prompt).toMatchObject({
+			title: "다운로드한 파일 확인",
+			suggestedAction: "open-project-file-input",
+			alternativeAction: { action: "download-project", label: "다시 다운로드" },
+		});
+		for (const invalid of [
+			{ downloadRequestCurrent: false },
+			{ currentChecksum: "edited-checksum" },
+			{ reopenExpectationProjectId: "another-project" },
+			{ reopenExpectationSequence: 0 },
+		]) {
+			const stale = evaluateGuidedBuildFoundation(
+				evidence({
+					...base,
+					projectPersistence: { ...request, ...invalid },
+				}),
+			);
+			expect(stale.currentMissionId).toBe("project-save");
+			expect(stale.missions.at(-2)?.prompt.suggestedAction).toBe("save-project");
+		}
+		const opening = evaluateGuidedBuildFoundation(
+			evidence({
+				...base,
+				projectPersistence: { ...request, operation: "opening" },
+			}),
+		);
+		expect(opening.missions.at(-2)?.prompt.suggestedAction).toBeNull();
+		const reopened = evaluateGuidedBuildFoundation(
+			evidence({
+				...base,
+				projectPersistence: { ...reopenedProjectEvidence(), downloadRequestCurrent: false },
+			}),
+		);
+		expect(reopened.complete).toBe(true);
+	});
+
+	it("offers explicit download and file-input actions without replacing native actions", () => {
+		const base = completedThroughChecks();
+		const unsaved = evaluateGuidedBuildFoundation(evidence(base));
+		expect(unsaved.missions.at(-2)?.prompt).toMatchObject({
+			suggestedAction: "save-project",
+			alternativeAction: { action: "download-project", label: "프로젝트 파일 다운로드" },
+		});
+		const saved = evaluateGuidedBuildFoundation(
+			evidence({
+				...base,
+				projectPersistence: savedProjectEvidence(),
+			}),
+		);
+		expect(saved.missions.at(-1)?.prompt).toMatchObject({
+			suggestedAction: "open-project",
+			alternativeAction: { action: "open-project-file-input", label: "파일 선택으로 열기" },
+		});
+		expect(guidedBuildSuggestedActionActivity("download-project")).toBe("inspect");
+		expect(guidedBuildSuggestedActionActivity("open-project-file-input")).toBe("inspect");
+	});
+
 	it("does not treat structurally repeated but unsafe closed systems as a completed loop", () => {
 		const readiness = duplicatedReadiness("unsafe-copies");
 		const evaluation = evaluateGuidedBuildFoundation(

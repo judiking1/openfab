@@ -68,7 +68,9 @@ export type GuidedBuildSuggestedAction =
 	| "open-checks"
 	| "confirm-checks"
 	| "save-project"
-	| "open-project";
+	| "download-project"
+	| "open-project"
+	| "open-project-file-input";
 
 export interface GuidedBuildMissionPrompt {
 	readonly eyebrow: string;
@@ -81,6 +83,10 @@ export interface GuidedBuildMissionPrompt {
 	readonly primaryCommandId: EditorCommandId | null;
 	readonly suggestedAction: GuidedBuildSuggestedAction | null;
 	readonly suggestedActionLabel: string | null;
+	readonly alternativeAction?: Readonly<{
+		action: GuidedBuildSuggestedAction;
+		label: string;
+	}>;
 	/** Guided organization rows may promote the second plain tap to the ordinary primary toggle. */
 	readonly organizationSelectionTargetCount?: 1 | 2;
 	readonly progressCue?: GuidedBuildMissionProgressCue;
@@ -334,6 +340,8 @@ export interface GuidedBuildProjectPersistenceEvidence {
 	readonly fileReferenceAvailable: boolean;
 	readonly migrated: boolean;
 	readonly needsSave: boolean;
+	/** A current download request still requires a later, validated file reopen. */
+	readonly downloadRequestCurrent?: boolean;
 	readonly reopenExpectationProjectId: string | null;
 	readonly reopenExpectationChecksum: string | null;
 	readonly reopenExpectationSequence: number;
@@ -699,7 +707,13 @@ export function guidedBuildSuggestedActionActivity(
 		return "inspect";
 	}
 	if (action === "ohb" || action === "eq" || action === "stk") return "equip";
-	if (action === "save-project" || action === "open-project") return "inspect";
+	if (
+		action === "save-project" ||
+		action === "download-project" ||
+		action === "open-project" ||
+		action === "open-project-file-input"
+	)
+		return "inspect";
 	return "assemble";
 }
 
@@ -1464,6 +1478,9 @@ function guidedBuildProjectSavePrompt(
 	definition: GuidedBuildMissionDefinition,
 	evidence: GuidedBuildEvidence,
 ): GuidedBuildMissionPrompt {
+	if (evidence.projectPersistence.operation === "opening") {
+		return guidedBuildProjectReopenPrompt(definition, evidence);
+	}
 	if (evidence.projectPersistence.operation === "saving") {
 		return bankPrompt(
 			definition,
@@ -1473,15 +1490,38 @@ function guidedBuildProjectSavePrompt(
 			null,
 		);
 	}
-	return bankPrompt(
-		definition,
-		"MISSION 12 · SAVE",
-		"OpenFab 프로젝트 저장",
-		"현재 FAB 전체를 하나의 .openfab 파일로 저장하세요. 일부 모듈만 보관하는 청사진 저장과는 다른 전체 프로젝트 저장입니다.",
-		null,
-		"save-project",
-		"전체 프로젝트 저장",
-	);
+	const persistence = evidence.projectPersistence;
+	if (
+		persistence.downloadRequestCurrent &&
+		persistence.reopenExpectationProjectId === persistence.projectId &&
+		persistence.reopenExpectationChecksum === persistence.currentChecksum &&
+		persistence.reopenExpectationSequence > 0
+	) {
+		return Object.freeze<GuidedBuildMissionPrompt>({
+			...bankPrompt(
+				definition,
+				"MISSION 12 · SAVE · VERIFY DOWNLOAD",
+				"다운로드한 파일 확인",
+				"다운로드한 .openfab 파일을 다시 여세요. 저장 여부를 물으면 ‘저장하지 않고 계속’을 선택하세요. 파일 확인 전까지 현재 변경 사항은 유지됩니다.",
+				null,
+				"open-project-file-input",
+				"다운로드한 파일 열기",
+			),
+			alternativeAction: { action: "download-project", label: "다시 다운로드" },
+		});
+	}
+	return Object.freeze<GuidedBuildMissionPrompt>({
+		...bankPrompt(
+			definition,
+			"MISSION 12 · SAVE",
+			"OpenFab 프로젝트 저장",
+			"현재 FAB 전체를 하나의 .openfab 파일로 저장하세요. 일부 모듈만 보관하는 청사진 저장과는 다른 전체 프로젝트 저장입니다.",
+			null,
+			"save-project",
+			"전체 프로젝트 저장",
+		),
+		alternativeAction: { action: "download-project", label: "프로젝트 파일 다운로드" },
+	});
 }
 
 function guidedBuildProjectReopenPrompt(
@@ -1500,17 +1540,20 @@ function guidedBuildProjectReopenPrompt(
 	const reopenedDifferentProject =
 		evidence.projectPersistence.lastOpenedProjectId !== null &&
 		!guidedBuildProjectReopened(evidence.projectPersistence);
-	return bankPrompt(
-		definition,
-		"MISSION 13 · REOPEN",
-		reopenedDifferentProject ? "저장한 프로젝트 다시 선택" : "저장한 프로젝트 다시 열기",
-		reopenedDifferentProject
-			? "다른 프로젝트가 열렸습니다. 이전 단계에서 저장한 동일 프로젝트 파일을 다시 선택하세요."
-			: "방금 저장한 OpenFab 파일을 선택하세요. 같은 FAB가 복원되면 CHECKS로 마지막 검사를 진행합니다.",
-		null,
-		"open-project",
-		"저장한 파일 열기",
-	);
+	return Object.freeze<GuidedBuildMissionPrompt>({
+		...bankPrompt(
+			definition,
+			"MISSION 13 · REOPEN",
+			reopenedDifferentProject ? "저장한 프로젝트 다시 선택" : "저장한 프로젝트 다시 열기",
+			reopenedDifferentProject
+				? "다른 프로젝트가 열렸습니다. 이전 단계에서 저장한 동일 프로젝트 파일을 다시 선택하세요."
+				: "방금 저장한 OpenFab 파일을 선택하세요. 같은 FAB가 복원되면 CHECKS로 마지막 검사를 진행합니다.",
+			null,
+			"open-project",
+			"저장한 파일 열기",
+		),
+		alternativeAction: { action: "open-project-file-input", label: "파일 선택으로 열기" },
+	});
 }
 
 function bankPrompt(
@@ -1701,5 +1744,6 @@ function guidedBuildSourceKey(evidence: GuidedBuildEvidence): string {
 		`checks-ui:${evidence.checksGuidance.navigatorOpen ? "open" : "closed"}:${evidence.checksGuidance.inspectionPending ? "pending" : "settled"}:${evidence.checksGuidance.acknowledgedFingerprint ?? "unacknowledged"}`,
 		`project:${evidence.projectPersistence.operation}:${evidence.projectPersistence.projectId}:${evidence.projectPersistence.currentChecksum}:${evidence.projectPersistence.savedChecksum}:${evidence.projectPersistence.currentOperationalConfigurationFingerprint}:${evidence.projectPersistence.savedOperationalConfigurationFingerprint}:${evidence.projectPersistence.fileReferenceAvailable ? "file" : "no-file"}:${evidence.projectPersistence.migrated ? "migrated" : "current"}:${evidence.projectPersistence.needsSave ? "needs-save" : "saved"}`,
 		`reopen:${evidence.projectPersistence.reopenExpectationProjectId ?? "no-expectation"}:${evidence.projectPersistence.reopenExpectationChecksum ?? "no-expected-checksum"}:${evidence.projectPersistence.reopenExpectationSequence}:${evidence.projectPersistence.lastOpenedProjectId ?? "never-opened"}:${evidence.projectPersistence.lastOpenedChecksum ?? "no-opened-checksum"}:${evidence.projectPersistence.lastOpenedSequence}`,
+		`download:${evidence.projectPersistence.downloadRequestCurrent ? "current-request" : "none"}`,
 	].join(":");
 }

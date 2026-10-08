@@ -3571,6 +3571,9 @@ export default function TileFabApp(): React.ReactElement {
 	const [lastProjectDownloadRequest, setLastProjectDownloadRequest] = useState<Readonly<{
 		projectId: string;
 		projectGeneration: number;
+		authoredChecksum: string;
+		operationalConfigurationFingerprint: string;
+		blueprints: OpenFabProjectBlueprintSection;
 		fileName: string;
 		requestedAt: string;
 	}> | null>(null);
@@ -4194,6 +4197,12 @@ export default function TileFabApp(): React.ReactElement {
 				fileReferenceAvailable: projectSession.fileReference !== null,
 				migrated: projectSession.migrated,
 				needsSave: projectSession.needsSave,
+				downloadRequestCurrent:
+					lastProjectDownloadRequest?.projectId === projectSession.manifest.id &&
+					lastProjectDownloadRequest.projectGeneration === projectGenerationRef.current &&
+					lastProjectDownloadRequest.authoredChecksum === editorModel.authoredChecksum &&
+					lastProjectDownloadRequest.operationalConfigurationFingerprint === operationalConfigurationFingerprint &&
+					lastProjectDownloadRequest.blueprints === projectBlueprints,
 				reopenExpectationProjectId: guidedBuildProjectReopenExpectation?.projectId ?? null,
 				reopenExpectationChecksum:
 					guidedBuildProjectReopenExpectation?.authoredChecksum ?? null,
@@ -4206,6 +4215,8 @@ export default function TileFabApp(): React.ReactElement {
 			editorModel.authoredChecksum,
 			guidedBuildLastOpenedProject,
 			guidedBuildProjectReopenExpectation,
+			lastProjectDownloadRequest,
+			projectBlueprints,
 			operationalConfigurationFingerprint,
 			projectSession,
 		],
@@ -20779,12 +20790,22 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			if (transaction.status === "download-requested") {
 				if (ownsOperation()) {
+					const { serialized, savedOperationalConfigurationFingerprint } = transaction.prepared;
 					setLastProjectDownloadRequest({
 						projectId: context.manifest.id,
 						projectGeneration: context.projectGeneration,
+						authoredChecksum: serialized.authoredChecksum,
+						operationalConfigurationFingerprint: savedOperationalConfigurationFingerprint,
+						blueprints: context.blueprints,
 						fileName: transaction.reference.name,
 						requestedAt: projectIdentity.now(),
 					});
+					if (source.isCurrent() && !controller.signal.aborted)
+						setGuidedBuildProjectReopenExpectation(Object.freeze({
+							projectId: context.manifest.id,
+							authoredChecksum: serialized.authoredChecksum,
+							sequence: ++guidedBuildProjectFileSequenceRef.current,
+						}));
 					setProjectOperation("idle");
 					setStatus("다운로드를 요청했습니다 · 다운로드한 파일을 확인하세요 · 현재 프로젝트와 변경 사항을 유지합니다");
 				}
@@ -32770,8 +32791,14 @@ export default function TileFabApp(): React.ReactElement {
 			case "save-project":
 				void handleSaveProject(false);
 				return;
+			case "download-project":
+				void handleSaveProject(false, "default", "download");
+				return;
 			case "open-project":
 				requestProjectAction({ kind: "open" });
+				return;
+			case "open-project-file-input":
+				requestProjectAction({ kind: "open", chooser: "file-input" });
 				return;
 			case "add-bay":
 				startProductionBayPlacementFromContext(

@@ -506,6 +506,8 @@ describe("GuidedBuildPanel", () => {
 
 		expect(markup).toContain('data-current-mission="complete"');
 		expect(markup).toContain('aria-valuetext="전체 미션 13/13 · 완료"');
+		expect(markup.replace(/<!--.*?-->/g, "")).toContain("미션 완료 8/8");
+		expect(markup.replace(/<!--.*?-->/g, "")).not.toContain("미션 완료 8/7");
 		expect(markup).toContain("첫 정적 FAB 작업 흐름 완료");
 		expect(markup).toContain("가이드 종료 · 편집 계속");
 		expect(markup).toContain('data-guided-action-id="action:continue-editing"');
