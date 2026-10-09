@@ -6,6 +6,15 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.99] - 2026-10-09
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Keep the actual endpoint selected through its latest reshape and direct Undo/Redo, using the
+  command's exact before/after endpoints. Preserve a different selection or explicit deselection.
+- Discard selection correspondence after another edit, a history branch or project replacement.
+  When replaying older moves, clear an endpoint selection that would become an unrelated straight.
+
 ## [0.1.98] - 2026-10-09
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
