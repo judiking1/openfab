@@ -9921,6 +9921,10 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	margin-top: 6px;
 }
 
+.tilefab-context-palette > section > .tilefab-context-action-reasons {
+	grid-column: 1 / -1;
+}
+
 .tilefab-context-palette > section > button {
 	display: flex;
 	min-width: 0;
@@ -9948,6 +9952,8 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-context-palette > section > button:disabled,
+.tilefab-context-palette > section > button[aria-disabled="true"],
+.tilefab-context-palette > section > button[aria-disabled="true"]:hover,
 .tilefab-context-palette > section > button:disabled:hover {
 	border-color: #293335;
 	color: #6d797b;
@@ -11401,6 +11407,8 @@ button.tilefab-action-hint[data-guided-target="true"] {
 }
 
 .tilefab-inspector-primary:disabled,
+.tilefab-inspector-primary[aria-disabled="true"],
+.tilefab-inspector-primary[aria-disabled="true"]:hover,
 .tilefab-inspector-primary:disabled:hover,
 .tilefab-inspector-danger:disabled,
 .tilefab-inspector-danger:disabled:hover {

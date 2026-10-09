@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
 import {
+	getStraightOffsetSource,
 	planMoveCorner,
 	planMoveEndpoint,
 	planOffsetStraight,
@@ -12,7 +13,7 @@ import {
 import { analyzeRailNetwork } from "./network";
 import { planRailConstruction } from "./paint";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
-import { DIR_E, DIR_W } from "./railShape";
+import { DIR_E, DIR_S, DIR_W } from "./railShape";
 import { encodeRailCell, TileMap } from "./TileMap";
 
 function buildLoopWithBypass(): RailDocument {
@@ -386,6 +387,80 @@ describe("endpoint replacement editing", () => {
 });
 
 describe("straight offset editing", () => {
+	it.each([
+		5, 7, 8, 9, 11,
+	])("checks the source boundary of a %i-cell open line without mutation", (count) => {
+		for (const vertical of [false, true]) {
+			const document = new RailDocument();
+			const cell = (distance: number) => (vertical ? { x: 0, y: distance } : { x: distance, y: 0 });
+			expect(document.commit(planRailConstruction(document.map, cell(0), cell(count - 1)))).toBe(
+				true,
+			);
+			const selected = cell(Math.floor(count / 2));
+			const before = [
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.captureRailMirrorHistoryLedger(),
+			];
+			const source = getStraightOffsetSource(document.map, selected);
+			expect(source.allowed).toBe(count >= 9);
+			const plan = planOffsetStraight(
+				document.map,
+				selected,
+				vertical ? { x: -3, y: selected.y } : { x: selected.x, y: -3 },
+			);
+			expect(plan.valid, plan.reason).toBe(source.allowed);
+			if (!source.allowed) expect(plan.reason).toBe(source.reason);
+			expect([
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.captureRailMirrorHistoryLedger(),
+			]).toEqual(before);
+		}
+	});
+
+	it("updates source availability after extension and Undo/Redo", () => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 6, y: 0 })),
+		).toBe(true);
+		const selected = { x: 4, y: 0 };
+		expect(getStraightOffsetSource(document.map, selected).allowed).toBe(false);
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 6, y: 0 }, { x: 8, y: 0 })),
+		).toBe(true);
+		expect(getStraightOffsetSource(document.map, selected).allowed).toBe(true);
+		expect(document.undo()).toBe(true);
+		expect(getStraightOffsetSource(document.map, selected).allowed).toBe(false);
+		expect(document.redo()).toBe(true);
+		expect(getStraightOffsetSource(document.map, selected).allowed).toBe(true);
+	});
+
+	it("shares terminal, branch and owned-switch rejection with the planner", () => {
+		const document = buildLoopWithBypass();
+		const open = buildOpenLine();
+		const switched = buildOpenLine();
+		switched.map.setAdvancedSwitch({
+			id: 17,
+			profileClass: "A",
+			origin: { x: 5, y: 0 },
+			forward: DIR_E,
+			lateral: DIR_S,
+			movementMask: 15,
+		});
+		for (const [map, selected] of [
+			[document.map, { x: 3, y: 0 }],
+			[open.map, { x: 0, y: 0 }],
+			[switched.map, { x: 5, y: 0 }],
+		] as const) {
+			const source = getStraightOffsetSource(map, selected);
+			expect(source.allowed).toBe(false);
+			const plan = planOffsetStraight(map, selected, { x: selected.x, y: -3 });
+			expect(plan.valid).toBe(false);
+			expect(plan.reason).toBe(source.reason);
+		}
+	});
+
 	it("replaces a horizontal run with a four-corner dogleg and keeps the loop closed", () => {
 		const document = buildPlainLoop();
 		const plan = planOffsetStraight(document.map, { x: 5, y: 0 }, { x: 5, y: -2 });
@@ -423,6 +498,7 @@ describe("straight offset editing", () => {
 		const document = buildPlainLoop();
 		document.map.setEncoded(5, -2, encodeRailCell({ incoming: DIR_W, outgoing: DIR_E }));
 
+		expect(getStraightOffsetSource(document.map, { x: 5, y: 0 }).allowed).toBe(true);
 		const plan = planOffsetStraight(document.map, { x: 5, y: 0 }, { x: 5, y: -2 });
 		expect(plan.valid).toBe(false);
 		expect(plan.conflicts).toContainEqual({ x: 5, y: -2 });

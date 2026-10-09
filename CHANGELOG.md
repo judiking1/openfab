@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.97] - 2026-10-09
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Show straight parallel-move availability and a short reason before entering the command.
+  Inspector, context menu and entry guard share the planner's source checks, and unavailable
+  commands remain keyboard reachable so their reason can be read.
+- Refresh availability after rail edits and Undo/Redo while retaining final target collision
+  validation and atomic Apply.
+
 ## [0.1.96] - 2026-10-08
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

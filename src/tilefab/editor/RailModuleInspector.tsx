@@ -50,6 +50,7 @@ export interface RailModuleInspectorProps {
 	readonly advancedSwitchPortSummary: (switchRecord: AdvancedSwitchRecord) => string;
 	readonly selectedPhysical: CompiledRailPiece | null | undefined;
 	readonly selectedType: AuthoredRailType | null;
+	readonly straightReshapeReason: string | null;
 	readonly selectedFitLabel: CompiledRailPiece["fitKind"] | "BASELINE";
 	readonly selectedJunction: CompiledJunction | null;
 	readonly copyConstructionPreset: (preset: RailConstructionCopyPreset) => void;
@@ -91,6 +92,7 @@ export function RailModuleInspector({
 	advancedSwitchPortSummary,
 	selectedPhysical,
 	selectedType,
+	straightReshapeReason,
 	selectedFitLabel,
 	selectedJunction,
 	copyConstructionPreset,
@@ -508,13 +510,28 @@ export function RailModuleInspector({
 							</button>
 						) : null}
 						{selectedType === "LINEAR" ? (
-							<button
-								type="button"
-								className="tilefab-inspector-primary"
-								onClick={() => startReshape("straight")}
-							>
-								<Move size={15} /> 직선 구간 평행 이동
-							</button>
+							<>
+								<button
+									type="button"
+									className="tilefab-inspector-primary"
+									aria-disabled={straightReshapeReason !== null}
+									aria-describedby={
+										straightReshapeReason ? "rail-straight-reshape-reason" : undefined
+									}
+									onClick={() => startReshape("straight")}
+								>
+									<Move size={15} /> 직선 구간 평행 이동
+								</button>
+								{straightReshapeReason ? (
+									<div
+										id="rail-straight-reshape-reason"
+										className="tilefab-context-action-reasons"
+										role="note"
+									>
+										{straightReshapeReason}
+									</div>
+								) : null}
+							</>
 						) : null}
 						{selectedType === "BRANCH" || selectedType === "MERGE" ? (
 							<button

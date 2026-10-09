@@ -299,38 +299,46 @@ export function planMoveEndpoint(
 	);
 }
 
-/** Offsets a local 7 m straight run through two dogleg transitions and four R500 corners. */
-export function planOffsetStraight(
-	map: TileMap,
-	selected: Cell,
-	target: Cell,
-): RailReplacementPlan {
+export type StraightOffsetSource =
+	| {
+			readonly allowed: true;
+			readonly reason: null;
+			readonly horizontal: boolean;
+			readonly previous: Cell;
+			readonly next: Cell;
+			readonly editableCells: readonly Cell[];
+	  }
+	| {
+			readonly allowed: false;
+			readonly reason: string;
+			readonly cells: readonly Cell[];
+			readonly conflicts: readonly Cell[];
+	  };
+
+/** Checks only the source rail; a target still needs the complete offset planner. */
+export function getStraightOffsetSource(map: TileMap, selected: Cell): StraightOffsetSource {
 	const switchOwner = map.getAdvancedSwitchOwningCell(selected.x, selected.y);
 	if (switchOwner) {
-		return invalidReplacement(
-			map,
-			[selected],
-			`스위치 ${switchOwner.id}의 내부 직선은 독립적으로 이동할 수 없습니다`,
-			[selected],
-		);
+		return {
+			allowed: false,
+			reason: `스위치 ${switchOwner.id}의 내부 직선은 독립적으로 이동할 수 없습니다`,
+			cells: [selected],
+			conflicts: [selected],
+		};
 	}
 	const selectedRail = map.getRail(selected.x, selected.y);
 	const incomingSide = singleDirection(selectedRail.incoming);
 	const outgoingSide = singleDirection(selectedRail.outgoing);
 	if (!incomingSide || !outgoingSide || outgoingSide !== oppositeDirection(incomingSide)) {
-		return invalidReplacement(map, [selected], "일반 단방향 직선 모듈만 평행 이동할 수 있습니다", [
-			selected,
-		]);
+		return {
+			allowed: false,
+			reason: "일반 단방향 직선 모듈만 평행 이동할 수 있습니다",
+			cells: [selected],
+			conflicts: [selected],
+		};
 	}
 
 	const horizontal = outgoingSide === DIR_E || outgoingSide === DIR_W;
-	const projectedTarget = horizontal
-		? { x: selected.x, y: target.y }
-		: { x: target.x, y: selected.y };
-	if (projectedTarget.x === selected.x && projectedTarget.y === selected.y) {
-		return invalidReplacement(map, [selected], "직선과 수직인 방향으로 이동하세요", [selected]);
-	}
-
 	const armLength = 3;
 	const previous = moveRepeated(selected, incomingSide, armLength);
 	const next = moveRepeated(selected, outgoingSide, armLength);
@@ -347,13 +355,32 @@ export function planOffsetStraight(
 		const cell = moveRepeated(selected, direction, Math.abs(distance));
 		const rail = map.getRail(cell.x, cell.y);
 		if (rail.incoming !== incomingSide || rail.outgoing !== outgoingSide) {
-			return invalidReplacement(
-				map,
-				editableCells,
-				"선택점 양쪽에 같은 방향의 3 m 직선 편집 여유가 필요합니다",
-				[cell],
-			);
+			return {
+				allowed: false,
+				reason: "양쪽에 같은 방향의 직선 3 m가 필요합니다",
+				cells: editableCells,
+				conflicts: [cell],
+			};
 		}
+	}
+	return { allowed: true, reason: null, horizontal, previous, next, editableCells };
+}
+
+/** Offsets a local 7 m straight run through two dogleg transitions and four R500 corners. */
+export function planOffsetStraight(
+	map: TileMap,
+	selected: Cell,
+	target: Cell,
+): RailReplacementPlan {
+	const source = getStraightOffsetSource(map, selected);
+	if (!source.allowed)
+		return invalidReplacement(map, source.cells, source.reason, source.conflicts);
+	const { horizontal, previous, next, editableCells } = source;
+	const projectedTarget = horizontal
+		? { x: selected.x, y: target.y }
+		: { x: target.x, y: selected.y };
+	if (projectedTarget.x === selected.x && projectedTarget.y === selected.y) {
+		return invalidReplacement(map, [selected], "직선과 수직인 방향으로 이동하세요", [selected]);
 	}
 
 	const entry = horizontal
