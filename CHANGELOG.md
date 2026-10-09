@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.100] - 2026-10-09
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Keep the exact corner or projected straight center selected through the latest reshape and
+  its direct Undo/Redo, reusing endpoint selection safeguards. Preserve other selections and
+  explicit deselection; clear unsupported older context instead of guessing a nearby rail.
+- Share one latest-move correspondence across corner, straight and endpoint edits without
+  changing rail identity, history data or existing edit eligibility.
+
 ## [0.1.99] - 2026-10-09
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

@@ -1014,7 +1014,7 @@ import {
 	parseRailScaleProbeCellCount,
 	parseRailScaleProbeRootCount,
 } from "./RailScaleProbeFixture";
-import { EndpointSelectionHistory, resolveRailSelectionOwnership } from "./RailSelection";
+import { ReshapeSelectionHistory, resolveRailSelectionOwnership } from "./RailSelection";
 import {
 	assemblyRailTemplateGallery,
 	contextualRailTemplates,
@@ -2712,7 +2712,7 @@ export default function TileFabApp(): React.ReactElement {
 	const selectedRef = useRef<Cell | null>(null);
 	const selectedModuleKeyRef = useRef<string | null>(null);
 	const selectedModuleRef = useRef<RailModuleOwnership | null>(null);
-	const endpointSelectionHistory = useMemo(() => new EndpointSelectionHistory(), []);
+	const reshapeSelectionHistory = useMemo(() => new ReshapeSelectionHistory(), []);
 	const selectedPortEquipmentRef = useRef<PortEquipmentSelection | null>(null);
 	const processLoopMembershipDisclosureRef = useRef<HTMLElement | null>(null);
 	const processLoopPrimaryActionRef = useRef<HTMLButtonElement | null>(null);
@@ -3045,12 +3045,12 @@ export default function TileFabApp(): React.ReactElement {
 	);
 	const railDocument = editorModel.document;
 	useEffect(() => {
-		const unsubscribe = railDocument.subscribe((event) => endpointSelectionHistory.observePatch(railDocument, event));
+		const unsubscribe = railDocument.subscribe((event) => reshapeSelectionHistory.observePatch(railDocument, event));
 		return () => {
 			unsubscribe();
-			endpointSelectionHistory.reset();
+			reshapeSelectionHistory.reset();
 		};
-	}, [railDocument, endpointSelectionHistory]);
+	}, [railDocument, reshapeSelectionHistory]);
 	const activeMap = editorModel.map;
 	const activePortEquipment = editorModel.portEquipment;
 	const operationalConfigurationSource = useMemo(
@@ -5505,7 +5505,7 @@ export default function TileFabApp(): React.ReactElement {
 				networkLinkPreviewTargetRef.current = null;
 				networkLinkStepStateRef.current = "source";
 				writeNetworkLinkStepState(networkLinkStepsRef.current, "source");
-				endpointSelectionHistory.reset();
+				reshapeSelectionHistory.reset();
 				selectedRef.current = null;
 				selectedModuleKeyRef.current = null;
 				selectedModuleRef.current = null;
@@ -5604,7 +5604,7 @@ export default function TileFabApp(): React.ReactElement {
 		scaleProbeRootCount,
 		equipmentScaleProbePortCount,
 		clearTemplatePlacementFeedback,
-		endpointSelectionHistory,
+		reshapeSelectionHistory,
 	]);
 
 	useEffect(() => {
@@ -7099,7 +7099,7 @@ export default function TileFabApp(): React.ReactElement {
 		setSelectedPortEquipmentState(next);
 		if (!next) return;
 		clearAreaSelection();
-		endpointSelectionHistory.reset();
+		reshapeSelectionHistory.reset();
 		selectedRef.current = null;
 		selectedModuleKeyRef.current = null;
 		selectedModuleRef.current = null;
@@ -7109,7 +7109,7 @@ export default function TileFabApp(): React.ReactElement {
 	const clearPortEquipmentSelection = (): void => setPortEquipmentSelection(null);
 	const setRailSelection = (cell: Cell | null, module: RailModuleOwnership | null): void => {
 		const model = editorModelRef.current;
-		endpointSelectionHistory.select(model.document, model.map, model.ownership, cell, module?.key ?? null);
+		reshapeSelectionHistory.select(model.document, model.map, model.ownership, cell, module?.key ?? null);
 		if (cell) {
 			clearAreaSelection();
 			selectedPortEquipmentRef.current = null;
@@ -7508,11 +7508,11 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const currentSelection = selectedRef.current;
 		const currentModuleKey = selectedModuleKeyRef.current;
-		const endpointProjection = endpointSelectionHistory.publish(document, nextModel.map, nextModel.ownership);
-		if (endpointProjection === "clear") {
+		const reshapeProjection = reshapeSelectionHistory.publish(document, nextModel.map, nextModel.ownership);
+		if (reshapeProjection === "clear") {
 			clearRailSelection();
-		} else if (endpointProjection) {
-			setRailSelection(endpointProjection.cell, endpointProjection.module);
+		} else if (reshapeProjection) {
+			setRailSelection(reshapeProjection.cell, reshapeProjection.module);
 		} else if (
 			currentSelection &&
 			!nextModel.map.hasRail(currentSelection.x, currentSelection.y) &&
@@ -19681,13 +19681,13 @@ export default function TileFabApp(): React.ReactElement {
 			void runProcessLoopRepair(finalPlan);
 			return;
 		}
-		const endpointMove = drag.tool === "reshape" && drag.reshape?.kind === "endpoint";
-		if (endpointMove) endpointSelectionHistory.prepareMove(editorModelRef.current.document, end);
+		const reshapeMove = drag.tool === "reshape" ? drag.reshape : null;
+		if (reshapeMove) reshapeSelectionHistory.prepareMove(editorModelRef.current.document, end, reshapeMove.kind);
 		let commitResult: RailPlanCommitResult;
 		try {
 			commitResult = finalPlan ? commitPlan(finalPlan) : { committed: false, evaluation: null, reason: "배치를 적용하지 않았습니다 · 유효한 초안이 없습니다 · 시작점과 끝점을 다시 선택하세요" };
 		} finally {
-			if (endpointMove) endpointSelectionHistory.finishMove();
+			if (reshapeMove) reshapeSelectionHistory.finishMove();
 		}
 		if (!commitResult.committed) {
 			if (
@@ -19812,15 +19812,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (drag.tool === "reshape") {
 			reshapeRef.current = null;
 			setReshapeKind(null);
-			if (endpointMove) {
-				if (!endpointSelectionHistory.awaitingMovePublication) clearRailSelection();
-			} else {
-				const nearest = closestCell(finalPlan?.cells ?? [], end);
-				setRailSelection(
-					nearest && railDocument.map.hasRail(nearest.x, nearest.y) ? nearest : null,
-					null,
-				);
-			}
+			if (!reshapeSelectionHistory.awaitingMovePublication) clearRailSelection();
 			toolRef.current = "inspect";
 			setTool("inspect");
 		}
@@ -20423,7 +20415,7 @@ export default function TileFabApp(): React.ReactElement {
 		networkLinkPreviewTargetRef.current = null;
 		networkLinkStepStateRef.current = "source";
 		writeNetworkLinkStepState(networkLinkStepsRef.current, "source");
-		endpointSelectionHistory.reset();
+		reshapeSelectionHistory.reset();
 		selectedRef.current = null;
 		selectedModuleKeyRef.current = null;
 		selectedModuleRef.current = null;

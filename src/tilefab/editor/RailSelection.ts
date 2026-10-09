@@ -2,6 +2,7 @@ import { classifyRailCell } from "../core/RailCellClassification";
 import type { RailDocument, RailPatchEvent } from "../core/RailDocument";
 import type { RailModuleOwnership, RailModuleOwnershipIndex } from "../core/RailModuleOwnership";
 import { railPatchTransitionFingerprint } from "../core/RailPatchHistory";
+import { DIR_E, DIR_W } from "../core/railShape";
 import { type Cell, encodeRailCell, type TileMap } from "../core/TileMap";
 
 /** Keep an existing semantic identity exact; only pending selections may resolve by cell. */
@@ -15,7 +16,10 @@ export function resolveRailSelectionOwnership(
 	return resolution.status === "resolved" ? resolution.module : null;
 }
 
-interface EndpointSelection {
+export type RailReshapeKind = "endpoint" | "corner" | "straight";
+
+interface ReshapeSelection {
+	readonly kind: RailReshapeKind;
 	readonly cell: Cell;
 	readonly moduleKey: string;
 	readonly encoded: number;
@@ -25,28 +29,28 @@ interface SelectionIdentity {
 	readonly document: RailDocument;
 	readonly cell: Cell;
 	readonly moduleKey: string | null;
-	readonly endpoint: EndpointSelection | null;
+	readonly anchor: ReshapeSelection | null;
 }
 
-interface EndpointMoveReceipt {
+interface ReshapeMoveReceipt {
 	readonly document: RailDocument;
 	readonly sequence: number;
 	readonly phase: "applied" | "undone";
-	readonly before: EndpointSelection;
-	readonly after: EndpointSelection;
+	readonly before: ReshapeSelection;
+	readonly after: ReshapeSelection;
 	readonly forward: string;
 	readonly reverse: string;
 }
 
-interface PreparedEndpointMove {
+interface PreparedReshapeMove {
 	readonly document: RailDocument;
 	readonly sequence: number;
 	readonly revision: number;
-	readonly before: EndpointSelection;
+	readonly before: ReshapeSelection;
 	readonly target: Cell;
 }
 
-type PendingEndpointSelection = Readonly<{
+type PendingReshapeSelection = Readonly<{
 	document: RailDocument;
 	sequence: number;
 	revision: number;
@@ -55,41 +59,50 @@ type PendingEndpointSelection = Readonly<{
 	(
 		| Readonly<{
 				kind: "apply";
-				before: EndpointSelection;
+				before: ReshapeSelection;
 				target: Cell;
 				encoded: number;
 				forward: string;
 				reverse: string;
 		  }>
-		| Readonly<{ kind: "replay"; receipt: EndpointMoveReceipt; target: EndpointSelection }>
-		| Readonly<{ kind: "guard"; target: EndpointSelection }>
+		| Readonly<{ kind: "replay"; receipt: ReshapeMoveReceipt; target: ReshapeSelection }>
+		| Readonly<{ kind: "guard"; target: ReshapeSelection }>
 	);
 
-export type EndpointSelectionProjection =
+export type ReshapeSelectionProjection =
 	| Readonly<{ cell: Cell; module: RailModuleOwnership }>
 	| "clear"
 	| null;
 
-function endpointSelection(
+function reshapeSelection(
 	map: TileMap,
 	index: RailModuleOwnershipIndex,
 	cell: Cell,
 	moduleKey?: string | null,
-): EndpointSelection | null {
+): ReshapeSelection | null {
 	if (index.revision !== map.getRevision()) return null;
 	const rail = map.getRail(cell.x, cell.y);
-	if (classifyRailCell(rail) !== "TERMINAL" || map.getAdvancedSwitchOwningCell(cell.x, cell.y))
-		return null;
+	const kind = reshapeKind(map, cell);
+	if (!kind || map.getAdvancedSwitchOwningCell(cell.x, cell.y)) return null;
 	const resolved = index.resolve(cell);
 	if (resolved.status !== "resolved" || (moduleKey != null && resolved.module.key !== moduleKey))
 		return null;
-	return { cell: { ...cell }, moduleKey: resolved.module.key, encoded: encodeRailCell(rail) };
+	return { kind, cell: { ...cell }, moduleKey: resolved.module.key, encoded: encodeRailCell(rail) };
 }
 
-function sameEndpoint(left: EndpointSelection | null, right: EndpointSelection | null): boolean {
+/** Identity proof only: the next edit still needs its existing source/target admission checks. */
+function reshapeKind(map: TileMap, cell: Cell): RailReshapeKind | null {
+	const type = classifyRailCell(map.getRail(cell.x, cell.y));
+	if (type === "TERMINAL") return "endpoint";
+	if (type === "LEFT_CURVE" || type === "RIGHT_CURVE") return "corner";
+	return type === "LINEAR" ? "straight" : null;
+}
+
+function sameAnchor(left: ReshapeSelection | null, right: ReshapeSelection | null): boolean {
 	return Boolean(
 		left &&
 			right &&
+			left.kind === right.kind &&
 			left.cell.x === right.cell.x &&
 			left.cell.y === right.cell.y &&
 			left.moduleKey === right.moduleKey &&
@@ -107,12 +120,12 @@ function sameSelection(left: SelectionIdentity | null, right: SelectionIdentity)
 	);
 }
 
-/** Runtime-only correspondence for the latest endpoint move; it never changes authored data. */
-export class EndpointSelectionHistory {
+/** Runtime-only correspondence for the latest ordinary reshape; it never changes authored data. */
+export class ReshapeSelectionHistory {
 	private selection: SelectionIdentity | null = null;
-	private prepared: PreparedEndpointMove | null = null;
-	private pending: PendingEndpointSelection | null = null;
-	private receipt: EndpointMoveReceipt | null = null;
+	private prepared: PreparedReshapeMove | null = null;
+	private pending: PendingReshapeSelection | null = null;
+	private receipt: ReshapeMoveReceipt | null = null;
 
 	reset(): void {
 		this.selection = null;
@@ -133,7 +146,7 @@ export class EndpointSelectionHistory {
 					document,
 					cell: { ...cell },
 					moduleKey,
-					endpoint: endpointSelection(map, index, cell, moduleKey),
+					anchor: reshapeSelection(map, index, cell, moduleKey),
 				}
 			: null;
 		if (!next || !sameSelection(this.selection, next)) {
@@ -144,10 +157,23 @@ export class EndpointSelectionHistory {
 		this.selection = next;
 	}
 
-	prepareMove(document: RailDocument, target: Cell): void {
-		const before = this.selection?.endpoint;
+	prepareMove(
+		document: RailDocument,
+		pointerTarget: Cell,
+		kind: RailReshapeKind = "endpoint",
+	): void {
+		const before = this.selection?.anchor;
+		const sourceRail = before ? document.map.getRail(before.cell.x, before.cell.y) : null;
+		// The straight planner ignores displacement along the original rail axis.
+		const target =
+			before && sourceRail && kind === "straight"
+				? sourceRail.outgoing === DIR_E || sourceRail.outgoing === DIR_W
+					? { x: before.cell.x, y: pointerTarget.y }
+					: { x: pointerTarget.x, y: before.cell.y }
+				: pointerTarget;
 		this.prepared =
 			before &&
+			before.kind === kind &&
 			this.selection?.document === document &&
 			encodeRailCell(document.map.getRail(before.cell.x, before.cell.y)) === before.encoded &&
 			(before.cell.x !== target.x || before.cell.y !== target.y)
@@ -189,7 +215,7 @@ export class EndpointSelectionHistory {
 			event.kind === "edit" &&
 			event.sequence === prepared.sequence + 1 &&
 			event.baseRevision === prepared.revision &&
-			sameEndpoint(selection.endpoint, prepared.before)
+			sameAnchor(selection.anchor, prepared.before)
 		) {
 			const sourceChange = event.changes.find(
 				({ x, y }) => x === prepared.before.cell.x && y === prepared.before.cell.y,
@@ -201,7 +227,7 @@ export class EndpointSelectionHistory {
 			if (
 				sourceChange?.before === prepared.before.encoded &&
 				targetChange?.after === encodeRailCell(targetRail) &&
-				classifyRailCell(targetRail) === "TERMINAL"
+				reshapeKind(document.map, prepared.target) === prepared.before.kind
 			) {
 				this.pending = {
 					...base,
@@ -222,7 +248,7 @@ export class EndpointSelectionHistory {
 			receipt?.document === document &&
 			event.sequence === receipt.sequence + 1 &&
 			receipt.phase === (undo ? "applied" : "undone") &&
-			sameEndpoint(selection.endpoint, undo ? receipt.after : receipt.before) &&
+			sameAnchor(selection.anchor, undo ? receipt.after : receipt.before) &&
 			railPatchTransitionFingerprint(event) === (undo ? receipt.reverse : receipt.forward)
 		) {
 			this.pending = {
@@ -231,9 +257,9 @@ export class EndpointSelectionHistory {
 				receipt: { ...receipt, sequence: event.sequence, phase: undo ? "undone" : "applied" },
 				target: undo ? receipt.before : receipt.after,
 			};
-		} else if (selection.endpoint) {
-			// Older/unrelated history cannot turn a selected endpoint into an arbitrary straight.
-			this.pending = { ...base, kind: "guard", target: selection.endpoint };
+		} else if (selection.anchor) {
+			// Older/unrelated history may retain only the exact cell, kind, ports and ownership.
+			this.pending = { ...base, kind: "guard", target: selection.anchor };
 		}
 	}
 
@@ -242,7 +268,7 @@ export class EndpointSelectionHistory {
 		document: RailDocument,
 		map: TileMap,
 		index: RailModuleOwnershipIndex,
-	): EndpointSelectionProjection {
+	): ReshapeSelectionProjection {
 		const pending = this.pending;
 		this.pending = null;
 		if (!pending) return null;
@@ -262,22 +288,22 @@ export class EndpointSelectionHistory {
 			return "clear";
 		}
 		const target = pending.kind === "apply" ? pending.target : pending.target.cell;
-		const endpoint = endpointSelection(
+		const anchor = reshapeSelection(
 			map,
 			index,
 			target,
 			pending.kind === "apply" ? null : pending.target.moduleKey,
 		);
 		if (
-			!endpoint ||
+			!anchor ||
 			(pending.kind === "apply"
-				? endpoint.encoded !== pending.encoded
-				: !sameEndpoint(endpoint, pending.target))
+				? anchor.kind !== pending.before.kind || anchor.encoded !== pending.encoded
+				: !sameAnchor(anchor, pending.target))
 		) {
 			this.receipt = null;
 			return "clear";
 		}
-		const module = index.find(endpoint.moduleKey);
+		const module = index.find(anchor.moduleKey);
 		if (!module) return "clear";
 		if (pending.kind === "apply") {
 			this.receipt = {
@@ -285,12 +311,12 @@ export class EndpointSelectionHistory {
 				sequence: pending.sequence,
 				phase: "applied",
 				before: pending.before,
-				after: endpoint,
+				after: anchor,
 				forward: pending.forward,
 				reverse: pending.reverse,
 			};
 		} else if (pending.kind === "replay") this.receipt = pending.receipt;
-		this.selection = { document, cell: endpoint.cell, moduleKey: endpoint.moduleKey, endpoint };
-		return { cell: endpoint.cell, module };
+		this.selection = { document, cell: anchor.cell, moduleKey: anchor.moduleKey, anchor };
+		return { cell: anchor.cell, module };
 	}
 }
