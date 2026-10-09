@@ -50,7 +50,7 @@ export interface RailModuleInspectorProps {
 	readonly advancedSwitchPortSummary: (switchRecord: AdvancedSwitchRecord) => string;
 	readonly selectedPhysical: CompiledRailPiece | null | undefined;
 	readonly selectedType: AuthoredRailType | null;
-	readonly straightReshapeReason: string | null;
+	readonly reshapeSourceReason: string | null;
 	readonly selectedFitLabel: CompiledRailPiece["fitKind"] | "BASELINE";
 	readonly selectedJunction: CompiledJunction | null;
 	readonly copyConstructionPreset: (preset: RailConstructionCopyPreset) => void;
@@ -92,7 +92,7 @@ export function RailModuleInspector({
 	advancedSwitchPortSummary,
 	selectedPhysical,
 	selectedType,
-	straightReshapeReason,
+	reshapeSourceReason,
 	selectedFitLabel,
 	selectedJunction,
 	copyConstructionPreset,
@@ -495,6 +495,8 @@ export function RailModuleInspector({
 							<button
 								type="button"
 								className="tilefab-inspector-primary"
+								aria-disabled={reshapeSourceReason !== null}
+								aria-describedby={reshapeSourceReason ? "rail-reshape-source-reason" : undefined}
 								onClick={() => startReshape("corner")}
 							>
 								<CornerDownRight size={15} /> 코너 구간 재배치
@@ -504,34 +506,32 @@ export function RailModuleInspector({
 							<button
 								type="button"
 								className="tilefab-inspector-primary"
+								aria-disabled={reshapeSourceReason !== null}
+								aria-describedby={reshapeSourceReason ? "rail-reshape-source-reason" : undefined}
 								onClick={() => startReshape("endpoint")}
 							>
 								<Move size={15} /> 끝점 재배치
 							</button>
 						) : null}
 						{selectedType === "LINEAR" ? (
-							<>
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									aria-disabled={straightReshapeReason !== null}
-									aria-describedby={
-										straightReshapeReason ? "rail-straight-reshape-reason" : undefined
-									}
-									onClick={() => startReshape("straight")}
-								>
-									<Move size={15} /> 직선 구간 평행 이동
-								</button>
-								{straightReshapeReason ? (
-									<div
-										id="rail-straight-reshape-reason"
-										className="tilefab-context-action-reasons"
-										role="note"
-									>
-										{straightReshapeReason}
-									</div>
-								) : null}
-							</>
+							<button
+								type="button"
+								className="tilefab-inspector-primary"
+								aria-disabled={reshapeSourceReason !== null}
+								aria-describedby={reshapeSourceReason ? "rail-reshape-source-reason" : undefined}
+								onClick={() => startReshape("straight")}
+							>
+								<Move size={15} /> 직선 구간 평행 이동
+							</button>
+						) : null}
+						{reshapeSourceReason ? (
+							<div
+								id="rail-reshape-source-reason"
+								className="tilefab-context-action-reasons"
+								role="note"
+							>
+								{reshapeSourceReason}
+							</div>
 						) : null}
 						{selectedType === "BRANCH" || selectedType === "MERGE" ? (
 							<button

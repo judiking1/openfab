@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.98] - 2026-10-09
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Show corner and endpoint move availability before entry, sharing each planner's existing
+  source checks across Inspector, context menu and the entry guard. Unavailable commands remain
+  keyboard reachable with a short reason.
+- Refresh availability after rail edits and Undo/Redo while preserving corner terminal boundaries,
+  endpoint direction checks, final target validation and atomic Apply.
+
 ## [0.1.97] - 2026-10-09
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

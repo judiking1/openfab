@@ -50,21 +50,33 @@ export interface RailOneWayCorridorProof {
 	readonly arrival: Readonly<{ from: Cell; to: Cell }>;
 }
 
-/** Replaces a regular 90-degree corner and 3 m approach arms with a routed detour. */
-export function planMoveCorner(
-	map: TileMap,
-	corner: Cell,
-	target: Cell,
-	preference: BendPreference = "auto",
-): RailReplacementPlan {
+interface RejectedReshapeSource {
+	readonly allowed: false;
+	readonly reason: string;
+	readonly cells: readonly Cell[];
+	readonly conflicts: readonly Cell[];
+}
+
+export type CornerMoveSource =
+	| {
+			readonly allowed: true;
+			readonly reason: null;
+			readonly previous: Cell;
+			readonly next: Cell;
+			readonly editableCells: readonly Cell[];
+	  }
+	| RejectedReshapeSource;
+
+/** Preserves the corner planner's source rules without testing a destination. */
+export function getCornerMoveSource(map: TileMap, corner: Cell): CornerMoveSource {
 	const switchOwner = map.getAdvancedSwitchOwningCell(corner.x, corner.y);
 	if (switchOwner) {
-		return invalidReplacement(
-			map,
-			[corner],
-			`스위치 ${switchOwner.id}는 복합 모듈 전체를 선택해 편집하세요`,
-			[corner],
-		);
+		return {
+			allowed: false,
+			reason: `스위치 ${switchOwner.id}는 복합 모듈 전체를 선택해 편집하세요`,
+			cells: [corner],
+			conflicts: [corner],
+		};
 	}
 	const cornerRail = map.getRail(corner.x, corner.y);
 	if (
@@ -73,16 +85,23 @@ export function planMoveCorner(
 		(cornerRail.incoming | cornerRail.outgoing) === 5 ||
 		(cornerRail.incoming | cornerRail.outgoing) === 10
 	) {
-		return invalidReplacement(map, [corner], "일반 90도 코너만 재배치할 수 있습니다", [corner]);
-	}
-	if (corner.x === target.x && corner.y === target.y) {
-		return invalidReplacement(map, [corner], "코너를 다른 셀로 이동하세요", [corner]);
+		return {
+			allowed: false,
+			reason: "일반 90도 코너만 재배치할 수 있습니다",
+			cells: [corner],
+			conflicts: [corner],
+		};
 	}
 
 	const incomingSide = singleDirection(cornerRail.incoming);
 	const outgoingSide = singleDirection(cornerRail.outgoing);
 	if (!incomingSide || !outgoingSide) {
-		return invalidReplacement(map, [corner], "코너 연결 방향을 찾을 수 없습니다", [corner]);
+		return {
+			allowed: false,
+			reason: "코너 연결 방향을 찾을 수 없습니다",
+			cells: [corner],
+			conflicts: [corner],
+		};
 	}
 
 	const armLength = 3;
@@ -97,21 +116,41 @@ export function planMoveCorner(
 		editableCells.push(moveRepeated(corner, outgoingSide, distance));
 	}
 	if (!map.hasRail(previous.x, previous.y) || !map.hasRail(next.x, next.y)) {
-		return invalidReplacement(map, editableCells, "코너 양쪽에 3 m 편집 여유가 필요합니다", [
-			corner,
-		]);
+		return {
+			allowed: false,
+			reason: "코너 양쪽에 3 m 편집 여유가 필요합니다",
+			cells: editableCells,
+			conflicts: [corner],
+		};
 	}
 	for (const cell of editableCells) {
 		const rail = map.getRail(cell.x, cell.y);
 		if (bitCount(rail.incoming) !== 1 || bitCount(rail.outgoing) !== 1) {
-			return invalidReplacement(
-				map,
-				editableCells,
-				"junction과 겹친 코너는 직접 이동할 수 없습니다",
-				[cell],
-			);
+			return {
+				allowed: false,
+				reason: "junction과 겹친 코너는 직접 이동할 수 없습니다",
+				cells: editableCells,
+				conflicts: [cell],
+			};
 		}
 	}
+	return { allowed: true, reason: null, previous, next, editableCells };
+}
+
+/** Replaces a regular 90-degree corner and 3 m approach arms with a routed detour. */
+export function planMoveCorner(
+	map: TileMap,
+	corner: Cell,
+	target: Cell,
+	preference: BendPreference = "auto",
+): RailReplacementPlan {
+	const source = getCornerMoveSource(map, corner);
+	if (!source.allowed)
+		return invalidReplacement(map, source.cells, source.reason, source.conflicts);
+	if (corner.x === target.x && corner.y === target.y) {
+		return invalidReplacement(map, [corner], "코너를 다른 셀로 이동하세요", [corner]);
+	}
+	const { previous, next, editableCells } = source;
 
 	const erasedBase = new MutationRailMap(map);
 	const erase = planRailErase(erasedBase, editableCells);
@@ -211,37 +250,49 @@ export function planMoveCorner(
 	);
 }
 
-/** Moves an open directed endpoint while preserving a 3 m fixed connection into the network. */
-export function planMoveEndpoint(
-	map: TileMap,
-	endpoint: Cell,
-	target: Cell,
-	preference: BendPreference = "auto",
-): RailReplacementPlan {
+export type EndpointMoveSource =
+	| {
+			readonly allowed: true;
+			readonly reason: null;
+			readonly movesFromEndpoint: boolean;
+			readonly boundary: Cell;
+			readonly editableCells: readonly Cell[];
+	  }
+	| RejectedReshapeSource;
+
+/** Requires only the existing inward directed arm, independently of any destination. */
+export function getEndpointMoveSource(map: TileMap, endpoint: Cell): EndpointMoveSource {
 	const switchOwner = map.getAdvancedSwitchOwningCell(endpoint.x, endpoint.y);
 	if (switchOwner) {
-		return invalidReplacement(
-			map,
-			[endpoint],
-			`스위치 ${switchOwner.id}의 boundary port는 이동할 수 없습니다`,
-			[endpoint],
-		);
+		return {
+			allowed: false,
+			reason: `스위치 ${switchOwner.id}의 boundary port는 이동할 수 없습니다`,
+			cells: [endpoint],
+			conflicts: [endpoint],
+		};
 	}
 	const endpointRail = map.getRail(endpoint.x, endpoint.y);
 	const movesFromEndpoint = endpointRail.incoming === 0 && bitCount(endpointRail.outgoing) === 1;
 	const movesIntoEndpoint = endpointRail.outgoing === 0 && bitCount(endpointRail.incoming) === 1;
 	if (!movesFromEndpoint && !movesIntoEndpoint) {
-		return invalidReplacement(map, [endpoint], "열린 레일 끝점만 재배치할 수 있습니다", [endpoint]);
-	}
-	if (endpoint.x === target.x && endpoint.y === target.y) {
-		return invalidReplacement(map, [endpoint], "끝점을 다른 셀로 이동하세요", [endpoint]);
+		return {
+			allowed: false,
+			reason: "열린 레일 끝점만 재배치할 수 있습니다",
+			cells: [endpoint],
+			conflicts: [endpoint],
+		};
 	}
 
 	const connectedSide = singleDirection(
 		movesFromEndpoint ? endpointRail.outgoing : endpointRail.incoming,
 	);
 	if (!connectedSide) {
-		return invalidReplacement(map, [endpoint], "끝점 연결 방향을 찾을 수 없습니다", [endpoint]);
+		return {
+			allowed: false,
+			reason: "끝점 연결 방향을 찾을 수 없습니다",
+			cells: [endpoint],
+			conflicts: [endpoint],
+		};
 	}
 
 	const armLength = 3;
@@ -255,14 +306,31 @@ export function planMoveEndpoint(
 		const cell = moveRepeated(endpoint, connectedSide, distance);
 		const rail = map.getRail(cell.x, cell.y);
 		if (rail.incoming !== expectedIncoming || rail.outgoing !== expectedOutgoing) {
-			return invalidReplacement(
-				map,
-				editableCells,
-				"끝점 안쪽에 같은 방향의 3 m 직선 편집 여유가 필요합니다",
-				[cell],
-			);
+			return {
+				allowed: false,
+				reason: "끝점 안쪽에 같은 방향의 직선 3 m가 필요합니다",
+				cells: editableCells,
+				conflicts: [cell],
+			};
 		}
 	}
+	return { allowed: true, reason: null, movesFromEndpoint, boundary, editableCells };
+}
+
+/** Moves an open directed endpoint while preserving a 3 m fixed connection into the network. */
+export function planMoveEndpoint(
+	map: TileMap,
+	endpoint: Cell,
+	target: Cell,
+	preference: BendPreference = "auto",
+): RailReplacementPlan {
+	const source = getEndpointMoveSource(map, endpoint);
+	if (!source.allowed)
+		return invalidReplacement(map, source.cells, source.reason, source.conflicts);
+	if (endpoint.x === target.x && endpoint.y === target.y) {
+		return invalidReplacement(map, [endpoint], "끝점을 다른 셀로 이동하세요", [endpoint]);
+	}
+	const { movesFromEndpoint, boundary, editableCells } = source;
 
 	const temporary = new MutationRailMap(map);
 	const erase = planRailErase(temporary, editableCells);

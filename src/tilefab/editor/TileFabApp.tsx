@@ -214,6 +214,8 @@ import {
 	type StkEquipmentTemplate,
 } from "../core/EquipmentGroup";
 import {
+	getCornerMoveSource,
+	getEndpointMoveSource,
 	getStraightOffsetSource,
 	planMoveCorner,
 	planMoveEndpoint,
@@ -23032,12 +23034,13 @@ export default function TileFabApp(): React.ReactElement {
 
 	const startReshape = (kind: ReshapeKind): void => {
 		if (modelSyncPendingRef.current || !selected) return;
-		if (kind === "straight") {
-			const source = getStraightOffsetSource(editorModelRef.current.map, selected);
-			if (!source.allowed) {
-				setStatus(source.reason);
-				return;
-			}
+		const map = editorModelRef.current.map;
+		const source = kind === "corner" ? getCornerMoveSource(map, selected)
+			: kind === "endpoint" ? getEndpointMoveSource(map, selected)
+				: getStraightOffsetSource(map, selected);
+		if (!source.allowed) {
+			setStatus(source.reason);
+			return;
 		}
 		const entryFocus = document.activeElement;
 		closeContextPalette();
@@ -30679,9 +30682,11 @@ export default function TileFabApp(): React.ReactElement {
 		: [false, false];
 	const selectedRail = selected ? activeMap.getRail(selected.x, selected.y) : null;
 	const selectedType = selectedRail ? classifyRailCell(selectedRail) : null;
-	const selectedStraightReshapeReason = selected && selectedType === "LINEAR"
-		? getStraightOffsetSource(activeMap, selected).reason
-		: null;
+	const selectedReshapeSourceReason = !selected ? null
+		: selectedType === "LEFT_CURVE" || selectedType === "RIGHT_CURVE"
+			? getCornerMoveSource(activeMap, selected).reason
+			: selectedType === "TERMINAL" ? getEndpointMoveSource(activeMap, selected).reason
+				: selectedType === "LINEAR" ? getStraightOffsetSource(activeMap, selected).reason : null;
 	const selectedOpenTerminal = selected
 		? terminalForwardDirection(activeMap, selected) !== null
 		: false;
@@ -37745,9 +37750,9 @@ export default function TileFabApp(): React.ReactElement {
 								</>
 							) : selectedOwnership ? (
 								<>
-									{selectedStraightReshapeReason ? (
-										<div id="context-straight-reshape-reason" className="tilefab-context-action-reasons" role="note">
-											{selectedStraightReshapeReason}
+									{selectedReshapeSourceReason ? (
+										<div id="context-reshape-source-reason" className="tilefab-context-action-reasons" role="note">
+											{selectedReshapeSourceReason}
 										</div>
 									) : null}
 									{selectedContextualRailTemplates.map((item) => (
@@ -37792,7 +37797,9 @@ export default function TileFabApp(): React.ReactElement {
 										<button
 											type="button"
 											role="menuitem"
-											onClick={() => runContextPaletteAction(() => startReshape("corner"))}
+											aria-disabled={selectedReshapeSourceReason !== null}
+											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
+											onClick={() => startReshape("corner")}
 										>
 											<CornerDownRight size={16} /> 코너 재배치
 										</button>
@@ -37800,7 +37807,9 @@ export default function TileFabApp(): React.ReactElement {
 										<button
 											type="button"
 											role="menuitem"
-											onClick={() => runContextPaletteAction(() => startReshape("endpoint"))}
+											aria-disabled={selectedReshapeSourceReason !== null}
+											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
+											onClick={() => startReshape("endpoint")}
 										>
 											<Move size={16} /> 끝점 재배치
 										</button>
@@ -37808,8 +37817,8 @@ export default function TileFabApp(): React.ReactElement {
 										<button
 											type="button"
 											role="menuitem"
-											aria-disabled={selectedStraightReshapeReason !== null}
-											aria-describedby={selectedStraightReshapeReason ? "context-straight-reshape-reason" : undefined}
+											aria-disabled={selectedReshapeSourceReason !== null}
+											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
 											onClick={() => startReshape("straight")}
 										>
 											<Move size={16} /> 직선 평행 이동
@@ -40595,7 +40604,7 @@ export default function TileFabApp(): React.ReactElement {
 						advancedSwitchPortSummary={advancedSwitchPortSummary}
 						selectedPhysical={selectedPhysical}
 						selectedType={selectedType}
-						straightReshapeReason={selectedStraightReshapeReason}
+						reshapeSourceReason={selectedReshapeSourceReason}
 						selectedFitLabel={selectedFitLabel}
 						selectedJunction={selectedJunction}
 						copyConstructionPreset={copyConstructionPreset}

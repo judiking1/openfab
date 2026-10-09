@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
 import {
+	getCornerMoveSource,
+	getEndpointMoveSource,
 	getStraightOffsetSource,
 	planMoveCorner,
 	planMoveEndpoint,
@@ -11,7 +13,7 @@ import {
 	planRepairOneWayCorridor,
 } from "./edit";
 import { analyzeRailNetwork } from "./network";
-import { planRailConstruction } from "./paint";
+import { planRailConstruction, planRailErase } from "./paint";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
 import { DIR_E, DIR_S, DIR_W } from "./railShape";
 import { encodeRailCell, TileMap } from "./TileMap";
@@ -276,6 +278,56 @@ describe("one-way bridge recovery", () => {
 });
 
 describe("corner replacement editing", () => {
+	it.each([2, 3, 4])("preserves the source boundary of a %i m corner arm in either flow", (arm) => {
+		for (const reversed of [false, true]) {
+			const document = new RailDocument();
+			const corner = { x: arm, y: 0 };
+			const first = reversed ? { x: arm, y: arm } : { x: 0, y: 0 };
+			const last = reversed ? { x: 0, y: 0 } : { x: arm, y: arm };
+			for (const [from, to] of [
+				[first, corner],
+				[corner, last],
+			] as const) {
+				expect(document.commit(planRailConstruction(document.map, from, to))).toBe(true);
+			}
+			const before = [
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.captureRailMirrorHistoryLedger(),
+			];
+			const source = getCornerMoveSource(document.map, corner);
+			expect(source.allowed).toBe(arm >= 3);
+			const plan = planMoveCorner(document.map, corner, { x: arm + 2, y: -2 });
+			expect(plan.valid, plan.reason).toBe(source.allowed);
+			if (!source.allowed) expect(plan.reason).toBe(source.reason);
+			expect([
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.captureRailMirrorHistoryLedger(),
+			]).toEqual(before);
+		}
+	});
+
+	it("shares owned-corner and arm-junction source rejections", () => {
+		const corner = { x: 10, y: 0 };
+		const owned = buildPlainLoop();
+		owned.map.setAdvancedSwitch({
+			id: 17,
+			profileClass: "A",
+			origin: corner,
+			forward: DIR_E,
+			lateral: DIR_S,
+			movementMask: 15,
+		});
+		const junction = buildPlainLoop();
+		junction.map.setEncoded(9, 0, encodeRailCell({ incoming: DIR_W, outgoing: DIR_E | DIR_S }));
+		for (const document of [owned, junction]) {
+			const source = getCornerMoveSource(document.map, corner);
+			expect(source.allowed).toBe(false);
+			expect(planMoveCorner(document.map, corner, { x: 12, y: -2 }).reason).toBe(source.reason);
+		}
+	});
+
 	it("moves a corner through one atomic edit while preserving the closed loop", () => {
 		const document = buildPlainLoop();
 		const plan = planMoveCorner(document.map, { x: 10, y: 0 }, { x: 12, y: -2 });
@@ -298,6 +350,7 @@ describe("corner replacement editing", () => {
 
 	it("rejects a corner move through occupied trunk cells", () => {
 		const document = buildPlainLoop();
+		expect(getCornerMoveSource(document.map, { x: 10, y: 0 }).allowed).toBe(true);
 		const plan = planMoveCorner(document.map, { x: 10, y: 0 }, { x: 5, y: 8 });
 		expect(plan.valid).toBe(false);
 		expect(plan.conflicts.length).toBeGreaterThan(0);
@@ -341,6 +394,84 @@ describe("corner replacement editing", () => {
 });
 
 describe("endpoint replacement editing", () => {
+	it.each([
+		4, 5,
+	])("preserves the inward source boundary of a %i-cell line in both axes and flows", (count) => {
+		for (const vertical of [false, true]) {
+			const document = new RailDocument();
+			const cell = (distance: number) => (vertical ? { x: 0, y: distance } : { x: distance, y: 0 });
+			expect(document.commit(planRailConstruction(document.map, cell(0), cell(count - 1)))).toBe(
+				true,
+			);
+			for (const endpoint of [cell(0), cell(count - 1)]) {
+				const before = [
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					document.captureRailMirrorHistoryLedger(),
+				];
+				const source = getEndpointMoveSource(document.map, endpoint);
+				expect(source.allowed).toBe(count >= 5);
+				const target = vertical ? { x: -2, y: endpoint.y } : { x: endpoint.x, y: -2 };
+				const plan = planMoveEndpoint(document.map, endpoint, target);
+				expect(plan.valid, plan.reason).toBe(source.allowed);
+				if (!source.allowed) expect(plan.reason).toBe(source.reason);
+				expect([
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					document.captureRailMirrorHistoryLedger(),
+				]).toEqual(before);
+			}
+		}
+	});
+
+	it("shares owned-terminal and non-terminal source rejections", () => {
+		const document = buildOpenLine();
+		document.map.setAdvancedSwitch({
+			id: 17,
+			profileClass: "A",
+			origin: { x: 10, y: 0 },
+			forward: DIR_E,
+			lateral: DIR_S,
+			movementMask: 15,
+		});
+		for (const endpoint of [
+			{ x: 10, y: 0 },
+			{ x: 5, y: 0 },
+		]) {
+			const source = getEndpointMoveSource(document.map, endpoint);
+			expect(source.allowed).toBe(false);
+			expect(planMoveEndpoint(document.map, endpoint, { x: endpoint.x, y: -2 }).reason).toBe(
+				source.reason,
+			);
+		}
+	});
+
+	it("refreshes corner and endpoint source availability through an arm edit and Undo/Redo", () => {
+		for (const fixture of [
+			{
+				document: buildPlainLoop(),
+				selected: { x: 10, y: 0 },
+				cut: { x: 8, y: 0 },
+				query: getCornerMoveSource,
+			},
+			{
+				document: buildOpenLine(),
+				selected: { x: 10, y: 0 },
+				cut: { x: 7, y: 0 },
+				query: getEndpointMoveSource,
+			},
+		]) {
+			const { document, selected, cut, query } = fixture;
+			expect(query(document.map, selected).allowed).toBe(true);
+			expect(document.commit(planRailErase(document.map, [cut]))).toBe(true);
+			expect(query(document.map, selected).allowed).toBe(false);
+			expect(document.undo()).toBe(true);
+			expect(query(document.map, selected).allowed).toBe(true);
+			expect(document.redo()).toBe(true);
+			expect(query(document.map, selected).allowed).toBe(false);
+		}
+	});
+
 	it("moves the outgoing start terminal without changing the directed open path", () => {
 		const document = buildOpenLine();
 		const plan = planMoveEndpoint(document.map, { x: 0, y: 0 }, { x: -2, y: -2 });
@@ -380,6 +511,7 @@ describe("endpoint replacement editing", () => {
 		const document = buildOpenLine();
 		document.map.setEncoded(7, 2, encodeRailCell({ incoming: DIR_W, outgoing: DIR_E }));
 
+		expect(getEndpointMoveSource(document.map, { x: 10, y: 0 }).allowed).toBe(true);
 		const plan = planMoveEndpoint(document.map, { x: 10, y: 0 }, { x: 7, y: 3 });
 		expect(plan.valid).toBe(false);
 		expect(plan.conflicts).toContainEqual({ x: 7, y: 2 });
