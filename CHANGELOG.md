@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.102] - 2026-10-09
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Move one existing FLEX Stocker Port along the same directed straight run while retaining its
+  identity, barcode, direction, other Ports and ownership. Preserve body section lengths and width;
+  preview the actual derived body position before one atomic Apply, with Cancel and Undo/Redo.
+- Show a concise body-length hint and explain when a source change ends an active Port move.
+  Unsafe slots, collisions, changed body lengths and out-of-Loop targets remain rejected.
+
 ## [0.1.101] - 2026-10-09
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

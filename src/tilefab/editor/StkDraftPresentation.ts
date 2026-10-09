@@ -252,11 +252,13 @@ export function portEquipmentGroupEditFeedback(
 	const recovery =
 		plan.baseRevision !== slots.revision
 			? "Esc로 취소한 뒤 이동을 다시 시작하세요"
-			: failure?.kind === "body"
-				? "겹친 몸체에서 떨어진 위치로 이동하세요 · Esc 취소"
-				: failure?.kind === "port"
-					? "방향키/WASD로 전체 Port가 놓일 다른 직선 슬롯을 고르세요 · Esc 취소"
-					: "다른 위치를 선택하거나 Esc로 취소하세요 · 원본은 유지됩니다";
+			: plan.groupEdit.scope === "port"
+				? "같은 직선 구간의 다른 슬롯을 선택하세요 · Esc 취소 · 다른 Port는 유지됩니다"
+				: failure?.kind === "body"
+					? "겹친 몸체에서 떨어진 위치로 이동하세요 · Esc 취소"
+					: failure?.kind === "port"
+						? "방향키/WASD로 전체 Port가 놓일 다른 직선 슬롯을 고르세요 · Esc 취소"
+						: "다른 위치를 선택하거나 Esc로 취소하세요 · 원본은 유지됩니다";
 	return {
 		reason,
 		location,

@@ -103,6 +103,7 @@ import {
 	planReversePortEquipmentServiceDirection,
 	resolvePortEquipmentSelection,
 } from "../compile/PortEquipmentEditPlanner";
+import { adjacentFlexStkPortRow, deriveFlexStkPortMoveBodyPreview, planMoveFlexStkPort } from "../compile/FlexStkPortMovePlanner";
 import {
 	capturePortEquipmentGroupEditSnapshot,
 	type PortEquipmentGroupEditMode,
@@ -1375,6 +1376,7 @@ interface OhbPlacementIntent extends PortEquipmentSelection {
 }
 
 interface PortEquipmentGroupEditSession {
+	readonly scope: "group" | "port";
 	readonly mode: PortEquipmentGroupEditMode;
 	readonly preservesLoopOwnership: boolean;
 	readonly modelGeneration: number;
@@ -1390,6 +1392,7 @@ interface PortEquipmentGroupEditSession {
 	readonly basePatchSequence: number;
 	targetRow: number | null;
 	plan: PortEquipmentGroupEditPlan | null;
+	bodyPreview: ReturnType<typeof deriveFlexStkPortMoveBodyPreview> | null;
 	eligibleProcessLoopIds: readonly number[] | null;
 	feedbackKey: string;
 }
@@ -7402,6 +7405,7 @@ export default function TileFabApp(): React.ReactElement {
 		cancelStaticFabBayFlowEditRef.current(undefined, false);
 		const document = nextModel.document;
 		const groupEdit = portEquipmentGroupEditSessionRef.current;
+		let portMoveEndedBySourceChange = false;
 		if (
 			groupEdit &&
 			(groupEdit.document !== document ||
@@ -7409,6 +7413,7 @@ export default function TileFabApp(): React.ReactElement {
 				groupEdit.baseRevision !== document.map.getRevision() ||
 				groupEdit.basePatchSequence !== document.getPatchSequence())
 		) {
+			portMoveEndedBySourceChange = groupEdit.scope === "port";
 			updatePortEquipmentGroupEditSession(null);
 		}
 		const membershipEdit = portEquipmentMembershipEditSessionRef.current;
@@ -7469,7 +7474,7 @@ export default function TileFabApp(): React.ReactElement {
 			readinessIssueLocationRef.current = nextLocation;
 			setReadinessIssueLocation(nextLocation);
 		}
-		setStatus(message);
+		setStatus(portMoveEndedBySourceChange ? "원본 변경 · Port 이동 취소" : message);
 		if (
 			(areaSelectionRef.current &&
 				areaSelectionRef.current.revision !== nextModel.map.getRevision()) ||
@@ -12566,6 +12571,7 @@ export default function TileFabApp(): React.ReactElement {
 		const removedOrganizationContext = retained?.organization
 			? null
 			: removedOrganizationContextRef.current;
+		const endingPortMove = portEquipmentGroupEditSessionRef.current?.scope === "port" ? portEquipmentGroupEditSessionRef.current : null;
 		if (!retained) clearTransientConstruction();
 		if ((railDocument.canReplayStaticFabProcessLoopRegistration("undo") || railDocument.canReplayStaticFabProcessLoopRepair("undo") || railDocument.canReplayStaticFabArrangement("undo") || railDocument.canReplayStaticFabAssemblyConnector("undo"))) { if (!(await replayStaticFabHistory("undo"))) return false; } else if (!railDocument.undo()) return false;
 		const duplicatedAssemblyUndoProjection = duplicatedAssemblyUndoCandidate
@@ -12676,7 +12682,10 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 		pendingConnectedFabHandoffFocusRef.current = restoreFabLoopReview;
 		pendingResilientFabChecksHandoffFocusRef.current = false;
-		syncModelUi(rememberHierarchyCommandFeedback("마지막 편집을 되돌렸습니다"));
+		const historyMessage = rememberHierarchyCommandFeedback("마지막 편집을 되돌렸습니다");
+		syncModelUi(endingPortMove && portEquipmentGroupEditSessionRef.current === null &&
+			endingPortMove.document === railDocument && endingPortMove.basePatchSequence !== railDocument.getPatchSequence()
+			? "실행 취소 · Port 이동 취소" : historyMessage);
 		if (retained) refreshRepeatPlacementAfterHistory(retained);
 		return true;
 	};
@@ -12756,6 +12765,7 @@ export default function TileFabApp(): React.ReactElement {
 		const removedOrganizationContext = retained?.organization
 			? null
 			: removedOrganizationContextRef.current;
+		const endingPortMove = portEquipmentGroupEditSessionRef.current?.scope === "port" ? portEquipmentGroupEditSessionRef.current : null;
 		if (!retained) clearTransientConstruction();
 		if ((railDocument.canReplayStaticFabProcessLoopRegistration("redo") || railDocument.canReplayStaticFabProcessLoopRepair("redo") || railDocument.canReplayStaticFabArrangement("redo") || railDocument.canReplayStaticFabAssemblyConnector("redo"))) { if (!(await replayStaticFabHistory("redo"))) return; } else if (!railDocument.redo()) return;
 		const duplicatedAssemblyRedoProjection = duplicatedAssemblyRedoCandidate
@@ -12915,7 +12925,10 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 		pendingConnectedFabHandoffFocusRef.current = restoreConnectorFab;
 		pendingResilientFabChecksHandoffFocusRef.current = restoreFabLoop;
-		syncModelUi(rememberHierarchyCommandFeedback("편집을 다시 실행했습니다"));
+		const historyMessage = rememberHierarchyCommandFeedback("편집을 다시 실행했습니다");
+		syncModelUi(endingPortMove && portEquipmentGroupEditSessionRef.current === null &&
+			endingPortMove.document === railDocument && endingPortMove.basePatchSequence !== railDocument.getPatchSequence()
+			? "다시 실행 · Port 이동 취소" : historyMessage);
 		if (restoredPlacedAssemblyRoot) {
 			if (restoredDuplicateSourceAssemblyRoot) {
 				selectStaticFabOrganization(restoredPlacedAssemblyRoot, true);
@@ -13610,6 +13623,7 @@ export default function TileFabApp(): React.ReactElement {
 					? {
 							slots: portEquipmentGroupEditSessionRef.current.slots,
 							plan: portEquipmentGroupEditSessionRef.current.plan,
+							bodyPreview: portEquipmentGroupEditSessionRef.current.bodyPreview,
 						}
 					: null,
 				portEquipmentMembershipPreview: portEquipmentMembershipEditSessionRef.current
@@ -16921,6 +16935,19 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 
+	const planPortEquipmentTransform = (session: PortEquipmentGroupEditSession, targetRow: number, validation: "preview" | "commit"): PortEquipmentGroupEditPlan => {
+		if (session.scope === "port") return planMoveFlexStkPort(
+			session.document.map, session.slots, session.slotIndex, session.availability,
+			session.document.portEquipment,
+			{ equipmentGroupId: session.sourceEquipmentGroupId, portId: session.sourceAnchorPortId },
+			targetRow, session.baseRevision, session.basePatchSequence, session.document.organizations,
+		);
+		return planPortEquipmentGroupEdit(session.document.map, session.slots, session.slotIndex,
+			session.availability, session.document.portEquipment, session.sourceEquipmentGroupId,
+			session.sourceAnchorPortId, targetRow, session.mode, session.baseRevision,
+			session.basePatchSequence, validation, session.document.organizations);
+	};
+
 	const updatePortEquipmentGroupEditTarget = (
 		session: PortEquipmentGroupEditSession,
 		targetRow: number | null,
@@ -16935,24 +16962,15 @@ export default function TileFabApp(): React.ReactElement {
 		session.plan =
 			targetRow === null
 				? null
-				: planPortEquipmentGroupEdit(
-						session.document.map,
-						session.slots,
-						session.slotIndex,
-						session.availability,
-						session.document.portEquipment,
-						session.sourceEquipmentGroupId,
-						session.sourceAnchorPortId,
-						targetRow,
-						session.mode,
-						session.baseRevision,
-						session.basePatchSequence,
-						"preview",
-						session.document.organizations,
-					);
+				: planPortEquipmentTransform(session, targetRow, "preview");
+		session.bodyPreview = session.scope === "port" && session.plan?.valid
+			? deriveFlexStkPortMoveBodyPreview(editorModelRef.current.physical, session.document.portEquipment, session.plan)
+			: null;
 		session.eligibleProcessLoopIds = null;
 		if (session.plan?.valid) {
-			const proposedPorts = session.plan.groupEdit.portTargets.map(
+			const proposedPorts = session.scope === "port" ? session.sourcePorts.map((port) =>
+				session.plan?.portMutations.find((change) => change.id === port.id)?.after ?? port)
+				: session.plan.groupEdit.portTargets.map(
 				(target) =>
 					session.plan?.portMutations.find((mutation) => mutation.id === target.targetPortId)?.after ??
 					session.sourcePorts.find((port) => port.id === target.sourcePortId),
@@ -16967,7 +16985,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (previewReadoutRef.current) {
 			previewReadoutRef.current.textContent = session.plan
 				? session.plan.valid
-					? `${session.portType} ${session.mode === "move" ? "그룹 이동" : "그룹 복제"} · ${session.plan.groupEdit.portTargets.length} PORT`
+					? session.scope === "port" ? `PORT-${session.sourceAnchorPortId}만 이동 · 적용 전 미리보기` : `${session.portType} ${session.mode === "move" ? "그룹 이동" : "그룹 복제"} · ${session.plan.groupEdit.portTargets.length} PORT`
 					: portEquipmentGroupEditFeedback(session.plan, session.slots).summary
 				: "";
 		}
@@ -16990,7 +17008,7 @@ export default function TileFabApp(): React.ReactElement {
 		const applyLabel = session.mode === "move" ? "이동 적용" : "복제 배치";
 		const feedback = plan
 			? plan.valid
-				? `${session.portType} 그룹 ${session.mode === "move" ? "이동" : "복제"} 가능 · ${touchPointer ? `${applyLabel} 버튼으로 확정` : "클릭하여 확정"}`
+				? session.scope === "port" ? `PORT-${session.sourceAnchorPortId} 이동 미리보기 · 적용 버튼 또는 Enter로 확정` : `${session.portType} 그룹 ${session.mode === "move" ? "이동" : "복제"} 가능 · ${touchPointer ? `${applyLabel} 버튼으로 확정` : "클릭하여 확정"}`
 				: portEquipmentGroupEditFeedback(plan, session.slots).summary
 			: `${session.portType} 기준 포트를 놓을 슬롯을 선택하세요`;
 		const feedbackKey = plan
@@ -17026,21 +17044,7 @@ export default function TileFabApp(): React.ReactElement {
 			scheduleRender();
 			return;
 		}
-		const plan = planPortEquipmentGroupEdit(
-			session.document.map,
-			session.slots,
-			session.slotIndex,
-			session.availability,
-			session.document.portEquipment,
-			session.sourceEquipmentGroupId,
-			session.sourceAnchorPortId,
-			targetRow,
-			session.mode,
-			session.baseRevision,
-			session.basePatchSequence,
-			"commit",
-			session.document.organizations,
-		);
+		const plan = planPortEquipmentTransform(session, targetRow, "commit");
 		session.plan = plan;
 		if (!plan.valid) {
 			publishPortEquipmentGroupEditAccessibility(session);
@@ -17079,7 +17083,7 @@ export default function TileFabApp(): React.ReactElement {
 			});
 		}
 		syncModelUi(
-			`${session.portType}-${plan.groupEdit.targetEquipmentGroupId} · ${plan.groupEdit.portTargets.length} PORT 전체를 ${session.mode === "move" ? "이동" : "복제"}했습니다`,
+			session.scope === "port" ? `PORT-${session.sourceAnchorPortId}만 이동했습니다 · ID·바코드·방향·소속 유지` : `${session.portType}-${plan.groupEdit.targetEquipmentGroupId} · ${plan.groupEdit.portTargets.length} PORT 전체를 ${session.mode === "move" ? "이동" : "복제"}했습니다`,
 		);
 		requestAnimationFrame(() => canvasRef.current?.focus());
 	};
@@ -17110,7 +17114,8 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		const slots = session.slots;
-		const { row: nextRow } = progressiveDirectionalPortEquipmentSlotRow({
+		const sourcePort = session.sourcePorts.find((port) => port.id === session.sourceAnchorPortId);
+		const nextRow = session.scope === "port" ? (sourcePort ? adjacentFlexStkPortRow(slots, session.slotIndex, sourcePort, currentRow, deltaX, deltaZ) : null) : progressiveDirectionalPortEquipmentSlotRow({
 			slots,
 			currentRow,
 			deltaX,
@@ -17118,9 +17123,9 @@ export default function TileFabApp(): React.ReactElement {
 			scope: "nearby",
 			target: groupEditCandidateBufferRef.current,
 			query: (bounds, target) => rendererRef.current.queryPortSlots(slots, bounds, target),
-		});
+		}).row;
 		if (nextRow === null) {
-			setStatus("해당 방향에 다음 장비 CENTER 슬롯이 없습니다");
+			setStatus(session.scope === "port" ? "같은 직선 구간의 바로 옆 슬롯으로 이동하세요" : "해당 방향에 다음 장비 CENTER 슬롯이 없습니다");
 			return;
 		}
 		hoverPortSlotRef.current = nextRow;
@@ -17129,7 +17134,7 @@ export default function TileFabApp(): React.ReactElement {
 		});
 		const feedback = plan
 			? plan.valid
-				? `${session.portType} 그룹 ${session.mode === "move" ? "이동" : "복제"} 가능 · Enter로 확정`
+				? session.scope === "port" ? `PORT-${session.sourceAnchorPortId} 이동 미리보기 · Enter로 적용` : `${session.portType} 그룹 ${session.mode === "move" ? "이동" : "복제"} 가능 · Enter로 확정`
 				: portEquipmentGroupEditFeedback(plan, session.slots).summary
 			: `${session.portType} 기준 포트를 선택하세요`;
 		session.feedbackKey = plan?.valid ? "valid" : `keyboard:${plan?.reason ?? "empty"}`;
@@ -18695,7 +18700,7 @@ export default function TileFabApp(): React.ReactElement {
 
 		const groupEditSession = portEquipmentGroupEditSessionRef.current;
 		if (groupEditSession) {
-			if (event.pointerType === "touch") {
+			if (event.pointerType === "touch" || groupEditSession.scope === "port") {
 				previewPortEquipmentGroupEditAtPointer(groupEditSession, hoverPortSlotRef.current, event.pointerType);
 			} else {
 				commitPortEquipmentGroupEdit(groupEditSession, hoverPortSlotRef.current);
@@ -22815,7 +22820,7 @@ export default function TileFabApp(): React.ReactElement {
 		scheduleRender();
 	};
 
-	const startSelectedPortEquipmentGroupEdit = (mode: PortEquipmentGroupEditMode): void => {
+	const startSelectedPortEquipmentGroupEdit = (mode: PortEquipmentGroupEditMode, scope: "group" | "port" = "group"): void => {
 		if (blockEqBodyDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
@@ -22834,6 +22839,10 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
+		if (scope === "port" && (mode !== "move" || resolved.equipmentGroup.kind !== "STK" ||
+			resolved.equipmentGroup.template !== "FLEX" || resolved.equipmentGroup.portIds.length < 2)) {
+			setStatus("여러 Port가 있는 FLEX STK에서 Port 하나를 선택하세요"); return;
+		}
 		const portType = resolved.equipmentGroup.kind;
 		lastEquipmentToolRef.current = portType === "EQ" ? "eq" : "stk";
 		updateEditorActivity("equip");
@@ -22851,6 +22860,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		const session: PortEquipmentGroupEditSession = {
+			scope,
 			mode,
 			preservesLoopOwnership: mode === "move" && directlyOwned,
 			modelGeneration: model.generation,
@@ -22870,13 +22880,14 @@ export default function TileFabApp(): React.ReactElement {
 			basePatchSequence: model.document.getPatchSequence(),
 			targetRow: null,
 			plan: null,
+			bodyPreview: null,
 			eligibleProcessLoopIds: null,
 			feedbackKey: "empty",
 		};
 		updatePortEquipmentGroupEditSession(session);
 		publishPortEquipmentGroupEditAccessibility(session);
 		setStatus(
-			`${portType}-${resolved.equipmentGroup.id} 전체 ${mode === "move" ? "이동" : "복제"}${session.preservesLoopOwnership ? " · 현재 Loop 소속 유지 · 모든 Port가 같은 Loop 안에 있어야 합니다" : ""} · 기준 포트를 놓을 슬롯을 선택하세요`,
+			scope === "port" ? `PORT-${resolved.port.id}만 이동 · 같은 직선 구간 · 몸체 길이 유지 · 위치 선택 후 적용 · Esc 취소` : `${portType}-${resolved.equipmentGroup.id} 전체 ${mode === "move" ? "이동" : "복제"}${session.preservesLoopOwnership ? " · 현재 Loop 소속 유지 · 모든 Port가 같은 Loop 안에 있어야 합니다" : ""} · 기준 포트를 놓을 슬롯을 선택하세요`,
 		);
 		scheduleRender();
 		requestAnimationFrame(() => canvasRef.current?.focus());
@@ -34577,6 +34588,7 @@ export default function TileFabApp(): React.ReactElement {
 			data-navigator-tab={navigatorTab ?? ""}
 			data-static-fab-issue-recheck={ordinaryStaticFabIssueRecheckLifecycle}
 			data-equipment-group-edit={portEquipmentGroupEditSession?.mode ?? ""}
+			data-equipment-edit-scope={portEquipmentGroupEditSession?.scope ?? ""}
 			data-equipment-group-edit-type={portEquipmentGroupEditSession?.portType ?? ""}
 			data-equipment-group-edit-valid={
 				portEquipmentGroupEditSession?.plan ? String(portEquipmentGroupEditSession.plan.valid) : ""
@@ -35467,7 +35479,7 @@ export default function TileFabApp(): React.ReactElement {
 				{portEquipmentGroupEditSession ? (
 					<>
 						<p id="tilefab-port-equipment-group-edit-description" className="tilefab-sr-only">
-							{portEquipmentGroupEditSession.portType} 장비 그룹 전체를 {portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"}하는 단계입니다. 방향키 또는 WASD로 기준 Port 슬롯을 이동하고 Enter 또는 마우스 클릭으로 적용하세요. 터치는 대상을 미리 본 뒤 {portEquipmentGroupEditSession.mode === "move" ? "이동 적용" : "복제 배치"} 버튼으로 확정합니다. Canvas에서 Tab은 취소 버튼, 다음 Tab은 활성화된 적용 버튼으로 이동합니다. 취소에서 Shift+Tab은 Canvas로 돌아갑니다. Space를 누른 채 드래그하면 화면만 이동합니다. Escape로 취소할 수 있습니다.
+							{portEquipmentGroupEditSession.scope === "port" ? `선택한 PORT-${portEquipmentGroupEditSession.sourceAnchorPortId} 하나만 이동합니다. 같은 연속 직선 구간에서 포인터 또는 방향키/WASD로 위치를 미리 보세요. 클릭은 미리보기이며 적용 버튼 또는 Enter로 확정하고 Escape로 취소합니다. 다른 Port는 유지됩니다.` : <>{portEquipmentGroupEditSession.portType} 장비 그룹 전체를 {portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"}하는 단계입니다. 방향키 또는 WASD로 기준 Port 슬롯을 이동하고 Enter 또는 마우스 클릭으로 적용하세요. 터치는 대상을 미리 본 뒤 적용 버튼으로 확정합니다.</>} Canvas에서 Tab은 취소 버튼, 다음 Tab은 활성화된 적용 버튼으로 이동합니다. 취소에서 Shift+Tab은 Canvas로 돌아갑니다. Space를 누른 채 드래그하면 화면만 이동합니다. Escape로 취소할 수 있습니다.
 						</p>
 						<p
 							id="tilefab-port-equipment-group-edit-readout"

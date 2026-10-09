@@ -15,6 +15,8 @@ export interface PortEquipmentGroupTransformBarProps {
 	readonly cancelButtonRef: RefObject<HTMLButtonElement | null>;
 	readonly exitPortEquipmentGroupEditToInspect: (message: string) => void;
 	readonly portEquipmentGroupEditSession: Readonly<{
+		scope?: "group" | "port";
+		sourceAnchorPortId?: number;
 		mode: PortEquipmentGroupEditMode;
 		preservesLoopOwnership: boolean;
 		portType: "EQ" | "STK";
@@ -37,6 +39,7 @@ export function PortEquipmentGroupTransformBar({
 	portEquipmentGroupEditState,
 }: PortEquipmentGroupTransformBarProps): ReactNode {
 	const plan = portEquipmentGroupEditSession.plan;
+	const singlePort = portEquipmentGroupEditSession.scope === "port";
 	const feedback =
 		plan && !plan.valid
 			? portEquipmentGroupEditFeedback(plan, portEquipmentGroupEditSession.slots)
@@ -48,6 +51,7 @@ export function PortEquipmentGroupTransformBar({
 			data-testid="port-equipment-group-transformbar"
 			data-port-type={portEquipmentGroupEditSession.portType}
 			data-mode={portEquipmentGroupEditSession.mode}
+			data-scope={singlePort ? "port" : "group"}
 			data-state={portEquipmentGroupEditState}
 			data-eligible-process-loop-ids={
 				portEquipmentGroupEditSession.eligibleProcessLoopIds?.join(",") ?? ""
@@ -59,15 +63,25 @@ export function PortEquipmentGroupTransformBar({
 				{portEquipmentGroupEditSession.sourceEquipmentGroupId}
 			</span>
 			<strong>
-				{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} ·{" "}
-				{portEquipmentGroupEditSource?.portIds.length ?? 0} Port
+				{singlePort ? (
+					`Port만 이동 · PORT-${portEquipmentGroupEditSession.sourceAnchorPortId}`
+				) : (
+					<>
+						{portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"} ·{" "}
+						{portEquipmentGroupEditSource?.portIds.length ?? 0} Port
+					</>
+				)}
 			</strong>
 			<div className="tilefab-equipment-transform-state">
 				{portEquipmentGroupEditState === "valid"
-					? "배치 가능"
+					? singlePort
+						? "이동 가능 · 다른 Port 유지"
+						: "배치 가능"
 					: portEquipmentGroupEditState === "invalid"
 						? (feedback?.reason ?? "배치할 수 없습니다")
-						: "대상 위치 선택"}
+						: singlePort
+							? "몸체 길이 유지 · 같은 직선에서 위치 선택"
+							: "대상 위치 선택"}
 				{feedback ? (
 					<small
 						className="tilefab-equipment-group-loop-preview"
@@ -88,10 +102,12 @@ export function PortEquipmentGroupTransformBar({
 					ref={cancelButtonRef}
 					type="button"
 					className="tilefab-placement-exit"
-					aria-label="장비 이동·복제 취소"
+					aria-label={singlePort ? "Port 이동 취소" : "장비 이동·복제 취소"}
 					aria-keyshortcuts="Escape"
 					onClick={() => {
-						exitPortEquipmentGroupEditToInspect("장비 그룹 편집을 취소했습니다");
+						exitPortEquipmentGroupEditToInspect(
+							singlePort ? "Port 이동을 취소했습니다" : "장비 그룹 편집을 취소했습니다",
+						);
 					}}
 				>
 					<X size={14} /> 취소

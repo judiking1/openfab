@@ -63,6 +63,7 @@ import type {
 	StaticFabOrganizationOutlineIndex,
 	StaticFabOrganizationOutlineRole,
 } from "../compile/StaticFabOrganizationOutlineIndex";
+import type { StkBodySweep } from "../compile/StkBodySweep";
 import type { StkDraftSelection } from "../compile/StkDraftSelector";
 import {
 	type AdvancedSwitchGeometry,
@@ -481,6 +482,7 @@ export interface TileRenderInput {
 	portEquipmentGroupEditPreview?: Readonly<{
 		slots: CompiledPortSlots;
 		plan: PortEquipmentGroupEditPlan | null;
+		bodyPreview?: readonly StkBodySweep[] | null;
 	}> | null;
 	portEquipmentMembershipPreview?: Readonly<{
 		movesPorts?: boolean;
@@ -2450,6 +2452,92 @@ export class TileRenderer {
 			x: slots.worldPositions[targetAnchorRow * 2] as number,
 			y: slots.worldPositions[targetAnchorRow * 2 + 1] as number,
 		};
+		if (plan.groupEdit.scope === "port") {
+			if (plan.valid && preview.bodyPreview?.length) {
+				const drawBody = (
+					x: number,
+					z: number,
+					tx: number,
+					tz: number,
+					halfLength: number,
+					halfWidth: number,
+					original: boolean,
+				): void => {
+					const center = this.worldToScreen({ x, y: z }, input.camera);
+					const tip = this.worldToScreen({ x: x + tx, y: z + tz }, input.camera);
+					const width = halfLength * 2 * input.camera.zoom;
+					const height = halfWidth * 2 * input.camera.zoom;
+					ctx.save();
+					ctx.translate(center.x, center.y);
+					ctx.rotate(Math.atan2(tip.y - center.y, tip.x - center.x));
+					ctx.fillStyle = original ? "rgba(8, 11, 12, 0.62)" : "rgba(73, 213, 181, 0.24)";
+					ctx.strokeStyle = original ? "rgba(143, 162, 165, 0.62)" : "#96f2dc";
+					ctx.lineWidth = original ? 1.5 : 2.2;
+					ctx.setLineDash(original ? [5, 4] : []);
+					roundRect(ctx, -width / 2, -height / 2, width, height, Math.min(7, height * 0.22));
+					ctx.fill();
+					ctx.stroke();
+					ctx.restore();
+				};
+				for (
+					let row = presentation.groupBodySectionOffsets[sourceGroupRow] as number;
+					row < (presentation.groupBodySectionOffsets[sourceGroupRow + 1] as number);
+					row++
+				) {
+					drawBody(
+						presentation.bodySectionCenters[row * 2] as number,
+						presentation.bodySectionCenters[row * 2 + 1] as number,
+						presentation.bodySectionTangents[row * 2] as number,
+						presentation.bodySectionTangents[row * 2 + 1] as number,
+						presentation.bodySectionHalfExtents[row * 2] as number,
+						presentation.bodySectionHalfExtents[row * 2 + 1] as number,
+						true,
+					);
+				}
+				for (const body of preview.bodyPreview) {
+					drawBody(
+						Math.fround(body.centerX),
+						Math.fround(body.centerZ),
+						Math.fround(body.tangentX),
+						Math.fround(body.tangentZ),
+						Math.fround(body.halfLength),
+						Math.fround(body.halfWidth),
+						false,
+					);
+				}
+			}
+			const sourcePoint = this.worldToScreen(sourceAnchor, input.camera);
+			const targetPoint = this.worldToScreen(targetAnchor, input.camera);
+			const radius = clamp(input.camera.zoom * 0.24, 8, 16);
+			ctx.save();
+			ctx.strokeStyle = plan.valid ? "#96f2dc" : "#ff8d94";
+			ctx.lineWidth = 2.5;
+			ctx.setLineDash([5, 4]);
+			ctx.beginPath();
+			ctx.arc(sourcePoint.x, sourcePoint.y, radius, 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.moveTo(sourcePoint.x, sourcePoint.y);
+			ctx.lineTo(targetPoint.x, targetPoint.y);
+			ctx.stroke();
+			ctx.setLineDash([]);
+			ctx.beginPath();
+			ctx.arc(targetPoint.x, targetPoint.y, radius + 3, 0, Math.PI * 2);
+			ctx.fillStyle = plan.valid ? "rgba(73, 213, 181, 0.24)" : "rgba(240, 92, 101, 0.2)";
+			ctx.fill();
+			ctx.stroke();
+			ctx.fillStyle = plan.valid ? "#effffb" : "#fff0f1";
+			ctx.font = "800 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+			ctx.textAlign = "center";
+			ctx.textBaseline = "bottom";
+			ctx.fillText(
+				`PORT-${plan.groupEdit.sourceAnchorPortId} 이동`,
+				targetPoint.x,
+				targetPoint.y - radius - 7,
+			);
+			ctx.restore();
+			return;
+		}
 		const radians = plan.groupEdit.quarterTurns * (Math.PI / 2);
 		const cosine = Math.cos(radians);
 		const sine = Math.sin(radians);

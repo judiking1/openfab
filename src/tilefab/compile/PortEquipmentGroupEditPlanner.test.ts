@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { createPortEquipmentMutationPlan } from "../core/PortEquipmentPlan";
+import type { PortRecord } from "../core/PortRecord";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
+import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
+import { compareDirectedRailEdges } from "../core/StaticFabOrganization";
 import { TileMap } from "../core/TileMap";
+import { captureOpenFabProject } from "../project/OpenFabProject";
+import { serializeOpenFabProject } from "../project/OpenFabProjectCodec";
+import { captureRailMirrorSnapshot, checksumRailMap } from "../worker/RailMirrorChecksum";
+import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
+import { RailPatchMirror } from "../worker/RailPatchMirror";
+import { compileRailStartup } from "../worker/RailStartupRuntime";
+import { decodeRailPatchSoA, encodeRailPatchEvent } from "../worker/railMirrorProtocol";
+import {
+	adjacentFlexStkPortRow,
+	deriveFlexStkPortMoveBodyPreview,
+	planMoveFlexStkPort,
+} from "./FlexStkPortMovePlanner";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { planResizeEqBody } from "./PortEquipmentEditPlanner";
 import {
@@ -10,7 +26,8 @@ import {
 	planPortEquipmentGroupEdit,
 	portEquipmentGroupSlotIndexFor,
 } from "./PortEquipmentGroupEditPlanner";
-import { planEqRowPlacement, planStkPlacement } from "./PortPlacementPlanner";
+import { compilePortEquipmentPresentation } from "./PortEquipmentPresentation";
+import { planEqRowPlacement, planOhbPlacement, planStkPlacement } from "./PortPlacementPlanner";
 import { PortSlotAvailabilityIndex } from "./PortSlotCompiler";
 import { compilePortSlotPreparedArtifactCatalog } from "./PortSlotPreparedArtifacts";
 
@@ -414,4 +431,606 @@ function rowAt(
 		if (slots.routeXs[row] === x && slots.routeZs[row] === z) return row;
 	}
 	throw new Error(`Missing ${slots.portType} slot at ${x},${z}.`);
+}
+
+describe("individual FLEX STK Port movement", () => {
+	it("nudges exact neighboring slots without a renderer and never jumps sideways or across a gap", () => {
+		const f = flexPortFixture(),
+			index = new PortEquipmentGroupSlotIndex(f.slots),
+			current = rowAt(f.slots, 8, 0);
+		expect(
+			adjacentFlexStkPortRow(
+				f.slots,
+				index,
+				f.document.portEquipment.ports[1] as PortRecord,
+				current,
+				1,
+				0,
+			),
+		).toBe(rowAt(f.slots, 9, 0));
+		expect(
+			adjacentFlexStkPortRow(
+				f.slots,
+				index,
+				f.document.portEquipment.ports[1] as PortRecord,
+				current,
+				-1,
+				0,
+			),
+		).toBe(rowAt(f.slots, 7, 0));
+		expect(
+			adjacentFlexStkPortRow(
+				f.slots,
+				index,
+				f.document.portEquipment.ports[1] as PortRecord,
+				current,
+				0,
+				1,
+			),
+		).toBeNull();
+		expect(
+			adjacentFlexStkPortRow(
+				f.slots,
+				index,
+				f.document.portEquipment.ports[1] as PortRecord,
+				current,
+				1,
+				1,
+			),
+		).toBeNull();
+		expect(
+			adjacentFlexStkPortRow(
+				f.slots,
+				index,
+				f.document.portEquipment.ports[1] as PortRecord,
+				-1,
+				1,
+				0,
+			),
+		).toBeNull();
+		expect(
+			adjacentFlexStkPortRow(
+				f.slots,
+				index,
+				f.document.portEquipment.ports[1] as PortRecord,
+				rowAt(f.slots, 19, 0),
+				1,
+				0,
+			),
+		).toBeNull();
+	});
+
+	it.each([
+		"east",
+		"south",
+		"west",
+		"north",
+	] as const)("moves one %s Port with retained identities, typed Worker and exact Undo/Redo", (direction) => {
+		const cell = (along: number) =>
+			direction === "east"
+				? [along, 0]
+				: direction === "south"
+					? [20, along]
+					: direction === "west"
+						? [20 - along, 20]
+						: [0, 20 - along];
+		const f = flexPortFixture([4, 8, 14].map(cell));
+		const before = f.document.portEquipment,
+			organizations = f.document.organizations;
+		const middle = before.ports.find(
+			(p) =>
+				p.route.kind === "CARDINAL_CELL" && p.route.x === cell(8)[0] && p.route.z === cell(8)[1],
+		) as PortRecord;
+		const mirror = new RailPatchMirror();
+		mirror.sync(
+			captureRailMirrorSnapshot(
+				f.document.map,
+				f.document.getPatchSequence(),
+				before,
+				organizations,
+			).snapshot,
+		);
+		const buffers = mirror.getPhysicalPublication().current.buffers;
+		const events: RailPatchEvent[] = [];
+		f.document.subscribe((event) => {
+			events.push(event);
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		});
+		const plan = f.plan(cell(9), middle.id);
+		expect(plan.valid, plan.reason).toBe(true);
+		expect(plan.portMutations).toHaveLength(1);
+		expect(plan.groupEdit).toMatchObject({ scope: "port", mode: "move" });
+		expect(f.document.portEquipment).toBe(before);
+		expect(events).toHaveLength(0);
+		expect(
+			f.document.commitPortEquipment(plan),
+			f.document.getLastCommandError() ?? plan.reason,
+		).toBe(true);
+		const after = f.document.portEquipment;
+		expect(after.nextPortId).toBe(before.nextPortId);
+		expect(after.nextEquipmentGroupId).toBe(before.nextEquipmentGroupId);
+		for (const port of before.ports)
+			expect(after.ports.find((p) => p.id === port.id)).toEqual(
+				port.id === middle.id
+					? { ...port, route: { ...port.route, x: cell(9)[0], z: cell(9)[1] } }
+					: port,
+			);
+		expect(after.equipmentGroups).toEqual(before.equipmentGroups);
+		expect(f.document.organizations).toBe(organizations);
+		expect(f.document.undo()).toBe(true);
+		expect(f.document.portEquipment).toEqual(before);
+		expect(f.document.redo()).toBe(true);
+		expect(f.document.portEquipment).toEqual(after);
+		expect(events).toHaveLength(3);
+		expect(
+			events.every(
+				(e) =>
+					e.portChanges.length === 1 &&
+					e.changes.length === 0 &&
+					e.organizationChanges.length === 0,
+			),
+		).toBe(true);
+		expect(mirror.state.checksum).toBe(checksumRailMap(f.document.map, after, organizations));
+		expect(mirror.getPhysicalPublication().current.buffers).toBe(buffers);
+	});
+
+	it.each([
+		[8, 0],
+		[14, 0],
+		[8, 20],
+		[20, 8],
+		[38, 0],
+		[1, 0],
+		[18, 0],
+	])("rejects unchanged, occupied, wrong-run, unsafe or resized target %j without any mutation", (x, z) => {
+		const f = flexPortFixture();
+		const before = f.document.portEquipment,
+			sequence = f.document.getPatchSequence();
+		const plan = f.plan([x, z]);
+		expect(plan.valid, plan.reason).toBe(false);
+		expect(plan.portMutations).toEqual([]);
+		expect(plan.equipmentGroupMutations).toEqual([]);
+		expect(f.document.commitPortEquipment(plan)).toBe(false);
+		expect(f.document.portEquipment).toBe(before);
+		expect(f.document.getPatchSequence()).toBe(sequence);
+	});
+
+	it("rejects a collinear gap and a branch inside the candidate interval", () => {
+		for (const branch of [false, true]) {
+			const source = closedLoopDocument(20, 20);
+			if (branch)
+				expect(
+					source.commit(planRailConstruction(source.map, { x: 10, y: 0 }, { x: 10, y: -8 })),
+				).toBe(true);
+			else
+				expect(
+					source.commit(planRailConstruction(source.map, { x: 30, y: 0 }, { x: 50, y: 0 })),
+				).toBe(true);
+			const f = flexPortFixture(
+				[
+					[4, 0],
+					[6, 0],
+				],
+				source,
+			);
+			expect(f.plan(branch ? [14, 0] : [38, 0]).reason).toMatch(/같은 연속 직선/);
+		}
+	});
+
+	it("preserves source when revision, sequence, prepared slots or state changes", () => {
+		const f = flexPortFixture(),
+			old = f.plan([9, 0]);
+		expect(f.document.commitPortEquipment(f.plan([7, 0]))).toBe(true);
+		const current = f.document.portEquipment,
+			sequence = f.document.getPatchSequence();
+		expect(f.document.commitPortEquipment(old)).toBe(false);
+		expect(f.document.portEquipment).toBe(current);
+		expect(f.document.getPatchSequence()).toBe(sequence);
+		expect(
+			planMoveFlexStkPort(
+				f.document.map,
+				f.slots,
+				new PortEquipmentGroupSlotIndex(f.slots),
+				f.availability,
+				current,
+				{ equipmentGroupId: 1, portId: 2 },
+				rowAt(f.slots, 9, 0),
+				f.document.map.getRevision(),
+				sequence,
+				f.document.organizations,
+			).valid,
+		).toBe(false);
+		expect(
+			f.document.commit(planRailConstruction(f.document.map, { x: 60, y: 0 }, { x: 70, y: 0 })),
+		).toBe(true);
+		expect(f.plan([9, 0]).reason).toMatch(/変更|변경/);
+	});
+
+	it("keeps service facing and canonical identities when the moved Port crosses another Port", () => {
+		const f = flexPortFixture([
+			[4, 0],
+			[7, 0],
+			[10, 0],
+			[14, 0],
+		]);
+		const before = f.document.portEquipment;
+		const plan = f.plan([11, 0], 2);
+		expect(plan.valid, plan.reason).toBe(true);
+		expect(f.document.commitPortEquipment(plan)).toBe(true);
+		expect(f.document.portEquipment.equipmentGroups[0]?.portIds).toEqual([1, 3, 2, 4]);
+		expect(f.document.portEquipment.ports.find((p) => p.id === 3)).toEqual(before.ports[2]);
+		expect(f.document.undo()).toBe(true);
+		expect(f.document.portEquipment).toEqual(before);
+	});
+
+	it.each([
+		false,
+		true,
+	])("previews the actual shifted FLEX body, retaining other sections: extra=%s", (extraSection) => {
+		const f = flexPortFixture(
+			[
+				[4, 0],
+				[9, 0],
+				[14, 0],
+				...(extraSection
+					? [
+							[26, 4],
+							[26, 9],
+						]
+					: []),
+			],
+			closedLoopDocument(26, 20),
+		);
+		const source = f.document.portEquipment;
+		const before = compilePortEquipmentPresentation(f.physical, source);
+		const sequence = f.document.getPatchSequence();
+		const plan = f.plan([19, 0], 1);
+		expect(plan.valid, plan.reason).toBe(true);
+		const preview = deriveFlexStkPortMoveBodyPreview(f.physical, source, plan);
+		expect(f.document.portEquipment).toBe(source);
+		expect(f.document.getPatchSequence()).toBe(sequence);
+		expect(preview).toHaveLength(extraSection ? 2 : 1);
+		const moved = preview.find((body) => body.tangentZ === 0);
+		expect(moved?.centerX).toBe(14.5);
+		expect(Array.from(before.bodySectionCenters).filter((_, i) => i % 2 === 0)).toContain(9.5);
+		expect(f.document.commitPortEquipment(plan)).toBe(true);
+		const applied = compilePortEquipmentPresentation(f.physical, f.document.portEquipment);
+		expect(
+			Array.from(new Float32Array(preview.flatMap((body) => [body.centerX, body.centerZ]))),
+		).toEqual(Array.from(applied.bodySectionCenters));
+		expect(
+			Array.from(new Float32Array(preview.flatMap((body) => [body.tangentX, body.tangentZ]))),
+		).toEqual(Array.from(applied.bodySectionTangents));
+		expect(
+			Array.from(new Float32Array(preview.flatMap((body) => [body.halfLength, body.halfWidth]))),
+		).toEqual(Array.from(applied.bodySectionHalfExtents));
+		expect(applied.bodySectionHalfExtents).toEqual(before.bodySectionHalfExtents);
+		if (extraSection) {
+			const retained = preview.find((body) => body.tangentZ !== 0);
+			expect(retained?.centerX).toBe(26.5);
+			expect(retained?.centerZ).toBe(7);
+		}
+	});
+
+	it("does not derive a body ghost for invalid or stale single-Port previews", () => {
+		const f = flexPortFixture();
+		const source = f.document.portEquipment;
+		const valid = f.plan([9, 0]);
+		expect(deriveFlexStkPortMoveBodyPreview(f.physical, source, f.plan([14, 0]))).toEqual([]);
+		expect(
+			deriveFlexStkPortMoveBodyPreview(f.physical, source, {
+				...valid,
+				baseRevision: valid.baseRevision + 1,
+			}),
+		).toEqual([]);
+		expect(f.document.commitPortEquipment(f.plan([7, 0]))).toBe(true);
+		expect(deriveFlexStkPortMoveBodyPreview(f.physical, f.document.portEquipment, valid)).toEqual(
+			[],
+		);
+	});
+
+	it("rejects strict STK presets and single-Port FLEX without changing group movement", () => {
+		const f = flexPortFixture(
+			[
+				[4, 0],
+				[5, 0],
+				[6, 0],
+				[7, 0],
+			],
+			undefined,
+			"FOUR_PORT",
+		);
+		expect(f.plan([8, 0]).reason).toMatch(/FLEX/);
+		const one = flexPortFixture([[4, 0]]);
+		expect(one.plan([5, 0], 1).reason).toMatch(/여러 Port/);
+		const whole = planPortEquipmentGroupEdit(
+			f.document.map,
+			f.slots,
+			new PortEquipmentGroupSlotIndex(f.slots),
+			f.availability,
+			f.document.portEquipment,
+			1,
+			1,
+			rowAt(f.slots, 6, 0),
+			"move",
+			f.document.map.getRevision(),
+			f.document.getPatchSequence(),
+			"commit",
+			f.document.organizations,
+		);
+		expect(whole.valid, whole.reason).toBe(true);
+		expect(whole.groupEdit.portTargets).toHaveLength(4);
+	});
+
+	it("retains Loop ownership and rejects outside Loop or invalid slots in Document and Worker", () => {
+		const f = flexPortFixture(),
+			source = f.document;
+		const railEdges = buildRailModuleOwnershipIndex(source.map)
+			.modules.flatMap((m) => m.eraseEdges)
+			.filter((e) => e.from.x < 30 && e.to.x < 30)
+			.sort(compareDirectedRailEdges);
+		const owned = RailDocument.fromLoadedMap(
+			source.map,
+			source.getPatchSequence(),
+			source.portEquipment,
+			{
+				nextOrganizationId: 2,
+				records: [
+					{
+						id: 1,
+						kind: "AISLE",
+						declaredSemanticRole: "PROCESS_LOOP",
+						name: "Synthetic Loop",
+						membership: { railEdges, advancedSwitchIds: [], equipmentGroupIds: [1] },
+					},
+				],
+			},
+		);
+		const plan = (x: number) =>
+			planMoveFlexStkPort(
+				owned.map,
+				f.slots,
+				new PortEquipmentGroupSlotIndex(f.slots),
+				new PortSlotAvailabilityIndex(f.physical, owned.portEquipment, "STK"),
+				owned.portEquipment,
+				{ equipmentGroupId: 1, portId: 2 },
+				rowAt(f.slots, x, 0),
+				owned.map.getRevision(),
+				owned.getPatchSequence(),
+				owned.organizations,
+			);
+		const valid = plan(9);
+		expect(valid.valid, valid.reason).toBe(true);
+		const mirror = new RailPatchMirror();
+		mirror.sync(
+			captureRailMirrorSnapshot(
+				owned.map,
+				owned.getPatchSequence(),
+				owned.portEquipment,
+				owned.organizations,
+			).snapshot,
+		);
+		owned.subscribe((event) =>
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch)),
+		);
+		expect(owned.commitPortEquipment(valid)).toBe(true);
+		expect(owned.undo()).toBe(true);
+		expect(owned.redo()).toBe(true);
+		expect(mirror.state.checksum).toBe(
+			checksumRailMap(owned.map, owned.portEquipment, owned.organizations),
+		);
+		const original = owned.portEquipment.ports[1] as PortRecord;
+		const group = owned.portEquipment.equipmentGroups[0];
+		if (!group) throw new Error("Expected the owned fixture group");
+		for (const x of [14, 1, 38]) {
+			const moved = { ...original, route: { ...original.route, x } } as PortRecord;
+			const forged = createPortEquipmentMutationPlan(
+				"edit-port-equipment",
+				owned.map.getRevision(),
+				owned.getPatchSequence(),
+				[{ id: original.id, before: original, after: moved }],
+				x === 38
+					? [
+							{
+								id: 1,
+								before: group,
+								after: { ...group, portIds: [1, 3, 2] },
+							},
+						]
+					: [],
+			);
+			const before = owned.portEquipment,
+				sequence = owned.getPatchSequence(),
+				state = mirror.state;
+			expect(owned.commitPortEquipment(forged)).toBe(false);
+			if (x === 38) expect(owned.getLastCommandError()).toMatch(/Loop.*밖/);
+			expect(owned.portEquipment).toBe(before);
+			expect(owned.getPatchSequence()).toBe(sequence);
+			const patch: RailPatchEvent = {
+				kind: "edit-port-equipment",
+				sequence: sequence + 1,
+				baseRevision: owned.map.getRevision(),
+				revision: owned.map.getRevision(),
+				changes: [],
+				switchChanges: [],
+				portChanges: forged.portMutations,
+				equipmentGroupChanges: forged.equipmentGroupMutations,
+				organizationChanges: [],
+				organizationNextIdBefore: 2,
+				organizationNextIdAfter: 2,
+				relationshipChanges: [],
+				relationshipNextIdBefore: 1,
+				relationshipNextIdAfter: 1,
+			};
+			expect(() =>
+				mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(patch).patch)),
+			).toThrow();
+			expect(mirror.state).toEqual(state);
+		}
+	});
+
+	it("rejects an expanded reservation around another equipment body in planner, Document and Worker", () => {
+		const f = flexPortFixture([
+				[4, 0],
+				[8, 0],
+			]),
+			d = f.document;
+		const ohbSlots = compilePortSlotPreparedArtifactCatalog(f.physical).OHB.slots;
+		expect(
+			d.commitPortEquipment(
+				planOhbPlacement(
+					ohbSlots,
+					rowAt(ohbSlots, 11, 0),
+					new PortSlotAvailabilityIndex(f.physical, d.portEquipment, "OHB"),
+					d.portEquipment,
+					d.map.getRevision(),
+					d.getPatchSequence(),
+				),
+			),
+		).toBe(true);
+		const rejected = f.plan([14, 0]);
+		expect(rejected.valid).toBe(false);
+		expect(rejected.reason).toMatch(/reservation|몸체/);
+		const before = d.portEquipment,
+			sequence = d.getPatchSequence(),
+			original = before.ports[1] as PortRecord;
+		const moved = { ...original, route: { ...original.route, x: 14 } } as PortRecord;
+		const forged = createPortEquipmentMutationPlan(
+			"edit-port-equipment",
+			d.map.getRevision(),
+			sequence,
+			[{ id: original.id, before: original, after: moved }],
+			[],
+		);
+		expect(d.commitPortEquipment(forged)).toBe(false);
+		expect(d.portEquipment).toBe(before);
+		expect(d.getPatchSequence()).toBe(sequence);
+		const mirror = new RailPatchMirror();
+		mirror.sync(captureRailMirrorSnapshot(d.map, sequence, before, d.organizations).snapshot);
+		const state = mirror.state;
+		const patch: RailPatchEvent = {
+			kind: "edit-port-equipment",
+			sequence: sequence + 1,
+			baseRevision: d.map.getRevision(),
+			revision: d.map.getRevision(),
+			changes: [],
+			switchChanges: [],
+			portChanges: forged.portMutations,
+			equipmentGroupChanges: [],
+			organizationChanges: [],
+			organizationNextIdBefore: 1,
+			organizationNextIdAfter: 1,
+			relationshipChanges: [],
+			relationshipNextIdBefore: 1,
+			relationshipNextIdAfter: 1,
+		};
+		expect(() => mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(patch).patch))).toThrow(
+			/reservation/,
+		);
+		expect(mirror.state).toEqual(state);
+	});
+
+	it("keeps an authored reversed service direction while moving only its slot", () => {
+		const f = flexPortFixture();
+		const before = f.document.portEquipment;
+		const state = {
+			...before,
+			ports: before.ports.map((port) => ({ ...port, direction: "AGAINST_TRAVEL" as const })),
+		};
+		const d = RailDocument.fromLoadedMap(f.document.map, f.document.getPatchSequence(), state);
+		const plan = planMoveFlexStkPort(
+			d.map,
+			f.slots,
+			new PortEquipmentGroupSlotIndex(f.slots),
+			new PortSlotAvailabilityIndex(f.physical, d.portEquipment, "STK"),
+			d.portEquipment,
+			{ equipmentGroupId: 1, portId: 2 },
+			rowAt(f.slots, 9, 0),
+			d.map.getRevision(),
+			d.getPatchSequence(),
+			d.organizations,
+		);
+		expect(d.commitPortEquipment(plan), plan.reason).toBe(true);
+		expect(d.portEquipment.ports.every((port) => port.direction === "AGAINST_TRAVEL")).toBe(true);
+	});
+
+	it("round-trips the native project with empty reopened history and permits another move", () => {
+		const f = flexPortFixture();
+		expect(f.document.commitPortEquipment(f.plan([9, 0]))).toBe(true);
+		const json = serializeOpenFabProject(
+			captureOpenFabProject(f.document, {
+				manifest: {
+					id: "flex-port-move-test",
+					name: "Synthetic STK Port",
+					createdAt: "2026-10-09T00:00:00.000Z",
+					updatedAt: "2026-10-09T00:00:00.000Z",
+				},
+			}),
+		);
+		const startup = compileRailStartup({ kind: "project-json", json }),
+			reopened = hydrateRailMirrorSnapshotDocument(startup.snapshot);
+		expect(reopened.portEquipment).toEqual(f.document.portEquipment);
+		expect(reopened.canUndo).toBe(false);
+		const physical = compilePhysicalRail(reopened.map),
+			slots = compilePortSlotPreparedArtifactCatalog(physical).STK.slots;
+		const plan = planMoveFlexStkPort(
+			reopened.map,
+			slots,
+			new PortEquipmentGroupSlotIndex(slots),
+			new PortSlotAvailabilityIndex(physical, reopened.portEquipment, "STK"),
+			reopened.portEquipment,
+			{ equipmentGroupId: 1, portId: 2 },
+			rowAt(slots, 8, 0),
+			reopened.map.getRevision(),
+			reopened.getPatchSequence(),
+			reopened.organizations,
+		);
+		expect(reopened.commitPortEquipment(plan), plan.reason).toBe(true);
+		expect(reopened.undo()).toBe(true);
+		expect(reopened.portEquipment).toEqual(f.document.portEquipment);
+		expect(reopened.redo()).toBe(true);
+	});
+});
+
+function flexPortFixture(
+	cells: number[][] = [
+		[4, 0],
+		[8, 0],
+		[14, 0],
+	],
+	source?: RailDocument,
+	template: "FLEX" | "FOUR_PORT" = "FLEX",
+) {
+	const document = source ?? closedLoopDocument(20, 20);
+	if (!source)
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 30, y: 0 }, { x: 50, y: 0 })),
+		).toBe(true);
+	const physical = compilePhysicalRail(document.map),
+		slots = compilePortSlotPreparedArtifactCatalog(physical).STK.slots;
+	const placement = planStkPlacement(
+		slots,
+		cells.map(([x, z]) => rowAt(slots, x as number, z as number)),
+		new PortSlotAvailabilityIndex(physical, document.portEquipment, "STK"),
+		document.portEquipment,
+		template,
+		document.map.getRevision(),
+		document.getPatchSequence(),
+	);
+	expect(document.commitPortEquipment(placement), placement.reason).toBe(true);
+	const availability = new PortSlotAvailabilityIndex(physical, document.portEquipment, "STK");
+	const plan = (cell: number[], id = 2) =>
+		planMoveFlexStkPort(
+			document.map,
+			slots,
+			new PortEquipmentGroupSlotIndex(slots),
+			new PortSlotAvailabilityIndex(physical, document.portEquipment, "STK"),
+			document.portEquipment,
+			{ equipmentGroupId: 1, portId: id },
+			rowAt(slots, cell[0] as number, cell[1] as number),
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+	return { document, physical, slots, availability, plan };
 }

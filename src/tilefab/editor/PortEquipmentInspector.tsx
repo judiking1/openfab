@@ -126,7 +126,10 @@ export interface PortEquipmentInspectorProps {
 		returnSelection?: PortEquipmentSelectionIdentity | null,
 	) => void;
 	readonly startSelectedOhbPlacementIntent: (kind: "move" | "copy") => void;
-	readonly startSelectedPortEquipmentGroupEdit: (mode: PortEquipmentGroupEditMode) => void;
+	readonly startSelectedPortEquipmentGroupEdit: (
+		mode: PortEquipmentGroupEditMode,
+		scope?: "group" | "port",
+	) => void;
 	readonly startSelectedPortEquipmentMembershipEdit: () => void;
 	readonly stkAuthoringTemplateLabel: (template: StkEquipmentTemplate) => string;
 	readonly viewMode: "2d" | "3d";
@@ -508,6 +511,20 @@ export function PortEquipmentInspector({
 									>
 										<MousePointer2 size={15} /> Port 구성 편집
 									</button>
+									{selectedEquipmentGroup.kind === "STK" &&
+									selectedEquipmentGroup.template === "FLEX" &&
+									selectedEquipmentGroup.portIds.length > 1 ? (
+										<button
+											type="button"
+											className="tilefab-inspector-primary"
+											data-testid="move-flex-stk-port"
+											disabled={!actions.move.allowed}
+											aria-describedby={equipmentActionDescriptionId(actions.move)}
+											onClick={() => startSelectedPortEquipmentGroupEdit("move", "port")}
+										>
+											<Move size={15} /> Port만 이동
+										</button>
+									) : null}
 									{!selectedEquipmentNeedsGroupMoveForProcessLoop ? (
 										<button
 											type="button"

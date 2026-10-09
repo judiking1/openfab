@@ -687,6 +687,12 @@
 .tilefab-equipment-group-transformbar .tilefab-equipment-transform-actions {
 	order: 20;
 }
+.tilefab-equipment-group-transformbar[data-scope="port"] .tilefab-placement-apply:disabled {
+	border-color: #4b5b5e;
+	background: #283538;
+	color: #a5b8ba;
+	cursor: default;
+}
 .tilefab-equipment-group-transformbar > .tilefab-equipment-help {
 	grid-column: 1 / -1;
 	order: 30;

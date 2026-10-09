@@ -636,6 +636,33 @@ function equipmentBodyExtentsByRun(
 	return extents;
 }
 
+/** Compare derived section lengths on the same canonical runs; STK width is fixed. */
+export function stkBodySectionDimensionsEqual(
+	map: TileMap,
+	group: StkEquipmentGroup,
+	beforePorts: readonly PortRecord[],
+	afterPorts: readonly PortRecord[],
+): boolean {
+	const runs = compileStraightRailRuns(map);
+	const before = equipmentBodyExtentsByRun(
+		group,
+		new Map(beforePorts.map((port) => [port.id, port])),
+		runs,
+	);
+	const after = equipmentBodyExtentsByRun(
+		group,
+		new Map(afterPorts.map((port) => [port.id, port])),
+		runs,
+	);
+	return (
+		before.size === after.size &&
+		[...before].every(([runId, extent]) => {
+			const target = after.get(runId);
+			return target !== undefined && extent.max - extent.min === target.max - target.min;
+		})
+	);
+}
+
 function buildBodySpanIntervalIndex(source: readonly BodySpan[]): BodySpanIntervalIndex {
 	const spans = [...source].sort(
 		(left, right) =>

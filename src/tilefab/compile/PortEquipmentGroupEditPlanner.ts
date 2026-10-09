@@ -58,6 +58,8 @@ export interface PortEquipmentGroupEditPortTarget {
 }
 
 export interface PortEquipmentGroupEditMetadata {
+	/** Preview scope only; authored admission uses the existing equipment mutation contract. */
+	readonly scope?: "port";
 	readonly mode: PortEquipmentGroupEditMode;
 	readonly sourceEquipmentGroupId: number;
 	readonly targetEquipmentGroupId: number;
