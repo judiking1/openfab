@@ -18,7 +18,80 @@ vi.mock("react", async (importOriginal) => {
 	return { ...actual, useState: vi.fn(actual.useState), useEffect: vi.fn(actual.useEffect) };
 });
 
+import { portEquipmentTransformPolicy } from "./PortEquipmentTransformPolicy";
+
 describe("PortEquipmentInspectorSelection", () => {
+	it.each([
+		{
+			kind: "OHB",
+			editor: "single-port",
+			moveId: "move-ohb-port",
+			copyId: "copy-ohb-port",
+			moveLabel: "위치 이동",
+			copyLabel: "OHB 복제",
+			contextMove: "포트 이동",
+			contextCopy: "포트 복제",
+		},
+		{
+			kind: "EQ",
+			editor: "group",
+			moveId: "move-port-equipment-group",
+			copyId: "copy-port-equipment-group",
+			moveLabel: "장비 이동",
+			copyLabel: "장비 복제",
+			contextMove: "그룹 전체 이동",
+			contextCopy: "그룹 전체 복제",
+		},
+		{
+			kind: "STK",
+			editor: "group",
+			moveId: "move-port-equipment-group",
+			copyId: "copy-port-equipment-group",
+			moveLabel: "장비 이동",
+			copyLabel: "장비 복제",
+			contextMove: "그룹 전체 이동",
+			contextCopy: "그룹 전체 복제",
+		},
+	] as const)("retains $kind transform labels, IDs and the command sent by each button", (expected) => {
+		const group: EquipmentGroupRecord =
+			expected.kind === "OHB"
+				? { id: 1, kind: "OHB", template: "SINGLE", portIds: [1] }
+				: expected.kind === "EQ"
+					? { id: 1, kind: "EQ", pitchMillimeters: 1_000, recipe: null, portIds: [1, 2] }
+					: { id: 1, kind: "STK", template: "FLEX", portIds: [1, 2] };
+		const state = eqState(
+			group.portIds.map((id) => ({
+				...port(id, 1, `${group.kind}-${id}`, id * 1_000),
+				portType: group.kind,
+			})),
+			[group],
+		);
+		const selected = resolveEditablePortEquipmentSelection(state, selection());
+		if (!selected) throw new Error("Expected editable transform fixture");
+		const transform = vi.fn();
+		const tree = PortEquipmentInspector({
+			...inspectorProps(state, selected),
+			startSelectedPortEquipmentTransform: transform,
+		});
+		for (const [mode, id, label] of [
+			["move", expected.moveId, expected.moveLabel],
+			["copy", expected.copyId, expected.copyLabel],
+		] as const) {
+			const button = findInspectorElement(tree, (element) => element.props["data-testid"] === id);
+			if (!button) throw new Error(`Missing ${id}`);
+			expect(button.props.disabled).toBe(false);
+			expect(renderToStaticMarkup(button)).toContain(label);
+			(button.props.onClick as () => void)();
+			expect(transform).toHaveBeenLastCalledWith(mode);
+		}
+		expect(transform).toHaveBeenCalledTimes(2);
+		const policy = portEquipmentTransformPolicy(group.kind);
+		expect(policy.editor).toBe(expected.editor);
+		expect(policy.move.contextLabel).toBe(expected.contextMove);
+		expect(policy.copy.contextLabel).toBe(expected.contextCopy);
+		expect(Object.isFrozen(policy)).toBe(true);
+	});
+
 	it.each([
 		"2d",
 		"3d",
@@ -831,7 +904,7 @@ function inspectorProps(
 		setCompactInspectorExpanded: noop,
 		setStatus: noop,
 		startEquipmentAuthoringContinuation: noop,
-		startSelectedOhbPlacementIntent: noop,
+		startSelectedPortEquipmentTransform: noop,
 		startSelectedPortEquipmentGroupEdit: noop,
 		startSelectedPortEquipmentMembershipEdit: noop,
 		stkAuthoringTemplateLabel: (template) => template,

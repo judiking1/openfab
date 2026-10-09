@@ -6,6 +6,14 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.103] - 2026-10-09
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Share one explicit OHB/EQ/Stocker move/copy routing policy across Inspector, context menus
+  and copy shortcuts. Preserve existing labels, editing behavior and restrictions while removing
+  repeated equipment-kind branches; new kinds require an explicit routing decision.
+
 ## [0.1.102] - 2026-10-09
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

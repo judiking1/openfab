@@ -64,6 +64,8 @@ import {
 	resolvePortEquipmentActionAvailability,
 } from "./PortEquipmentInspectorSelection";
 
+import { portEquipmentTransformPolicy } from "./PortEquipmentTransformPolicy";
+
 export interface PortEquipmentInspectorProps {
 	readonly onEqBodyDraftChange: (hasDraft: boolean) => void;
 	readonly commitSelectedEqBodyDimensions: (
@@ -125,7 +127,7 @@ export interface PortEquipmentInspectorProps {
 		continuation: EquipmentAuthoringContinuation,
 		returnSelection?: PortEquipmentSelectionIdentity | null,
 	) => void;
-	readonly startSelectedOhbPlacementIntent: (kind: "move" | "copy") => void;
+	readonly startSelectedPortEquipmentTransform: (kind: "move" | "copy") => void;
 	readonly startSelectedPortEquipmentGroupEdit: (
 		mode: PortEquipmentGroupEditMode,
 		scope?: "group" | "port",
@@ -183,13 +185,14 @@ export function PortEquipmentInspector({
 	setCompactInspectorExpanded,
 	setStatus,
 	startEquipmentAuthoringContinuation,
-	startSelectedOhbPlacementIntent,
+	startSelectedPortEquipmentTransform,
 	startSelectedPortEquipmentGroupEdit,
 	startSelectedPortEquipmentMembershipEdit,
 	stkAuthoringTemplateLabel,
 	viewMode,
 	workerState,
 }: PortEquipmentInspectorProps): ReactNode {
+	const transform = portEquipmentTransformPolicy(selectedEquipmentGroup.kind);
 	const actions = resolvePortEquipmentActionAvailability({
 		editableSelection: selectedPortEditableDetails,
 		directlyOwned: selectedEquipmentDirectlyOwned,
@@ -331,7 +334,7 @@ export function PortEquipmentInspector({
 					aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 장비 전체 이동을 시작하고 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
 					disabled={modelSyncPending || workerState.status !== "ready" || !actions.move.allowed}
 					aria-describedby={equipmentActionDescriptionId(actions.move)}
-					onClick={() => startSelectedPortEquipmentGroupEdit("move")}
+					onClick={() => startSelectedPortEquipmentTransform("move")}
 				>
 					<Move
 						className="tilefab-equipment-process-loop-primary-icon"
@@ -488,18 +491,7 @@ export function PortEquipmentInspector({
 					<>
 						<div className="tilefab-device-actions">
 							{!actions.move.allowed ? ownershipNotice : null}
-							{selectedEquipmentGroup.kind === "OHB" ? (
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									data-testid="move-ohb-port"
-									disabled={!actions.move.allowed}
-									aria-describedby={equipmentActionDescriptionId(actions.move)}
-									onClick={() => startSelectedOhbPlacementIntent("move")}
-								>
-									<Move size={15} /> 위치 이동
-								</button>
-							) : (
+							{transform.editor === "group" ? (
 								<>
 									<button
 										type="button"
@@ -525,43 +517,31 @@ export function PortEquipmentInspector({
 											<Move size={15} /> Port만 이동
 										</button>
 									) : null}
-									{!selectedEquipmentNeedsGroupMoveForProcessLoop ? (
-										<button
-											type="button"
-											className="tilefab-inspector-primary"
-											data-testid="move-port-equipment-group"
-											disabled={!actions.move.allowed}
-											aria-describedby={equipmentActionDescriptionId(actions.move)}
-											onClick={() => startSelectedPortEquipmentGroupEdit("move")}
-										>
-											<Move size={15} /> 장비 이동
-										</button>
-									) : null}
 								</>
-							)}
-							{selectedEquipmentGroup.kind === "OHB" ? (
+							) : null}
+							{transform.editor === "single-port" ||
+							!selectedEquipmentNeedsGroupMoveForProcessLoop ? (
 								<button
 									type="button"
 									className="tilefab-inspector-primary"
-									data-testid="copy-ohb-port"
-									disabled={!actions.copy.allowed}
-									aria-describedby={equipmentActionDescriptionId(actions.copy)}
-									onClick={() => startSelectedOhbPlacementIntent("copy")}
+									data-testid={transform.move.inspectorTestId}
+									disabled={!actions.move.allowed}
+									aria-describedby={equipmentActionDescriptionId(actions.move)}
+									onClick={() => startSelectedPortEquipmentTransform("move")}
 								>
-									<Copy size={15} /> OHB 복제
+									<Move size={15} /> {transform.move.inspectorLabel}
 								</button>
-							) : (
-								<button
-									type="button"
-									className="tilefab-inspector-primary"
-									data-testid="copy-port-equipment-group"
-									disabled={!actions.copy.allowed}
-									aria-describedby={equipmentActionDescriptionId(actions.copy)}
-									onClick={() => startSelectedPortEquipmentGroupEdit("copy")}
-								>
-									<Copy size={15} /> 장비 복제
-								</button>
-							)}
+							) : null}
+							<button
+								type="button"
+								className="tilefab-inspector-primary"
+								data-testid={transform.copy.inspectorTestId}
+								disabled={!actions.copy.allowed}
+								aria-describedby={equipmentActionDescriptionId(actions.copy)}
+								onClick={() => startSelectedPortEquipmentTransform("copy")}
+							>
+								<Copy size={15} /> {transform.copy.inspectorLabel}
+							</button>
 							<button
 								type="button"
 								className="tilefab-inspector-primary"

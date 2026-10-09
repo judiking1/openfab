@@ -211,6 +211,7 @@ import {
 	collectPortEquipmentIntegrityIssues,
 	EQ_MAXIMUM_PORT_COUNT,
 	type EqBodyDimensions,
+	type EquipmentGroupRecord,
 	type PortEquipmentState,
 	STK_MAXIMUM_PORT_COUNT,
 	type StkEquipmentTemplate,
@@ -766,6 +767,7 @@ import { PortEquipmentMembershipEditBar } from "./PortEquipmentMembershipEditBar
 import { PortEquipmentGroupTransformBar } from "./PortEquipmentGroupTransformBar";
 import { PortEquipmentPlacementWorkspace } from "./PortEquipmentPlacementWorkspace";
 import { PortEquipmentInspector } from "./PortEquipmentInspector";
+import { portEquipmentTransformPolicy } from "./PortEquipmentTransformPolicy";
 import { RailModuleInspector } from "./RailModuleInspector";
 import { EditorInputCue } from "./EditorInputCue";
 import {
@@ -22893,6 +22895,13 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => canvasRef.current?.focus());
 	};
 
+	// Use the command's displayed/resolved kind only to select its existing guarded editor.
+	// The chosen handler still resolves the live document and checks every mutation guard itself.
+	const startSelectedPortEquipmentTransform = (mode: PortEquipmentGroupEditMode, kind: EquipmentGroupRecord["kind"]): void => {
+		const editors = { "single-port": startSelectedOhbPlacementIntent, group: startSelectedPortEquipmentGroupEdit };
+		editors[portEquipmentTransformPolicy(kind).editor](mode);
+	};
+
 	const startSelectedPortEquipmentMembershipEdit = (): void => {
 		if (blockEqBodyDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
@@ -24188,11 +24197,7 @@ export default function TileFabApp(): React.ReactElement {
 		});
 		const { resolved: selectedEquipment, actions } = currentPortEquipmentActions();
 		if (blockPortEquipmentAction(actions.copy) || !selectedEquipment) return;
-		if (selectedEquipment.equipmentGroup.kind === "OHB") {
-			startSelectedOhbPlacementIntent("copy");
-		} else {
-			startSelectedPortEquipmentGroupEdit("copy");
-		}
+		startSelectedPortEquipmentTransform("copy", selectedEquipment.equipmentGroup.kind);
 	};
 
 	const selectConnectedAuthoredComponent = (): void => {
@@ -24348,12 +24353,8 @@ export default function TileFabApp(): React.ReactElement {
 		const selectedPort = selectedPortEquipmentRef.current;
 		const { resolved: selectedEquipment, actions } = currentPortEquipmentActions();
 		if (selectedPort && blockPortEquipmentAction(actions.copy)) return;
-		if (selectedEquipment?.equipmentGroup.kind === "OHB") {
-			startSelectedOhbPlacementIntent("copy");
-			return;
-		}
 		if (selectedEquipment) {
-			startSelectedPortEquipmentGroupEdit("copy");
+			startSelectedPortEquipmentTransform("copy", selectedEquipment.equipmentGroup.kind);
 			return;
 		}
 		setStatus("선택 메뉴에서 클릭 또는 드래그로 일부 레일 선택 · 닫힌 Loop 불필요");
@@ -30747,12 +30748,14 @@ export default function TileFabApp(): React.ReactElement {
 		directlyOwned: selectedEquipmentDirectlyOwned,
 		organizations: activeOrganizations,
 	});
+	const selectedPortTransform = selectedPortDetails
+		? portEquipmentTransformPolicy(selectedPortDetails.equipmentGroup.kind) : null;
 	const contextPortActionReasons = selectedPortDetails && !templateSession && !areaStampSession && !areaSelection && !organizationBundlePlacementSession
 		? [...new Set([
 			selectedPortActions.move.reason,
 			selectedPortActions.copy.reason,
 			selectedPortActions.reverseServiceDirection.reason,
-			...(selectedPortDetails.equipmentGroup.kind === "OHB" ? [] : [selectedPortActions.editMembership.reason]),
+			...(selectedPortTransform?.editor === "single-port" ? [] : [selectedPortActions.editMembership.reason]),
 			selectedPortActions.delete.reason,
 		].filter((reason): reason is string => reason !== null))]
 		: [];
@@ -37776,70 +37779,37 @@ export default function TileFabApp(): React.ReactElement {
 										<X size={16} /> 선택 해제
 									</button>
 								</>
-							) : selectedPortDetails ? (
+							) : selectedPortDetails && selectedPortTransform ? (
 								<>
-									{selectedPortDetails.equipmentGroup.kind === "OHB" ? (
-										<>
-											<button
-												type="button"
-												role="menuitem"
-												disabled={!selectedPortActions.move.allowed}
-												title={selectedPortActions.move.reason ?? undefined}
-												onClick={() =>
-													runContextPaletteAction(() => startSelectedOhbPlacementIntent("move"))
-												}
-											>
-												<Move size={16} /> 포트 이동
-											</button>
-											<button
-												type="button"
-												role="menuitem"
-												disabled={!selectedPortActions.copy.allowed}
-												title={selectedPortActions.copy.reason ?? undefined}
-												onClick={() =>
-													runContextPaletteAction(() => startSelectedOhbPlacementIntent("copy"))
-												}
-											>
-												<Copy size={16} /> 포트 복제
-											</button>
-										</>
-									) : (
-										<>
-											<button
-												type="button"
-												role="menuitem"
-												disabled={!selectedPortActions.editMembership.allowed}
-												title={selectedPortActions.editMembership.reason ?? undefined}
-												onClick={() =>
-													runContextPaletteAction(startSelectedPortEquipmentMembershipEdit)
-												}
-											>
-												<MousePointer2 size={16} /> 포트 구성 편집
-											</button>
-											<button
-												type="button"
-												role="menuitem"
-												disabled={!selectedPortActions.move.allowed}
-												title={selectedPortActions.move.reason ?? undefined}
-												onClick={() =>
-													runContextPaletteAction(() => startSelectedPortEquipmentGroupEdit("move"))
-												}
-											>
-												<Move size={16} /> 그룹 전체 이동
-											</button>
-											<button
-												type="button"
-												role="menuitem"
-												disabled={!selectedPortActions.copy.allowed}
-												title={selectedPortActions.copy.reason ?? undefined}
-												onClick={() =>
-													runContextPaletteAction(() => startSelectedPortEquipmentGroupEdit("copy"))
-												}
-											>
-												<Copy size={16} /> 그룹 전체 복제
-											</button>
-										</>
-									)}
+									{selectedPortTransform.editor === "group" ? (
+										<button
+											type="button"
+											role="menuitem"
+											disabled={!selectedPortActions.editMembership.allowed}
+											title={selectedPortActions.editMembership.reason ?? undefined}
+											onClick={() => runContextPaletteAction(startSelectedPortEquipmentMembershipEdit)}
+										>
+											<MousePointer2 size={16} /> 포트 구성 편집
+										</button>
+									) : null}
+									<button
+										type="button"
+										role="menuitem"
+										disabled={!selectedPortActions.move.allowed}
+										title={selectedPortActions.move.reason ?? undefined}
+										onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentTransform("move", selectedPortDetails.equipmentGroup.kind))}
+									>
+										<Move size={16} /> {selectedPortTransform.move.contextLabel}
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										disabled={!selectedPortActions.copy.allowed}
+										title={selectedPortActions.copy.reason ?? undefined}
+										onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentTransform("copy", selectedPortDetails.equipmentGroup.kind))}
+									>
+										<Copy size={16} /> {selectedPortTransform.copy.contextLabel}
+									</button>
 									<button
 										type="button"
 										role="menuitem"
@@ -40683,7 +40653,7 @@ export default function TileFabApp(): React.ReactElement {
 						setCompactInspectorExpanded={setCompactInspectorExpanded}
 						setStatus={setStatus}
 						startEquipmentAuthoringContinuation={startEquipmentAuthoringContinuation}
-						startSelectedOhbPlacementIntent={startSelectedOhbPlacementIntent}
+						startSelectedPortEquipmentTransform={(mode) => startSelectedPortEquipmentTransform(mode, selectedPortDetails.equipmentGroup.kind)}
 						startSelectedPortEquipmentGroupEdit={startSelectedPortEquipmentGroupEdit}
 						startSelectedPortEquipmentMembershipEdit={startSelectedPortEquipmentMembershipEdit}
 						stkAuthoringTemplateLabel={stkAuthoringTemplateLabel}
