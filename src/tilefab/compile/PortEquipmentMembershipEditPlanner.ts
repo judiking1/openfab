@@ -1,5 +1,7 @@
+import { eqPitchPortTargets, resolveEqPitchEditTransition } from "../core/EqPitchEdit";
 import {
 	applyPortEquipmentMutations,
+	collectPortEquipmentIntegrityIssues,
 	defaultEqBodyDimensions,
 	type EquipmentGroupRecord,
 	equipmentGroupEquals,
@@ -18,7 +20,7 @@ import {
 	createPortEquipmentMutationPlan,
 	type PortEquipmentMutationPlan,
 } from "../core/PortEquipmentPlan";
-import type { PortMutation, PortRecord } from "../core/PortRecord";
+import { type PortMutation, type PortRecord, portRecordEquals } from "../core/PortRecord";
 import type { StaticFabOrganizationState } from "../core/StaticFabOrganization";
 import type { TileMap } from "../core/TileMap";
 import {
@@ -47,6 +49,114 @@ export interface PortEquipmentMembershipEditPlan extends PortEquipmentMutationPl
 export interface PortEquipmentMembershipEditReview {
 	readonly valid: boolean;
 	readonly reason: string;
+}
+
+/** Preview and commit use the same exact, anchor-fixed pitch plan; no IDs are allocated. */
+export function planEqPortPitchEdit(
+	map: TileMap,
+	slots: CompiledPortSlots,
+	slotIndex: PortEquipmentGroupSlotIndex,
+	availability: PortSlotAvailabilityIndex,
+	state: PortEquipmentState,
+	selection: { readonly equipmentGroupId: number; readonly portId: number },
+	pitchMillimeters: number,
+	baseRevision: number,
+	basePatchSequence: number,
+	organizations: StaticFabOrganizationState,
+): PortEquipmentMembershipEditPlan {
+	let editMetadata = metadata(selection.equipmentGroupId, [], [], [], []);
+	const fail = (reason: string) => invalid(baseRevision, basePatchSequence, editMetadata, reason);
+	if (
+		map.getRevision() !== baseRevision ||
+		slots.revision !== baseRevision ||
+		slotIndex.revision !== baseRevision ||
+		availability.revision !== baseRevision ||
+		!slotIndex.matches(slots) ||
+		!availability.matchesState(state)
+	)
+		return fail("원본 슬롯이나 장비가 변경되었습니다 · EQ를 다시 선택하세요");
+	if (slots.portType !== "EQ" || slotIndex.portType !== "EQ" || availability.portType !== "EQ")
+		return fail("EQ 간격 편집에는 EQ 슬롯이 필요합니다");
+	if (collectPortEquipmentIntegrityIssues(state).length > 0)
+		return fail("장비 Port 관계가 불완전합니다 · EQ를 다시 확인하세요");
+	try {
+		const snapshot = capturePortEquipmentGroupEditSnapshot(
+			state,
+			selection.equipmentGroupId,
+			selection.portId,
+		);
+		const source = snapshot.equipmentGroup;
+		if (source.kind !== "EQ") return fail("간격을 편집할 EQ Port를 선택하세요");
+		const targetPorts = eqPitchPortTargets(
+			source,
+			snapshot.ports,
+			selection.portId,
+			pitchMillimeters,
+		);
+		const rows: number[] = [];
+		const problems: string[] = [];
+		for (const [index, port] of targetPorts.entries()) {
+			const original = snapshot.ports[index] as PortRecord;
+			if (slotIndex.rowForPort(original) === null)
+				problems.push(`PORT-${port.id}의 기존 슬롯이 정확하지 않습니다`);
+			const row = slotIndex.rowForPort(port);
+			if (row === null) {
+				problems.push(
+					`PORT-${port.id}가 놓일 직선 슬롯이 없습니다 · 간격을 줄이거나 레일을 확장하세요`,
+				);
+				continue;
+			}
+			rows.push(row);
+			if (slots.statuses[row] !== PORT_SLOT_STATUS.LEGAL)
+				problems.push(`PORT-${port.id}가 놓일 슬롯이 안전하지 않습니다`);
+			const occupied = availability.statusForEquipmentGroup(slots, row, source.id);
+			if (occupied.status !== PORT_SLOT_STATUS.LEGAL)
+				problems.push(
+					`PORT-${port.id}의 대상 슬롯이 다른 장비와 겹칩니다 · 간격이나 주변 배치를 확인하세요`,
+				);
+		}
+		editMetadata = metadata(source.id, rows, source.portIds, [], []);
+		if (problems.length > 0) return fail(problems[0] as string);
+		if (source.pitchMillimeters === pitchMillimeters)
+			return fail("현재 간격과 같습니다 · 다른 간격을 선택하세요");
+		const target = { ...source, pitchMillimeters };
+		const minimum = defaultEqBodyDimensions(target).lengthMillimeters;
+		if (target.bodyDimensions && target.bodyDimensions.lengthMillimeters < minimum)
+			return fail(
+				`지정한 몸체 길이 ${target.bodyDimensions.lengthMillimeters / 1_000} m가 부족합니다 · ${source.portIds.length} Port에는 최소 ${minimum / 1_000} m가 필요합니다`,
+			);
+		const portChanges = targetPorts.flatMap((port, index) =>
+			portRecordEquals(snapshot.ports[index], port)
+				? []
+				: [{ id: port.id, before: snapshot.ports[index] as PortRecord, after: port }],
+		);
+		const groupChanges = [{ id: source.id, before: source, after: target }];
+		const prospective = applyPortEquipmentMutations(state, portChanges, groupChanges);
+		const transition = resolveEqPitchEditTransition(
+			organizations,
+			state,
+			prospective,
+			portChanges,
+			groupChanges,
+		);
+		if (!transition || transition.reason)
+			return fail(transition?.reason ?? "간격 변경을 확인할 수 없습니다");
+		assertPortEquipmentLayout(map, prospective);
+		return Object.freeze({
+			...createPortEquipmentMutationPlan(
+				"edit-port-equipment",
+				baseRevision,
+				basePatchSequence,
+				portChanges,
+				groupChanges,
+			),
+			reason: `PORT-${selection.portId} 고정 · ${source.portIds.length} Port · ${source.pitchMillimeters / 1_000} → ${pitchMillimeters / 1_000} m`,
+			membershipEdit: editMetadata,
+		});
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : "EQ 간격을 변경할 수 없습니다";
+		return fail(reason.replace(/^Port equipment layout is invalid:\s*/, "") || reason);
+	}
 }
 
 /**

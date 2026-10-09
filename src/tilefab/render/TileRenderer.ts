@@ -483,6 +483,7 @@ export interface TileRenderInput {
 		plan: PortEquipmentGroupEditPlan | null;
 	}> | null;
 	portEquipmentMembershipPreview?: Readonly<{
+		movesPorts?: boolean;
 		slots: CompiledPortSlots;
 		sourceRows: readonly number[];
 		targetRows: readonly number[];
@@ -3006,12 +3007,18 @@ export class TileRenderer {
 				input,
 				preview.slots,
 				row,
-				targetRows.has(row) ? "retained" : "removed",
+				targetRows.has(row) ? "retained" : preview.movesPorts ? "origin" : "removed",
 			);
 		}
 		for (const row of preview.targetRows) {
 			if (sourceRows.has(row)) continue;
-			this.drawPortMembershipMarker(ctx, input, preview.slots, row, "added");
+			this.drawPortMembershipMarker(
+				ctx,
+				input,
+				preview.slots,
+				row,
+				preview.movesPorts ? "destination" : "added",
+			);
 		}
 	}
 
@@ -3020,7 +3027,7 @@ export class TileRenderer {
 		input: TileRenderInput,
 		slots: CompiledPortSlots,
 		row: number,
-		state: "retained" | "added" | "removed",
+		state: "retained" | "added" | "removed" | "origin" | "destination",
 	): void {
 		if (!isPortSlotRow(slots, row)) return;
 		const center = this.worldToScreen(
@@ -3031,7 +3038,14 @@ export class TileRenderer {
 			input.camera,
 		);
 		const radius = clamp(input.camera.zoom * 0.2, 8, 13);
-		const color = state === "added" ? "#6fe0a8" : state === "removed" ? "#ff7f8e" : "#d9c884";
+		const color =
+			state === "added" || state === "destination"
+				? "#6fe0a8"
+				: state === "removed"
+					? "#ff7f8e"
+					: state === "origin"
+						? "#9bb8be"
+						: "#d9c884";
 		ctx.save();
 		ctx.beginPath();
 		ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
@@ -3052,7 +3066,11 @@ export class TileRenderer {
 		ctx.font = `bold ${Math.round(clamp(radius * 1.25, 11, 16))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
 		ctx.textAlign = "center";
 		ctx.textBaseline = "middle";
-		ctx.fillText(state === "added" ? "+" : state === "removed" ? "−" : "·", center.x, center.y);
+		ctx.fillText(
+			state === "added" ? "+" : state === "removed" ? "−" : state === "origin" ? "↔" : "·",
+			center.x,
+			center.y,
+		);
 		ctx.restore();
 	}
 
@@ -3105,6 +3123,7 @@ export class TileRenderer {
 		input: TileRenderInput,
 		draft: EqRowDraftSelection,
 	): void {
+		if (input.portEquipmentMembershipPreview?.movesPorts) return;
 		const slots = input.portSlots;
 		const snappedRow = draft.rows.at(-1);
 		if (!slots || !isPortSlotRow(slots, draft.anchorRow) || snappedRow === undefined) return;

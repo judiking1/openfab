@@ -754,3 +754,41 @@
 		width: min(620px, calc(100% - 202px));
 	}
 }
+
+.tilefab-eq-membership-options {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	flex-basis: 100%;
+	min-width: 0;
+}
+.tilefab-eq-edit-mode,
+.tilefab-eq-pitch-options {
+	border: 0;
+	padding: 0;
+	margin: 0;
+	min-width: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+.tilefab-eq-membership-options button[aria-pressed="true"] {
+	border-color: #65d7bd;
+	color: #adf4dc;
+	background: #21443e;
+}
+.tilefab-eq-membership-options > small {
+	flex-basis: 100%;
+	color: #a8b7b4;
+}
+.tilefab-equipment-membershipbar .tilefab-equipment-transform-actions {
+	flex-wrap: wrap;
+}
+.tilefab-equipment-membershipbar
+	.tilefab-equipment-transform-actions
+	> .tilefab-equipment-transform-state {
+	flex-basis: 100%;
+	width: 100%;
+	margin-bottom: 4px;
+}

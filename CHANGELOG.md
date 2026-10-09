@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.101] - 2026-10-09
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Edit an existing EQ's Port pitch from 1–5 m while keeping the selected Port fixed and preserving
+  Port count, IDs, barcodes, service direction and Process Loop ownership. Preview the change,
+  then apply or cancel it; one Undo/Redo restores the complete edit.
+- Preserve explicitly authored body dimensions and reject insufficient length, unsafe slots or
+  collisions with a clear reason. Automatic body dimensions follow the new pitch, and saved
+  projects reopen with the same editable Port configuration.
+
 ## [0.1.100] - 2026-10-09
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { type PortEquipmentState, resolveEqBodyDimensions } from "../core/EquipmentGroup";
 import { planRailConstruction } from "../core/paint";
 import { RailDocument, type RailPatchEvent } from "../core/RailDocument";
 import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
 import { compareDirectedRailEdges } from "../core/StaticFabOrganization";
+import { captureOpenFabProject } from "../project/OpenFabProject";
+import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/OpenFabProjectCodec";
 import { checksumRailMap } from "../worker/RailMirrorChecksum";
+import { hydrateRailMirrorSnapshotDocument } from "../worker/RailMirrorSnapshotDocument";
+import { compileRailStartup } from "../worker/RailStartupRuntime";
 import { selectEqRowDraft } from "./EqRowDraftSelector";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { planResizeEqBody } from "./PortEquipmentEditPlanner";
@@ -12,6 +17,7 @@ import {
 	portEquipmentGroupSlotIndexFor,
 } from "./PortEquipmentGroupEditPlanner";
 import {
+	planEqPortPitchEdit,
 	planPortEquipmentMembershipEdit,
 	reviewPortEquipmentMembershipEdit,
 } from "./PortEquipmentMembershipEditPlanner";
@@ -642,4 +648,434 @@ function rowAt(
 		if (slots.routeXs[row] === x && slots.routeZs[row] === z) return row;
 	}
 	throw new Error(`Missing ${slots.portType} slot at ${x},${z}.`);
+}
+
+describe("anchor-fixed EQ pitch editing", () => {
+	it("keeps the complete body-collision cause without the internal layout prefix", () => {
+		const { document, slots, physical, plan } = pitchFixture();
+		expect(
+			document.commitPortEquipment(
+				planResizeEqBody(
+					document.map,
+					document.portEquipment,
+					{ portId: 1, equipmentGroupId: 1 },
+					{ lengthMillimeters: 8_000, widthMillimeters: 900 },
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					document.organizations,
+				),
+			),
+		).toBe(true);
+		const neighbor = planEqRowPlacement(
+			slots,
+			[16, 17].map((x) => rowAt(slots, x, 0)),
+			new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+			document.portEquipment,
+			1_000,
+			null,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+		);
+		expect(document.commitPortEquipment(neighbor), neighbor.reason).toBe(true);
+		const source = document.portEquipment;
+		const sequence = document.getPatchSequence();
+		expect(plan(2_000, 1)).toMatchObject({
+			valid: false,
+			reason: "EQ 1 몸체가 EQ 2 몸체와 겹칩니다 · 길이·폭을 줄이거나 주변 장비를 이동하세요.",
+		});
+		expect(document.portEquipment).toBe(source);
+		expect(document.getPatchSequence()).toBe(sequence);
+	});
+
+	it.each([
+		"Unexpected slot lookup failure: detailed cause",
+		"Port equipment layout is invalid:",
+	])("preserves an unknown or detail-free error: %s", (reason) => {
+		const { slots, plan } = pitchFixture();
+		const lookup = vi
+			.spyOn(portEquipmentGroupSlotIndexFor(slots), "rowForPort")
+			.mockImplementationOnce(() => {
+				throw new Error(reason);
+			});
+		try {
+			expect(plan(2_000)).toMatchObject({ valid: false, reason });
+		} finally {
+			lookup.mockRestore();
+		}
+	});
+
+	it.each([
+		"east",
+		"south",
+		"west",
+		"north",
+	] as const)("keeps all identities with each anchor on a %s rail", (direction) => {
+		for (const anchorId of [1, 2, 3]) {
+			const fixture = pitchFixture(direction);
+			const { document } = fixture;
+			const original = document.portEquipment;
+			const originalSequence = document.getPatchSequence();
+			const plan = fixture.plan(3_000, anchorId);
+			expect(plan.valid, plan.reason).toBe(true);
+			expect(document.portEquipment).toBe(original);
+			expect(document.getPatchSequence()).toBe(originalSequence);
+			expect(plan.membershipEdit).toMatchObject({
+				retainedPortIds: [1, 2, 3],
+				addedPortIds: [],
+				removedPortIds: [],
+			});
+			expect(plan.portMutations).toHaveLength(2);
+			expect(
+				document.commitPortEquipment(plan),
+				document.getLastCommandError() ?? plan.reason,
+			).toBe(true);
+			const changed = document.portEquipment;
+			expect(changed.ports.find((port) => port.id === anchorId)).toEqual(
+				original.ports.find((port) => port.id === anchorId),
+			);
+			expect(changed.equipmentGroups[0]).toEqual({
+				...original.equipmentGroups[0],
+				pitchMillimeters: 3_000,
+			});
+			expect(changed.equipmentGroups[0]).not.toHaveProperty("bodyDimensions");
+			expect(changed.nextPortId).toBe(original.nextPortId);
+			expect(changed.nextEquipmentGroupId).toBe(original.nextEquipmentGroupId);
+			for (const port of changed.ports)
+				expect({
+					...port,
+					route: original.ports.find((source) => source.id === port.id)?.route,
+				}).toEqual(original.ports.find((source) => source.id === port.id));
+			expect(document.undo()).toBe(true);
+			expect(document.portEquipment).toEqual(original);
+			expect(document.redo()).toBe(true);
+			expect(document.portEquipment).toEqual(changed);
+		}
+	});
+
+	it.each([
+		1_000, 2_000, 3_000, 4_000, 5_000,
+	])("supports %i mm and derives automatic body length", (pitch) => {
+		const { document, plan } = pitchFixture();
+		if (pitch === 1_000) {
+			expect(plan(pitch).valid).toBe(false);
+			expect(document.commitPortEquipment(plan(2_000))).toBe(true);
+		}
+		const edit = plan(pitch);
+		expect(document.commitPortEquipment(edit), edit.reason).toBe(true);
+		const group = document.portEquipment.equipmentGroups[0];
+		if (group?.kind !== "EQ") throw new Error("Expected EQ");
+		expect(resolveEqBodyDimensions(group).lengthMillimeters).toBe(2 * pitch + 1_000);
+		expect(group).not.toHaveProperty("bodyDimensions");
+	});
+
+	it("preserves explicit dimensions and rejects insufficient length without changing the draft source", () => {
+		const { document, plan } = pitchFixture();
+		const dimensions = { lengthMillimeters: 5_000, widthMillimeters: 1_000 };
+		expect(
+			document.commitPortEquipment(
+				planResizeEqBody(
+					document.map,
+					document.portEquipment,
+					{ portId: 2, equipmentGroupId: 1 },
+					dimensions,
+					document.map.getRevision(),
+					document.getPatchSequence(),
+					document.organizations,
+				),
+			),
+		).toBe(true);
+		const before = document.portEquipment;
+		expect(plan(3_000)).toMatchObject({ valid: false, reason: expect.stringMatching(/최소 7 m/) });
+		expect(document.portEquipment).toBe(before);
+		expect(document.commitPortEquipment(plan(2_000))).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]).toMatchObject({ bodyDimensions: dimensions });
+	});
+
+	it("rejects invalid pitch, anchor, stale catalogs, missing slots and occupied target slots", () => {
+		const { document, slots, physical, plan } = pitchFixture();
+		for (const pitch of [0, 500, 1_500, 6_000, Number.NaN]) expect(plan(pitch).valid).toBe(false);
+		expect(plan(2_000, 99).valid).toBe(false);
+		const staleAvailability = new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ");
+		const stale = plan(2_000);
+		expect(document.commitPortEquipment(stale)).toBe(true);
+		expect(document.commitPortEquipment(stale)).toBe(false);
+		expect(
+			planEqPortPitchEdit(
+				document.map,
+				slots,
+				portEquipmentGroupSlotIndexFor(slots),
+				staleAvailability,
+				document.portEquipment,
+				{ equipmentGroupId: 1, portId: 2 },
+				3_000,
+				document.map.getRevision(),
+				document.getPatchSequence(),
+				document.organizations,
+			).valid,
+		).toBe(false);
+		const limited = pitchFixture("east", [2, 3, 4]);
+		expect(limited.plan(5_000, 3)).toMatchObject({
+			valid: false,
+			reason: expect.stringMatching(/직선 슬롯이 없습니다/),
+		});
+		const occupied = pitchFixture();
+		const extra = planEqRowPlacement(
+			occupied.slots,
+			[14, 15].map((x) => rowAt(occupied.slots, x, 0)),
+			new PortSlotAvailabilityIndex(occupied.physical, occupied.document.portEquipment, "EQ"),
+			occupied.document.portEquipment,
+			1_000,
+			null,
+			occupied.document.map.getRevision(),
+			occupied.document.getPatchSequence(),
+		);
+		expect(occupied.document.commitPortEquipment(extra), extra.reason).toBe(true);
+		expect(occupied.plan(3_000)).toMatchObject({
+			valid: false,
+			reason: expect.stringMatching(/겹칩니다/),
+		});
+	});
+
+	it.each([
+		false,
+		true,
+	])("reopens pitch and explicit-body=%s through the native codec and continues editing", (explicitBody) => {
+		const fixture = pitchFixture();
+		const { document } = fixture;
+		if (explicitBody)
+			expect(
+				document.commitPortEquipment(
+					planResizeEqBody(
+						document.map,
+						document.portEquipment,
+						{ portId: 2, equipmentGroupId: 1 },
+						{ lengthMillimeters: 7_000, widthMillimeters: 900 },
+						document.map.getRevision(),
+						document.getPatchSequence(),
+						document.organizations,
+					),
+				),
+			).toBe(true);
+		expect(document.commitPortEquipment(fixture.plan(3_000))).toBe(true);
+		const manifest = {
+			id: "eq-pitch-test",
+			name: "Synthetic EQ pitch",
+			createdAt: "2026-10-09T00:00:00.000Z",
+			updatedAt: "2026-10-09T00:00:00.000Z",
+		};
+		const json = serializeOpenFabProject(captureOpenFabProject(document, { manifest }));
+		expect(parseOpenFabProjectJson(json).project.schemaVersion).toBe(16);
+		const startup = compileRailStartup({ kind: "project-json", json });
+		const reopened = hydrateRailMirrorSnapshotDocument(startup.snapshot);
+		expect(startup.authoredChecksum).toBe(
+			checksumRailMap(document.map, document.portEquipment, document.organizations),
+		);
+		expect(reopened.portEquipment).toEqual(document.portEquipment);
+		expect(reopened.canUndo).toBe(false);
+		const physical = compilePhysicalRail(reopened.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const edit = planEqPortPitchEdit(
+			reopened.map,
+			slots,
+			portEquipmentGroupSlotIndexFor(slots),
+			new PortSlotAvailabilityIndex(physical, reopened.portEquipment, "EQ"),
+			reopened.portEquipment,
+			{ equipmentGroupId: 1, portId: 2 },
+			2_000,
+			reopened.map.getRevision(),
+			reopened.getPatchSequence(),
+			reopened.organizations,
+		);
+		expect(reopened.commitPortEquipment(edit), edit.reason).toBe(true);
+		expect(reopened.undo()).toBe(true);
+		expect(reopened.portEquipment).toEqual(document.portEquipment);
+		expect(reopened.redo()).toBe(true);
+	});
+
+	it("keeps all 64 Port identities at the maximum count and pitch", () => {
+		const document = closedLoopDocument(330, 8);
+		const physical = compilePhysicalRail(document.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const rows = Array.from({ length: 64 }, (_, index) => rowAt(slots, index + 2, 0));
+		expect(
+			document.commitPortEquipment(
+				planEqRowPlacement(
+					slots,
+					rows,
+					new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+					document.portEquipment,
+					1_000,
+					null,
+					document.map.getRevision(),
+					document.getPatchSequence(),
+				),
+			),
+		).toBe(true);
+		const source = document.portEquipment;
+		const edit = planEqPortPitchEdit(
+			document.map,
+			slots,
+			portEquipmentGroupSlotIndexFor(slots),
+			new PortSlotAvailabilityIndex(physical, source, "EQ"),
+			source,
+			{ equipmentGroupId: 1, portId: 1 },
+			5_000,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+		expect(edit.portMutations).toHaveLength(63);
+		expect(document.commitPortEquipment(edit), edit.reason).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]?.portIds).toEqual(
+			source.equipmentGroups[0]?.portIds,
+		);
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment).toEqual(source);
+	});
+
+	it("rejects proposals crossing separated straight runs", () => {
+		const document = new RailDocument();
+		for (const [start, end] of [
+			[0, 6],
+			[8, 14],
+		])
+			expect(
+				document.commit(
+					planRailConstruction(
+						document.map,
+						{ x: start as number, y: 0 },
+						{ x: end as number, y: 0 },
+					),
+				),
+			).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		expect(
+			document.commitPortEquipment(
+				planEqRowPlacement(
+					slots,
+					[2, 3].map((x) => rowAt(slots, x, 0)),
+					new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+					document.portEquipment,
+					1_000,
+					null,
+					document.map.getRevision(),
+					document.getPatchSequence(),
+				),
+			),
+		).toBe(true);
+		const plan = planEqPortPitchEdit(
+			document.map,
+			slots,
+			portEquipmentGroupSlotIndexFor(slots),
+			new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+			document.portEquipment,
+			{ equipmentGroupId: 1, portId: 1 },
+			5_000,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+		expect(plan).toMatchObject({
+			valid: false,
+			reason: expect.stringMatching(/슬롯/),
+		});
+	});
+
+	it("rechecks every proposed Port against supplied Process Loop containment", () => {
+		const fixture = pitchFixture("east", [16, 17, 18]);
+		const { document } = fixture;
+		// A narrowed ownership snapshot is passed to preview directly: containment must be checked
+		// independently of document admission (which also requires whole rail modules).
+		const organizations = {
+			nextOrganizationId: 2,
+			records: [
+				{
+					id: 1,
+					kind: "AISLE" as const,
+					declaredSemanticRole: "PROCESS_LOOP" as const,
+					name: "Synthetic Loop",
+					membership: {
+						railEdges: buildRailModuleOwnershipIndex(document.map)
+							.modules.flatMap((module) => module.eraseEdges)
+							.filter((edge) => edge.from.x < 20 && edge.to.x < 20)
+							.sort(compareDirectedRailEdges),
+						advancedSwitchIds: [],
+						equipmentGroupIds: [1],
+					},
+				},
+			],
+		};
+		const plan = planEqPortPitchEdit(
+			document.map,
+			fixture.slots,
+			portEquipmentGroupSlotIndexFor(fixture.slots),
+			new PortSlotAvailabilityIndex(fixture.physical, document.portEquipment, "EQ"),
+			document.portEquipment,
+			{ equipmentGroupId: 1, portId: 2 },
+			3_000,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			organizations,
+		);
+		expect(plan).toMatchObject({ valid: false, reason: expect.stringMatching(/Loop.*밖/) });
+	});
+});
+
+function pitchFixture(
+	direction: "east" | "south" | "west" | "north" = "east",
+	positions = [10, 11, 12],
+) {
+	const rails = closedLoopDocument(30, 30);
+	const physical = compilePhysicalRail(rails.map);
+	const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+	const rows = positions.map((position) =>
+		rowAt(
+			slots,
+			direction === "east"
+				? position
+				: direction === "west"
+					? 30 - position
+					: direction === "south"
+						? 30
+						: 0,
+			direction === "south"
+				? position
+				: direction === "north"
+					? 30 - position
+					: direction === "west"
+						? 30
+						: 0,
+		),
+	);
+	const placement = planEqRowPlacement(
+		slots,
+		rows,
+		new PortSlotAvailabilityIndex(physical, rails.portEquipment, "EQ"),
+		rails.portEquipment,
+		1_000,
+		"PHOTO",
+		rails.map.getRevision(),
+		rails.getPatchSequence(),
+	);
+	expect(rails.commitPortEquipment(placement), placement.reason).toBe(true);
+	const state: PortEquipmentState = {
+		...rails.portEquipment,
+		ports: rails.portEquipment.ports.map((port) => ({ ...port, direction: "AGAINST_TRAVEL" })),
+	};
+	const document = RailDocument.fromLoadedMap(rails.map, rails.getPatchSequence(), state);
+	const plan = (pitch: number, anchorId = 2) =>
+		planEqPortPitchEdit(
+			document.map,
+			slots,
+			portEquipmentGroupSlotIndexFor(slots),
+			new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+			document.portEquipment,
+			{ equipmentGroupId: 1, portId: anchorId },
+			pitch,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+	return { document, slots, physical, plan };
 }

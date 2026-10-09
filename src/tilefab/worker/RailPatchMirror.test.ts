@@ -11,7 +11,10 @@ import {
 	PortEquipmentGroupSlotIndex,
 	planPortEquipmentGroupEdit,
 } from "../compile/PortEquipmentGroupEditPlanner";
-import { planPortEquipmentMembershipEdit } from "../compile/PortEquipmentMembershipEditPlanner";
+import {
+	planEqPortPitchEdit,
+	planPortEquipmentMembershipEdit,
+} from "../compile/PortEquipmentMembershipEditPlanner";
 import {
 	compilePortEquipmentPresentation,
 	PortEquipmentSpatialIndex,
@@ -2762,5 +2765,133 @@ describe("rail mirror checksum", () => {
 		for (const [x, y, encoded] of [...cells].reverse()) reverse.setEncoded(x, y, encoded);
 
 		expect(checksumRailMap(forward)).toBe(checksumRailMap(reverse));
+	});
+});
+
+describe("anchor-fixed EQ pitch admission", () => {
+	it.each([
+		"unowned",
+		"loop",
+		"standalone",
+	] as const)("mirrors %s pitch edits and exact Undo/Redo", (ownership) => {
+		const { document, slots, physical } = loopEquipmentFixture("EQ", ownership);
+		const before = document.portEquipment;
+		const mirror = new RailPatchMirror();
+		mirror.sync(
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				before,
+				document.organizations,
+			).snapshot,
+		);
+		const buffers = mirror.getPhysicalPublication().current.buffers;
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => {
+			events.push(event);
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		});
+		const plan = planEqPortPitchEdit(
+			document.map,
+			slots,
+			new PortEquipmentGroupSlotIndex(slots),
+			new PortSlotAvailabilityIndex(physical, before, "EQ"),
+			before,
+			{ equipmentGroupId: 1, portId: 1 },
+			3_000,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+		expect(document.commitPortEquipment(plan), document.getLastCommandError() ?? plan.reason).toBe(
+			true,
+		);
+		const after = document.portEquipment;
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment).toEqual(before);
+		expect(document.redo()).toBe(true);
+		expect(document.portEquipment).toEqual(after);
+		expect(events).toHaveLength(3);
+		expect(
+			events.every(
+				(event) =>
+					event.portChanges.length === 1 &&
+					event.equipmentGroupChanges.length === 1 &&
+					event.organizationChanges.length === 0,
+			),
+		).toBe(true);
+		expect(mirror.state.checksum).toBe(
+			checksumRailMap(document.map, after, document.organizations),
+		);
+		expect(mirror.getPhysicalPublication().current.buffers).toBe(buffers);
+	});
+
+	it("rejects forged metadata, changed anchors, mixed edits and unsupported owners in Document and Worker", () => {
+		const { document, slots, physical } = loopEquipmentFixture("EQ");
+		const before = document.portEquipment;
+		const valid = planEqPortPitchEdit(
+			document.map,
+			slots,
+			new PortEquipmentGroupSlotIndex(slots),
+			new PortSlotAvailabilityIndex(physical, before, "EQ"),
+			before,
+			{ equipmentGroupId: 1, portId: 1 },
+			3_000,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+		expect(valid.valid, valid.reason).toBe(true);
+		for (const field of [
+			{ barcode: "REPLACED" },
+			{ direction: "AGAINST_TRAVEL" as const },
+			{ stationMillimeters: 501 },
+		]) {
+			assertLoopEditRejected(
+				document,
+				{
+					...valid,
+					portMutations: valid.portMutations.map((change) => ({
+						...change,
+						after: change.after ? { ...change.after, ...field } : null,
+					})),
+				},
+				"direction" in field ? /서비스 방향 반전/ : /간격만 변경/,
+			);
+		}
+		const anchor = before.ports[0] as PortRecord;
+		assertLoopEditRejected(
+			document,
+			{
+				...valid,
+				portMutations: [
+					...valid.portMutations,
+					{ id: anchor.id, before: anchor, after: { ...anchor, barcode: "NEW-ANCHOR" } },
+				].sort((a, b) => a.id - b.id),
+			},
+			/기준 Port 하나/,
+		);
+		for (const extra of [
+			{ recipe: "CHANGED" },
+			{ bodyDimensions: { lengthMillimeters: 4_000, widthMillimeters: 900 } },
+		]) {
+			assertLoopEditRejected(
+				document,
+				{
+					...valid,
+					equipmentGroupMutations: valid.equipmentGroupMutations.map((change) => ({
+						...change,
+						after: change.after?.kind === "EQ" ? { ...change.after, ...extra } : change.after,
+					})),
+				},
+				/몸체 설정|Port를 고정/,
+			);
+		}
+		for (const owner of ["area", "multiple"] as const)
+			assertLoopEditRejected(
+				loopEquipmentFixture("EQ", owner).document,
+				valid,
+				/Process Loop가 아닙니다|여러 조직/,
+			);
 	});
 });

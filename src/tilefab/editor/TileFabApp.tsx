@@ -113,6 +113,7 @@ import {
 } from "../compile/PortEquipmentGroupEditPlanner";
 import {
 	type PortEquipmentMembershipEditPlan,
+	planEqPortPitchEdit,
 	planPortEquipmentMembershipEdit,
 	reviewPortEquipmentMembershipEdit,
 } from "../compile/PortEquipmentMembershipEditPlanner";
@@ -1413,6 +1414,8 @@ interface PortEquipmentMembershipEditSessionBase {
 type PortEquipmentMembershipEditSession =
 	| (PortEquipmentMembershipEditSessionBase & {
 			readonly portType: "EQ";
+			readonly editMode: "membership" | "pitch";
+			readonly sourcePitchMillimeters: number;
 			readonly pitchMillimeters: number;
 			activeEndpoint: "upstream" | "downstream";
 			fixedAnchorRow: number;
@@ -13611,6 +13614,7 @@ export default function TileFabApp(): React.ReactElement {
 					: null,
 				portEquipmentMembershipPreview: portEquipmentMembershipEditSessionRef.current
 					? {
+							movesPorts: portEquipmentMembershipEditSessionRef.current.portType === "EQ" && portEquipmentMembershipEditSessionRef.current.editMode === "pitch",
 							slots: portEquipmentMembershipEditSessionRef.current.slots,
 							sourceRows: portEquipmentMembershipEditSessionRef.current.sourceRows,
 							targetRows: portEquipmentMembershipEditSessionRef.current.selection.rows,
@@ -17182,7 +17186,7 @@ export default function TileFabApp(): React.ReactElement {
 
 	nudgePortEquipmentMembershipRef.current = (deltaX: number, deltaZ: number): void => {
 		const session = portEquipmentMembershipEditSessionRef.current;
-		if (!session || (deltaX === 0 && deltaZ === 0)) return;
+		if (!session || (session.portType === "EQ" && session.editMode === "pitch") || (deltaX === 0 && deltaZ === 0)) return;
 		if (!isCurrentPortEquipmentMembershipEdit(session)) {
 			clearTransientConstruction("정적 FAB가 변경되어 포트 구성 편집을 취소했습니다");
 			return;
@@ -17261,6 +17265,7 @@ export default function TileFabApp(): React.ReactElement {
 		session: Extract<PortEquipmentMembershipEditSession, { portType: "EQ" }>,
 		targetRow: number,
 	): boolean => {
+		if (session.editMode === "pitch") return false;
 		if (!isCurrentPortEquipmentMembershipEdit(session)) {
 			eqMembershipDragRef.current = null;
 			clearTransientConstruction("정적 FAB가 변경되어 EQ 포트 편집을 취소했습니다");
@@ -17361,6 +17366,48 @@ export default function TileFabApp(): React.ReactElement {
 		scheduleRender();
 	};
 
+	const chooseEqMembershipPitch = (pitchMillimeters: number): void => {
+		const session = portEquipmentMembershipEditSessionRef.current;
+		if (!session || session.portType !== "EQ" || session.editMode !== "pitch") return;
+		if (!isCurrentPortEquipmentMembershipEdit(session)) {
+			clearTransientConstruction("정적 FAB가 변경되었습니다 · EQ 간격을 다시 편집하세요");
+			return;
+		}
+		const plan = planEqPortPitchEdit(session.document.map, session.slots, session.slotIndex,
+			session.availability, session.document.portEquipment,
+			{ equipmentGroupId: session.sourceEquipmentGroupId, portId: session.sourceAnchorPortId },
+			pitchMillimeters, session.baseRevision, session.basePatchSequence, session.document.organizations);
+		const sourcePort = session.sourceState.ports.find((port) => port.id === session.sourceAnchorPortId);
+		const anchorRow = sourcePort ? session.slotIndex.rowForPort(sourcePort) : null;
+		if (anchorRow === null) return;
+		updatePortEquipmentMembershipEditSession(Object.freeze({ ...session, pitchMillimeters, plan,
+			keyboardRow: anchorRow,
+			selection: Object.freeze({ ...session.selection,
+				state: plan.valid ? "READY" : "BLOCKED", valid: plan.valid, reason: plan.reason,
+				pitchMillimeters, anchorRow, targetRow: anchorRow, rows: plan.membershipEdit.targetRows,
+				blockedRows: [], continuityRows: [],
+			}),
+		}));
+		setStatus(plan.reason);
+		scheduleRender();
+	};
+
+	const setEqMembershipEditMode = (mode: "membership" | "pitch"): void => {
+		const session = portEquipmentMembershipEditSessionRef.current;
+		if (!session || session.portType !== "EQ" || session.editMode === mode) return;
+		const dirty = session.editMode === "pitch"
+			? session.pitchMillimeters !== session.sourcePitchMillimeters
+			: !sameNumberSet(session.sourceRows, session.selection.rows);
+		if (dirty) { setStatus("현재 변경을 적용하거나 취소한 뒤 편집 방식을 바꾸세요"); return; }
+		if (!isCurrentPortEquipmentMembershipEdit(session)) {
+			clearTransientConstruction("정적 FAB가 변경되었습니다 · EQ를 다시 선택하세요"); return;
+		}
+		if (mode === "membership") { startSelectedPortEquipmentMembershipEdit(); return; }
+		eqMembershipDragRef.current = null;
+		updatePortEquipmentMembershipEditSession(Object.freeze({ ...session, editMode: "pitch", plan: null }));
+		chooseEqMembershipPitch(session.sourcePitchMillimeters);
+	};
+
 	const completePortEquipmentMembershipEdit = (): void => {
 		const session = portEquipmentMembershipEditSessionRef.current;
 		const blockedReason = editorMutationWaitBlockedReason();
@@ -17375,6 +17422,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		const selectedRows = session.selection.rows;
+		const pitchEdit = session.portType === "EQ" && session.editMode === "pitch";
 		if (
 			(session.portType === "EQ" && !session.selection.valid) ||
 			(session.portType === "STK" && !session.selection.canComplete)
@@ -17386,12 +17434,17 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
-		if (sameNumberSet(session.sourceRows, selectedRows)) {
+		if (!pitchEdit && sameNumberSet(session.sourceRows, selectedRows)) {
 			setStatus("포트 구성에 변경사항이 없습니다");
 			return;
 		}
 		const planStartedAt = performanceNow();
-		const plan = planPortEquipmentMembershipEdit(
+		const plan = pitchEdit ? planEqPortPitchEdit(
+			session.document.map, session.slots, session.slotIndex, session.availability,
+			session.document.portEquipment,
+			{ equipmentGroupId: session.sourceEquipmentGroupId, portId: session.sourceAnchorPortId },
+			session.pitchMillimeters, session.baseRevision, session.basePatchSequence, session.document.organizations,
+		) : planPortEquipmentMembershipEdit(
 			session.document.map,
 			session.slots,
 			session.slotIndex,
@@ -17450,7 +17503,7 @@ export default function TileFabApp(): React.ReactElement {
 			});
 		}
 		syncModelUi(
-			`${session.portType}-${session.sourceEquipmentGroupId} 포트 구성 완료 · ${selectedRows.length} PORT · +${plan.membershipEdit.addedPortIds.length} / -${plan.membershipEdit.removedPortIds.length}`,
+			pitchEdit ? `EQ-${session.sourceEquipmentGroupId} 간격 ${session.pitchMillimeters / 1_000} m 적용 · PORT-${session.sourceAnchorPortId} 고정` : `${session.portType}-${session.sourceEquipmentGroupId} 포트 구성 완료 · ${selectedRows.length} PORT · +${plan.membershipEdit.addedPortIds.length} / -${plan.membershipEdit.removedPortIds.length}`,
 		);
 		requestAnimationFrame(() => canvasRef.current?.focus());
 	};
@@ -17459,7 +17512,7 @@ export default function TileFabApp(): React.ReactElement {
 
 	const switchEqMembershipEndpoint = (): void => {
 		const session = portEquipmentMembershipEditSessionRef.current;
-		if (!session || session.portType !== "EQ" || session.selection.rows.length < 2) return;
+		if (!session || session.portType !== "EQ" || session.editMode === "pitch" || session.selection.rows.length < 2) return;
 		if (!isCurrentPortEquipmentMembershipEdit(session)) {
 			clearTransientConstruction("정적 FAB가 변경되어 포트 구성 편집을 취소했습니다");
 			return;
@@ -18651,6 +18704,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const membershipEditSession = portEquipmentMembershipEditSessionRef.current;
 		if (membershipEditSession) {
+			if (membershipEditSession.portType === "EQ" && membershipEditSession.editMode === "pitch") return;
 			const row = hoverPortSlotRef.current;
 			if (row === null) {
 				setStatus(`${membershipEditSession.portType} CENTER 슬롯을 선택하세요`);
@@ -22931,6 +22985,8 @@ export default function TileFabApp(): React.ReactElement {
 			session = Object.freeze({
 				...base,
 				portType: "EQ",
+				editMode: "membership",
+				sourcePitchMillimeters: resolved.equipmentGroup.pitchMillimeters,
 				pitchMillimeters: resolved.equipmentGroup.pitchMillimeters,
 				activeEndpoint,
 				fixedAnchorRow,
@@ -31350,12 +31406,22 @@ export default function TileFabApp(): React.ReactElement {
 	const membershipReviewRows = portEquipmentMembershipEditSession?.selection.rows;
 	const membershipReviewRevision = portEquipmentMembershipEditSession?.baseRevision;
 	const membershipReviewSequence = portEquipmentMembershipEditSession?.basePatchSequence;
+	const membershipReviewPitch = portEquipmentMembershipEditSession?.portType === "EQ" &&
+		portEquipmentMembershipEditSession.editMode === "pitch" ? portEquipmentMembershipEditSession.pitchMillimeters : undefined;
+	const membershipReviewAnchor = portEquipmentMembershipEditSession?.sourceAnchorPortId;
 	const portEquipmentMembershipReview = useMemo(() => {
 		if (!membershipReviewDocument || !membershipReviewSlots || !membershipReviewIndex ||
 			!membershipReviewAvailability || membershipReviewGroupId === undefined || !membershipReviewRows ||
 			membershipReviewRevision === undefined || membershipReviewSequence === undefined) return null;
 		if (membershipReviewDocument !== railDocument || membershipReviewSequence !== navigatorSourceSequence) {
 			return Object.freeze({ valid: false, reason: "정적 FAB가 변경되었습니다 · 포트 구성을 다시 편집하세요" });
+		}
+		if (membershipReviewPitch !== undefined && membershipReviewAnchor !== undefined) {
+			const { valid, reason } = planEqPortPitchEdit(membershipReviewDocument.map, membershipReviewSlots,
+				membershipReviewIndex, membershipReviewAvailability, activePortEquipment,
+				{ equipmentGroupId: membershipReviewGroupId, portId: membershipReviewAnchor }, membershipReviewPitch,
+				membershipReviewRevision, membershipReviewSequence, activeOrganizations);
+			return { valid, reason };
 		}
 		return reviewPortEquipmentMembershipEdit(
 			membershipReviewDocument.map,
@@ -31371,11 +31437,23 @@ export default function TileFabApp(): React.ReactElement {
 		);
 	}, [membershipReviewDocument, membershipReviewSlots, membershipReviewIndex,
 		membershipReviewAvailability, membershipReviewGroupId, membershipReviewRows,
-		membershipReviewRevision, membershipReviewSequence, railDocument, navigatorSourceSequence,
+		membershipReviewRevision, membershipReviewSequence, membershipReviewPitch, membershipReviewAnchor, railDocument, navigatorSourceSequence,
 		activePortEquipment, activeOrganizations]);
 	const portEquipmentMembershipSummary = useMemo(() => {
 		const session = portEquipmentMembershipEditSession;
 		if (!session) return null;
+		if (session.portType === "EQ" && session.editMode === "pitch") {
+			const dirty = session.pitchMillimeters !== session.sourcePitchMillimeters;
+			const group = session.sourceState.equipmentGroups.find((candidate) => candidate.id === session.sourceEquipmentGroupId);
+			const bodyLabel = group?.kind === "EQ" && group.bodyDimensions
+				? `지정 몸체 ${group.bodyDimensions.lengthMillimeters / 1_000} m 유지`
+				: `자동 몸체 ${((session.sourceRows.length - 1) * session.pitchMillimeters + 1_000) / 1_000} m`;
+			return Object.freeze({ sourceCount: session.sourceRows.length, draftCount: session.sourceRows.length,
+				added: 0, removed: 0, dirty,
+				canComplete: dirty && portEquipmentMembershipReview?.valid === true && session.plan?.valid !== false,
+				reason: `${session.plan?.valid === false ? session.plan.reason : portEquipmentMembershipReview?.reason ?? "간격을 선택하세요"} · ${bodyLabel}`,
+			});
+		}
 		const sourceRows = new Set(session.sourceRows);
 		const draftRows = session.selection.rows;
 		const draftSet = new Set(draftRows);
@@ -39752,6 +39830,8 @@ export default function TileFabApp(): React.ReactElement {
 					<PortEquipmentMembershipEditBar
 						clearTransientConstruction={clearTransientConstruction}
 						completePortEquipmentMembershipEdit={completePortEquipmentMembershipEdit}
+						setEqMembershipEditMode={setEqMembershipEditMode}
+						chooseEqMembershipPitch={chooseEqMembershipPitch}
 						portEquipmentMembershipEditSession={portEquipmentMembershipEditSession}
 						portEquipmentMembershipSummary={portEquipmentMembershipSummary}
 						showStkSelection={showStkSelection}
