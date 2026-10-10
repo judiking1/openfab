@@ -57,6 +57,7 @@ interface StaticFabNavigatorProps {
 	readonly onCenterWorld: (x: number, y: number) => void;
 	readonly onFitAll: () => void;
 	readonly onInspectEquipment: () => void;
+	readonly onBrowseEquipment?: () => void;
 }
 
 const ORGANIZATION_COLORS: Readonly<Record<StaticFabOrganizationColor, string>> = Object.freeze({
@@ -87,6 +88,7 @@ export function StaticFabNavigator({
 	onCenterWorld,
 	onFitAll,
 	onInspectEquipment,
+	onBrowseEquipment,
 }: StaticFabNavigatorProps): React.ReactElement {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const backingRef = useRef<HTMLCanvasElement | null>(null);
@@ -360,6 +362,18 @@ export function StaticFabNavigator({
 					onClick={() => onTabChange("checks")}
 				/>
 			</div>
+			{onBrowseEquipment ? (
+				<button
+					type="button"
+					className="tilefab-equipment-browser-entry"
+					data-testid="open-equipment-browser"
+					disabled={equipmentActionDisabled}
+					onClick={onBrowseEquipment}
+				>
+					<Boxes size={14} aria-hidden="true" /> 기존 장비 찾기 ·{" "}
+					{equipmentGroupCount.toLocaleString()}개
+				</button>
+			) : null}
 			<div
 				className="tilefab-navigator-body"
 				{...(tab === "map"

@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.107] - 2026-10-10
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Find existing OHB, EQ and STK equipment from the equipment catalog or Navigator using
+  equipment/Port IDs, kind and Process Loop ownership. Open existing properties and return with
+  filters, scroll and focus preserved, including after deletion; unfinished edits remain guarded.
+- Make rail-first Process Loop registration easier to follow, with a return to the originating
+  selection and an explicit next action for eligible equipment that still needs Loop ownership.
+  Registration does not attach equipment automatically; existing atomic commands and Undo remain.
+
 ## [0.1.106] - 2026-10-10
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

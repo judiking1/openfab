@@ -1006,7 +1006,8 @@ import {
 } from "./RailEditorStartup";
 import { createStaticFabArrangementCheckpoint } from "./StaticFabArrangementCheckpoint";
 import { StandaloneProcessLoopAuthoringController } from "./StandaloneProcessLoopAuthoringController";
-import { StandaloneProcessLoopAuthoringBar, StandaloneProcessLoopRegistrationForm } from "./StandaloneProcessLoopAuthoringPanel";
+import { EquipmentBrowser, type EquipmentBrowserKindFilter, type EquipmentBrowserLoopFilter, type EquipmentBrowserRow } from "./EquipmentBrowser";
+import { StandaloneProcessLoopAuthoringBar, StandaloneProcessLoopMembershipNextAction, StandaloneProcessLoopRegistrationAction, StandaloneProcessLoopRegistrationForm } from "./StandaloneProcessLoopAuthoringPanel";
 import {
 	railReadinessIssueCorridorAt,
 	railReadinessIssueGuide,
@@ -3285,7 +3286,20 @@ export default function TileFabApp(): React.ReactElement {
 	const [contextualBlueprintSaveError, setContextualBlueprintSaveError] = useState<string | null>(
 		null,
 	);
-	const [navigatorTab, setNavigatorTab] = useState<StaticFabNavigatorTab | null>(null);
+	const [navigatorTab, setNavigatorTab] = useState<StaticFabNavigatorTab | "equipment" | null>(null);
+	const [equipmentBrowserInspectorOrigin, setEquipmentBrowserInspectorOrigin] = useState<Readonly<{
+		document: RailDocument; equipmentGroupId: number;
+	}> | null>(null);
+	const [equipmentBrowserQuery, setEquipmentBrowserQuery] = useState({
+		document: railDocument, search: "", kind: "ALL" as EquipmentBrowserKindFilter,
+		loop: "ALL" as EquipmentBrowserLoopFilter, page: 0,
+	});
+	const equipmentBrowserListRef = useRef<HTMLDivElement | null>(null);
+	const equipmentBrowserSearchRef = useRef<HTMLInputElement | null>(null);
+	const equipmentBrowserNavigatorOriginRef = useRef<StaticFabNavigatorTab>("map");
+	const equipmentBrowserPositionRef = useRef<Readonly<{
+		document: RailDocument; listTop: number; workspaceTop: number; equipmentGroupId: number | null;
+	}> | null>(null);
 	const [operationalConfigurationOpen, setOperationalConfigurationOpen] = useState(false);
 	const [staticFabOrganizationOverview, setStaticFabOrganizationOverview] =
 		useState<StaticFabOrganizationOverview | null>(null);
@@ -3298,8 +3312,21 @@ export default function TileFabApp(): React.ReactElement {
 	const organizationLibraryOpen = navigatorTab === "organizations";
 	const [organizationLibraryView, setOrganizationLibraryView] = useState<"list" | "detail">("list");
 	const navigatorMapOpen = navigatorTab === "map";
+	const equipmentBrowserOpen = navigatorTab === "equipment";
 	const readinessOpen = navigatorTab === "checks";
 	const staticFabNavigatorOpen = navigatorTab !== null;
+	useLayoutEffect(() => {
+		if (!equipmentBrowserOpen) return;
+		const saved = equipmentBrowserPositionRef.current;
+		const position = saved?.document === railDocument ? saved : null;
+		if (equipmentBrowserListRef.current) equipmentBrowserListRef.current.scrollTop = position?.listTop ?? 0;
+		const workspace = appRootRef.current?.querySelector<HTMLElement>(".tilefab-active-authoring-scroll-content");
+		if (workspace) workspace.scrollTop = position?.workspaceTop ?? 0;
+		const row = position?.equipmentGroupId == null ? null : equipmentBrowserListRef.current?.querySelector<HTMLButtonElement>(
+			`[data-equipment-group-id="${position.equipmentGroupId}"] .tilefab-equipment-browser-edit`);
+		if (row) row.focus({ preventScroll: true });
+		else equipmentBrowserSearchRef.current?.focus();
+	}, [equipmentBrowserOpen, railDocument]);
 	const navigatorSourceSequence = railDocument.getPatchSequence();
 	const staticFabCurrentSourceKey = [
 		activeMap.getRevision(),
@@ -3346,7 +3373,7 @@ export default function TileFabApp(): React.ReactElement {
 				staticFabCheckRepairChooserRef.current.close();
 			}
 		}
-		setNavigatorTab((current) => (open ? "map" : current === "map" ? null : current));
+		setNavigatorTab((current) => (open ? "map" : current === "map" || current === "equipment" ? null : current));
 	}, []);
 	const setReadinessOpen = useCallback((open: boolean): void => {
 		staticFabCheckRepairChecksOpenRef.current = open;
@@ -3370,6 +3397,13 @@ export default function TileFabApp(): React.ReactElement {
 	const [processLoopRailEditFeedback, setProcessLoopRailEditFeedback] = useState<string | null>(null);
 	const [processLoopRailEdit, setProcessLoopRailEdit] = useState<{ readonly document: RailDocument; readonly organizationId: number } | null>(null);
 	const [processLoopNameDraft, setProcessLoopNameDraft] = useState("작업 루프 1");
+	const [processLoopRegistrationEntry, setProcessLoopRegistrationEntry] = useState<Readonly<{
+		document: RailDocument; selection: StaticFabSelection;
+		equipment: PortEquipmentSelection | null; returnSelection: StaticFabSelection;
+	}> | null>(null);
+	const [registeredProcessLoop, setRegisteredProcessLoop] = useState<Readonly<{
+		document: RailDocument; organizationId: number;
+	}> | null>(null);
 	const [organizationNameDraft, setOrganizationNameDraft] = useState("Area 1");
 	const [organizationKindDraft, setOrganizationKindDraft] =
 		useState<StaticFabOrganizationKind>("AREA");
@@ -6899,6 +6933,7 @@ export default function TileFabApp(): React.ReactElement {
 	const clearOrganizationMultiSelection = (): void =>
 		updateOrganizationMultiSelection(createStaticFabOrganizationMultiSelection());
 	const updateAreaSelection = (next: RailAreaSelection | null): void => {
+		setProcessLoopRegistrationEntry(null);
 		cancelStaticFabArrangementRef.current();
 		clearOrganizationMultiSelection();
 		setOrganizationConflictReviewOpen(false);
@@ -6921,6 +6956,7 @@ export default function TileFabApp(): React.ReactElement {
 		preserveOrganizationRoots = false,
 		showOrganizationInspector = false,
 	): void => {
+		setProcessLoopRegistrationEntry(null);
 		cancelStaticFabArrangementRef.current();
 		if (!preserveOrganizationRoots) clearOrganizationMultiSelection();
 		setOrganizationConflictReviewOpen(false);
@@ -24732,7 +24768,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const chooseStaticFabNavigatorTab = (
-		tab: StaticFabNavigatorTab,
+		tab: StaticFabNavigatorTab | "equipment",
 		returnFocusTarget?: HTMLElement | null,
 	): void => {
 		if (blockEqInspectorDraftSelectionChange(null)) return;
@@ -24770,6 +24806,13 @@ export default function TileFabApp(): React.ReactElement {
 		if (organizationLibraryOpen && !closeOrganizationLibrary(false)) return;
 		chooseTool("inspect", "preserve-area");
 		updateEditorActivity("inspect");
+		if (tab === "equipment") {
+			if (navigatorTab && navigatorTab !== "equipment") equipmentBrowserNavigatorOriginRef.current = navigatorTab;
+			closeReadiness();
+			setNavigatorTab("equipment");
+			setStatus("기존 장비 찾기 · 장비를 선택해 속성을 편집하세요");
+			return;
+		}
 		if (tab === "checks") {
 			setNavigatorMapOpen(false);
 			setReadinessOpen(true);
@@ -24799,7 +24842,7 @@ export default function TileFabApp(): React.ReactElement {
 			guidedPrimaryFocusHandoffRef.current = true;
 		}
 		staticFabNavigatorReturnFocusRef.current = null;
-		setNavigatorMapOpen(false);
+		setNavigatorTab(null);
 		staticFabNavigatorCloseFocusRef.current = returnTarget ?? canvasRef.current;
 	};
 
@@ -25028,6 +25071,55 @@ export default function TileFabApp(): React.ReactElement {
 		return processLoopRailEditRef.current === context;
 	}
 
+	function focusProcessLoopRegistration(
+		selection: StaticFabSelection,
+		equipment: PortEquipmentSelection | null = null,
+		returnSelection: StaticFabSelection = selection,
+	): void {
+		const document = editorModelRef.current.document;
+		setProcessLoopRegistrationEntry({ document, selection, equipment, returnSelection });
+		setAuthoringSurface("task");
+		setCompactInspectorExpanded(true);
+		requestAnimationFrame(() => {
+			if (editorModelRef.current.document !== document || staticFabSelectionRef.current !== selection) return;
+			const scroll = appRootRef.current?.querySelector<HTMLElement>(".tilefab-active-authoring-scroll-content");
+			if (scroll) scroll.scrollTop = 0;
+			appRootRef.current?.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]')?.focus({ preventScroll: true });
+		});
+	}
+
+	function returnFromProcessLoopRegistration(): void {
+		const entry = processLoopRegistrationEntry;
+		if (!entry || processLoopOperationRef.current) return;
+		const model = editorModelRef.current;
+		const sameDocument = entry.document === model.document;
+		const equipment = sameDocument && entry.equipment &&
+			resolveEditablePortEquipmentSelection(model.document.portEquipment, entry.equipment) ? entry.equipment : null;
+		if (blockEqInspectorDraftSelectionChange(equipment?.equipmentGroupId ?? null) || !chooseExplicitEditorTool("inspect")) return;
+		setProcessLoopRegistrationEntry(null);
+		if (equipment) {
+			setPortEquipmentSelection(equipment);
+		} else if (sameDocument) {
+			const selection = entry.returnSelection;
+			const stale = staticFabSelectionStaleReason(model.map, model.ownership,
+				model.document.portEquipment, model.document.getPatchSequence(), selection);
+			updateStaticFabSelection(stale ? null : selection);
+		}
+		setCompactInspectorExpanded(true);
+		setStatus(equipment ? "장비 선택으로 돌아왔습니다 · 루프 이름 입력은 유지됩니다" :
+			entry.equipment ? "원래 장비가 현재 프로젝트에 없습니다 · 현재 레일을 다시 선택하세요" : "선택으로 돌아왔습니다 · 루프 이름 입력은 유지됩니다");
+		scheduleRender();
+		const returnSelection = staticFabSelectionRef.current;
+		requestAnimationFrame(() => {
+			if (editorModelRef.current.document !== model.document ||
+				selectedPortEquipmentRef.current !== equipment || staticFabSelectionRef.current !== returnSelection) return;
+			const target = equipment ? processLoopPrimaryActionRef.current ?? processLoopPrimaryStatusRef.current ?? compactInspectorCloseRef.current :
+				returnSelection ? appRootRef.current?.querySelector<HTMLButtonElement>('[data-testid="start-process-loop-registration"]') ?? compactInspectorCloseRef.current : canvasRef.current;
+			target?.scrollIntoView({ block: "nearest" });
+			target?.focus({ preventScroll: true });
+		});
+	}
+
 	function selectEquipmentProcessLoopRailForRegistration(): void {
 		if (blockEqInspectorDraftSelectionChange(null) || blockStaticFabExclusiveCommand()) return;
 		const blocked = editorActivityTransitionBlockedReason();
@@ -25042,14 +25134,9 @@ export default function TileFabApp(): React.ReactElement {
 		setRailSelection(null, null);
 		clearPortEquipmentSelection();
 		updateStaticFabSelection(result.selection);
-		setCompactInspectorExpanded(true);
+		focusProcessLoopRegistration(result.selection, selected);
 		setStatus("연결 레일만 선택했습니다 · 루프 등록 후 장비 소속은 별도로 지정하세요");
 		scheduleRender();
-		requestAnimationFrame(() => {
-			if (editorModelRef.current !== model || staticFabSelectionRef.current !== result.selection) return;
-			const input = document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
-			input?.scrollIntoView({ block: "nearest" }); input?.focus({ preventScroll: true });
-		});
 	}
 
 	function chooseSelectionEquipmentScope(scope: "rail" | "attached-equipment"): void {
@@ -25080,14 +25167,12 @@ export default function TileFabApp(): React.ReactElement {
 		if (staleReason) { setStatus(staleReason); return; }
 		const railOnly = createStaticFabSelection(selection.rail, model.document.portEquipment,
 			model.document.getPatchSequence(), []);
+		const entry = processLoopRegistrationEntry?.document === model.document &&
+			processLoopRegistrationEntry.selection === selection ? processLoopRegistrationEntry : null;
 		updateStaticFabSelection(railOnly);
+		focusProcessLoopRegistration(railOnly, entry?.equipment ?? null, entry?.returnSelection ?? selection);
 		setStatus("레일만 선택했습니다 · 장비는 그대로 유지됩니다 · 이름을 입력하고 루프 등록을 확정하세요");
 		scheduleRender();
-		requestAnimationFrame(() => {
-			if (editorModelRef.current !== model || staticFabSelectionRef.current !== railOnly) return;
-			const input = document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
-			input?.scrollIntoView({ block: "nearest" }); input?.focus({ preventScroll: true });
-		});
 	}
 
 	async function registerSelectedProcessLoop(): Promise<void> {
@@ -25111,8 +25196,15 @@ export default function TileFabApp(): React.ReactElement {
 			processLoopOperationRef.current = null;
 			setProcessLoopOperation(null);
 			const organizationId = result.organizationId;
-			syncModelUi(`${name} 작업 루프를 등록했습니다 · 이제 장비를 배치하거나 레일 편집을 열 수 있습니다`);
+			syncModelUi(`${name} 작업 루프를 등록했습니다`);
 			restoreStaticFabOrganizationContext(organizationId);
+			setRegisteredProcessLoop({ document, organizationId });
+			setAuthoringSurface("task");
+			requestAnimationFrame(() => {
+				if (editorModelRef.current.document !== document) return;
+				const scroll = appRootRef.current?.querySelector<HTMLElement>(".tilefab-active-authoring-scroll-content");
+				if (scroll) scroll.scrollTop = 0;
+			});
 			setOrganizationDetailTab("overview");
 			setOrganizationFilter("AISLE");
 			if (result.commit.publicationError) setStatus(`${name} 등록 완료 · 동기화 오류: ${result.commit.publicationError}`);
@@ -31637,6 +31729,7 @@ export default function TileFabApp(): React.ReactElement {
 			ordinaryPortGroupCounts.stk > 0 &&
 			!readinessOpen &&
 			!navigatorMapOpen &&
+			!equipmentBrowserOpen &&
 			!blueprintLibraryOpen &&
 			!organizationLibraryOpen &&
 			!ohbPlacementIntent &&
@@ -32895,7 +32988,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (staticFabNavigatorOpen) {
 			if (organizationLibraryOpen && !closeOrganizationLibrary(false)) return false;
 			closeReadiness();
-			setNavigatorMapOpen(false);
+			setNavigatorTab(null);
 			staticFabNavigatorReturnFocusRef.current = null;
 		}
 		closeContextPalette();
@@ -33292,11 +33385,87 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
-		if (!chooseExplicitEditorTool("inspect")) return;
-		setStatus(
-			`${equipmentGroupCount.toLocaleString()}개 장비 · Canvas에서 장비 몸체 또는 Port를 선택하세요`,
-		);
-		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+		chooseStaticFabNavigatorTab("equipment");
+	};
+	const equipmentBrowserData = useMemo(() => {
+		if (!equipmentBrowserOpen) return { rows: [], loopOptions: [] };
+		const portById = new Map(activePortEquipment.ports.map((port) => [port.id, port]));
+		const ownersByGroup = new Map<number, StaticFabOrganizationRecord[]>();
+		for (const owner of activeOrganizations.records) for (const id of owner.membership.equipmentGroupIds) {
+			const owners = ownersByGroup.get(id) ?? [];
+			owners.push(owner); ownersByGroup.set(id, owners);
+		}
+		const loopOptions = activeOrganizations.records.filter((record) => organizationSemanticRoles.get(record.id) === "PROCESS_LOOP");
+		const rows = activePortEquipment.equipmentGroups.map((equipmentGroup) => {
+			const owners = ownersByGroup.get(equipmentGroup.id) ?? [];
+			const ports = equipmentGroup.portIds.map((id) => portById.get(id));
+			const disabledReason = activePortEquipmentIntegrityIssues.length > 0 || ports.length === 0 ||
+				ports.some((port) => !port || port.equipmentGroupId !== equipmentGroup.id)
+				? "장비 Port 무결성을 검사한 뒤 다시 선택하세요" : null;
+			return {
+				equipmentGroup, disabledReason,
+				ownershipLabel: owners.length === 0 ? "미소속" : owners.map((owner) =>
+					`${organizationSemanticRoles.get(owner.id) === "PROCESS_LOOP" ? "Loop" : owner.kind} · ${owner.name}`).join(" / "),
+				ownerIds: owners.map((owner) => owner.id),
+				searchText: [`${equipmentGroup.kind}-${equipmentGroup.id}`, String(equipmentGroup.id),
+					...ports.flatMap((port) => port ? [`PORT-${port.id}`, String(port.id), port.barcode ?? ""] : [])].join(" ").toLowerCase(),
+			} satisfies EquipmentBrowserRow & { ownerIds: number[]; searchText: string };
+		});
+		return { rows, loopOptions };
+	}, [equipmentBrowserOpen, activePortEquipment, activeOrganizations, organizationSemanticRoles, activePortEquipmentIntegrityIssues]);
+	const currentEquipmentBrowserQuery = equipmentBrowserQuery.document === railDocument ? equipmentBrowserQuery : {
+		document: railDocument, search: "", kind: "ALL" as EquipmentBrowserKindFilter, loop: "ALL" as EquipmentBrowserLoopFilter, page: 0,
+	};
+	const equipmentBrowserLoopFilter = typeof currentEquipmentBrowserQuery.loop === "number" &&
+		!equipmentBrowserData.loopOptions.some((loop) => loop.id === currentEquipmentBrowserQuery.loop)
+		? "ALL" : currentEquipmentBrowserQuery.loop;
+	const equipmentBrowserMatches = useMemo(() => {
+		const terms = currentEquipmentBrowserQuery.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+		return equipmentBrowserData.rows.filter((row) =>
+			(currentEquipmentBrowserQuery.kind === "ALL" || row.equipmentGroup.kind === currentEquipmentBrowserQuery.kind) &&
+			(equipmentBrowserLoopFilter === "ALL" || (equipmentBrowserLoopFilter === "UNOWNED" ? row.ownerIds.length === 0 : row.ownerIds.includes(equipmentBrowserLoopFilter))) &&
+			terms.every((term) => row.searchText.includes(term)));
+	}, [equipmentBrowserData.rows, currentEquipmentBrowserQuery.search, currentEquipmentBrowserQuery.kind, equipmentBrowserLoopFilter]);
+	const equipmentBrowserPage = Math.min(currentEquipmentBrowserQuery.page, Math.max(0, Math.ceil(equipmentBrowserMatches.length / 30) - 1));
+	const equipmentBrowserPageStart = equipmentBrowserPage * 30;
+	const updateEquipmentBrowserQuery = (change: Partial<Pick<typeof equipmentBrowserQuery, "search" | "kind" | "loop" | "page">>): void => {
+		if (railDocument !== editorModelRef.current.document) return;
+		setEquipmentBrowserQuery({ ...currentEquipmentBrowserQuery, loop: equipmentBrowserLoopFilter, page: 0, ...change });
+		equipmentBrowserPositionRef.current = null;
+		if (equipmentBrowserListRef.current) equipmentBrowserListRef.current.scrollTop = 0;
+	};
+	const inspectEquipmentBrowserCandidate = (equipmentGroupId: number, trigger: HTMLButtonElement, openProperties: boolean): boolean => {
+		const model = editorModelRef.current;
+		const group = model.document.portEquipment.equipmentGroups.find((candidate) => candidate.id === equipmentGroupId);
+		const searchedPort = currentEquipmentBrowserQuery.search.trim().match(/^(?:port[-\s]*)?(\d+)$/i)?.[1];
+		const portId = group?.portIds.find((id) => id === Number(searchedPort)) ?? group?.portIds[0];
+		const selection = portId === undefined ? null : { equipmentGroupId, portId };
+		if (railDocument !== model.document || navigatorSourceSequence !== model.document.getPatchSequence() ||
+			!selection || !resolveEditablePortEquipmentSelection(model.document.portEquipment, selection)) {
+			setStatus("장비 목록이 바뀌었습니다 · 현재 목록에서 장비를 다시 선택하세요");
+			return false;
+		}
+		if (blockEqInspectorDraftSelectionChange(selection.equipmentGroupId) || blockStaticFabExclusiveCommand()) return false;
+		const blocked = editorActivityTransitionBlockedReason();
+		if (blocked) { setStatus(blocked); return false; }
+		if (openProperties && !chooseExplicitEditorTool("inspect")) return false;
+		equipmentBrowserPositionRef.current = { document: model.document,
+			listTop: equipmentBrowserListRef.current?.scrollTop ?? 0,
+			workspaceTop: appRootRef.current?.querySelector<HTMLElement>(".tilefab-active-authoring-scroll-content")?.scrollTop ?? 0,
+			equipmentGroupId };
+		if (openProperties) setEquipmentBrowserInspectorOrigin({ document: model.document, equipmentGroupId });
+		setPortEquipmentSelection(selection);
+		setCompactInspectorExpanded(true);
+		setStatus(`장비 ${selection.equipmentGroupId} · PORT-${selection.portId} 선택 · 기존 속성에서 편집하세요`);
+		scheduleRender();
+		if (!openProperties) { trigger.focus({ preventScroll: true }); return true; }
+		requestAnimationFrame(() => {
+			if (editorModelRef.current.document !== model.document || selectedPortEquipmentRef.current !== selection) return;
+			const target = processLoopPrimaryActionRef.current ?? processLoopPrimaryStatusRef.current ?? compactInspectorCloseRef.current;
+			target?.scrollIntoView({ block: "nearest" });
+			target?.focus({ preventScroll: true });
+		});
+		return true;
 	};
 	const selectNextPortEquipmentGroup = (): void => {
 		const model = editorModelRef.current;
@@ -33744,6 +33913,7 @@ export default function TileFabApp(): React.ReactElement {
 			!staticFabExclusiveCommandActive &&
 			!readinessOpen &&
 			!navigatorMapOpen &&
+			!equipmentBrowserOpen &&
 			!blueprintLibraryOpen &&
 			!organizationLibraryOpen,
 	);
@@ -33782,6 +33952,7 @@ export default function TileFabApp(): React.ReactElement {
 			!staticFabExclusiveCommandActive &&
 			!readinessOpen &&
 			!navigatorMapOpen &&
+			!equipmentBrowserOpen &&
 			!organizationLibraryOpen &&
 			!ohbPlacementIntent &&
 			!portEquipmentGroupEditSession &&
@@ -33907,6 +34078,7 @@ export default function TileFabApp(): React.ReactElement {
 			!staticFabExclusiveCommandActive &&
 			!readinessOpen &&
 			!navigatorMapOpen &&
+			!equipmentBrowserOpen &&
 			!organizationLibraryOpen,
 	);
 	const contextualInspectorVisible =
@@ -34767,6 +34939,7 @@ export default function TileFabApp(): React.ReactElement {
 		{ id: "rail-edit", title: "레일 편집", actions: [authoringAction("rail-erase", "레일 철거", "선택한 모듈 구간을 제거 · 실행 취소 가능", () => { chooseExplicitEditorTool("erase"); })] },
 	] : browseCategory === "equipment" ? [
 		{ id: "equipment-create", title: "Port 기준 장비 제작", description: activeMap.size === 0 ? "장비가 연결될 직선 레일을 먼저 만드세요" : "기존 레일에서 유효한 Port 위치를 선택합니다", actions: equipmentActions },
+		{ id: "equipment-find", title: "기존 장비 편집", actions: [authoringAction("find-equipment", "기존 장비 찾기", "ID·Port·Loop로 찾아 속성 편집", (trigger) => chooseStaticFabNavigatorTab("equipment", trigger))] },
 		{ id: "equipment-import", title: "고급 가져오기", actions: [authoringAction("station-proposal", "Station proposal 검토", "외부 제안을 검토한 뒤 반영", (trigger) => void openStationProposalReview(trigger))] },
 	] : [{ id: "blueprint-library", title: "청사진 재사용", actions: blueprintActions }];
 	const authoringUtilityActions = [
@@ -34774,7 +34947,58 @@ export default function TileFabApp(): React.ReactElement {
 		authoringAction("checks", "검사", "연결과 장비·구조 문제를 확인하고 수정", (trigger) => chooseStaticFabNavigatorTab("checks", trigger)),
 		authoringAction("guide", guidedBuildResumeAvailable ? "실습 이어하기" : "도움말·선택적 실습", "작업을 보존하고 사용법 확인", (trigger) => openOrResumeGuidedBuild(trigger)),
 	];
-	const visibleAuthoringResult = authoringResult?.document === railDocument &&
+	const processLoopRegistrationFocused = processLoopRegistrationEntry?.document === railDocument &&
+		processLoopRegistrationEntry.selection === staticFabSelection && areaSelectionProvenance === "ad-hoc" &&
+		railAreaSelectionInspectorVisible;
+	const registeredLoopNextAction = useMemo(() => {
+		if (registeredProcessLoop?.document !== editorModel.document) return null;
+		const document = editorModel.document;
+		const organization = document.organizations.records.find((record) => record.id === registeredProcessLoop.organizationId);
+		if (!organization) return null;
+		const equipment = document.portEquipment.equipmentGroups.flatMap((group) => {
+			const portId = group.portIds[0];
+			if (portId === undefined) return [];
+			const selection = { equipmentGroupId: group.id, portId };
+			if (!resolveEditablePortEquipmentSelection(document.portEquipment, selection)) return [];
+			const membership = queryStaticFabProcessLoopEquipmentMembership(document.portEquipment, document.organizations, group.id);
+			if (membership.ownerOrganizationIds.length !== 0 || membership.eligibleProcessLoopIds.length !== 1 ||
+				membership.eligibleProcessLoopIds[0] !== organization.id) return [];
+			const plan = planAttachEquipmentGroupToProcessLoop(document.map, document.portEquipment,
+				document.getPatchSequence(), document.organizations, group.id, organization.id);
+			return plan.valid ? [{ id: group.id, kind: group.kind, selection }] : [];
+		});
+		return { document, organization, equipment, sequence: document.getPatchSequence() };
+	}, [registeredProcessLoop, editorModel]);
+	const reviewRegisteredLoopEquipment = (equipmentGroupId: number): boolean => {
+		const next = registeredLoopNextAction;
+		const document = editorModelRef.current.document;
+		if (!next || next.document !== document || next.sequence !== document.getPatchSequence()) {
+			setStatus("루프 또는 장비가 바뀌었습니다 · 현재 소속 대상을 다시 확인하세요"); return false;
+		}
+		const candidate = next.equipment.find((group) => group.id === equipmentGroupId);
+		if (!candidate || blockEqInspectorDraftSelectionChange(equipmentGroupId)) return false;
+		if (!chooseExplicitEditorTool("inspect")) return false;
+		setPortEquipmentSelection(candidate.selection);
+		setCompactInspectorExpanded(true);
+		setStatus(`${candidate.kind}-${candidate.id} · ${next.organization.name} 소속을 확인한 뒤 확정하세요`);
+		scheduleRender();
+		requestAnimationFrame(() => {
+			if (editorModelRef.current.document !== document || selectedPortEquipmentRef.current !== candidate.selection) return;
+			processLoopPrimaryActionRef.current?.scrollIntoView({ block: "nearest" });
+			processLoopPrimaryActionRef.current?.focus({ preventScroll: true });
+		});
+		return true;
+	};
+	const processLoopRegistrationProps = {
+		name: processLoopNameDraft, busy: processLoopOperation !== null,
+		selectionAvailable: staticFabSelection !== null && staticFabSelection.rail === areaSelection && staticFabEquipmentGroupCount === 0,
+		selectionUnavailableReason: staticFabEquipmentGroupCount > 0 ? "레일만 선택 버튼으로 장비를 선택에서 제외한 뒤 등록하세요. 장비와 소속은 바뀌지 않습니다." : undefined,
+		selectedEquipmentGroupCount: staticFabEquipmentGroupCount,
+		onSelectRailOnly: selectProcessLoopRailOnly,
+		onNameChange: (name: string) => { processLoopNameDraftRef.current = name; setProcessLoopNameDraft(name); },
+		onRegister: () => { void registerSelectedProcessLoop(); },
+	};
+	const visibleAuthoringResult = !equipmentBrowserOpen && !processLoopRegistrationFocused && authoringResult?.document === railDocument &&
 		(authoringResult.rootId === null || activeOrganizations.records.some((record) => record.id === authoringResult.rootId)) ? authoringResult : null;
 	const activeBayPlacement = organizationBundlePlacementSession !== null && productionBayRequestRef.current?.document === railDocument &&
 		productionBayRequestRef.current.fingerprint === organizationBundlePlacementSession.bundleFingerprint;
@@ -34783,7 +35007,7 @@ export default function TileFabApp(): React.ReactElement {
 	const authoringTask: AuthoringTaskPresentation = {
 		id: portEquipmentInspectorVisible ? `equipment-${selectedEquipmentGroup?.id}` : templateSession ? `template-${templateSession.id}` : `${editorActivity}-${tool}`,
 		kind: selectedPortDetails || equipmentWorkspaceActive ? "equipment" : areaStampSession || stampSession || blueprintLibraryOpen ? "blueprint" : organizationBundlePlacementSession || staticFabExclusiveCommandActive ? "structure" : editorActivity === "inspect" || staticFabNavigatorOpen ? "selection" : "rail",
-		title: visibleAuthoringResult ? `${visibleAuthoringResult.kind === "fab" ? "FAB 생성" : "Bay 배치"} 완료` : readinessOpen ? "FAB 검사" : organizationLibraryOpen ? "구조 선택·편집" : navigatorMapOpen ? "FAB 지도" : blueprintLibraryOpen ? "청사진" : selectedPortDetails && portEquipmentInspectorVisible ? "장비 선택·편집" : productionBayConfiguration ? "Bay 배치" : templateSession ? railTemplateCatalogItem(templateSession.id).statusLabel : organizationBundlePlacementSession ? "구조 배치" : areaStampSession || stampSession ? "청사진 배치" : staticFabExclusiveCommandActive ? "구조 편집 검토" : equipmentWorkspaceActive ? `${tool === "stk" ? "Stocker" : tool.toUpperCase()} 배치` : tool === "inspect" ? "선택·편집" : tool === "erase" ? "레일 철거" : "레일 제작",
+		title: equipmentBrowserOpen ? "기존 장비 찾기" : processLoopRegistrationFocused ? "작업 루프 등록" : visibleAuthoringResult ? `${visibleAuthoringResult.kind === "fab" ? "FAB 생성" : "Bay 배치"} 완료` : readinessOpen ? "FAB 검사" : organizationLibraryOpen ? "구조 선택·편집" : navigatorMapOpen ? "FAB 지도" : blueprintLibraryOpen ? "청사진" : selectedPortDetails && portEquipmentInspectorVisible ? "장비 선택·편집" : productionBayConfiguration ? "Bay 배치" : templateSession ? railTemplateCatalogItem(templateSession.id).statusLabel : organizationBundlePlacementSession ? "구조 배치" : areaStampSession || stampSession ? "청사진 배치" : staticFabExclusiveCommandActive ? "구조 편집 검토" : equipmentWorkspaceActive ? `${tool === "stk" ? "Stocker" : tool.toUpperCase()} 배치` : tool === "inspect" ? "선택·편집" : tool === "erase" ? "레일 철거" : "레일 제작",
 	};
 	const authoringWorkspaceVisible = startupReady && (authoringToolActivated || analysis.cells > 0 || guidedBuildOpen || templateSession !== null || organizationBundlePlacementSession !== null || blueprintLibraryOpen || staticFabNavigatorOpen);
 	const authoringSidebarExpanded = !compactAuthoringViewport || authoringSurface === "catalog";
@@ -34847,7 +35071,17 @@ tool: tool,
 visibleRecentPlacedOhb: visibleRecentPlacedOhb,
 workerState: workerState,
 zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
-	const authoringTaskActions = activeBayPlacement ? <div className="tilefab-authoring-task-actions" data-testid="authoring-bay-actions">
+	const authoringTaskActions = processLoopRegistrationFocused ? <div className="tilefab-authoring-task-actions">
+		<button type="button" className="tilefab-loop-registration-control" data-testid="return-process-loop-registration"
+			disabled={processLoopOperation !== null} onClick={returnFromProcessLoopRegistration}>
+			{processLoopRegistrationEntry.equipment ? "장비로 돌아가기" : "선택으로 돌아가기"}
+		</button>
+		<StandaloneProcessLoopRegistrationAction {...processLoopRegistrationProps} />
+	</div> : equipmentBrowserInspectorOrigin?.document === railDocument &&
+		(portEquipmentInspectorVisible || (!staticFabNavigatorOpen && activeEquipmentDeletionRecovery !== null)) ?
+		<div className="tilefab-authoring-task-actions"><button type="button" data-testid="return-equipment-browser"
+			onClick={() => chooseStaticFabNavigatorTab("equipment")}>장비 목록으로 돌아가기</button></div>
+	: activeBayPlacement ? <div className="tilefab-authoring-task-actions" data-testid="authoring-bay-actions">
 		<label className="tilefab-authoring-repeat"><input type="checkbox" checked={repeatBayPlacement}
 			onChange={(event) => { repeatBayPlacementRef.current = event.currentTarget.checked; setRepeatBayPlacement(event.currentTarget.checked); }} /> 연속 배치</label>
 		<button type="button" disabled={blueprintPlacementPending || modelSyncPending || activeBayConfigurationError !== null} onClick={(event) => applyBlueprintPlacementKeyboard(event.shiftKey)}>현재 위치에 배치</button>
@@ -37309,6 +37543,32 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 			<div className="tilefab-active-workspace-host" hidden={viewMode === "3d" || !authoringWorkspaceVisible}>
  <ActiveAuthoringWorkspace task={authoringTask} compact={compactAuthoringViewport} expanded={authoringWorkspaceExpanded}
  onExpandedChange={(expanded) => setAuthoringSurface(expanded ? "task" : null)} actions={authoringTaskActions}>
+ {equipmentBrowserOpen ? <div className="tilefab-equipment-browser-panel">
+ <button type="button" className="tilefab-equipment-browser-back" onClick={() => chooseStaticFabNavigatorTab(equipmentBrowserNavigatorOriginRef.current)}>
+ {equipmentBrowserNavigatorOriginRef.current === "checks" ? "검사" : equipmentBrowserNavigatorOriginRef.current === "organizations" ? "구조" : "전체 보기"}로 돌아가기
+ </button>
+ <EquipmentBrowser rows={equipmentBrowserMatches.slice(equipmentBrowserPageStart, equipmentBrowserPageStart + 30)}
+ loopOptions={equipmentBrowserData.loopOptions} kindFilter={currentEquipmentBrowserQuery.kind}
+ loopFilter={equipmentBrowserLoopFilter} search={currentEquipmentBrowserQuery.search}
+ selectedEquipmentGroupId={selectedPortEquipment?.equipmentGroupId ?? null}
+ equipmentCount={equipmentBrowserData.rows.length} matchCount={equipmentBrowserMatches.length} pageStart={equipmentBrowserPageStart}
+ interactionBlockedReason={editorMutationWaitActive || modelSyncPending || projectBusy || workerState.status !== "ready" || staticFabExclusiveCommandActive ? "현재 작업과 동기화가 끝난 뒤 장비를 선택하세요" : null}
+ listRef={equipmentBrowserListRef} searchInputRef={equipmentBrowserSearchRef}
+ onListScroll={(event) => { equipmentBrowserPositionRef.current = { document: railDocument, listTop: event.currentTarget.scrollTop,
+ workspaceTop: appRootRef.current?.querySelector<HTMLElement>(".tilefab-active-authoring-scroll-content")?.scrollTop ?? 0,
+ equipmentGroupId: equipmentBrowserPositionRef.current?.document === railDocument ? equipmentBrowserPositionRef.current.equipmentGroupId : null }; }}
+ onSearchChange={(search) => updateEquipmentBrowserQuery({ search })}
+ onKindFilterChange={(kind) => updateEquipmentBrowserQuery({ kind })}
+ onLoopFilterChange={(loop) => updateEquipmentBrowserQuery({ loop })}
+ onChangePage={(direction) => updateEquipmentBrowserQuery({ page: Math.max(0, equipmentBrowserPage + direction) })}
+ onSelectEquipment={(id, trigger) => { inspectEquipmentBrowserCandidate(id, trigger, false); }}
+ onOpenProperties={(id, trigger) => { inspectEquipmentBrowserCandidate(id, trigger, true); }} />
+ </div> : null}
+ {processLoopRegistrationFocused ? <StandaloneProcessLoopRegistrationForm {...processLoopRegistrationProps} externalAction /> : null}
+ {!equipmentBrowserOpen && !processLoopRegistrationFocused && registeredLoopNextAction ? <StandaloneProcessLoopMembershipNextAction
+ loopName={registeredLoopNextAction.organization.name} equipment={registeredLoopNextAction.equipment}
+ blocked={editorMutationWaitActive || modelSyncPending || projectBusy || workerState.status !== "ready" || staticFabExclusiveCommandActive}
+ onReview={reviewRegisteredLoopEquipment} /> : null}
  {visibleAuthoringResult ? <section className="tilefab-authoring-result" data-testid="authoring-result">
  <strong>{visibleAuthoringResult.label} {visibleAuthoringResult.kind === "fab" ? "생성" : "배치"} 완료</strong>
  <p>결과가 현재 프로젝트에 반영되었습니다. 다음 작업을 선택하세요.</p>
@@ -37596,6 +37856,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 							onCenterWorld={centerNavigatorWorld}
 							onFitAll={fitMap}
 							onInspectEquipment={inspectStaticFabEquipment}
+							onBrowseEquipment={() => chooseStaticFabNavigatorTab("equipment")}
 						/>
 					</aside>
 				) : null}
@@ -37722,6 +37983,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 							onCenterWorld={centerNavigatorWorld}
 							onFitAll={fitMap}
 							onInspectEquipment={inspectStaticFabEquipment}
+							onBrowseEquipment={() => chooseStaticFabNavigatorTab("equipment")}
 						/>
 						<div
 							className="tilefab-navigator-tabpanel tilefab-navigator-tabpanel--checks"
@@ -38669,7 +38931,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 					id="tilefab-template-placement-feedback"
 					className="tilefab-template-feedback"
 					data-testid="template-placement-feedback"
-					data-obscured={readinessOpen || navigatorMapOpen}
+					data-obscured={readinessOpen || navigatorMapOpen || equipmentBrowserOpen}
 					aria-label="패턴 배치 판정"
 				>
 					<header>
@@ -39921,6 +40183,7 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 						handleStaticFabOrganizationOptionKeyDown={handleStaticFabOrganizationOptionKeyDown}
 						handleStaticFabOrganizationSearchKeyDown={handleStaticFabOrganizationSearchKeyDown}
 						inspectStaticFabEquipment={inspectStaticFabEquipment}
+						browseStaticFabEquipment={() => chooseStaticFabNavigatorTab("equipment")}
 						modelSyncPending={modelSyncPending}
 						navigatorIssueMarkers={navigatorIssueMarkers}
 						navigatorModel={navigatorModel}
@@ -40107,14 +40370,10 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 								</p>
 							) : null}
 						</section>
-						{areaSelectionProvenance === "ad-hoc" && compactInspectorSheetActive ? (
+						{areaSelectionProvenance === "ad-hoc" && compactInspectorSheetActive && !processLoopRegistrationFocused ? (
 							<button type="button" className="tilefab-selection-loop-entry" data-testid="start-process-loop-registration"
 								aria-controls="rail-area-selection-inspector-content"
-								onClick={() => { setCompactInspectorExpanded(true); requestAnimationFrame(() => {
-									const target = document.querySelector<HTMLElement>('[data-testid="process-loop-select-rail-only"]') ??
-										document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
-									target?.scrollIntoView({ block: "nearest" }); target?.focus({ preventScroll: true });
-								}); }}>작업 루프 등록 열기{staticFabEquipmentGroupCount > 0 ? " · 레일만 선택" : ""}</button>
+								onClick={() => { if (staticFabSelection) focusProcessLoopRegistration(staticFabSelection); }}>작업 루프 등록 열기{staticFabEquipmentGroupCount > 0 ? " · 레일만 선택" : ""}</button>
 						) : null}
 						<div
 							id="rail-area-selection-inspector-content"
@@ -40134,14 +40393,8 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 								</small>
 							</span>
 						</p>
-						{areaSelectionProvenance === "ad-hoc" ? (
-							<StandaloneProcessLoopRegistrationForm name={processLoopNameDraft} busy={processLoopOperation !== null}
-								selectionAvailable={staticFabSelection !== null && staticFabSelection.rail === areaSelection && staticFabEquipmentGroupCount === 0}
-								selectionUnavailableReason={staticFabEquipmentGroupCount > 0 ? "레일만 선택 버튼으로 장비를 선택에서 제외한 뒤 등록하세요. 장비와 소속은 바뀌지 않습니다." : undefined}
-								selectedEquipmentGroupCount={staticFabEquipmentGroupCount}
-								onSelectRailOnly={selectProcessLoopRailOnly}
-								onNameChange={(name) => { processLoopNameDraftRef.current = name; setProcessLoopNameDraft(name); }}
-								onRegister={() => { void registerSelectedProcessLoop(); }} />
+						{areaSelectionProvenance === "ad-hoc" && !processLoopRegistrationFocused ? (
+							<StandaloneProcessLoopRegistrationForm {...processLoopRegistrationProps} />
 						) : null}
 						<dl>
 							<div>

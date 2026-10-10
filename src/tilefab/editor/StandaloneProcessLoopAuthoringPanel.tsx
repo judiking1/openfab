@@ -7,6 +7,29 @@ export interface StandaloneProcessLoopRegistrationFormProps {
 	readonly onSelectRailOnly?: () => void;
 	readonly onNameChange: (name: string) => void;
 	readonly onRegister: () => void;
+	readonly externalAction?: boolean;
+}
+
+export function StandaloneProcessLoopRegistrationAction({
+	name,
+	busy,
+	selectionAvailable,
+	onRegister,
+}: Pick<
+	StandaloneProcessLoopRegistrationFormProps,
+	"name" | "busy" | "selectionAvailable" | "onRegister"
+>) {
+	return (
+		<button
+			type="button"
+			className="tilefab-inspector-primary tilefab-loop-registration-control"
+			data-testid="register-process-loop"
+			disabled={busy || !selectionAvailable || name.trim().length === 0}
+			onClick={onRegister}
+		>
+			{busy ? "루프 등록 검사 중…" : "선택한 레일을 작업 루프로 등록"}
+		</button>
+	);
 }
 
 /** Explicit user intent; candidate closure and membership are validated when submitted. */
@@ -19,6 +42,7 @@ export function StandaloneProcessLoopRegistrationForm({
 	onSelectRailOnly,
 	onNameChange,
 	onRegister,
+	externalAction = false,
 }: StandaloneProcessLoopRegistrationFormProps) {
 	return (
 		<section
@@ -66,21 +90,62 @@ export function StandaloneProcessLoopRegistrationForm({
 					}}
 				/>
 			</label>
-			<button
-				type="button"
-				className="tilefab-inspector-primary tilefab-loop-registration-control"
-				data-testid="register-process-loop"
-				disabled={busy || !selectionAvailable || name.trim().length === 0}
-				onClick={onRegister}
-			>
-				{busy ? "루프 등록 검사 중…" : "선택한 레일을 작업 루프로 등록"}
-			</button>
+			{externalAction ? null : (
+				<StandaloneProcessLoopRegistrationAction
+					name={name}
+					busy={busy}
+					selectionAvailable={selectionAvailable}
+					onRegister={onRegister}
+				/>
+			)}
 			<small data-testid="standalone-process-loop-selection-help">
 				{!selectionAvailable
 					? (selectionUnavailableReason ??
 						"선택 메뉴에서 폐쇄 레일 전체를 선택한 뒤 여기서 등록하세요.")
 					: "등록 시 폐합과 기존 소속을 검사합니다. 실패하면 레일과 선택이 유지됩니다."}
 			</small>
+		</section>
+	);
+}
+
+export function StandaloneProcessLoopMembershipNextAction({
+	loopName,
+	equipment,
+	blocked,
+	onReview,
+}: {
+	readonly loopName: string;
+	readonly equipment: readonly Readonly<{ id: number; kind: string }>[];
+	readonly blocked: boolean;
+	readonly onReview: (equipmentGroupId: number) => boolean;
+}) {
+	if (equipment.length === 0) return null;
+	return (
+		<section
+			className="tilefab-loop-membership-next"
+			data-testid="registered-loop-next-action"
+			aria-label="작업 루프 등록 후 다음 작업"
+		>
+			<strong>{loopName} · 등록 완료</strong>
+			<details>
+				<summary>장비 {equipment.length}개 소속 지정</summary>
+				<p>장비를 선택해 소속을 확인하고 확정하세요.</p>
+				{equipment.map((group) => (
+					<button
+						type="button"
+						key={group.id}
+						data-testid="review-registered-loop-equipment"
+						data-equipment-group-id={group.id}
+						disabled={blocked}
+						onClick={(event) => {
+							const details = event.currentTarget.closest("details");
+							if (onReview(group.id) && details) details.open = false;
+						}}
+					>
+						{group.kind}-{group.id} 소속 확인
+					</button>
+				))}
+			</details>
 		</section>
 	);
 }

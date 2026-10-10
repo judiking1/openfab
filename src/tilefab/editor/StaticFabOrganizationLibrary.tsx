@@ -108,6 +108,7 @@ interface StaticFabOrganizationLibraryProps {
 		event: ReactKeyboardEvent<HTMLInputElement>,
 	) => void;
 	readonly inspectStaticFabEquipment: () => void;
+	readonly browseStaticFabEquipment: () => void;
 	readonly modelSyncPending: boolean;
 	readonly navigatorIssueMarkers: readonly StaticFabNavigatorIssueMarker[];
 	readonly navigatorModel: StaticFabNavigatorModel | null;
@@ -229,6 +230,7 @@ export function StaticFabOrganizationLibrary({
 	handleStaticFabOrganizationOptionKeyDown,
 	handleStaticFabOrganizationSearchKeyDown,
 	inspectStaticFabEquipment,
+	browseStaticFabEquipment,
 	modelSyncPending,
 	navigatorIssueMarkers,
 	navigatorModel,
@@ -454,6 +456,7 @@ export function StaticFabOrganizationLibrary({
 				onCenterWorld={centerNavigatorWorld}
 				onFitAll={fitMap}
 				onInspectEquipment={inspectStaticFabEquipment}
+				onBrowseEquipment={browseStaticFabEquipment}
 			/>
 			<div
 				className="tilefab-navigator-tabpanel tilefab-navigator-tabpanel--organizations"
