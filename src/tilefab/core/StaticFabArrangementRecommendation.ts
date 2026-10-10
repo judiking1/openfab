@@ -148,6 +148,8 @@ function translatedBoundsOverlap(bounds: readonly StaticFabArrangementRoot["boun
 
 function modeLabel(mode: StaticFabArrangementMode): string {
 	switch (mode) {
+		case "TRANSLATE":
+			return "거리 이동";
 		case "ALIGN_MIN":
 			return "최소 경계 정렬";
 		case "ALIGN_CENTER":

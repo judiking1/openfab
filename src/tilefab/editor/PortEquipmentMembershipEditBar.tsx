@@ -61,8 +61,8 @@ export function PortEquipmentMembershipEditBar({
 			}
 		>
 			<span id="tilefab-port-membership-description" className="tilefab-sr-only" aria-live="polite">
-				{portEquipmentMembershipEditSession.portType} 포트 구성 편집. 현재{" "}
-				{portEquipmentMembershipSummary?.draftCount ?? 0}개. 커서 X{" "}
+				{portEquipmentMembershipEditSession.portType} {pitchMode ? "Port 간격" : "포트 구성"} 편집.
+				현재 {portEquipmentMembershipSummary?.draftCount ?? 0}개. 커서 X{" "}
 				{
 					portEquipmentMembershipEditSession.slots.routeXs[
 						portEquipmentMembershipEditSession.keyboardRow
@@ -86,7 +86,7 @@ export function PortEquipmentMembershipEditBar({
 				Enter로 완료, Escape로 취소합니다.
 			</span>
 			<span className="tilefab-buildbar-title">
-				<MousePointer2 size={15} />
+				{pitchMode ? <ArrowLeftRight size={15} /> : <MousePointer2 size={15} />}
 				{portEquipmentMembershipEditSession.portType}-
 				{portEquipmentMembershipEditSession.sourceEquipmentGroupId}
 			</span>
@@ -223,8 +223,12 @@ export function PortEquipmentMembershipEditBar({
 					className="tilefab-placement-exit"
 					data-testid="cancel-port-equipment-membership"
 					aria-keyshortcuts="Escape"
-					aria-label="포트 구성 편집 취소"
-					onClick={() => clearTransientConstruction("포트 구성 편집을 취소했습니다")}
+					aria-label={pitchMode ? "간격 편집 취소" : "포트 구성 편집 취소"}
+					onClick={() =>
+						clearTransientConstruction(
+							pitchMode ? "간격 편집을 취소했습니다" : "포트 구성 편집을 취소했습니다",
+						)
+					}
 				>
 					<X size={14} /> 취소
 				</button>

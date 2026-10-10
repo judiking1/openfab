@@ -7,6 +7,10 @@ import { applyPortEquipmentMutations, type PortEquipmentState } from "../core/Eq
 import { portEquipmentLayoutError } from "../core/PortEquipmentLayoutValidator";
 import { copyPortRecord, type PortMutation, type PortRecord } from "../core/PortRecord";
 import { type RailMutation, railMutationTopologyError } from "../core/paint";
+import {
+	isSupportedRailCoordinate,
+	RAIL_COORDINATE_DOMAIN_REASON,
+} from "../core/RailCoordinateDomain";
 import type { DirectedRailEdge, RailModuleOwnershipIndex } from "../core/RailModuleOwnership";
 import { ALL_DIRECTIONS, directionBetween, moveCell, oppositeDirection } from "../core/railShape";
 import type { StaticFabArrangementResult } from "../core/StaticFabArrangement";
@@ -39,6 +43,7 @@ import { type Cell, cellKey, decodeRailCell, encodeRailCell, type TileMap } from
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
 import { additionalStaticFabArrangementClearanceCells } from "./StaticFabArrangementClearance";
 import type { ResolvedStaticFabArrangementRoot } from "./StaticFabArrangementRoots";
+import { staticFabTranslationSelectionReason } from "./StaticFabTranslationSelection";
 
 export const STATIC_FAB_ARRANGEMENT_MAX_RAIL_EDGES = 200_000;
 export const STATIC_FAB_ARRANGEMENT_MAX_PORTS = 100_000;
@@ -96,6 +101,22 @@ export function planStaticFabArrangement(
 			"정렬할 정적 FAB 루트가 없습니다",
 		);
 	}
+	if (arrangement.mode === "TRANSLATE") {
+		const reason = staticFabTranslationSelectionReason(
+			organizations,
+			roots,
+			roots.flatMap((root) => root.equipmentGroupIds),
+		);
+		if (reason)
+			return invalid(
+				map,
+				patchSequence,
+				organizations,
+				relationships,
+				"INVALID_ARRANGEMENT",
+				reason,
+			);
+	}
 	const moves = resolveRootMoves(roots, arrangement);
 	if (typeof moves === "string") {
 		return invalid(map, patchSequence, organizations, relationships, "INVALID_ARRANGEMENT", moves);
@@ -131,6 +152,20 @@ export function planStaticFabArrangement(
 			selected.reason,
 			selected.conflicts,
 		);
+	}
+	if (arrangement.mode === "TRANSLATE") {
+		for (const cell of selected.targetCellCoordinates.values()) {
+			if (!isSupportedRailCoordinate(cell.x, cell.y))
+				return invalid(
+					map,
+					patchSequence,
+					organizations,
+					relationships,
+					"COORDINATE_OVERFLOW",
+					RAIL_COORDINATE_DOMAIN_REASON,
+					[cell],
+				);
+		}
 	}
 	if (selected.edges.length > STATIC_FAB_ARRANGEMENT_MAX_RAIL_EDGES) {
 		return invalid(

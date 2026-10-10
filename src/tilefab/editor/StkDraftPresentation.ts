@@ -9,6 +9,7 @@ import {
 	STK_MAXIMUM_PORT_COUNT,
 	type StkAuthoringTemplate,
 } from "../core/EquipmentGroup";
+import type { PortRecord } from "../core/PortRecord";
 
 export interface StkDraftStatusPresentation {
 	readonly label: string;
@@ -24,6 +25,25 @@ export interface StkTemplatePresentation {
 export interface StkOverviewCoachPresentation {
 	readonly instruction: string;
 	readonly zoomActionLabel: string;
+}
+
+/** Compare the authored source cell with the current preview slot, without claiming validity. */
+export function stkPortMoveCoordinates(
+	source: PortRecord["route"] | undefined,
+	slots: Pick<CompiledPortSlots, "count" | "routeXs" | "routeZs">,
+	targetRow: number | null,
+): string | null {
+	if (source?.kind !== "CARDINAL_CELL") return null;
+	const origin = `X ${source.x} · Z ${source.z}`;
+	if (
+		targetRow === null ||
+		!Number.isInteger(targetRow) ||
+		targetRow < 0 ||
+		targetRow >= slots.count
+	) {
+		return `${origin} · 대상 선택`;
+	}
+	return `${origin} → X ${slots.routeXs[targetRow]} · Z ${slots.routeZs[targetRow]}`;
 }
 
 /** A compact review of the canonical draft, shared by pointer and keyboard authoring. */

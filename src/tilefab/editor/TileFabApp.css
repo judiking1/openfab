@@ -12732,6 +12732,36 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	border-color: #456164;
 }
 
+.tilefab-translation-distance {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	color: #d9efeb;
+	font-size: 12px;
+}
+
+.tilefab-translation-distance-label {
+	display: grid;
+	gap: 3px;
+}
+
+.tilefab-translation-distance small {
+	color: #98aaa9;
+}
+
+.tilefab-translation-distance input {
+	width: 100px;
+	min-height: 44px;
+	box-sizing: border-box;
+	border: 1px solid #567c78;
+	border-radius: 4px;
+	background: #101d1c;
+	color: #e4f5ef;
+	padding: 8px;
+	font: inherit;
+}
+
 .tilefab-arrangement-summary {
 	display: flex;
 	width: 170px;
@@ -14582,5 +14612,74 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	.tilefab-organization-library[data-view="detail"]:not([data-guided-picker="true"]) {
 		height: calc(100% - 86px);
 		max-height: calc(100% - 86px);
+	}
+}
+
+/* Selection edits stay ahead of registration and collapsible details. */
+.tilefab-selection-edit {
+	margin: 0 8px 8px;
+}
+
+.tilefab-selection-edit-actions {
+	display: flex;
+	gap: 6px;
+}
+
+.tilefab-selection-edit-button {
+	display: flex;
+	min-width: 0;
+	min-height: 44px;
+	flex: 1;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 8px;
+	border: 1px solid #456164;
+	border-radius: 4px;
+	color: #cfe8e7;
+	background: #162526;
+	cursor: pointer;
+	font: inherit;
+	font-size: var(--tilefab-font-label);
+	font-weight: 720;
+	white-space: nowrap;
+}
+
+.tilefab-selection-edit-button:hover:not(:disabled) {
+	border-color: #69bfc4;
+	background: #1d3435;
+}
+
+.tilefab-selection-edit-button:disabled {
+	cursor: not-allowed;
+	opacity: 0.5;
+}
+
+.tilefab-selection-edit-reason {
+	margin: 6px 0 0;
+	color: #dbc3a0;
+	font-size: var(--tilefab-font-label);
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+}
+
+@media (max-width: 860px) {
+	.tilefab-inspector[data-compact-layout="bottom-sheet"][data-compact-expanded="true"]:has(
+			.tilefab-selection-edit
+		) {
+		grid-template-rows: 64px auto minmax(0, 1fr);
+	}
+
+	.tilefab-inspector[data-compact-layout="bottom-sheet"][data-compact-expanded="true"]:has(
+			.tilefab-selection-edit
+		):has(.tilefab-selection-loop-entry) {
+		grid-template-rows: 64px auto auto minmax(0, 1fr);
+	}
+
+	.tilefab-inspector[data-compact-layout="bottom-sheet"][data-compact-expanded="false"]:has(
+			.tilefab-selection-edit
+		) {
+		height: auto;
+		grid-template-rows: 64px auto;
 	}
 }

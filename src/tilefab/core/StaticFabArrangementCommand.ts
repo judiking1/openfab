@@ -2,6 +2,7 @@ import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
 import {
 	STATIC_FAB_ARRANGEMENT_MAX_ROOTS,
 	STATIC_FAB_ARRANGEMENT_VERSION,
+	STATIC_FAB_TRANSLATION_MAX_DISTANCE,
 	type StaticFabArrangementAxis,
 	type StaticFabArrangementMode,
 } from "./StaticFabArrangement";
@@ -32,6 +33,8 @@ export interface StaticFabArrangementCommandIntent {
 	readonly arrangementVersion: typeof STATIC_FAB_ARRANGEMENT_VERSION;
 	readonly axis: StaticFabArrangementAxis;
 	readonly mode: StaticFabArrangementMode;
+	readonly distanceMeters?: number;
+	readonly equipmentGroupIds?: readonly number[];
 	readonly roots: readonly StaticFabArrangementRootReference[];
 }
 
@@ -56,6 +59,29 @@ export function prepareStaticFabArrangementCommand(
 		!Array.isArray(input.roots)
 	) {
 		return failure("정렬 명령의 버전, 축 또는 방식이 유효하지 않습니다");
+	}
+	if (input.mode === "TRANSLATE") {
+		if (
+			input.roots.length !== 1 ||
+			!isRecord(input.roots[0]) ||
+			input.roots[0].kind !== "STATIC_COMPONENT"
+		)
+			return failure("조직 미소속의 독립 구조 하나를 선택하세요");
+		if (
+			typeof input.distanceMeters !== "number" ||
+			!Number.isInteger(input.distanceMeters) ||
+			Math.abs(input.distanceMeters) > STATIC_FAB_TRANSLATION_MAX_DISTANCE
+		)
+			return failure("이동 거리는 -260096~260096 m 범위의 정수로 입력하세요");
+		if (
+			!Array.isArray(input.equipmentGroupIds) ||
+			input.equipmentGroupIds.length > 100000 ||
+			input.equipmentGroupIds.some((id) => !positiveInt32(id)) ||
+			new Set(input.equipmentGroupIds).size !== input.equipmentGroupIds.length
+		)
+			return failure("함께 이동할 장비 목록이 유효하지 않습니다");
+	} else if (input.distanceMeters !== undefined || input.equipmentGroupIds !== undefined) {
+		return failure("거리와 장비 목록은 독립 구조 이동에서만 지정할 수 있습니다");
 	}
 	if (input.roots.length === 0) return failure("정렬할 루트를 하나 이상 지정하세요");
 	if (input.roots.length > STATIC_FAB_ARRANGEMENT_MAX_ROOTS) {
@@ -118,6 +144,14 @@ export function prepareStaticFabArrangementCommand(
 		arrangementVersion: STATIC_FAB_ARRANGEMENT_VERSION,
 		axis: input.axis,
 		mode: input.mode,
+		...(input.mode === "TRANSLATE"
+			? {
+					distanceMeters: input.distanceMeters as number,
+					equipmentGroupIds: Object.freeze(
+						[...(input.equipmentGroupIds as number[])].sort((a, b) => a - b),
+					),
+				}
+			: {}),
 		roots: Object.freeze(roots),
 	} satisfies StaticFabArrangementCommandIntent);
 	return Object.freeze({
@@ -141,6 +175,13 @@ export function staticFabArrangementCommandFingerprint(input: unknown): string {
 		prepared.intent.arrangementVersion,
 		prepared.intent.roots.length,
 	]);
+	if (prepared.intent.mode === "TRANSLATE") {
+		checksum.addNumbers([
+			prepared.intent.distanceMeters as number,
+			prepared.intent.equipmentGroupIds?.length ?? 0,
+			...(prepared.intent.equipmentGroupIds ?? []),
+		]);
+	}
 	for (const root of prepared.intent.roots) {
 		checksum.addStrings([root.kind]);
 		if (root.kind === "STATIC_COMPONENT") {
@@ -160,6 +201,7 @@ function failure(reason: string): StaticFabArrangementCommandPreparation {
 
 function isMode(value: unknown): value is StaticFabArrangementMode {
 	return (
+		value === "TRANSLATE" ||
 		value === "ALIGN_MIN" ||
 		value === "ALIGN_CENTER" ||
 		value === "ALIGN_MAX" ||

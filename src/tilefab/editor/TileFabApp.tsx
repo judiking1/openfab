@@ -1,3 +1,4 @@
+import { staticFabTranslationSelectionReason } from "../compile/StaticFabTranslationSelection";
 import {
 	AlertTriangle,
 	ArrowLeft,
@@ -1845,6 +1846,7 @@ type StaticFabArrangementSource = "SELECTION" | "ORGANIZATIONS";
 type StaticFabArrangementPhase = "capturing" | "planning" | "committing" | "certified" | "rejected";
 
 interface StaticFabArrangementUiState {
+	readonly distanceMeters?: number;
 	readonly source: StaticFabArrangementSource;
 	readonly axis: StaticFabArrangementAxis;
 	readonly mode: StaticFabArrangementMode;
@@ -3522,6 +3524,7 @@ export default function TileFabApp(): React.ReactElement {
 	const [areaSelectionProvenance, setAreaSelectionProvenance] =
 		useState<StaticFabAreaSelectionProvenance>(null);
 	const [staticFabSelection, setStaticFabSelection] = useState<StaticFabSelection | null>(null);
+	const [translationDistanceInput, setTranslationDistanceInput] = useState("0");
 	const [staticFabArrangement, setStaticFabArrangement] =
 		useState<StaticFabArrangementUiState | null>(null);
 	const [staticFabAssemblyConnector, setStaticFabAssemblyConnector] =
@@ -9086,6 +9089,7 @@ export default function TileFabApp(): React.ReactElement {
 		axis: StaticFabArrangementAxis,
 		mode: StaticFabArrangementMode,
 		requestId: number,
+		distanceMeters?: number,
 	): void => {
 		if (requestId !== staticFabArrangementRequestRef.current) return;
 		if (!staticFabArrangementBindingIsCurrent(binding)) {
@@ -9103,13 +9107,14 @@ export default function TileFabApp(): React.ReactElement {
 
 		let intent: ReturnType<typeof staticFabArrangementCommandFromRoots>;
 		try {
-			intent = staticFabArrangementCommandFromRoots(axis, mode, binding.roots);
+			intent = staticFabArrangementCommandFromRoots(axis, mode, binding.roots, distanceMeters);
 		} catch (error) {
 			publishStaticFabArrangementUi(
 				Object.freeze({
 					source: binding.source,
 					axis,
 					mode,
+					distanceMeters,
 					rootCount: binding.roots.length,
 					phase: "rejected",
 					reason: error instanceof Error ? error.message : "정렬 요청이 유효하지 않습니다",
@@ -9122,7 +9127,7 @@ export default function TileFabApp(): React.ReactElement {
 			);
 			return;
 		}
-		const solvedArrangement = solveStaticFabArrangementFromRoots(axis, mode, binding.roots);
+		const solvedArrangement = solveStaticFabArrangementFromRoots(axis, mode, binding.roots, distanceMeters);
 		const previewTranslations = solvedArrangement.valid ? solvedArrangement.translations : [];
 		const previewFootprintRoots = binding.roots.map((root) => ({
 			key: root.key,
@@ -9208,6 +9213,7 @@ export default function TileFabApp(): React.ReactElement {
 						source: binding.source,
 						axis,
 						mode,
+						distanceMeters,
 						rootCount: binding.roots.length,
 						phase: committablePlan ? "certified" : "rejected",
 						reason: committableReason,
@@ -9244,6 +9250,7 @@ export default function TileFabApp(): React.ReactElement {
 		binding: StaticFabArrangementBinding,
 		axis: StaticFabArrangementAxis,
 		mode: StaticFabArrangementMode,
+		distanceMeters?: number,
 	): void => {
 		if (!staticFabArrangementBindingIsCurrent(binding)) {
 			cancelStaticFabArrangement("선택한 FAB가 변경되어 정렬을 취소했습니다");
@@ -9262,6 +9269,7 @@ export default function TileFabApp(): React.ReactElement {
 				source: binding.source,
 				axis,
 				mode,
+				distanceMeters,
 				rootCount: binding.roots.length,
 				phase: "planning",
 				reason: "선택한 정렬 방식으로 배치할 수 있는지 검사하고 있습니다",
@@ -9274,14 +9282,26 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		staticFabArrangementRequestTimerRef.current = window.setTimeout(() => {
 			staticFabArrangementRequestTimerRef.current = null;
-			executeStaticFabArrangementRequest(binding, axis, mode, requestId);
+			executeStaticFabArrangementRequest(binding, axis, mode, requestId, distanceMeters);
 		}, 80);
 	};
 
 	const startStaticFabArrangement = (
 		selectionModeOverride?: StaticFabOrganizationSelectionMode,
+		translation = false,
 	): void => {
 		if (blockStaticFabExclusiveCommand()) return;
+		if (translation) {
+			const blocked = editorActivityTransitionBlockedReason();
+			if (blocked) { setStatus(blocked); return; }
+			if (blockEqBodyDraftSelectionChange(null)) return;
+			if (areaStampSessionRef.current || organizationBundlePlacementSessionRef.current || stampSessionRef.current ||
+				templateSessionRef.current || anchorRef.current || dragRef.current || reshapeRef.current ||
+				inspectAreaDragRef.current || portRowDragRef.current || stkDraftSessionRef.current || ohbPlacementIntentRef.current ||
+				portEquipmentGroupEditSessionRef.current || portEquipmentMembershipEditSessionRef.current) {
+				setStatus("진행 중인 편집을 적용하거나 취소한 뒤 구조를 이동하세요"); return;
+			}
+		}
 		if (staticFabOrganizationOverlapSelectionRef.current) {
 			setStatus("겹친 조직 후보를 선택하거나 Esc로 닫은 뒤 FAB 배치를 정리하세요");
 			return;
@@ -9334,15 +9354,21 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus(resolution.reason);
 			return;
 		}
-		if (resolution.roots.length < 2) {
+		if (translation) {
+ const reason = staticFabTranslationSelectionReason(model.document.organizations, resolution.roots,
+ staticFabSelectionRef.current?.equipmentGroups.map(selected => selected.group.id) ?? []);
+ if (reason) { setStatus(reason); return; }
+ }
+ if (!translation && resolution.roots.length < 2) {
 			setStatus("정렬하려면 서로 독립적인 FAB 블록 또는 조직이 2개 이상 필요합니다");
 			return;
 		}
-		const recommendation = recommendStaticFabArrangement(resolution.roots);
+		const recommendation = translation ? {valid: true as const, axis: "X" as const, mode: "TRANSLATE" as const} : recommendStaticFabArrangement(resolution.roots);
 		if (!recommendation.valid) {
 			setStatus(`${recommendation.reason} · 현재 선택은 유지됩니다`);
 			return;
 		}
+		if (translation) setTranslationDistanceInput("0");
 		closeContextPalette();
 		clearTransientConstruction();
 		setProjectMenuOpen(false);
@@ -9377,6 +9403,7 @@ export default function TileFabApp(): React.ReactElement {
 				source: binding.source,
 				axis: recommendation.axis,
 				mode: recommendation.mode,
+				distanceMeters: translation ? 0 : undefined,
 				rootCount: binding.roots.length,
 				phase: "capturing",
 				reason: "정렬할 FAB 데이터를 준비하고 있습니다 · Esc로 취소",
@@ -9419,7 +9446,7 @@ export default function TileFabApp(): React.ReactElement {
 				});
 				staticFabArrangementCaptureRef.current = null;
 				updateEditorActivity("assemble");
-				requestStaticFabArrangement(binding, recommendation.axis, recommendation.mode);
+				requestStaticFabArrangement(binding, recommendation.axis, recommendation.mode, translation ? 0 : undefined);
 			})
 			.catch((error) => {
 				if (requestId !== staticFabArrangementRequestRef.current || capture.signal.aborted) return;
@@ -9455,7 +9482,7 @@ export default function TileFabApp(): React.ReactElement {
 			current.axis === axis
 		)
 			return;
-		requestStaticFabArrangement(binding, axis, current.mode);
+		requestStaticFabArrangement(binding, axis, current.mode, current.distanceMeters);
 	};
 
 	const setStaticFabArrangementMode = (mode: StaticFabArrangementMode): void => {
@@ -9466,7 +9493,7 @@ export default function TileFabApp(): React.ReactElement {
 			!current ||
 			current.phase === "capturing" ||
 			current.phase === "committing" ||
-			current.mode === mode
+			(current.mode === mode || current.mode === "TRANSLATE")
 		)
 			return;
 		if ((mode === "DISTRIBUTE_CENTERS" || mode === "DISTRIBUTE_GAPS") && binding.roots.length < 3) {
@@ -9474,6 +9501,12 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		requestStaticFabArrangement(binding, current.axis, mode);
+	};
+	const setStaticFabTranslationDistance = (value: string): void => {
+		const binding = staticFabArrangementBindingRef.current, current = staticFabArrangementUiRef.current;
+		if (!binding || current?.mode !== "TRANSLATE" || current.phase === "capturing" || current.phase === "committing") return;
+		setTranslationDistanceInput(value);
+		requestStaticFabArrangement(binding, current.axis, "TRANSLATE", value.trim() === "" ? Number.NaN : Number(value));
 	};
 	const focusCanvasAfterPointerArrangementCommand = (
 		event: ReactMouseEvent<HTMLButtonElement>,
@@ -13513,6 +13546,13 @@ export default function TileFabApp(): React.ReactElement {
 						})
 					: undefined;
 			if (!stkCandidateFilter) stkCandidateFilterRef.current.clear();
+			const inspectedPort = toolRef.current === "inspect" && selectedPortEquipmentRef.current &&
+				!portEquipmentGroupEditSessionRef.current && !portEquipmentMembershipEditSessionRef.current
+				? resolveExactPortEquipmentSelection(activeModel.document.portEquipment, selectedPortEquipmentRef.current) : null;
+			const inspectedFlexStkPort = inspectedPort?.equipmentGroup.kind === "STK" &&
+				inspectedPort.equipmentGroup.template === "FLEX" && inspectedPort.equipmentGroup.portIds.length > 1 &&
+				inspectedPort.port.equipmentGroupId === inspectedPort.equipmentGroup.id &&
+				inspectedPort.equipmentGroup.portIds.includes(inspectedPort.port.id) ? inspectedPort.port : null;
 			const railCoachInsets = guidedBuildRailSelectionCoach ? fitMapInsets(canvas) : null;
 			const portCoachInsets = guidedBuildPortPlacementCoach ? fitMapInsets(canvas) : null;
 			const portCoachSession = guidedPortKeyboardSessionRef.current;
@@ -13573,6 +13613,10 @@ export default function TileFabApp(): React.ReactElement {
 							? "ports"
 							: "rail",
 				portEquipmentPresentation: portEquipmentPresentationRef.current,
+				selectedStkPort: inspectedFlexStkPort ? { portId: inspectedFlexStkPort.id, insets: fitMapInsets(canvas) } : null,
+				movingStkPort: portEquipmentGroupEditSessionRef.current?.scope === "port" &&
+					!portEquipmentGroupEditSessionRef.current.plan
+					? { portId: portEquipmentGroupEditSessionRef.current.sourceAnchorPortId, insets: fitMapInsets(canvas) } : null,
 				hoverPortId: activeArrangementPreview || portEquipmentMembershipEditSessionRef.current ? null : hoverPortIdRef.current,
 				selectedPortId: activeArrangementPreview || portEquipmentMembershipEditSessionRef.current
 					? null
@@ -13634,6 +13678,13 @@ export default function TileFabApp(): React.ReactElement {
 							slots: portEquipmentMembershipEditSessionRef.current.slots,
 							sourceRows: portEquipmentMembershipEditSessionRef.current.sourceRows,
 							targetRows: portEquipmentMembershipEditSessionRef.current.selection.rows,
+							fixedAnchor: portEquipmentMembershipEditSessionRef.current.portType === "EQ" &&
+								portEquipmentMembershipEditSessionRef.current.editMode === "pitch"
+								? {
+									portId: portEquipmentMembershipEditSessionRef.current.sourceAnchorPortId,
+									row: portEquipmentMembershipEditSessionRef.current.selection.anchorRow,
+									insets: fitMapInsets(canvas),
+								} : null,
 						}
 					: null,
 				ghost: activeGhost,
@@ -22892,7 +22943,16 @@ export default function TileFabApp(): React.ReactElement {
 			scope === "port" ? `PORT-${resolved.port.id}만 이동 · 같은 직선 구간 · 몸체 길이 유지 · 위치 선택 후 적용 · Esc 취소` : `${portType}-${resolved.equipmentGroup.id} 전체 ${mode === "move" ? "이동" : "복제"}${session.preservesLoopOwnership ? " · 현재 Loop 소속 유지 · 모든 Port가 같은 Loop 안에 있어야 합니다" : ""} · 기준 포트를 놓을 슬롯을 선택하세요`,
 		);
 		scheduleRender();
-		requestAnimationFrame(() => canvasRef.current?.focus());
+		requestAnimationFrame(() => {
+			const canvas = canvasRef.current;
+			if (!canvas || portEquipmentGroupEditSessionRef.current !== session) return;
+			const row = scope === "port" && session.targetRow === null ? session.slotIndex.rowForPort(resolved.port) : null;
+			if (row !== null && centerWorldPointIfObscured(session.slots.worldPositions[row * 2],
+				session.slots.worldPositions[row * 2 + 1], canvas, cameraRef.current, rendererRef.current, fitMapInsets(canvas))) {
+				rendererRef.current.invalidateStatic(); scheduleRender();
+			}
+			canvas.focus({ preventScroll: true });
+		});
 	};
 
 	// Use the command's displayed/resolved kind only to select its existing guarded editor.
@@ -22902,7 +22962,7 @@ export default function TileFabApp(): React.ReactElement {
 		editors[portEquipmentTransformPolicy(kind).editor](mode);
 	};
 
-	const startSelectedPortEquipmentMembershipEdit = (): void => {
+	const startSelectedPortEquipmentMembershipEdit = (initialMode: "membership" | "pitch" = "membership"): void => {
 		if (blockEqBodyDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
@@ -22919,6 +22979,10 @@ export default function TileFabApp(): React.ReactElement {
 					? "무결성 진단 대상은 읽기 전용입니다 · 검사 화면에서 관계를 먼저 복구하세요"
 					: "EQ 또는 Stocker 그룹의 포트를 먼저 선택하세요",
 			);
+			return;
+		}
+		if (initialMode === "pitch" && resolved.equipmentGroup.kind !== "EQ") {
+			setStatus("간격을 편집할 EQ Port를 다시 선택하세요");
 			return;
 		}
 		const portType = resolved.equipmentGroup.kind;
@@ -23037,7 +23101,8 @@ export default function TileFabApp(): React.ReactElement {
 		portEquipmentMembershipTelemetryRef.current = createPortEquipmentMembershipTelemetry();
 		hoverPortSlotRef.current = session.keyboardRow;
 		updatePortEquipmentMembershipEditSession(session);
-		setStatus(
+		if (initialMode === "pitch") setEqMembershipEditMode("pitch");
+		else setStatus(
 			portType === "EQ"
 				? `EQ-${resolved.equipmentGroup.id} 포트 편집 · 선택한 쪽 끝점을 드래그 · Q/E로 반대 끝점`
 				: `STK-${resolved.equipmentGroup.id} 포트 편집 · 슬롯을 클릭해 추가/제거`,
@@ -33211,6 +33276,39 @@ export default function TileFabApp(): React.ReactElement {
 		setStatus(`장비 ${next.equipmentGroupId} · PORT-${next.portId} 선택`);
 		scheduleRender();
 	};
+	const selectFlexStkPort = (selection: PortEquipmentSelection): boolean => {
+		if (blockStaticFabExclusiveCommand()) return false;
+		const blocked = editorActivityTransitionBlockedReason();
+		if (blocked) { setStatus(blocked); return false; }
+		if (portEquipmentGroupEditSessionRef.current || portEquipmentMembershipEditSessionRef.current ||
+			stkDraftSessionRef.current || portRowDragRef.current || ohbPlacementIntentRef.current) {
+			setStatus("현재 Port 편집을 적용하거나 취소한 뒤 다른 Port를 선택하세요"); return false;
+		}
+		const current = selectedPortEquipmentRef.current;
+		if (current?.equipmentGroupId !== selection.equipmentGroupId || toolRef.current !== "inspect") return false;
+		const resolved = resolveEditablePortEquipmentSelection(editorModelRef.current.document.portEquipment, selection);
+		if (!resolved || resolved.equipmentGroup.kind !== "STK" || resolved.equipmentGroup.template !== "FLEX" ||
+			resolved.equipmentGroup.portIds.length < 2) {
+			setStatus("현재 Stocker의 Port를 다시 선택하세요"); return false;
+		}
+		setPortEquipmentSelection(selection);
+		setStatus(`STK-${selection.equipmentGroupId} · PORT-${selection.portId} 선택 · Port만 이동으로 편집`);
+		scheduleRender();
+		return true;
+	};
+	const startNextFlexStkPortMove = (expected: PortEquipmentSelection, nextPortId: number): void => {
+		const current = selectedPortEquipmentRef.current;
+		if (current?.portId !== expected.portId || current.equipmentGroupId !== expected.equipmentGroupId) return;
+		const { resolved, actions } = currentPortEquipmentActions();
+		if (blockPortEquipmentAction(actions.move)) return;
+		const group = resolved?.equipmentGroup;
+		if (!group || group.kind !== "STK" || group.template !== "FLEX" || group.portIds.length < 2) return;
+		const index = group.portIds.indexOf(expected.portId);
+		if (index < 0 || group.portIds[(index + 1) % group.portIds.length] !== nextPortId) {
+			setStatus("Port 순서가 변경되었습니다 · 목록에서 다시 선택하세요"); return;
+		}
+		if (selectFlexStkPort({ portId: nextPortId, equipmentGroupId: group.id })) startSelectedPortEquipmentGroupEdit("move", "port");
+	};
 	const activateGuidedBuildSuggestedAction = (next: GuidedBuildSuggestedAction): void => {
 		if (
 			guidedBuildSuggestedActionClearsPortSelection(
@@ -33597,6 +33695,26 @@ export default function TileFabApp(): React.ReactElement {
 			!blueprintLibraryOpen &&
 			!organizationLibraryOpen,
 	);
+	const translationEntryReason = useMemo(() => {
+		if (!railAreaSelectionInspectorVisible) return null;
+		if (modelSyncPending || projectBusy) return "프로젝트와 Worker가 준비될 때까지 기다리세요";
+		if (!staticFabSelection) return "이동할 연결 구조 전체를 선택하세요";
+		const resolution = resolveStaticFabSelectionArrangementRoots(
+			editorModel.map,
+			editorModel.ownership,
+			editorModel.document.portEquipment,
+			editorModel.document.getPatchSequence(),
+			staticFabSelection,
+			activePortEquipmentPresentation,
+		);
+		return resolution.valid
+			? staticFabTranslationSelectionReason(
+					editorModel.document.organizations,
+					resolution.roots,
+					staticFabSelection.equipmentGroups.map((selected) => selected.group.id),
+				)
+			: resolution.reason;
+	}, [railAreaSelectionInspectorVisible, modelSyncPending, projectBusy, staticFabSelection, editorModel, activePortEquipmentPresentation]);
 	const portEquipmentInspectorVisible = Boolean(
 		selectedPortDetails &&
 			!guidedBuildExpertSelectionInspectorsHidden &&
@@ -37789,7 +37907,19 @@ export default function TileFabApp(): React.ReactElement {
 											title={selectedPortActions.editMembership.reason ?? undefined}
 											onClick={() => runContextPaletteAction(startSelectedPortEquipmentMembershipEdit)}
 										>
-											<MousePointer2 size={16} /> 포트 구성 편집
+											<MousePointer2 size={16} /> {selectedPortDetails.equipmentGroup.kind === "EQ" ? "Port 수 편집" : "포트 구성 편집"}
+										</button>
+									) : null}
+									{selectedPortDetails.equipmentGroup.kind === "EQ" ? (
+										<button
+											type="button"
+											role="menuitem"
+											data-testid="context-edit-eq-port-pitch"
+											disabled={!selectedPortActions.editMembership.allowed || modelSyncPending || workerState.status !== "ready"}
+											title={selectedPortActions.editMembership.reason ?? `PORT-${selectedPortDetails.port.id} 고정 · Port 수 유지`}
+											onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentMembershipEdit("pitch"))}
+										>
+											<ArrowLeftRight size={16} /> Port 간격 · {selectedPortDetails.equipmentGroup.pitchMillimeters / 1_000} m
 										</button>
 									) : null}
 									<button
@@ -38871,7 +39001,7 @@ export default function TileFabApp(): React.ReactElement {
 						data-axis={staticFabArrangement.axis}
 						data-mode={staticFabArrangement.mode}
 						data-source-plan-index={staticFabArrangement.sourcePlanIndex ?? undefined}
-						aria-label="정적 FAB 정렬 및 분배"
+						aria-label={staticFabArrangement.mode === "TRANSLATE" ? "독립 구조 이동" : "정적 FAB 정렬 및 분배"}
 						aria-busy={staticFabArrangement.phase === "planning" || staticFabArrangement.phase === "capturing" || staticFabArrangement.phase === "committing"}
 					>
 						<header className="tilefab-arrangement-summary">
@@ -38884,7 +39014,7 @@ export default function TileFabApp(): React.ReactElement {
 							)}
 							<span>
 								<strong>
-									{guidedBuildArrangementSubject
+									{staticFabArrangement.mode === "TRANSLATE" ? "독립 구조 이동" : guidedBuildArrangementSubject
 										? `정렬 · ${guidedBuildArrangementSubject}`
 										: `${staticFabArrangement.rootCount}개 구조 정렬`}
 								</strong>
@@ -38897,7 +39027,7 @@ export default function TileFabApp(): React.ReactElement {
 								</small>
 							</span>
 						</header>
-						<fieldset className="tilefab-segmented tilefab-arrangement-axis" aria-label="정렬 축" disabled={staticFabArrangement.phase === "capturing" || staticFabArrangement.phase === "committing"}>
+						<fieldset className="tilefab-segmented tilefab-arrangement-axis" aria-label={staticFabArrangement.mode === "TRANSLATE" ? "이동 축" : "정렬 축"} disabled={staticFabArrangement.phase === "capturing" || staticFabArrangement.phase === "committing"}>
 							<button
 								type="button"
 								data-active={staticFabArrangement.axis === "X"}
@@ -38907,7 +39037,7 @@ export default function TileFabApp(): React.ReactElement {
 									setStaticFabArrangementAxis("X");
 									focusCanvasAfterPointerArrangementCommand(event);
 								}}
-								title="X축 정렬 · X"
+								title={`${staticFabArrangement.mode === "TRANSLATE" ? "X축 이동" : "X축 정렬"} · X`}
 							>
 								<ArrowLeftRight size={14} /> X <kbd>X</kbd>
 							</button>
@@ -38920,11 +39050,19 @@ export default function TileFabApp(): React.ReactElement {
 									setStaticFabArrangementAxis("Z");
 									focusCanvasAfterPointerArrangementCommand(event);
 								}}
-								title="Z축 정렬 · Z"
+								title={`${staticFabArrangement.mode === "TRANSLATE" ? "Z축 이동" : "Z축 정렬"} · Z`}
 							>
 								<ArrowUpDown size={14} /> Z <kbd>Z</kbd>
 							</button>
 						</fieldset>
+						{staticFabArrangement.mode === "TRANSLATE" ? (
+							<label className="tilefab-translation-distance">
+								<span className="tilefab-translation-distance-label">이동 거리 <small>m · 음수 가능</small></span>
+								<input data-testid="static-fab-translation-distance" aria-label="이동 거리 (m)" type="text" inputMode="numeric"
+									value={translationDistanceInput} disabled={staticFabArrangement.phase === "capturing" || staticFabArrangement.phase === "committing"}
+									onChange={event => setStaticFabTranslationDistance(event.currentTarget.value)} />
+							</label>
+						) : (
 						<fieldset
 							className="tilefab-segmented tilefab-arrangement-modes"
 							aria-label="정렬 및 분배 방식"
@@ -38964,6 +39102,7 @@ export default function TileFabApp(): React.ReactElement {
 								);
 							})}
 						</fieldset>
+						)}
 						<p
 							id="tilefab-arrangement-feedback"
 							className="tilefab-arrangement-feedback"
@@ -38981,7 +39120,7 @@ export default function TileFabApp(): React.ReactElement {
 											: "적용할 수 없음"}
 							</strong>
 							<span className="tilefab-arrangement-reason" title={staticFabArrangement.reason}>{staticFabArrangement.reason}</span>
-							{staticFabArrangement.rootCount < 3 && (
+							{staticFabArrangement.mode !== "TRANSLATE" && staticFabArrangement.rootCount < 3 && (
 								<span>간격 맞춤: 구조 3개 이상 필요</span>
 							)}
 						</p>
@@ -39000,7 +39139,7 @@ export default function TileFabApp(): React.ReactElement {
 										? "tilefab-guided-primary-target-description tilefab-arrangement-feedback"
 										: undefined
 								}
-								aria-label="FAB 배치 정리 취소"
+								aria-label={staticFabArrangement.mode === "TRANSLATE" ? "구조 이동 취소" : "FAB 배치 정리 취소"}
 								aria-keyshortcuts="Escape"
 								onClick={() => {
 									cancelStaticFabArrangement("FAB 배치 정리를 취소했습니다 · 선택은 유지됩니다");
@@ -40065,6 +40204,45 @@ export default function TileFabApp(): React.ReactElement {
 								</button>
 							</div>
 						</header>
+						<section className="tilefab-selection-edit" aria-label="선택한 구조 편집">
+							<div className="tilefab-selection-edit-actions">
+								<button
+									type="button"
+									className="tilefab-selection-edit-button"
+									data-testid="start-static-fab-translation"
+									aria-label="선택한 구조 거리 입력으로 이동"
+									aria-describedby={translationEntryReason ? "tilefab-translation-entry-reason" : undefined}
+									disabled={translationEntryReason !== null}
+									onClick={() => startStaticFabArrangement(undefined, true)}
+									title="미소속 독립 폐회로와 부착 장비를 기존 ID 그대로 이동"
+								>
+									<Move size={15} /> 거리 이동
+								</button>
+								{areaStampEligibility?.valid === true ? (
+									<button
+										type="button"
+										className="tilefab-selection-edit-button"
+										aria-label="선택한 구조 복제"
+										data-testid="duplicate-rail-area-selection"
+										aria-describedby="tilefab-rail-partial-copy-note"
+										onClick={() =>
+											startAreaStamp(
+												areaSelection,
+												areaStampEligibility.template,
+												areaStampEligibility.staticFabTemplate ?? undefined,
+											)
+										}
+									>
+										<Copy size={15} /> 구조 복제
+									</button>
+								) : null}
+							</div>
+							{translationEntryReason ? (
+								<p id="tilefab-translation-entry-reason" className="tilefab-selection-edit-reason" data-testid="static-fab-translation-entry-reason">
+									이동: {translationEntryReason}
+								</p>
+							) : null}
+						</section>
 						{areaSelectionProvenance === "ad-hoc" && compactInspectorSheetActive ? (
 							<button type="button" className="tilefab-selection-loop-entry" data-testid="start-process-loop-registration"
 								aria-controls="rail-area-selection-inspector-content"
@@ -40092,26 +40270,6 @@ export default function TileFabApp(): React.ReactElement {
 								</small>
 							</span>
 						</p>
-						{areaStampEligibility?.valid === true ? (
-							<button
-								type="button"
-								className="tilefab-inspector-primary"
-								data-testid="duplicate-rail-area-selection"
-								aria-describedby="tilefab-rail-partial-copy-note"
-								onClick={() =>
-									startAreaStamp(
-										areaSelection,
-										areaStampEligibility.template,
-										areaStampEligibility.staticFabTemplate ?? undefined,
-									)
-								}
-							>
-								<Copy size={15} /> 선택한 레일 모듈 {areaSelection.ownerships.length}개
-								{staticFabEquipmentGroupCount > 0
-									? ` · 장비 ${staticFabEquipmentGroupCount}개`
-									: ""} 복제
-							</button>
-						) : null}
 						{areaSelectionProvenance === "ad-hoc" ? (
 							<StandaloneProcessLoopRegistrationForm name={processLoopNameDraft} busy={processLoopOperation !== null}
 								selectionAvailable={staticFabSelection !== null && staticFabSelection.rail === areaSelection && staticFabEquipmentGroupCount === 0}
@@ -40638,6 +40796,8 @@ export default function TileFabApp(): React.ReactElement {
 						selectEquipmentProcessLoopRailForRegistration={selectEquipmentProcessLoopRailForRegistration}
 						selectedEquipmentProcessLoopRegistrationAvailable={selectedEquipmentProcessLoopRegistration?.valid ?? false}
 						selectNextPortEquipmentGroup={selectNextPortEquipmentGroup}
+						selectFlexStkPort={selectFlexStkPort}
+						startNextFlexStkPortMove={startNextFlexStkPortMove}
 						selectedEquipmentDirectlyOwned={selectedEquipmentDirectlyOwned}
 						selectedEquipmentGroup={selectedEquipmentGroup}
 						selectedEquipmentNeedsGroupMoveForProcessLoop={selectedEquipmentNeedsGroupMoveForProcessLoop}
@@ -41357,6 +41517,7 @@ function staticFabArrangementModeForKeyboardCode(code: string): StaticFabArrange
 
 function staticFabArrangementModeLabel(mode: StaticFabArrangementMode): string {
 	switch (mode) {
+		case "TRANSLATE": return "거리 이동";
 		case "ALIGN_MIN":
 			return "최소 경계";
 		case "ALIGN_CENTER":
@@ -41372,6 +41533,7 @@ function staticFabArrangementModeLabel(mode: StaticFabArrangementMode): string {
 
 function staticFabArrangementModeDescription(mode: StaticFabArrangementMode): string {
 	switch (mode) {
+		case "TRANSLATE": return "독립 구조를 입력한 거리만큼 이동합니다";
 		case "ALIGN_MIN":
 			return "선택 축의 최소 경계를 맞춥니다";
 		case "ALIGN_CENTER":

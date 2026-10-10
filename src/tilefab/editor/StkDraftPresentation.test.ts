@@ -4,6 +4,7 @@ import type { PortEquipmentGroupEditPlan } from "../compile/PortEquipmentGroupEd
 import { compilePortSlotPreparedArtifactCatalog } from "../compile/PortSlotPreparedArtifacts";
 import type { StkDraftSelection } from "../compile/StkDraftSelector";
 import { createInvalidPortEquipmentMutationPlan } from "../core/PortEquipmentPlan";
+import { DIR_E, DIR_W } from "../core/railShape";
 import { TileMap } from "../core/TileMap";
 import {
 	portEquipmentGroupEditFeedback,
@@ -14,10 +15,29 @@ import {
 	stkDraftReviewPresentation,
 	stkDraftStatusPresentation,
 	stkOverviewCoachPresentation,
+	stkPortMoveCoordinates,
 	stkTemplatePresentation,
 } from "./StkDraftPresentation";
 
 describe("StkDraftPresentation", () => {
+	it("compares source and target route cells without accepting or mutating a move", () => {
+		const source = Object.freeze({
+			kind: "CARDINAL_CELL" as const,
+			x: 9,
+			z: -2,
+			from: DIR_W,
+			to: DIR_E,
+		});
+		const slots = { count: 2, routeXs: new Int32Array([10, 4]), routeZs: new Int32Array([-2, 7]) };
+		expect(stkPortMoveCoordinates(source, slots, null)).toBe("X 9 · Z -2 · 대상 선택");
+		expect(stkPortMoveCoordinates(source, slots, 0)).toBe("X 9 · Z -2 → X 10 · Z -2");
+		expect(stkPortMoveCoordinates(source, slots, 1)).toBe("X 9 · Z -2 → X 4 · Z 7");
+		for (const row of [-1, 2, 0.5, Number.NaN])
+			expect(stkPortMoveCoordinates(source, slots, row)).toBe("X 9 · Z -2 · 대상 선택");
+		expect(stkPortMoveCoordinates(undefined, slots, 0)).toBeNull();
+		expect(source.x).toBe(9);
+		expect([...slots.routeXs]).toEqual([10, 4]);
+	});
 	it("keeps both failed and conflicting Port IDs and avoids invented coordinates", () => {
 		expect(portEquipmentReasonLabel("PORT-12 maps to an unsafe rail slot.")).toBe(
 			"PORT-12 · 그룹의 일부 포트가 안전 영역을 벗어납니다",

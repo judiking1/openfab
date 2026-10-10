@@ -21,6 +21,113 @@ vi.mock("react", async (importOriginal) => {
 import { portEquipmentTransformPolicy } from "./PortEquipmentTransformPolicy";
 
 describe("PortEquipmentInspectorSelection", () => {
+	it("selects a stable FLEX STK Port identity from compact coordinates without starting an edit", () => {
+		const state = {
+			...eqState(
+				[4, 8, 12].map((id, index) => ({
+					...port(id, 1, `STK-${id}`, 500),
+					portType: "STK" as const,
+					route: { kind: "CARDINAL_CELL" as const, x: index * 5 + 4, z: 0, from: DIR_W, to: DIR_E },
+				})),
+				[{ id: 1, kind: "STK", template: "FLEX", portIds: [4, 8, 12] }],
+			),
+			nextPortId: 13,
+		};
+		const selected = resolveEditablePortEquipmentSelection(state, {
+			portId: 8,
+			equipmentGroupId: 1,
+		});
+		if (!selected) throw new Error("Expected editable FLEX STK");
+		const select = vi.fn(),
+			move = vi.fn(),
+			nextMove = vi.fn(),
+			before = JSON.stringify(state);
+		const props = {
+			...inspectorProps(state, selected),
+			selectFlexStkPort: select,
+			startSelectedPortEquipmentGroupEdit: move,
+			startNextFlexStkPortMove: nextMove,
+		};
+		const tree = PortEquipmentInspector(props);
+		const picker = findInspectorElement(
+			tree,
+			(e) => e.props["data-testid"] === "select-flex-stk-port",
+		);
+		expect(picker?.props.value).toBe(8);
+		expect(picker?.props.disabled).toBe(false);
+		expect(renderToStaticMarkup(picker)).toContain('value="8" selected=""');
+		expect(renderToStaticMarkup(picker)).toContain("PORT-12 · X 14 · Z 0");
+		(picker?.props.onChange as (e: { currentTarget: { value: string } }) => void)({
+			currentTarget: { value: "12" },
+		});
+		expect(select).toHaveBeenCalledExactlyOnceWith({ portId: 12, equipmentGroupId: 1 });
+		expect(move).not.toHaveBeenCalled();
+		const next = findInspectorElement(
+			tree,
+			(e) => e.props["data-testid"] === "move-next-flex-stk-port",
+		);
+		expect(next?.props["aria-label"]).toBe("다음 Port 이동 · PORT-12");
+		(next?.props.onClick as () => void)();
+		expect(nextMove).toHaveBeenCalledExactlyOnceWith({ portId: 8, equipmentGroupId: 1 }, 12);
+		expect(move).not.toHaveBeenCalled();
+		expect(JSON.stringify(state)).toBe(before);
+		for (const blocked of [
+			{ modelSyncPending: true },
+			{ workerState: { status: "error" as const } },
+			{ selectedPortEditableDetails: null },
+		]) {
+			const node = findInspectorElement(
+				PortEquipmentInspector({ ...props, ...blocked }),
+				(e) => e.props["data-testid"] === "select-flex-stk-port",
+			);
+			expect(node?.props.disabled).toBe(true);
+			expect(
+				findInspectorElement(
+					PortEquipmentInspector({ ...props, ...blocked }),
+					(e) => e.props["data-testid"] === "move-next-flex-stk-port",
+				)?.props.disabled,
+			).toBe(true);
+		}
+		expect(
+			renderToStaticMarkup(PortEquipmentInspector({ ...props, viewMode: "3d" })),
+		).not.toContain('data-testid="select-flex-stk-port"');
+		const reordered = { ...selected.equipmentGroup, portIds: [4, 12, 8] };
+		const wrapped = findInspectorElement(
+			PortEquipmentInspector({ ...props, selectedEquipmentGroup: reordered }),
+			(e) => e.props["data-testid"] === "move-next-flex-stk-port",
+		);
+		expect(wrapped?.props["aria-label"]).toBe("다음 Port 이동 · PORT-4");
+	});
+	it("opens EQ pitch directly from the selected Port without applying an edit", () => {
+		const state = eqState();
+		const selected = resolveEditablePortEquipmentSelection(state, selection());
+		if (!selected) throw new Error("Expected editable EQ selection");
+		const before = JSON.stringify(state);
+		const start = vi.fn();
+		const tree = PortEquipmentInspector({
+			...inspectorProps(state, selected),
+			startSelectedPortEquipmentMembershipEdit: start,
+		});
+		const pitch = findInspectorElement(
+			tree,
+			(element) => element.props["data-testid"] === "edit-eq-port-pitch",
+		);
+		const count = findInspectorElement(
+			tree,
+			(element) => element.props["data-testid"] === "edit-port-equipment-membership",
+		);
+		if (!pitch || !count) throw new Error("Expected both EQ Port edit entries");
+		expect(pitch.props.disabled).toBe(false);
+		expect(pitch.props["aria-label"]).toBe("Port 간격 편집 · 현재 1 m");
+		expect(pitch.props.title).toBe("PORT-1 고정 · Port 수 유지 · 간격 미리보기");
+		(pitch.props.onClick as () => void)();
+		expect(start).toHaveBeenLastCalledWith("pitch");
+		(count.props.onClick as () => void)();
+		expect(start).toHaveBeenLastCalledWith();
+		expect(start).toHaveBeenCalledTimes(2);
+		expect(JSON.stringify(state)).toBe(before);
+	});
+
 	it.each([
 		{
 			kind: "OHB",
@@ -109,6 +216,7 @@ describe("PortEquipmentInspectorSelection", () => {
 		expect(markup.includes('data-testid="select-equipment-process-loop-rail"')).toBe(
 			viewMode === "2d",
 		);
+		expect(markup.includes('data-testid="edit-eq-port-pitch"')).toBe(viewMode === "2d");
 		expect(markup.includes('data-primary-process-loop-availability="register"')).toBe(
 			viewMode === "2d",
 		);
@@ -196,6 +304,11 @@ describe("PortEquipmentInspectorSelection", () => {
 					selectedEquipmentDirectlyOwned: directlyOwned,
 				}),
 			);
+			if (group.kind === "EQ") {
+				expect(inspectorActionButton(markup, "edit-eq-port-pitch").includes('disabled=""')).toBe(
+					!actions.editMembership.allowed,
+				);
+			} else expect(markup).not.toContain('data-testid="edit-eq-port-pitch"');
 			const ids = [
 				group.kind === "OHB" ? "move-ohb-port" : "move-port-equipment-group",
 				group.kind === "OHB" ? "copy-ohb-port" : "copy-port-equipment-group",
@@ -273,6 +386,7 @@ describe("PortEquipmentInspectorSelection", () => {
 		const markup = renderToStaticMarkup(
 			createElement(PortEquipmentInspector, inspectorProps(state, selected)),
 		);
+		expect(markup).not.toContain('data-testid="select-flex-stk-port"');
 		for (const id of [
 			"move-port-equipment-group",
 			"copy-port-equipment-group",
@@ -572,6 +686,8 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 			expect(inspectorActionButton(markup, "edit-port-equipment-membership")).not.toContain(
 				'disabled=""',
 			);
+		if (kind === "EQ")
+			expect(inspectorActionButton(markup, "edit-eq-port-pitch")).not.toContain('disabled=""');
 		expect(inspectorActionButton(markup, "delete-port-equipment")).toContain('disabled=""');
 		expect(inspectorActionButton(markup, "reverse-port-equipment-service-direction")).not.toContain(
 			'disabled=""',
@@ -722,6 +838,7 @@ describe("PortEquipmentInspector action explanations", () => {
 		for (const id of [
 			"move-port-equipment-group",
 			"edit-port-equipment-membership",
+			"edit-eq-port-pitch",
 			"delete-port-equipment",
 		]) {
 			expect(inspectorActionButton(markup, id)).toContain(
@@ -797,6 +914,7 @@ describe("PortEquipmentInspector action explanations", () => {
 			"move-port-equipment-group",
 			"copy-port-equipment-group",
 			"edit-port-equipment-membership",
+			"edit-eq-port-pitch",
 			"delete-port-equipment",
 		]) {
 			const button = inspectorActionButton(markup, id);
@@ -828,6 +946,9 @@ describe("PortEquipmentInspector action explanations", () => {
 		expect(
 			inspectorActionButton(markup, "move-port-equipment-group-primary").includes('disabled=""'),
 		).toBe(status !== "ready");
+		expect(inspectorActionButton(markup, "edit-eq-port-pitch").includes('disabled=""')).toBe(
+			status !== "ready",
+		);
 	});
 });
 
@@ -889,6 +1010,8 @@ function inspectorProps(
 		selectEquipmentProcessLoopRailForRegistration: noop,
 		selectedEquipmentProcessLoopRegistrationAvailable: false,
 		selectNextPortEquipmentGroup: noop,
+		selectFlexStkPort: noop,
+		startNextFlexStkPortMove: noop,
 		selectedEquipmentDirectlyOwned: false,
 		selectedEquipmentGroup: selected.equipmentGroup,
 		selectedEquipmentNeedsGroupMoveForProcessLoop: false,

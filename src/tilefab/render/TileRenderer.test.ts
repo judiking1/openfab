@@ -9,8 +9,9 @@ import {
 	PortEquipmentGroupSlotIndex,
 	planPortEquipmentGroupEdit,
 } from "../compile/PortEquipmentGroupEditPlanner";
+import { planEqPortPitchEdit } from "../compile/PortEquipmentMembershipEditPlanner";
 import { compilePortEquipmentPresentation } from "../compile/PortEquipmentPresentation";
-import { planEqRowPlacement } from "../compile/PortPlacementPlanner";
+import { planEqRowPlacement, planStkPlacement } from "../compile/PortPlacementPlanner";
 import {
 	PORT_SLOT_STATUS,
 	PortSlotAvailabilityIndex,
@@ -116,10 +117,333 @@ import {
 	railDraftDisplayReason,
 	STK_PASSIVE_SLOT_VISUAL_MIN_ZOOM,
 	TileRenderer,
+	type TileRenderInput,
 	touchPortSlotPickRadiusMeters,
 } from "./TileRenderer";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("selected FLEX STK Port annotation", () => {
+	it.each([
+		0, 1,
+	] as const)("follows the selected actual Port through row changes and rotation %s", (rotation) => {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 24, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map),
+			slots = compilePortSlotPreparedArtifactCatalog(physical).STK.slots;
+		const rows = [4, 9, 14].map((x) =>
+			Array.from(slots.routeXs).findIndex((value, row) => value === x && slots.routeZs[row] === 0),
+		);
+		expect(
+			document.commitPortEquipment(
+				planStkPlacement(
+					slots,
+					rows,
+					new PortSlotAvailabilityIndex(physical, document.portEquipment, "STK"),
+					document.portEquipment,
+					"FLEX",
+					document.map.getRevision(),
+					document.getPatchSequence(),
+				),
+			),
+		).toBe(true);
+		const presentation = compilePortEquipmentPresentation(physical, document.portEquipment);
+		const source = document.portEquipment,
+			sequence = document.getPatchSequence();
+		const renderer = new TileRenderer();
+		for (const width of [1440, 390])
+			for (const portId of [1, 3, 2]) {
+				const row = presentation.portIds.indexOf(portId);
+				const camera = { offsetX: 0, offsetY: 0, zoom: 20, rotation };
+				const point = renderer.worldToScreen(
+					{ x: presentation.worldPositions[row * 2], y: presentation.worldPositions[row * 2 + 1] },
+					camera,
+				);
+				camera.offsetX = 220 - point.x;
+				camera.offsetY = 380 - point.y;
+				const overlay = createRecordingContext(),
+					arcs = vi.spyOn(overlay.context, "arc"),
+					text = vi.spyOn(overlay.context, "fillText");
+				const input: TileRenderInput = {
+					map: document.map,
+					physicalPaths: physical.paths,
+					portEquipmentPresentation: presentation,
+					selectedPortId: portId,
+					selectedStkPort: { portId, insets: { left: 72, right: 16, top: 120, bottom: 220 } },
+					camera,
+					width,
+					height: 844,
+					dpr: 1,
+					ghost: null,
+					hoverTile: null,
+					hoverWorld: null,
+					anchorTile: null,
+					selectedTile: null,
+				};
+				renderer.render(createRecordingContext().context, overlay.context, input);
+				expect(overlay.labels.filter((label) => label.includes("선택"))).toEqual([
+					`PORT-${portId} · 선택`,
+				]);
+				expect(
+					arcs.mock.calls.filter(([x, y, r]) => x === 220 && y === 380 && r === 10),
+				).toHaveLength(1);
+				const call = text.mock.calls.find(([label]) => label === `PORT-${portId} · 선택`);
+				if (!call) throw new Error("Missing selected Port annotation");
+				const halfWidth = (call[0].length * 6 + 16) / 2;
+				expect(call[1] - halfWidth).toBeGreaterThanOrEqual(80);
+				expect(call[1] + halfWidth).toBeLessThanOrEqual(width - 24);
+				expect(call[2] - 12).toBeGreaterThanOrEqual(128);
+				expect(call[2] + 12).toBeLessThanOrEqual(616);
+				const moving = createRecordingContext();
+				const movingArcs = vi.spyOn(moving.context, "arc");
+				renderer.render(createRecordingContext().context, moving.context, {
+					...input,
+					portEquipmentGroupEditPreview: { slots, plan: null },
+					movingStkPort: input.selectedStkPort,
+				});
+				expect(moving.labels.filter((label) => label.startsWith("PORT-"))).toEqual([
+					`PORT-${portId} · 이동 기준`,
+				]);
+				expect(
+					movingArcs.mock.calls.filter(([x, y, r]) => x === 220 && y === 380 && r === 10),
+				).toHaveLength(1);
+				for (const blocked of [
+					{ selectedStkPort: null },
+					{
+						selectedStkPort: {
+							portId: 999,
+							insets: { left: 72, right: 16, top: 120, bottom: 220 },
+						},
+					},
+					{ portEquipmentPresentation: { ...presentation, revision: presentation.revision + 1 } },
+					{ portEquipmentGroupEditPreview: { slots, plan: null } },
+				]) {
+					const quiet = createRecordingContext();
+					renderer.render(createRecordingContext().context, quiet.context, {
+						...input,
+						...blocked,
+					});
+					expect(quiet.labels.some((label) => label.includes("선택"))).toBe(false);
+				}
+			}
+		expect(document.portEquipment).toBe(source);
+		expect(document.getPatchSequence()).toBe(sequence);
+	});
+});
+
+describe("EQ pitch fixed Port identification", () => {
+	function fixture() {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 24, y: 0 })),
+		).toBe(true);
+		const physical = compilePhysicalRail(document.map);
+		const slots = compilePortSlotPreparedArtifactCatalog(physical).EQ.slots;
+		const rowAt = (x: number) =>
+			Array.from(slots.routeXs).findIndex((value, row) => value === x && slots.routeZs[row] === 0);
+		for (const xs of [
+			[2, 3, 4, 5],
+			[10, 11, 12, 13, 14],
+		]) {
+			expect(
+				document.commitPortEquipment(
+					planEqRowPlacement(
+						slots,
+						xs.map(rowAt),
+						new PortSlotAvailabilityIndex(physical, document.portEquipment, "EQ"),
+						document.portEquipment,
+						1000,
+						null,
+						document.map.getRevision(),
+						document.getPatchSequence(),
+					),
+				),
+			).toBe(true);
+		}
+		const source = document.portEquipment;
+		const plan = planEqPortPitchEdit(
+			document.map,
+			slots,
+			new PortEquipmentGroupSlotIndex(slots),
+			new PortSlotAvailabilityIndex(physical, source, "EQ"),
+			source,
+			{ equipmentGroupId: 2, portId: 7 },
+			2000,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+		expect(plan.valid, plan.reason).toBe(true);
+		const anchorRow = rowAt(12);
+		const preview = {
+			movesPorts: true,
+			slots,
+			sourceRows: [10, 11, 12, 13, 14].map(rowAt),
+			targetRows: plan.membershipEdit.targetRows,
+			fixedAnchor: {
+				portId: 7,
+				row: anchorRow,
+				insets: { left: 72, right: 16, top: 120, bottom: 220 },
+			},
+		};
+		const input: TileRenderInput = {
+			map: document.map,
+			physicalPaths: physical.paths,
+			portSlots: slots,
+			portEquipmentPresentation: compilePortEquipmentPresentation(physical, source),
+			portEquipmentMembershipPreview: preview,
+			portRowDraft: {
+				portType: "EQ",
+				selection: {
+					state: "READY",
+					valid: true,
+					reason: plan.reason,
+					anchorRow,
+					targetRow: anchorRow,
+					pitchMillimeters: 2000,
+					rows: preview.targetRows,
+					blockedRows: [],
+					continuityRows: [],
+				},
+			},
+			ghost: null,
+			camera: { offsetX: 0, offsetY: 0, zoom: 20, rotation: 0 },
+			width: 390,
+			height: 844,
+			dpr: 1,
+			hoverTile: null,
+			hoverWorld: null,
+			anchorTile: null,
+			selectedTile: null,
+		};
+		return { document, source, slots, anchorRow, preview, input };
+	}
+
+	it.each([
+		0, 1, 2, 3,
+	] as const)("identifies actual PORT-7 at the third preview Port with camera rotation %s", (rotation) => {
+		const { document, source, slots, anchorRow, preview, input } = fixture();
+		const revision = document.map.getRevision(),
+			sequence = document.getPatchSequence();
+		const sourceJson = JSON.stringify(source);
+		const renderer = new TileRenderer();
+		for (const width of [960, 390]) {
+			const uncentered = { ...input.camera, rotation };
+			const world = {
+				x: slots.worldPositions[anchorRow * 2],
+				y: slots.worldPositions[anchorRow * 2 + 1],
+			};
+			const point = renderer.worldToScreen(world, uncentered);
+			const camera = Object.freeze({
+				...uncentered,
+				offsetX: 220 - point.x,
+				offsetY: 380 - point.y,
+			});
+			const overlay = createRecordingContext();
+			const text = vi.spyOn(overlay.context, "fillText"),
+				arcs = vi.spyOn(overlay.context, "arc");
+			renderer.render(createRecordingContext().context, overlay.context, {
+				...input,
+				camera,
+				width,
+			});
+			expect(overlay.labels.filter((label) => label.startsWith("PORT-"))).toEqual([
+				"PORT-7 · 고정",
+			]);
+			expect(overlay.labels).not.toContain("3");
+			expect(overlay.labels).toEqual(expect.arrayContaining(["1", "2", "4", "5"]));
+			expect(
+				arcs.mock.calls.filter(([x, y, radius]) => x === 220 && y === 380 && radius === 10),
+			).toHaveLength(1);
+			const label = text.mock.calls.find(([value]) => value === "PORT-7 · 고정");
+			if (!label) throw new Error("Missing fixed Port label");
+			const [, x, y] = label,
+				halfWidth = (label[0].length * 6 + 16) / 2;
+			expect(x - halfWidth).toBeGreaterThanOrEqual(preview.fixedAnchor.insets.left + 8);
+			expect(x + halfWidth).toBeLessThanOrEqual(width - preview.fixedAnchor.insets.right - 8);
+			expect(y - 12).toBeGreaterThanOrEqual(preview.fixedAnchor.insets.top + 8);
+			expect(y + 12).toBeLessThanOrEqual(input.height - preview.fixedAnchor.insets.bottom - 8);
+			for (const row of new Set([...preview.sourceRows, ...preview.targetRows])) {
+				const port = renderer.worldToScreen(
+					{ x: slots.worldPositions[row * 2], y: slots.worldPositions[row * 2 + 1] },
+					camera,
+				);
+				expect(Math.abs(port.x - x) > halfWidth + 16 || Math.abs(port.y - y) > 28).toBe(true);
+			}
+			const ordinary = createRecordingContext();
+			renderer.render(createRecordingContext().context, ordinary.context, {
+				...input,
+				camera,
+				width,
+				portEquipmentMembershipPreview: { ...preview, movesPorts: false },
+			});
+			expect(ordinary.labels.some((label) => label.includes("고정"))).toBe(false);
+			expect(ordinary.labels).toContain("3");
+			const cancelled = createRecordingContext();
+			renderer.render(createRecordingContext().context, cancelled.context, {
+				...input,
+				camera,
+				width,
+				portEquipmentMembershipPreview: null,
+				portRowDraft: null,
+			});
+			expect(cancelled.labels.some((label) => label.includes("고정"))).toBe(false);
+		}
+		expect(document.portEquipment).toBe(source);
+		expect(JSON.stringify(source)).toBe(sourceJson);
+		expect(document.map.getRevision()).toBe(revision);
+		expect(document.getPatchSequence()).toBe(sequence);
+	});
+
+	it.each([
+		"covered",
+		"crowded",
+		"blocked",
+	] as const)("keeps the fixed location safe when the preview is %s", (state) => {
+		const { slots, anchorRow, preview, input } = fixture();
+		const renderer = new TileRenderer(),
+			overlay = createRecordingContext();
+		const point = renderer.worldToScreen(
+			{ x: slots.worldPositions[anchorRow * 2], y: slots.worldPositions[anchorRow * 2 + 1] },
+			input.camera,
+		);
+		const camera = { ...input.camera, offsetX: 220 - point.x, offsetY: 380 - point.y };
+		const insets =
+			state === "covered"
+				? { left: 170, right: 170, top: 120, bottom: 220 }
+				: state === "crowded"
+					? { left: 72, right: 16, top: 352, bottom: 436 }
+					: preview.fixedAnchor.insets;
+		const arcs = vi.spyOn(overlay.context, "arc");
+		renderer.render(createRecordingContext().context, overlay.context, {
+			...input,
+			camera,
+			portRowDraft:
+				state === "blocked" && input.portRowDraft?.portType === "EQ"
+					? {
+							portType: "EQ",
+							selection: {
+								...input.portRowDraft.selection,
+								state: "BLOCKED",
+								valid: false,
+								rows: [],
+							},
+						}
+					: input.portRowDraft,
+			portEquipmentMembershipPreview: {
+				...preview,
+				targetRows: state === "blocked" ? [] : preview.targetRows,
+				fixedAnchor: { ...preview.fixedAnchor, insets },
+			},
+		});
+		expect(
+			arcs.mock.calls.filter(([x, y, radius]) => x === 220 && y === 380 && radius === 10),
+		).toHaveLength(1);
+		expect(overlay.labels.includes("PORT-7 · 고정")).toBe(state === "blocked");
+	});
+});
 
 describe("TileRenderer camera transforms", () => {
 	it.each([

@@ -6,6 +6,18 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.104] - 2026-10-10
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Enter EQ Port pitch editing directly and show the fixed Port on Canvas. Select a FLEX
+  Stocker Port by its actual ID, continue to the next Port, and see source/target coordinates.
+- Move one complete, unowned independent closed rail structure with all attached equipment by
+  an integer distance on X or Z. Preview before Apply; preserve IDs, barcodes and settings with
+  one undoable edit. Incomplete, owned, stale or conflicting moves remain rejected.
+- Keep structure move and copy together at the top of the selection panel, including compact
+  layouts, with adjacent guidance when the selected structure cannot enter the move workflow.
+
 ## [0.1.103] - 2026-10-09
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

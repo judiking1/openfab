@@ -474,6 +474,11 @@ export interface TileRenderInput {
 	portEquipmentPresentation?: CompiledPortEquipmentPresentation | null;
 	hoverPortId?: number | null;
 	selectedPortId?: number | null;
+	selectedStkPort?: Readonly<{
+		portId: number;
+		insets: Readonly<{ left: number; right: number; top: number; bottom: number }>;
+	}> | null;
+	movingStkPort?: TileRenderInput["selectedStkPort"];
 	selectedEquipmentGroupIds?: readonly number[];
 	hoverPortSlot?: number | null;
 	ignoredPortIdForPortSlots?: number;
@@ -489,6 +494,11 @@ export interface TileRenderInput {
 		slots: CompiledPortSlots;
 		sourceRows: readonly number[];
 		targetRows: readonly number[];
+		fixedAnchor?: Readonly<{
+			portId: number;
+			row: number;
+			insets: Readonly<{ left: number; right: number; top: number; bottom: number }>;
+		}> | null;
 	}> | null;
 	ghost: GhostState | null;
 	measurementInsets?: Readonly<{
@@ -970,6 +980,7 @@ export class TileRenderer {
 		this.drawPortRowDraft(overlayContext, input);
 		this.drawPortEquipmentMembershipPreview(overlayContext, input);
 		this.drawPortEquipmentGroupEditPreview(overlayContext, input);
+		this.drawPortIdentityAnnotation(overlayContext, input);
 		this.drawHoveredPortSlot(overlayContext, input);
 		this.drawAnchor(overlayContext, input);
 		this.drawStaticFabArrangementPreview(overlayContext, input);
@@ -3039,7 +3050,10 @@ export class TileRenderer {
 					eqDraft.state !== "BLOCKED" ||
 						(hasSpecificBlockedRows && !eqDraft.blockedRows.includes(row)),
 					"EQ",
-					String(index + 1),
+					input.portEquipmentMembershipPreview?.movesPorts &&
+						input.portEquipmentMembershipPreview.fixedAnchor?.row === row
+						? undefined
+						: String(index + 1),
 					eqDraft.state === "ANCHORED" ? 2 : 0,
 				);
 			}
@@ -3090,6 +3104,7 @@ export class TileRenderer {
 		const sourceRows = new Set(preview.sourceRows);
 		const targetRows = new Set(preview.targetRows);
 		for (const row of preview.sourceRows) {
+			if (preview.movesPorts && preview.fixedAnchor?.row === row) continue;
 			this.drawPortMembershipMarker(
 				ctx,
 				input,
@@ -3108,6 +3123,163 @@ export class TileRenderer {
 				preview.movesPorts ? "destination" : "added",
 			);
 		}
+	}
+
+	private drawPortIdentityAnnotation(ctx: CanvasRenderingContext2D, input: TileRenderInput): void {
+		const preview = input.portEquipmentMembershipPreview;
+		const fixed =
+			preview?.movesPorts &&
+			preview.fixedAnchor &&
+			preview.slots.portType === "EQ" &&
+			isPortSlotRow(preview.slots, preview.fixedAnchor.row) &&
+			preview.sourceRows.includes(preview.fixedAnchor.row)
+				? preview.fixedAnchor
+				: null;
+		const presentation = input.portEquipmentPresentation;
+		const moving =
+			!preview && input.portEquipmentGroupEditPreview && !input.portEquipmentGroupEditPreview.plan
+				? input.movingStkPort
+				: null;
+		const selected =
+			moving ?? (!preview && !input.portEquipmentGroupEditPreview ? input.selectedStkPort : null);
+		const selectedRow =
+			selected && presentation?.revision === input.map.getRevision()
+				? portEquipmentPresentationRow(presentation, selected.portId)
+				: null;
+		const anchor =
+			fixed ??
+			(selected &&
+			selectedRow !== null &&
+			presentation &&
+			PORT_TYPES[presentation.portTypes[selectedRow]] === "STK"
+				? selected
+				: null);
+		if (!anchor) return;
+		let center: ScreenPoint;
+		if (fixed && preview)
+			center = this.portSlotScreenPosition(preview.slots, fixed.row, input.camera);
+		else {
+			if (!presentation || selectedRow === null) return;
+			center = this.worldToScreen(
+				{
+					x: presentation.worldPositions[selectedRow * 2],
+					y: presentation.worldPositions[selectedRow * 2 + 1],
+				},
+				input.camera,
+			);
+		}
+		const radius = clamp(input.camera.zoom * 0.24, 10, 16);
+		ctx.save();
+		// Match the individual STK Port callout, with a crosshair identifying the fixed location.
+		ctx.strokeStyle = "#96f2dc";
+		ctx.fillStyle = "rgba(73, 213, 181, 0.24)";
+		ctx.lineWidth = 2;
+		ctx.beginPath();
+		ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.stroke();
+		ctx.beginPath();
+		for (const [dx, dy] of [
+			[1, 0],
+			[-1, 0],
+			[0, 1],
+			[0, -1],
+		]) {
+			ctx.moveTo(center.x + dx * (radius - 3), center.y + dy * (radius - 3));
+			ctx.lineTo(center.x + dx * (radius + 4), center.y + dy * (radius + 4));
+		}
+		ctx.stroke();
+		ctx.fillStyle = "#96f2dc";
+		ctx.fillRect(center.x - 2, center.y - 2, 4, 4);
+
+		const label = `PORT-${anchor.portId} · ${fixed ? "고정" : moving ? "이동 기준" : "선택"}`;
+		ctx.font = "800 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+		const width = ctx.measureText(label).width + 16,
+			height = 24;
+		const left = Math.max(0, anchor.insets.left) + 8;
+		const right = input.width - Math.max(0, anchor.insets.right) - 8;
+		const top = Math.max(0, anchor.insets.top) + 8;
+		const bottom = input.height - Math.max(0, anchor.insets.bottom) - 8;
+		if (
+			width > right - left ||
+			height > bottom - top ||
+			center.x < 0 ||
+			center.x > input.width ||
+			center.y < 0 ||
+			center.y > input.height
+		) {
+			ctx.restore();
+			return;
+		}
+		const obstacles =
+			fixed && preview
+				? [...new Set([...preview.sourceRows, ...preview.targetRows])]
+						.filter((row) => isPortSlotRow(preview.slots, row))
+						.map((row) => ({
+							...this.portSlotScreenPosition(preview.slots, row, input.camera),
+							radius: row === fixed.row ? radius + 4 : 16,
+						}))
+				: [{ ...center, radius: radius + 4 }];
+		if (presentation) {
+			for (const row of this.visiblePortEquipmentBuffer) {
+				if (presentation.portIds[row] === anchor.portId) continue;
+				obstacles.push({
+					...this.worldToScreen(
+						{
+							x: presentation.worldPositions[row * 2],
+							y: presentation.worldPositions[row * 2 + 1],
+						},
+						input.camera,
+					),
+					radius: Math.max(16, input.camera.zoom * 0.4),
+				});
+			}
+		}
+		const gap = radius + 10;
+		const candidates = [
+			{ x: center.x - width / 2, y: center.y - gap - height },
+			{ x: center.x - width / 2, y: center.y + gap },
+			{ x: center.x + gap, y: center.y - height / 2 },
+			{ x: center.x - gap - width, y: center.y - height / 2 },
+		];
+		const position = candidates
+			.map(({ x, y }) => ({
+				x: clamp(x, left, right - width),
+				y: clamp(y, top, bottom - height),
+			}))
+			.find(
+				({ x, y }) =>
+					!obstacles.some(
+						(point) =>
+							point.x + point.radius >= x &&
+							point.x - point.radius <= x + width &&
+							point.y + point.radius >= y &&
+							point.y - point.radius <= y + height,
+					),
+			);
+		// Keep the marker and UI identity when no local label fits around Ports and controls.
+		if (position) {
+			ctx.lineWidth = 1;
+			ctx.beginPath();
+			const endX = clamp(center.x, position.x, position.x + width);
+			const endY = clamp(center.y, position.y, position.y + height);
+			const angle = Math.atan2(endY - center.y, endX - center.x);
+			ctx.moveTo(
+				center.x + Math.cos(angle) * (radius + 4),
+				center.y + Math.sin(angle) * (radius + 4),
+			);
+			ctx.lineTo(endX, endY);
+			ctx.stroke();
+			ctx.fillStyle = "rgba(10, 24, 24, 0.96)";
+			roundRect(ctx, position.x, position.y, width, height, 4);
+			ctx.fill();
+			ctx.stroke();
+			ctx.textAlign = "center";
+			ctx.textBaseline = "middle";
+			ctx.fillStyle = "#effffb";
+			ctx.fillText(label, position.x + width / 2, position.y + height / 2);
+		}
+		ctx.restore();
 	}
 
 	private drawPortMembershipMarker(

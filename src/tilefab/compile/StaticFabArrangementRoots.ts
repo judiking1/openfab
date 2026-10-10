@@ -291,12 +291,16 @@ export function staticFabArrangementCommandFromRoots(
 	axis: StaticFabArrangementAxis,
 	mode: StaticFabArrangementMode,
 	roots: readonly ResolvedStaticFabArrangementRoot[],
+	distanceMeters?: number,
 ): StaticFabArrangementCommandIntent {
 	const prepared = prepareStaticFabArrangementCommand({
 		version: STATIC_FAB_ARRANGEMENT_COMMAND_VERSION,
 		arrangementVersion: STATIC_FAB_ARRANGEMENT_VERSION,
 		axis,
 		mode,
+		...(mode === "TRANSLATE"
+			? { distanceMeters, equipmentGroupIds: roots.flatMap((root) => root.equipmentGroupIds) }
+			: {}),
 		roots: roots.map((root) => {
 			if (root.kind === "STATIC_COMPONENT") {
 				return { kind: "STATIC_COMPONENT" as const, moduleKeys: root.moduleKeys };
@@ -324,11 +328,13 @@ export function solveStaticFabArrangementFromRoots(
 	axis: StaticFabArrangementAxis,
 	mode: StaticFabArrangementMode,
 	roots: readonly ResolvedStaticFabArrangementRoot[],
+	distanceMeters?: number,
 ): StaticFabArrangementResult {
 	return solveStaticFabArrangement({
 		version: STATIC_FAB_ARRANGEMENT_VERSION,
 		axis,
 		mode,
+		distanceMeters,
 		roots: roots.map((root) => ({ key: root.key, bounds: root.bounds })),
 	});
 }

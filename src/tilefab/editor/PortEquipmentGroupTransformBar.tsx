@@ -6,8 +6,9 @@ import type {
 } from "../compile/PortEquipmentGroupEditPlanner";
 import type { CompiledPortSlots } from "../compile/PortSlotCompiler";
 import type { EquipmentGroupRecord } from "../core/EquipmentGroup";
+import type { PortRecord } from "../core/PortRecord";
 import { observePortDockClearance } from "./observePortDockClearance";
-import { portEquipmentGroupEditFeedback } from "./StkDraftPresentation";
+import { portEquipmentGroupEditFeedback, stkPortMoveCoordinates } from "./StkDraftPresentation";
 
 export interface PortEquipmentGroupTransformBarProps {
 	readonly onApply: () => void;
@@ -17,6 +18,8 @@ export interface PortEquipmentGroupTransformBarProps {
 	readonly portEquipmentGroupEditSession: Readonly<{
 		scope?: "group" | "port";
 		sourceAnchorPortId?: number;
+		sourcePorts?: readonly PortRecord[];
+		targetRow?: number | null;
 		mode: PortEquipmentGroupEditMode;
 		preservesLoopOwnership: boolean;
 		portType: "EQ" | "STK";
@@ -40,6 +43,15 @@ export function PortEquipmentGroupTransformBar({
 }: PortEquipmentGroupTransformBarProps): ReactNode {
 	const plan = portEquipmentGroupEditSession.plan;
 	const singlePort = portEquipmentGroupEditSession.scope === "port";
+	const coordinates = singlePort
+		? stkPortMoveCoordinates(
+				portEquipmentGroupEditSession.sourcePorts?.find(
+					(port) => port.id === portEquipmentGroupEditSession.sourceAnchorPortId,
+				)?.route,
+				portEquipmentGroupEditSession.slots,
+				portEquipmentGroupEditSession.targetRow ?? null,
+			)
+		: null;
 	const feedback =
 		plan && !plan.valid
 			? portEquipmentGroupEditFeedback(plan, portEquipmentGroupEditSession.slots)
@@ -82,6 +94,14 @@ export function PortEquipmentGroupTransformBar({
 						: singlePort
 							? "몸체 길이 유지 · 같은 직선에서 위치 선택"
 							: "대상 위치 선택"}
+				{coordinates ? (
+					<small
+						className="tilefab-equipment-group-loop-preview"
+						data-testid="stk-port-move-coordinates"
+					>
+						{coordinates}
+					</small>
+				) : null}
 				{feedback ? (
 					<small
 						className="tilefab-equipment-group-loop-preview"

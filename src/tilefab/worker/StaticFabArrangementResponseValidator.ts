@@ -309,7 +309,16 @@ export function* staticFabArrangementMetadataShapeErrorSteps(
 		return "arrangement plan metadata counts are inconsistent";
 	}
 	const minimumRoots =
-		value.mode === "DISTRIBUTE_CENTERS" || value.mode === "DISTRIBUTE_GAPS" ? 3 : 2;
+		value.mode === "TRANSLATE"
+			? 1
+			: value.mode === "DISTRIBUTE_CENTERS" || value.mode === "DISTRIBUTE_GAPS"
+				? 3
+				: 2;
+	if (
+		value.mode === "TRANSLATE" &&
+		(value.rootCount !== 1 || value.affectedOrganizationIds.length !== 0)
+	)
+		return "independent translation must have one unowned root";
 	if (value.rootCount < minimumRoots) return "arrangement plan has too few roots for its mode";
 	const affectedError = yield* canonicalPositiveIdArrayError(
 		value.affectedOrganizationIds,
@@ -837,6 +846,7 @@ function validPlanIssueCode(value: unknown, valid: boolean): boolean {
 
 function validArrangementMode(value: unknown): boolean {
 	return (
+		value === "TRANSLATE" ||
 		value === "ALIGN_MIN" ||
 		value === "ALIGN_CENTER" ||
 		value === "ALIGN_MAX" ||

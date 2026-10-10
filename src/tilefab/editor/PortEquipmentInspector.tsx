@@ -1,5 +1,6 @@
 import {
 	AlertTriangle,
+	ArrowLeftRight,
 	Check,
 	ChevronDown,
 	ChevronRight,
@@ -73,7 +74,7 @@ export interface PortEquipmentInspectorProps {
 		expectedSelection: PortEquipmentSelectionIdentity,
 	) => string | void;
 	readonly organizations?: StaticFabOrganizationState;
-	readonly activePortEquipment: Pick<PortEquipmentState, "equipmentGroups">;
+	readonly activePortEquipment: Pick<PortEquipmentState, "equipmentGroups" | "ports">;
 	readonly bindCompactInspectorDisclosure: (node: HTMLButtonElement | null) => void;
 	readonly canvasRef: RefObject<HTMLCanvasElement | null>;
 	readonly chooseGuidedEquipmentTool: (
@@ -109,6 +110,11 @@ export interface PortEquipmentInspectorProps {
 	readonly selectEquipmentProcessLoopRailForRegistration: () => void;
 	readonly selectedEquipmentProcessLoopRegistrationAvailable: boolean;
 	readonly selectNextPortEquipmentGroup: () => void;
+	readonly selectFlexStkPort: (selection: PortEquipmentSelectionIdentity) => void;
+	readonly startNextFlexStkPortMove: (
+		current: PortEquipmentSelectionIdentity,
+		nextPortId: number,
+	) => void;
 	readonly selectedEquipmentDirectlyOwned: boolean;
 	readonly selectedEquipmentGroup: EquipmentGroupRecord;
 	readonly selectedEquipmentNeedsGroupMoveForProcessLoop: boolean;
@@ -132,7 +138,7 @@ export interface PortEquipmentInspectorProps {
 		mode: PortEquipmentGroupEditMode,
 		scope?: "group" | "port",
 	) => void;
-	readonly startSelectedPortEquipmentMembershipEdit: () => void;
+	readonly startSelectedPortEquipmentMembershipEdit: (initialMode?: "membership" | "pitch") => void;
 	readonly stkAuthoringTemplateLabel: (template: StkEquipmentTemplate) => string;
 	readonly viewMode: "2d" | "3d";
 	readonly workerState: Pick<RailWorkerBridgeState, "status">;
@@ -170,6 +176,8 @@ export function PortEquipmentInspector({
 	selectEquipmentProcessLoopRailForRegistration,
 	selectedEquipmentProcessLoopRegistrationAvailable,
 	selectNextPortEquipmentGroup,
+	selectFlexStkPort,
+	startNextFlexStkPortMove,
 	selectedEquipmentDirectlyOwned,
 	selectedEquipmentGroup,
 	selectedEquipmentNeedsGroupMoveForProcessLoop,
@@ -193,6 +201,16 @@ export function PortEquipmentInspector({
 	workerState,
 }: PortEquipmentInspectorProps): ReactNode {
 	const transform = portEquipmentTransformPolicy(selectedEquipmentGroup.kind);
+	const selectedPortIndex = selectedEquipmentGroup.portIds.indexOf(selectedPortDetails.port.id);
+	const nextStkPortId =
+		selectedEquipmentGroup.kind === "STK" &&
+		selectedEquipmentGroup.template === "FLEX" &&
+		selectedEquipmentGroup.portIds.length > 1 &&
+		selectedPortIndex >= 0
+			? selectedEquipmentGroup.portIds[
+					(selectedPortIndex + 1) % selectedEquipmentGroup.portIds.length
+				]
+			: undefined;
 	const actions = resolvePortEquipmentActionAvailability({
 		editableSelection: selectedPortEditableDetails,
 		directlyOwned: selectedEquipmentDirectlyOwned,
@@ -499,23 +517,103 @@ export function PortEquipmentInspector({
 										data-testid="edit-port-equipment-membership"
 										aria-describedby={equipmentActionDescriptionId(actions.editMembership)}
 										disabled={!actions.editMembership.allowed}
-										onClick={startSelectedPortEquipmentMembershipEdit}
+										onClick={() => startSelectedPortEquipmentMembershipEdit()}
 									>
-										<MousePointer2 size={15} /> Port 구성 편집
+										<MousePointer2 size={15} />
+										{selectedEquipmentGroup.kind === "EQ" ? "Port 수" : "Port 구성 편집"}
 									</button>
-									{selectedEquipmentGroup.kind === "STK" &&
-									selectedEquipmentGroup.template === "FLEX" &&
-									selectedEquipmentGroup.portIds.length > 1 ? (
+									{selectedEquipmentGroup.kind === "EQ" ? (
 										<button
 											type="button"
 											className="tilefab-inspector-primary"
-											data-testid="move-flex-stk-port"
-											disabled={!actions.move.allowed}
-											aria-describedby={equipmentActionDescriptionId(actions.move)}
-											onClick={() => startSelectedPortEquipmentGroupEdit("move", "port")}
+											data-testid="edit-eq-port-pitch"
+											aria-label={`Port 간격 편집 · 현재 ${selectedEquipmentGroup.pitchMillimeters / 1_000} m`}
+											title={`PORT-${selectedPortDetails.port.id} 고정 · Port 수 유지 · 간격 미리보기`}
+											aria-describedby={equipmentActionDescriptionId(actions.editMembership)}
+											disabled={
+												!actions.editMembership.allowed ||
+												modelSyncPending ||
+												workerState.status !== "ready"
+											}
+											onClick={() => startSelectedPortEquipmentMembershipEdit("pitch")}
 										>
-											<Move size={15} /> Port만 이동
+											<ArrowLeftRight size={15} /> 간격{" "}
+											{selectedEquipmentGroup.pitchMillimeters / 1_000} m
 										</button>
+									) : null}
+									{nextStkPortId !== undefined ? (
+										<button
+											type="button"
+											className="tilefab-inspector-primary"
+											data-testid="move-next-flex-stk-port"
+											aria-label={`다음 Port 이동 · PORT-${nextStkPortId}`}
+											title={`목록 순서의 다음 PORT-${nextStkPortId} 이동 시작 · 적용 전에는 변경되지 않습니다`}
+											disabled={
+												!actions.move.allowed || modelSyncPending || workerState.status !== "ready"
+											}
+											aria-describedby={equipmentActionDescriptionId(actions.move)}
+											onClick={() =>
+												startNextFlexStkPortMove(
+													{
+														portId: selectedPortDetails.port.id,
+														equipmentGroupId: selectedEquipmentGroup.id,
+													},
+													nextStkPortId,
+												)
+											}
+										>
+											<ChevronRight size={15} /> 다음 PORT-{nextStkPortId}
+										</button>
+									) : null}
+									{selectedEquipmentGroup.kind === "STK" &&
+									selectedEquipmentGroup.template === "FLEX" &&
+									selectedEquipmentGroup.portIds.length > 1 ? (
+										<div className="tilefab-stk-port-selection">
+											<select
+												aria-label="이 Stocker의 Port 선택"
+												data-testid="select-flex-stk-port"
+												value={selectedPortDetails.port.id}
+												disabled={
+													!selectedPortEditableDetails ||
+													modelSyncPending ||
+													workerState.status !== "ready"
+												}
+												onChange={(event) =>
+													selectFlexStkPort({
+														portId: Number(event.currentTarget.value),
+														equipmentGroupId: selectedEquipmentGroup.id,
+													})
+												}
+											>
+												{selectedEquipmentGroup.portIds.map((id) => {
+													const port = activePortEquipment.ports.find(
+														(candidate) =>
+															candidate.id === id &&
+															candidate.equipmentGroupId === selectedEquipmentGroup.id,
+													);
+													return (
+														<option key={id} value={id} disabled={!port}>
+															PORT-{id} ·{" "}
+															{port?.route.kind === "CARDINAL_CELL"
+																? `X ${port.route.x} · Z ${port.route.z}`
+																: port
+																	? portRouteSummary(port)
+																	: "연결 확인 필요"}
+														</option>
+													);
+												})}
+											</select>
+											<button
+												type="button"
+												className="tilefab-inspector-primary"
+												data-testid="move-flex-stk-port"
+												disabled={!actions.move.allowed}
+												aria-describedby={equipmentActionDescriptionId(actions.move)}
+												onClick={() => startSelectedPortEquipmentGroupEdit("move", "port")}
+											>
+												<Move size={15} /> Port만 이동
+											</button>
+										</div>
 									) : null}
 								</>
 							) : null}

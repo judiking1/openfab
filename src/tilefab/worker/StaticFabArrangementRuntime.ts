@@ -5,6 +5,8 @@ import { assertPortSlotCapacity } from "../compile/PortSlotCompiler";
 import { additionalStaticFabArrangementClearanceCells } from "../compile/StaticFabArrangementClearance";
 import { resolveStaticFabArrangementCommand } from "../compile/StaticFabArrangementCommandResolver";
 import { planStaticFabArrangement } from "../compile/StaticFabArrangementPlanner";
+import { evaluateStaticFabProcessLoopTopology } from "../compile/StaticFabProcessLoopTopology";
+import { staticFabTranslationRailMembership } from "../compile/StaticFabTranslationSelection";
 import { applyPortEquipmentMutations, portEquipmentStateError } from "../core/EquipmentGroup";
 import { portEquipmentLayoutError } from "../core/PortEquipmentLayoutValidator";
 import { buildRailModuleOwnershipIndex } from "../core/RailModuleOwnership";
@@ -164,6 +166,7 @@ function prepareStaticFabArrangementCandidate(
 		version: preparedCommand.intent.arrangementVersion,
 		axis: preparedCommand.intent.axis,
 		mode: preparedCommand.intent.mode,
+		distanceMeters: preparedCommand.intent.distanceMeters,
 		roots: resolution.roots,
 	});
 	const plan = planStaticFabArrangement(
@@ -190,6 +193,21 @@ function prepareStaticFabArrangementCandidate(
 
 	const validationStartedAt = now();
 	try {
+		if (preparedCommand.intent.mode === "TRANSLATE") {
+			const closed = evaluateStaticFabProcessLoopTopology(
+				source.map,
+				staticFabTranslationRailMembership(resolution.roots[0]),
+			);
+			if (!closed.valid)
+				return rejected(
+					null,
+					"selection",
+					"열린 끝이나 끊긴 흐름이 있습니다 · 완전한 독립 폐회로를 선택하세요",
+					[],
+					planningMilliseconds,
+					now() - validationStartedAt,
+				);
+		}
 		const prospectiveMap = source.map.clone();
 		if (!prospectiveMap.applyAtomicMutations(plan.mutations, plan.switchMutations)) {
 			throw new Error("정렬 mutation이 스냅샷의 before 상태와 일치하지 않습니다");

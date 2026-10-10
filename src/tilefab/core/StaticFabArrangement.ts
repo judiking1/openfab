@@ -1,9 +1,12 @@
+import { RAIL_COORDINATE_MAX_METERS } from "./RailCoordinateDomain";
 export const STATIC_FAB_ARRANGEMENT_VERSION = 1 as const;
 export const STATIC_FAB_ARRANGEMENT_MAX_ROOTS = 1_024;
+export const STATIC_FAB_TRANSLATION_MAX_DISTANCE = 2 * RAIL_COORDINATE_MAX_METERS;
 
 export type StaticFabArrangementAxis = "X" | "Z";
 
 export type StaticFabArrangementMode =
+	| "TRANSLATE"
 	| "ALIGN_MIN"
 	| "ALIGN_CENTER"
 	| "ALIGN_MAX"
@@ -27,6 +30,7 @@ export interface StaticFabArrangementIntent {
 	readonly version: typeof STATIC_FAB_ARRANGEMENT_VERSION;
 	readonly axis: StaticFabArrangementAxis;
 	readonly mode: StaticFabArrangementMode;
+	readonly distanceMeters?: number;
 	readonly roots: readonly StaticFabArrangementRoot[];
 }
 
@@ -97,7 +101,22 @@ export function solveStaticFabArrangement(intent: unknown): StaticFabArrangement
 			mode,
 		);
 	}
-	const minimumRoots = mode === "DISTRIBUTE_CENTERS" || mode === "DISTRIBUTE_GAPS" ? 3 : 2;
+	if (
+		mode === "TRANSLATE" &&
+		(intent.roots.length !== 1 ||
+			!Number.isInteger(intent.distanceMeters) ||
+			typeof intent.distanceMeters !== "number" ||
+			Math.abs(intent.distanceMeters) > STATIC_FAB_TRANSLATION_MAX_DISTANCE)
+	) {
+		return failure(
+			"INVALID_INTENT",
+			"독립 구조 하나와 -260096~260096 m 범위의 정수 거리를 지정하세요",
+			axis,
+			mode,
+		);
+	}
+	const minimumRoots =
+		mode === "TRANSLATE" ? 1 : mode === "DISTRIBUTE_CENTERS" || mode === "DISTRIBUTE_GAPS" ? 3 : 2;
 	if (intent.roots.length < minimumRoots) {
 		return failure(
 			"TOO_FEW_ROOTS",
@@ -127,10 +146,16 @@ export function solveStaticFabArrangement(intent: unknown): StaticFabArrangement
 		roots.push(freezeRoot(value));
 	}
 
-	const deltas =
-		mode === "ALIGN_MIN" || mode === "ALIGN_CENTER" || mode === "ALIGN_MAX"
-			? alignmentDeltas(roots, axis, mode)
-			: distributionDeltas(roots, axis, mode);
+	const deltas: DeltaResult | DeltaFailure =
+		mode === "TRANSLATE"
+			? {
+					valid: true,
+					byKey: new Map(roots.map((root) => [root.key, intent.distanceMeters as number])),
+					maximumSnapErrorMeters: 0,
+				}
+			: mode === "ALIGN_MIN" || mode === "ALIGN_CENTER" || mode === "ALIGN_MAX"
+				? alignmentDeltas(roots, axis, mode)
+				: distributionDeltas(roots, axis, mode);
 	if (!deltas.valid) return failure(deltas.code, deltas.reason, axis, mode);
 
 	const translations: StaticFabArrangementTranslation[] = [];
@@ -161,7 +186,10 @@ export function solveStaticFabArrangement(intent: unknown): StaticFabArrangement
 	return Object.freeze({
 		valid: true,
 		code: null,
-		reason: arrangementReason(axis, mode, translations.length, deltas.maximumSnapErrorMeters),
+		reason:
+			mode === "TRANSLATE"
+				? `선택 구조 ${axis}축 ${intent.distanceMeters} m 이동`
+				: arrangementReason(axis, mode, translations.length, deltas.maximumSnapErrorMeters),
 		axis,
 		mode,
 		translations: Object.freeze(translations),
@@ -452,6 +480,7 @@ function isAxis(value: unknown): value is StaticFabArrangementAxis {
 
 function isMode(value: unknown): value is StaticFabArrangementMode {
 	return (
+		value === "TRANSLATE" ||
 		value === "ALIGN_MIN" ||
 		value === "ALIGN_CENTER" ||
 		value === "ALIGN_MAX" ||

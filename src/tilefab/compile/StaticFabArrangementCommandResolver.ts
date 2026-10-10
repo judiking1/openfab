@@ -19,6 +19,7 @@ import {
 	type StaticFabArrangementRootFailureCode,
 	validateResolvedStaticFabArrangementRoots,
 } from "./StaticFabArrangementRoots";
+import { staticFabTranslationSelectionReason } from "./StaticFabTranslationSelection";
 
 export type StaticFabArrangementCommandResolution =
 	| {
@@ -115,6 +116,14 @@ export function resolveStaticFabArrangementCommand(
 			);
 		}
 		roots.push(resolution.roots[0] as ResolvedStaticFabArrangementRoot);
+	}
+	if (prepared.intent.mode === "TRANSLATE") {
+		const reason = staticFabTranslationSelectionReason(
+			organizations,
+			roots,
+			prepared.intent.equipmentGroupIds ?? [],
+		);
+		if (reason) return failure("INVALID_SOURCE", reason);
 	}
 	const validation = validateResolvedStaticFabArrangementRoots(roots);
 	if (!validation.valid) return failure(validation.code, validation.reason);
