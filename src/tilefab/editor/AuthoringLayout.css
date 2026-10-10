@@ -488,6 +488,60 @@
 	padding: 10px 0;
 	cursor: pointer;
 }
+.tilefab-guided-task {
+	margin-bottom: 10px;
+}
+.tilefab-guided-task p {
+	margin: 8px 0;
+	line-height: 1.45;
+}
+.tilefab-guided-task button,
+.tilefab-guided-task-resume,
+.tilefab-guided-task-legacy > summary {
+	min-height: 44px;
+}
+.tilefab-guided-task-primary,
+.tilefab-guided-task-resume {
+	width: 100%;
+	white-space: normal;
+}
+.tilefab-guided-task-secondary {
+	margin-top: 4px;
+	flex-wrap: wrap;
+}
+.tilefab-guided-task-heading {
+	display: block;
+	margin-top: 4px;
+	color: #a8d8cb;
+	font-size: 11px;
+	font-weight: 400;
+}
+.tilefab-active-authoring-heading[data-guidance-pinned="true"] {
+	flex-wrap: wrap;
+}
+.tilefab-guided-task-pinned {
+	display: flex;
+	flex: 0 0 100%;
+	align-items: center;
+	gap: 8px;
+	color: #a8d8cb;
+}
+.tilefab-guided-task-pinned > span {
+	flex: 1;
+	min-width: 0;
+}
+.tilefab-guided-task-pinned > button {
+	flex-shrink: 0;
+}
+.tilefab-guided-task :focus-visible,
+.tilefab-guided-task-resume:focus-visible {
+	outline: 2px solid #8be1ca;
+	outline-offset: 2px;
+}
+.tilefab-guided-task-legacy > summary {
+	padding: 12px 0;
+	cursor: pointer;
+}
 .tilefab-active-authoring-toggle {
 	display: flex;
 	align-items: center;
@@ -540,11 +594,23 @@
 	.tilefab-buildbar.tilefab-equipment-group-transformbar {
 	flex-wrap: nowrap;
 }
+/* Pitch controls share one column; legacy row flex bases must not create sideways columns. */
+.tilefab-app[data-authoring-layout="unified"] .tilefab-active-authoring-workspace
+	.tilefab-buildbar.tilefab-equipment-membershipbar[data-edit-mode="pitch"] {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+}
 .tilefab-app[data-authoring-layout="unified"]
 	.tilefab-active-authoring-workspace
 	.tilefab-equipment-group-transformbar
 	.tilefab-equipment-transform-actions {
 	flex: 0 0 auto;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-equipment-membershipbar[data-edit-mode="pitch"]
+	.tilefab-equipment-transform-actions {
+	position: static;
 }
 .tilefab-app[data-authoring-layout="unified"]
 	.tilefab-active-authoring-workspace

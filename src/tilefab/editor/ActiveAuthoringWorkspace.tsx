@@ -11,6 +11,10 @@ export interface ActiveAuthoringWorkspaceProps {
 	readonly children?: ReactNode;
 	readonly feedback?: ReactNode;
 	readonly actions?: ReactNode;
+	readonly guidance?: ReactNode;
+	readonly guidanceLabel?: string;
+	readonly guidanceGoal?: string;
+	readonly onExitGuidance?: () => void;
 }
 
 /** Keeps task controls mounted; the caller retains drafts, validation and command authority. */
@@ -23,6 +27,10 @@ export function ActiveAuthoringWorkspace({
 	children,
 	feedback,
 	actions,
+	guidance,
+	guidanceLabel,
+	guidanceGoal,
+	onExitGuidance,
 }: ActiveAuthoringWorkspaceProps): ReactNode {
 	const instanceId = useId();
 	const titleId = `${instanceId}-title`;
@@ -54,9 +62,15 @@ export function ActiveAuthoringWorkspace({
 			data-expanded={expanded}
 			aria-labelledby={titleId}
 		>
-			<header className="tilefab-active-authoring-heading">
+			<header
+				className="tilefab-active-authoring-heading"
+				data-guidance-pinned={Boolean(guidanceGoal)}
+			>
 				<h2 id={titleId} className="tilefab-active-authoring-title">
 					{task.title}
+					{guidanceLabel ? (
+						<small className="tilefab-guided-task-heading">{guidanceLabel}</small>
+					) : null}
 				</h2>
 				<div
 					id={headingActionsId}
@@ -86,6 +100,14 @@ export function ActiveAuthoringWorkspace({
 					)}
 					<span>{expanded ? "접기" : "펼치기"}</span>
 				</button>
+				{guidanceGoal ? (
+					<div className="tilefab-guided-task-pinned" data-testid="guided-task-pinned">
+						<span role="status">{guidanceGoal}</span>
+						<button type="button" onClick={onExitGuidance} data-testid="guided-task-pinned-exit">
+							실습 종료
+						</button>
+					</div>
+				) : null}
 			</header>
 			<div
 				id={bodyId}
@@ -95,6 +117,7 @@ export function ActiveAuthoringWorkspace({
 				inert={!expanded}
 			>
 				<div className="tilefab-active-authoring-scroll-content">
+					{guidance}
 					<p className="tilefab-active-authoring-instruction" hidden={!task.instruction}>
 						{task.instruction}
 					</p>

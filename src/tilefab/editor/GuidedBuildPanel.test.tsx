@@ -1,13 +1,104 @@
 import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { ActiveAuthoringWorkspace } from "./ActiveAuthoringWorkspace";
 import type { GuidedBuildChapterId } from "./GuidedBuildChapter";
+import { GuidedBuildTaskCoach } from "./GuidedBuildChapterCheckpoint";
 import { guidedBuildInputHint } from "./GuidedBuildInputHint";
 import { evaluateGuidedBuildFoundation, type GuidedBuildEvidence } from "./GuidedBuildMission";
 import { GuidedBuildPanel } from "./GuidedBuildPanel";
 import { OpenFabStartDialog } from "./OpenFabStartDialog";
 
 describe("OpenFabStartDialog", () => {
+	it("keeps the compact goal and exit outside the collapsed scrolling task body", () => {
+		const markup = renderToStaticMarkup(
+			<ActiveAuthoringWorkspace
+				task={{ id: "equipment", kind: "equipment", title: "장비 선택·편집" }}
+				compact
+				expanded={false}
+				onExpandedChange={() => undefined}
+				guidanceLabel="실습 · Port 방향 바꾸기 · 2/2"
+				guidanceGoal="목표 · Port 서비스 방향 반전"
+				onExitGuidance={() => undefined}
+			>
+				<input defaultValue="Unapplied draft" />
+			</ActiveAuthoringWorkspace>,
+		);
+		const header = markup.slice(markup.indexOf("<header"), markup.indexOf("</header>"));
+		expect(header).toContain('data-testid="guided-task-pinned"');
+		expect(header).toContain('data-testid="guided-task-pinned-exit"');
+		expect(header).toContain("목표 · Port 서비스 방향 반전");
+		expect(header.slice(header.indexOf('class="tilefab-guided-task-pinned"'))).not.toContain(
+			'inert=""',
+		);
+		expect(markup).toContain("Unapplied draft");
+	});
+	it("offers independent short tasks while keeping the original course optional", () => {
+		const markup = renderToStaticMarkup(
+			<OpenFabStartDialog
+				onGuidedBuild={() => undefined}
+				onVerifiedTemplate={() => undefined}
+				onBlankCanvas={() => undefined}
+				onClose={() => undefined}
+				onTask={() => undefined}
+				resumableTaskTitle="청사진 재사용"
+				onResumeTask={() => undefined}
+			/>,
+		);
+		expect(markup).toContain('data-testid="guided-task-start-fab"');
+		expect(markup).toContain('data-testid="guided-task-start-equipment"');
+		expect(markup).toContain('data-testid="guided-task-start-eq-configuration"');
+		expect(markup).toContain("EQ Port 구성 바꾸기");
+		expect(markup).toContain("Port 방향 바꾸기");
+		expect(markup).not.toContain("장비와 Port 편집");
+		expect(markup).toContain('data-testid="guided-task-start-blueprint"');
+		expect(markup).toContain("청사진 재사용 이어하기");
+		expect(markup).toContain('<details class="tilefab-guided-task-legacy">');
+		expect(markup).toContain("GUIDED BUILD");
+		expect(markup).not.toContain("처음이라면 Guided Build");
+	});
+	it("keeps another practice unavailable while the full course owns an unfinished input", () => {
+		const markup = renderToStaticMarkup(
+			<OpenFabStartDialog
+				onGuidedBuild={() => undefined}
+				onVerifiedTemplate={() => undefined}
+				onBlankCanvas={() => undefined}
+				onClose={() => undefined}
+				onTask={() => undefined}
+				taskBlockedReason="현재 Port 초안을 먼저 적용하거나 취소하세요"
+			/>,
+		);
+		expect(markup).toContain("현재 Port 초안을 먼저 적용하거나 취소하세요");
+		for (const id of ["fab", "equipment", "blueprint"]) {
+			expect(markup).toContain(
+				`data-testid="guided-task-start-${id}" class="tilefab-openfab-start-option" disabled=""`,
+			);
+		}
+	});
+
+	it("keeps task completion evidence separate from skip, pause and execution controls", () => {
+		const markup = renderToStaticMarkup(
+			<GuidedBuildTaskCoach
+				title="청사진 재사용"
+				step={2}
+				complete={false}
+				instruction="유효한 위치에 배치하세요."
+				actionLabel="캔버스에서 위치 선택"
+				blockedReason="동기화 중"
+				onAction={() => undefined}
+				onPause={() => undefined}
+				onExit={() => undefined}
+				onChooseTask={() => undefined}
+			/>,
+		);
+		expect(markup).toContain('data-complete="false"');
+		expect(markup).toContain('class="tilefab-guided-task-primary" disabled=""');
+		expect(markup).toContain("건너뛰고 편집");
+		expect(markup).toContain("실습 종료");
+		expect(markup).not.toContain("<details");
+		expect(markup).not.toContain("완료로 표시");
+	});
+
 	it("offers the three explicit non-mutating start paths", () => {
 		const markup = renderToStaticMarkup(
 			<OpenFabStartDialog

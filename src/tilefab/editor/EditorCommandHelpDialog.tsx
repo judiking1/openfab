@@ -48,6 +48,7 @@ const COMMAND_GROUP_LABELS = Object.freeze({
 export interface EditorCommandHelpDialogProps {
 	readonly open: boolean;
 	readonly guidedBuild?: Readonly<{
+		readonly taskSelection?: boolean;
 		readonly mode: "active" | "paused" | "available";
 		readonly currentSequence: number;
 		readonly missionCount: number;
@@ -192,15 +193,18 @@ export function EditorCommandHelpDialog({
 									</span>
 									<p>
 										<strong>
-											{guidedBuild.mode === "active"
-												? "Guided Build가 열려 있습니다"
-												: guidedBuild.mode === "paused"
-													? "Guided Build를 계속할 수 있습니다"
-													: "처음이라면 Guided Build로 시작하세요"}
+											{guidedBuild.taskSelection
+												? "필요한 작업만 짧게 실습하세요"
+												: guidedBuild.mode === "active"
+													? "Guided Build가 열려 있습니다"
+													: guidedBuild.mode === "paused"
+														? "Guided Build를 계속할 수 있습니다"
+														: "처음이라면 Guided Build로 시작하세요"}
 										</strong>
 										<small>
-											{guidedBuild.currentChapterLabel} · {guidedBuild.currentSequence} /{" "}
-											{guidedBuild.missionCount} · {guidedBuild.currentTitle}
+											{guidedBuild.taskSelection
+												? "FAB 만들기 · Port 방향 · EQ Port 구성 · 청사진 재사용"
+												: `${guidedBuild.currentChapterLabel} · ${guidedBuild.currentSequence} / ${guidedBuild.missionCount} · ${guidedBuild.currentTitle}`}
 										</small>
 									</p>
 									<button
@@ -210,11 +214,13 @@ export function EditorCommandHelpDialog({
 											onOpenGuidedBuild();
 										}}
 									>
-										{guidedBuild.mode === "active"
-											? "현재 단계 보기"
-											: guidedBuild.mode === "paused"
-												? "가이드 계속하기"
-												: "가이드 시작하기"}
+										{guidedBuild.taskSelection
+											? "실습 고르기"
+											: guidedBuild.mode === "active"
+												? "현재 단계 보기"
+												: guidedBuild.mode === "paused"
+													? "가이드 계속하기"
+													: "가이드 시작하기"}
 									</button>
 								</section>
 							) : null}

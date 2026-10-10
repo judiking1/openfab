@@ -1,5 +1,6 @@
 import { Check, Factory, FolderClock, GraduationCap, MousePointer2, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef } from "react";
+import { GUIDED_BUILD_TASKS, type GuidedBuildTaskId } from "./GuidedBuildChapter";
 
 export interface OpenFabStartDialogProps {
 	readonly busy?: boolean;
@@ -15,6 +16,10 @@ export interface OpenFabStartDialogProps {
 	readonly onResumeRecovery?: () => void;
 	readonly onReviewRecovery?: () => void;
 	readonly onClose: () => void;
+	readonly onTask?: (task: GuidedBuildTaskId) => void;
+	readonly resumableTaskTitle?: string;
+	readonly onResumeTask?: () => void;
+	readonly taskBlockedReason?: string | null;
 }
 
 export function OpenFabStartDialog({
@@ -28,6 +33,10 @@ export function OpenFabStartDialog({
 	onResumeRecovery,
 	onReviewRecovery,
 	onClose,
+	onTask,
+	resumableTaskTitle,
+	onResumeTask,
+	taskBlockedReason = null,
 }: OpenFabStartDialogProps): React.ReactElement {
 	const dialogRef = useRef<HTMLElement | null>(null);
 	const guidedButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -51,7 +60,7 @@ export function OpenFabStartDialog({
 			dialog.querySelectorAll<HTMLElement>(
 				"button:not(:disabled), [href], [tabindex]:not([tabindex='-1'])",
 			),
-		).filter((element) => !element.hasAttribute("hidden"));
+		).filter((element) => !element.hasAttribute("hidden") && element.getClientRects().length > 0);
 		if (focusable.length === 0) {
 			event.preventDefault();
 			dialog.focus({ preventScroll: true });
@@ -88,7 +97,7 @@ export function OpenFabStartDialog({
 					</span>
 					<div>
 						<small>START OPENFAB</small>
-						<h2 id="openfab-start-title">어떻게 시작할까요?</h2>
+						<h2 id="openfab-start-title">{onTask ? "무엇을 해 볼까요?" : "어떻게 시작할까요?"}</h2>
 					</div>
 					<button
 						type="button"
@@ -102,9 +111,11 @@ export function OpenFabStartDialog({
 				<p id="openfab-start-description">
 					{recovery
 						? "저장되지 않은 작업의 로컬 복구본이 있습니다. 이어서 열거나 새 FAB를 시작하세요. 새로 시작해도 복구본은 자동으로 삭제되지 않습니다."
-						: hasCurrentFabContent
-							? "현재 FAB를 계속 편집할 수 있습니다. 빈 프로젝트가 필요하면 프로젝트 메뉴에서 새 프로젝트를 선택하세요."
-							: "처음이라면 Guided Build로 첫 정적 FAB를 완성하세요. 같은 프로젝트와 편집 명령으로 레일부터 검증·저장까지 이어집니다."}
+						: onTask
+							? "필요한 작업만 골라 직접 해 보세요. 실습을 닫아도 편집 내용은 유지됩니다."
+							: hasCurrentFabContent
+								? "현재 FAB를 계속 편집할 수 있습니다. 빈 프로젝트가 필요하면 프로젝트 메뉴에서 새 프로젝트를 선택하세요."
+								: "처음이라면 Guided Build로 첫 정적 FAB를 완성하세요. 같은 프로젝트와 편집 명령으로 레일부터 검증·저장까지 이어집니다."}
 				</p>
 				{recovery && onResumeRecovery && onReviewRecovery ? (
 					<section className="tilefab-openfab-start-recovery" aria-label="복구본 이어하기">
@@ -131,56 +142,95 @@ export function OpenFabStartDialog({
 						</div>
 					</section>
 				) : null}
-				<div className="tilefab-openfab-start-options">
-					<button
-						ref={guidedButtonRef}
-						type="button"
-						className="tilefab-openfab-start-option tilefab-openfab-start-option--primary"
-						disabled={busy}
-						onClick={onGuidedBuild}
-					>
-						<GraduationCap size={22} />
-						<span>
-							<strong>GUIDED BUILD</strong>
-							<small>레일 → Port → Bay/Bank → Fab → 검증·저장</small>
-						</span>
-						<em>
-							<Check size={12} /> 추천
-						</em>
-					</button>
-					<button
-						type="button"
-						className="tilefab-openfab-start-option"
-						disabled={busy}
-						onClick={onVerifiedTemplate}
-					>
-						<Factory size={22} />
-						<span>
-							<strong>VERIFIED TEMPLATE</strong>
-							<small>
-								{hasCurrentFabContent
-									? "합성 레일·FAB 구조를 새 프로젝트 또는 현재 FAB에 배치 · 장비는 직접 배치"
-									: "합성 레일·FAB 구조 예제 · 장비는 직접 배치"}
-							</small>
-						</span>
-					</button>
-					<button
-						type="button"
-						className="tilefab-openfab-start-option"
-						disabled={busy}
-						onClick={onBlankCanvas}
-					>
-						<MousePointer2 size={22} />
-						<span>
-							<strong>BLANK CANVAS</strong>
-							<small>
-								{hasCurrentFabContent
-									? "현재 FAB를 유지하고 편집기로 돌아가기"
-									: "빈 프로젝트에서 편집 도구 직접 사용"}
-							</small>
-						</span>
-					</button>
-				</div>
+				{onTask ? (
+					<div className="tilefab-openfab-start-options">
+						{taskBlockedReason ? <p role="status">{taskBlockedReason}</p> : null}
+						{resumableTaskTitle && onResumeTask ? (
+							<button
+								type="button"
+								className="tilefab-openfab-start-option"
+								disabled={busy}
+								onClick={onResumeTask}
+							>
+								<GraduationCap size={22} />
+								<span>
+									<strong>{resumableTaskTitle} 이어하기</strong>
+									<small>현재 작업에서 안내 재개</small>
+								</span>
+							</button>
+						) : null}
+						{GUIDED_BUILD_TASKS.map((task, index) => (
+							<button
+								key={task.id}
+								ref={index === 0 ? guidedButtonRef : undefined}
+								type="button"
+								data-testid={`guided-task-start-${task.id}`}
+								className="tilefab-openfab-start-option"
+								disabled={busy || taskBlockedReason !== null}
+								onClick={() => onTask(task.id)}
+							>
+								<GraduationCap size={22} />
+								<span>
+									<strong>{task.title}</strong>
+									<small>{task.description}</small>
+								</span>
+							</button>
+						))}
+					</div>
+				) : null}
+				<details className="tilefab-guided-task-legacy" open={onTask ? undefined : true}>
+					<summary hidden={!onTask}>레일 기초부터 배우기·다른 시작 방법</summary>
+					<div className="tilefab-openfab-start-options">
+						<button
+							ref={onTask ? undefined : guidedButtonRef}
+							type="button"
+							className="tilefab-openfab-start-option tilefab-openfab-start-option--primary"
+							disabled={busy}
+							onClick={onGuidedBuild}
+						>
+							<GraduationCap size={22} />
+							<span>
+								<strong>GUIDED BUILD</strong>
+								<small>레일 → Port → Bay/Bank → Fab → 검증·저장</small>
+							</span>
+							<em>
+								<Check size={12} /> 추천
+							</em>
+						</button>
+						<button
+							type="button"
+							className="tilefab-openfab-start-option"
+							disabled={busy}
+							onClick={onVerifiedTemplate}
+						>
+							<Factory size={22} />
+							<span>
+								<strong>VERIFIED TEMPLATE</strong>
+								<small>
+									{hasCurrentFabContent
+										? "합성 레일·FAB 구조를 새 프로젝트 또는 현재 FAB에 배치 · 장비는 직접 배치"
+										: "합성 레일·FAB 구조 예제 · 장비는 직접 배치"}
+								</small>
+							</span>
+						</button>
+						<button
+							type="button"
+							className="tilefab-openfab-start-option"
+							disabled={busy}
+							onClick={onBlankCanvas}
+						>
+							<MousePointer2 size={22} />
+							<span>
+								<strong>BLANK CANVAS</strong>
+								<small>
+									{hasCurrentFabContent
+										? "현재 FAB를 유지하고 편집기로 돌아가기"
+										: "빈 프로젝트에서 편집 도구 직접 사용"}
+								</small>
+							</span>
+						</button>
+					</div>
+				</details>
 			</section>
 		</div>
 	);

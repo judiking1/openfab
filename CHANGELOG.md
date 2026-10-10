@@ -6,6 +6,20 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.109] - 2026-10-10
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Choose short optional practices for creating a FAB, changing Port service direction, editing
+  EQ Port configuration, and saving/reusing a Blueprint. Follow existing tools with one current
+  goal, and keep the original course separately available. Preserve unfinished edits on guide exit.
+- Confirm practice progress from actual current commands and results, including Undo/Redo and
+  shared Blueprint placement cells. Keep Selection behavior aligned after leaving placement and
+  retain the practice goal and exit control in the compact workspace header.
+- Guide same-EQ pitch and explicit body-size edits through existing Apply/Cancel controls. Accept
+  a body-length repair before retrying pitch, distinguish automatic body growth, and keep pitch
+  inputs and actions visible together without horizontal scrolling.
+
 ## [0.1.108] - 2026-10-10
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

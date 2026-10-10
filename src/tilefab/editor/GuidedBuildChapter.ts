@@ -1,8 +1,203 @@
+import { advancedSwitchEquals } from "../core/AdvancedSwitch";
+import {
+	type EqBodyDimensions,
+	eqBodyDimensionsEqual,
+	equipmentGroupEquals,
+	type PortEquipmentState,
+	resolveEqBodyDimensions,
+} from "../core/EquipmentGroup";
+import { type PortRecord, portRecordEquals } from "../core/PortRecord";
+import type { RailDocument } from "../core/RailDocument";
+import { staticFabAssemblyRelationshipRecordEquals } from "../core/StaticFabAssemblyRelationship";
+import { staticFabOrganizationRecordEquals } from "../core/StaticFabOrganization";
+import type { StaticFabOrganizationBundlePlacementPlan } from "../core/StaticFabOrganizationBundlePlacement";
+import type { OpenFabProjectBlueprint } from "../project/OpenFabBlueprintLibrary";
 import type {
 	GuidedBuildEvaluation,
 	GuidedBuildFoundationMissionId,
 	GuidedBuildSuggestedAction,
 } from "./GuidedBuildMission";
+
+export type GuidedBuildTaskId = "fab" | "equipment" | "eq-configuration" | "blueprint";
+
+export interface GuidedBuildTaskEqResult {
+	readonly groupId: number;
+	readonly pitch?: Readonly<{ millimeters: number; ports: readonly PortRecord[] }>;
+	readonly body?: EqBodyDimensions;
+}
+
+/** Independent command results: a pitch-derived body never supplies an explicit body receipt. */
+export function guidedBuildTaskEqResultMatches(
+	result: GuidedBuildTaskEqResult | undefined,
+	state: PortEquipmentState,
+) {
+	if (!result) return { pitch: false, body: false };
+	const group = state.equipmentGroups.find((candidate) => candidate.id === result.groupId);
+	if (group?.kind !== "EQ") return { pitch: false, body: false };
+	const pitch = result.pitch;
+	const ports = new Map(
+		state.ports.filter((port) => port.equipmentGroupId === group.id).map((port) => [port.id, port]),
+	);
+	return {
+		pitch: Boolean(
+			pitch &&
+				group.pitchMillimeters === pitch.millimeters &&
+				group.portIds.length === pitch.ports.length &&
+				pitch.ports.every(
+					(expected) =>
+						group.portIds.includes(expected.id) &&
+						portRecordEquals(ports.get(expected.id), expected),
+				),
+		),
+		body: Boolean(
+			result.body && eqBodyDimensionsEqual(resolveEqBodyDimensions(group), result.body),
+		),
+	};
+}
+
+export type GuidedBuildTaskPlacementPlan = Pick<StaticFabOrganizationBundlePlacementPlan, "cells"> &
+	Partial<
+		Pick<
+			StaticFabOrganizationBundlePlacementPlan,
+			| "switchMutations"
+			| "portMutations"
+			| "equipmentGroupMutations"
+			| "organizationMutations"
+			| "relationshipMutations"
+		>
+	>;
+
+export type GuidedBuildTaskPlacementResult = Omit<GuidedBuildTaskPlacementPlan, "cells"> & {
+	readonly footprint: readonly Readonly<{ x: number; y: number; encoded: number }>[];
+};
+
+/** Capture only the successful placement's full footprint, including unchanged shared cells. */
+export function captureGuidedBuildTaskPlacementResult(
+	plan: GuidedBuildTaskPlacementPlan,
+	map: Pick<RailDocument["map"], "getEncoded">,
+): GuidedBuildTaskPlacementResult {
+	return Object.freeze({
+		footprint: Object.freeze(
+			plan.cells.map(({ x, y }) => Object.freeze({ x, y, encoded: map.getEncoded(x, y) })),
+		),
+		switchMutations: plan.switchMutations,
+		portMutations: plan.portMutations,
+		equipmentGroupMutations: plan.equipmentGroupMutations,
+		organizationMutations: plan.organizationMutations,
+		relationshipMutations: plan.relationshipMutations,
+	});
+}
+
+/** Read the committed footprint with existing domain equality; never replay a command for guidance. */
+export function guidedBuildTaskPlacementResultExists(
+	result: GuidedBuildTaskPlacementResult,
+	document: Pick<RailDocument, "map" | "portEquipment" | "organizations" | "relationships">,
+): boolean {
+	if (!result.footprint.length && !result.switchMutations?.length) return false;
+	if (!result.footprint.every(({ x, y, encoded }) => document.map.getEncoded(x, y) === encoded))
+		return false;
+	if (
+		result.switchMutations &&
+		!result.switchMutations.every(({ id, after }) =>
+			advancedSwitchEquals(document.map.getAdvancedSwitch(id), after),
+		)
+	)
+		return false;
+	const recordsMatch = <T extends { readonly id: number }>(
+		changes: readonly { readonly id: number; readonly after: T | null }[] | undefined,
+		records: readonly T[],
+		equals: (left: T | undefined, right: T | null) => boolean,
+	): boolean => {
+		if (!changes?.length) return true;
+		const byId = new Map(records.map((record) => [record.id, record]));
+		return changes.every(({ id, after }) => equals(byId.get(id), after));
+	};
+	return (
+		recordsMatch(result.portMutations, document.portEquipment.ports, portRecordEquals) &&
+		recordsMatch(
+			result.equipmentGroupMutations,
+			document.portEquipment.equipmentGroups,
+			equipmentGroupEquals,
+		) &&
+		recordsMatch(
+			result.organizationMutations,
+			document.organizations.records,
+			staticFabOrganizationRecordEquals,
+		) &&
+		recordsMatch(
+			result.relationshipMutations,
+			document.relationships.records,
+			staticFabAssemblyRelationshipRecordEquals,
+		)
+	);
+}
+
+/** Library refresh and metadata edits preserve the saved source; replacement content does not. */
+export function guidedBuildTaskBlueprintMatches(
+	a: OpenFabProjectBlueprint,
+	b: OpenFabProjectBlueprint,
+): boolean {
+	if (a === b) return true;
+	if (a.id !== b.id || a.kind !== b.kind || a.createdAt !== b.createdAt) return false;
+	const content = (record: OpenFabProjectBlueprint) =>
+		JSON.stringify([
+			record.edges,
+			"ports" in record ? record.ports : null,
+			"equipmentGroups" in record ? record.equipmentGroups : null,
+			"bundle" in record ? record.bundle : null,
+		]);
+	return content(a) === content(b);
+}
+
+export const GUIDED_BUILD_TASKS = [
+	{ id: "fab", title: "FAB 만들기", description: "규모 정하기 → 생성 → 검사 보기" },
+	{
+		id: "equipment",
+		title: "Port 방향 바꾸기",
+		description: "장비 선택 → Port 서비스 방향 바꾸기",
+	},
+	{
+		id: "eq-configuration",
+		title: "EQ Port 구성 바꾸기",
+		description: "같은 EQ의 Port 간격 → 몸체 크기 직접 적용",
+	},
+	{ id: "blueprint", title: "청사진 재사용", description: "선택을 청사진으로 저장 → 다시 배치" },
+] as const;
+
+export interface GuidedBuildTaskEvidence {
+	readonly settled: boolean;
+	readonly fabCreated: boolean;
+	readonly fabInspected: boolean;
+	readonly equipmentSelected: boolean;
+	readonly equipmentEdited: boolean;
+	readonly eqPitchEdited: boolean;
+	readonly eqBodyEdited: boolean;
+	readonly blueprintSaved: boolean;
+	readonly blueprintPlaced: boolean;
+}
+
+/** A short projection of existing commands, not a second authoring or completion authority. */
+export function evaluateGuidedBuildTask(
+	task: GuidedBuildTaskId,
+	evidence: GuidedBuildTaskEvidence,
+) {
+	const conditions =
+		task === "fab"
+			? [evidence.fabCreated, evidence.fabInspected]
+			: task === "equipment"
+				? [evidence.equipmentSelected, evidence.equipmentEdited]
+				: task === "eq-configuration"
+					? [evidence.eqPitchEdited, evidence.eqBodyEdited]
+					: [evidence.blueprintSaved, evidence.blueprintPlaced];
+	const firstMissing = conditions.findIndex((condition) => !condition);
+	const complete = evidence.settled && firstMissing === -1;
+	return {
+		task,
+		complete,
+		step: complete ? 2 : firstMissing === -1 ? 2 : firstMissing + 1,
+		count: 2,
+	} as const;
+}
 
 export const GUIDED_BUILD_CHAPTER_IDS = ["quick-start", "equip", "reuse", "advanced-fab"] as const;
 

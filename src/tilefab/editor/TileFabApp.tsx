@@ -212,6 +212,9 @@ import {
 	collectPortEquipmentIntegrityIssues,
 	EQ_MAXIMUM_PORT_COUNT,
 	type EqBodyDimensions,
+	type EqEquipmentGroup,
+	eqBodyDimensionsEqual,
+	resolveEqBodyDimensions,
 	type EquipmentGroupRecord,
 	type PortEquipmentState,
 	STK_MAXIMUM_PORT_COUNT,
@@ -234,6 +237,7 @@ import {
 	type RailNetworkAnalysis,
 } from "../core/network";
 import type { PortRecord, PortType } from "../core/PortRecord";
+import type { RailMirrorHistoryLedgerEntry } from "../core/RailPatchHistory";
 import { recognizeProductionBayModule } from "../core/ProductionBayModuleRecognition";
 import type { ProductionBayInternalFlowPattern } from "../core/ProductionBayModulePlanner";
 import {
@@ -788,12 +792,23 @@ import {
 	type GuidedBuildPreferenceLoadStatus,
 } from "./GuidedBuildFirstRun";
 import {
+	captureGuidedBuildTaskPlacementResult,
 	deriveGuidedBuildChapters,
+	evaluateGuidedBuildTask,
+	GUIDED_BUILD_TASKS,
+	type GuidedBuildTaskId,
+	type GuidedBuildTaskEqResult,
+	type GuidedBuildTaskPlacementPlan,
+	type GuidedBuildTaskPlacementResult,
 	guidedBuildChapterEntryTool,
 	guidedBuildCurrentChapter,
+	guidedBuildTaskBlueprintMatches,
+	guidedBuildTaskEqResultMatches,
+	guidedBuildTaskPlacementResultExists,
 	resolveGuidedBuildChapterCheckpoint,
 	type GuidedBuildChapterId,
 } from "./GuidedBuildChapter";
+import { GuidedBuildTaskCoach } from "./GuidedBuildChapterCheckpoint";
 import {
 	evaluateGuidedBuildFoundation,
 	GUIDED_FIRST_RAIL_TARGET_METERS,
@@ -1741,6 +1756,33 @@ interface GuidedBuildProjectFileReceipt {
 	readonly projectId: string;
 	readonly authoredChecksum: string;
 	readonly sequence: number;
+}
+
+interface GuidedBuildTaskSession {
+	readonly run: number;
+	readonly task: GuidedBuildTaskId;
+	readonly document: RailDocument;
+	readonly projectGeneration: number;
+	readonly startSequence: number;
+	readonly paused: boolean;
+	readonly fabRootId?: number;
+	readonly inspectedSourceKey?: string;
+	readonly equipment?: Readonly<{
+		groupId: number;
+		entry: RailMirrorHistoryLedgerEntry;
+		ports: readonly Readonly<{ id: number; direction: PortRecord["direction"] }>[];
+	}>;
+	readonly eqConfiguration?: GuidedBuildTaskEqResult & Readonly<{
+		pitchEntry?: RailMirrorHistoryLedgerEntry;
+		bodyEntry?: RailMirrorHistoryLedgerEntry;
+	}>;
+	readonly blueprint?: OpenFabProjectBlueprint;
+	readonly blueprintPlacement?: Readonly<{
+		areaTemplate: RailAreaStampTemplate | null;
+		organizationSession: StaticFabOrganizationBundlePlacementSession | null;
+	}>;
+	readonly placementEntry?: RailMirrorHistoryLedgerEntry;
+	readonly placementResult?: GuidedBuildTaskPlacementResult;
 }
 
 type NewOpenFabFabProjectBinding = NewFabProfilePreparedBinding<VerifiedOpenFabFabPreparedProject>;
@@ -3863,6 +3905,43 @@ export default function TileFabApp(): React.ReactElement {
 	const [openFabStartDialogOpen, setOpenFabStartDialogOpen] = useState(false);
 	const openFabStartReturnFocusRef = useRef<HTMLElement | null>(null);
 	const [guidedBuildOpen, setGuidedBuildOpen] = useState(false);
+	const [guidedTask, setGuidedTask] = useState<GuidedBuildTaskSession | null>(null);
+	const guidedTaskRef = useRef<GuidedBuildTaskSession | null>(null);
+	const guidedTaskRunRef = useRef(0);
+	const publishGuidedTask = useCallback((next: GuidedBuildTaskSession | null): void => {
+		guidedTaskRef.current = next;
+		setGuidedTask(next);
+	}, []);
+	const recordGuidedTaskBlueprint = (run: number | undefined, record: OpenFabProjectBlueprint): void => {
+		const current = guidedTaskRef.current;
+		if (!current || current.run !== run || current.task !== "blueprint" ||
+			current.document !== editorModelRef.current.document || current.projectGeneration !== projectGenerationRef.current) return;
+		publishGuidedTask({ ...current, blueprint: record, blueprintPlacement: undefined, placementEntry: undefined, placementResult: undefined });
+	};
+	const recordGuidedTaskEqEdit = (kind: "pitch" | "body", before: EqEquipmentGroup): void => {
+		const task = guidedTaskRef.current;
+		const document = editorModelRef.current.document;
+		if (task?.task !== "eq-configuration" || task.document !== document ||
+			task.projectGeneration !== projectGenerationRef.current || task.run !== guidedTaskRunRef.current ||
+			document.getPatchSequence() <= task.startSequence) return;
+		const group = document.portEquipment.equipmentGroups.find((candidate) => candidate.id === before.id);
+		const entry = document.captureRailMirrorHistoryLedger().undo.at(-1);
+		if (group?.kind !== "EQ" || !entry) return;
+		const previous = task.eqConfiguration;
+		const boundGroupExists = previous && document.portEquipment.equipmentGroups.some((candidate) => candidate.id === previous.groupId);
+		if (boundGroupExists && previous.groupId !== group.id) return;
+		const result = boundGroupExists ? previous : { groupId: group.id };
+		if (kind === "pitch") {
+			if (before.pitchMillimeters === group.pitchMillimeters) return;
+			publishGuidedTask({ ...task, eqConfiguration: { ...result, pitchEntry: entry,
+				pitch: { millimeters: group.pitchMillimeters,
+					ports: document.portEquipment.ports.filter((port) => port.equipmentGroupId === group.id) } } });
+		} else {
+			const body = resolveEqBodyDimensions(group);
+			if (eqBodyDimensionsEqual(resolveEqBodyDimensions(before), body)) return;
+			publishGuidedTask({ ...task, eqConfiguration: { ...result, bodyEntry: entry, body } });
+		}
+	};
 	const [guidedBuildCopyReceipt, setGuidedBuildCopyReceipt] = useState<GuidedBuildCopyReceipt | null>(null);
 	const guidedBuildCopyReceiptRef = useRef<GuidedBuildCopyReceipt | null>(null);
 	const [guidedBuildCopyUndo] = useState(() => new GuidedBuildCopyUndo());
@@ -4391,6 +4470,51 @@ export default function TileFabApp(): React.ReactElement {
 	const guidedBuildCopySettled = !modelSyncPending && editorModel === editorModelRef.current &&
 		workerBridgeDocumentRef.current === railDocument && workerState.status === "ready" &&
 		workerState.sequence === guidedBuildCopySequence && workerState.checksum === editorModel.authoredChecksum;
+	const currentGuidedTask = guidedTask?.document === railDocument &&
+		guidedTask.projectGeneration === projectGenerationRef.current ? guidedTask : null;
+	const guidedTaskHistory = currentGuidedTask ? railDocument.captureRailMirrorHistoryLedger().undo : [];
+	const guidedTaskEquipment = currentGuidedTask?.equipment;
+	const guidedTaskEq = currentGuidedTask?.eqConfiguration;
+	const guidedTaskEqResults = useMemo(() => guidedBuildTaskEqResultMatches(guidedTaskEq, activePortEquipment), [guidedTaskEq, activePortEquipment]);
+	const guidedTaskEqPitchEdited = Boolean(guidedTaskEqResults.pitch && guidedTaskEq?.pitchEntry && guidedTaskHistory.includes(guidedTaskEq.pitchEntry));
+	const guidedTaskEqBodyEdited = Boolean(guidedTaskEqResults.body && guidedTaskEq?.bodyEntry && guidedTaskHistory.includes(guidedTaskEq.bodyEntry));
+	const guidedTaskEquipmentEdited = Boolean(guidedTaskEquipment && guidedTaskHistory.includes(guidedTaskEquipment.entry) &&
+		activePortEquipment.equipmentGroups.some((group) => group.id === guidedTaskEquipment.groupId &&
+			group.portIds.length === guidedTaskEquipment.ports.length && guidedTaskEquipment.ports.every((expected) =>
+				group.portIds.includes(expected.id) && activePortEquipment.ports.some((port) =>
+					port.id === expected.id && port.equipmentGroupId === group.id && port.direction === expected.direction))));
+	const guidedTaskSavedBlueprint = useMemo(() => {
+		const expected = currentGuidedTask?.blueprint;
+		if (!expected) return undefined;
+		return [...projectBlueprints.records, ...userBlueprints.map((entry) => entry.blueprint)]
+			.find((record) => guidedBuildTaskBlueprintMatches(expected, record));
+	}, [currentGuidedTask?.blueprint, projectBlueprints.records, userBlueprints]);
+	const guidedTaskBlueprintSaved = guidedTaskSavedBlueprint !== undefined;
+	const guidedTaskPlacementResultCurrent = useMemo(() => {
+		const result = currentGuidedTask?.placementResult;
+		return Boolean(result && guidedBuildCopySettled && railDocument.getPatchSequence() === guidedBuildCopySequence &&
+			guidedBuildTaskPlacementResultExists(result, railDocument));
+	}, [currentGuidedTask?.placementResult, guidedBuildCopySettled, railDocument, guidedBuildCopySequence]);
+	const guidedTaskEvaluation = currentGuidedTask ? evaluateGuidedBuildTask(currentGuidedTask.task, {
+		settled: guidedBuildCopySettled,
+		fabCreated: currentGuidedTask.fabRootId !== undefined && activeOrganizations.records.some((record) => record.id === currentGuidedTask.fabRootId),
+		fabInspected: currentGuidedTask.inspectedSourceKey === staticFabCurrentSourceKey,
+		equipmentSelected: guidedTaskEquipmentEdited || Boolean(tool === "inspect" && editorActivity === "inspect" &&
+			!staticFabNavigatorOpen && selectedPortEquipment &&
+			resolveEditablePortEquipmentSelection(activePortEquipment, selectedPortEquipment)),
+		equipmentEdited: guidedTaskEquipmentEdited,
+		eqPitchEdited: guidedTaskEqPitchEdited,
+		eqBodyEdited: guidedTaskEqBodyEdited,
+		blueprintSaved: guidedTaskBlueprintSaved,
+		blueprintPlaced: Boolean(guidedTaskPlacementResultCurrent && currentGuidedTask.placementEntry && guidedTaskHistory.includes(currentGuidedTask.placementEntry)),
+	}) : null;
+	const guidedTaskTitle = GUIDED_BUILD_TASKS.find((task) => task.id === currentGuidedTask?.task)?.title;
+	useEffect(() => {
+		if (currentGuidedTask?.task !== "fab" || currentGuidedTask.fabRootId === undefined ||
+			!readinessOpen || !currentStaticFabProjectChecks || !guidedBuildCopySettled ||
+			currentGuidedTask.inspectedSourceKey === staticFabCurrentSourceKey) return;
+		publishGuidedTask({ ...currentGuidedTask, inspectedSourceKey: staticFabCurrentSourceKey });
+	}, [currentGuidedTask, readinessOpen, currentStaticFabProjectChecks, guidedBuildCopySettled, staticFabCurrentSourceKey, publishGuidedTask]);
 	const guidedBuildReuseComplete = guidedBuildEvaluation.missions.some(
 		(mission) => mission.definition.id === "reuse-loop" && mission.conditionMet,
 	);
@@ -6595,9 +6719,7 @@ export default function TileFabApp(): React.ReactElement {
 			const returnContext = organizationPlacementReturnContextRef.current;
 			organizationPlacementReturnContextRef.current = null;
 			if (current && returnContext?.document === editorModelRef.current.document) {
-				toolRef.current = returnContext.tool;
-				setTool(returnContext.tool);
-				updateEditorActivity(returnContext.activity);
+				updateEditorInteraction(returnContext.tool, returnContext.activity);
 			}
 			organizationBundlePlacementInitialAccessibilityRef.current = null;
 			if (canvasRef.current) {
@@ -6988,6 +7110,11 @@ export default function TileFabApp(): React.ReactElement {
 	const updateEditorActivity = (next: EditorActivity): void => {
 		editorActivityRef.current = next;
 		setEditorActivity(next);
+	};
+	const updateEditorInteraction = (nextTool: EditorTool, nextActivity: EditorActivity): void => {
+		toolRef.current = nextTool;
+		setTool(nextTool);
+		updateEditorActivity(nextActivity);
 	};
 	const completeGuidedAreaStampSingleCommit = (session: RailAreaStampSession): void => {
 		if (areaStampSessionRef.current !== session) return;
@@ -8310,7 +8437,16 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	};
 
-	const recordCommittedBlueprintPlacement = (anchor: Cell): void => {
+	const recordCommittedBlueprintPlacement = (anchor: Cell, result: GuidedBuildTaskPlacementPlan): void => {
+		const task = guidedTaskRef.current;
+		const source = editorModelRef.current.document;
+		const placement = task?.blueprintPlacement;
+		if (task?.task === "blueprint" && task.document === source && task.projectGeneration === projectGenerationRef.current && placement &&
+			((placement.areaTemplate !== null && placement.areaTemplate === areaStampSessionRef.current?.template) ||
+				(placement.organizationSession !== null && placement.organizationSession === organizationBundlePlacementSessionRef.current))) {
+			publishGuidedTask({ ...task, placementEntry: source.captureRailMirrorHistoryLedger().undo.at(-1),
+				placementResult: captureGuidedBuildTaskPlacementResult(result, source.map) });
+		}
 		const encodedAnchor = `${anchor.x},${anchor.y}`;
 		setLastBlueprintPlacementAnchor(encodedAnchor);
 		if (canvasRef.current) {
@@ -8460,7 +8596,7 @@ export default function TileFabApp(): React.ReactElement {
 				failPlacement("청사진 확정 직전에 맵이 변경되었습니다 · 다시 배치하세요");
 				return;
 			}
-			recordCommittedBlueprintPlacement(anchor);
+			recordCommittedBlueprintPlacement(anchor, prepared.plan);
 			recordCommittedAreaStampPlacement();
 			previewRef.current = null;
 			clearDraftPreviewTelemetry(canvas);
@@ -8810,7 +8946,7 @@ export default function TileFabApp(): React.ReactElement {
 					prospectiveChecksum.length > 0 && prospectiveChecksum === targetChecksum,
 				);
 			}
-			recordCommittedBlueprintPlacement(plan.organizationBundle.anchor);
+			recordCommittedBlueprintPlacement(plan.organizationBundle.anchor, plan);
 			const committedCount = organizationBundlePlacementCommittedCountRef.current + 1;
 			organizationBundlePlacementCommittedCountRef.current = committedCount;
 			setOrganizationBundlePlacementCommittedCount(committedCount);
@@ -9041,10 +9177,10 @@ export default function TileFabApp(): React.ReactElement {
 				finalMessage = "모듈 복제 배치를 취소했습니다 · 원본 선택으로 돌아왔습니다";
 			}
 		}
+		if (areaStampReturnContext && activeAreaStampSession?.document === editorModelRef.current.document) {
+			updateEditorInteraction(areaStampReturnContext.tool, areaStampReturnContext.activity);
+		}
 		if (areaStampReturnContext && activeAreaStampSession?.origin === "selection-copy") {
-			toolRef.current = areaStampReturnContext.tool;
-			setTool(areaStampReturnContext.tool);
-			updateEditorActivity(areaStampReturnContext.activity);
 			const ordinaryUncommittedSelectionCopy =
 				activeAreaStampSession?.origin === "selection-copy" &&
 				!guidedSelectionCopy &&
@@ -10461,7 +10597,7 @@ export default function TileFabApp(): React.ReactElement {
 		const committedAnchor = isStaticFabMutationPlan(preview.plan)
 			? preview.plan.staticFab.anchor
 			: preview.plan.areaStamp.anchor;
-		recordCommittedBlueprintPlacement(committedAnchor);
+		recordCommittedBlueprintPlacement(committedAnchor, preview.plan);
 		recordCommittedAreaStampPlacement();
 		previewRef.current = null;
 		clearDraftPreviewTelemetry(canvasRef.current);
@@ -17575,6 +17711,10 @@ export default function TileFabApp(): React.ReactElement {
 		const nextPortId = group?.portIds.includes(session.sourceAnchorPortId)
 			? session.sourceAnchorPortId
 			: group?.portIds[0];
+		if (pitchEdit) {
+			const before = session.sourceState.equipmentGroups.find((candidate) => candidate.id === session.sourceEquipmentGroupId);
+			if (before?.kind === "EQ") recordGuidedTaskEqEdit("pitch", before);
+		}
 		eqMembershipDragRef.current = null;
 		updatePortEquipmentMembershipEditSession(null);
 		toolRef.current = "inspect";
@@ -18573,7 +18713,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (event.button === 0) {
 			setAuthoringToolActivated(true);
-			setAuthoringSurface("task");
+			setAuthoringSurface(compactAuthoringViewport && currentGuidedTask && !currentGuidedTask.paused ? null : "task");
 		}
 		if (event.button === 0) {
 			const blockedReason = editorMutationWaitBlockedReason();
@@ -19904,8 +20044,8 @@ export default function TileFabApp(): React.ReactElement {
 				: null;
 		const committedBlueprintAnchor =
 			builtStaticFab?.staticFab.anchor ?? builtAreaStamp?.areaStamp.anchor ?? null;
-		if (committedBlueprintAnchor) {
-			recordCommittedBlueprintPlacement(committedBlueprintAnchor);
+		if (committedBlueprintAnchor && finalPlan) {
+			recordCommittedBlueprintPlacement(committedBlueprintAnchor, finalPlan);
 			if (activeAreaStamp) recordCommittedAreaStampPlacement();
 		}
 		if ((builtStaticFab || builtAreaStamp) && activeAreaStamp && guidedSingleCommitAreaStamp) {
@@ -20644,6 +20784,7 @@ export default function TileFabApp(): React.ReactElement {
 			activationReadyMilliseconds: null,
 		});
 		projectGenerationRef.current += 1;
+		publishGuidedTask(null);
 		setProjectBlueprintNameDraft(null);
 		setProjectSession({
 			manifest: prepared.metadata.manifest,
@@ -21070,6 +21211,9 @@ export default function TileFabApp(): React.ReactElement {
 	const handleNewOpenFabFabProject = async (
 		binding: NewOpenFabFabProjectBinding,
 	): Promise<void> => {
+		const guidedCreation = guidedTaskRef.current?.task === "fab" &&
+			guidedTaskRef.current.document === editorModelRef.current.document
+			? guidedTaskRef.current : null;
 		const controller = beginProjectOperation("creating");
 		setProjectMenuOpen(false);
 		const verified = binding.evidence;
@@ -21108,6 +21252,12 @@ export default function TileFabApp(): React.ReactElement {
 			const createdDocument = editorModelRef.current.document;
 			const roles = deriveStaticFabOrganizationSemanticRoles(createdDocument.organizations);
 			const createdFab = createdDocument.organizations.records.find((record) => roles.get(record.id) === "FAB");
+			if (guidedCreation && createdFab && guidedCreation.run === guidedTaskRunRef.current &&
+				!controller.signal.aborted && projectOperationControllerRef.current === controller) {
+				publishGuidedTask({ ...guidedCreation, document: createdDocument,
+					projectGeneration: projectGenerationRef.current, startSequence: createdDocument.getPatchSequence(),
+					fabRootId: createdFab.id, inspectedSourceKey: undefined });
+			}
 			chooseTool("inspect", "preserve-context");
 			updateEditorActivity("assemble");
 			if (createdFab) selectStaticFabOrganization(createdFab);
@@ -22857,6 +23007,7 @@ export default function TileFabApp(): React.ReactElement {
 			scheduleRender();
 			return reason.replace(/^Port equipment layout is invalid:\s*/, "");
 		}
+		recordGuidedTaskEqEdit("body", resolved.equipmentGroup);
 		clearTransientConstruction();
 		setPortEquipmentSelection(expectedSelection);
 		syncModelUi(
@@ -22892,6 +23043,15 @@ export default function TileFabApp(): React.ReactElement {
 			));
 			scheduleRender();
 			return;
+		}
+		const task = guidedTaskRef.current;
+		const entry = activeDocument.captureRailMirrorHistoryLedger().undo.at(-1);
+		if (task?.task === "equipment" && task.document === activeDocument &&
+			task.projectGeneration === projectGenerationRef.current && entry &&
+			activeDocument.getPatchSequence() > task.startSequence) {
+			const ports = activeDocument.portEquipment.ports.filter((port) => port.equipmentGroupId === selection.equipmentGroupId);
+			publishGuidedTask({ ...task, equipment: { groupId: selection.equipmentGroupId, entry,
+				ports: ports.map(({ id, direction }) => ({ id, direction })) } });
 		}
 		clearTransientConstruction();
 		setPortEquipmentSelection(selection);
@@ -23804,13 +23964,13 @@ export default function TileFabApp(): React.ReactElement {
 		},
 		libraryReturnSelection?: StaticFabSelection,
 	): void => {
-		const returnContext =
-			origin === "selection-copy" || (origin === "library" && libraryReturnSelection)
-				? Object.freeze({
+		const returnSelection = libraryReturnSelection ?? staticFabSelectionRef.current;
+		clearTransientConstruction();
+		const returnContext = Object.freeze({
 						activity: editorActivityRef.current,
 						tool: toolRef.current,
 						patchSequence: editorModelRef.current.document.getPatchSequence(),
-						staticFabSelection: libraryReturnSelection ?? staticFabSelectionRef.current,
+						staticFabSelection: returnSelection,
 						guidedCopySource: captureGuidedBuildCopySource({
 							document: editorModelRef.current.document,
 							patchSequence: editorModelRef.current.document.getPatchSequence(),
@@ -23818,9 +23978,7 @@ export default function TileFabApp(): React.ReactElement {
 						}, { guided: guidedBuildExperienceActive, missionId: guidedBuildEvaluation.currentMissionId,
 							origin, settled: guidedBuildCopySettled && !modelSyncPendingRef.current,
 							template: staticFabTemplate }),
-					})
-				: undefined;
-		clearTransientConstruction();
+					});
 		const initialPose = initialRailAreaStampPose();
 		prepareRailAreaStampPointerPlanning(template, initialPose);
 		if (blueprintPlacementCapturesRecent(origin)) {
@@ -23845,8 +24003,7 @@ export default function TileFabApp(): React.ReactElement {
 		setBuildAnchor(null);
 		updateCopiedSide(null);
 		updateExplicitSide(null);
-		toolRef.current = "build";
-		setTool("build");
+		updateEditorInteraction("build", "assemble");
 		clearAreaSelection();
 		clearRailSelection();
 		const statusPrefix = blueprintPlacementStatusPrefix(origin);
@@ -23943,8 +24100,7 @@ export default function TileFabApp(): React.ReactElement {
 		setBuildAnchor(null);
 		updateCopiedSide(null);
 		updateExplicitSide(null);
-		toolRef.current = "build";
-		setTool("build");
+		updateEditorInteraction("build", "assemble");
 		updateStaticFabSelection(null, true);
 		setRailSelection(null, null);
 		const placementLifecycle = blueprintPlacementLifecycle(origin);
@@ -29105,6 +29261,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (blueprintCaptureBlocked("현재")) return;
+		const guidedSaveRun = guidedTaskRef.current?.run;
 		setContextualBlueprintSaveBusy(true);
 		setContextualBlueprintSaveError(null);
 		try {
@@ -29137,6 +29294,7 @@ export default function TileFabApp(): React.ReactElement {
 					[...projectBlueprints.records, record],
 					`${validation.folder ? `${validation.folder} / ` : ""}${name} 청사진을 프로젝트에 저장했습니다`,
 				);
+				recordGuidedTaskBlueprint(guidedSaveRun, record);
 				setProjectBlueprintSearch("");
 				setBlueprintNameDraft(nextBlueprintName([...projectBlueprints.records, record]));
 				closeContextualBlueprintSave();
@@ -29163,6 +29321,8 @@ export default function TileFabApp(): React.ReactElement {
 				);
 				return;
 			}
+			recordGuidedTaskBlueprint(guidedSaveRun,
+				userBlueprintsRef.current.find((entry) => entry.blueprint.id === record.id)?.blueprint ?? record);
 			closeContextualBlueprintSave();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "청사진을 저장하지 못했습니다";
@@ -29177,9 +29337,20 @@ export default function TileFabApp(): React.ReactElement {
 		origin: Extract<BlueprintPlacementOrigin, "library" | "favorite"> = "library",
 		fromLibraryRecord = false,
 	): void => {
+		const bindTaskPlacement = (): void => {
+			const current = guidedTaskRef.current;
+			if (current?.task !== "blueprint" || current.document !== editorModelRef.current.document ||
+				current.projectGeneration !== projectGenerationRef.current || !current.blueprint ||
+				!guidedBuildTaskBlueprintMatches(current.blueprint, record)) return;
+			publishGuidedTask({ ...current, blueprintPlacement: {
+				areaTemplate: areaStampSessionRef.current?.template ?? null,
+				organizationSession: organizationBundlePlacementSessionRef.current,
+			} });
+		};
 		if (record.kind === OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION) {
 			closeBlueprintLibrary(false);
 			activateOrganizationBundlePlacement(record.bundle, origin, record.name);
+			bindTaskPlacement();
 			return;
 		}
 		const staticFabTemplate =
@@ -29208,6 +29379,7 @@ export default function TileFabApp(): React.ReactElement {
 				? staticFabSelectionRef.current ?? undefined
 				: undefined,
 		);
+		bindTaskPlacement();
 		setStatus(
 			`${blueprintPlacementStatusPrefix(origin)}${record.name} · R 회전 · F 흐름 반전 · 빈 공간 또는 호환 레일 클릭`,
 		);
@@ -33123,6 +33295,12 @@ export default function TileFabApp(): React.ReactElement {
 	const openActiveTemplateConfiguration = (returnFocusTarget?: HTMLButtonElement | null): void =>
 		void openStaticFabAssemblePalette(returnFocusTarget, true);
 	const chooseEditorActivity = (next: EditorActivity, trigger?: HTMLButtonElement): void => {
+		if (next === "inspect" && next === editorActivityRef.current && (toolRef.current !== "inspect" || areaStampSessionRef.current || organizationBundlePlacementSessionRef.current || stampSessionRef.current || templateSessionRef.current)) {
+			if (blockEqInspectorDraftSelectionChange(null) || !prepareEditorActivityTransition(next)) return;
+			chooseTool("inspect", "preserve-area");
+			updateEditorActivity("inspect");
+			return;
+		}
 		if (next === editorActivityRef.current) {
 			if (next === "assemble") {
 				if (templatePaletteOpen) closeStaticFabAssemblePalette();
@@ -33664,13 +33842,15 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => recoveryRestoreButtonRef.current?.focus({ preventScroll: true }));
 	};
 	const startGuidedBuild = (): void => {
+		if (blockEqInspectorDraftSelectionChange(null) || !chooseExplicitEditorTool("build")) return;
+		guidedTaskRunRef.current++;
+		publishGuidedTask(null);
 		recordGuidedBuildChoice("guided");
 		guidedBuildWasOpenRef.current = false;
 		setGuidedBuildReviewing(false);
 		setOpenFabStartDialogOpen(false);
 		setGuidedBuildOpen(true);
 		if (viewMode === "3d") switchEditorView("2d");
-		chooseExplicitEditorTool("build");
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const resumeGuidedBuild = (): void => {
@@ -33684,13 +33864,49 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const openOrResumeGuidedBuild = (returnFocus: HTMLElement | null): void => {
 		guidedBuildFirstRunConsideredRef.current = true;
-		if (guidedBuildResumeAvailable) {
-			resumeGuidedBuild();
-			return;
-		}
 		openFabStartReturnFocusRef.current = returnFocus;
 		setProjectMenuOpen(false);
 		setOpenFabStartDialogOpen(true);
+	};
+	const guidedTaskEntryBlockedReason = guidedBuildOpen
+		? guidedBuildInputBlockedReason() ?? (guidedRailKeyboardSessionRef.current || guidedPortKeyboardSessionRef.current ||
+			anchorRef.current || dragRef.current || stkDraftSessionRef.current || portRowDragRef.current ||
+			areaStampSessionRef.current || organizationBundlePlacementSessionRef.current
+			? "현재 레일·Port·배치 작업을 적용하거나 취소한 뒤 다른 실습을 선택하세요" : null)
+		: null;
+	const startGuidedTask = (task: GuidedBuildTaskId): void => {
+		if (guidedTaskEntryBlockedReason) { setStatus(guidedTaskEntryBlockedReason); return; }
+		if (guidedBuildOpen) {
+			const reason = guidedBuildInputBlockedReason();
+			if (reason || blockEqInspectorDraftSelectionChange(null)) { if (reason) setStatus(reason); return; }
+		}
+		recordGuidedBuildChoice("dismissed");
+		guidedBuildWasOpenRef.current = false;
+		setGuidedBuildChapterCheckpoint(null);
+		setGuidedBuildReviewing(false);
+		setGuidedBuildOpen(false);
+		publishGuidedTask({ task, run: ++guidedTaskRunRef.current, document: editorModelRef.current.document,
+			projectGeneration: projectGenerationRef.current, startSequence: editorModelRef.current.document.getPatchSequence(), paused: false });
+		setOpenFabStartDialogOpen(false);
+		setAuthoringSurface("task");
+	};
+	const resumeGuidedTask = (): void => {
+		const current = guidedTaskRef.current;
+		if (!current || current.document !== editorModelRef.current.document || current.projectGeneration !== projectGenerationRef.current) return;
+		publishGuidedTask({ ...current, paused: false });
+		setOpenFabStartDialogOpen(false);
+		setAuthoringSurface("task");
+	};
+	const pauseGuidedTask = (): void => {
+		const current = guidedTaskRef.current;
+		if (current) publishGuidedTask({ ...current, paused: true });
+		restoreCanvasFocusAfterAction();
+	};
+	const exitGuidedTask = (): void => {
+		guidedTaskRunRef.current++;
+		publishGuidedTask(null);
+		setStatus("실습 안내를 종료했습니다 · 편집 내용과 진행 중인 작업은 유지됩니다");
+		restoreCanvasFocusAfterAction();
 	};
 	const retryGuidedBuildCopy = async (): Promise<void> => {
 		const receipt = guidedBuildCopyReceiptRef.current;
@@ -34915,7 +35131,7 @@ export default function TileFabApp(): React.ReactElement {
 		}, railClipboardKind ? authoringAvailability : { state: "blocked", reason: "먼저 레일·장비·구조를 선택해 복제하세요" }),
 	];
 	const blueprintSelectionAvailable = areaStampEligibility?.valid === true || organizationSelectionCount > 0;
-	const startBlueprintSelection = (mode: "area" | "organization", trigger: HTMLButtonElement): void => {
+	const startBlueprintSelection = (mode: "area" | "organization", trigger: HTMLElement | null): void => {
 		if (blockEqInspectorDraftSelectionChange(null) || !chooseExplicitEditorTool("inspect")) return;
 		setBlueprintSelectionEntry({ document: editorModelRef.current.document, mode });
 		if (mode === "organization") {
@@ -34975,10 +35191,141 @@ export default function TileFabApp(): React.ReactElement {
 		{ id: "blueprint-library", title: "청사진 재사용", actions: blueprintActions },
 	];
 	const authoringUtilityActions = [
-		authoringAction("select", "선택·편집", "캔버스에서 레일·장비·구조를 선택", (trigger) => { chooseEditorActivity("inspect", trigger); }, authoringAvailability, editorActivity === "inspect" && !staticFabNavigatorOpen),
+		authoringAction("select", "선택·편집", "캔버스에서 레일·장비·구조를 선택", (trigger) => { chooseEditorActivity("inspect", trigger); }, authoringAvailability, editorActivity === "inspect" && tool === "inspect" && !staticFabNavigatorOpen),
 		authoringAction("checks", "검사", "연결과 장비·구조 문제를 확인하고 수정", (trigger) => chooseStaticFabNavigatorTab("checks", trigger)),
-		authoringAction("guide", guidedBuildResumeAvailable ? "실습 이어하기" : "도움말·선택적 실습", "작업을 보존하고 사용법 확인", (trigger) => openOrResumeGuidedBuild(trigger)),
+		authoringAction("guide", "도움말·선택적 실습", "FAB 만들기 · Port 방향 · EQ Port 구성 · 청사진 재사용", (trigger) => openOrResumeGuidedBuild(trigger)),
 	];
+	const guidedTaskEqGroups = currentGuidedTask?.task === "eq-configuration"
+		? activePortEquipment.equipmentGroups.filter((group) => group.kind === "EQ") : [];
+	const guidedTaskEqTarget = guidedTaskEqGroups.find((group) => group.id === guidedTaskEq?.groupId);
+	const guidedTaskSelectedEq = tool === "inspect" && editorActivity === "inspect" && !staticFabNavigatorOpen && selectedPortEquipment
+		? guidedTaskEqGroups.find((group) => group.id === selectedPortEquipment.equipmentGroupId && group.portIds.includes(selectedPortEquipment.portId)) : undefined;
+	const guidedTaskEqReady = guidedTaskSelectedEq && (!guidedTaskEqTarget || guidedTaskEqTarget.id === guidedTaskSelectedEq.id);
+	const guidedTaskEqPitchSession = portEquipmentMembershipEditSession?.portType === "EQ" && portEquipmentMembershipEditSession.editMode === "pitch"
+		? portEquipmentMembershipEditSession : null;
+	const guidedTaskEqBodyRecovery = guidedTaskEqPitchSession?.plan?.valid === false && guidedTaskEqPitchSession.plan.reason.includes("몸체 길이");
+	const guidedTaskPlacementActive = currentGuidedTask?.blueprintPlacement &&
+		((currentGuidedTask.blueprintPlacement.areaTemplate !== null && currentGuidedTask.blueprintPlacement.areaTemplate === areaStampSession?.template) ||
+			(currentGuidedTask.blueprintPlacement.organizationSession !== null && currentGuidedTask.blueprintPlacement.organizationSession === organizationBundlePlacementSession));
+	const guidedTaskInstruction = !currentGuidedTask || !guidedTaskEvaluation ? "" : guidedTaskEvaluation.complete
+		? currentGuidedTask.task === "fab" ? "새 FAB를 만들고 검사 결과를 확인했습니다."
+			: currentGuidedTask.task === "equipment" ? "선택한 장비의 Port 서비스 방향을 바꿨습니다. 실행 취소로 되돌릴 수 있습니다."
+				: currentGuidedTask.task === "eq-configuration" ? `EQ-${guidedTaskEq?.groupId}의 Port 간격과 몸체 크기를 직접 적용했습니다. 실행 취소로 되돌릴 수 있습니다.`
+				: "저장한 청사진을 다시 배치했습니다. 실행 취소로 되돌릴 수 있습니다."
+		: currentGuidedTask.task === "fab" ? guidedTaskEvaluation.step === 1
+			? "규모를 정하고 검증한 뒤 새 FAB를 생성하세요."
+			: "생성한 FAB의 검사 결과를 열어 확인하세요."
+		: currentGuidedTask.task === "equipment" ? activeMap.size === 0
+			? "장비를 놓을 레일이 필요합니다. 먼저 FAB 만들기 실습을 선택하세요."
+			: guidedTaskEvaluation.step === 1 ? activePortEquipment.equipmentGroups.length === 0
+				? "직선 레일에서 시작·끝 Port를 골라 EQ를 배치하세요."
+				: "장비 목록에서 하나를 골라 속성 편집을 여세요."
+				: "선택한 장비의 ‘서비스 방향 반전’을 눌러 Port 방향을 바꾸세요."
+		: currentGuidedTask.task === "eq-configuration" ? activeMap.size === 0
+			? "EQ를 놓을 레일이 필요합니다. 먼저 FAB 만들기 실습을 선택하세요."
+			: eqBodyDraftPending || eqRecipeDraftPending ? "현재 입력을 적용하거나 취소하세요. 몸체 크기 적용은 Port 위치와 방향을 유지합니다."
+			: guidedTaskEqPitchSession ? guidedTaskEqBodyRecovery
+				? "간격 편집을 취소한 뒤 ‘몸체 크기’에서 길이를 늘리고 다시 시도하세요. 이 길이 적용으로 몸체 단계도 완료됩니다."
+				: "기준 Port와 개수를 유지합니다. 다른 간격의 미리보기를 확인하고 ‘적용’을 누르세요."
+			: !guidedTaskEqReady ? guidedTaskEqGroups.length === 0
+				? "직선 레일에 EQ를 배치하세요. 다른 종류의 장비는 EQ로 바뀌지 않습니다."
+				: guidedTaskEqTarget ? `목록에서 EQ-${guidedTaskEqTarget.id}의 속성 편집을 여세요. 두 변경은 같은 EQ에 적용해야 합니다.`
+					: "EQ 목록에서 하나를 골라 속성 편집을 여세요."
+			: guidedTaskEvaluation.step === 1
+				? "‘Port 간격 편집’에서 다른 간격을 적용하세요. 기준 Port와 개수는 유지됩니다. 몸체 길이가 부족하면 취소 → 몸체 길이 적용 → 간격 재시도 순서입니다."
+				: "‘몸체 크기’에서 길이 또는 폭을 바꾸고 적용하세요. Port 위치와 방향은 유지됩니다."
+		: activeMap.size === 0 ? "저장할 레일이 필요합니다. 먼저 FAB 만들기 실습을 선택하세요."
+			: guidedTaskEvaluation.step === 1 ? blueprintSelectionAvailable
+				? "선택한 원본에 이름을 붙여 청사진으로 저장하세요."
+				: "저장할 레일·장비를 드래그하거나 구조 목록에서 선택하세요."
+				: guidedTaskPlacementActive ? "빈 곳에서 유효한 미리보기를 확인하고 배치하세요."
+					: `방금 저장한 ‘${guidedTaskSavedBlueprint?.name ?? "청사진"}’을 다시 배치하세요.`;
+	const guidedTaskActionLabel = currentGuidedTask?.task === "fab"
+		? guidedTaskEvaluation?.step === 1 ? "새 FAB 설정 열기" : "검사 결과 보기"
+		: activeMap.size === 0 ? "FAB 만들기 실습"
+		: currentGuidedTask?.task === "equipment" ? guidedTaskEvaluation?.step === 1
+			? activePortEquipment.equipmentGroups.length === 0 ? "EQ 배치 도구 열기" : "장비 찾기"
+			: "Port 편집 위치 보기"
+		: currentGuidedTask?.task === "eq-configuration"
+			? eqBodyDraftPending || eqRecipeDraftPending ? "입력 적용·취소 위치 보기"
+			: guidedTaskEqPitchSession ? "간격 적용·취소 위치 보기"
+			: !guidedTaskEqReady ? guidedTaskEqGroups.length === 0 ? "EQ 배치 도구 열기" : "EQ 찾기"
+			: guidedTaskEvaluation?.step === 1 ? "Port 간격 편집 위치 보기" : "몸체 크기 입력 위치 보기"
+		: guidedTaskEvaluation?.step === 1 ? blueprintSelectionAvailable ? "선택을 청사진으로 저장" : "영역 선택 시작"
+			: guidedTaskPlacementActive ? "캔버스에서 위치 선택" : "저장한 청사진 배치";
+	const activateGuidedTaskAction = (): void => {
+		if (!currentGuidedTask || !guidedTaskEvaluation || currentGuidedTask !== guidedTaskRef.current) return;
+		const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : canvasRef.current;
+		if (currentGuidedTask.task === "fab") {
+			if (guidedTaskEvaluation.step === 1) {
+				if (blockPendingLoopOrHistoryCommand()) return;
+				newFabProfileWizardReturnFocusRef.current = trigger;
+				setNewFabProfileWizardOpen(true);
+			} else {
+				setAuthoringResult(null);
+				chooseStaticFabNavigatorTab("checks", trigger);
+			}
+		} else if (activeMap.size === 0) startGuidedTask("fab");
+		else if (currentGuidedTask.task === "equipment") {
+			if (guidedTaskEvaluation.step === 1) {
+				if (activePortEquipment.equipmentGroups.length === 0) chooseGuidedEquipmentTool("eq");
+				else chooseStaticFabNavigatorTab("equipment", trigger);
+			} else {
+				setCompactInspectorExpanded(true);
+				requestAnimationFrame(() => {
+					const button = Array.from(appRootRef.current?.querySelectorAll<HTMLButtonElement>('[data-testid="port-equipment-inspector"] button') ?? [])
+						.find((candidate) => candidate.textContent?.includes("서비스 방향 반전"));
+					button?.scrollIntoView({ block: "nearest" });
+					button?.focus({ preventScroll: true });
+				});
+			}
+		} else if (currentGuidedTask.task === "eq-configuration") {
+			if (!eqBodyDraftPending && !eqRecipeDraftPending && !guidedTaskEqPitchSession && !guidedTaskEqReady) {
+				if (guidedTaskEqGroups.length === 0) chooseGuidedEquipmentTool("eq");
+				else {
+					chooseStaticFabNavigatorTab("equipment", trigger);
+					updateEquipmentBrowserQuery({ kind: "EQ", loop: "ALL", search: guidedTaskEqTarget ? `EQ-${guidedTaskEqTarget.id}` : "" });
+				}
+				return;
+			}
+			setCompactInspectorExpanded(true);
+			requestAnimationFrame(() => {
+				const root = appRootRef.current;
+				const section = root?.querySelector<HTMLDetailsElement>(eqRecipeDraftPending ? '[data-testid="eq-recipe-editor"]' : '[data-testid="eq-body-dimensions"]');
+				const showBody = eqBodyDraftPending || eqRecipeDraftPending || (!guidedTaskEqPitchSession && guidedTaskEvaluation.step === 2);
+				if (showBody && section) section.open = true;
+				const target = showBody ? section?.querySelector<HTMLInputElement>("input, textarea")
+					: root?.querySelector<HTMLButtonElement>(guidedTaskEqPitchSession
+						? '[data-testid="cancel-port-equipment-membership"]' : '[data-testid="edit-eq-port-pitch"]');
+				target?.scrollIntoView({ block: "nearest" });
+				target?.focus({ preventScroll: true });
+			});
+		} else if (guidedTaskEvaluation.step === 1) {
+			if (blueprintSelectionAvailable) requestContextualBlueprintSave(organizationMultiSelectionRef.current.selectedOrganizationIds.length > 0 ? "organization" : "area", trigger);
+			else startBlueprintSelection("area", trigger);
+		} else if (guidedTaskPlacementActive) {
+			if (compactAuthoringViewport) setAuthoringSurface(null);
+			restoreCanvasFocusAfterAction();
+		} else if (guidedTaskSavedBlueprint && guidedTaskBlueprintSaved) {
+			if (!prepareEditorActivityTransition("assemble") || blockEqInspectorDraftSelectionChange(null)) return;
+			placeProjectBlueprint(guidedTaskSavedBlueprint, "library", true);
+		}
+	};
+	const guidedTaskCoach = currentGuidedTask && guidedTaskEvaluation && guidedTaskTitle
+		? currentGuidedTask.paused ? <button type="button" className="tilefab-guided-task-resume" data-testid="guided-task-resume" onClick={resumeGuidedTask}>{guidedTaskTitle} · 안내 이어하기</button>
+			: <GuidedBuildTaskCoach title={guidedTaskTitle} step={guidedTaskEvaluation.step} complete={guidedTaskEvaluation.complete}
+				instruction={guidedTaskInstruction} actionLabel={guidedTaskActionLabel}
+				blockedReason={(currentGuidedTask.task === "eq-configuration" && (eqBodyDraftPending || eqRecipeDraftPending || guidedTaskEqPitchSession) ? null : editorActivityBlockedReason) ?? (!guidedBuildCopySettled ? "편집 동기화 후 계속하세요" : null)}
+				onAction={activateGuidedTaskAction} onPause={pauseGuidedTask} onExit={exitGuidedTask}
+				onChooseTask={() => openOrResumeGuidedBuild(document.activeElement instanceof HTMLElement ? document.activeElement : null)} />
+		: null;
+	const guidedTaskHeaderGoal = currentGuidedTask && guidedTaskEvaluation
+		? guidedTaskEvaluation.complete ? "실습 완료" : currentGuidedTask.paused ? "안내를 접었습니다"
+			: currentGuidedTask.task === "fab" ? guidedTaskEvaluation.step === 1 ? "목표 · 새 FAB 생성" : "목표 · 검사 결과 확인"
+			: currentGuidedTask.task === "equipment" ? guidedTaskEvaluation.step === 1 ? "목표 · 장비 선택" : "목표 · Port 서비스 방향 반전"
+			: currentGuidedTask.task === "eq-configuration" ? guidedTaskEvaluation.step === 1 ? "목표 · EQ Port 간격 적용" : "목표 · 같은 EQ 몸체 크기 적용"
+			: guidedTaskEvaluation.step === 1 ? "목표 · 선택을 청사진으로 저장" : "목표 · 저장한 청사진 배치"
+		: undefined;
 	const processLoopRegistrationFocused = processLoopRegistrationEntry?.document === railDocument &&
 		processLoopRegistrationEntry.selection === staticFabSelection && areaSelectionProvenance === "ad-hoc" &&
 		railAreaSelectionInspectorVisible;
@@ -35052,7 +35399,7 @@ export default function TileFabApp(): React.ReactElement {
 				: blueprintSelectionEntry.mode === "organization" ? "목록에서 저장할 구조를 선택하세요 · 포함 범위를 확인한 뒤 저장합니다"
 					: "캔버스에서 레일과 장비를 드래그해 선택한 뒤 저장하세요",
 	} : baseAuthoringTask;
-	const authoringWorkspaceVisible = startupReady && (authoringToolActivated || analysis.cells > 0 || guidedBuildOpen || templateSession !== null || organizationBundlePlacementSession !== null || blueprintLibraryOpen || staticFabNavigatorOpen);
+	const authoringWorkspaceVisible = startupReady && (authoringToolActivated || analysis.cells > 0 || guidedBuildOpen || currentGuidedTask !== null || templateSession !== null || organizationBundlePlacementSession !== null || blueprintLibraryOpen || staticFabNavigatorOpen);
 	const authoringSidebarExpanded = !compactAuthoringViewport || authoringSurface === "catalog";
 	const authoringWorkspaceExpanded = authoringSurface === "task";
 	const portWorkspaceProps: PortEquipmentPlacementWorkspaceProps | null = equipmentWorkspaceActive && activePortAuthoringType && activePortAuthoringPresentation ? {applyGuidedPortKeyboard: applyGuidedPortKeyboard,
@@ -35148,6 +35495,10 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 			data-editor-tool={tool}
 			data-openfab-start-dialog={openFabStartDialogOpen}
 			data-guided-build-active={guidedBuildOpen}
+			data-guided-task={currentGuidedTask?.task ?? ""}
+			data-guided-task-step={guidedTaskEvaluation?.step ?? ""}
+			data-guided-task-complete={guidedTaskEvaluation?.complete ?? false}
+			data-guided-task-paused={currentGuidedTask?.paused ?? false}
 			data-guided-build-scoped={guidedBuildExperienceActive}
 			data-guided-build-current={guidedBuildEvaluation.currentMissionId ?? "complete"}
 			data-guided-primary-target={guidedBuildPresentedTargetId ?? ""}
@@ -35401,6 +35752,10 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 			{openFabStartDialogOpen ? (
 				<OpenFabStartDialog
 					busy={projectBusy}
+					onTask={startGuidedTask}
+					taskBlockedReason={guidedTaskEntryBlockedReason}
+					resumableTaskTitle={guidedTaskTitle}
+					onResumeTask={resumeGuidedTask}
 					hasCurrentFabContent={!projectUntouchedBlank}
 					returnFocus={openFabStartReturnFocusRef.current}
 					recovery={
@@ -35819,6 +36174,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 					open={commandHelpOpen}
 					context={editorHelpContext}
 					guidedBuild={{
+						taskSelection: !guidedBuildOpen,
 						mode: guidedBuildOpen
 							? "active"
 							: guidedBuildResumeAvailable
@@ -37589,7 +37945,9 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 				</div>
 			<div className="tilefab-active-workspace-host" hidden={viewMode === "3d" || !authoringWorkspaceVisible}>
  <ActiveAuthoringWorkspace task={authoringTask} compact={compactAuthoringViewport} expanded={authoringWorkspaceExpanded}
- onExpandedChange={(expanded) => setAuthoringSurface(expanded ? "task" : null)} actions={authoringTaskActions}>
+ onExpandedChange={(expanded) => setAuthoringSurface(expanded ? "task" : null)} actions={authoringTaskActions}
+ guidance={guidedTaskCoach} guidanceLabel={currentGuidedTask && guidedTaskTitle ? `실습 · ${guidedTaskTitle} · ${currentGuidedTask.paused ? "접힘" : guidedTaskEvaluation?.complete ? "완료" : `${guidedTaskEvaluation?.step}/2`}` : undefined}
+ guidanceGoal={compactAuthoringViewport ? guidedTaskHeaderGoal : undefined} onExitGuidance={exitGuidedTask}>
  {equipmentBrowserOpen ? <div className="tilefab-equipment-browser-panel">
  <button type="button" className="tilefab-equipment-browser-back" onClick={() => chooseStaticFabNavigatorTab(equipmentBrowserNavigatorOriginRef.current)}>
  {equipmentBrowserNavigatorOriginRef.current === "checks" ? "검사" : equipmentBrowserNavigatorOriginRef.current === "organizations" ? "구조" : "전체 보기"}로 돌아가기
@@ -37724,7 +38082,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 					</p>
 				) : null}
 {guidedBuildOpen && startupReady && viewMode === "2d" && !staticFabCheckRepairChooser ? (
-					<section className="tilefab-authoring-guidance"><div><strong>실습 · {guidedBuildCurrentPrompt?.title}</strong><button type="button" onClick={minimizeGuidedBuild}>안내 접기</button></div><p>{guidedBuildCurrentPrompt?.objective}</p><details><summary>실습 단계와 조작 보기</summary><DeferredGuidedBuildPanel
+					<DeferredGuidedBuildPanel
 						key={guidedBuildEvaluation.currentMissionId ?? "complete"}
 						evaluation={guidedBuildEvaluation}
 						copyRecovery={guidedBuildCopyPhase ? {
@@ -37831,7 +38189,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 							setGuidedBuildReviewing(false);
 							exitGuidedBuild();
 						}}
-					/></details></section>
+					/>
 				) : null}
 {productionBayConfiguration && productionBayPanelExpanded ? (
 					<DeferredProductionBayModulePanel

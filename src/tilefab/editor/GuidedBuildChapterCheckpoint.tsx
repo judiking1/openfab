@@ -2,6 +2,63 @@ import { ArrowRight, Check, MousePointer2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { GuidedBuildChapterDefinition } from "./GuidedBuildChapter";
 
+export function GuidedBuildTaskCoach({
+	title,
+	step,
+	complete,
+	instruction,
+	actionLabel,
+	blockedReason,
+	onAction,
+	onPause,
+	onExit,
+	onChooseTask,
+}: {
+	readonly title: string;
+	readonly step: number;
+	readonly complete: boolean;
+	readonly instruction: string;
+	readonly actionLabel: string;
+	readonly blockedReason: string | null;
+	readonly onAction: () => void;
+	readonly onPause: () => void;
+	readonly onExit: () => void;
+	readonly onChooseTask: () => void;
+}): React.ReactElement {
+	return (
+		<section
+			className="tilefab-authoring-guidance tilefab-guided-task"
+			data-testid="guided-task-coach"
+			data-step={step}
+			data-complete={complete}
+			aria-label={`${title} 실습`}
+		>
+			<p role="status" aria-live="polite">
+				{instruction}
+			</p>
+			{blockedReason ? <small>{blockedReason}</small> : null}
+			<button
+				type="button"
+				className="tilefab-guided-task-primary"
+				disabled={blockedReason !== null}
+				onClick={complete ? onChooseTask : onAction}
+			>
+				{complete ? "다른 실습 고르기" : actionLabel}
+			</button>
+			<div className="tilefab-guided-task-secondary">
+				{!complete ? (
+					<button type="button" onClick={onPause}>
+						건너뛰고 편집
+					</button>
+				) : null}
+				<button type="button" onClick={onExit}>
+					{complete ? "편집 계속" : "실습 종료"}
+				</button>
+			</div>
+		</section>
+	);
+}
+
 export interface GuidedBuildChapterCheckpointProps {
 	readonly completedChapter: GuidedBuildChapterDefinition;
 	readonly nextChapter: GuidedBuildChapterDefinition;
