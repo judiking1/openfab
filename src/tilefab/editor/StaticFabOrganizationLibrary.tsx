@@ -52,6 +52,7 @@ import {
 export type OrganizationDetailTab = "overview" | "relations" | "properties";
 
 interface StaticFabOrganizationLibraryProps {
+	readonly blueprintSelectionActive?: boolean;
 	readonly view: "list" | "detail";
 	readonly onOpenDetails: () => void;
 	readonly onShowList: () => void;
@@ -191,6 +192,7 @@ interface StaticFabOrganizationLibraryProps {
 }
 
 export function StaticFabOrganizationLibrary({
+	blueprintSelectionActive = false,
 	view,
 	onOpenDetails,
 	onShowList,
@@ -302,7 +304,7 @@ export function StaticFabOrganizationLibrary({
 	const reuseActions = (
 		<details
 			className="tilefab-organization-reuse"
-			open={organizationSelectionCount > 1 || undefined}
+			open={blueprintSelectionActive || organizationSelectionCount > 1 || undefined}
 		>
 			<summary>복사·청사진 {organizationSelectionCount > 1 ? "· 연결·정렬" : ""}</summary>
 

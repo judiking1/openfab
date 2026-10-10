@@ -3404,6 +3404,9 @@ export default function TileFabApp(): React.ReactElement {
 	const [registeredProcessLoop, setRegisteredProcessLoop] = useState<Readonly<{
 		document: RailDocument; organizationId: number;
 	}> | null>(null);
+	const [blueprintSelectionEntry, setBlueprintSelectionEntry] = useState<Readonly<{
+		document: RailDocument; mode: "area" | "organization";
+	}> | null>(null);
 	const [organizationNameDraft, setOrganizationNameDraft] = useState("Area 1");
 	const [organizationKindDraft, setOrganizationKindDraft] =
 		useState<StaticFabOrganizationKind>("AREA");
@@ -9833,6 +9836,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockStaticFabExclusiveCommand()) return;
 		setAuthoringToolActivated(true);
 		setAuthoringSurface("task");
+		setBlueprintSelectionEntry(null);
 		discardPendingStaticFabCheckRepairReturn();
 		if (next !== "build" && next !== "erase") { processLoopRailEditRef.current = null; setProcessLoopRailEdit(null); setProcessLoopRailEditFeedback(null); }
 		setOrdinaryPortProcessLoopFeedback(null);
@@ -16914,7 +16918,7 @@ export default function TileFabApp(): React.ReactElement {
 				? " · 현재 Loop 소속 유지 · 모든 Port가 같은 Loop 안에 있습니다"
 				: session.eligibleProcessLoopIds?.length
 				? ` · ${session.mode === "move" ? "이동" : "복제"} 후 Loop 소속 가능 · 소속은 배치 후 별도로 지정하세요`
-				: " · 소속 미지정으로 배치 · 소속은 장비 속성에서 별도로 지정할 수 있습니다"
+				: " · 이 위치에서 소속 가능한 Loop 없음 · 미소속 유지 가능"
 			: "";
 		const summary =
 			row === null
@@ -20593,6 +20597,7 @@ export default function TileFabApp(): React.ReactElement {
 		setSelectedModuleKey(null);
 		setSelectedPortEquipmentState(null);
 		setEquipmentDeletionRecovery(null);
+		setBlueprintSelectionEntry(null);
 		handleEqBodyDraftChange(false);
 		handleEqRecipeDraftChange(false);
 		setOhbPlacementIntentState(null);
@@ -28862,6 +28867,7 @@ export default function TileFabApp(): React.ReactElement {
 		const returnTarget = contextualBlueprintSaveReturnFocusRef.current;
 		contextualBlueprintSaveReturnFocusRef.current = null;
 		if (!restoreFocus) return;
+		if (returnTarget?.closest(".tilefab-authoring-sidebar")) setAuthoringSurface("catalog");
 		const restoreWhenModalCleanupCompletes = (attemptsRemaining: number): void => {
 			requestAnimationFrame(() => {
 				const target = returnTarget?.isConnected ? returnTarget : canvasRef.current;
@@ -31039,31 +31045,24 @@ export default function TileFabApp(): React.ReactElement {
 		(selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 1
 			? selectedEquipmentUnownedProcessLoopMembership.eligibleProcessLoopIds[0] ?? null
 			: null);
-	const selectedEquipmentNoProcessLoopHint =
-		selectedEquipmentProcessLoopRegistration && !selectedEquipmentProcessLoopRegistration.valid
-			? selectedEquipmentProcessLoopRegistration.reason
-			: equipmentProcessLoopChoices.length === 0
-			? "선택에서 폐쇄 레일 등록"
-			: selectedEquipmentGroup && selectedEquipmentGroup.portIds.length > 1
-				? "모든 Port를 같은 Loop로 이동"
-				: "Port를 Loop 직접 레일로 이동";
+	const selectedEquipmentNoProcessLoopHint = "미소속으로 유지할 수 있습니다";
 	const selectedEquipmentNeedsGroupMoveForProcessLoop =
 		selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0 &&
 		!selectedEquipmentProcessLoopRegistration?.valid &&
-		selectedEquipmentGroup?.kind === "STK" &&
+		(selectedEquipmentGroup?.kind === "EQ" || (selectedEquipmentGroup?.kind === "STK" &&
 		selectedEquipmentGroup.template !== "CUSTOM" &&
 		selectedEquipmentGroup.portIds.length > 1 &&
-		equipmentProcessLoopChoices.length > 0;
+		equipmentProcessLoopChoices.length > 0));
 	const selectedEquipmentGroupMoveRecoveryId = selectedEquipmentNeedsGroupMoveForProcessLoop
 		? (selectedEquipmentGroup?.id ?? null)
 		: null;
 	useEffect(() => {
 		if (selectedEquipmentGroupMoveRecoveryId === null) return;
 		const frame = window.requestAnimationFrame(() => {
-			setStatus(`STK-${selectedEquipmentGroupMoveRecoveryId} · 연결할 Loop 없음 · 전체 이동 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요`);
+			setStatus(`${selectedEquipmentGroup?.kind}-${selectedEquipmentGroupMoveRecoveryId} · 이 위치에서 소속 가능한 Loop 없음 · 미소속 유지 또는 장비 전체 이동`);
 		});
 		return () => window.cancelAnimationFrame(frame);
-	}, [selectedEquipmentGroupMoveRecoveryId]);
+	}, [selectedEquipmentGroupMoveRecoveryId, selectedEquipmentGroup?.kind]);
 	const selectedEquipmentProcessLoopScope = useMemo(() => {
 		if (!activePortAuthoringType || ordinaryPortProcessLoopTargetId === null) return null;
 		if (ordinaryPortProcessLoopTargetRef.current?.projectId !== projectSession.manifest.id) return null;
@@ -34915,6 +34914,36 @@ export default function TileFabApp(): React.ReactElement {
 			if (prepareEditorActivityTransition("assemble")) { updateEditorActivity("assemble"); pasteRecentRailClipboard(); }
 		}, railClipboardKind ? authoringAvailability : { state: "blocked", reason: "먼저 레일·장비·구조를 선택해 복제하세요" }),
 	];
+	const blueprintSelectionAvailable = areaStampEligibility?.valid === true || organizationSelectionCount > 0;
+	const startBlueprintSelection = (mode: "area" | "organization", trigger: HTMLButtonElement): void => {
+		if (blockEqInspectorDraftSelectionChange(null) || !chooseExplicitEditorTool("inspect")) return;
+		setBlueprintSelectionEntry({ document: editorModelRef.current.document, mode });
+		if (mode === "organization") {
+			openOrganizationLibrary(trigger);
+			setOrganizationLibraryView("list");
+		} else {
+			setCompactInspectorExpanded(true);
+			setStatus("청사진 영역 선택 · 캔버스에서 레일과 장비를 드래그한 뒤 선택을 저장하세요");
+			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+		}
+	};
+	const returnFromBlueprintSelection = (): void => {
+		const mode = blueprintSelectionEntry?.mode;
+		if (blockEqInspectorDraftSelectionChange(null) || !chooseExplicitEditorTool("inspect")) return;
+		setBrowseCategory("blueprints");
+		setAuthoringSurface("catalog");
+		setStatus("청사진 만들기로 돌아왔습니다 · 현재 선택은 유지됩니다");
+		requestAnimationFrame(() => {
+			const target = editorNavigationRef.current?.querySelector<HTMLButtonElement>(`[data-authoring-action="blueprint-select-${mode ?? "area"}"]`);
+			target?.scrollIntoView({ block: "nearest" });
+			target?.focus({ preventScroll: true });
+		});
+	};
+	const blueprintCreateActions = [
+		...(blueprintSelectionAvailable ? [authoringAction("blueprint-save-selection", "선택을 청사진으로 저장", "선택한 레일·장비 또는 조직의 저장 옵션 열기", (trigger) => { requestContextualBlueprintSave(organizationMultiSelectionRef.current.selectedOrganizationIds.length > 0 ? "organization" : "area", trigger); })] : []),
+		authoringAction("blueprint-select-area", "영역 선택으로 시작", "캔버스에서 레일과 장비를 드래그해 선택", (trigger) => startBlueprintSelection("area", trigger)),
+		authoringAction("blueprint-select-organization", "구조 선택으로 시작", "FAB · Bank · Bay · Process Loop를 목록에서 선택", (trigger) => startBlueprintSelection("organization", trigger)),
+	];
 	const equipmentActions = (["ohb", "eq", "stk"] as const)
 		.map((id) => authoringAction(`equipment-${id}`, id === "ohb" ? "OHB 배치" : id === "eq" ? "EQ 장비 배치" : "Stocker 배치",
 			id === "ohb" ? "레일 옆 Port를 선택해 보관 위치 생성" : id === "eq" ? "직선 레일의 시작·끝을 선택해 장비 생성" : "입출고 Port를 선택한 뒤 Stocker 생성",
@@ -34941,7 +34970,10 @@ export default function TileFabApp(): React.ReactElement {
 		{ id: "equipment-create", title: "Port 기준 장비 제작", description: activeMap.size === 0 ? "장비가 연결될 직선 레일을 먼저 만드세요" : "기존 레일에서 유효한 Port 위치를 선택합니다", actions: equipmentActions },
 		{ id: "equipment-find", title: "기존 장비 편집", actions: [authoringAction("find-equipment", "기존 장비 찾기", "ID·Port·Loop로 찾아 속성 편집", (trigger) => chooseStaticFabNavigatorTab("equipment", trigger))] },
 		{ id: "equipment-import", title: "고급 가져오기", actions: [authoringAction("station-proposal", "Station proposal 검토", "외부 제안을 검토한 뒤 반영", (trigger) => void openStationProposalReview(trigger))] },
-	] : [{ id: "blueprint-library", title: "청사진 재사용", actions: blueprintActions }];
+	] : [
+		{ id: "blueprint-create", title: "새 청사진 만들기", description: "저장할 대상을 선택한 뒤 이름과 저장 위치를 정합니다", actions: blueprintCreateActions },
+		{ id: "blueprint-library", title: "청사진 재사용", actions: blueprintActions },
+	];
 	const authoringUtilityActions = [
 		authoringAction("select", "선택·편집", "캔버스에서 레일·장비·구조를 선택", (trigger) => { chooseEditorActivity("inspect", trigger); }, authoringAvailability, editorActivity === "inspect" && !staticFabNavigatorOpen),
 		authoringAction("checks", "검사", "연결과 장비·구조 문제를 확인하고 수정", (trigger) => chooseStaticFabNavigatorTab("checks", trigger)),
@@ -35004,11 +35036,22 @@ export default function TileFabApp(): React.ReactElement {
 		productionBayRequestRef.current.fingerprint === organizationBundlePlacementSession.bundleFingerprint;
 	const activeBayConfigurationError = productionBayConfiguration
 		? productionBayModuleCatalogRequestError(productionBayConfiguration) : null;
-	const authoringTask: AuthoringTaskPresentation = {
+	const blueprintSelectionFocused = blueprintSelectionEntry?.document === railDocument &&
+		editorActivity === "inspect" && tool === "inspect" && !blueprintLibraryOpen &&
+		(!staticFabNavigatorOpen || organizationLibraryOpen) && !processLoopRegistrationFocused;
+	const baseAuthoringTask: AuthoringTaskPresentation = {
 		id: portEquipmentInspectorVisible ? `equipment-${selectedEquipmentGroup?.id}` : templateSession ? `template-${templateSession.id}` : `${editorActivity}-${tool}`,
 		kind: selectedPortDetails || equipmentWorkspaceActive ? "equipment" : areaStampSession || stampSession || blueprintLibraryOpen ? "blueprint" : organizationBundlePlacementSession || staticFabExclusiveCommandActive ? "structure" : editorActivity === "inspect" || staticFabNavigatorOpen ? "selection" : "rail",
 		title: equipmentBrowserOpen ? "기존 장비 찾기" : processLoopRegistrationFocused ? "작업 루프 등록" : visibleAuthoringResult ? `${visibleAuthoringResult.kind === "fab" ? "FAB 생성" : "Bay 배치"} 완료` : readinessOpen ? "FAB 검사" : organizationLibraryOpen ? "구조 선택·편집" : navigatorMapOpen ? "FAB 지도" : blueprintLibraryOpen ? "청사진" : selectedPortDetails && portEquipmentInspectorVisible ? "장비 선택·편집" : productionBayConfiguration ? "Bay 배치" : templateSession ? railTemplateCatalogItem(templateSession.id).statusLabel : organizationBundlePlacementSession ? "구조 배치" : areaStampSession || stampSession ? "청사진 배치" : staticFabExclusiveCommandActive ? "구조 편집 검토" : equipmentWorkspaceActive ? `${tool === "stk" ? "Stocker" : tool.toUpperCase()} 배치` : tool === "inspect" ? "선택·편집" : tool === "erase" ? "레일 철거" : "레일 제작",
 	};
+	const authoringTask: AuthoringTaskPresentation = blueprintSelectionFocused ? {
+		...baseAuthoringTask, title: "새 청사진 만들기",
+		instruction: organizationSelectionCount > 0
+			? `선택 조직 ${organizationSelectionCount}개 · ${organizationSelectionMode === "EFFECTIVE" ? "하위 조직의 레일·장비 포함" : "선택 조직에 직접 속한 레일·장비만 포함"}`
+			: blueprintSelectionAvailable ? areaStampEligibility?.reason
+				: blueprintSelectionEntry.mode === "organization" ? "목록에서 저장할 구조를 선택하세요 · 포함 범위를 확인한 뒤 저장합니다"
+					: "캔버스에서 레일과 장비를 드래그해 선택한 뒤 저장하세요",
+	} : baseAuthoringTask;
 	const authoringWorkspaceVisible = startupReady && (authoringToolActivated || analysis.cells > 0 || guidedBuildOpen || templateSession !== null || organizationBundlePlacementSession !== null || blueprintLibraryOpen || staticFabNavigatorOpen);
 	const authoringSidebarExpanded = !compactAuthoringViewport || authoringSurface === "catalog";
 	const authoringWorkspaceExpanded = authoringSurface === "task";
@@ -35071,7 +35114,11 @@ tool: tool,
 visibleRecentPlacedOhb: visibleRecentPlacedOhb,
 workerState: workerState,
 zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
-	const authoringTaskActions = processLoopRegistrationFocused ? <div className="tilefab-authoring-task-actions">
+	const authoringTaskActions = blueprintSelectionFocused ? <div className="tilefab-authoring-task-actions tilefab-blueprint-selection-actions" data-testid="blueprint-selection-actions">
+		<button type="button" data-testid="save-blueprint-selection" disabled={!blueprintSelectionAvailable || projectBusy || modelSyncPending || userBlueprintLibraryBusy !== null}
+			onClick={(event) => requestContextualBlueprintSave(organizationMultiSelectionRef.current.selectedOrganizationIds.length > 0 ? "organization" : "area", event.currentTarget)}>선택을 청사진으로 저장</button>
+		<button type="button" data-testid="return-blueprint-selection" onClick={returnFromBlueprintSelection}>청사진으로 돌아가기</button>
+	</div> : processLoopRegistrationFocused ? <div className="tilefab-authoring-task-actions">
 		<button type="button" className="tilefab-loop-registration-control" data-testid="return-process-loop-registration"
 			disabled={processLoopOperation !== null} onClick={returnFromProcessLoopRegistration}>
 			{processLoopRegistrationEntry.equipment ? "장비로 돌아가기" : "선택으로 돌아가기"}
@@ -40144,6 +40191,7 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 				) : null}
 {organizationLibraryOpen && !readinessOpen ? (
 					<StaticFabOrganizationLibrary
+						blueprintSelectionActive={blueprintSelectionFocused}
 						view={organizationLibraryView}
 						onOpenDetails={() => setOrganizationLibraryView("detail")}
 						onShowList={() => setOrganizationLibraryView("list")}
@@ -40919,6 +40967,7 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 						selectConnectedAuthoredComponent={selectConnectedAuthoredComponent}
 						selectEquipmentProcessLoopRailForRegistration={selectEquipmentProcessLoopRailForRegistration}
 						selectedEquipmentProcessLoopRegistrationAvailable={selectedEquipmentProcessLoopRegistration?.valid ?? false}
+						selectedEquipmentProcessLoopRegistrationReason={selectedEquipmentProcessLoopRegistration && !selectedEquipmentProcessLoopRegistration.valid ? selectedEquipmentProcessLoopRegistration.reason : null}
 						selectNextPortEquipmentGroup={selectNextPortEquipmentGroup}
 						selectFlexStkPort={selectFlexStkPort}
 						startNextFlexStkPortMove={startNextFlexStkPortMove}

@@ -257,6 +257,9 @@
 .tilefab-authoring-task-actions button {
 	flex: 1 1 120px;
 }
+.tilefab-blueprint-selection-actions button {
+	min-height: 44px;
+}
 .tilefab-authoring-task-actions .tilefab-loop-registration-control {
 	font-size: 13px;
 }
@@ -531,6 +534,17 @@
 	align-items: stretch;
 	gap: 12px;
 	padding: 12px;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-buildbar.tilefab-equipment-group-transformbar {
+	flex-wrap: nowrap;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-equipment-group-transformbar
+	.tilefab-equipment-transform-actions {
+	flex: 0 0 auto;
 }
 .tilefab-app[data-authoring-layout="unified"]
 	.tilefab-active-authoring-workspace

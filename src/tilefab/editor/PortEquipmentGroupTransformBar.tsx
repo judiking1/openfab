@@ -193,8 +193,7 @@ export function PortEquipmentGroupTransformBar({
 						) : (
 							<>
 								소속 미지정으로 배치
-								<br />
-								소속은 장비 속성에서 별도로 지정할 수 있습니다
+								<br />이 위치에서 소속 가능한 Loop 없음 · 미소속 유지 가능
 							</>
 						)}
 					</small>

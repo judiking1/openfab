@@ -6,6 +6,7 @@ import {
 	ChevronRight,
 	ChevronUp,
 	Copy,
+	Info,
 	Layers3,
 	MousePointer2,
 	Move,
@@ -116,6 +117,7 @@ export interface PortEquipmentInspectorProps {
 	readonly selectConnectedAuthoredComponent: () => void;
 	readonly selectEquipmentProcessLoopRailForRegistration: () => void;
 	readonly selectedEquipmentProcessLoopRegistrationAvailable: boolean;
+	readonly selectedEquipmentProcessLoopRegistrationReason?: string | null;
 	readonly selectNextPortEquipmentGroup: () => void;
 	readonly selectFlexStkPort: (selection: PortEquipmentSelectionIdentity) => void;
 	readonly startNextFlexStkPortMove: (
@@ -187,6 +189,7 @@ export function PortEquipmentInspector({
 	selectConnectedAuthoredComponent,
 	selectEquipmentProcessLoopRailForRegistration,
 	selectedEquipmentProcessLoopRegistrationAvailable,
+	selectedEquipmentProcessLoopRegistrationReason,
 	selectNextPortEquipmentGroup,
 	selectFlexStkPort,
 	startNextFlexStkPortMove,
@@ -284,6 +287,24 @@ export function PortEquipmentInspector({
 					</span>
 				</button>
 			</div>
+		) : (selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length ?? 0) > 1 ? (
+			<div className="tilefab-equipment-process-loop-primary">
+				<button
+					type="button"
+					ref={processLoopPrimaryActionRef}
+					data-testid="choose-equipment-process-loop-primary"
+					onClick={() => {
+						const summary = processLoopMembershipDisclosureRef.current;
+						const disclosure = summary?.closest("details");
+						if (!summary || !disclosure) return;
+						disclosure.open = true;
+						summary.focus({ preventScroll: true });
+						disclosure.scrollIntoView({ block: "nearest" });
+					}}
+				>
+					<Layers3 size={15} aria-hidden="true" /> 소속할 Loop 선택
+				</button>
+			</div>
 		) : selectedEquipmentDirectlyOwned && selectedEquipmentProcessLoopMembership ? (
 			<div
 				className={`tilefab-equipment-process-loop-primary${viewMode === "2d" ? " tilefab-equipment-process-loop-primary-with-management" : ""}`}
@@ -361,7 +382,7 @@ export function PortEquipmentInspector({
 					ref={processLoopPrimaryActionRef}
 					type="button"
 					data-testid="move-port-equipment-group-primary"
-					aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 연결할 Loop가 없습니다. 장비 전체 이동을 시작하고 미리보기에서 모든 Port의 Loop 소속 가능 여부를 확인하세요. 이동 후 소속은 별도로 지정해야 합니다.`}
+					aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 이 위치에서 소속 가능한 Loop 없음. 장비 전체 이동. 미소속으로 유지할 수도 있습니다.`}
 					disabled={modelSyncPending || workerState.status !== "ready" || !actions.move.allowed}
 					aria-describedby={equipmentActionDescriptionId(actions.move)}
 					onClick={() => startSelectedPortEquipmentTransform("move")}
@@ -373,10 +394,10 @@ export function PortEquipmentInspector({
 					/>
 					<span className="tilefab-equipment-process-loop-primary-copy">
 						<strong className="tilefab-equipment-process-loop-primary-title">
-							연결할 Loop 없음 · 전체 이동
+							이 위치에서 소속 가능한 Loop 없음
 						</strong>
 						<small className="tilefab-equipment-process-loop-primary-name">
-							이동 미리보기에서 Loop 소속 확인
+							장비 전체 이동 · 미소속 유지 가능
 						</small>
 					</span>
 				</button>
@@ -388,7 +409,7 @@ export function PortEquipmentInspector({
 					className="tilefab-equipment-process-loop-primary-owned tilefab-equipment-process-loop-primary-unavailable"
 					data-testid="equipment-process-loop-unavailable"
 					role="status"
-					aria-label={`Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
+					aria-label={`이 위치에서 소속 가능한 Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
 					title={selectedEquipmentUnownedProcessLoopMembership?.reason ?? undefined}
 					tabIndex={-1}
 				>
@@ -398,7 +419,9 @@ export function PortEquipmentInspector({
 						aria-hidden="true"
 					/>
 					<span className="tilefab-equipment-process-loop-primary-copy">
-						<strong className="tilefab-equipment-process-loop-primary-title">Loop 없음</strong>
+						<strong className="tilefab-equipment-process-loop-primary-title">
+							이 위치에서 소속 가능한 Loop 없음
+						</strong>
 						<small className="tilefab-equipment-process-loop-primary-name">
 							{selectedEquipmentNoProcessLoopHint}
 						</small>
@@ -418,6 +441,7 @@ export function PortEquipmentInspector({
 			data-editable={selectedPortEditableDetails !== null}
 			data-primary-process-loop-visible={
 				selectedEquipmentPrimaryProcessLoopId !== null ||
+				(selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length ?? 0) > 1 ||
 				selectedEquipmentDirectlyOwned ||
 				selectedEquipmentUnownedProcessLoopMembership?.eligibleProcessLoopIds.length === 0
 			}
@@ -708,6 +732,17 @@ export function PortEquipmentInspector({
 							/>
 						) : null}
 						{primaryProcessLoopAction}
+						{selectedEquipmentProcessLoopRegistrationReason ? (
+							<details
+								className="tilefab-equipment-loop-registration-info"
+								data-testid="equipment-loop-registration-info"
+							>
+								<summary aria-label="새 Loop 등록 불가 사유" title="새 Loop 등록 불가 사유">
+									<Info size={16} aria-hidden="true" />
+								</summary>
+								<small>새 Loop 등록: {selectedEquipmentProcessLoopRegistrationReason}</small>
+							</details>
+						) : null}
 						{selectedEquipmentProcessLoopMembership ? (
 							<details
 								key={`process-loop-${selectedEquipmentGroup.id}`}

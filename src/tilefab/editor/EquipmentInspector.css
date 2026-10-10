@@ -167,6 +167,33 @@
 	background: #182224;
 }
 
+.tilefab-equipment-loop-registration-info summary {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	min-height: 44px;
+	color: #b8c7c8;
+	cursor: pointer;
+	list-style: none;
+}
+
+.tilefab-equipment-loop-registration-info summary::-webkit-details-marker {
+	display: none;
+}
+
+.tilefab-equipment-loop-registration-info summary:focus-visible {
+	outline: 2px solid #8edee3;
+	outline-offset: -2px;
+}
+
+.tilefab-equipment-loop-registration-info small {
+	display: block;
+	padding: 0 10px 8px;
+	color: #b8c7c8;
+	overflow-wrap: anywhere;
+}
+
 .tilefab-equipment-process-loop-primary-icon {
 	flex: 0 0 auto;
 }

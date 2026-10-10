@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.108] - 2026-10-10
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Start a new Blueprint directly from the Blueprint category through area or structure selection.
+  Keep save and return actions visible, expose existing inclusion options, and preserve unfinished
+  edits while browsing. Reuse the existing save dialog and selection validation.
+- Distinguish equipment Loop eligibility from new-Loop registration restrictions. Offer whole-EQ
+  movement or remaining unowned when no Loop is eligible, and prioritize explicit attachment when
+  one is available. Correct move-preview guidance and keep its controls within the mobile workspace.
+
 ## [0.1.107] - 2026-10-10
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
