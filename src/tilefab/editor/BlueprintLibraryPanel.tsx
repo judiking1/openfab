@@ -31,6 +31,7 @@ import {
 	useMemo,
 	useRef,
 } from "react";
+import { prepareRailModuleBlueprint } from "../core/RailModuleStamp";
 import {
 	OPENFAB_BLUEPRINT_KIND_STATIC_FAB,
 	OPENFAB_BLUEPRINT_KIND_STATIC_FAB_ORGANIZATION,
@@ -319,6 +320,17 @@ export function BlueprintLibraryPanel({
 	wholeMapBlueprintAvailable,
 }: BlueprintLibraryPanelProps): ReactElement {
 	const projectBlueprintSearchRef = useRef<HTMLInputElement>(null);
+	const recentModuleBlueprints = useMemo(
+		() =>
+			new Map(
+				recentRailClipboards.flatMap(({ id, clipboard }) =>
+					clipboard.kind === "module"
+						? [[id, prepareRailModuleBlueprint(clipboard.template)] as const]
+						: [],
+				),
+			),
+		[recentRailClipboards],
+	);
 	const visibleProjectBlueprints = useMemo(
 		() => filterProjectBlueprintRecords(orderedProjectBlueprints, projectBlueprintSearch),
 		[orderedProjectBlueprints, projectBlueprintSearch],
@@ -1395,81 +1407,93 @@ export function BlueprintLibraryPanel({
 					data-testid="blueprint-recent-panel"
 				>
 					{hasRecentBlueprint ? (
-						recentRailClipboards.map(({ id, clipboard }, index) => (
-							<article
-								key={id}
-								data-testid={
-									index === 0 ? "blueprint-recent-record" : "blueprint-recent-history-record"
-								}
-								data-recent-index={index}
-								data-active={index === recentRailClipboardActiveIndex}
-							>
-								<button
-									type="button"
-									className="tilefab-blueprint-place"
-									aria-current={index === recentRailClipboardActiveIndex ? "true" : undefined}
-									onClick={() => {
-										closeBlueprintLibrary(false);
-										chooseRecentRailClipboard(index, true);
-									}}
+						recentRailClipboards.map(({ id, clipboard }, index) => {
+							const prepared = recentModuleBlueprints.get(id);
+							const unavailableReason = prepared && !prepared.valid ? prepared.reason : null;
+							return (
+								<article
+									key={id}
+									data-testid={
+										index === 0 ? "blueprint-recent-record" : "blueprint-recent-history-record"
+									}
+									data-recent-index={index}
+									data-active={index === recentRailClipboardActiveIndex}
 								>
-									<span className="tilefab-blueprint-recent-glyph">
-										<Copy size={24} />
-										<small>{index === 0 ? "LATEST" : `-${index}`}</small>
-									</span>
-									<span>
-										<strong>
-											{index === recentRailClipboardActiveIndex
-												? `ACTIVE · RECENT ${index + 1}`
-												: index === 0
-													? "LATEST CAPTURE"
-													: `RECENT ${index + 1}`}
-										</strong>
-										<small>
-											{clipboard.kind === "organization"
-												? `${clipboard.bundle.sourceWidthMeters}×${clipboard.bundle.sourceHeightMeters} m · ${clipboard.bundle.sourceModuleCount} MODULES`
-												: clipboard.kind === "area"
-													? `${clipboard.template.sourceWidthMeters}×${clipboard.template.sourceHeightMeters} m · ${clipboard.template.sourceModuleCount} MODULES`
-													: `${clipboard.template.grammar} · ${clipboard.template.path.length} CELLS`}
-										</small>
-										<small className="tilefab-blueprint-kind">
-											{clipboard.kind === "organization"
-												? `ORGANIZATION FAB · ${clipboard.bundle.organizations.length} ORGS · ${clipboard.bundle.equipmentGroups.length} GROUPS · ${clipboard.bundle.ports.length} PORTS`
-												: clipboard.kind === "area" && clipboard.staticFabTemplate
-													? `STATIC FAB · ${clipboard.staticFabTemplate.equipmentGroups.length} GROUPS · ${clipboard.staticFabTemplate.ports.length} PORTS`
-													: "TRANSIENT CLIPBOARD · CTRL + V"}
-										</small>
-									</span>
-								</button>
-								<div className="tilefab-blueprint-record-tools">
 									<button
 										type="button"
-										data-testid="save-recent-blueprint"
-										aria-label={`RECENT ${index + 1} 보관`}
-										title={
-											clipboard.kind === "module"
-												? "단일 모듈 복사 기록의 청사진 보관은 아직 지원하지 않습니다"
-												: "이 복사 기록을 청사진으로 보관"
-										}
-										disabled={
-											clipboard.kind === "module" ||
-											projectBusy ||
-											modelSyncPending ||
-											userBlueprintLibraryBusy !== null
-										}
-										onClick={(event) =>
-											requestContextualBlueprintSave(
-												{ recentEntry: { id, clipboard } },
-												event.currentTarget,
-												blueprintSaveDestination,
-											)
-										}
+										className="tilefab-blueprint-place"
+										aria-current={index === recentRailClipboardActiveIndex ? "true" : undefined}
+										onClick={() => {
+											closeBlueprintLibrary(false);
+											chooseRecentRailClipboard(index, true);
+										}}
 									>
-										보관
+										<span className="tilefab-blueprint-recent-glyph">
+											<Copy size={24} />
+											<small>{index === 0 ? "LATEST" : `-${index}`}</small>
+										</span>
+										<span>
+											<strong>
+												{index === recentRailClipboardActiveIndex
+													? `ACTIVE · RECENT ${index + 1}`
+													: index === 0
+														? "LATEST CAPTURE"
+														: `RECENT ${index + 1}`}
+											</strong>
+											<small>
+												{clipboard.kind === "organization"
+													? `${clipboard.bundle.sourceWidthMeters}×${clipboard.bundle.sourceHeightMeters} m · ${clipboard.bundle.sourceModuleCount} MODULES`
+													: clipboard.kind === "area"
+														? `${clipboard.template.sourceWidthMeters}×${clipboard.template.sourceHeightMeters} m · ${clipboard.template.sourceModuleCount} MODULES`
+														: `${clipboard.template.grammar} · ${clipboard.template.path.length} CELLS`}
+											</small>
+											<small className="tilefab-blueprint-kind">
+												{clipboard.kind === "organization"
+													? `ORGANIZATION FAB · ${clipboard.bundle.organizations.length} ORGS · ${clipboard.bundle.equipmentGroups.length} GROUPS · ${clipboard.bundle.ports.length} PORTS`
+													: clipboard.kind === "area" && clipboard.staticFabTemplate
+														? `STATIC FAB · ${clipboard.staticFabTemplate.equipmentGroups.length} GROUPS · ${clipboard.staticFabTemplate.ports.length} PORTS`
+														: "TRANSIENT CLIPBOARD · CTRL + V"}
+											</small>
+											{unavailableReason ? (
+												<small
+													className="tilefab-blueprint-unavailable"
+													id={`recent-blueprint-unavailable-${id}`}
+													data-testid="recent-blueprint-unavailable"
+												>
+													보관: {unavailableReason}
+												</small>
+											) : null}
+										</span>
 									</button>
-								</div>
-							</article>
-						))
+									<div className="tilefab-blueprint-record-tools">
+										<button
+											type="button"
+											data-testid="save-recent-blueprint"
+											aria-label={`RECENT ${index + 1} 보관`}
+											aria-describedby={
+												unavailableReason ? `recent-blueprint-unavailable-${id}` : undefined
+											}
+											title={unavailableReason ?? "이 복사 기록을 청사진으로 보관"}
+											disabled={
+												unavailableReason !== null ||
+												projectBusy ||
+												modelSyncPending ||
+												userBlueprintLibraryBusy !== null
+											}
+											onClick={(event) =>
+												requestContextualBlueprintSave(
+													{ recentEntry: { id, clipboard } },
+													event.currentTarget,
+													blueprintSaveDestination,
+												)
+											}
+										>
+											보관
+										</button>
+									</div>
+								</article>
+							);
+						})
 					) : (
 						<div className="tilefab-blueprint-empty">
 							<FolderClock size={24} />

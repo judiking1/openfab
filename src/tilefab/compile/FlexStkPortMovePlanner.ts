@@ -60,6 +60,53 @@ export function deriveFlexStkPortMoveBodyPreview(
 	return new StkBodySweepIndex(layout, { ...state, ports, equipmentGroups: [group] }, false).sweeps;
 }
 
+/** Signed metres from the source along its authored travel direction; admission still uses the move planner. */
+export function flexStkPortRowAtDistance(
+	slots: CompiledPortSlots,
+	slotIndex: PortEquipmentGroupSlotIndex,
+	source: PortRecord,
+	distance: number,
+): number | null {
+	if (
+		!slotIndex.matches(slots) ||
+		slots.portType !== "STK" ||
+		!Number.isSafeInteger(distance) ||
+		source.route.kind !== "CARDINAL_CELL" ||
+		source.route.to === 0 ||
+		slotIndex.rowForPort(source) === null
+	)
+		return null;
+	const travel = moveCell({ x: 0, y: 0 }, source.route.to);
+	return slotIndex.rowForPort({
+		...source,
+		route: {
+			...source.route,
+			x: source.route.x + travel.x * distance,
+			z: source.route.z + travel.y * distance,
+		},
+	});
+}
+
+export function flexStkPortDistanceForRow(
+	slots: CompiledPortSlots,
+	source: PortRecord,
+	row: number | null,
+): number | null {
+	if (
+		row === null ||
+		!Number.isInteger(row) ||
+		row < 0 ||
+		row >= slots.count ||
+		source.route.kind !== "CARDINAL_CELL" ||
+		source.route.to === 0
+	)
+		return null;
+	const travel = moveCell({ x: 0, y: 0 }, source.route.to);
+	const dx = (slots.routeXs[row] as number) - source.route.x;
+	const dz = (slots.routeZs[row] as number) - source.route.z;
+	return dx * travel.y === dz * travel.x ? dx * travel.x + dz * travel.y : null;
+}
+
 /** A single-Port nudge never skips a gap or waits for the renderer to bind its spatial index. */
 export function adjacentFlexStkPortRow(
 	slots: CompiledPortSlots,

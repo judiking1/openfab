@@ -12,6 +12,13 @@ export interface PortEquipmentSelectionIdentity {
 	readonly equipmentGroupId: number;
 }
 
+export interface EqRecipeEditSource extends PortEquipmentSelectionIdentity {
+	readonly modelGeneration: number;
+	readonly baseRevision: number;
+	readonly basePatchSequence: number;
+	readonly recipe: string | null;
+}
+
 export interface ResolvedPortEquipmentSelection {
 	readonly port: PortRecord;
 	readonly equipmentGroup: PortEquipmentState["equipmentGroups"][number];
@@ -22,6 +29,7 @@ export type PortEquipmentActionBlockCode =
 	| "DIRECTLY_OWNED"
 	| "LEGACY_CUSTOM"
 	| "EQ_BODY_ONLY"
+	| "EQ_RECIPE_ONLY"
 	| "OHB_MEMBERSHIP_UNSUPPORTED";
 
 export type PortEquipmentActionDecision =
@@ -38,6 +46,7 @@ export interface PortEquipmentActionAvailability {
 	readonly editMembership: PortEquipmentActionDecision;
 	readonly reverseServiceDirection: PortEquipmentActionDecision;
 	readonly editEqBody: PortEquipmentActionDecision;
+	readonly editEqRecipe: PortEquipmentActionDecision;
 	readonly delete: PortEquipmentActionDecision;
 }
 
@@ -84,6 +93,7 @@ export function resolvePortEquipmentActionAvailability({
 			editMembership: blocked,
 			reverseServiceDirection: blocked,
 			editEqBody: blocked,
+			editEqRecipe: blocked,
 			delete: blocked,
 		});
 	}
@@ -115,6 +125,10 @@ export function resolvePortEquipmentActionAvailability({
 			group.kind === "EQ"
 				? (ownershipBlock ?? EQUIPMENT_ACTION_ALLOWED)
 				: blockedEquipmentAction("EQ_BODY_ONLY", "몸체 길이·폭 편집은 EQ에서 사용할 수 있습니다"),
+		editEqRecipe:
+			group.kind === "EQ"
+				? (ownershipBlock ?? EQUIPMENT_ACTION_ALLOWED)
+				: blockedEquipmentAction("EQ_RECIPE_ONLY", "Recipe 편집은 EQ에서 사용할 수 있습니다"),
 		editMembership:
 			group.kind === "OHB"
 				? blockedEquipmentAction(

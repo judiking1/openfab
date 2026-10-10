@@ -448,6 +448,12 @@
 .tilefab-equipment-dimensions-form > label input {
 	min-height: 44px;
 }
+.tilefab-equipment-recipe-form > label {
+	grid-column: 1 / -1;
+}
+.tilefab-equipment-recipe-form > label input {
+	text-align: left;
+}
 .tilefab-equipment-dimensions-form > p,
 .tilefab-equipment-dimensions-form > details {
 	grid-column: 1 / -1;

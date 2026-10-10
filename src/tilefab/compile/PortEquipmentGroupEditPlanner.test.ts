@@ -16,6 +16,8 @@ import { decodeRailPatchSoA, encodeRailPatchEvent } from "../worker/railMirrorPr
 import {
 	adjacentFlexStkPortRow,
 	deriveFlexStkPortMoveBodyPreview,
+	flexStkPortDistanceForRow,
+	flexStkPortRowAtDistance,
 	planMoveFlexStkPort,
 } from "./FlexStkPortMovePlanner";
 import { compilePhysicalRail } from "./PhysicalRailCompiler";
@@ -434,6 +436,54 @@ function rowAt(
 }
 
 describe("individual FLEX STK Port movement", () => {
+	it.each([
+		"east",
+		"south",
+		"west",
+		"north",
+	] as const)("resolves signed distance from the %s source, retaining ordinary move validation", (direction) => {
+		const cell = (along: number) =>
+			direction === "east"
+				? [along, 0]
+				: direction === "south"
+					? [20, along]
+					: direction === "west"
+						? [20 - along, 20]
+						: [0, 20 - along];
+		const f = flexPortFixture([4, 8, 14].map(cell));
+		const source = f.document.portEquipment.ports.find(
+			(port) =>
+				port.route.kind === "CARDINAL_CELL" &&
+				port.route.x === cell(8)[0] &&
+				port.route.z === cell(8)[1],
+		) as PortRecord;
+		const index = new PortEquipmentGroupSlotIndex(f.slots);
+		for (const distance of [-2, 0, 3]) {
+			const target = cell(8 + distance);
+			const row = flexStkPortRowAtDistance(f.slots, index, source, distance);
+			expect(row).toBe(rowAt(f.slots, target[0] as number, target[1] as number));
+			expect(flexStkPortDistanceForRow(f.slots, source, row)).toBe(distance);
+			expect(f.plan(target, source.id).valid).toBe(distance !== 0);
+		}
+		expect(f.plan(cell(14), source.id).valid).toBe(false);
+		for (const value of [Number.NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1, 1000]) {
+			expect(flexStkPortRowAtDistance(f.slots, index, source, value)).toBeNull();
+		}
+	});
+
+	it("cannot use a distant matching slot to bypass a gap or stale slot index", () => {
+		const f = flexPortFixture();
+		const source = f.document.portEquipment.ports[1] as PortRecord;
+		const index = new PortEquipmentGroupSlotIndex(f.slots);
+		expect(flexStkPortRowAtDistance(f.slots, index, source, 27)).toBe(rowAt(f.slots, 35, 0));
+		expect(f.plan([35, 0]).valid).toBe(false);
+		const empty = compilePortSlotPreparedArtifactCatalog(compilePhysicalRail(new TileMap())).STK
+			.slots;
+		expect(flexStkPortRowAtDistance(empty, index, source, 1)).toBeNull();
+		for (const row of [null, -1, 1.5, f.slots.count])
+			expect(flexStkPortDistanceForRow(f.slots, source, row)).toBeNull();
+	});
+
 	it("nudges exact neighboring slots without a renderer and never jumps sideways or across a gap", () => {
 		const f = flexPortFixture(),
 			index = new PortEquipmentGroupSlotIndex(f.slots),

@@ -1,4 +1,5 @@
 import { resolveEqBodyEditTransition } from "../core/EqBodyEdit";
+import { resolveEqRecipeEditTransition } from "../core/EqRecipeEdit";
 import {
 	applyPortEquipmentMutations,
 	collectPortEquipmentIntegrityIssues,
@@ -87,6 +88,52 @@ export function planResizeEqBody(
 		);
 	} catch (error) {
 		return fail(error instanceof Error ? error.message : "EQ 몸체 크기를 적용할 수 없습니다");
+	}
+}
+
+/** Match creation normalization; recipe remains an optional authoring label, never a process rule. */
+export function planEditEqRecipe(
+	map: TileMap,
+	state: PortEquipmentState,
+	selection: { readonly portId: number; readonly equipmentGroupId: number },
+	text: string,
+	baseRevision: number,
+	basePatchSequence: number,
+	organizations: StaticFabOrganizationState,
+): PortEquipmentMutationPlan {
+	const fail = (reason: string) =>
+		invalid("edit-port-equipment", baseRevision, basePatchSequence, reason);
+	if (map.getRevision() !== baseRevision)
+		return fail("원본 레일이 변경되었습니다 · EQ를 다시 선택하세요");
+	if (collectPortEquipmentIntegrityIssues(state).length > 0)
+		return fail("장비 Port 관계가 불완전합니다 · 무결성을 복구한 뒤 다시 선택하세요");
+	const source = state.equipmentGroups.find((group) => group.id === selection.equipmentGroupId);
+	const port = state.ports.find((candidate) => candidate.id === selection.portId);
+	if (
+		source?.kind !== "EQ" ||
+		!port ||
+		port.equipmentGroupId !== source.id ||
+		!source.portIds.includes(port.id)
+	)
+		return fail("Recipe를 편집할 EQ와 Port를 다시 선택하세요");
+	const recipe = text.trim() || null;
+	if (recipe === source.recipe) return fail("Recipe가 현재 값과 같습니다");
+	try {
+		const changes = [{ id: source.id, before: source, after: { ...source, recipe } }];
+		const after = applyPortEquipmentMutations(state, [], changes);
+		const transition = resolveEqRecipeEditTransition(organizations, state, after, [], changes);
+		if (!transition || transition.reason)
+			return fail(transition?.reason ?? "EQ Recipe 변경을 확인할 수 없습니다");
+		assertPortEquipmentLayout(map, after);
+		return createPortEquipmentMutationPlan(
+			"edit-port-equipment",
+			baseRevision,
+			basePatchSequence,
+			[],
+			changes,
+		);
+	} catch (error) {
+		return fail(error instanceof Error ? error.message : "EQ Recipe를 적용할 수 없습니다");
 	}
 }
 

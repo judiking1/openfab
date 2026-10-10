@@ -6,6 +6,19 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.105] - 2026-10-10
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Keep the exact selected rails while choosing rail-only or all fully attached equipment for
+  Blueprint reuse. Explain when equipment crosses the selection boundary and is excluded.
+- Move a FLEX Stocker Port by an exact signed integer distance along its rail. Invalid distance
+  input removes Apply authority, including Enter after a previous keyboard preview.
+- Store complete straight, turn, U-turn and SHIFT modules from RECENT in Project or BrowserLocal
+  Blueprints. Reuse the captured shape after source deletion; explain unsupported junctions.
+- Edit an existing EQ Recipe with explicit Apply/Cancel and one Undo/Redo step. Preserve equipment
+  identity, Ports, geometry and ownership; retain stale drafts and reject outdated Apply attempts.
+
 ## [0.1.104] - 2026-10-10
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

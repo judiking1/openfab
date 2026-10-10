@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compilePhysicalPathMigration } from "../compile/PhysicalPathMigration";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import {
+	planEditEqRecipe,
 	planEraseEquipmentGroup,
 	planMoveOhbToSlot,
 	planResizeEqBody,
@@ -65,10 +66,215 @@ import {
 import { planCreateStaticFabOrganizationFromSelection } from "../core/StaticFabOrganizationPlan";
 import { createStaticFabSelection, planStaticFabSelectionErase } from "../core/StaticFabSelection";
 import { encodeRailCell, TileMap } from "../core/TileMap";
+import { captureOpenFabProject } from "../project/OpenFabProject";
+import { parseOpenFabProjectJson, serializeOpenFabProject } from "../project/OpenFabProjectCodec";
 import { captureRailMirrorSnapshot, checksumRailMap } from "./RailMirrorChecksum";
 import { RailPatchMirror } from "./RailPatchMirror";
 import { checksumRailPhysicalLayout } from "./RailPhysicalLayout";
 import { decodeRailPatchSoA, encodeRailPatchEvent } from "./railMirrorProtocol";
+
+describe("EQ Recipe authoring metadata", () => {
+	const selection = { portId: 1, equipmentGroupId: 1 };
+	const edit = (document: RailDocument, text: string) =>
+		planEditEqRecipe(
+			document.map,
+			document.portEquipment,
+			selection,
+			text,
+			document.map.getRevision(),
+			document.getPatchSequence(),
+			document.organizations,
+		);
+	it.each([
+		"unowned",
+		"loop",
+		"standalone",
+	] as const)("edits %s EQ with exact typed Worker parity and one-step history", (ownership) => {
+		const { document } = loopEquipmentFixture("EQ", ownership);
+		const before = document.portEquipment,
+			organizations = document.organizations;
+		const relationships = document.relationships,
+			config = document.operationalConfiguration;
+		const mirror = new RailPatchMirror();
+		mirror.sync(
+			captureRailMirrorSnapshot(document.map, document.getPatchSequence(), before, organizations)
+				.snapshot,
+		);
+		const geometry = mirror.getPhysicalPublication().current.buffers;
+		const sequence = document.getPatchSequence(),
+			revision = document.map.getRevision();
+		const events: RailPatchEvent[] = [];
+		document.subscribe((event) => {
+			events.push(event);
+			mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+		});
+		const plan = edit(document, "  Etch A  ");
+		expect(document.commitPortEquipment(plan), plan.reason).toBe(true);
+		const after = document.portEquipment;
+		expect(after).toEqual({
+			...before,
+			equipmentGroups: before.equipmentGroups.map((group) => ({ ...group, recipe: "Etch A" })),
+		});
+		expect(document.getPatchSequence()).toBe(sequence + 1);
+		expect(document.map.getRevision()).toBe(revision);
+		expect(mirror.getPhysicalPublication().current.buffers).toBe(geometry);
+		expect(mirror.state.checksum).toBe(checksumRailMap(document.map, after, organizations));
+		const manifest = {
+			id: "synthetic-eq-recipe",
+			name: "Synthetic EQ Recipe",
+			createdAt: "2026-10-10T00:00:00.000Z",
+			updatedAt: "2026-10-10T00:00:00.000Z",
+		};
+		const project = captureOpenFabProject(document, { manifest });
+		expect(parseOpenFabProjectJson(serializeOpenFabProject(project)).project).toEqual(project);
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment).toEqual(before);
+		expect(document.redo()).toBe(true);
+		expect(document.portEquipment).toEqual(after);
+		expect(events).toHaveLength(3);
+		for (const event of events) {
+			expect(event.portChanges).toEqual([]);
+			expect(event.equipmentGroupChanges).toHaveLength(1);
+			expect(event.changes).toEqual([]);
+			expect(event.organizationChanges).toEqual([]);
+		}
+		expect(document.organizations).toBe(organizations);
+		expect(document.relationships).toBe(relationships);
+		expect(document.operationalConfiguration).toBe(config);
+		expect(mirror.state.checksum).toBe(checksumRailMap(document.map, after, organizations));
+	});
+	it("uses creation label rules: trim, blank to null, 120 limit, no control characters or no-op", () => {
+		const { document } = loopEquipmentFixture("EQ", "unowned");
+		for (const text of ["", "  ", "x".repeat(121), "A\u0000B", "A\u007fB", "A\nB"])
+			expect(edit(document, text).valid, JSON.stringify(text)).toBe(false);
+		expect(document.commitPortEquipment(edit(document, "x".repeat(120)))).toBe(true);
+		expect(document.commitPortEquipment(edit(document, "  "))).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]).toMatchObject({ recipe: null });
+		expect(document.undo()).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]).toMatchObject({ recipe: "x".repeat(120) });
+		expect(document.redo()).toBe(true);
+		expect(document.portEquipment.equipmentGroups[0]).toMatchObject({ recipe: null });
+	});
+	it.each([
+		"area",
+		"multiple",
+	] as const)("independently rejects %s ownership in planner, Document and Worker", (ownership) => {
+		const { document } = loopEquipmentFixture("EQ", ownership);
+		expect(edit(document, "A").valid).toBe(false);
+		assertLoopEditRejected(
+			document,
+			edit(loopEquipmentFixture("EQ").document, "A"),
+			/Process Loop가 아닙니다|여러 조직/,
+		);
+	});
+	it.each([
+		"ports",
+		"body",
+		"pitch",
+		"recipe",
+		"extra-group",
+	] as const)("rejects forged %s deltas atomically in Document and Worker", (mixed) => {
+		const { document } = loopEquipmentFixture("EQ");
+		const plan = edit(document, "A"),
+			change = plan.equipmentGroupMutations[0];
+		if (!change?.after || change.after.kind !== "EQ") throw Error("Expected EQ mutation");
+		const port = document.portEquipment.ports[0];
+		if (!port) throw Error("Expected EQ Port");
+		const forged =
+			mixed === "ports"
+				? {
+						...plan,
+						portMutations: [{ id: port.id, before: port, after: { ...port, barcode: "Changed" } }],
+					}
+				: mixed === "extra-group"
+					? {
+							...plan,
+							equipmentGroupMutations: [
+								...plan.equipmentGroupMutations,
+								{ id: 2, before: null, after: { ...change.after, id: 2, portIds: [] } },
+							],
+						}
+					: {
+							...plan,
+							equipmentGroupMutations: [
+								{
+									...change,
+									after: {
+										...change.after,
+										...(mixed === "body"
+											? { bodyDimensions: { lengthMillimeters: 4000, widthMillimeters: 2000 } }
+											: mixed === "pitch"
+												? { pitchMillimeters: 2000 }
+												: { recipe: "A\u0000B" }),
+									},
+								},
+							],
+						};
+		if (mixed === "recipe" || mixed === "extra-group") {
+			const before = document.portEquipment,
+				sequence = document.getPatchSequence(),
+				history = document.captureRailMirrorHistoryLedger();
+			let rejected = false;
+			try {
+				rejected = !document.commitPortEquipment(forged);
+			} catch {
+				rejected = true;
+			}
+			expect(rejected).toBe(true);
+			expect(document.portEquipment).toBe(before);
+			expect(document.getPatchSequence()).toBe(sequence);
+			expect(document.captureRailMirrorHistoryLedger()).toEqual(history);
+			const mirror = new RailPatchMirror();
+			mirror.sync(
+				captureRailMirrorSnapshot(document.map, sequence, before, document.organizations).snapshot,
+			);
+			const state = mirror.state,
+				publication = mirror.getPhysicalPublication();
+			expect(() =>
+				mirror.applyPatch({
+					...emptyOrganizationPatch(),
+					kind: forged.kind,
+					sequence: sequence + 1,
+					baseRevision: document.map.getRevision(),
+					revision: document.map.getRevision(),
+					changes: [],
+					switchChanges: [],
+					portChanges: forged.portMutations,
+					equipmentGroupChanges: forged.equipmentGroupMutations,
+					organizationNextIdBefore: document.organizations.nextOrganizationId,
+					organizationNextIdAfter: document.organizations.nextOrganizationId,
+				}),
+			).toThrow();
+			expect(mirror.state).toEqual(state);
+			expect(mirror.getPhysicalPublication()).toBe(publication);
+		} else
+			assertLoopEditRejected(document, forged, /Recipe|recipe|몸체|피치|간격|port|Port|Equipment/i);
+	});
+	it("rejects stale revision, patch sequence and changed source values without changing history", () => {
+		const { document } = loopEquipmentFixture("EQ");
+		const stale = edit(document, "A");
+		expect(document.commitPortEquipment(edit(document, "B"))).toBe(true);
+		const before = document.portEquipment,
+			sequence = document.getPatchSequence();
+		const history = document.captureRailMirrorHistoryLedger();
+		expect(document.commitPortEquipment(stale)).toBe(false);
+		expect(document.commitPortEquipment({ ...stale, basePatchSequence: sequence })).toBe(false);
+		expect(
+			planEditEqRecipe(
+				document.map,
+				before,
+				selection,
+				"C",
+				document.map.getRevision() - 1,
+				sequence,
+				document.organizations,
+			).valid,
+		).toBe(false);
+		expect(document.portEquipment).toBe(before);
+		expect(document.getPatchSequence()).toBe(sequence);
+		expect(document.captureRailMirrorHistoryLedger()).toEqual(history);
+	});
+});
 
 describe("Port-fixed EQ body dimensions", () => {
 	it.each([

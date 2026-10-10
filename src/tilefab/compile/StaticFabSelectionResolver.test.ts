@@ -5,11 +5,13 @@ import { createRailAreaSelection } from "../core/RailAreaSelection";
 import { RailDocument } from "../core/RailDocument";
 import { buildRailModuleOwnershipIndex, type DirectedRailEdge } from "../core/RailModuleOwnership";
 import { DIR_E, DIR_W, directionBetween } from "../core/railShape";
+import { createStaticFabSelection } from "../core/StaticFabSelection";
 import type { CompiledPortEquipmentPresentation } from "./PortEquipmentPresentation";
 import { compileStaticFabHierarchyIndex } from "./StaticFabHierarchy";
 import {
 	resolveStaticFabEquipmentGroupsForRailSelection,
 	resolveStaticFabEquipmentGroupsInBounds,
+	resolveStaticFabSelectionEquipmentScope,
 } from "./StaticFabSelectionResolver";
 import { buildSyntheticFabStarter, defaultSyntheticFabStarterRequest } from "./SyntheticFabStarter";
 
@@ -131,6 +133,96 @@ describe("resolveStaticFabEquipmentGroupsForRailSelection", () => {
 			partialGroupIds: [20],
 		});
 	}, 30_000);
+});
+
+describe("selection equipment scope", () => {
+	function fixture() {
+		const document = new RailDocument();
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 0, y: 0 }, { x: 10, y: 0 })),
+		).toBe(true);
+		const ownership = buildRailModuleOwnershipIndex(document.map);
+		const rail = createRailAreaSelection(
+			ownership,
+			{ x: 0, y: 0 },
+			{ x: 5, y: 0 },
+			"fully-contained",
+		);
+		const state = equipmentState();
+		const sequence = document.getPatchSequence();
+		const selection = createStaticFabSelection(rail, state, sequence, [20, 30]);
+		return { document, ownership, state, sequence, selection };
+	}
+
+	it("replaces outside/partial equipment with exact complete groups while preserving the rail object and source", () => {
+		const f = fixture();
+		const before = JSON.stringify(f.state);
+		const result = resolveStaticFabSelectionEquipmentScope(
+			f.document.map,
+			f.ownership,
+			f.state,
+			f.sequence,
+			f.selection,
+			"attached-equipment",
+		);
+		expect(result.valid).toBe(true);
+		if (!result.valid) return;
+		expect(result.selection.rail).toBe(f.selection.rail);
+		expect(result.selection.equipmentGroups.map((item) => item.group.id)).toEqual([10]);
+		expect(result.partialGroupIds).toEqual([20]);
+		expect(f.selection.equipmentGroups.map((item) => item.group.id)).toEqual([20, 30]);
+		expect(JSON.stringify(f.state)).toBe(before);
+		expect(f.document.getPatchSequence()).toBe(f.sequence);
+		const railOnly = resolveStaticFabSelectionEquipmentScope(
+			f.document.map,
+			f.ownership,
+			f.state,
+			f.sequence,
+			result.selection,
+			"rail",
+		);
+		expect(railOnly.valid && railOnly.selection.equipmentGroups).toEqual([]);
+		expect(railOnly.valid && railOnly.selection.rail).toBe(f.selection.rail);
+		if (!railOnly.valid) return;
+		const restored = resolveStaticFabSelectionEquipmentScope(
+			f.document.map,
+			f.ownership,
+			f.state,
+			f.sequence,
+			railOnly.selection,
+			"attached-equipment",
+		);
+		expect(restored).toEqual(result);
+	});
+
+	it("rejects stale patch and rail revisions instead of rebasing the selection", () => {
+		const f = fixture();
+		for (const scope of ["rail", "attached-equipment"] as const) {
+			expect(
+				resolveStaticFabSelectionEquipmentScope(
+					f.document.map,
+					f.ownership,
+					f.state,
+					f.sequence + 1,
+					f.selection,
+					scope,
+				).valid,
+			).toBe(false);
+		}
+		expect(
+			f.document.commit(planRailConstruction(f.document.map, { x: 20, y: 0 }, { x: 25, y: 0 })),
+		).toBe(true);
+		expect(
+			resolveStaticFabSelectionEquipmentScope(
+				f.document.map,
+				f.ownership,
+				f.state,
+				f.sequence,
+				f.selection,
+				"rail",
+			).valid,
+		).toBe(false);
+	});
 });
 
 function equipmentState(): PortEquipmentState {

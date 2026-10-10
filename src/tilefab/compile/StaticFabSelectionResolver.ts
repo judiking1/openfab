@@ -1,11 +1,48 @@
 import type { PortEquipmentState } from "../core/EquipmentGroup";
 import type { RailAreaSelection, RailAreaSelectionBounds } from "../core/RailAreaSelection";
+import type { RailModuleOwnershipIndex } from "../core/RailModuleOwnership";
 import { type Direction, moveCell } from "../core/railShape";
+import {
+	createStaticFabSelection,
+	type StaticFabSelection,
+	staticFabSelectionStaleReason,
+} from "../core/StaticFabSelection";
+import type { TileMap } from "../core/TileMap";
 import type { CompiledPortEquipmentPresentation } from "./PortEquipmentPresentation";
 
 export interface StaticFabEquipmentGroupSelectionResolution {
 	readonly completeGroupIds: readonly number[];
 	readonly partialGroupIds: readonly number[];
+}
+
+/** Replace only equipment selection; never expand the authored rail boundary or change the document. */
+export function resolveStaticFabSelectionEquipmentScope(
+	map: TileMap,
+	ownership: RailModuleOwnershipIndex,
+	state: PortEquipmentState,
+	patchSequence: number,
+	selection: StaticFabSelection,
+	scope: "rail" | "attached-equipment",
+):
+	| { readonly valid: false; readonly reason: string }
+	| {
+			readonly valid: true;
+			readonly selection: StaticFabSelection;
+			readonly partialGroupIds: readonly number[];
+	  } {
+	const reason = staticFabSelectionStaleReason(map, ownership, state, patchSequence, selection);
+	if (reason) return { valid: false, reason };
+	const resolved = resolveStaticFabEquipmentGroupsForRailSelection(state, selection.rail);
+	return {
+		valid: true,
+		selection: createStaticFabSelection(
+			selection.rail,
+			state,
+			patchSequence,
+			scope === "rail" ? [] : resolved.completeGroupIds,
+		),
+		partialGroupIds: resolved.partialGroupIds,
+	};
 }
 
 /** Resolve complete equipment groups intersecting an inclusive cell-area marquee. */

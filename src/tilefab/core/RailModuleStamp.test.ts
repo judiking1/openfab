@@ -1,8 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import { RailDraftEvaluator } from "../compile/RailDraftEvaluator";
+import {
+	createOpenFabRailAreaBlueprint,
+	railAreaStampTemplateFromOpenFabBlueprint,
+} from "../project/OpenFabBlueprintLibrary";
+import { parseOpenFabProjectBlueprintValue } from "../project/OpenFabProjectCodec";
+import {
+	createOpenFabUserBlueprintRecord,
+	parseOpenFabUserBlueprintJson,
+	serializeOpenFabUserBlueprintRecord,
+} from "../project/OpenFabUserBlueprintLibrary";
+import { captureRailMirrorSnapshot, checksumRailMap } from "../worker/RailMirrorChecksum";
+import { RailPatchMirror } from "../worker/RailPatchMirror";
+import { decodeRailPatchSoA, encodeRailPatchEvent } from "../worker/railMirrorProtocol";
 import { planAdvancedSwitch } from "./AdvancedSwitchPlanner";
 import { planRailConstruction, planRailPath } from "./paint";
+import {
+	initialRailAreaStampPose,
+	planRailAreaStamp,
+	rotateRailAreaStampPose,
+} from "./RailAreaStamp";
 import { RailDocument, type RailPatchEvent } from "./RailDocument";
 import { buildRailModuleOwnershipIndex, type RailModuleOwnership } from "./RailModuleOwnership";
 import { planRailModule } from "./RailModulePlanner";
@@ -11,6 +29,7 @@ import {
 	createRailModuleStampTemplate,
 	initialRailModuleStampPose,
 	planRailModuleStamp,
+	prepareRailModuleBlueprint,
 	rotateRailModuleStampPose,
 	setRailModuleStampSide,
 } from "./RailModuleStamp";
@@ -321,6 +340,198 @@ describe("RailModuleStamp", () => {
 		expect(mismatch.cells.length).toBeGreaterThan(1);
 	});
 });
+
+describe("single-module RECENT Blueprint conversion", () => {
+	it.each([
+		"straight",
+		"turn",
+		"u-turn",
+		"shift",
+	] as const)("preserves %s geometry in both codecs and all rotated placements", (kind) => {
+		const seed = ordinaryStampSources().find((module) => module.kind === kind);
+		if (!seed) throw new Error("missing module seed");
+		for (const forward of ALL_DIRECTIONS) {
+			const source = new RailDocument();
+			const seedTemplate = createRailModuleStampTemplate(seed);
+			expect(
+				source.commit(
+					planRailModuleStamp(
+						source.map,
+						seedTemplate,
+						{ x: 9, y: -4 },
+						{ forward, side: seedTemplate.sourceSide },
+					),
+				),
+			).toBe(true);
+			const module = moduleOfKind(source, kind),
+				captured = createRailModuleStampTemplate(module);
+			const fixed = JSON.stringify(captured);
+			const prepared = prepareRailModuleBlueprint(captured);
+			expect(prepared.valid).toBe(true);
+			if (!prepared.valid) continue;
+			const blueprint = parseOpenFabProjectBlueprintValue(
+				JSON.parse(
+					JSON.stringify(
+						createOpenFabRailAreaBlueprint(prepared.template, {
+							id: "single-module",
+							name: "Single module",
+							createdAt: "2026-10-10T00:00:00.000Z",
+						}),
+					),
+				),
+			);
+			expect(blueprint.kind).toBe("RAIL_AREA");
+			if (blueprint.kind !== "RAIL_AREA") continue;
+			expect(blueprint.sourceModuleCount).toBe(1);
+			expect(blueprint.edges).toEqual(normalizedEdges(module.eraseEdges));
+			const local = createOpenFabUserBlueprintRecord(blueprint, {
+				id: "local-module",
+				createdAt: "2026-10-10T00:00:00.000Z",
+			});
+			expect(
+				parseOpenFabUserBlueprintJson(serializeOpenFabUserBlueprintRecord(local)).blueprint,
+			).toEqual(blueprint);
+			// Source deletion after copy cannot change the captured RECENT payload.
+			expect(source.undo()).toBe(true);
+			expect(prepareRailModuleBlueprint(captured)).toEqual(prepared);
+			expect(JSON.stringify(captured)).toBe(fixed);
+			const restored = railAreaStampTemplateFromOpenFabBlueprint(blueprint);
+			let pose = initialRailAreaStampPose();
+			for (let rotation = 0; rotation < 4; rotation++) {
+				const target = new RailDocument(),
+					mirror = new RailPatchMirror(),
+					events: RailPatchEvent[] = [];
+				mirror.sync(
+					captureRailMirrorSnapshot(
+						target.map,
+						target.getPatchSequence(),
+						target.portEquipment,
+						target.organizations,
+					).snapshot,
+				);
+				target.subscribe((event) => {
+					events.push(event);
+					mirror.applyPatch(decodeRailPatchSoA(encodeRailPatchEvent(event).patch));
+				});
+				const plan = planRailAreaStamp(target.map, restored, { x: 20, y: 20 }, pose);
+				const evaluation = new RailDraftEvaluator().evaluate(
+					target.map,
+					compilePhysicalRail(target.map),
+					plan,
+				);
+				expect(evaluation.valid, evaluation.reason).toBe(true);
+				expect(target.commit(evaluation.plan)).toBe(true);
+				expect(events).toHaveLength(1);
+				expect(target.map.edgeCount).toBe(blueprint.edges.length);
+				const placed = moduleOfKind(target, kind);
+				expect(placed.construction.span).toBe(module.construction.span);
+				expect(placed.construction.side).toBe(module.construction.side);
+				const rotated = (x: number, y: number): Cell =>
+					rotation === 0
+						? { x, y }
+						: rotation === 1
+							? { x: -y, y: x }
+							: rotation === 2
+								? { x: -x, y: -y }
+								: { x: y, y: -x };
+				expect(normalizedEdges(placed.eraseEdges)).toEqual(
+					normalizedEdges(
+						blueprint.edges.map(([x, y, tx, ty]) => ({ from: rotated(x, y), to: rotated(tx, ty) })),
+					),
+				);
+				expect(mirror.state.checksum).toBe(
+					checksumRailMap(target.map, target.portEquipment, target.organizations),
+				);
+				expect(target.undo()).toBe(true);
+				expect(target.map.edgeCount).toBe(0);
+				expect(target.redo()).toBe(true);
+				expect(target.map.edgeCount).toBe(blueprint.edges.length);
+				expect(mirror.state.checksum).toBe(
+					checksumRailMap(target.map, target.portEquipment, target.organizations),
+				);
+				pose = rotateRailAreaStampPose(pose, 1);
+			}
+		}
+	});
+
+	it.each([
+		"u-turn",
+		"shift",
+	] as const)("preserves both sides and compact/wide %s spans", (kind) => {
+		for (const span of ["compact", "wide"] as const)
+			for (const side of [-1, 1]) {
+				const source = documentEndingAt(DIR_E);
+				expect(
+					source.commit(
+						planRailModule(source.map, { x: 0, y: 0 }, { x: 0, y: side * 3 }, kind, span),
+					),
+				).toBe(true);
+				const module = moduleOfKind(source, kind),
+					prepared = prepareRailModuleBlueprint(createRailModuleStampTemplate(module));
+				expect(prepared.valid).toBe(true);
+				if (prepared.valid)
+					expect(normalizedEdges(prepared.template.edges)).toEqual(
+						normalizedEdges(module.eraseEdges),
+					);
+			}
+	});
+
+	it("rejects branch, merge and advanced switches rather than inventing host rails or degrading their kind", () => {
+		for (const grammar of ["directed-branch", "directed-merge"] as const) {
+			const result = prepareRailModuleBlueprint(turnoutTemplate(grammar));
+			expect(result.valid).toBe(false);
+			expect(!result.valid && result.reason).toMatch(/부착 본선/);
+		}
+		const source = documentEndingAt(DIR_E);
+		expect(source.commit(planAdvancedSwitch(source.map, { x: 0, y: 0 }, { x: 0, y: 3 }, "C"))).toBe(
+			true,
+		);
+		const result = prepareRailModuleBlueprint(
+			createRailModuleStampTemplate(moduleOfKind(source, "advanced-switch")),
+		);
+		expect(result.valid).toBe(false);
+		expect(!result.valid && result.reason).toMatch(/별도 스위치 데이터/);
+	});
+
+	it("fails closed on attachment mismatches and malformed paths without repairing the payload", () => {
+		const source = createRailModuleStampTemplate(ordinaryStampSources()[0] as RailModuleOwnership);
+		for (const template of [
+			{ ...source, grammar: "network-link" as const },
+			{ ...source, anchorRole: "switch-input-0" as const },
+			{ ...source, path: [] },
+			{
+				...source,
+				path: [
+					{ longitudinal: 0, lateral: 0 },
+					{ longitudinal: 3, lateral: 0 },
+				],
+			},
+			{
+				...source,
+				path: [
+					{ longitudinal: 0, lateral: 0 },
+					{ longitudinal: Number.NaN, lateral: 0 },
+				],
+			},
+		])
+			expect(prepareRailModuleBlueprint(template).valid).toBe(false);
+	});
+});
+
+function normalizedEdges(edges: readonly { readonly from: Cell; readonly to: Cell }[]): number[][] {
+	const cells = edges.flatMap((edge) => [edge.from, edge.to]);
+	const minX = Math.min(...cells.map((cell) => cell.x)),
+		minY = Math.min(...cells.map((cell) => cell.y));
+	return edges
+		.map(({ from, to }) => [from.x - minX, from.y - minY, to.x - minX, to.y - minY])
+		.sort(
+			(a, b) =>
+				(a[0] as number) - (b[0] as number) ||
+				(a[1] as number) - (b[1] as number) ||
+				(a[2] as number) - (b[2] as number) ||
+				(a[3] as number) - (b[3] as number),
+		);
+}
 
 function ordinaryStampSources(): RailModuleOwnership[] {
 	const straight = new RailDocument();

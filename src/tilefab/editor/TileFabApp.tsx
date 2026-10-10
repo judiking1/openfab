@@ -98,13 +98,14 @@ import {
 import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
 import {
 	planCopyOhbToSlot,
+	planEditEqRecipe,
 	planEraseEquipmentGroup,
 	planMoveOhbToSlot,
 	planResizeEqBody,
 	planReversePortEquipmentServiceDirection,
 	resolvePortEquipmentSelection,
 } from "../compile/PortEquipmentEditPlanner";
-import { adjacentFlexStkPortRow, deriveFlexStkPortMoveBodyPreview, planMoveFlexStkPort } from "../compile/FlexStkPortMovePlanner";
+import { adjacentFlexStkPortRow, deriveFlexStkPortMoveBodyPreview, flexStkPortDistanceForRow, flexStkPortRowAtDistance, planMoveFlexStkPort } from "../compile/FlexStkPortMovePlanner";
 import {
 	capturePortEquipmentGroupEditSnapshot,
 	type PortEquipmentGroupEditMode,
@@ -183,7 +184,7 @@ import type {
 	StaticFabProjectChecks,
 } from "../compile/StaticFabProjectChecks";
 import { STATIC_FAB_PROJECT_CHECK_DOMAINS } from "../compile/StaticFabProjectChecks";
-import { resolveStaticFabEquipmentGroupsInBounds } from "../compile/StaticFabSelectionResolver";
+import { resolveStaticFabEquipmentGroupsInBounds, resolveStaticFabSelectionEquipmentScope } from "../compile/StaticFabSelectionResolver";
 import {
 	evaluateStkDraftSelection,
 	STK_AUTHORING_TEMPLATES,
@@ -311,6 +312,7 @@ import {
 	initialRailModuleStampPose,
 	isRailModuleStampPlan,
 	planRailModuleStamp,
+	prepareRailModuleBlueprint,
 	type RailModuleStampPlan,
 	type RailModuleStampPose,
 	type RailModuleStampTemplate,
@@ -953,6 +955,7 @@ import {
 } from "./OpenTerminalSnap";
 import {
 	type PortEquipmentSelectionIdentity,
+	type EqRecipeEditSource,
 	type PortEquipmentActionDecision,
 	resolveEditablePortEquipmentSelection,
 	resolveExactPortEquipmentSelection,
@@ -3427,6 +3430,14 @@ export default function TileFabApp(): React.ReactElement {
 	const [userBlueprintRejectedDiagnostics, setUserBlueprintRejectedDiagnostics] = useState<
 		readonly OpenFabUserBlueprintRejectedDiagnostic[]
 	>(Object.freeze([]));
+	const [eqRecipeDraftGeneration, setEqRecipeDraftGeneration] = useState<number | null>(null);
+	const [eqRecipeDraftPending, setEqRecipeDraftPending] = useState(false);
+	const eqRecipeDraftPendingRef = useRef(false);
+	const handleEqRecipeDraftChange = useCallback((hasDraft: boolean): void => {
+		eqRecipeDraftPendingRef.current = hasDraft;
+		setEqRecipeDraftPending(hasDraft);
+		setEqRecipeDraftGeneration((current) => hasDraft ? current ?? editorModelRef.current.generation : null);
+	}, []);
 	const [eqBodyDraftPending, setEqBodyDraftPending] = useState(false);
 	const eqBodyDraftPendingRef = useRef(false);
 	const handleEqBodyDraftChange = useCallback((hasDraft: boolean): void => {
@@ -3554,6 +3565,8 @@ export default function TileFabApp(): React.ReactElement {
 	);
 	const [portEquipmentGroupEditSession, setPortEquipmentGroupEditSessionState] =
 		useState<PortEquipmentGroupEditSession | null>(null);
+	const [stkPortMoveDistanceDraft, setStkPortMoveDistanceDraft] = useState("");
+	const [stkPortMoveDistanceError, setStkPortMoveDistanceError] = useState<string | null>(null);
 	const [portEquipmentGroupEditAccessibilitySummary, setPortEquipmentGroupEditAccessibilitySummary] =
 		useState("");
 	const [portEquipmentMembershipEditSession, setPortEquipmentMembershipEditSessionState] =
@@ -7058,6 +7071,8 @@ export default function TileFabApp(): React.ReactElement {
 		next: PortEquipmentGroupEditSession | null,
 	): void => {
 		if (next === null) clearPortEquipmentGroupEditAccessibility();
+		setStkPortMoveDistanceDraft("");
+		setStkPortMoveDistanceError(null);
 		portEquipmentGroupEditSessionRef.current = next;
 		setPortEquipmentGroupEditSessionState(next);
 	};
@@ -7090,16 +7105,17 @@ export default function TileFabApp(): React.ReactElement {
 		setStkDraftSelection(next?.selection ?? null);
 		rendererRef.current.invalidateStatic();
 	};
-	const blockEqBodyDraftSelectionChange = (nextEquipmentGroupId: number | null): boolean => {
-		if (!eqBodyDraftPendingRef.current ||
+	const blockEqInspectorDraftSelectionChange = (nextEquipmentGroupId: number | null): boolean => {
+		if ((!eqBodyDraftPendingRef.current && !eqRecipeDraftPendingRef.current) ||
 			nextEquipmentGroupId === selectedPortEquipmentRef.current?.equipmentGroupId) return false;
-		setStatus("EQ 몸체 크기를 적용하거나 입력 취소한 뒤 다른 항목을 선택하세요");
+		const recipeDraft = eqRecipeDraftPendingRef.current;
+		setStatus(recipeDraft ? "EQ Recipe를 적용하거나 입력 취소한 뒤 다른 항목을 선택하세요" : "EQ 몸체 크기를 적용하거나 입력 취소한 뒤 다른 항목을 선택하세요");
 		setCompactInspectorExpanded(true);
 		requestAnimationFrame(() => {
-			const details = appRootRef.current?.querySelector<HTMLDetailsElement>('[data-testid="eq-body-dimensions"]');
+			const details = appRootRef.current?.querySelector<HTMLDetailsElement>(recipeDraft ? '[data-testid="eq-recipe-editor"]' : '[data-testid="eq-body-dimensions"]');
 			if (!details) return;
 			details.open = true;
-			const apply = details.querySelector<HTMLButtonElement>('[data-testid="apply-eq-body-dimensions"]');
+			const apply = details.querySelector<HTMLButtonElement>(recipeDraft ? '[data-testid="cancel-eq-recipe"]' : '[data-testid="apply-eq-body-dimensions"]');
 			apply?.focus({ preventScroll: true });
 			apply?.scrollIntoView({ block: "nearest" });
 		});
@@ -9294,7 +9310,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (translation) {
 			const blocked = editorActivityTransitionBlockedReason();
 			if (blocked) { setStatus(blocked); return; }
-			if (blockEqBodyDraftSelectionChange(null)) return;
+			if (blockEqInspectorDraftSelectionChange(null)) return;
 			if (areaStampSessionRef.current || organizationBundlePlacementSessionRef.current || stampSessionRef.current ||
 				templateSessionRef.current || anchorRef.current || dragRef.current || reshapeRef.current ||
 				inspectAreaDragRef.current || portRowDragRef.current || stkDraftSessionRef.current || ohbPlacementIntentRef.current ||
@@ -13190,7 +13206,7 @@ export default function TileFabApp(): React.ReactElement {
 					return;
 				}
 				if (selectedPortEquipmentRef.current || selectedModuleRef.current) {
-					if (blockEqBodyDraftSelectionChange(null)) return;
+					if (blockEqInspectorDraftSelectionChange(null)) return;
 					const selectionKind = selectedPortEquipmentRef.current ? "Port" : "레일";
 					canvasRef.current?.focus({ preventScroll: true });
 					setRailSelection(null, null);
@@ -17012,6 +17028,12 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (session.targetRow === targetRow) return session.plan;
 		session.targetRow = targetRow;
+		if (session.scope === "port") {
+			const source = session.sourcePorts.find((port) => port.id === session.sourceAnchorPortId);
+			const distance = source ? flexStkPortDistanceForRow(session.slots, source, targetRow) : null;
+			setStkPortMoveDistanceDraft(distance === null ? "" : String(distance));
+			setStkPortMoveDistanceError(null);
+		}
 		session.plan =
 			targetRow === null
 				? null
@@ -17049,6 +17071,24 @@ export default function TileFabApp(): React.ReactElement {
 		return session.plan;
 	};
 
+	const chooseStkPortMoveDistance = (text: string): void => {
+		const session = portEquipmentGroupEditSessionRef.current;
+		if (!session || session.scope !== "port") return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const source = session.sourcePorts.find((port) => port.id === session.sourceAnchorPortId);
+		const distance = /^[+-]?\d+$/.test(text.trim()) ? Number(text) : Number.NaN;
+		const row = source ? flexStkPortRowAtDistance(session.slots, session.slotIndex, source, distance) : null;
+		const plan = updatePortEquipmentGroupEditTarget(session, row);
+		if (portEquipmentGroupEditSessionRef.current !== session) return;
+		const error = !Number.isSafeInteger(distance) ? "이동 거리를 정수 미터로 입력하세요" :
+			row === null ? "그 거리에 같은 방향의 슬롯이 없습니다" : null;
+		setStkPortMoveDistanceDraft(text);
+		setStkPortMoveDistanceError(error);
+		setStatus(error ?? (plan?.valid ? `PORT-${session.sourceAnchorPortId} · ${distance} m 이동 미리보기 · 적용 전 원본 유지` : plan?.reason ?? "이동 거리를 입력하세요"));
+		scheduleRender();
+	};
+
 	const previewPortEquipmentGroupEditAtPointer = (
 		session: PortEquipmentGroupEditSession,
 		targetRow: number | null,
@@ -17083,6 +17123,13 @@ export default function TileFabApp(): React.ReactElement {
 		const blockedReason = editorMutationWaitBlockedReason();
 		if (blockedReason) {
 			setStatus(blockedReason);
+			scheduleRender();
+			return;
+		}
+		// A single-Port Apply confirms an explicit preview; it must never acquire a hover target.
+		if (session.scope === "port" && (targetRow === null || targetRow !== session.targetRow ||
+			!session.plan?.valid || session.plan.groupEdit.targetAnchorRow !== targetRow)) {
+			setStatus(stkPortMoveDistanceError ?? session.plan?.reason ?? "이동할 Port의 유효한 대상을 먼저 선택하세요");
 			scheduleRender();
 			return;
 		}
@@ -17144,7 +17191,7 @@ export default function TileFabApp(): React.ReactElement {
 	commitPortEquipmentGroupEditRef.current = (): void => {
 		const session = portEquipmentGroupEditSessionRef.current;
 		if (!session) return;
-		commitPortEquipmentGroupEdit(session, session.targetRow ?? hoverPortSlotRef.current);
+		commitPortEquipmentGroupEdit(session, session.scope === "port" ? session.targetRow : session.targetRow ?? hoverPortSlotRef.current);
 	};
 
 	nudgePortEquipmentGroupEditRef.current = (
@@ -17950,7 +17997,7 @@ export default function TileFabApp(): React.ReactElement {
 		const guidedReuseAnchorTarget =
 			appRootRef.current?.dataset.guidedPrimaryTarget === "canvas:inspect";
 		const portHit = portEquipmentAtWorld(pointer.world);
-		if (blockEqBodyDraftSelectionChange(portHit?.equipmentGroupId ?? null)) return false;
+		if (blockEqInspectorDraftSelectionChange(portHit?.equipmentGroupId ?? null)) return false;
 		clearAreaSelection();
 		if (portHit) {
 			if (guidedReuseAnchorTarget) guidedPrimaryFocusHandoffRef.current = true;
@@ -18064,7 +18111,7 @@ export default function TileFabApp(): React.ReactElement {
 		pointer: Readonly<{ cell: Cell; world: { x: number; y: number } }>,
 		tile: Cell,
 	): void => {
-		if (blockEqBodyDraftSelectionChange(null)) return;
+		if (blockEqInspectorDraftSelectionChange(null)) return;
 		const incoming = staticFabSelectionAtInspectTarget(pointer, tile);
 		if (!incoming) {
 			setStatus("Ctrl/⌘+클릭 위치에 선택할 레일 모듈 또는 장비 그룹이 없습니다");
@@ -18266,7 +18313,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startInspectAreaKeyboardSession = (): void => {
-		if (blockEqBodyDraftSelectionChange(null)) return;
+		if (blockEqInspectorDraftSelectionChange(null)) return;
 		if (toolRef.current !== "inspect" || editorActivityRef.current !== "inspect") {
 			if (!chooseExplicitEditorTool("inspect")) return;
 		}
@@ -18708,7 +18755,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (event.shiftKey) {
-			if (blockEqBodyDraftSelectionChange(null)) return;
+			if (blockEqInspectorDraftSelectionChange(null)) return;
 			const selectionTile = pointer.cell;
 			clearTransientConstruction();
 			setTemplatePaletteOpen(false);
@@ -19125,7 +19172,7 @@ export default function TileFabApp(): React.ReactElement {
 					event.clientY - inspectDrag.startClientY,
 				) >= 3
 			) {
-				if (blockEqBodyDraftSelectionChange(null)) {
+				if (blockEqInspectorDraftSelectionChange(null)) {
 					inspectAreaDragRef.current = null;
 					scheduleRender();
 					return;
@@ -20568,6 +20615,7 @@ export default function TileFabApp(): React.ReactElement {
 		setSelectedPortEquipmentState(null);
 		setEquipmentDeletionRecovery(null);
 		handleEqBodyDraftChange(false);
+		handleEqRecipeDraftChange(false);
 		setOhbPlacementIntentState(null);
 		setPortEquipmentGroupEditSessionState(null);
 		setPortEquipmentMembershipEditSessionState(null);
@@ -21411,7 +21459,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const requestProjectAction = (action: PendingProjectAction): void => {
-		if (blockPendingLoopOrHistoryCommand()) {
+		if (blockEqInspectorDraftSelectionChange(null) || blockPendingLoopOrHistoryCommand()) {
 			if (action.kind === "new-profile-fab") {
 				const { prepared, evidence } = action.binding.evidence;
 				discardOpenFabFabPreparedProject(prepared, evidence);
@@ -22748,6 +22796,34 @@ export default function TileFabApp(): React.ReactElement {
 		scheduleRender();
 	};
 
+	const commitSelectedEqRecipe = (text: string, source: EqRecipeEditSource): string | null => {
+		const fail = (reason: string): string => { setStatus(reason); return reason; };
+		if (blockStaticFabExclusiveCommand()) return fail("현재 작업을 완료하거나 취소한 뒤 Recipe를 적용하세요");
+		const blocked = editorActivityTransitionBlockedReason();
+		if (blocked) return fail(blocked);
+		if (eqBodyDraftPendingRef.current) return fail("몸체 크기 입력을 적용하거나 취소하세요");
+		const { document: activeDocument, resolved, actions } = currentPortEquipmentActions();
+		const selection = selectedPortEquipmentRef.current;
+		if (activeDocument !== railDocument || editorModelRef.current.generation !== source.modelGeneration ||
+			activeDocument.map.getRevision() !== source.baseRevision || activeDocument.getPatchSequence() !== source.basePatchSequence ||
+			selection?.portId !== source.portId || selection.equipmentGroupId !== source.equipmentGroupId ||
+			resolved?.equipmentGroup.kind !== "EQ" || resolved.equipmentGroup.recipe !== source.recipe) {
+			return fail("프로젝트 또는 선택한 EQ가 변경되었습니다 · 입력 취소 후 Recipe를 다시 입력하세요");
+		}
+		if (!actions.editEqRecipe.allowed) return fail(actions.editEqRecipe.reason);
+		const plan = planEditEqRecipe(activeDocument.map, activeDocument.portEquipment, source, text,
+			source.baseRevision, source.basePatchSequence, activeDocument.organizations);
+		if (!activeDocument.commitPortEquipment(plan)) {
+			scheduleRender();
+			return fail(portEquipmentReasonLabel(plan.valid ? activeDocument.getLastCommandError() ?? "EQ Recipe를 적용할 수 없습니다" : plan.reason));
+		}
+		clearTransientConstruction();
+		setPortEquipmentSelection({ portId: source.portId, equipmentGroupId: source.equipmentGroupId });
+		syncModelUi(`EQ-${source.equipmentGroupId} Recipe를 적용했습니다`);
+		restoreCanvasFocusAfterAction();
+		return null;
+	};
+
 	const commitSelectedEqBodyDimensions = (
 		dimensions: EqBodyDimensions | null,
 		expectedSelection: PortEquipmentSelectionIdentity,
@@ -22874,7 +22950,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startSelectedPortEquipmentGroupEdit = (mode: PortEquipmentGroupEditMode, scope: "group" | "port" = "group"): void => {
-		if (blockEqBodyDraftSelectionChange(null)) return;
+		if (blockEqInspectorDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
@@ -22963,7 +23039,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const startSelectedPortEquipmentMembershipEdit = (initialMode: "membership" | "pitch" = "membership"): void => {
-		if (blockEqBodyDraftSelectionChange(null)) return;
+		if (blockEqInspectorDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const blocked = editorMutationWaitBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
@@ -24701,7 +24777,7 @@ export default function TileFabApp(): React.ReactElement {
 		tab: StaticFabNavigatorTab,
 		returnFocusTarget?: HTMLElement | null,
 	): void => {
-		if (blockEqBodyDraftSelectionChange(null)) return;
+		if (blockEqInspectorDraftSelectionChange(null)) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const transitionBlockedReason = editorActivityTransitionBlockedReason();
 		if (transitionBlockedReason) {
@@ -24995,7 +25071,7 @@ export default function TileFabApp(): React.ReactElement {
 	}
 
 	function selectEquipmentProcessLoopRailForRegistration(): void {
-		if (blockEqBodyDraftSelectionChange(null) || blockStaticFabExclusiveCommand()) return;
+		if (blockEqInspectorDraftSelectionChange(null) || blockStaticFabExclusiveCommand()) return;
 		const blocked = editorActivityTransitionBlockedReason();
 		if (blocked) { setStatus(blocked); return; }
 		const model = editorModelRef.current;
@@ -25016,6 +25092,22 @@ export default function TileFabApp(): React.ReactElement {
 			const input = document.querySelector<HTMLInputElement>('[data-testid="standalone-process-loop-name"]');
 			input?.scrollIntoView({ block: "nearest" }); input?.focus({ preventScroll: true });
 		});
+	}
+
+	function chooseSelectionEquipmentScope(scope: "rail" | "attached-equipment"): void {
+		if (blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const model = editorModelRef.current;
+		const selection = staticFabSelectionRef.current;
+		if (!selection || selection.rail !== areaSelectionRef.current || areaSelectionProvenanceRef.current !== "ad-hoc") return;
+		const result = resolveStaticFabSelectionEquipmentScope(model.map, model.ownership,
+			model.document.portEquipment, model.document.getPatchSequence(), selection, scope);
+		if (!result.valid) { setStatus(result.reason); return; }
+		updateStaticFabSelection(result.selection);
+		setStatus(`레일 범위 유지 · 장비 ${result.selection.equipmentGroups.length}개 선택 · 문서는 변경되지 않았습니다${
+			result.partialGroupIds.length ? ` · 경계에 걸친 장비 ${result.partialGroupIds.length}개 제외` : ""}`);
+		scheduleRender();
 	}
 
 	function selectProcessLoopRailOnly(): void {
@@ -28792,8 +28884,9 @@ export default function TileFabApp(): React.ReactElement {
 					"MY BLUEPRINT",
 				);
 			}
-			setStatus("단일 모듈 복사 기록의 청사진 보관은 아직 지원하지 않습니다");
-			return null;
+			const prepared = prepareRailModuleBlueprint(clipboard.template);
+			if (!prepared.valid) { setStatus(prepared.reason); return null; }
+			return areaContextualBlueprintCapture(prepared.template, null, "recent", clipboard.template.grammar);
 		}
 		const organizationGhost = organizationBundlePlacementSessionRef.current;
 		const areaGhost = areaStampSessionRef.current;
@@ -32654,6 +32747,9 @@ export default function TileFabApp(): React.ReactElement {
 		if (!startupReady || projectBusy || modelSyncPendingRef.current) {
 			return "프로젝트와 Worker 동기화가 끝난 뒤 3D 검사를 여세요";
 		}
+		if (eqRecipeDraftPendingRef.current || eqRecipeDraftPending) {
+			return "EQ Recipe 입력을 적용하거나 입력 취소한 뒤 3D 검사를 여세요";
+		}
 		if (eqBodyDraftPendingRef.current || eqBodyDraftPending) {
 			return "EQ 몸체 크기 입력을 적용하거나 입력 취소한 뒤 3D 검사를 여세요";
 		}
@@ -32832,7 +32928,7 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const prepareEditorActivityTransition = (next: EditorActivity): boolean => {
-		if (next !== editorActivityRef.current && blockEqBodyDraftSelectionChange(null)) return false;
+		if (next !== editorActivityRef.current && blockEqInspectorDraftSelectionChange(null)) return false;
 		if (blockStaticFabExclusiveCommand()) return false;
 		const blockedReason = editorActivityTransitionBlockedReason();
 		if (blockedReason) {
@@ -33270,7 +33366,7 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		const next = candidates[(Math.max(0, currentIndex) + 1) % candidates.length];
 		if (!next) return;
-		if (blockEqBodyDraftSelectionChange(next.equipmentGroupId)) return;
+		if (blockEqInspectorDraftSelectionChange(next.equipmentGroupId)) return;
 		nextPortEquipmentFocusPendingRef.current = true;
 		setPortEquipmentSelection(next);
 		setStatus(`장비 ${next.equipmentGroupId} · PORT-${next.portId} 선택`);
@@ -33695,6 +33791,15 @@ export default function TileFabApp(): React.ReactElement {
 			!blueprintLibraryOpen &&
 			!organizationLibraryOpen,
 	);
+	const selectionEquipmentScope = useMemo(() => {
+		if (!railAreaSelectionInspectorVisible || areaSelectionProvenance !== "ad-hoc" ||
+			!staticFabSelection || staticFabSelection.rail !== areaSelection) return null;
+		return resolveStaticFabSelectionEquipmentScope(editorModel.map, editorModel.ownership,
+			editorModel.document.portEquipment, editorModel.document.getPatchSequence(), staticFabSelection, "attached-equipment");
+	}, [railAreaSelectionInspectorVisible, areaSelectionProvenance, staticFabSelection, areaSelection, editorModel]);
+	const selectionEquipmentScopeMatches = selectionEquipmentScope?.valid && staticFabSelection &&
+		selectionEquipmentScope.selection.equipmentGroups.length === staticFabSelection.equipmentGroups.length &&
+		selectionEquipmentScope.selection.equipmentGroups.every((item, index) => item.group.id === staticFabSelection.equipmentGroups[index]?.group.id);
 	const translationEntryReason = useMemo(() => {
 		if (!railAreaSelectionInspectorVisible) return null;
 		if (modelSyncPending || projectBusy) return "프로젝트와 Worker가 준비될 때까지 기다리세요";
@@ -39967,6 +40072,9 @@ export default function TileFabApp(): React.ReactElement {
 						portEquipmentGroupEditSession={portEquipmentGroupEditSession}
 						portEquipmentGroupEditSource={portEquipmentGroupEditSource}
 						portEquipmentGroupEditState={portEquipmentGroupEditState}
+						moveDistance={stkPortMoveDistanceDraft}
+						moveDistanceError={stkPortMoveDistanceError}
+						onMoveDistanceChange={chooseStkPortMoveDistance}
 					/>
 				) : equipmentWorkspaceActive && activePortAuthoringType && activePortAuthoringPresentation ? (
 					<PortEquipmentPlacementWorkspace
@@ -40237,6 +40345,24 @@ export default function TileFabApp(): React.ReactElement {
 									</button>
 								) : null}
 							</div>
+							{selectionEquipmentScope ? (
+								<div className="tilefab-selection-equipment-scope" data-testid="selection-equipment-scope">
+									<small>레일 범위 유지 · 청사진·복제에 포함할 장비</small>
+									<div className="tilefab-selection-edit-actions">
+										<button type="button" className="tilefab-selection-edit-button" data-testid="selection-scope-rail"
+											aria-pressed={staticFabEquipmentGroupCount === 0}
+											disabled={editorMutationWaitActive || modelSyncPending || projectBusy || !selectionEquipmentScope.valid}
+											onClick={() => chooseSelectionEquipmentScope("rail")}>레일만</button>
+										<button type="button" className="tilefab-selection-edit-button" data-testid="selection-scope-equipment"
+											aria-pressed={Boolean(selectionEquipmentScopeMatches && staticFabEquipmentGroupCount > 0)}
+											disabled={editorMutationWaitActive || modelSyncPending || projectBusy || !selectionEquipmentScope.valid || selectionEquipmentScope.selection.equipmentGroups.length === 0}
+											onClick={() => chooseSelectionEquipmentScope("attached-equipment")}>범위 안 장비 포함{selectionEquipmentScope.valid ? ` · ${selectionEquipmentScope.selection.equipmentGroups.length}` : ""}</button>
+									</div>
+									{!selectionEquipmentScope.valid ? <p className="tilefab-selection-edit-reason">{selectionEquipmentScope.reason}</p> : selectionEquipmentScope.partialGroupIds.length > 0 ? (
+										<p className="tilefab-selection-edit-reason" data-testid="selection-scope-partial">경계에 걸친 장비 {selectionEquipmentScope.partialGroupIds.length}개는 제외합니다. 모든 Port의 레일을 선택하면 포함할 수 있습니다.</p>
+									) : null}
+								</div>
+							) : null}
 							{translationEntryReason ? (
 								<p id="tilefab-translation-entry-reason" className="tilefab-selection-edit-reason" data-testid="static-fab-translation-entry-reason">
 									이동: {translationEntryReason}
@@ -40762,8 +40888,16 @@ export default function TileFabApp(): React.ReactElement {
 
 				{selectedPortDetails && selectedEquipmentGroup && portEquipmentInspectorVisible ? (
 					<PortEquipmentInspector
+						eqRecipeSource={selectedEquipmentGroup.kind === "EQ" && selectedPortEquipment ? {
+							...selectedPortEquipment, modelGeneration: editorModel.generation,
+							baseRevision: railDocument.map.getRevision(), basePatchSequence: railDocument.getPatchSequence(), recipe: selectedEquipmentGroup.recipe,
+						} : null}
+						eqBodyDraftPending={eqBodyDraftPending}
+						eqRecipeDraftPending={eqRecipeDraftPending}
+						onEqRecipeDraftChange={handleEqRecipeDraftChange}
+						commitSelectedEqRecipe={commitSelectedEqRecipe}
 						onEqBodyDraftChange={handleEqBodyDraftChange}
-						key={editorModel.generation}
+						key={eqRecipeDraftGeneration ?? editorModel.generation}
 						commitSelectedEqBodyDimensions={commitSelectedEqBodyDimensions}
 						organizations={activeOrganizations}
 						activePortEquipment={activePortEquipment}
@@ -40771,7 +40905,7 @@ export default function TileFabApp(): React.ReactElement {
 						canvasRef={canvasRef}
 						chooseGuidedEquipmentTool={chooseGuidedEquipmentTool}
 						clearPortEquipmentSelection={() => {
-							if (!blockEqBodyDraftSelectionChange(null)) clearPortEquipmentSelection();
+							if (!blockEqInspectorDraftSelectionChange(null)) clearPortEquipmentSelection();
 						}}
 						commitSelectedEquipmentProcessLoopMembership={commitSelectedEquipmentProcessLoopMembership}
 						compactInspectorCloseRef={compactInspectorCloseRef}

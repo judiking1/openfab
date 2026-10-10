@@ -6818,6 +6818,13 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	font-weight: 700;
 }
 
+.tilefab-blueprint-place .tilefab-blueprint-unavailable {
+	color: #d2bb91;
+	line-height: 1.4;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
 .tilefab-blueprint-list article[data-kind="STATIC_FAB"] {
 	border-left: 2px solid #4f9f99;
 }
@@ -14663,7 +14670,54 @@ button.tilefab-action-hint[data-guided-target="true"] {
 	overflow-wrap: anywhere;
 }
 
+.tilefab-selection-equipment-scope {
+	display: grid;
+	gap: 5px;
+	margin-top: 10px;
+	color: #bed0d0;
+}
+
+.tilefab-selection-equipment-scope .tilefab-selection-edit-button[aria-pressed="true"] {
+	border-color: #69bfc4;
+	background: #264345;
+}
+
+.tilefab-stk-port-distance {
+	display: grid;
+	flex: 0 0 185px;
+	gap: 3px;
+	color: #d7e5e5;
+	font-size: 11px;
+}
+
+.tilefab-stk-port-distance input {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	min-height: 44px;
+	padding: 6px 10px;
+	border: 1px solid #577578;
+	border-radius: 4px;
+	background: #102125;
+	color: #fff;
+	font: inherit;
+	font-size: 16px;
+}
+
+.tilefab-stk-port-distance input[aria-invalid="true"] {
+	border-color: #ff9aa1;
+}
+
 @media (max-width: 860px) {
+	.tilefab-equipment-transformbar.tilefab-equipment-group-transformbar[data-scope="port"] {
+		max-height: min(360px, calc(100dvh - 180px));
+		overflow-y: auto;
+	}
+
+	.tilefab-stk-port-distance {
+		flex: 1 0 100%;
+	}
+
 	.tilefab-inspector[data-compact-layout="bottom-sheet"][data-compact-expanded="true"]:has(
 			.tilefab-selection-edit
 		) {

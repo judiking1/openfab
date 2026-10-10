@@ -7,6 +7,7 @@ import {
 import { createCooperativeTask } from "./CooperativeTask";
 import { resolveEqBodyEditTransition } from "./EqBodyEdit";
 import { resolveEqPitchEditTransition } from "./EqPitchEdit";
+import { resolveEqRecipeEditTransition } from "./EqRecipeEdit";
 import {
 	applyPortEquipmentAdditionsCooperatively,
 	applyPortEquipmentMutations,
@@ -4175,8 +4176,16 @@ export class RailDocument {
 			effectiveEquipmentGroupChanges,
 		);
 		if (pitchEdit?.reason) throw new Error(pitchEdit.reason);
+		const recipeEdit = resolveEqRecipeEditTransition(
+			this.currentOrganizations,
+			this.currentPortEquipment,
+			nextPortEquipment,
+			effectivePortChanges,
+			effectiveEquipmentGroupChanges,
+		);
+		if (recipeEdit?.reason) throw new Error(recipeEdit.reason);
 		if (
-			(serviceDirection || bodyEdit || pitchEdit) &&
+			(serviceDirection || bodyEdit || pitchEdit || recipeEdit) &&
 			(effectiveChanges.length > 0 ||
 				effectiveSwitchChanges.length > 0 ||
 				effectiveOrganizationChanges.length > 0 ||
@@ -4185,7 +4194,7 @@ export class RailDocument {
 				organizationImpactAuthorizations.length > 0)
 		) {
 			throw new Error(
-				`${pitchEdit ? "EQ Port 간격 편집" : bodyEdit ? "EQ 몸체 크기 편집" : "서비스 방향 반전"}은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다`,
+				`${recipeEdit ? "EQ Recipe 편집" : pitchEdit ? "EQ Port 간격 편집" : bodyEdit ? "EQ 몸체 크기 편집" : "서비스 방향 반전"}은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다`,
 			);
 		}
 		assertPortEquipmentLayout(resolvedNextMap, nextPortEquipment);
@@ -4211,6 +4220,7 @@ export class RailDocument {
 		// Recompute this narrow port-only exemption from the current source, never from UI state
 		// or an authorization carried by the plan. History reversal is checked identically.
 		const loopEdit =
+			recipeEdit ??
 			pitchEdit ??
 			bodyEdit ??
 			serviceDirection ??

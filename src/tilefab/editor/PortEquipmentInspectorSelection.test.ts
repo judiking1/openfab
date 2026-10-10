@@ -98,6 +98,20 @@ describe("PortEquipmentInspectorSelection", () => {
 		);
 		expect(wrapped?.props["aria-label"]).toBe("다음 Port 이동 · PORT-4");
 	});
+	it("exposes explicit EQ Recipe Apply/Cancel only in editable 2D", () => {
+		const state = eqState();
+		const selected = resolveEditablePortEquipmentSelection(state, selection());
+		if (!selected) throw Error("Expected EQ");
+		const props = inspectorProps(state, selected);
+		const markup = renderToStaticMarkup(createElement(PortEquipmentInspector, props));
+		expect(markup).toContain('data-testid="eq-recipe-input"');
+		expect(markup).toContain('maxLength="120"');
+		expect(markup).toContain('data-testid="apply-eq-recipe"');
+		expect(markup).toContain('data-testid="cancel-eq-recipe"');
+		expect(
+			renderToStaticMarkup(createElement(PortEquipmentInspector, { ...props, viewMode: "3d" })),
+		).not.toContain('data-testid="eq-recipe-input"');
+	});
 	it("opens EQ pitch directly from the selected Port without applying an edit", () => {
 		const state = eqState();
 		const selected = resolveEditablePortEquipmentSelection(state, selection());
@@ -288,6 +302,7 @@ describe("PortEquipmentInspectorSelection", () => {
 			const ordered = [actions.move, actions.copy, actions.editMembership, actions.delete];
 			expect(actions.reverseServiceDirection).toEqual(actions.move);
 			expect(actions.editEqBody.allowed).toBe(group.kind === "EQ" && !directlyOwned);
+			expect(actions.editEqRecipe.allowed).toBe(group.kind === "EQ" && !directlyOwned);
 			expect(ordered.map((action) => action.allowed)).toEqual(directlyOwned ? owned : unowned);
 			expect(Object.isFrozen(actions)).toBe(true);
 			for (const action of ordered) {
@@ -669,6 +684,7 @@ describe("PortEquipmentInspector same-Loop editing", () => {
 		expect(actions.move.allowed).toBe(true);
 		expect(actions.reverseServiceDirection.allowed).toBe(true);
 		expect(actions.editEqBody.allowed).toBe(kind === "EQ");
+		expect(actions.editEqRecipe.allowed).toBe(kind === "EQ");
 		expect(actions.copy.allowed).toBe(true);
 		expect(actions.editMembership.allowed).toBe(kind !== "OHB");
 		expect(actions.delete).toMatchObject({ allowed: false, code: "DIRECTLY_OWNED" });
@@ -980,6 +996,20 @@ function inspectorProps(
 ): PortEquipmentInspectorProps {
 	const noop = (): void => undefined;
 	return {
+		eqRecipeSource:
+			selected.equipmentGroup.kind === "EQ"
+				? {
+						...selection(),
+						modelGeneration: 1,
+						baseRevision: 0,
+						basePatchSequence: 0,
+						recipe: selected.equipmentGroup.recipe,
+					}
+				: null,
+		eqBodyDraftPending: false,
+		eqRecipeDraftPending: false,
+		onEqRecipeDraftChange: noop,
+		commitSelectedEqRecipe: () => null,
 		activePortEquipment: state,
 		onEqBodyDraftChange: noop,
 		bindCompactInspectorDisclosure: noop,

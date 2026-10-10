@@ -49,6 +49,7 @@ import {
 	editorCommandAriaKeyShortcuts,
 	editorCommandMatchesKeyboard,
 } from "./EditorCommandRegistry";
+import { EqRecipeEditor } from "./EqRecipeEditor";
 import type { EquipmentAuthoringContinuation } from "./EquipmentAuthoringContinuation";
 import {
 	equipmentAuthoringContinuation,
@@ -58,6 +59,7 @@ import { scrollFocusedInspectorDisclosure } from "./InspectorDisclosureFocus";
 import type { OrdinaryCompletedModuleHandoffPresentation } from "./OrdinaryCompletedModuleHandoff";
 import type { OrdinaryEqToStkHandoffPresentation } from "./OrdinaryEqToStkHandoff";
 import { ORDINARY_STK_HANDOFF_ENTRY_STATUS } from "./OrdinaryEqToStkHandoff";
+import type { EqRecipeEditSource } from "./PortEquipmentInspectorSelection";
 import {
 	type PortEquipmentActionDecision,
 	type PortEquipmentSelectionIdentity,
@@ -68,6 +70,11 @@ import {
 import { portEquipmentTransformPolicy } from "./PortEquipmentTransformPolicy";
 
 export interface PortEquipmentInspectorProps {
+	readonly eqRecipeSource: EqRecipeEditSource | null;
+	readonly eqBodyDraftPending: boolean;
+	readonly eqRecipeDraftPending: boolean;
+	readonly onEqRecipeDraftChange: (hasDraft: boolean) => void;
+	readonly commitSelectedEqRecipe: (text: string, source: EqRecipeEditSource) => string | null;
 	readonly onEqBodyDraftChange: (hasDraft: boolean) => void;
 	readonly commitSelectedEqBodyDimensions: (
 		dimensions: EqBodyDimensions | null,
@@ -145,6 +152,11 @@ export interface PortEquipmentInspectorProps {
 }
 
 export function PortEquipmentInspector({
+	eqRecipeSource,
+	eqBodyDraftPending,
+	eqRecipeDraftPending,
+	onEqRecipeDraftChange,
+	commitSelectedEqRecipe,
 	onEqBodyDraftChange,
 	commitSelectedEqBodyDimensions,
 	organizations,
@@ -666,10 +678,33 @@ export function PortEquipmentInspector({
 								group={selectedEquipmentGroup}
 								selection={selectedPortEquipment}
 								disabled={
-									!actions.editEqBody.allowed || modelSyncPending || workerState.status !== "ready"
+									!actions.editEqBody.allowed ||
+									eqRecipeDraftPending ||
+									modelSyncPending ||
+									workerState.status !== "ready"
 								}
 								reason={actions.editEqBody.reason}
 								commit={commitSelectedEqBodyDimensions}
+							/>
+						) : null}
+						{selectedEquipmentGroup.kind === "EQ" && eqRecipeSource ? (
+							<EqRecipeEditor
+								key={selectedEquipmentGroup.id}
+								group={selectedEquipmentGroup}
+								source={eqRecipeSource}
+								disabled={
+									!actions.editEqRecipe.allowed ||
+									eqBodyDraftPending ||
+									modelSyncPending ||
+									workerState.status !== "ready"
+								}
+								reason={
+									eqBodyDraftPending
+										? "몸체 크기 입력을 적용하거나 취소하세요"
+										: actions.editEqRecipe.reason
+								}
+								onDraftChange={onEqRecipeDraftChange}
+								commit={commitSelectedEqRecipe}
 							/>
 						) : null}
 						{primaryProcessLoopAction}

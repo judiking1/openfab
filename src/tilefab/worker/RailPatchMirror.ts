@@ -21,6 +21,7 @@ import {
 } from "../core/AdvancedSwitch";
 import { resolveEqBodyEditTransition } from "../core/EqBodyEdit";
 import { resolveEqPitchEditTransition } from "../core/EqPitchEdit";
+import { resolveEqRecipeEditTransition } from "../core/EqRecipeEdit";
 import {
 	applyPortEquipmentMutations,
 	emptyPortEquipmentState,
@@ -617,8 +618,16 @@ export class RailPatchMirror {
 				patch.equipmentGroupChanges,
 			);
 			if (pitchEdit?.reason) throw new Error(pitchEdit.reason);
+			const recipeEdit = resolveEqRecipeEditTransition(
+				this.mirroredOrganizations,
+				this.mirroredPortEquipment,
+				nextPortEquipment,
+				patch.portChanges,
+				patch.equipmentGroupChanges,
+			);
+			if (recipeEdit?.reason) throw new Error(recipeEdit.reason);
 			if (
-				(serviceDirection || bodyEdit || pitchEdit) &&
+				(serviceDirection || bodyEdit || pitchEdit || recipeEdit) &&
 				(railMutationCount > 0 ||
 					patch.organizationChanges.length > 0 ||
 					patch.relationshipChanges.length > 0 ||
@@ -626,7 +635,7 @@ export class RailPatchMirror {
 					organizationImpactAuthorizations.length > 0)
 			) {
 				throw new Error(
-					`${pitchEdit ? "EQ Port 간격 편집" : bodyEdit ? "EQ 몸체 크기 편집" : "서비스 방향 반전"}은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다`,
+					`${recipeEdit ? "EQ Recipe 편집" : pitchEdit ? "EQ Port 간격 편집" : bodyEdit ? "EQ 몸체 크기 편집" : "서비스 방향 반전"}은 다른 레일·조직·설정 변경과 함께 적용할 수 없습니다`,
 				);
 			}
 			if (railMutationCount > 0) {
@@ -660,6 +669,7 @@ export class RailPatchMirror {
 			}
 			// The mirror independently proves same-Loop containment; no new transport permit is trusted.
 			const loopEdit =
+				recipeEdit ??
 				pitchEdit ??
 				bodyEdit ??
 				serviceDirection ??

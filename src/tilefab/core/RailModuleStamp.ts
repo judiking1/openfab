@@ -1,6 +1,11 @@
 import type { AdvancedSwitchPlan, AdvancedSwitchPlanningMap } from "./AdvancedSwitchPlanner";
 import { planAdvancedSwitch } from "./AdvancedSwitchPlanner";
 import { planRailPath, type RailConstructionPlan } from "./paint";
+import {
+	initialRailAreaStampPose,
+	type RailAreaStampTemplate,
+	transformRailAreaStampTemplate,
+} from "./RailAreaStamp";
 import type { RailConstructionCatalogId } from "./RailConstructionCatalog";
 import {
 	type RailConstructionGrammar,
@@ -20,7 +25,7 @@ import {
 	moveCell,
 	oppositeDirection,
 } from "./railShape";
-import type { Cell } from "./TileMap";
+import { type Cell, TileMap } from "./TileMap";
 
 export interface RailModuleStampOffset {
 	readonly longitudinal: number;
@@ -94,6 +99,64 @@ export function createRailModuleStampTemplate(
 
 export function initialRailModuleStampPose(template: RailModuleStampTemplate): RailModuleStampPose {
 	return Object.freeze({ forward: template.sourceForward, side: template.sourceSide });
+}
+
+/** Convert the fixed clipboard path, without consulting or recapturing any live document. */
+export function prepareRailModuleBlueprint(
+	template: RailModuleStampTemplate,
+):
+	| Readonly<{ valid: true; template: RailAreaStampTemplate }>
+	| Readonly<{ valid: false; reason: string }> {
+	const fail = (reason: string) => Object.freeze({ valid: false as const, reason });
+	if (template.sourceKind === "advanced-switch" || template.advancedSwitchProfile !== null)
+		return fail("고급 스위치는 별도 스위치 데이터가 필요해 보관할 수 없습니다");
+	if (template.sourceKind === "turnout" || template.anchorRole === "junction")
+		return fail("분기·합류는 부착 본선이 필요해 단일 모듈로 보관할 수 없습니다");
+	const grammar = {
+		straight: "straight-1-5m",
+		turn: "r500-turn",
+		"u-turn": "u-turn",
+		shift: "shift",
+	}[template.sourceKind];
+	if (template.anchorRole !== "entry" || template.grammar !== grammar)
+		return fail("이 모듈의 부착 조건은 현재 청사진으로 보관할 수 없습니다");
+	try {
+		const plan = planRailModuleStamp(
+			new TileMap(),
+			template,
+			{ x: 0, y: 0 },
+			initialRailModuleStampPose(template),
+		);
+		if (!plan.valid) return fail(`모듈 경로를 보관할 수 없습니다 · ${plan.reason}`);
+		const xs = plan.cells.map((cell) => cell.x),
+			ys = plan.cells.map((cell) => cell.y);
+		const edges = plan.cells.slice(1).map((to, index) =>
+			Object.freeze({
+				from: Object.freeze({ ...(plan.cells[index] as Cell) }),
+				to: Object.freeze({ ...to }),
+			}),
+		);
+		// The area transform normalizes and validates exact directed topology; no host rail is added.
+		const area = transformRailAreaStampTemplate(
+			Object.freeze({
+				sourceRevision: 0,
+				sourceModuleKeys: Object.freeze([template.sourceKey]),
+				sourceModuleCount: 1,
+				sourceEdgeCount: edges.length,
+				sourceWidthMeters: Math.max(...xs) - Math.min(...xs),
+				sourceHeightMeters: Math.max(...ys) - Math.min(...ys),
+				edges: Object.freeze(edges),
+			}),
+			initialRailAreaStampPose(),
+		);
+		return Object.freeze({ valid: true, template: area });
+	} catch (error) {
+		return fail(
+			error instanceof Error
+				? `모듈 경로를 보관할 수 없습니다 · ${error.message}`
+				: "모듈 경로를 보관할 수 없습니다",
+		);
+	}
 }
 
 export function rotateRailModuleStampPose(

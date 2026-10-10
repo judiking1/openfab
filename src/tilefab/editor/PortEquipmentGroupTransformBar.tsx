@@ -30,6 +30,9 @@ export interface PortEquipmentGroupTransformBarProps {
 	}>;
 	readonly portEquipmentGroupEditSource: Pick<EquipmentGroupRecord, "portIds"> | null | undefined;
 	readonly portEquipmentGroupEditState: "choose" | "valid" | "invalid";
+	readonly moveDistance: string;
+	readonly moveDistanceError: string | null;
+	readonly onMoveDistanceChange: (text: string) => void;
 }
 
 export function PortEquipmentGroupTransformBar({
@@ -40,6 +43,9 @@ export function PortEquipmentGroupTransformBar({
 	portEquipmentGroupEditSession,
 	portEquipmentGroupEditSource,
 	portEquipmentGroupEditState,
+	moveDistance,
+	moveDistanceError,
+	onMoveDistanceChange,
 }: PortEquipmentGroupTransformBarProps): ReactNode {
 	const plan = portEquipmentGroupEditSession.plan;
 	const singlePort = portEquipmentGroupEditSession.scope === "port";
@@ -64,7 +70,7 @@ export function PortEquipmentGroupTransformBar({
 			data-port-type={portEquipmentGroupEditSession.portType}
 			data-mode={portEquipmentGroupEditSession.mode}
 			data-scope={singlePort ? "port" : "group"}
-			data-state={portEquipmentGroupEditState}
+			data-state={moveDistanceError ? "invalid" : portEquipmentGroupEditState}
 			data-eligible-process-loop-ids={
 				portEquipmentGroupEditSession.eligibleProcessLoopIds?.join(",") ?? ""
 			}
@@ -84,16 +90,34 @@ export function PortEquipmentGroupTransformBar({
 					</>
 				)}
 			</strong>
+			{singlePort ? (
+				<label className="tilefab-stk-port-distance">
+					<span>원래 위치에서 이동 (m)</span>
+					<input
+						type="text"
+						inputMode="text"
+						value={moveDistance}
+						disabled={busy}
+						data-testid="stk-port-move-distance"
+						aria-label="Port 이동 거리 미터"
+						aria-invalid={Boolean(moveDistanceError)}
+						aria-describedby="stk-port-distance-help"
+						onChange={(event) => onMoveDistanceChange(event.target.value)}
+					/>
+					<small id="stk-port-distance-help">진행 방향 + · 반대 방향 − · 정수 입력</small>
+				</label>
+			) : null}
 			<div className="tilefab-equipment-transform-state">
-				{portEquipmentGroupEditState === "valid"
-					? singlePort
-						? "이동 가능 · 다른 Port 유지"
-						: "배치 가능"
-					: portEquipmentGroupEditState === "invalid"
-						? (feedback?.reason ?? "배치할 수 없습니다")
-						: singlePort
-							? "몸체 길이 유지 · 같은 직선에서 위치 선택"
-							: "대상 위치 선택"}
+				{moveDistanceError ??
+					(portEquipmentGroupEditState === "valid"
+						? singlePort
+							? "이동 가능 · 다른 Port 유지"
+							: "배치 가능"
+						: portEquipmentGroupEditState === "invalid"
+							? (feedback?.reason ?? "배치할 수 없습니다")
+							: singlePort
+								? "몸체 길이 유지 · 같은 직선에서 위치 선택"
+								: "대상 위치 선택")}
 				{coordinates ? (
 					<small
 						className="tilefab-equipment-group-loop-preview"
@@ -136,7 +160,7 @@ export function PortEquipmentGroupTransformBar({
 					type="button"
 					className="tilefab-placement-apply"
 					data-testid="apply-port-equipment-group"
-					disabled={busy || portEquipmentGroupEditState !== "valid"}
+					disabled={busy || Boolean(moveDistanceError) || portEquipmentGroupEditState !== "valid"}
 					aria-keyshortcuts="Enter"
 					onClick={onApply}
 				>
