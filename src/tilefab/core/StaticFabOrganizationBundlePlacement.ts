@@ -18,6 +18,7 @@ import {
 	canonicalEquipmentGroupPortIds,
 	equipmentGroupPortBarcode,
 } from "./EquipmentGroupPortOrder";
+import { unreachableEquipmentKind } from "./EquipmentKind";
 import { OrderedTypedChecksum } from "./OrderedTypedChecksum";
 import { allocatePortEquipmentRecordIds } from "./PortEquipmentIdAllocator";
 import { portEquipmentLayoutError } from "./PortEquipmentLayoutValidator";
@@ -1588,7 +1589,10 @@ function instantiateEquipmentGroup(
 			portIds: canonicalIds,
 		});
 	}
-	return Object.freeze({ id, kind: "STK", template: template.template, portIds: canonicalIds });
+	if (template.kind === "STK") {
+		return Object.freeze({ id, kind: "STK", template: template.template, portIds: canonicalIds });
+	}
+	return unreachableEquipmentKind(template);
 }
 
 function allocateSwitchIds(map: TileMap, count: number): readonly number[] {

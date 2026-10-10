@@ -582,6 +582,42 @@
 }
 .tilefab-app[data-authoring-layout="unified"]
 	.tilefab-active-authoring-workspace
+	.tilefab-readiness[data-check-repair-chooser="true"] {
+	height: min(520px, 60dvh);
+	max-height: 60dvh;
+	overflow: hidden;
+	flex-wrap: nowrap;
+}
+/* Connector review uses the workspace width, not the old full-canvas bottom bar. */
+.tilefab-app[data-authoring-layout="unified"] .tilefab-active-authoring-workspace
+	.tilefab-assembly-connector {
+	display: flex;
+	flex-direction: column;
+	flex-wrap: nowrap;
+	gap: 8px;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	:is(.tilefab-assembly-connector-gateways, .tilefab-assembly-connector-status) {
+	grid-template-columns: minmax(0, 1fr);
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-assembly-connector-direction {
+	display: none;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	:is(.tilefab-assembly-connector-actions, .tilefab-assembly-connector-result) {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-assembly-connector-cues {
+	grid-column: 1 / -1;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
 	.tilefab-buildbar {
 	display: flex;
 	flex-direction: column;
@@ -599,6 +635,27 @@
 	.tilefab-buildbar.tilefab-equipment-membershipbar[data-edit-mode="pitch"] {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
+}
+/* Copy controls stay in one column even when the mobile handoff has a row flex basis. */
+.tilefab-app[data-authoring-layout="unified"] .tilefab-active-authoring-workspace
+	.tilefab-buildbar:has(> .tilefab-area-stamp-auto-pose) {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-buildbar:has(> .tilefab-area-stamp-auto-pose)
+	> * {
+	min-width: 0;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-buildbar:has(> .tilefab-area-stamp-auto-pose)
+	.tilefab-multi-place-status {
+	height: auto;
+	min-height: 44px;
+	flex-wrap: wrap;
+	white-space: normal;
 }
 .tilefab-app[data-authoring-layout="unified"]
 	.tilefab-active-authoring-workspace

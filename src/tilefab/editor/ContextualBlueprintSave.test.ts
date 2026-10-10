@@ -1,10 +1,68 @@
 import { describe, expect, it } from "vitest";
+import type { RailAreaStampTemplate } from "../core/RailAreaStamp";
 import {
+	contextualBlueprintConnectivityLabel,
+	contextualBlueprintSaveConnectivity,
 	normalizeContextualBlueprintName,
 	validateContextualBlueprintSaveDraft,
 } from "./ContextualBlueprintSave";
 
 describe("ContextualBlueprintSave", () => {
+	it("reports the captured directed graph without treating open partial rails as invalid metadata", () => {
+		const template = railTemplate([
+			[0, 0],
+			[1, 0],
+			[2, 0],
+			[3, 0],
+			[4, 0],
+		]);
+		const before = JSON.stringify(template);
+		const graph = contextualBlueprintSaveConnectivity(template);
+		expect(graph).toMatchObject({ openPaths: 2, invalidPaths: 0, stronglyConnected: false });
+		expect(contextualBlueprintConnectivityLabel(graph)).toContain("열린 경로 2개");
+		expect(
+			validateContextualBlueprintSaveDraft({
+				name: "Partial rail",
+				folder: "",
+				destination: "project",
+				quickSlot: null,
+			}).valid,
+		).toBe(true);
+		expect(JSON.stringify(template)).toBe(before);
+	});
+
+	it("distinguishes one directed component from disconnected closed loops and reanalyzes each capture", () => {
+		const cells: [number, number][] = [];
+		for (let x = 0; x < 4; x++) cells.push([x, 0]);
+		for (let y = 0; y < 4; y++) cells.push([4, y]);
+		for (let x = 4; x > 0; x--) cells.push([x, 4]);
+		for (let y = 4; y >= 0; y--) cells.push([0, y]);
+		const loop = railTemplate(cells);
+		const closed = contextualBlueprintSaveConnectivity(loop);
+		expect(closed).toMatchObject({
+			openPaths: 0,
+			invalidPaths: 0,
+			strongComponents: 1,
+			stronglyConnected: true,
+		});
+		const disconnected = {
+			...loop,
+			edges: [
+				...loop.edges,
+				...loop.edges.map(({ from, to }) => ({
+					from: { x: from.x + 12, y: from.y },
+					to: { x: to.x + 12, y: to.y },
+				})),
+			],
+		};
+		expect(contextualBlueprintSaveConnectivity(disconnected)).toMatchObject({
+			openPaths: 0,
+			strongComponents: 2,
+			stronglyConnected: false,
+		});
+		expect(contextualBlueprintSaveConnectivity(loop)).toEqual(closed);
+	});
+
 	it("normalizes a folder and retains an available browser-local quick slot", () => {
 		expect(
 			validateContextualBlueprintSaveDraft({
@@ -91,3 +149,17 @@ describe("ContextualBlueprintSave", () => {
 		expect(normalizeContextualBlueprintName("A".repeat(100))).toHaveLength(80);
 	});
 });
+
+function railTemplate(cells: readonly (readonly [number, number])[]): RailAreaStampTemplate {
+	return {
+		sourceRevision: 1,
+		sourceModuleKeys: [],
+		sourceModuleCount: 1,
+		sourceEdgeCount: cells.length - 1,
+		sourceWidthMeters: 4,
+		sourceHeightMeters: 4,
+		edges: cells
+			.slice(1)
+			.map(([x, y], i) => ({ from: { x: cells[i][0], y: cells[i][1] }, to: { x, y } })),
+	};
+}

@@ -20,6 +20,7 @@ import {
 	STK_AUTHORING_TEMPLATES,
 	type StkAuthoringTemplate,
 } from "./EquipmentGroup";
+import { unreachableEquipmentKind } from "./EquipmentKind";
 import { assertFrozenDataContainersSteps } from "./ImmutableDataContainers";
 import { validatePortEquipmentActivation } from "./PortEquipmentActivation";
 import { portEquipmentLayoutError } from "./PortEquipmentLayoutValidator";
@@ -1652,7 +1653,10 @@ function copyPortableEquipmentGroup(
 			portIndices,
 		});
 	}
-	return Object.freeze({ kind: "STK", template: group.template, portIndices });
+	if (group.kind === "STK") {
+		return Object.freeze({ kind: "STK", template: group.template, portIndices });
+	}
+	return unreachableEquipmentKind(group);
 }
 
 function copyPortableOrganizationProperties(
@@ -1706,10 +1710,13 @@ function portableEquipmentGroup(
 			portIndices,
 		});
 	}
-	if (!isStkAuthoringTemplate(group.template)) {
-		throw new Error("legacy CUSTOM STK 그룹은 portable 조직 번들로 캡처할 수 없습니다");
+	if (group.kind === "STK") {
+		if (!isStkAuthoringTemplate(group.template)) {
+			throw new Error("legacy CUSTOM STK 그룹은 portable 조직 번들로 캡처할 수 없습니다");
+		}
+		return Object.freeze({ kind: "STK", template: group.template, portIndices });
 	}
-	return Object.freeze({ kind: "STK", template: group.template, portIndices });
+	return unreachableEquipmentKind(group);
 }
 
 function runtimeEquipmentGroup(
@@ -1728,7 +1735,10 @@ function runtimeEquipmentGroup(
 			portIds,
 		};
 	}
-	return { id, kind: "STK", template: group.template, portIds };
+	if (group.kind === "STK") {
+		return { id, kind: "STK", template: group.template, portIds };
+	}
+	return unreachableEquipmentKind(group);
 }
 
 function runtimePortRecord(port: StaticFabOrganizationBundlePort, id: number): PortRecord {
@@ -1879,7 +1889,10 @@ function* portableOrganizationRootClosureErrorSteps(
 		: "EFFECTIVE 조직 번들에는 루트에서 도달할 수 없는 조직이 있습니다";
 }
 
-function reconstructPortableBundleMap(bundle: StaticFabOrganizationBundle): TileMap | string {
+/** Reconstruct the captured graph, including switches, without borrowing parent rail edges. */
+export function reconstructPortableBundleMap(
+	bundle: StaticFabOrganizationBundle,
+): TileMap | string {
 	return completeCooperativeSteps(reconstructPortableBundleMapSteps(bundle));
 }
 

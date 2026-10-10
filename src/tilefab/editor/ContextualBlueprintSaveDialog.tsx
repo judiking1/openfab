@@ -8,6 +8,7 @@ import {
 	type ContextualBlueprintSaveDraft,
 	type ContextualBlueprintSaveSourceSummary,
 	type ContextualBlueprintSaveValidation,
+	contextualBlueprintConnectivityLabel,
 	normalizeContextualBlueprintFolder,
 	normalizeContextualBlueprintName,
 } from "./ContextualBlueprintSave";
@@ -25,6 +26,7 @@ export interface ContextualBlueprintSaveDialogProps {
 	readonly onDestination: (destination: ContextualBlueprintSaveDestination) => void;
 	readonly onQuickSlot: (quickSlot: ContextualBlueprintQuickSlot | null) => void;
 	readonly onCancel: () => void;
+	readonly onChangeScope?: () => void;
 	readonly onSave: () => void;
 }
 
@@ -40,6 +42,7 @@ export function ContextualBlueprintSaveDialog({
 	onDestination,
 	onQuickSlot,
 	onCancel,
+	onChangeScope,
 	onSave,
 }: ContextualBlueprintSaveDialogProps) {
 	const backdropRef = useRef<HTMLDivElement | null>(null);
@@ -165,6 +168,28 @@ export function ContextualBlueprintSaveDialog({
 							? ` · 조직 ${source.organizationCount.toLocaleString()}개`
 							: ""}
 					</span>
+				</div>
+				<div
+					className="tilefab-contextual-save-connectivity"
+					data-testid="blueprint-capture-connectivity"
+				>
+					<p>
+						{contextualBlueprintConnectivityLabel(source.connectivity)}
+						<small className="tilefab-contextual-save-connectivity-note">
+							캡처 내부 연결만 확인 · 배치·기존 FAB 연결은 별도 검사
+						</small>
+					</p>
+					{onChangeScope ? (
+						<button
+							className="tilefab-contextual-save-change-scope"
+							type="button"
+							disabled={busy}
+							onClick={onChangeScope}
+							data-testid="change-blueprint-capture-scope"
+						>
+							범위 바꾸기
+						</button>
+					) : null}
 				</div>
 				<p
 					id="tilefab-contextual-save-project-note"

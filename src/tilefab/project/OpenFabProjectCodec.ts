@@ -16,6 +16,7 @@ import {
 	STK_AUTHORING_TEMPLATES,
 	STK_EQUIPMENT_TEMPLATES,
 } from "../core/EquipmentGroup";
+import { unreachableEquipmentKind } from "../core/EquipmentKind";
 import {
 	copyOperationalConfigurationState,
 	emptyOperationalConfigurationState,
@@ -1789,7 +1790,7 @@ function validateEquipmentGroup(value: unknown, path: string): OpenFabProjectEqu
 			recipe: group.recipe === null ? null : expectString(group.recipe, `${path}.recipe`),
 			...validateEqBodyDimensionsProperties(group, path),
 		});
-	} else {
+	} else if (kind === "STK") {
 		expectExactKeys(group, ["id", "kind", "template", "portIds"], path);
 		parsed = Object.freeze({
 			id: expectPositiveInt32(group.id, `${path}.id`),
@@ -1797,6 +1798,8 @@ function validateEquipmentGroup(value: unknown, path: string): OpenFabProjectEqu
 			template: expectEnum(group.template, STK_EQUIPMENT_TEMPLATES, `${path}.template`),
 			portIds: validatePortIds(group.portIds, `${path}.portIds`),
 		});
+	} else {
+		unreachableEquipmentKind(kind);
 	}
 	const error = equipmentGroupError(parsed);
 	if (error) fail("INVALID_PORT_EQUIPMENT", path, error);
@@ -2487,16 +2490,19 @@ function validateStaticFabBlueprintEquipmentGroups(
 					portIndices,
 				});
 			}
-			expectExactKeys(group, ["kind", "template", "portIndices"], groupPath);
-			return Object.freeze({
-				kind: "STK" as const,
-				template: expectEnum(group.template, STK_AUTHORING_TEMPLATES, `${groupPath}.template`) as
-					| "FLEX"
-					| "FOUR_PORT"
-					| "SIX_PORT"
-					| "BACK_TO_BACK",
-				portIndices,
-			});
+			if (kind === "STK") {
+				expectExactKeys(group, ["kind", "template", "portIndices"], groupPath);
+				return Object.freeze({
+					kind: "STK" as const,
+					template: expectEnum(group.template, STK_AUTHORING_TEMPLATES, `${groupPath}.template`) as
+						| "FLEX"
+						| "FOUR_PORT"
+						| "SIX_PORT"
+						| "BACK_TO_BACK",
+					portIndices,
+				});
+			}
+			return unreachableEquipmentKind(kind);
 		}),
 	);
 }
@@ -2601,12 +2607,15 @@ function validateStaticFabBlueprintLayout(
 				portIds,
 			});
 		}
-		return Object.freeze({
-			id: groupIndex + 1,
-			kind: "STK" as const,
-			template: group.template,
-			portIds,
-		});
+		if (group.kind === "STK") {
+			return Object.freeze({
+				id: groupIndex + 1,
+				kind: "STK" as const,
+				template: group.template,
+				portIds,
+			});
+		}
+		return unreachableEquipmentKind(group);
 	});
 	if (claimedPortIndices.size !== ports.length) {
 		fail(

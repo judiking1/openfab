@@ -675,6 +675,7 @@ import {
 	resolveUserBlueprintQuickSlot,
 } from "./ConstructionKeyboard";
 import {
+	contextualBlueprintSaveConnectivity,
 	type ContextualBlueprintQuickSlot,
 	type ContextualBlueprintSaveDestination,
 	type ContextualBlueprintSaveDraft,
@@ -1031,6 +1032,7 @@ import {
 	railReadinessIssueLocationsAreComplete,
 	railReadinessIssuePathIdentityAt,
 	railReadinessOpenTerminalRepairLocation,
+	railReadinessRepairProtection,
 } from "./RailReadinessIssueGuide";
 import {
 	parseRailEquipmentScaleProbePortCount,
@@ -1111,10 +1113,12 @@ import {
 	type StaticFabAssemblyConnectorSession,
 	staticFabAssemblyConnectorIntent,
 	staticFabAssemblyConnectorOverlayGateways,
+	staticFabAssemblyConnectorRecommendationFailureReason,
 	staticFabAssemblyConnectorRecommendationPairs,
 	staticFabAssemblyConnectorSelectedSource,
 	staticFabAssemblyConnectorSelectedTarget,
 	type StaticFabAssemblyConnectorRecommendationPair,
+	type StaticFabAssemblyConnectorRecommendationFailure,
 	staticFabAssemblyConnectorSessionIsCurrent,
 	staticFabAssemblyConnectorSourceCandidates,
 	staticFabAssemblyConnectorTargetCandidates,
@@ -2388,6 +2392,7 @@ function useEditorSurfaceRestoration({
 
 const INTERACTIVE_EDITOR_ACTION_HINTS = new Set([
 	"build-track",
+	"place-blueprint",
 	"rail-keyboard-apply",
 	"rail-keyboard-cancel",
 	"connected-selection",
@@ -3313,6 +3318,7 @@ export default function TileFabApp(): React.ReactElement {
 		useState<BlueprintSaveDestination>("project");
 	const blueprintSaveDestinationRef = useRef<BlueprintSaveDestination>("project");
 	const [blueprintNameDraft, setBlueprintNameDraft] = useState("Blueprint 1");
+	const contextualBlueprintScopeDraftRef = useRef<RailDocument | null>(null);
 	const [contextualBlueprintSaveCapture, setContextualBlueprintSaveCapture] =
 		useState<ContextualBlueprintSaveCapture | null>(null);
 	const [contextualBlueprintSaveDraft, setContextualBlueprintSaveDraft] =
@@ -6682,6 +6688,7 @@ export default function TileFabApp(): React.ReactElement {
 	const updateOrganizationBundlePlacementSession = (
 		next: StaticFabOrganizationBundlePlacementSession | null,
 	): void => {
+		if (next) setAuthoringResult(null);
 		setOrganizationBundlePlacementFailure(null);
 		const current = organizationBundlePlacementSessionRef.current;
 		const preservesPlacementLifecycle =
@@ -8250,7 +8257,10 @@ export default function TileFabApp(): React.ReactElement {
 		projectSession,
 		stationProposalFileGateway,
 		blockStaticFabExclusiveCommand,
-		setStationProposalReviewState,
+		setStationProposalReviewState: (next) => {
+			if (next) setAuthoringResult(null);
+			setStationProposalReviewState(next);
+		},
 		setStatus,
 		rememberLauncher: (launcher) => {
 			stationProposalReviewLauncherRef.current = launcher;
@@ -9973,6 +9983,7 @@ export default function TileFabApp(): React.ReactElement {
 		setAuthoringToolActivated(true);
 		setAuthoringSurface("task");
 		setBlueprintSelectionEntry(null);
+		contextualBlueprintScopeDraftRef.current = null;
 		discardPendingStaticFabCheckRepairReturn();
 		if (next !== "build" && next !== "erase") { processLoopRailEditRef.current = null; setProcessLoopRailEdit(null); setProcessLoopRailEditFeedback(null); }
 		setOrdinaryPortProcessLoopFeedback(null);
@@ -15924,6 +15935,7 @@ export default function TileFabApp(): React.ReactElement {
 	const publishStaticFabAssemblyConnector = (
 		next: StaticFabAssemblyConnectorUiState | null,
 	): void => {
+		if (next) setAuthoringResult(null);
 		staticFabAssemblyConnectorUiRef.current = next;
 		setStaticFabAssemblyConnector(next);
 		scheduleRender();
@@ -16235,6 +16247,7 @@ export default function TileFabApp(): React.ReactElement {
 		void (async () => {
 			let lastPrepared: ValidatedStaticFabAssemblyConnector | null = null;
 			let lastSession: StaticFabAssemblyConnectorSession | null = null;
+			const failures: StaticFabAssemblyConnectorRecommendationFailure[] = [];
 			while (run.nextPairIndex < run.pairs.length) {
 				const current = staticFabAssemblyConnectorUiRef.current;
 				if (
@@ -16347,6 +16360,7 @@ export default function TileFabApp(): React.ReactElement {
 					);
 					return;
 				}
+				failures.push(prepared.validation);
 			}
 			const active = staticFabAssemblyConnectorUiRef.current;
 			if (
@@ -16364,10 +16378,11 @@ export default function TileFabApp(): React.ReactElement {
 			if (appRootRef.current) {
 				appRootRef.current.dataset.assemblyConnectorRecommendationStatus = "exhausted";
 			}
+			const reason = staticFabAssemblyConnectorRecommendationFailureReason(failures);
 			const rejectedSession = reduceStaticFabAssemblyConnectorSession(active.session, {
 					type: "VERIFICATION_REJECTED",
 					requestSequence: active.session.requestSequence,
-					reason: `${run.pairs.length}개 추천 후보에서 인증 경로를 찾지 못했습니다 · gateway를 직접 선택하세요`,
+					reason,
 					conflictCount: lastPrepared.validation.conflictCount,
 					timings: {
 						workerRoundTripMilliseconds: lastPrepared.workerRoundTripMilliseconds,
@@ -16380,9 +16395,7 @@ export default function TileFabApp(): React.ReactElement {
 				plan: lastPrepared.plan,
 			});
 			refreshStaticFabAssemblyConnectorRecovery(rejectedSession);
-			setStatus(
-				`${run.pairs.length}개 Worker 추천 후보에서 경로를 찾지 못했습니다 · gateway를 직접 선택하세요`,
-			);
+			setStatus(reason);
 		})();
 	};
 
@@ -18119,6 +18132,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockEqInspectorDraftSelectionChange(portHit?.equipmentGroupId ?? null)) return false;
 		clearAreaSelection();
 		if (portHit) {
+			setAuthoringResult(null);
 			if (guidedReuseAnchorTarget) guidedPrimaryFocusHandoffRef.current = true;
 			setPortEquipmentSelection({
 				portId: portHit.portId,
@@ -18141,6 +18155,7 @@ export default function TileFabApp(): React.ReactElement {
 		const module = resolution.status === "resolved" ? resolution.module : null;
 		const unresolvedReason =
 			resolution.status === "resolved" ? "선택을 해제했습니다" : resolution.reason;
+		if (module) setAuthoringResult(null);
 		setRailSelection(module ? tile : null, module);
 		if (module && guidedReuseAnchorTarget) guidedPrimaryFocusHandoffRef.current = true;
 		setStatus(
@@ -20738,6 +20753,7 @@ export default function TileFabApp(): React.ReactElement {
 		setSelectedPortEquipmentState(null);
 		setEquipmentDeletionRecovery(null);
 		setBlueprintSelectionEntry(null);
+		contextualBlueprintScopeDraftRef.current = null;
 		handleEqBodyDraftChange(false);
 		handleEqRecipeDraftChange(false);
 		setOhbPlacementIntentState(null);
@@ -22652,6 +22668,13 @@ export default function TileFabApp(): React.ReactElement {
 
 	const activateReadinessRepair = (issue: RailProjectReadinessIssue): void => {
 		if (blockStaticFabExclusiveCommand()) return;
+		const protection = railReadinessRepairProtection(
+			readiness, issue, editorModelRef.current.document, readinessIssueLocationRef.current,
+		);
+		if (protection) {
+			setStatus(protection.reason);
+			return;
+		}
 		invalidateStaticFabCheckRepairNavigation();
 		const guide = railReadinessIssueGuide(readiness, issue);
 		let repairLocationIndex = readinessIssueLocationRef.current;
@@ -24958,6 +24981,7 @@ export default function TileFabApp(): React.ReactElement {
 		assemblePaletteReturnFocusRef.current = null;
 		if (tab !== "organizations") closeBlueprintLibrary(false);
 		if (tab === "organizations") {
+			setAuthoringResult(null);
 			setNavigatorMapOpen(false);
 			chooseTool("inspect", "preserve-area");
 			updateEditorActivity("inspect");
@@ -24965,6 +24989,7 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (organizationLibraryOpen && !closeOrganizationLibrary(false)) return;
+		setAuthoringResult(null);
 		chooseTool("inspect", "preserve-area");
 		updateEditorActivity("inspect");
 		if (tab === "equipment") {
@@ -26381,6 +26406,12 @@ export default function TileFabApp(): React.ReactElement {
 	);
 	const organizationEditorDirty = organizationDetailsDirty || organizationRenameDirty;
 	organizationEditorDirtyRef.current = organizationEditorDirty;
+	useLayoutEffect(() => {
+		if (organizationLibraryView === "detail" && !organizationEditorDirty && !organizationDetailsStale &&
+			(selectedOrganizationId === null || !organizationMultiSelection.selectedOrganizationIds.includes(selectedOrganizationId))) {
+			setOrganizationLibraryView("list");
+		}
+	}, [organizationLibraryView, organizationEditorDirty, organizationDetailsStale, selectedOrganizationId, organizationMultiSelection.selectedOrganizationIds]);
 	// Worker completion may outlive the selection or input captured before Undo/Redo.
 	currentOrganizationHistoryContextRef.current = {
 		interaction: organizationHistoryInteraction,
@@ -29018,6 +29049,7 @@ export default function TileFabApp(): React.ReactElement {
 		return true;
 	};
 	const closeContextualBlueprintSave = (restoreFocus = true): void => {
+		contextualBlueprintScopeDraftRef.current = null;
 		setContextualBlueprintSaveCapture(null);
 		setContextualBlueprintSaveError(null);
 		const returnTarget = contextualBlueprintSaveReturnFocusRef.current;
@@ -29057,6 +29089,7 @@ export default function TileFabApp(): React.ReactElement {
 				equipmentGroupCount: staticFabTemplate?.equipmentGroups.length ?? 0,
 				portCount: staticFabTemplate?.ports.length ?? 0,
 				organizationCount: 0,
+				connectivity: contextualBlueprintSaveConnectivity(template),
 			}),
 		});
 	const organizationContextualBlueprintCapture = (
@@ -29078,6 +29111,7 @@ export default function TileFabApp(): React.ReactElement {
 				equipmentGroupCount: bundle.equipmentGroups.length,
 				portCount: bundle.ports.length,
 				organizationCount: bundle.organizations.length,
+				connectivity: contextualBlueprintSaveConnectivity(bundle),
 			}),
 		});
 	const prepareContextualBlueprintSaveCapture = (
@@ -29187,8 +29221,16 @@ export default function TileFabApp(): React.ReactElement {
 			organizationMultiSelectionRef.current.selectedOrganizationIds.length > 0;
 		if (!hasPortableContext) return false;
 		if (blueprintCaptureBlocked(request === "whole-map" ? "전체 맵" : "현재")) return true;
-		const capture = prepareContextualBlueprintSaveCapture(request);
+		let capture: ContextualBlueprintSaveCapture | null;
+		try {
+			capture = prepareContextualBlueprintSaveCapture(request);
+		} catch (error) {
+			setStatus(error instanceof Error ? error.message : "청사진 범위를 확인하지 못했습니다");
+			return true;
+		}
 		if (!capture) return true;
+		const preserveScopeDraft = contextualBlueprintScopeDraftRef.current === editorModelRef.current.document;
+		contextualBlueprintScopeDraftRef.current = null;
 		const activeElement = document.activeElement;
 		contextualBlueprintSaveReturnFocusRef.current =
 			trigger ?? (activeElement instanceof HTMLElement ? activeElement : canvasRef.current);
@@ -29199,7 +29241,7 @@ export default function TileFabApp(): React.ReactElement {
 					: nextBlueprintName(projectBlueprints.records)
 				: capture.summary.label;
 		setContextualBlueprintSaveDraft((current) =>
-			Object.freeze({
+			preserveScopeDraft ? current : Object.freeze({
 				...current,
 				name: normalizeBlueprintName(fallbackName),
 				destination: initialDestination,
@@ -31399,6 +31441,9 @@ export default function TileFabApp(): React.ReactElement {
 	const activeReadinessGuide = activeReadinessIssue
 		? railReadinessIssueGuide(readiness, activeReadinessIssue)
 		: null;
+	const activeReadinessRepairProtection = activeReadinessIssue
+		? railReadinessRepairProtection(readiness, activeReadinessIssue, railDocument, readinessIssueLocation)
+		: null;
 	const activeReadinessLocationCount = activeReadinessIssue
 		? railReadinessIssueLocationCount(readiness, activeReadinessIssue)
 		: 0;
@@ -33169,6 +33214,7 @@ export default function TileFabApp(): React.ReactElement {
 			setTemplatePaletteOpen(false);
 			assemblePaletteReturnFocusRef.current = null;
 		}
+		setAuthoringResult(null);
 		return true;
 	};
 	const openStaticFabAssemblePalette = (
@@ -33302,6 +33348,11 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (next === editorActivityRef.current) {
+			if (next === "inspect") {
+				if (blockEqInspectorDraftSelectionChange(null)) return;
+				prepareEditorActivityTransition(next);
+				return;
+			}
 			if (next === "assemble") {
 				if (templatePaletteOpen) closeStaticFabAssemblePalette();
 				else openStaticFabAssemblePalette(trigger);
@@ -35075,11 +35126,10 @@ export default function TileFabApp(): React.ReactElement {
 		if (availability.state === "blocked") { setStatus(availability.reason); return; }
 		setAuthoringToolActivated(true);
 		setAuthoringSurface("task");
-		setAuthoringResult(null);
 		activate(trigger);
 	} });
 	const startAuthoringTemplate = (id: RailTemplateId): void => {
-		if (!prepareEditorActivityTransition("assemble") || blockEqInspectorDraftSelectionChange(null)) return;
+		if (blockEqInspectorDraftSelectionChange(null) || !prepareEditorActivityTransition("assemble")) return;
 		updateEditorActivity("assemble");
 		startRailTemplate(id, selected);
 		setTemplatePaletteOpen(true);
@@ -35131,8 +35181,8 @@ export default function TileFabApp(): React.ReactElement {
 		}, railClipboardKind ? authoringAvailability : { state: "blocked", reason: "먼저 레일·장비·구조를 선택해 복제하세요" }),
 	];
 	const blueprintSelectionAvailable = areaStampEligibility?.valid === true || organizationSelectionCount > 0;
-	const startBlueprintSelection = (mode: "area" | "organization", trigger: HTMLElement | null): void => {
-		if (blockEqInspectorDraftSelectionChange(null) || !chooseExplicitEditorTool("inspect")) return;
+	const startBlueprintSelection = (mode: "area" | "organization", trigger: HTMLElement | null): boolean => {
+		if (blockEqInspectorDraftSelectionChange(null) || !chooseExplicitEditorTool("inspect")) return false;
 		setBlueprintSelectionEntry({ document: editorModelRef.current.document, mode });
 		if (mode === "organization") {
 			openOrganizationLibrary(trigger);
@@ -35142,10 +35192,20 @@ export default function TileFabApp(): React.ReactElement {
 			setStatus("청사진 영역 선택 · 캔버스에서 레일과 장비를 드래그한 뒤 선택을 저장하세요");
 			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 		}
+		return true;
+	};
+	const changeContextualBlueprintScope = (): void => {
+		const capture = contextualBlueprintSaveCapture;
+		if (!capture || contextualBlueprintSaveBusy || blueprintCaptureBlocked("범위 변경")) return;
+		if (!startBlueprintSelection(capture.kind === "organization" ? "organization" : "area", contextualBlueprintSaveReturnFocusRef.current)) return;
+		closeContextualBlueprintSave(false);
+		contextualBlueprintScopeDraftRef.current = editorModelRef.current.document;
+		setStatus("저장 입력을 보존했습니다 · 포함할 범위를 직접 선택한 뒤 청사진 저장을 다시 여세요");
 	};
 	const returnFromBlueprintSelection = (): void => {
 		const mode = blueprintSelectionEntry?.mode;
 		if (blockEqInspectorDraftSelectionChange(null) || !chooseExplicitEditorTool("inspect")) return;
+		contextualBlueprintScopeDraftRef.current = null;
 		setBrowseCategory("blueprints");
 		setAuthoringSurface("catalog");
 		setStatus("청사진 만들기로 돌아왔습니다 · 현재 선택은 유지됩니다");
@@ -35262,7 +35322,6 @@ export default function TileFabApp(): React.ReactElement {
 				newFabProfileWizardReturnFocusRef.current = trigger;
 				setNewFabProfileWizardOpen(true);
 			} else {
-				setAuthoringResult(null);
 				chooseStaticFabNavigatorTab("checks", trigger);
 			}
 		} else if (activeMap.size === 0) startGuidedTask("fab");
@@ -35307,7 +35366,7 @@ export default function TileFabApp(): React.ReactElement {
 			if (compactAuthoringViewport) setAuthoringSurface(null);
 			restoreCanvasFocusAfterAction();
 		} else if (guidedTaskSavedBlueprint && guidedTaskBlueprintSaved) {
-			if (!prepareEditorActivityTransition("assemble") || blockEqInspectorDraftSelectionChange(null)) return;
+			if (blockEqInspectorDraftSelectionChange(null) || !prepareEditorActivityTransition("assemble")) return;
 			placeProjectBlueprint(guidedTaskSavedBlueprint, "library", true);
 		}
 	};
@@ -37354,6 +37413,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 							);
 						}}
 						onCancel={() => closeContextualBlueprintSave()}
+						onChangeScope={changeContextualBlueprintScope}
 						onSave={() => void saveContextualBlueprint()}
 					/>
 				) : null}
@@ -37985,7 +38045,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
  publishProductionBayPlacementSession(request, false); setAuthoringSurface("task");
  }}>하나 더 배치</button> : <button type="button" disabled={modelSyncPending} onClick={(event) => bayAction.onActivate(event.currentTarget)}>Bay 추가</button>}
  <button type="button" onClick={() => { setBrowseCategory("equipment"); if (compactAuthoringViewport) setAuthoringSurface("catalog"); }}>장비 놓기</button>
- <button type="button" disabled={modelSyncPending} onClick={(event) => { setAuthoringResult(null); chooseStaticFabNavigatorTab("organizations", event.currentTarget); }}>구조 수정</button>
+ <button type="button" disabled={modelSyncPending} onClick={(event) => chooseStaticFabNavigatorTab("organizations", event.currentTarget)}>구조 수정</button>
  </div></section> : null}
  <StaticFabAssemblyConnectorPanel
 					phase={staticFabAssemblyConnector?.session.phase ?? "idle"}
@@ -38539,6 +38599,11 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 								</header>
 								<h3 id="rail-readiness-guide-title">{activeReadinessGuide.title}</h3>
 								<p>{activeReadinessGuide.summary}</p>
+								{activeReadinessRepairProtection ? (
+									<p id="rail-readiness-repair-protection" data-testid="checks-repair-protection">
+										{activeReadinessRepairProtection.reason}
+									</p>
+								) : null}
 
 								<footer>
 									{activeReadinessLocationCount > 0 ? (
@@ -38579,7 +38644,8 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 											type="button"
 											className="tilefab-readiness-repair"
 											data-testid="checks-direct-repair"
-											disabled={staticFabExclusiveCommandActive}
+											disabled={staticFabExclusiveCommandActive || activeReadinessRepairProtection !== null}
+											aria-describedby={activeReadinessRepairProtection ? "rail-readiness-repair-protection" : undefined}
 											onClick={() =>
 												activeOneWayRepairBlocked
 													? inspectBlockedOneWayRepair(
@@ -38604,10 +38670,10 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 										</button>
 									) : null}
 								</footer>
-								<details className="tilefab-checks-secondary"><summary>수정 방법·다른 작업</summary>
+								<details className="tilefab-checks-secondary" open={activeReadinessRepairProtection ? true : undefined}><summary>수정 방법·다른 작업</summary>
 								<div className="tilefab-readiness-next-action">
 									<small>다음 작업</small>
-									<p>{activeReadinessGuide.action}</p>
+									<p>{activeReadinessRepairProtection ? "아래 구조 편집 경로에서 대상을 선택하세요. 각 경로가 현재 소속·장비·연결 조건을 다시 검사합니다." : activeReadinessGuide.action}</p>
 									{activeOneWayRepairBlocked ? (
 										<span className="tilefab-readiness-auto-blocked">
 											<AlertTriangle size={12} /> 자동 수정 불가 · {activeOneWayRepairBlockedReason}
@@ -38617,12 +38683,13 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" &&
 										["OPEN_TERMINAL", "DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) ? (
 										<button type="button" className="tilefab-readiness-repair" data-testid="checks-choose-process-loop"
-											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending}
+											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending || (activeReadinessRepairProtection !== null && !activeReadinessRepairProtection.loopRepairSupported)}
+											aria-describedby={activeReadinessRepairProtection && !activeReadinessRepairProtection.loopRepairSupported ? "rail-readiness-repair-protection" : undefined}
 											onClick={() => openStaticFabCheckRepairChooser("loop")}>
 											작업 루프를 골라 수정
 										</button>
 									) : null}
-									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" && ["DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) && readiness.summary.weakComponents > 1 ? (
+									{activeReadinessIssue.sourceCode !== "ONE_WAY_CORRIDOR" && (["DISCONNECTED_NETWORK", "MULTIPLE_STRONG_COMPONENTS"].includes(activeReadinessIssue.code) || (activeReadinessIssue.code === "OPEN_TERMINAL" && activeReadinessRepairProtection !== null)) && readiness.summary.weakComponents > 1 ? (
 										<button type="button" className="tilefab-readiness-repair" data-testid="checks-choose-connector"
 											disabled={staticFabExclusiveCommandActive || !currentStaticFabProjectChecks || projectBusy || modelSyncPending}
 											onClick={() => openStaticFabCheckRepairChooser("connector")}>
@@ -39561,7 +39628,28 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 								"data-hint-id": hint.id,
 								"data-primary": index === 0,
 							};
-							return hint.id === "build-track" ? (
+							return hint.id === "place-blueprint" ? (
+								<button
+									type="button"
+									key={`${actionHintContext}:${hint.id}`}
+									{...common}
+									data-testid="blueprint-placement-apply"
+									data-interactive="true"
+									aria-label={hint.action}
+									aria-keyshortcuts={editorCommandAriaKeyShortcuts(["placement.apply"])}
+									disabled={blueprintPlacementPending || modelSyncPending || projectBusy || projectSourceOperationPending}
+									aria-disabled={blueprintPlacementPending || modelSyncPending || projectBusy || projectSourceOperationPending}
+									onPointerDown={(event) => event.stopPropagation()}
+									onClick={(event) => {
+										event.stopPropagation();
+										if (blueprintPlacementPendingRef.current || modelSyncPendingRef.current) return;
+										applyBlueprintPlacementKeyboard(event.shiftKey);
+										canvasRef.current?.focus({ preventScroll: true });
+									}}
+								>
+									{content}
+								</button>
+							) : hint.id === "build-track" ? (
 								<button
 									type="button"
 									key={`${actionHintContext}:${hint.id}`}
@@ -40551,7 +40639,11 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 					<StaticFabOrganizationLibrary
 						blueprintSelectionActive={blueprintSelectionFocused}
 						view={organizationLibraryView}
-						onOpenDetails={() => setOrganizationLibraryView("detail")}
+						onOpenDetails={() => {
+							if (blockEqInspectorDraftSelectionChange(null) || blockStaticFabExclusiveCommand()) return;
+							if (selectedStaticFabOrganization && selectStaticFabOrganization(selectedStaticFabOrganization,
+								organizationMultiSelectionRef.current.selectedOrganizationIds.includes(selectedStaticFabOrganization.id))) setOrganizationLibraryView("detail");
+						}}
 						onShowList={() => setOrganizationLibraryView("list")}
 						bayFlowSupport={selectedBayFlowSupport}
 						bankDetachSupport={selectedBankDetachSupport}

@@ -7,6 +7,8 @@ import {
 	collectPortEquipmentIntegrityIssues,
 	copyEquipmentGroupRecord,
 	copyPortEquipmentState,
+	EQUIPMENT_GROUP_KINDS,
+	type EquipmentGroupRecord,
 	emptyPortEquipmentState,
 	equipmentGroupError,
 	isCanonicalPortEquipmentState,
@@ -14,10 +16,59 @@ import {
 	portEquipmentStateError,
 	portEquipmentStateErrorSteps,
 } from "./EquipmentGroup";
-import { copyPortRecord, type PortRecord, portRecordError } from "./PortRecord";
+import {
+	canonicalEquipmentGroupPortIds,
+	copyEquipmentGroupWithPortIds,
+	type EquipmentGroupPortOrderDescriptor,
+} from "./EquipmentGroupPortOrder";
+import { EQUIPMENT_KINDS } from "./EquipmentKind";
+import { copyPortRecord, PORT_TYPES, type PortRecord, portRecordError } from "./PortRecord";
 import { DIR_E, DIR_W } from "./railShape";
 
 describe("port and equipment-group authored records", () => {
+	it("preserves string aliases and copied field order, including CUSTOM and optional EQ bodies", () => {
+		expect(EQUIPMENT_KINDS).toEqual(["OHB", "EQ", "STK"]);
+		expect(EQUIPMENT_GROUP_KINDS).toEqual(EQUIPMENT_KINDS);
+		expect(PORT_TYPES).toEqual(EQUIPMENT_KINDS);
+		const records: readonly EquipmentGroupRecord[] = [
+			{ id: 1, kind: "OHB", template: "SINGLE", portIds: [1] },
+			{ id: 2, kind: "EQ", portIds: [3, 2], pitchMillimeters: 1_000, recipe: null },
+			{
+				id: 3,
+				kind: "EQ",
+				portIds: [4, 5],
+				pitchMillimeters: 1_000,
+				recipe: "PHOTO",
+				bodyDimensions: { lengthMillimeters: 2_000, widthMillimeters: 1_000 },
+			},
+			{ id: 4, kind: "STK", template: "CUSTOM", portIds: [7, 6] },
+		];
+		const copied = records.map(copyEquipmentGroupRecord);
+		expect(JSON.stringify(copied)).toBe(JSON.stringify(records));
+		expect(copied[1]).not.toHaveProperty("bodyDimensions");
+		for (let index = 0; index < copied.length; index++) {
+			expect(copied[index]).not.toBe(records[index]);
+			expect(copied[index]?.portIds).not.toBe(records[index]?.portIds);
+			expect(Object.isFrozen(copied[index])).toBe(true);
+		}
+		const unknown = { id: 1, kind: "UNKNOWN", portIds: [1], template: "SINGLE" };
+		expect(equipmentGroupError(unknown as EquipmentGroupRecord)).toBe(
+			"equipment group kind is invalid",
+		);
+		expect(() => copyEquipmentGroupRecord(unknown as EquipmentGroupRecord)).toThrow(
+			"equipment group kind is invalid",
+		);
+		expect(() => copyEquipmentGroupRecord({ ...unknown, id: 0 } as EquipmentGroupRecord)).toThrow(
+			"equipment group id must be a positive signed int32",
+		);
+		expect(() => copyEquipmentGroupWithPortIds(unknown as EquipmentGroupRecord, 2, [1])).toThrow(
+			"equipment group kind is invalid",
+		);
+		expect(() =>
+			canonicalEquipmentGroupPortIds(unknown as EquipmentGroupPortOrderDescriptor, [1], []),
+		).toThrow("equipment group kind is invalid");
+	});
+
 	it("schedules reciprocal ownership checks through late records without changing their results", () => {
 		const base = ohbState();
 		const count = 257;

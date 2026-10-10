@@ -38,6 +38,45 @@ function residentSetBytes(): number {
 }
 
 describe("OpenFab station proposal review draft SoA", () => {
+	it("retains one-based kind codes and the mixed-draft fingerprint independently of the rail SoA", async () => {
+		const source = mixedDraft();
+		const firstRow = source.rowDecisions[0];
+		if (firstRow?.disposition !== "INCLUDE") throw new Error("Expected an included row.");
+		const draft: OpenFabStationProposalReviewDraft = {
+			...source,
+			rowDecisions: [...source.rowDecisions, { ...firstRow, row: 4, portType: "OHB" }],
+			groupDecisions: [
+				...source.groupDecisions,
+				{
+					reviewGroupId: 11,
+					kind: "OHB",
+					template: "SINGLE",
+					memberRows: [4],
+					groupingReview: "CONFIRM_DECLARED",
+				},
+			],
+		};
+		const snapshot = await encodeOpenFabStationProposalReviewDraftCooperatively(
+			draft,
+			5,
+			NOOP_OPTIONS,
+		);
+		expect([...snapshot.portTypes]).toEqual([2, 2, 0, 3, 1]);
+		expect([...snapshot.groupKinds]).toEqual([2, 3, 1]);
+		expect(snapshot.fingerprint).toBe("openfab-station-proposal-review-draft:v1:16ebaef6:fa6d685a");
+		expect(decodeOpenFabStationProposalReviewDraftSnapshot(snapshot)).toEqual(draft);
+		await expect(
+			encodeOpenFabStationProposalReviewDraftCooperatively(
+				{
+					...draft,
+					groupDecisions: [{ ...draft.groupDecisions[0], kind: "UNKNOWN" }],
+				} as unknown as OpenFabStationProposalReviewDraft,
+				5,
+				NOOP_OPTIONS,
+			),
+		).rejects.toThrow("INVALID_INPUT");
+	});
+
 	it("round-trips mixed cardinal and advanced decisions with deterministic order-sensitive evidence", async () => {
 		const draft = mixedDraft();
 		const first = await encodeOpenFabStationProposalReviewDraftCooperatively(

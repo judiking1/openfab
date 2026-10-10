@@ -8,6 +8,7 @@ import {
 	reduceStaticFabAssemblyConnectorSession,
 	staticFabAssemblyConnectorIntent,
 	staticFabAssemblyConnectorOverlayGateways,
+	staticFabAssemblyConnectorRecommendationFailureReason,
 	staticFabAssemblyConnectorRecommendationPairs,
 	staticFabAssemblyConnectorSessionIsCurrent,
 	staticFabAssemblyConnectorSourceCandidates,
@@ -181,6 +182,85 @@ describe("StaticFabAssemblyConnectorSession", () => {
 			sourceGatewayId: null,
 			targetGatewayId: null,
 		});
+	});
+
+	it("presents only the certified pair first and restores all manual candidates on a side change", () => {
+		const targetB = gateway("b-2", 22, 12, 0, 12, 0, DIR_W);
+		let state = createStaticFabAssemblyConnectorSession({
+			...binding,
+			gateways: [sourceA, sourceB, target, targetB],
+		});
+		state = reduceStaticFabAssemblyConnectorSession(state, {
+			type: "SELECT_SOURCE",
+			gatewayId: sourceB.id,
+		});
+		state = reduceStaticFabAssemblyConnectorSession(state, {
+			type: "SELECT_TARGET",
+			gatewayId: targetB.id,
+		});
+		expect(staticFabAssemblyConnectorSourceCandidates(state)).toEqual([sourceA, sourceB]);
+		expect(staticFabAssemblyConnectorTargetCandidates(state)).toEqual([target, targetB]);
+		state = reduceStaticFabAssemblyConnectorSession(state, {
+			type: "VERIFICATION_READY",
+			requestSequence: state.requestSequence,
+			reason: "certified",
+			conflictCount: 0,
+			timings: {
+				workerRoundTripMilliseconds: 1,
+				responseValidationMilliseconds: 1,
+				adoptionMilliseconds: 1,
+			},
+		});
+		expect(staticFabAssemblyConnectorSourceCandidates(state)).toEqual([sourceB, sourceA]);
+		expect(staticFabAssemblyConnectorTargetCandidates(state)).toEqual([targetB, target]);
+		expect(state.binding.gatewaysByOrganizationId.get(11)).toEqual([sourceA, sourceB]);
+		expect(staticFabAssemblyConnectorIntent(state)?.targetGatewayId).toBe(targetB.id);
+		state = reduceStaticFabAssemblyConnectorSession(state, { type: "SET_SIDE", side: "left" });
+		expect(staticFabAssemblyConnectorSourceCandidates(state)).toEqual([sourceA, sourceB]);
+		expect(staticFabAssemblyConnectorTargetCandidates(state)).toEqual([target, targetB]);
+		expect(state.phase).toBe("verifying");
+	});
+
+	it("retains distinct planner rejection reasons and locations after every recommendation fails", () => {
+		const support = Object.freeze({
+			reason: "왕복 분기 지지가 부족합니다",
+			conflictCells: [{ x: 122, y: 26 }],
+			conflictCount: 1,
+		});
+		const crossing = Object.freeze({
+			reason: "평면 십자 교차는 허용되지 않습니다",
+			conflictCells: [
+				{ x: 122, y: 4 },
+				{ x: 122, y: 0 },
+			],
+			conflictCount: 2,
+		});
+		const reason = staticFabAssemblyConnectorRecommendationFailureReason([
+			support,
+			crossing,
+			support,
+		]);
+		expect(reason).toBe(
+			"3개 후보 검증 · 인증 경로 없음 · 왕복 분기 지지가 부족합니다 · 실패 위치 (122, 26) / 평면 십자 교차는 허용되지 않습니다 · 실패 위치 (122, 4), (122, 0)",
+		);
+		expect(
+			staticFabAssemblyConnectorRecommendationFailureReason([
+				{ ...support, conflictCells: [], conflictCount: 0 },
+			]),
+		).not.toContain("실패 위치");
+		expect(
+			staticFabAssemblyConnectorRecommendationFailureReason([
+				{
+					...crossing,
+					conflictCells: [...crossing.conflictCells, { x: 122, y: -4 }, { x: 122, y: -8 }],
+					conflictCount: 5,
+				},
+			]),
+		).toContain("실패 위치 (122, 4), (122, 0), (122, -4) 외 2곳");
+		expect(() => staticFabAssemblyConnectorRecommendationFailureReason([])).toThrow(RangeError);
+		expect(() =>
+			staticFabAssemblyConnectorRecommendationFailureReason(Array(9).fill(support)),
+		).toThrow(RangeError);
 	});
 });
 

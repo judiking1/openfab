@@ -1284,6 +1284,17 @@ describe("OpenFab project codec", () => {
 		if (!stationPort) throw new Error("Expected mixed blueprint port.");
 		stationPort.stationMillimeters = 400;
 		expectProjectError(wrongStation, "INVALID_PORT_EQUIPMENT", ".stationMillimeters");
+		const unknownKind = mutableCopy(project);
+		const unknownGroups = (
+			unknownKind.blueprints?.records[0] as { equipmentGroups: Array<{ kind: string }> }
+		).equipmentGroups;
+		if (!unknownGroups[0]) throw new Error("Expected mixed blueprint equipment.");
+		unknownGroups[0].kind = "UNKNOWN";
+		expectProjectError(
+			unknownKind,
+			"INVALID_FIELD",
+			"$.blueprints.records[0].equipmentGroups[0].kind",
+		);
 
 		const missingSupport = mutableCopy(project);
 		const supportPort = (
@@ -1628,6 +1639,12 @@ describe("OpenFab project codec", () => {
 		const mismatch = mutableCopy(project);
 		(mismatch.ports.records[0] as { portType: string }).portType = "EQ";
 		expectProjectError(mismatch, "INVALID_PORT_EQUIPMENT", "$.ports");
+		const unknownKind = mutableCopy(project);
+		(unknownKind.equipment.records[0] as { kind: string }).kind = "UNKNOWN";
+		expectProjectError(unknownKind, "INVALID_FIELD", "$.equipment.records[0].kind");
+		const unknownPortType = mutableCopy(project);
+		(unknownPortType.ports.records[0] as { portType: string }).portType = "UNKNOWN";
+		expectProjectError(unknownPortType, "INVALID_FIELD", "$.ports.records[0].portType");
 	});
 
 	it("rejects invalid JSON, timestamps, project ids, and oversized coordinate values", () => {

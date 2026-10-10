@@ -15,9 +15,112 @@ import {
 	railReadinessIssueLocationsAreComplete,
 	railReadinessIssuePathIdentityAt,
 	railReadinessOpenTerminalRepairLocation,
+	railReadinessRepairProtection,
 } from "./RailReadinessIssueGuide";
 
 describe("RailReadinessIssueGuide", () => {
+	it("blocks ordinary repair at the resolved protected sink without changing source or history", () => {
+		const rails = new RailDocument();
+		expect(rails.commit(planRailConstruction(rails.map, { x: 0, y: 0 }, { x: 4, y: 0 }))).toBe(
+			true,
+		);
+		const document = RailDocument.fromLoadedMap(rails.map.clone(), 1, rails.portEquipment, {
+			nextOrganizationId: 2,
+			records: [
+				{
+					id: 1,
+					kind: "AISLE",
+					name: "Portable Process Loop",
+					declaredSemanticRole: "PROCESS_LOOP",
+					membership: {
+						railEdges: Array.from({ length: 4 }, (_, x) => ({
+							from: { x, y: 0 },
+							to: { x: x + 1, y: 0 },
+						})),
+						advancedSwitchIds: [],
+						equipmentGroupIds: [],
+					},
+				},
+			],
+		});
+		const diagnostic = issue("OPEN_TERMINAL", 2);
+		const base = report({ openTerminals: 2, closure: "open" });
+		const current = {
+			...base,
+			locations: { ...base.locations, openTerminalCells: new Int32Array([0, 0, 4, 0]) },
+		};
+		const history = document.captureRailMirrorHistoryLedger();
+		const owners = document.organizations;
+		const protection = railReadinessRepairProtection(current, diagnostic, document, 0);
+		const reason = protection?.reason;
+		expect(protection?.loopRepairSupported).toBe(true);
+		expect(reason).toContain("X 4 · Z 0");
+		expect(reason).toContain("AISLE 'Portable Process Loop'");
+		expect(reason).toContain("작업 루프를 골라 수정");
+		expect(reason).toContain("베이·뱅크를 골라 연결");
+		const generatedLoop = {
+			map: document.map,
+			organizations: {
+				...document.organizations,
+				records: document.organizations.records.map((record) => ({
+					...record,
+					declaredSemanticRole: undefined,
+				})),
+			},
+			staticFabOrganizationOwnersForCell: (x: number, y: number) =>
+				document.staticFabOrganizationOwnersForCell(x, y),
+		};
+		expect(
+			railReadinessRepairProtection(current, diagnostic, generatedLoop, 0)?.loopRepairSupported,
+		).toBe(false);
+		expect(document.getPatchSequence()).toBe(1);
+		expect(document.organizations).toBe(owners);
+		expect(document.captureRailMirrorHistoryLedger()).toEqual(history);
+		expect(
+			document.commit(planRailConstruction(document.map, { x: 4, y: 0 }, { x: 7, y: 0 })),
+		).toBe(false);
+		expect(document.getLastCommandError()).toContain("보호된 원본");
+		expect(document.organizations).toBe(owners);
+		expect(document.captureRailMirrorHistoryLedger()).toEqual(history);
+		expect(railReadinessRepairProtection(current, diagnostic, rails, 0)).toBeNull();
+		expect(rails.commit(planRailConstruction(rails.map, { x: 4, y: 0 }, { x: 7, y: 0 }))).toBe(
+			true,
+		);
+	});
+
+	it("checks only the current repair location and leaves inspection available", () => {
+		const base = report({ weakComponents: 2 });
+		const current = {
+			...base,
+			locations: {
+				...base.locations,
+				componentRepresentativeCells: new Int32Array([1, 0, 9, 0]),
+			},
+		};
+		const diagnostic = {
+			...issue("DISCONNECTED_NETWORK", 2),
+			cells: [
+				{ x: 1, y: 0 },
+				{ x: 9, y: 0 },
+			],
+		};
+		const document = {
+			map: new RailDocument().map,
+			organizations: { nextOrganizationId: 8, records: [] },
+			staticFabOrganizationOwnersForCell: (x: number) =>
+				x === 1 ? [{ organizationId: 7, kind: "BAY" as const }] : [],
+		};
+		const protection = railReadinessRepairProtection(current, diagnostic, document, 0);
+		expect(protection?.reason).toContain("BAY-7");
+		expect(protection?.reason).toContain("작업 루프 레일 수정을 지원하지 않습니다");
+		expect(protection?.loopRepairSupported).toBe(false);
+		expect(railReadinessRepairProtection(current, diagnostic, document, 1)).toBeNull();
+		expect(
+			railReadinessRepairProtection(base, issue("CLEARANCE_CONFLICT", 1), document, 0),
+		).toBeNull();
+		expect(railReadinessRepairProtection(base, issue("EMPTY_PROJECT", 0), document, 0)).toBeNull();
+	});
+
 	it("explains why a visually joined rail can still fail directed flow", () => {
 		const base = report({ weakComponents: 1, strongComponents: 17, minimumReturnLinks: 1 });
 		const diagnosticReport = {

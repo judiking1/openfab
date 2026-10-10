@@ -426,6 +426,13 @@ export class RailDocument {
 		return this.organizationImpactIndex.organizationOwnersForMembership(membership, kind);
 	}
 
+	staticFabOrganizationOwnersForCell(
+		x: number,
+		y: number,
+	): readonly StaticFabOrganizationImpactOwner[] {
+		return this.organizationImpactIndex.organizationOwnersForCell(x, y);
+	}
+
 	/** Activate a fully validated baseline without manufacturing editor history entries. */
 	static fromLoadedMap(
 		map: TileMap,

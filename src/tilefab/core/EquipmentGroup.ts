@@ -1,5 +1,6 @@
 import { stableSortSteps } from "./CooperativeSort";
 import { completeCooperativeSteps } from "./CooperativeTask";
+import { EQUIPMENT_KINDS, type EquipmentKind, unreachableEquipmentKind } from "./EquipmentKind";
 import {
 	copyPortRecord,
 	isPositiveRecordId,
@@ -9,8 +10,8 @@ import {
 	portRecordError,
 } from "./PortRecord";
 
-export const EQUIPMENT_GROUP_KINDS = ["OHB", "EQ", "STK"] as const;
-export type EquipmentGroupKind = (typeof EQUIPMENT_GROUP_KINDS)[number];
+export const EQUIPMENT_GROUP_KINDS = EQUIPMENT_KINDS;
+export type EquipmentGroupKind = EquipmentKind;
 
 export const EQ_PORT_PITCHES_MILLIMETERS = Object.freeze([1_000, 2_000, 3_000, 4_000, 5_000]);
 export const EQ_MINIMUM_PORT_COUNT = 2;
@@ -333,25 +334,28 @@ export function equipmentGroupError(group: EquipmentGroupRecord): string | null 
 		}
 		return null;
 	}
-	if (!STK_EQUIPMENT_TEMPLATES.includes(group.template)) {
-		return "STK equipment template is invalid";
+	if (group.kind === "STK") {
+		if (!STK_EQUIPMENT_TEMPLATES.includes(group.template)) {
+			return "STK equipment template is invalid";
+		}
+		if (group.portIds.length > STK_MAXIMUM_PORT_COUNT) {
+			return `STK equipment cannot own more than ${STK_MAXIMUM_PORT_COUNT} ports`;
+		}
+		if (group.template === "FOUR_PORT" && group.portIds.length !== 4) {
+			return "the four-port STK template requires exactly four ports";
+		}
+		if (group.template === "SIX_PORT" && group.portIds.length !== 6) {
+			return "the six-port STK template requires exactly six ports";
+		}
+		if (
+			group.template === "BACK_TO_BACK" &&
+			(group.portIds.length < 4 || group.portIds.length % 2 !== 0)
+		) {
+			return "the back-to-back STK template requires an even port count of at least four";
+		}
+		return null;
 	}
-	if (group.portIds.length > STK_MAXIMUM_PORT_COUNT) {
-		return `STK equipment cannot own more than ${STK_MAXIMUM_PORT_COUNT} ports`;
-	}
-	if (group.template === "FOUR_PORT" && group.portIds.length !== 4) {
-		return "the four-port STK template requires exactly four ports";
-	}
-	if (group.template === "SIX_PORT" && group.portIds.length !== 6) {
-		return "the six-port STK template requires exactly six ports";
-	}
-	if (
-		group.template === "BACK_TO_BACK" &&
-		(group.portIds.length < 4 || group.portIds.length % 2 !== 0)
-	) {
-		return "the back-to-back STK template requires an even port count of at least four";
-	}
-	return null;
+	return unreachableEquipmentKind(group);
 }
 
 export function portEquipmentStateError(state: PortEquipmentState): string | null {
@@ -680,19 +684,29 @@ export function copyEquipmentGroupRecord(group: EquipmentGroupRecord): Equipment
 	}
 	const frozenPortIds = Object.freeze(portIds);
 	const kind = group.kind;
-	const copy: EquipmentGroupRecord =
-		kind === "OHB"
-			? { id: group.id, kind, template: group.template, portIds: frozenPortIds }
-			: kind === "EQ"
-				? {
-						id: group.id,
-						kind,
-						portIds: frozenPortIds,
-						pitchMillimeters: group.pitchMillimeters,
-						recipe: group.recipe,
-						...copyEqBodyDimensionsProperties(group),
-					}
-				: { id: group.id, kind, template: group.template, portIds: frozenPortIds };
+	let copy: EquipmentGroupRecord;
+	switch (kind) {
+		case "OHB":
+			copy = { id: group.id, kind, template: group.template, portIds: frozenPortIds };
+			break;
+		case "EQ":
+			copy = {
+				id: group.id,
+				kind,
+				portIds: frozenPortIds,
+				pitchMillimeters: group.pitchMillimeters,
+				recipe: group.recipe,
+				...copyEqBodyDimensionsProperties(group),
+			};
+			break;
+		case "STK":
+			copy = { id: group.id, kind, template: group.template, portIds: frozenPortIds };
+			break;
+		default: {
+			const unsupported: never = group;
+			throw new TypeError(equipmentGroupError(unsupported) ?? "equipment group kind is invalid");
+		}
+	}
 	const error = equipmentGroupError(copy);
 	if (error) throw new TypeError(error);
 	return Object.freeze(copy);

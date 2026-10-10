@@ -12,6 +12,7 @@ import {
 	canonicalEquipmentGroupPortIds,
 	equipmentGroupPortBarcode,
 } from "./EquipmentGroupPortOrder";
+import { unreachableEquipmentKind } from "./EquipmentKind";
 import { allocatePortEquipmentRecordIds } from "./PortEquipmentIdAllocator";
 import { assertPortEquipmentLayout, portRouteExists } from "./PortEquipmentLayoutValidator";
 import {
@@ -440,7 +441,8 @@ function selectedRailOrigin(selection: StaticFabSelection): Cell {
 	return Object.freeze({ x: minX, y: minY });
 }
 
-function railTemplateMap(template: RailAreaStampTemplate): TileMap {
+/** Reconstruct only captured rail edges; the source document is never consulted or changed. */
+export function railTemplateMap(template: RailAreaStampTemplate): TileMap {
 	const map = new TileMap();
 	for (const edge of template.edges) {
 		const direction = directionBetween(edge.from, edge.to);
@@ -479,14 +481,17 @@ function copyGroupTemplate(
 			portIndices: frozenPortIndices,
 		});
 	}
-	if (!isStkAuthoringTemplate(group.template)) {
-		throw new Error("legacy CUSTOM STK 그룹은 새 청사진으로 복제할 수 없습니다");
+	if (group.kind === "STK") {
+		if (!isStkAuthoringTemplate(group.template)) {
+			throw new Error("legacy CUSTOM STK 그룹은 새 청사진으로 복제할 수 없습니다");
+		}
+		return Object.freeze({
+			kind: "STK",
+			template: group.template,
+			portIndices: frozenPortIndices,
+		});
 	}
-	return Object.freeze({
-		kind: "STK",
-		template: group.template,
-		portIndices: frozenPortIndices,
-	});
+	return unreachableEquipmentKind(group);
 }
 
 function copyBlueprintEquipmentGroupTemplate(
@@ -505,7 +510,10 @@ function copyBlueprintEquipmentGroupTemplate(
 			portIndices,
 		});
 	}
-	return Object.freeze({ kind: "STK", template: group.template, portIndices });
+	if (group.kind === "STK") {
+		return Object.freeze({ kind: "STK", template: group.template, portIndices });
+	}
+	return unreachableEquipmentKind(group);
 }
 
 function isStkAuthoringTemplate(value: string): value is StkAuthoringTemplate {
@@ -557,7 +565,10 @@ function instantiateEquipmentGroup(
 			portIds,
 		});
 	}
-	return Object.freeze({ id, kind: "STK", template: template.template, portIds });
+	if (template.kind === "STK") {
+		return Object.freeze({ id, kind: "STK", template: template.template, portIds });
+	}
+	return unreachableEquipmentKind(template);
 }
 
 export function staticFabPortSpacingConflict(

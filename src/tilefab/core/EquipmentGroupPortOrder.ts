@@ -1,5 +1,6 @@
 import type { EquipmentGroupRecord, StkEquipmentTemplate } from "./EquipmentGroup";
 import { copyEqBodyDimensionsProperties } from "./EquipmentGroup";
+import { unreachableEquipmentKind } from "./EquipmentKind";
 import type { PortRecord } from "./PortRecord";
 import { moveCell } from "./railShape";
 import { analyzeStkPortLayout } from "./StkPortLayout";
@@ -43,27 +44,30 @@ export function canonicalEquipmentGroupPortIds(
 			}),
 		);
 	}
-	const analysis = analyzeStkPortLayout(
-		portIds.map((portId) => {
-			const port = portById.get(portId);
-			if (!port || port.route.kind !== "CARDINAL_CELL") {
-				throw new Error("STK port route is not a cardinal route.");
-			}
-			return {
-				id: port.id,
-				x: port.route.x,
-				z: port.route.z,
-				from: port.route.from,
-				to: port.route.to,
-				side: port.side,
-				lateralOffsetMillimeters: port.lateralOffsetMillimeters,
-				direction: port.direction,
-			};
-		}),
-		descriptor.template,
-	);
-	if (!analysis.valid) throw new Error(analysis.reason);
-	return Object.freeze([...analysis.orderedIds]);
+	if (descriptor.kind === "STK") {
+		const analysis = analyzeStkPortLayout(
+			portIds.map((portId) => {
+				const port = portById.get(portId);
+				if (!port || port.route.kind !== "CARDINAL_CELL") {
+					throw new Error("STK port route is not a cardinal route.");
+				}
+				return {
+					id: port.id,
+					x: port.route.x,
+					z: port.route.z,
+					from: port.route.from,
+					to: port.route.to,
+					side: port.side,
+					lateralOffsetMillimeters: port.lateralOffsetMillimeters,
+					direction: port.direction,
+				};
+			}),
+			descriptor.template,
+		);
+		if (!analysis.valid) throw new Error(analysis.reason);
+		return Object.freeze([...analysis.orderedIds]);
+	}
+	return unreachableEquipmentKind(descriptor);
 }
 
 export function equipmentGroupPortBarcode(
@@ -95,10 +99,13 @@ export function copyEquipmentGroupWithPortIds(
 			portIds: frozenPortIds,
 		});
 	}
-	return Object.freeze({
-		id,
-		kind: "STK",
-		template: source.template,
-		portIds: frozenPortIds,
-	});
+	if (source.kind === "STK") {
+		return Object.freeze({
+			id,
+			kind: "STK",
+			template: source.template,
+			portIds: frozenPortIds,
+		});
+	}
+	return unreachableEquipmentKind(source);
 }

@@ -1,3 +1,15 @@
+import {
+	analyzePhysicalPathTopology,
+	type PhysicalPathTopologyAnalysis,
+} from "../compile/PhysicalPathTopology";
+import { compilePhysicalRail } from "../compile/PhysicalRailCompiler";
+import type { RailAreaStampTemplate } from "../core/RailAreaStamp";
+import { railTemplateMap } from "../core/StaticFabBlueprint";
+import {
+	reconstructPortableBundleMap,
+	type StaticFabOrganizationBundle,
+} from "../core/StaticFabOrganizationBundle";
+
 export const CONTEXTUAL_BLUEPRINT_SAVE_DESTINATIONS = ["project", "user-library"] as const;
 export const CONTEXTUAL_BLUEPRINT_QUICK_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
@@ -20,6 +32,35 @@ export interface ContextualBlueprintSaveSourceSummary {
 	readonly equipmentGroupCount: number;
 	readonly portCount: number;
 	readonly organizationCount: number;
+	readonly connectivity: Pick<
+		PhysicalPathTopologyAnalysis,
+		"paths" | "openPaths" | "invalidPaths" | "strongComponents" | "stronglyConnected"
+	>;
+}
+
+/** Inspect the exact captured payload once per save-dialog entry; this does not authorize placement. */
+export function contextualBlueprintSaveConnectivity(
+	source: RailAreaStampTemplate | StaticFabOrganizationBundle,
+): ContextualBlueprintSaveSourceSummary["connectivity"] {
+	const map =
+		"railEdges" in source ? reconstructPortableBundleMap(source) : railTemplateMap(source);
+	if (typeof map === "string") throw new Error(map);
+	const graph = analyzePhysicalPathTopology(compilePhysicalRail(map).paths);
+	return Object.freeze({
+		paths: graph.paths,
+		openPaths: graph.openPaths,
+		invalidPaths: graph.invalidPaths,
+		strongComponents: graph.strongComponents,
+		stronglyConnected: graph.stronglyConnected,
+	});
+}
+
+export function contextualBlueprintConnectivityLabel(
+	graph: ContextualBlueprintSaveSourceSummary["connectivity"],
+): string {
+	if (graph.paths === 0) return "캡처된 레일 경로 없음";
+	if (graph.invalidPaths > 0) return "캡처된 레일 경로에 연결 검사 필요";
+	return `열린 경로 ${graph.openPaths.toLocaleString()}개 · ${graph.stronglyConnected ? "방향을 따라 전체 연결" : "방향을 따라 전체 연결되지 않음"}`;
 }
 
 export interface ContextualBlueprintSaveDraft {

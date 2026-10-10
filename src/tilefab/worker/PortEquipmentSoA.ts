@@ -7,6 +7,7 @@ import {
 	type EquipmentGroupRecord,
 	type PortEquipmentState,
 } from "../core/EquipmentGroup";
+import { type EquipmentKind, unreachableEquipmentKind } from "../core/EquipmentKind";
 import { copyPortRecord, type PortMutation, type PortRecord } from "../core/PortRecord";
 import type { Direction } from "../core/railShape";
 import { hasTransferableArrayBuffer, isTransferableTypedArray } from "./TransferableTypedArray";
@@ -19,8 +20,9 @@ const PROFILE_CLASSES = ["A", "B", "C", "D"] as const;
 const ROUTE_ROLES = ["INPUT", "THROAT", "OUTPUT"] as const;
 const PORT_SIDES = ["CENTER", "LEFT", "RIGHT"] as const;
 const PORT_DIRECTIONS = ["WITH_TRAVEL", "AGAINST_TRAVEL"] as const;
-const PORT_TYPES = ["OHB", "EQ", "STK"] as const;
-const GROUP_KINDS = ["OHB", "EQ", "STK"] as const;
+// This protocol owns zero-based wire codes: OHB=0, EQ=1, STK=2.
+const PORT_TYPES = ["OHB", "EQ", "STK"] as const satisfies readonly EquipmentKind[];
+const GROUP_KINDS = ["OHB", "EQ", "STK"] as const satisfies readonly EquipmentKind[];
 const GROUP_TEMPLATES = [
 	"SINGLE",
 	"CUSTOM",
@@ -477,13 +479,16 @@ function readEquipmentFromFields(
 				: { bodyDimensions: { lengthMillimeters, widthMillimeters } }),
 		});
 	}
-	const template = enumValue(
-		GROUP_TEMPLATES,
-		fields.templates[index] as number,
-		"equipment group template",
-	);
-	if (template === "SINGLE") throw new Error("STK equipment cannot use the OHB single template.");
-	return copyEquipmentGroupRecord({ id, kind, template, portIds });
+	if (kind === "STK") {
+		const template = enumValue(
+			GROUP_TEMPLATES,
+			fields.templates[index] as number,
+			"equipment group template",
+		);
+		if (template === "SINGLE") throw new Error("STK equipment cannot use the OHB single template.");
+		return copyEquipmentGroupRecord({ id, kind, template, portIds });
+	}
+	return unreachableEquipmentKind(kind);
 }
 
 export function portEquipmentSnapshotTransfers(snapshot: PortEquipmentSnapshot): ArrayBuffer[] {
@@ -673,7 +678,11 @@ function writeEquipmentGroup(
 		(fields.recipes as (string | null)[])[index] = group.recipe;
 		return;
 	}
-	fields.templates[index] = GROUP_TEMPLATES.indexOf(group.template);
+	if (group.kind === "STK") {
+		fields.templates[index] = GROUP_TEMPLATES.indexOf(group.template);
+		return;
+	}
+	unreachableEquipmentKind(group);
 }
 
 function createMutationEquipmentGroupFields(

@@ -6,6 +6,7 @@ import {
 	type StaticFabAssemblyConnectorPurpose,
 	type StaticFabAssemblyGatewayCandidate,
 } from "../core/StaticFabAssemblyConnector";
+import type { Cell } from "../core/TileMap";
 
 export type StaticFabAssemblyConnectorSessionPhase =
 	| "pick-source-gateway"
@@ -81,6 +82,34 @@ export interface StaticFabAssemblyConnectorRecommendationPair {
 }
 
 export const STATIC_FAB_ASSEMBLY_CONNECTOR_RECOMMENDATION_PAIR_LIMIT = 8;
+
+export interface StaticFabAssemblyConnectorRecommendationFailure {
+	readonly reason: string;
+	readonly conflictCells: readonly Cell[];
+	readonly conflictCount: number;
+}
+
+/** Keep exact Worker rejection evidence after the bounded recommendation pass is exhausted. */
+export function staticFabAssemblyConnectorRecommendationFailureReason(
+	failures: readonly StaticFabAssemblyConnectorRecommendationFailure[],
+): string {
+	if (
+		failures.length === 0 ||
+		failures.length > STATIC_FAB_ASSEMBLY_CONNECTOR_RECOMMENDATION_PAIR_LIMIT
+	) {
+		throw new RangeError("Expected 1-8 rejected connector recommendations.");
+	}
+	const reasons = new Set(
+		failures.map(({ reason, conflictCells, conflictCount }) => {
+			const locations = conflictCells.slice(0, 3).map(({ x, y }) => `(${x}, ${y})`);
+			const remaining = Math.max(0, conflictCount - locations.length);
+			return locations.length > 0
+				? `${reason} · 실패 위치 ${locations.join(", ")}${remaining > 0 ? ` 외 ${remaining}곳` : ""}`
+				: reason;
+		}),
+	);
+	return `${failures.length}개 후보 검증 · 인증 경로 없음 · ${[...reasons].join(" / ")}`;
+}
 
 export type StaticFabAssemblyConnectorSessionAction =
 	| Readonly<{ type: "SELECT_SOURCE"; gatewayId: string }>
@@ -247,9 +276,11 @@ export function reduceStaticFabAssemblyConnectorSession(
 export function staticFabAssemblyConnectorSourceCandidates(
 	state: StaticFabAssemblyConnectorSession,
 ): readonly StaticFabAssemblyGatewayCandidate[] {
-	return (
+	return certifiedGatewayFirst(
+		state,
 		state.binding.gatewaysByOrganizationId.get(state.binding.organizationIds[0]) ??
-		Object.freeze([])
+			Object.freeze([]),
+		state.sourceGatewayId,
 	);
 }
 
@@ -260,9 +291,24 @@ export function staticFabAssemblyConnectorTargetCandidates(
 	const targetOrganizationId = source
 		? state.binding.organizationIds.find((id) => id !== source.organizationId)
 		: state.binding.organizationIds[1];
-	return targetOrganizationId === undefined
-		? Object.freeze([])
-		: (state.binding.gatewaysByOrganizationId.get(targetOrganizationId) ?? Object.freeze([]));
+	const candidates =
+		targetOrganizationId === undefined
+			? Object.freeze([])
+			: (state.binding.gatewaysByOrganizationId.get(targetOrganizationId) ?? Object.freeze([]));
+	return certifiedGatewayFirst(state, candidates, state.targetGatewayId);
+}
+
+function certifiedGatewayFirst(
+	state: StaticFabAssemblyConnectorSession,
+	candidates: readonly StaticFabAssemblyGatewayCandidate[],
+	selectedId: string | null,
+): readonly StaticFabAssemblyGatewayCandidate[] {
+	// Certification belongs to this exact pair/side, never to a gateway on its own.
+	if (state.phase !== "ready" && state.phase !== "applying") return candidates;
+	const selected = candidates.find((candidate) => candidate.id === selectedId);
+	return selected && candidates[0] !== selected
+		? Object.freeze([selected, ...candidates.filter((candidate) => candidate !== selected)])
+		: candidates;
 }
 
 /**

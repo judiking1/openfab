@@ -123,6 +123,34 @@
 	line-height: 1.5;
 }
 
+.tilefab-contextual-save-connectivity {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 10px 14px;
+	border-bottom: 1px solid #303a3c;
+	font-size: 12px;
+}
+.tilefab-contextual-save-connectivity p {
+	margin: 0;
+}
+.tilefab-contextual-save-connectivity-note {
+	display: block;
+	margin-top: 4px;
+	color: #98a6a8;
+}
+.tilefab-contextual-save-change-scope {
+	min-height: 44px;
+	padding: 8px 12px;
+	border: 1px solid #526064;
+	border-radius: 4px;
+	color: inherit;
+	background: #18342e;
+	cursor: pointer;
+}
+
 .tilefab-contextual-blueprint-save form {
 	display: grid;
 	gap: 12px;

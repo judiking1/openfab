@@ -4,7 +4,12 @@ import type {
 	RailProjectReadinessIssue,
 } from "../compile/RailProjectReadiness";
 import type { RailMapReader } from "../core/paint";
+import type { RailDocument } from "../core/RailDocument";
 import { terminalForwardDirection } from "../core/RailModulePlanner";
+import {
+	staticFabOrganizationDeclaredSemanticRole,
+	staticFabOrganizationParentIds,
+} from "../core/StaticFabOrganization";
 import type { Cell } from "../core/TileMap";
 
 export type RailReadinessRepairTool = "build" | "inspect" | "replace-one-way" | null;
@@ -407,6 +412,50 @@ export function railReadinessOpenTerminalRepairLocation(
 		nearest = { index, cell: candidate };
 	}
 	return nearest ? Object.freeze(nearest) : null;
+}
+
+/** Explain the same cell ownership guard that a plain rail commit will encounter. */
+export function railReadinessRepairProtection(
+	report: RailProjectReadiness,
+	issue: RailProjectReadinessIssue,
+	document: Pick<RailDocument, "map" | "organizations" | "staticFabOrganizationOwnersForCell">,
+	locationIndex: number,
+): Readonly<{ reason: string; loopRepairSupported: boolean }> | null {
+	if (
+		issue.code === "EMPTY_PROJECT" ||
+		railReadinessIssueGuide(report, issue).repairTool !== "build"
+	)
+		return null;
+	const focus =
+		issue.code === "OPEN_TERMINAL"
+			? railReadinessOpenTerminalRepairLocation(report, issue, document.map, locationIndex)?.cell
+			: railReadinessIssueLocationAt(report, issue, locationIndex);
+	if (!focus) return null;
+	const owners = document.staticFabOrganizationOwnersForCell(focus.x, focus.y);
+	if (owners.length === 0) return null;
+	const labels = owners.map((owner) => {
+		const record = document.organizations.records.find(
+			(record) => record.id === owner.organizationId,
+		);
+		return record ? `${record.kind} '${record.name}'` : `${owner.kind}-${owner.organizationId}`;
+	});
+	const loopRepairSupported = owners.some((owner) => {
+		const record = document.organizations.records.find(
+			(record) => record.id === owner.organizationId,
+		);
+		return (
+			record?.kind === "AISLE" &&
+			staticFabOrganizationDeclaredSemanticRole(record) === "PROCESS_LOOP" &&
+			staticFabOrganizationParentIds(record).length === 0
+		);
+	});
+	const loopAction = loopRepairSupported
+		? "‘작업 루프를 골라 수정’에서 독립 작업 루프를 선택하세요."
+		: "이 조직은 직접 등록한 독립 작업 루프가 아니므로 작업 루프 레일 수정을 지원하지 않습니다. Production Bay 전체도 열린 끝을 포함할 수 있습니다. 저장할 범위의 연결 상태를 확인하세요.";
+	return {
+		loopRepairSupported,
+		reason: `X ${focus.x} · Z ${focus.y}의 레일은 ${labels.join(", ")} 소속으로 보호됩니다. 일반 레일 이어 그리기로는 이 구조를 변경할 수 없습니다. ${loopAction} Production Bay·Bay Bank 사이 연결은 ‘베이·뱅크를 골라 연결’에서 지원 여부를 확인하세요. 소속은 자동으로 해제하지 않습니다.`,
+	};
 }
 
 interface FullLocationSource {

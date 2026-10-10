@@ -7,13 +7,13 @@ import type {
 import type { AdvancedSwitchProfileClass } from "../core/AdvancedSwitch";
 import { ADVANCED_SWITCH_PROFILE_CLASSES } from "../core/AdvancedSwitch";
 import { STK_AUTHORING_TEMPLATES, type StkAuthoringTemplate } from "../core/EquipmentGroup";
+import { type EquipmentKind, unreachableEquipmentKind } from "../core/EquipmentKind";
 import { OrderedTypedChecksum } from "../core/OrderedTypedChecksum";
 import {
 	ADVANCED_SWITCH_ROUTE_ROLES,
 	type AdvancedSwitchRouteRole,
 	PORT_DIRECTIONS,
 	PORT_SIDES,
-	PORT_TYPES,
 	type PortDirection,
 	type PortSide,
 	type PortType,
@@ -250,7 +250,9 @@ const SOURCE_POSITION_REVIEWS = Object.freeze([
 	"ACKNOWLEDGE_MISMATCH",
 ] as const);
 const GROUPING_REVIEWS = Object.freeze(["CONFIRM_DECLARED", "OVERRIDE"] as const);
-const GROUP_KINDS = Object.freeze(["OHB", "EQ", "STK"] as const);
+// This protocol owns one-based wire codes; zero represents an absent decision.
+const PORT_TYPES = Object.freeze(["OHB", "EQ", "STK"] as const satisfies readonly EquipmentKind[]);
+const GROUP_KINDS = Object.freeze(["OHB", "EQ", "STK"] as const satisfies readonly EquipmentKind[]);
 const GROUP_TEMPLATES = Object.freeze(["SINGLE", ...STK_AUTHORING_TEMPLATES] as const);
 const REJECTED_SOURCE_ROWS_POLICIES = Object.freeze([
 	"NOT_APPLICABLE",
@@ -796,7 +798,7 @@ function decodeCapturedSnapshot(
 				pitchMillimeters: snapshot.groupPitchMillimeters[index] as number,
 				recipe: null,
 			});
-		} else {
+		} else if (kind === "STK") {
 			groupDecisions[index] = Object.freeze({
 				...common,
 				kind,
@@ -805,6 +807,8 @@ function decodeCapturedSnapshot(
 					snapshot.groupTemplates[index] as number,
 				) as StkAuthoringTemplate,
 			});
+		} else {
+			unreachableEquipmentKind(kind);
 		}
 	}
 

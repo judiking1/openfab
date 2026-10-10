@@ -1,4 +1,5 @@
 import { copyEqBodyDimensionsProperties, type EqBodyDimensions } from "../core/EquipmentGroup";
+import { unreachableEquipmentKind } from "../core/EquipmentKind";
 import {
 	RAIL_AREA_STAMP_MAX_EDGES,
 	type RailAreaStampEdge,
@@ -372,11 +373,14 @@ function copyStaticFabEquipmentGroup(
 			portIndices: Object.freeze([...group.portIndices]),
 		});
 	}
-	return Object.freeze({
-		kind: "STK",
-		template: group.template,
-		portIndices: Object.freeze([...group.portIndices]),
-	});
+	if (group.kind === "STK") {
+		return Object.freeze({
+			kind: "STK",
+			template: group.template,
+			portIndices: Object.freeze([...group.portIndices]),
+		});
+	}
+	return unreachableEquipmentKind(group);
 }
 
 function copyEdges(

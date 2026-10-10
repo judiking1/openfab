@@ -1,5 +1,6 @@
 import type { AdvancedSwitchPortIndex, AdvancedSwitchProfileClass } from "./AdvancedSwitch";
 import { ADVANCED_SWITCH_PROFILE_CLASSES } from "./AdvancedSwitch";
+import { EQUIPMENT_KINDS, type EquipmentKind } from "./EquipmentKind";
 import { ALL_DIRECTIONS, type Direction } from "./railShape";
 
 export const PORT_RECORD_MAX_ID = 0x7fff_ffff;
@@ -15,8 +16,8 @@ export type PortSide = (typeof PORT_SIDES)[number];
 export const PORT_DIRECTIONS = ["WITH_TRAVEL", "AGAINST_TRAVEL"] as const;
 export type PortDirection = (typeof PORT_DIRECTIONS)[number];
 
-export const PORT_TYPES = ["OHB", "EQ", "STK"] as const;
-export type PortType = (typeof PORT_TYPES)[number];
+export const PORT_TYPES = EQUIPMENT_KINDS;
+export type PortType = EquipmentKind;
 
 export const ADVANCED_SWITCH_ROUTE_ROLES = ["INPUT", "THROAT", "OUTPUT"] as const;
 export type AdvancedSwitchRouteRole = (typeof ADVANCED_SWITCH_ROUTE_ROLES)[number];

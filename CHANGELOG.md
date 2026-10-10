@@ -6,6 +6,21 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.110] - 2026-10-11
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Make equipment-kind handling explicit while preserving existing project and Worker formats,
+  Port ordering, equipment constraints and unsupported-kind rejection.
+- Keep completed Bay placement selected, expose the existing Blueprint placement action as a
+  working button, and fit copy and connector controls within the authoring workspace.
+- Route Checks through ownership-aware repair actions and keep structure details aligned with
+  the actual selection, preserving unfinished edits and organization protection.
+- Show captured Blueprint graph connectivity and allow scope changes without losing save inputs.
+  Clear the scope-resumption draft when leaving that flow; keep partial open blueprints saveable.
+- Present the Worker-certified connector pair first and retain actual rejection reasons and
+  locations when bounded recommendations fail, without relaxing crossing or ownership rules.
+
 ## [0.1.109] - 2026-10-10
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

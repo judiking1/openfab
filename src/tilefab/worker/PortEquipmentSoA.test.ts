@@ -65,9 +65,21 @@ describe("PortEquipmentSoA", () => {
 		expect(isCanonicalPortEquipmentState(hydrated)).toBe(true);
 		expect([...snapshot.portIds]).toEqual([1, 2, 3, 4, 5, 6, 7]);
 		expect([...snapshot.equipmentGroupIds]).toEqual([1, 2, 3]);
+		expect([...snapshot.ports.portTypes]).toEqual([0, 1, 1, 2, 2, 2, 2]);
+		expect([...snapshot.equipmentGroups.kinds]).toEqual([0, 1, 2]);
+		expect([...snapshot.equipmentGroups.templates]).toEqual([0, 0, 2]);
 		expect([...snapshot.equipmentGroups.portOffsets]).toEqual([0, 1, 3, 7]);
 		expect(snapshot.ports.routePortIndices).toBeInstanceOf(Int8Array);
 		expect(snapshot.equipmentGroups.portIds).toBeInstanceOf(Int32Array);
+		const custom = copyPortEquipmentState({
+			...canonical,
+			equipmentGroups: canonical.equipmentGroups.map((group) =>
+				group.kind === "STK" ? { ...group, template: "CUSTOM" } : group,
+			),
+		});
+		const customSnapshot = createPortEquipmentSnapshot(custom);
+		expect([...customSnapshot.equipmentGroups.templates]).toEqual([0, 0, 1]);
+		expect(hydratePortEquipmentSnapshot(customSnapshot)).toEqual(custom);
 	});
 
 	it("cooperatively hydrates canonical reciprocal ownership", async () => {
@@ -131,6 +143,16 @@ describe("PortEquipmentSoA", () => {
 		const invalidRoute = createPortEquipmentSnapshot(fixture());
 		invalidRoute.ports.routeKinds[0] = 9;
 		expect(() => hydratePortEquipmentSnapshot(invalidRoute)).toThrow();
+		const invalidPortType = createPortEquipmentSnapshot(fixture());
+		invalidPortType.ports.portTypes[0] = 3;
+		expect(() => hydratePortEquipmentSnapshot(invalidPortType)).toThrow(
+			"Invalid port type code 3.",
+		);
+		const invalidKind = createPortEquipmentSnapshot(fixture());
+		invalidKind.equipmentGroups.kinds[0] = 3;
+		expect(() => hydratePortEquipmentSnapshot(invalidKind)).toThrow(
+			"Invalid equipment group kind code 3.",
+		);
 
 		const orphan = createPortEquipmentSnapshot(fixture());
 		orphan.portIds[0] = 99;
