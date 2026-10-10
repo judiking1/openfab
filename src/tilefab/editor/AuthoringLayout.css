@@ -1,0 +1,505 @@
+/* One catalog and one task surface; existing command/session owners remain unchanged. */
+.tilefab-app[data-authoring-layout="unified"] {
+	--authoring-sidebar-width: 264px;
+	--authoring-workspace-width: 358px;
+}
+.tilefab-authoring-navigation {
+	position: absolute;
+	top: 12px;
+	bottom: 16px;
+	left: 12px;
+	width: var(--authoring-sidebar-width);
+	z-index: 35;
+	pointer-events: none;
+}
+.tilefab-authoring-sidebar,
+.tilefab-active-authoring-workspace {
+	box-sizing: border-box;
+	color: #e3edeb;
+	background: #151e20;
+	border: 1px solid #374b4b;
+	border-radius: 12px;
+	box-shadow: 0 12px 35px #0005;
+	pointer-events: auto;
+	font-size: 12px;
+}
+.tilefab-authoring-sidebar {
+	display: flex;
+	flex-direction: column;
+	max-height: 100%;
+}
+.tilefab-authoring-sidebar-heading,
+.tilefab-active-authoring-workspace > header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 12px;
+	border-bottom: 1px solid #304244;
+}
+.tilefab-authoring-sidebar h2 {
+	margin: 0;
+	font-size: 18px;
+}
+.tilefab-authoring-sidebar p {
+	margin: 5px 0 0;
+	color: #a7bcbb;
+	line-height: 1.5;
+}
+.tilefab-authoring-sidebar button,
+.tilefab-active-authoring-workspace button,
+.tilefab-active-authoring-workspace input,
+.tilefab-active-authoring-workspace select {
+	min-height: 44px;
+}
+.tilefab-authoring-sidebar button,
+.tilefab-active-authoring-workspace > header button {
+	border: 1px solid #3d5354;
+	border-radius: 7px;
+	background: #1b292c;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	padding: 9px;
+}
+.tilefab-authoring-sidebar button:hover {
+	background: #273e40;
+}
+.tilefab-authoring-sidebar button:focus-visible,
+.tilefab-active-authoring-workspace :is(button, input, select, summary):focus-visible {
+	outline: 2px solid #a4efda;
+	outline-offset: 2px;
+}
+.tilefab-authoring-sidebar-body {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow: hidden;
+	padding: 10px;
+}
+.tilefab-authoring-sidebar-content {
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+.tilefab-authoring-sidebar-categories {
+	flex-shrink: 0;
+}
+.tilefab-authoring-sidebar-categories {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 6px;
+}
+.tilefab-authoring-sidebar-category {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	text-align: left;
+}
+.tilefab-authoring-sidebar-home {
+	grid-column: 1 / -1;
+}
+.tilefab-authoring-sidebar [data-active="true"] {
+	background: #24564e;
+	border-color: #91d6c2;
+}
+.tilefab-authoring-sidebar section {
+	margin-top: 16px;
+}
+.tilefab-authoring-sidebar h3 {
+	font-size: 12px;
+	margin: 0 0 7px;
+	color: #a5cfc4;
+}
+.tilefab-authoring-sidebar-action {
+	display: flex;
+	width: 100%;
+	text-align: left;
+	align-items: flex-start;
+	gap: 8px;
+	margin: 6px 0;
+}
+.tilefab-authoring-sidebar-action-copy {
+	display: grid;
+	gap: 5px;
+	min-width: 0;
+	flex: 1;
+}
+.tilefab-authoring-sidebar-action strong {
+	font-size: 13px;
+}
+.tilefab-authoring-sidebar-action :is(small, p) {
+	display: block;
+	line-height: 1.5;
+	white-space: normal;
+}
+.tilefab-authoring-sidebar-action [aria-hidden="true"] {
+	flex-shrink: 0;
+}
+.tilefab-authoring-sidebar [aria-disabled="true"] {
+	color: #a4b0b1;
+	cursor: default;
+	background: #192326;
+}
+.tilefab-authoring-sidebar-reason {
+	color: #dac69b;
+}
+.tilefab-authoring-sidebar-actions {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.tilefab-authoring-sidebar-description {
+	font-size: 11px;
+	color: #adbfbc;
+	line-height: 1.5;
+}
+
+.tilefab-authoring-sidebar-utilities {
+	margin-top: 16px;
+	padding-top: 14px;
+	border-top: 1px solid #415455;
+}
+.tilefab-authoring-sidebar-utilities {
+	flex-shrink: 0;
+	margin-top: 10px;
+	padding-top: 8px;
+}
+.tilefab-authoring-sidebar-utilities .tilefab-authoring-sidebar-actions {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 4px;
+}
+.tilefab-authoring-sidebar-utilities .tilefab-authoring-sidebar-action {
+	height: 100%;
+	margin: 0;
+	align-items: center;
+}
+.tilefab-authoring-sidebar-utilities .tilefab-authoring-sidebar-description {
+	display: none;
+}
+.tilefab-authoring-sidebar-utilities li:last-child {
+	grid-column: 1 / -1;
+}
+.tilefab-authoring-sidebar-toggle {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.tilefab-active-workspace-host {
+	position: absolute;
+	top: 66px;
+	right: 12px;
+	bottom: 16px;
+	width: var(--authoring-workspace-width);
+	z-index: 34;
+	pointer-events: none;
+	display: flex;
+	flex-direction: column;
+}
+.tilefab-active-authoring-workspace {
+	display: flex;
+	flex: 0 1 auto;
+	flex-direction: column;
+	max-height: 100%;
+	overflow: hidden;
+}
+.tilefab-active-authoring-heading {
+	flex: 0 0 auto;
+}
+.tilefab-active-authoring-workspace h2 {
+	font-size: 15px;
+	margin: 0;
+}
+.tilefab-active-authoring-workspace p {
+	line-height: 1.5;
+}
+.tilefab-active-authoring-body {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	min-height: 0;
+	overflow: hidden;
+}
+.tilefab-active-authoring-scroll-content {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+.tilefab-active-authoring-settings {
+	display: grid;
+	gap: 12px;
+	padding: 12px;
+}
+.tilefab-active-authoring-actions {
+	flex: 0 0 auto;
+	background: #151e20;
+}
+.tilefab-authoring-task-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 12px;
+	border-top: 1px solid #435656;
+}
+.tilefab-authoring-task-actions button,
+.tilefab-authoring-result button,
+.tilefab-authoring-guidance button {
+	padding: 8px 12px;
+	border: 1px solid #5b8580;
+	border-radius: 6px;
+	color: #e0f5ee;
+	background: #24483f;
+	cursor: pointer;
+}
+.tilefab-authoring-task-actions button {
+	flex: 1 1 120px;
+}
+.tilefab-authoring-repeat {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	width: 100%;
+}
+.tilefab-authoring-repeat input {
+	min-height: 20px;
+	width: 18px;
+	height: 18px;
+}
+.tilefab-authoring-result {
+	padding: 12px;
+	background: #203c34;
+	border: 1px solid #549d83;
+	border-radius: 8px;
+}
+.tilefab-authoring-result > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.tilefab-authoring-guidance {
+	padding: 10px;
+	background: #23302d;
+	border: 1px solid #536d63;
+	border-radius: 8px;
+}
+.tilefab-authoring-guidance > div {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 6px;
+}
+.tilefab-authoring-guidance summary {
+	padding: 10px 0;
+	cursor: pointer;
+}
+.tilefab-active-authoring-toggle {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	:is(
+		.tilefab-buildbar,
+		.tilefab-inspector,
+		.tilefab-pattern-browser,
+		.tilefab-production-bay-panel,
+		.tilefab-readiness,
+		.tilefab-navigator-panel,
+		.tilefab-organization-library,
+		.tilefab-blueprint-library,
+		.tilefab-assembly-connector,
+		.tilefab-guided-build-panel,
+		.tilefab-action-hints,
+		.tilefab-template-feedback,
+		.tilefab-equipment-delete-recovery,
+		.tilefab-arrangement-historybar,
+		.tilefab-process-loop-contextbar
+	) {
+	position: static;
+	inset: auto;
+	transform: none;
+	width: 100%;
+	min-width: 0;
+	max-width: 100%;
+	height: auto;
+	max-height: none;
+	margin: 0;
+	box-sizing: border-box;
+	box-shadow: none;
+	overflow: visible;
+	flex-wrap: wrap;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-buildbar {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 12px;
+	padding: 12px;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	:is(.tilefab-segmented, .tilefab-equipment-actions) {
+	display: flex;
+	flex-wrap: wrap;
+	height: auto;
+	gap: 6px;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	:is(.tilefab-rail-options-toggle, .tilefab-buildbar-title, .tilefab-build-spec) {
+	display: none;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-buildbar
+	> :not([hidden]) {
+	visibility: visible;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-inspector
+	dl {
+	width: 100%;
+}
+/* This shell owns camera bounds, including short-screen and Guided layouts. */
+.tilefab-app[data-authoring-layout="unified"] #openfab-camera-controls {
+	display: flex;
+	flex-direction: row;
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	left: auto;
+	bottom: auto;
+	width: auto;
+	max-width: calc(100% - 24px);
+	gap: 5px;
+	z-index: 40;
+	padding: 4px;
+	border: 1px solid #354a4c;
+	border-radius: 9px;
+	background: #172125;
+}
+.tilefab-app[data-authoring-layout="unified"] #openfab-camera-controls button {
+	width: 36px;
+	min-height: 36px;
+}
+.tilefab-app[data-authoring-layout="unified"] .tilefab-metrics {
+	display: none;
+}
+.tilefab-app[data-authoring-layout="unified"] .tilefab-topbar {
+	gap: 10px;
+}
+.tilefab-app[data-authoring-layout="unified"] .tilefab-commands {
+	margin-left: auto;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	:is(
+		.tilefab-authoring-navigation,
+		.tilefab-active-workspace-host,
+		.tilefab-authoring-sidebar,
+		.tilefab-active-authoring-workspace
+	)
+	[hidden],
+.tilefab-app[data-authoring-layout="unified"]
+	:is(.tilefab-authoring-navigation, .tilefab-active-workspace-host)[hidden] {
+	display: none;
+}
+@media (min-width: 1001px) {
+	.tilefab-authoring-sidebar-toggle {
+		display: none;
+	}
+}
+@media (max-width: 1000px) {
+	.tilefab-authoring-navigation {
+		top: 10px;
+		left: 10px;
+		bottom: 78px;
+		width: min(340px, calc(100% - 20px));
+	}
+	.tilefab-authoring-navigation:has([data-expanded="true"]) {
+		top: 66px;
+	}
+	.tilefab-authoring-sidebar[data-expanded="false"] {
+		width: max-content;
+		max-width: 180px;
+	}
+	.tilefab-authoring-sidebar[data-expanded="false"] .tilefab-authoring-sidebar-heading-copy {
+		display: none;
+	}
+	.tilefab-active-workspace-host {
+		top: auto;
+		right: 10px;
+		left: 10px;
+		bottom: 10px;
+		width: auto;
+		height: min(62%, 560px);
+		justify-content: flex-end;
+	}
+	.tilefab-app[data-authoring-layout="unified"]
+		.tilefab-active-authoring-workspace
+		:is(.tilefab-inspector, .tilefab-equipment-workspace, .tilefab-guided-build-panel) {
+		min-height: 0;
+	}
+	.tilefab-app[data-authoring-layout="unified"] #openfab-camera-controls {
+		top: 10px;
+		right: 10px;
+		max-width: calc(100% - 150px);
+	}
+	.tilefab-app[data-authoring-layout="unified"] #openfab-camera-controls button {
+		min-height: 44px;
+		width: 44px;
+	}
+	.tilefab-app[data-authoring-layout="unified"] .tilefab-topbar .tilefab-commands {
+		gap: 3px;
+	}
+}
+
+@media (max-width: 1000px) and (max-height: 700px) {
+	.tilefab-authoring-sidebar-heading {
+		flex-shrink: 0;
+	}
+	.tilefab-authoring-sidebar-body {
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+	.tilefab-authoring-sidebar-content {
+		flex-shrink: 0;
+		overflow: visible;
+	}
+}
+
+.tilefab-active-authoring-actions > .tilefab-equipment-actions {
+	padding: 12px;
+	border-top: 1px solid #435656;
+}
+.tilefab-active-authoring-actions .tilefab-equipment-actions button {
+	padding: 8px 12px;
+	border: 1px solid #5b8580;
+	border-radius: 6px;
+	background: #24483f;
+	color: #e0f5ee;
+}
+.tilefab-active-authoring-actions .tilefab-equipment-actions button:disabled {
+	opacity: 0.5;
+}
+
+/* The shared task column is narrower than the former floating Bay panel. */
+.tilefab-active-authoring-workspace .tilefab-production-bay-controls {
+	grid-template-columns: minmax(0, 1fr);
+}
+.tilefab-active-authoring-workspace .tilefab-production-bay-controls label > span:last-child {
+	grid-template-columns: 44px minmax(64px, 1fr) 20px 44px;
+}
+.tilefab-active-authoring-workspace .tilefab-production-bay-controls label button {
+	width: 44px;
+}
+.tilefab-active-authoring-workspace .tilefab-production-bay-controls input {
+	min-width: 64px;
+	box-sizing: border-box;
+}

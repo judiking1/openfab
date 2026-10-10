@@ -68,6 +68,7 @@ import "./SyntheticFabStarterDialog.css";
 interface SyntheticFabStarterDialogProps {
 	readonly busy: boolean;
 	readonly mode: "project" | "pattern" | "preset";
+	readonly presetIntent?: "project" | "placement";
 	readonly returnFocus?: HTMLElement | null;
 	readonly operationError?: string | null;
 	readonly placementBlockedReason?: string | null;
@@ -97,6 +98,7 @@ interface StarterPreviewFailure {
 export function SyntheticFabStarterDialog({
 	busy,
 	mode,
+	presetIntent = "project",
 	returnFocus = null,
 	operationError = null,
 	placementBlockedReason = null,
@@ -109,7 +111,7 @@ export function SyntheticFabStarterDialog({
 }: SyntheticFabStarterDialogProps): React.ReactElement {
 	const initialId =
 		mode === "project" ? "blank" : mode === "preset" ? "paired-circulation-fab-52" : "bay-assembly";
-	const createsProject = mode !== "pattern";
+	const createsProject = mode === "project" || (mode === "preset" && presetIntent === "project");
 	const [request, setRequest] = useState<SyntheticFabStarterRequest>(() =>
 		defaultSyntheticFabStarterRequest(initialId),
 	);
@@ -496,6 +498,7 @@ export function SyntheticFabStarterDialog({
 								: "ready"
 				}
 				data-mode={mode}
+				data-preset-intent={mode === "preset" ? presetIntent : undefined}
 				data-preview-source={previewSource}
 			>
 				<header>
@@ -508,14 +511,18 @@ export function SyntheticFabStarterDialog({
 								{mode === "project"
 									? "새 프로젝트 · 시작 구성"
 									: mode === "preset"
-										? "프리셋으로 새 프로젝트 만들기 · 현재 FAB에 배치"
+										? createsProject
+											? "프리셋으로 새 프로젝트 만들기"
+											: "현재 프로젝트에 FAB 프리셋 추가"
 										: "현재 FAB에 조립 패턴 배치"}
 							</small>
 							<strong id="tilefab-starter-title">
 								{mode === "project"
 									? "FAB 구성 시작점"
 									: mode === "preset"
-										? "생산 FAB 레일 프리셋"
+										? createsProject
+											? "프리셋으로 새 FAB 시작"
+											: "FAB 프리셋 추가"
 										: "생산 Bay 조립 패턴"}
 							</strong>
 						</span>
@@ -920,26 +927,28 @@ export function SyntheticFabStarterDialog({
 									}}
 								/>
 							</label>
-							{mode === "preset" && placementBlockedReason ? (
-								<small
-									id="tilefab-starter-placement-status"
-									className="tilefab-starter-placement-blocked"
-									data-testid="synthetic-fab-placement-blocked"
-									role="status"
-								>
-									<AlertTriangle size={12} aria-hidden="true" /> {placementBlockedReason}
-								</small>
-							) : null}
 						</div>
 					) : (
 						<div className="tilefab-starter-placement-mode">
 							<Stamp size={17} />
 							<span>
-								<small>조립 패턴 배치</small>
-								<strong>선택한 위치에 반복 배치</strong>
+								<small>{mode === "preset" ? "현재 프로젝트에 추가" : "조립 패턴 배치"}</small>
+								<strong>
+									{mode === "preset" ? "선택한 위치에 1회 배치" : "선택한 위치에 반복 배치"}
+								</strong>
 							</span>
 						</div>
 					)}
+					{mode === "preset" && placementBlockedReason ? (
+						<small
+							id="tilefab-starter-placement-status"
+							className="tilefab-starter-placement-blocked"
+							data-testid="synthetic-fab-placement-blocked"
+							role="status"
+						>
+							<AlertTriangle size={12} aria-hidden="true" /> {placementBlockedReason}
+						</small>
+					) : null}
 					<div className="tilefab-starter-actions">
 						<span
 							id="tilefab-starter-create-status"
@@ -951,7 +960,9 @@ export function SyntheticFabStarterDialog({
 							{busy
 								? "정적 레일 프로젝트를 활성화하고 검증하는 중입니다. 생성 취소를 사용할 수 있습니다."
 								: previewIdle
-									? "프리셋 사양과 도식이 준비되었습니다. 새 프로젝트 또는 현재 FAB에 1회 배치를 선택하면 OpenFab 검증 레일을 불러옵니다."
+									? createsProject
+										? "새 프로젝트 만들기를 선택하면 검증된 프리셋을 불러옵니다. 기존 문서는 전환 전에 보호됩니다."
+										: "현재 FAB에 배치를 선택하면 검증된 프리셋을 불러옵니다. 현재 프로젝트는 유지됩니다."
 									: previewPending
 										? certifiedPreviewPending
 											? "빌드 시 검증된 OpenFab 합성 레일 아티팩트를 불러오는 중입니다."
@@ -974,36 +985,39 @@ export function SyntheticFabStarterDialog({
 						>
 							{busy ? "생성 취소" : "취소"}
 						</button>
-						<button
-							type="button"
-							className={mode === "preset" ? undefined : "tilefab-starter-create"}
-							disabled={busy || (!previewIdle && !previewMatchesPlan)}
-							aria-describedby="tilefab-starter-create-status"
-							data-testid={
-								mode === "pattern"
-									? "place-synthetic-fab-pattern"
-									: mode === "preset"
-										? "create-project-from-synthetic-fab-preset"
-										: "create-synthetic-fab-project"
-							}
-							onClick={create}
-						>
-							{createsProject ? <Factory size={16} /> : <Stamp size={16} />}
-							{busy
-								? createsProject
-									? "생성 중"
-									: "준비 중"
-								: previewPending
-									? certifiedPreviewPending
-										? "불러오는 중"
-										: "검증 중"
-									: mode === "pattern"
-										? "배치 시작"
+						{mode !== "preset" || createsProject ? (
+							<button
+								type="button"
+								className="tilefab-starter-create"
+								disabled={busy || (!previewIdle && !previewMatchesPlan)}
+								aria-describedby="tilefab-starter-create-status"
+								data-testid={
+									mode === "pattern"
+										? "place-synthetic-fab-pattern"
 										: mode === "preset"
-											? "새 프로젝트"
-											: "프로젝트 생성"}
-						</button>
-						{mode === "preset" ? (
+											? "create-project-from-synthetic-fab-preset"
+											: "create-synthetic-fab-project"
+								}
+								onClick={create}
+							>
+								{createsProject ? <Factory size={16} /> : <Stamp size={16} />}
+								{busy
+									? createsProject
+										? "생성 중"
+										: "준비 중"
+									: previewPending
+										? certifiedPreviewPending
+											? "불러오는 중"
+											: "검증 중"
+										: mode === "pattern"
+											? "배치 시작"
+											: mode === "preset"
+												? "새 프로젝트"
+												: "프로젝트 생성"}
+							</button>
+						) : null}
+
+						{mode === "preset" && !createsProject ? (
 							<button
 								type="button"
 								className="tilefab-starter-create"
@@ -1018,7 +1032,7 @@ export function SyntheticFabStarterDialog({
 								onClick={place}
 							>
 								<Stamp size={16} />
-								{busy ? "준비 중" : previewPending ? "불러오는 중" : "현재 FAB에 배치"}
+								{busy ? "준비 중" : previewPending ? "불러오는 중" : "현재 FAB에 1회 배치"}
 							</button>
 						) : null}
 					</div>

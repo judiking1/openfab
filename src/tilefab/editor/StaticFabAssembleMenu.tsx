@@ -25,6 +25,7 @@ import "./StaticFabSemanticFabDeleteDialog.css";
 export const STATIC_FAB_ASSEMBLE_DUPLICATE_CAPTURE_MODE = "EFFECTIVE" as const;
 
 export interface StaticFabAssembleMenuProps {
+	readonly creationActionsVisible?: boolean;
 	readonly selectionCount: number;
 	readonly selectedBayCount: number;
 	readonly selectedBankCount: number;
@@ -76,6 +77,7 @@ export interface StaticFabAssembleActionAvailability {
 }
 
 export function StaticFabAssembleMenu({
+	creationActionsVisible = true,
 	selectionCount,
 	selectedBayCount,
 	selectedBankCount,
@@ -117,57 +119,61 @@ export function StaticFabAssembleMenu({
 				<li>PROCESS LOOP</li>
 			</ol>
 
-			<button
-				type="button"
-				className="tilefab-assemble-primary"
-				data-testid="fab-preset-browser"
-				onClick={onNewFab}
-			>
-				<span className="tilefab-assemble-action-icon">
-					<Factory size={24} />
-				</span>
-				<span>
-					<small>새 프로젝트 시작</small>
-					<strong>새 FAB 만들기</strong>
-					<em>Bay와 Bank, 진입·진출구가 연결된 FAB를 만듭니다.</em>
-				</span>
-				<ChevronRight size={18} />
-			</button>
-
-			<section className="tilefab-assemble-section" aria-labelledby="tilefab-assemble-add-title">
-				<header>
-					<span>
-						<LayoutTemplate size={14} />
-						<strong id="tilefab-assemble-add-title">현재 FAB에 추가</strong>
+			{creationActionsVisible ? (
+				<button
+					type="button"
+					className="tilefab-assemble-primary"
+					data-testid="fab-preset-browser"
+					onClick={onNewFab}
+				>
+					<span className="tilefab-assemble-action-icon">
+						<Factory size={24} />
 					</span>
-					<small>Bay부터 차례로 조립</small>
-				</header>
-				<div className="tilefab-assemble-action-grid">
-					<button
-						type="button"
-						data-testid="production-bay-module-browser"
-						ref={productionBayTriggerRef}
-						onClick={onAddBay}
-					>
-						<span className="tilefab-assemble-action-icon">
-							<Network size={20} />
-						</span>
+					<span>
+						<small>새 프로젝트 시작</small>
+						<strong>새 FAB 만들기</strong>
+						<em>Bay와 Bank, 진입·진출구가 연결된 FAB를 만듭니다.</em>
+					</span>
+					<ChevronRight size={18} />
+				</button>
+			) : null}
+
+			{creationActionsVisible ? (
+				<section className="tilefab-assemble-section" aria-labelledby="tilefab-assemble-add-title">
+					<header>
 						<span>
-							<strong>Bay 추가</strong>
-							<small>Process Loop 1개 또는 2개 구성</small>
+							<LayoutTemplate size={14} />
+							<strong id="tilefab-assemble-add-title">현재 FAB에 추가</strong>
 						</span>
-					</button>
-					<button type="button" data-testid="assemble-open-blueprints" onClick={onOpenBlueprints}>
-						<span className="tilefab-assemble-action-icon">
-							<LibraryBig size={20} />
-						</span>
-						<span>
-							<strong>청사진 배치</strong>
-							<small>{blueprintCount.toLocaleString()} 개 저장됨</small>
-						</span>
-					</button>
-				</div>
-			</section>
+						<small>Bay부터 차례로 조립</small>
+					</header>
+					<div className="tilefab-assemble-action-grid">
+						<button
+							type="button"
+							data-testid="production-bay-module-browser"
+							ref={productionBayTriggerRef}
+							onClick={onAddBay}
+						>
+							<span className="tilefab-assemble-action-icon">
+								<Network size={20} />
+							</span>
+							<span>
+								<strong>Bay 추가</strong>
+								<small>Process Loop 1개 또는 2개 구성</small>
+							</span>
+						</button>
+						<button type="button" data-testid="assemble-open-blueprints" onClick={onOpenBlueprints}>
+							<span className="tilefab-assemble-action-icon">
+								<LibraryBig size={20} />
+							</span>
+							<span>
+								<strong>청사진 배치</strong>
+								<small>{blueprintCount.toLocaleString()} 개 저장됨</small>
+							</span>
+						</button>
+					</div>
+				</section>
+			) : null}
 
 			<section
 				className="tilefab-assemble-section tilefab-assemble-selection"
@@ -422,44 +428,46 @@ export function StaticFabAssembleMenu({
 				) : null}
 			</section>
 
-			<details
-				className="tilefab-assemble-advanced"
-				open={advancedOpen}
-				onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
-			>
-				<summary>
-					<span>
-						<LayoutTemplate size={15} />
-						<strong>고급 레일 패턴</strong>
-						<small>닫힌 레일 패턴을 개별 배치</small>
-					</span>
-					<ChevronRight size={16} />
-				</summary>
-				{advancedOpen ? (
-					<div className="tilefab-assemble-advanced-body">
-						<p data-testid="contextual-rail-tool-guidance">
-							이 패턴은 레일만 배치하며 Fab·Bank·Bay 조직을 만들지 않습니다. 캔버스에서 직선
-							레일이나 열린 끝점을 선택하면 반환·우회·끝점 복구 도구를 사용할 수 있습니다.
-						</p>
-						<button
-							type="button"
-							className="tilefab-assemble-legacy"
-							data-testid="synthetic-fab-pattern-browser"
-							onClick={onOpenLegacyAssemblies}
-						>
-							<span className="tilefab-assemble-action-icon">
-								<LayoutTemplate size={18} />
-							</span>
-							<span>
-								<strong>레일 전용 조립</strong>
-								<small>기존 영역 스탬프와 호환되는 도구</small>
-							</span>
-							<ChevronRight size={16} />
-						</button>
-						{renderAdvancedRailMotifs()}
-					</div>
-				) : null}
-			</details>
+			{creationActionsVisible ? (
+				<details
+					className="tilefab-assemble-advanced"
+					open={advancedOpen}
+					onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+				>
+					<summary>
+						<span>
+							<LayoutTemplate size={15} />
+							<strong>고급 레일 패턴</strong>
+							<small>닫힌 레일 패턴을 개별 배치</small>
+						</span>
+						<ChevronRight size={16} />
+					</summary>
+					{advancedOpen ? (
+						<div className="tilefab-assemble-advanced-body">
+							<p data-testid="contextual-rail-tool-guidance">
+								이 패턴은 레일만 배치하며 Fab·Bank·Bay 조직을 만들지 않습니다. 캔버스에서 직선
+								레일이나 열린 끝점을 선택하면 반환·우회·끝점 복구 도구를 사용할 수 있습니다.
+							</p>
+							<button
+								type="button"
+								className="tilefab-assemble-legacy"
+								data-testid="synthetic-fab-pattern-browser"
+								onClick={onOpenLegacyAssemblies}
+							>
+								<span className="tilefab-assemble-action-icon">
+									<LayoutTemplate size={18} />
+								</span>
+								<span>
+									<strong>레일 전용 조립</strong>
+									<small>기존 영역 스탬프와 호환되는 도구</small>
+								</span>
+								<ChevronRight size={16} />
+							</button>
+							{renderAdvancedRailMotifs()}
+						</div>
+					) : null}
+				</details>
+			) : null}
 		</section>
 	);
 }

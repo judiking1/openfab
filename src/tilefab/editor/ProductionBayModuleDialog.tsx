@@ -15,6 +15,7 @@ import twinBaySchematic from "./assets/production-bay-twin.svg?no-inline";
 import "./ProductionBayModuleDialog.css";
 
 export interface ProductionBayModulePanelProps {
+	readonly externalActions?: boolean;
 	readonly continuation?: React.ReactNode;
 	readonly request: ProductionBayModuleCatalogRequest;
 	readonly rotationDegrees: 0 | 90 | 180 | 270;
@@ -88,6 +89,7 @@ const NUMERIC_PARAMETERS: readonly Readonly<{
  * request; the app owns the canonical organization-bundle placement session and live ghost.
  */
 export function ProductionBayModulePanel({
+	externalActions = false,
 	continuation,
 	request,
 	rotationDegrees,
@@ -146,14 +148,16 @@ export function ProductionBayModulePanel({
 					<span className="tilefab-sr-only">Rotation </span>
 					{rotationDegrees}°
 				</span>
-				<button
-					type="button"
-					className="tilefab-production-bay-close"
-					onClick={onClose}
-					aria-label="Close Production Bay panel"
-				>
-					<X size={17} />
-				</button>
+				{!externalActions ? (
+					<button
+						type="button"
+						className="tilefab-production-bay-close"
+						onClick={onClose}
+						aria-label="Close Production Bay panel"
+					>
+						<X size={17} />
+					</button>
+				) : null}
 			</header>
 
 			<nav
@@ -341,17 +345,21 @@ export function ProductionBayModulePanel({
 							(continuation ? "전체 복제 또는 계속 배치" : "클릭·Enter 배치 · R 회전 · Esc 취소")}
 					</small>
 				</span>
-				<button type="button" className="tilefab-production-bay-cancel" onClick={onCancel}>
-					배치 취소
-				</button>
-				<button
-					type="button"
-					className="tilefab-production-bay-canvas"
-					disabled={error !== null}
-					onClick={onFocusCanvas}
-				>
-					<Crosshair size={15} /> 배치 위치 선택
-				</button>
+				{!externalActions ? (
+					<>
+						<button type="button" className="tilefab-production-bay-cancel" onClick={onCancel}>
+							배치 취소
+						</button>
+						<button
+							type="button"
+							className="tilefab-production-bay-canvas"
+							disabled={error !== null}
+							onClick={onFocusCanvas}
+						>
+							<Crosshair size={15} /> 배치 위치 선택
+						</button>
+					</>
+				) : null}
 			</footer>
 		</section>
 	);

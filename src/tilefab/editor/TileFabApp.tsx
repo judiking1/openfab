@@ -37,8 +37,6 @@ import {
 	Network,
 	Orbit,
 	PackagePlus,
-	PanelLeftClose,
-	PanelLeftOpen,
 	Plus,
 	Redo2,
 	RefreshCcw,
@@ -141,6 +139,7 @@ import {
 	defaultProductionBayModuleCatalogRequest,
 	type ProductionBayModuleCatalogRequest,
 	productionBayModuleCatalogItem,
+	productionBayModuleCatalogRequestError,
 } from "../compile/ProductionBayModuleCatalog";
 import {
 	type RailConstructionCopyPreset,
@@ -680,8 +679,10 @@ import {
 } from "./ContextualBlueprintSave";
 import { ContextualBlueprintSaveDialog } from "./ContextualBlueprintSaveDialog";
 import { type EditorActivity, editorActivityCanvasLabel } from "./EditorActivity";
-import { EditorActivityTools } from "./EditorActivityTools";
-import { EditorActivityRail } from "./EditorActivityRail";
+import { RailAuthoringSettings } from "./RailAuthoringSettings";
+import { AuthoringSidebar, type AuthoringAction, type AuthoringCategory, type AuthoringSection } from "./AuthoringSidebar";
+import { ActiveAuthoringWorkspace } from "./ActiveAuthoringWorkspace";
+import type { AuthoringTaskPresentation } from "./AuthoringTaskPresentation";
 import { editorToolDensityPresentation } from "./EditorToolDensityPresentation";
 import { DeferredEditorCommandHelpDialog } from "./DeferredEditorCommandHelpDialog";
 import { deriveEditorHelpContext } from "./EditorHelpContext";
@@ -768,7 +769,8 @@ import { deriveEditorActionHints, editorActionHint } from "./EditorActionHintPre
 import type { EditorTool } from "./EditorTool";
 import { PortEquipmentMembershipEditBar } from "./PortEquipmentMembershipEditBar";
 import { PortEquipmentGroupTransformBar } from "./PortEquipmentGroupTransformBar";
-import { PortEquipmentPlacementWorkspace } from "./PortEquipmentPlacementWorkspace";
+import { PortEquipmentPlacementActions } from "./PortEquipmentPlacementActions";
+import { PortEquipmentPlacementWorkspace, type PortEquipmentPlacementWorkspaceProps } from "./PortEquipmentPlacementWorkspace";
 import { PortEquipmentInspector } from "./PortEquipmentInspector";
 import { portEquipmentTransformPolicy } from "./PortEquipmentTransformPolicy";
 import { RailModuleInspector } from "./RailModuleInspector";
@@ -805,17 +807,14 @@ import {
 	guidedBuildPortPlacementRetainsSelection,
 	guidedBuildSelectionCopyPlacementIsSingleCommit,
 	guidedBuildRevealedActivities,
-	guidedBuildRevealedEquipmentToolIds,
 	guidedBuildRevealedRailConstructionCatalogIds,
 	guidedBuildRevealsCheckStatus,
 	guidedBuildRevealsConstructionBar,
-	guidedBuildRevealsErase,
 	guidedBuildRevealsRouteBendControls,
 	guidedBuildShouldAddOrganizationTap,
 	guidedBuildSuggestedActionClearsOrganizationPlacement,
 	guidedBuildSuggestedActionClearsPortSelection,
 	guidedBuildSuggestedActionSuppressesBayConfiguration,
-	guidedBuildTargetActivity,
 	guidedBuildTreatsPrimaryTouchAsPan,
 	guidedBuildUsesCompactOrganizationPicker,
 	guidedBuildVisibleOrganizationSelectionCount,
@@ -1234,6 +1233,7 @@ import {
 import { useEditorNavigationScroll } from "./useEditorNavigationScroll";
 import { useEquipmentWorkspaceFraming } from "./useEquipmentWorkspaceFraming";
 import "./EquipmentAuthoringWorkspace.css";
+import "./AuthoringLayout.css";
 import "./EquipmentInspector.css";
 import { observePortDockClearance } from "./observePortDockClearance";
 
@@ -3102,7 +3102,32 @@ export default function TileFabApp(): React.ReactElement {
 		useState<StaticFabInspection3DVisibility>(DEFAULT_STATIC_FAB_INSPECTION_3D_VISIBILITY);
 	const [inspection3DVisibilityMenuOpen, setInspection3DVisibilityMenuOpen] = useState(false);
 	const [editorActivity, setEditorActivity] = useState<EditorActivity>("build");
-	const [editorToolDescriptionPreference, setEditorToolDescriptionPreference] = useState<
+	const [browseCategory, setBrowseCategory] = useState<AuthoringCategory | null>(null);
+	const [authoringSurface, setAuthoringSurface] = useState<"catalog" | "task" | null>("catalog");
+	const [authoringToolActivated, setAuthoringToolActivated] = useState(false);
+	const [authoringResult, setAuthoringResult] = useState<Readonly<{
+		document: RailDocument; rootId: number | null; kind: "fab" | "bay"; label: string;
+		bayRequest?: ProductionBayModuleCatalogRequest;
+	}> | null>(null);
+	const newFabResultFrameRef = useRef<Readonly<{ document: RailDocument; camera: Camera }> | null>(null);
+	useLayoutEffect(() => {
+		const frame = newFabResultFrameRef.current;
+		if (!frame || authoringResult?.document !== frame.document || authoringResult.kind !== "fab") return;
+		newFabResultFrameRef.current = null;
+		const camera = cameraRef.current;
+		if (editorModelRef.current.document !== frame.document || viewMode !== "2d" || panRef.current !== null) return;
+		if (camera.offsetX !== frame.camera.offsetX || camera.offsetY !== frame.camera.offsetY ||
+			camera.zoom !== frame.camera.zoom || camera.rotation !== frame.camera.rotation) return;
+		// Measure the committed result sheet once; later browsing/resizing preserves the user's camera.
+		fitMapRef.current();
+	}, [authoringResult, viewMode]);
+	const productionBayRequestRef = useRef<Readonly<{
+		document: RailDocument; fingerprint: string; request: ProductionBayModuleCatalogRequest;
+	}> | null>(null);
+	const [repeatBayPlacement, setRepeatBayPlacement] = useState(false);
+	const repeatBayPlacementRef = useRef(false);
+	const compactAuthoringViewport = useViewportMedia("(max-width: 1000px)");
+	const [editorToolDescriptionPreference] = useState<
 		"auto" | "compact" | "expanded"
 	>("auto");
 	const [compactPortToolDescriptionsExpanded, setCompactPortToolDescriptionsExpanded] =
@@ -4458,10 +4483,7 @@ export default function TileFabApp(): React.ReactElement {
 		() => guidedBuildRevealedRailConstructionCatalogIds(guidedBuildEvaluation),
 		[guidedBuildEvaluation],
 	);
-	const guidedBuildVisibleEquipmentToolIds = useMemo(
-		() => guidedBuildRevealedEquipmentToolIds(guidedBuildEvaluation),
-		[guidedBuildEvaluation],
-	);
+
 	const guidedBuildCurrentMission = guidedBuildCopyRecovering ? null :
 		guidedBuildEvaluation.missions.find((mission) => mission.status === "current") ?? null;
 	const guidedBuildCurrentPrompt = guidedBuildCurrentMission?.prompt ?? null;
@@ -4529,7 +4551,8 @@ export default function TileFabApp(): React.ReactElement {
 		!guidedBuildEvaluation.complete &&
 		guidedBuildPreferences?.lastEntryChoice === "guided" &&
 		startupState.status === "ready";
-	const guidedBuildExperienceActive = !guidedBuildCopyRecovering && (guidedBuildOpen || guidedBuildResumeAvailable);
+	// A saved/resumable lesson is not an active exercise. Keep progress while restoring ordinary tools.
+	const guidedBuildExperienceActive = !guidedBuildCopyRecovering && guidedBuildOpen;
 	const staticFabExclusiveCommandActive = processLoopOperation !== null || staticFabMutationHistory !== null ||
 		operationalConfigurationOpen ||
 		stationProposalReview !== null ||
@@ -4792,18 +4815,7 @@ export default function TileFabApp(): React.ReactElement {
 												? "연결 구조의 복제 범위를 확인하는 중입니다. 준비되면 일반 복제 명령을 직접 강조합니다."
 									: "다음 실제 편집 대상을 준비하고 있습니다."
 					: null));
-	const guidedBuildCurrentTargetActivity =
-		guidedBuildCopyRecovering || guidedBuildChapterCheckpoint ||
-		guidedBuildReviewing ||
-		guidedBuildPlacementSessionActive ||
-		guidedBuildOrganizationPickerSurfaceOpen ||
-		guidedBuildPanelActionOwnsNextStep
-			? null
-			: guidedBuildPrimaryTarget?.kind === "activity"
-				? guidedBuildPrimaryTarget.activity
-				: !guidedBuildPrimaryTargetManaged
-					? guidedBuildTargetActivity(guidedBuildEvaluation)
-					: null;
+
 	const guidedBuildPrimaryTargetId = guidedBuildPrimaryTarget?.id ?? null;
 	const guidedBuildDirectTargetId =
 		guidedBuildOrganizationPlacementTargetId ??
@@ -5271,7 +5283,7 @@ export default function TileFabApp(): React.ReactElement {
 		guidedBuildOpen && guidedBuildExperienceActive,
 		guidedBuildEvaluation.currentMissionId,
 	);
-	const guidedBuildEraseRevealed = guidedBuildRevealsErase(guidedBuildEvaluation);
+
 	const guidedBuildCheckStatusRevealed = guidedBuildRevealsCheckStatus(guidedBuildEvaluation);
 	const guidedBuildConstructionBarRevealed =
 		guidedBuildRevealsConstructionBar(guidedBuildEvaluation) ||
@@ -5297,6 +5309,7 @@ export default function TileFabApp(): React.ReactElement {
 	const [newFabProfileWizardOpen, setNewFabProfileWizardOpen] = useState(false);
 	const [factoryPatternDialogOpen, setFactoryPatternDialogOpen] = useState(false);
 	const [fabPresetDialogOpen, setFabPresetDialogOpen] = useState(false);
+	const [fabPresetIntent, setFabPresetIntent] = useState<"project" | "placement">("project");
 	const [productionBayConfiguration, setProductionBayConfiguration] =
 		useState<ProductionBayModuleCatalogRequest | null>(null);
 	const [collapsedProductionBayRequest, setCollapsedProductionBayRequest] =
@@ -8476,7 +8489,10 @@ export default function TileFabApp(): React.ReactElement {
 			sourceDocument.map.getRevision() === sourceRevision &&
 			workerBridgeRef.current === mirrorBridge &&
 			workerBridgeDocumentRef.current === sourceDocument;
-		let singleCommitCompleted: "guided" | "preset" | null = null;
+		let singleCommitCompleted: "guided" | "preset" | "bay" | null = null;
+		const baySource = productionBayRequestRef.current;
+		const bayRequest = baySource?.document === sourceDocument && baySource.fingerprint === session.bundleFingerprint
+			? baySource.request : null;
 		let publicationWarning: string | null = null;
 		setOrganizationBundlePublicationNotice(null);
 		setOrganizationBundlePlacementFailure(null);
@@ -8788,6 +8804,12 @@ export default function TileFabApp(): React.ReactElement {
 				)
 			) {
 				singleCommitCompleted = "guided";
+			} else if (bayRequest && !keepRepeatPlacement && !repeatBayPlacementRef.current) {
+				singleCommitCompleted = "bay";
+				const rootId = plan.nextOrganizationIdBefore + (session.bundle.rootOrganizationIndices[0] ?? 0);
+				const root = activeDocument.organizations.records.find((record) => record.id === rootId);
+				if (root) selectStaticFabOrganization(root);
+				setAuthoringResult({ document: activeDocument, rootId: root?.id ?? null, kind: "bay", label: session.label, bayRequest });
 			} else if (
 				blueprintPlacementUsesSingleCommitByDefault(session.origin) &&
 				!keepRepeatPlacement
@@ -8822,9 +8844,19 @@ export default function TileFabApp(): React.ReactElement {
 				if (canvasRef.current) canvasRef.current.dataset.blueprintPlacementPending = "false";
 				if (singleCommitCompleted && organizationBundlePlacementSessionRef.current === session) {
 					updateOrganizationBundlePlacementSession(null);
+					if (singleCommitCompleted === "bay") {
+						setProductionBayConfiguration(null);
+						productionBayPlacementFingerprintRef.current = null;
+						organizationBundlePlacementPreviewPendingAnchorRef.current = null;
+						toolRef.current = "inspect";
+						setTool("inspect");
+						updateEditorActivity("assemble");
+						setAuthoringSurface("task");
+					}
 					setStatus(
 						publicationWarning ?? (singleCommitCompleted === "guided"
 							? `${session.label} 배치를 완료했습니다 · 다음 가이드 단계로 이동합니다`
+							: singleCommitCompleted === "bay" ? `${session.label} 배치를 완료했습니다 · 배치한 구조를 선택했습니다`
 							: `${session.label} 1회 배치를 완료했습니다 · Shift+클릭 반복은 프리셋에서 다시 시작할 수 있습니다`),
 					);
 					requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
@@ -9763,6 +9795,8 @@ export default function TileFabApp(): React.ReactElement {
 			| "preserve-port" = "clear",
 	): void => {
 		if (blockStaticFabExclusiveCommand()) return;
+		setAuthoringToolActivated(true);
+		setAuthoringSurface("task");
 		discardPendingStaticFabCheckRepairReturn();
 		if (next !== "build" && next !== "erase") { processLoopRailEditRef.current = null; setProcessLoopRailEdit(null); setProcessLoopRailEditFeedback(null); }
 		setOrdinaryPortProcessLoopFeedback(null);
@@ -14511,81 +14545,12 @@ export default function TileFabApp(): React.ReactElement {
 				previousHeight > 0 &&
 				(nextWidth !== previousWidth || nextHeight !== previousHeight)
 			) {
-				const organizationSession = organizationBundlePlacementSessionRef.current;
-				const organizationPreview = organizationBundlePlacementPreviewRef.current;
-				const organizationAnchor =
-					organizationPreview?.anchor ??
-					(organizationSession && hoverRef.current
-						? organizationSession.anchorAtPointerCell(hoverRef.current)
-						: null);
-				const organizationFramingBounds =
-					organizationSession && organizationAnchor
-						? organizationBundlePlacementFramingBounds(
-								organizationSession,
-								organizationAnchor,
-							)
-						: null;
-				const arrangementBinding = staticFabArrangementBindingRef.current;
-				const currentModel = editorModelRef.current;
-				if (cameraFitScopeRef.current === "assembly-review") {
-					fitAssemblyReviewRef.current();
-				} else if (organizationFramingBounds) {
-					const previousZoom = cameraRef.current.zoom;
-					const insets = fitMapInsets(canvas);
-					fitCameraToBounds(
-						organizationFramingBounds,
-						canvas,
-						cameraRef.current,
-						rendererRef.current,
-						insets,
-						4,
-					);
-					if (cameraRef.current.zoom > previousZoom) {
-						cameraRef.current.zoom = previousZoom;
-						centerCameraOnBounds(
-							organizationFramingBounds,
-							canvas,
-							cameraRef.current,
-							rendererRef.current,
-							insets,
-						);
-					}
-				} else if (
-					arrangementBinding &&
-					arrangementBinding.modelGeneration === currentModel.generation &&
-					arrangementBinding.document === currentModel.document &&
-					arrangementBinding.map === currentModel.map &&
-					arrangementBinding.revision === currentModel.map.getRevision() &&
-					arrangementBinding.patchSequence === currentModel.document.getPatchSequence()
-				) {
-					fitCameraToBounds(
-						unionStaticFabArrangementRootBounds(arrangementBinding.roots),
-						canvas,
-						cameraRef.current,
-						rendererRef.current,
-						fitMapInsets(canvas),
-					);
-				} else {
-					cameraRef.current.offsetX += (nextWidth - previousWidth) / 2;
-					cameraRef.current.offsetY += (nextHeight - previousHeight) / 2;
-				}
+				// Preserve zoom and the world point at the viewport center; only explicit navigation fits.
+				cameraRef.current.offsetX += (nextWidth - previousWidth) / 2;
+				cameraRef.current.offsetY += (nextHeight - previousHeight) / 2;
 			}
 			previousWidth = nextWidth;
 			previousHeight = nextHeight;
-			centerGuidedReuseSelectionTarget();
-			const portKeyboardSession = guidedPortKeyboardSessionRef.current;
-			if (
-				portKeyboardSession?.scope === "ordinary" &&
-				centerPortKeyboardRowIfObscured(
-					portKeyboardSession,
-					canvas,
-					cameraRef.current,
-					rendererRef.current,
-					fitMapInsets(canvas),
-				)
-			) {
-				cameraReadyRef.current = true;
-			}
 			rendererRef.current.invalidateStatic();
 			schedule();
 		});
@@ -14705,17 +14670,15 @@ export default function TileFabApp(): React.ReactElement {
 				cancelOrdinaryStaticFabIssueRecheckRef.current();
 				return;
 			}
-			const blockedActivityTarget = target?.closest<HTMLButtonElement>(
-				'.tilefab-editor-activity-button[aria-disabled="true"]',
+			const authoringNavigationTarget = target?.closest<HTMLElement>(
+				".tilefab-authoring-sidebar button, .tilefab-active-authoring-heading button",
 			);
 			if (
-				blockedActivityTarget &&
-				!event.metaKey &&
-				!event.ctrlKey &&
-				!event.altKey &&
-				["Enter", "NumpadEnter", "Space"].includes(event.code)
+				authoringNavigationTarget && !event.metaKey && !event.ctrlKey && !event.altKey &&
+				["Tab", "Enter", "NumpadEnter", "Space"].includes(event.code)
 			) {
-				// Let the native button activation reach the Activity rail's reason announcer.
+				// Native navigation/collapse activation is not a Canvas Apply intent.
+				// Catalog command callbacks retain their existing admission and stale/Worker guards.
 				return;
 			}
 			const activeAssemblyConnector = staticFabAssemblyConnectorUiRef.current;
@@ -14761,7 +14724,7 @@ export default function TileFabApp(): React.ReactElement {
 				if (textEditingTarget) return;
 				if (connectorPanel && interactiveTarget) return;
 				const plainKey = !event.metaKey && !event.ctrlKey && !event.altKey;
-				if (plainKey && commandMatches("command.apply", "assembly-connector")) {
+				if (target === canvas && plainKey && commandMatches("command.apply", "assembly-connector")) {
 					event.preventDefault();
 					keyboardActionsRef.current.applyStaticFabAssemblyConnector();
 					return;
@@ -15074,7 +15037,7 @@ export default function TileFabApp(): React.ReactElement {
 				const plainKey = !event.metaKey && !event.ctrlKey && !event.altKey;
 				const arrangementBar = target?.closest<HTMLElement>(".tilefab-arrangementbar") ?? null;
 				const arrangementCommandTarget = arrangementBar !== null;
-				if (!interactiveTarget && plainKey && commandMatches("command.apply", "arrangement")) {
+				if (target === canvas && plainKey && commandMatches("command.apply", "arrangement")) {
 					event.preventDefault();
 					keyboardActionsRef.current.applyStaticFabArrangement();
 					return;
@@ -15092,33 +15055,9 @@ export default function TileFabApp(): React.ReactElement {
 					keyboardActionsRef.current.setStaticFabArrangementMode(arrangementMode);
 					return;
 				}
-				if (plainKey && event.code === "Tab") {
-					event.preventDefault();
-					const commandBar =
-						arrangementBar ?? document.querySelector<HTMLElement>(".tilefab-arrangementbar");
-					const guidedPanel = document.querySelector<HTMLElement>(
-						'[data-testid="guided-build-panel"]',
-					);
-					const controls = [guidedPanel, commandBar]
-						.flatMap((surface) =>
-							surface
-								? [...surface.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")]
-								: [],
-						)
-						.filter((control) => control.getClientRects().length > 0);
-					if (controls.length > 0) {
-						const currentIndex = controls.indexOf(target as HTMLButtonElement);
-						const direction = event.shiftKey ? -1 : 1;
-						const nextIndex =
-							currentIndex < 0
-								? event.shiftKey
-									? controls.length - 1
-									: 0
-								: (currentIndex + direction + controls.length) % controls.length;
-						controls[nextIndex]?.focus();
-					}
-					return;
-				}
+				// This is a non-modal workspace. Native Tab order includes the visible shell and
+				// catalog; hidden/inert task controls must never become a separate focus loop.
+				if (plainKey && event.code === "Tab") return;
 				const nativeCommandBarKey =
 					arrangementCommandTarget &&
 					plainKey &&
@@ -18593,6 +18532,10 @@ export default function TileFabApp(): React.ReactElement {
 			return;
 		}
 		if (event.button === 0) {
+			setAuthoringToolActivated(true);
+			setAuthoringSurface("task");
+		}
+		if (event.button === 0) {
 			const blockedReason = editorMutationWaitBlockedReason();
 			if (blockedReason) {
 				setStatus(blockedReason);
@@ -21121,6 +21064,17 @@ export default function TileFabApp(): React.ReactElement {
 			setTemplatePaletteOpen(false);
 			assemblePaletteReturnFocusRef.current = null;
 			setNewFabProfileWizardOpen(false);
+			const createdDocument = editorModelRef.current.document;
+			const roles = deriveStaticFabOrganizationSemanticRoles(createdDocument.organizations);
+			const createdFab = createdDocument.organizations.records.find((record) => roles.get(record.id) === "FAB");
+			chooseTool("inspect", "preserve-context");
+			updateEditorActivity("assemble");
+			if (createdFab) selectStaticFabOrganization(createdFab);
+			setBrowseCategory("fab");
+			setAuthoringSurface("task");
+			newFabResultFrameRef.current = { document: createdDocument, camera: { ...cameraRef.current } };
+			setAuthoringResult({ document: createdDocument, rootId: createdFab?.id ?? null, kind: "fab", label: consumed.manifest.name });
+			setStatus(`${consumed.manifest.name} 생성 완료 · Bay 추가, 장비 배치 또는 구조 편집을 계속하세요`);
 			requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 		} catch (error) {
 			discardOpenFabFabPreparedProject(verified.prepared, verified.evidence);
@@ -24085,6 +24039,9 @@ export default function TileFabApp(): React.ReactElement {
 				);
 				productionBayPlacementFingerprintRef.current =
 					organizationBundlePlacementSessionRef.current?.bundleFingerprint ?? null;
+				if (productionBayPlacementFingerprintRef.current) productionBayRequestRef.current = {
+					document: editorModelRef.current.document, fingerprint: productionBayPlacementFingerprintRef.current, request,
+				};
 				return;
 			}
 			cancelBlueprintPlacement();
@@ -24094,6 +24051,7 @@ export default function TileFabApp(): React.ReactElement {
 				quarterTurns: current.quarterTurns,
 			});
 			productionBayPlacementFingerprintRef.current = next.bundleFingerprint;
+			productionBayRequestRef.current = { document: editorModelRef.current.document, fingerprint: next.bundleFingerprint, request };
 			updateOrganizationBundlePlacementSession(next);
 			refreshBuildPreview();
 			setStatus(
@@ -30200,6 +30158,7 @@ export default function TileFabApp(): React.ReactElement {
 		: null;
 	const organizationBundleSingleCommit = organizationBundlePlacementSession
 		? organizationBundlePlacementLifecycle?.mode === "single" ||
+ (productionBayRequestRef.current?.document === railDocument && productionBayRequestRef.current.fingerprint === organizationBundlePlacementSession.bundleFingerprint && !repeatBayPlacement) ||
 			(guidedBuildOpen &&
 				guidedBuildOrganizationPlacementIsSingleCommit(
 					guidedBuildEvaluation.currentMissionId,
@@ -31043,11 +31002,7 @@ export default function TileFabApp(): React.ReactElement {
 		!portEquipmentMembershipEditSession &&
 		!portEquipmentGroupEditSession &&
 		activePortAuthoringType !== null &&
-		activePortAuthoringPresentation !== null &&
-		(!guidedBuildOpen ||
-			(guidedBuildIsEquipmentMission(guidedBuildEvaluation.currentMissionId) &&
-				guidedBuildCurrentSuggestedAction === tool &&
-				!guidedBuildReviewing && !guidedBuildChapterCheckpoint));
+		activePortAuthoringPresentation !== null;
 	const activePortLegalSlotCount = activePortAuthoringType
 		? editorModel.portSlotArtifacts[activePortAuthoringType].slots.legalCount
 		: 0;
@@ -33331,7 +33286,7 @@ export default function TileFabApp(): React.ReactElement {
 			requestAnimationFrame(() =>
 				document
 					.querySelector<HTMLButtonElement>(
-						'.tilefab-editor-activity-tools .tilefab-tool-button[data-active="true"]',
+						'.tilefab-authoring-sidebar [data-authoring-action][data-active="true"]',
 					)
 					?.focus({ preventScroll: true }),
 			);
@@ -33727,8 +33682,9 @@ export default function TileFabApp(): React.ReactElement {
 		if (decision.action === "wait") return;
 		guidedBuildFirstRunConsideredRef.current = true;
 		if (decision.action === "suppress") return;
-		openFabStartReturnFocusRef.current = canvasRef.current;
-		setOpenFabStartDialogOpen(true);
+		setBrowseCategory(null);
+		setAuthoringSurface("catalog");
+		setStatus("제작 홈에서 새 FAB를 만들거나 현재 프로젝트에 Bay·레일을 추가하세요");
 	}, [
 		activeMap.edgeCount,
 		commandHelpOpen,
@@ -34105,28 +34061,7 @@ export default function TileFabApp(): React.ReactElement {
 		cameraReadyRef,
 		scheduleRenderRef,
 	});
-	const toggleEditorToolDescriptions = (): void => {
-		if (editorToolDescriptionConstraint) {
-			setStatus(`${editorToolDescriptionConstraint} · 패널을 닫으면 이전 설정으로 돌아갑니다`);
-			scheduleRender();
-			return;
-		}
-		if (compactPortToolFocusActive) {
-			setCompactPortToolDescriptionsExpanded((current) => !current);
-			setStatus(
-				compactPortToolDescriptionsExpanded
-					? "현재 Port 도구 설명을 접었습니다 · OHB/EQ/Stocker/IMPORT 표시는 유지됩니다"
-					: "현재 Port 도구 설명을 펼쳤습니다 · Port 작업을 끝내면 이전 메뉴 설정으로 돌아갑니다",
-			);
-			return;
-		}
-		setEditorToolDescriptionPreference(editorToolDescriptionsExpanded ? "compact" : "expanded");
-		setStatus(
-			editorToolDescriptionsExpanded
-				? "왼쪽 메뉴 설명을 접었습니다 · 버튼의 기능과 단축키는 그대로입니다"
-				: "왼쪽 메뉴 설명을 펼쳤습니다",
-		);
-	};
+
 	const staticFabOrganizationCanvasBlockedReason =
 		editorActivity === "assemble" ? staticFabOrganizationCanvasSelectionBlockedReason() : null;
 	const staticFabOrganizationCanvasSelectionEnabled =
@@ -34741,9 +34676,190 @@ export default function TileFabApp(): React.ReactElement {
 		</>
 	) : null;
 
+	const authoringAvailability: AuthoringAction["availability"] = editorActivityBlockedReason
+		? { state: "blocked", reason: editorActivityBlockedReason }
+		: { state: "ready" };
+	const authoringAction = (
+		id: string, label: string, description: string,
+		activate: (trigger: HTMLButtonElement) => void,
+		availability: AuthoringAction["availability"] = authoringAvailability,
+		active = false,
+	): AuthoringAction => ({ id, label, description, availability, active, onActivate: (trigger) => {
+		if (availability.state === "blocked") { setStatus(availability.reason); return; }
+		setAuthoringToolActivated(true);
+		setAuthoringSurface("task");
+		setAuthoringResult(null);
+		activate(trigger);
+	} });
+	const startAuthoringTemplate = (id: RailTemplateId): void => {
+		if (!prepareEditorActivityTransition("assemble") || blockEqInspectorDraftSelectionChange(null)) return;
+		updateEditorActivity("assemble");
+		startRailTemplate(id, selected);
+		setTemplatePaletteOpen(true);
+	};
+	const returnToAuthoringPatterns = (): void => {
+		const templateId = templateSessionRef.current?.id;
+		clearTransientConstruction("FAB 제작에서 배치할 레일 패턴을 선택하세요");
+		setTemplatePaletteOpen(false);
+		setBrowseCategory("fab");
+		setAuthoringSurface("catalog");
+		requestAnimationFrame(() => {
+			const actionId = templateId === "long-bay" ? "add-process-loop" : `template-${templateId}`;
+			const target = editorNavigationRef.current?.querySelector<HTMLButtonElement>(`[data-authoring-action="${actionId}"]`)
+				?? editorNavigationRef.current?.querySelector<HTMLButtonElement>('[data-authoring-category="fab"]');
+			target?.scrollIntoView({ block: "nearest" });
+			target?.focus({ preventScroll: true });
+		});
+	};
+	const newFabAction = authoringAction("new-fab", "새 FAB 프로젝트", "설정한 규모로 새 문서를 만듭니다 · 현재 문서는 전환 전에 보호됩니다", (trigger) => {
+		if (blockPendingLoopOrHistoryCommand()) return;
+		newFabProfileWizardReturnFocusRef.current = trigger;
+		setNewFabProfileWizardOpen(true);
+	});
+	const openAuthoringFabPreset = (intent: "project" | "placement", trigger: HTMLButtonElement): void => {
+		if (blockPendingLoopOrHistoryCommand()) return;
+		fabPresetDialogReturnFocusRef.current = trigger;
+		setFabPresetIntent(intent);
+		setFabPresetDialogOpen(true);
+	};
+	const presetFabAction = authoringAction("fab-presets", "완성된 FAB에서 시작", "검증된 프리셋으로 새 프로젝트를 만듭니다 · 현재 문서는 전환 전에 보호됩니다",
+		(trigger) => openAuthoringFabPreset("project", trigger));
+	const addFabPresetAction = authoringAction("add-fab-preset", "FAB 프리셋 추가", "현재 프로젝트를 유지하고 검증된 FAB를 1회 배치합니다",
+		(trigger) => openAuthoringFabPreset("placement", trigger));
+	const bayAction = authoringAction("add-bay", "Bay 추가", "현재 프로젝트에 작업 구역을 배치합니다", (trigger) => {
+		productionBayLauncherRef.current = trigger;
+		startProductionBayPlacementFromContext(true);
+	});
+	const loopAction = authoringAction("add-process-loop", "Process Loop 레일", "크기를 정해 폐쇄 레일을 배치합니다 · 조직 등록은 선택 후", () => startAuthoringTemplate("long-bay"));
+	const railActions = RAIL_CONSTRUCTION_CATALOG.map((item) => authoringAction(
+		`rail-${item.id}`, item.id === "route" ? "레일 그리기" : item.label,
+		`${item.title} · ${railConstructionApplicability(activeMap, item.id, buildAnchor, networkLinkContextRef.current).reason}`,
+		() => { if (chooseExplicitEditorTool("build")) chooseBuildMode(item.id); },
+		authoringAvailability, authoringToolActivated && tool === "build" && !templateSession && !areaStampSession && !stampSession && !organizationBundlePlacementSession && buildMode === item.id,
+	));
+	const blueprintActions = [
+		authoringAction("blueprints", "저장된 청사진", "프로젝트와 내 라이브러리에서 찾아 배치", (trigger) => openBlueprintLibraryFromActivity("saved", trigger)),
+		authoringAction("blueprint-recent", "최근 복제 항목 배치", "레일·장비·구조의 마지막 복제 항목", () => {
+			if (prepareEditorActivityTransition("assemble")) { updateEditorActivity("assemble"); pasteRecentRailClipboard(); }
+		}, railClipboardKind ? authoringAvailability : { state: "blocked", reason: "먼저 레일·장비·구조를 선택해 복제하세요" }),
+	];
+	const equipmentActions = (["ohb", "eq", "stk"] as const)
+		.map((id) => authoringAction(`equipment-${id}`, id === "ohb" ? "OHB 배치" : id === "eq" ? "EQ 장비 배치" : "Stocker 배치",
+			id === "ohb" ? "레일 옆 Port를 선택해 보관 위치 생성" : id === "eq" ? "직선 레일의 시작·끝을 선택해 장비 생성" : "입출고 Port를 선택한 뒤 Stocker 생성",
+			() => { chooseGuidedEquipmentTool(id); }, authoringAvailability, tool === id));
+	const structureActions = [
+		authoringAction("structure-list", "구조 선택·관리", "FAB · Bank · Bay · Process Loop", (trigger) => chooseStaticFabNavigatorTab("organizations", trigger)),
+		authoringAction("structure-copy", "선택 구조 복제", assemblyDuplicateAvailability.reason, duplicateSelectedFabAssembly, assemblyDuplicateAvailability),
+		authoringAction("structure-connect", "선택 구조 연결", assemblyConnectorAvailability.reason, startStaticFabAssemblyConnector, assemblyConnectorAvailability),
+	];
+	const authoringSections: readonly AuthoringSection[] = browseCategory === null ? [
+		{ id: "home-new", title: "새 프로젝트 시작", description: "공장 전체를 만들거나 검증된 예제로 시작합니다", actions: [newFabAction, presetFabAction] },
+		{ id: "home-add", title: "현재 프로젝트에 추가", description: "지금 열린 문서에서 제작을 시작합니다", actions: [bayAction, loopAction, addFabPresetAction, ...railActions.filter((action) => action.id === "rail-route")] },
+	] : browseCategory === "fab" ? [
+		{ id: "fab-new", title: "새 프로젝트", actions: [newFabAction, presetFabAction] },
+		{ id: "fab-add", title: "현재 프로젝트에 추가", actions: [bayAction, loopAction, addFabPresetAction] },
+		{ id: "fab-selection", title: "선택한 구조 편집", actions: structureActions },
+		{ id: "fab-patterns", title: "추가 레일 패턴", actions: RAIL_TEMPLATE_CATALOG.filter((item) => item.id !== "long-bay").map((item) => authoringAction(`template-${item.id}`, item.statusLabel, item.title,
+			() => startAuthoringTemplate(item.id), item.anchorRequirement === "free-closed" || selectedContextualRailTemplates.some((candidate) => candidate.id === item.id)
+				? authoringAvailability : { state: "blocked", reason: item.anchorRequirement === "directed-straight-trunk" ? "연결할 직선 레일을 먼저 선택하세요" : "열린 레일 끝점을 먼저 선택하세요" })) },
+	] : browseCategory === "rail" ? [
+		{ id: "rail-build", title: "레일 제작", description: "도구를 고른 뒤 캔버스에서 배치합니다", actions: railActions },
+		{ id: "rail-edit", title: "레일 편집", actions: [authoringAction("rail-erase", "레일 철거", "선택한 모듈 구간을 제거 · 실행 취소 가능", () => { chooseExplicitEditorTool("erase"); })] },
+	] : browseCategory === "equipment" ? [
+		{ id: "equipment-create", title: "Port 기준 장비 제작", description: activeMap.size === 0 ? "장비가 연결될 직선 레일을 먼저 만드세요" : "기존 레일에서 유효한 Port 위치를 선택합니다", actions: equipmentActions },
+		{ id: "equipment-import", title: "고급 가져오기", actions: [authoringAction("station-proposal", "Station proposal 검토", "외부 제안을 검토한 뒤 반영", (trigger) => void openStationProposalReview(trigger))] },
+	] : [{ id: "blueprint-library", title: "청사진 재사용", actions: blueprintActions }];
+	const authoringUtilityActions = [
+		authoringAction("select", "선택·편집", "캔버스에서 레일·장비·구조를 선택", (trigger) => { chooseEditorActivity("inspect", trigger); }, authoringAvailability, editorActivity === "inspect" && !staticFabNavigatorOpen),
+		authoringAction("checks", "검사", "연결과 장비·구조 문제를 확인하고 수정", (trigger) => chooseStaticFabNavigatorTab("checks", trigger)),
+		authoringAction("guide", guidedBuildResumeAvailable ? "실습 이어하기" : "도움말·선택적 실습", "작업을 보존하고 사용법 확인", (trigger) => openOrResumeGuidedBuild(trigger)),
+	];
+	const visibleAuthoringResult = authoringResult?.document === railDocument &&
+		(authoringResult.rootId === null || activeOrganizations.records.some((record) => record.id === authoringResult.rootId)) ? authoringResult : null;
+	const activeBayPlacement = organizationBundlePlacementSession !== null && productionBayRequestRef.current?.document === railDocument &&
+		productionBayRequestRef.current.fingerprint === organizationBundlePlacementSession.bundleFingerprint;
+	const activeBayConfigurationError = productionBayConfiguration
+		? productionBayModuleCatalogRequestError(productionBayConfiguration) : null;
+	const authoringTask: AuthoringTaskPresentation = {
+		id: portEquipmentInspectorVisible ? `equipment-${selectedEquipmentGroup?.id}` : templateSession ? `template-${templateSession.id}` : `${editorActivity}-${tool}`,
+		kind: selectedPortDetails || equipmentWorkspaceActive ? "equipment" : areaStampSession || stampSession || blueprintLibraryOpen ? "blueprint" : organizationBundlePlacementSession || staticFabExclusiveCommandActive ? "structure" : editorActivity === "inspect" || staticFabNavigatorOpen ? "selection" : "rail",
+		title: visibleAuthoringResult ? `${visibleAuthoringResult.kind === "fab" ? "FAB 생성" : "Bay 배치"} 완료` : readinessOpen ? "FAB 검사" : organizationLibraryOpen ? "구조 선택·편집" : navigatorMapOpen ? "FAB 지도" : blueprintLibraryOpen ? "청사진" : selectedPortDetails && portEquipmentInspectorVisible ? "장비 선택·편집" : productionBayConfiguration ? "Bay 배치" : templateSession ? railTemplateCatalogItem(templateSession.id).statusLabel : organizationBundlePlacementSession ? "구조 배치" : areaStampSession || stampSession ? "청사진 배치" : staticFabExclusiveCommandActive ? "구조 편집 검토" : equipmentWorkspaceActive ? `${tool === "stk" ? "Stocker" : tool.toUpperCase()} 배치` : tool === "inspect" ? "선택·편집" : tool === "erase" ? "레일 철거" : "레일 제작",
+	};
+	const authoringWorkspaceVisible = startupReady && (authoringToolActivated || analysis.cells > 0 || guidedBuildOpen || templateSession !== null || organizationBundlePlacementSession !== null || blueprintLibraryOpen || staticFabNavigatorOpen);
+	const authoringSidebarExpanded = !compactAuthoringViewport || authoringSurface === "catalog";
+	const authoringWorkspaceExpanded = authoringSurface === "task";
+	const portWorkspaceProps: PortEquipmentPlacementWorkspaceProps | null = equipmentWorkspaceActive && activePortAuthoringType && activePortAuthoringPresentation ? {applyGuidedPortKeyboard: applyGuidedPortKeyboard,
+activeMap: activeMap,
+activePortAuthoringInstruction: activePortAuthoringInstruction,
+activePortAuthoringPresentation: activePortAuthoringPresentation,
+activePortAuthoringType: activePortAuthoringType,
+activeStkZoomActionLabel: activeStkZoomActionLabel,
+basePortAuthoringInstruction: basePortAuthoringInstruction,
+bindEquipmentSelectionReadout: bindEquipmentSelectionReadout,
+cancelGuidedPortKeyboard: cancelGuidedPortKeyboard,
+canvasRef: canvasRef,
+chooseExplicitEditorTool: chooseExplicitEditorTool,
+chooseGuidedEquipmentTool: chooseGuidedEquipmentTool,
+chooseOrdinaryPortProcessLoop: chooseOrdinaryPortProcessLoop,
+completeStkDraft: completeStkDraft,
+editorMutationWaitActive: editorMutationWaitActive,
+eqPitchMillimeters: eqPitchMillimeters,
+eqRecipe: eqRecipe,
+equipmentProcessLoopChoices: equipmentProcessLoopChoices,
+exitOrdinaryPortAuthoring: exitOrdinaryPortAuthoring,
+guidedBuildCommandsActionable: guidedBuildCommandsActionable,
+guidedBuildExperienceActive: guidedBuildExperienceActive,
+guidedBuildPortPlacementCoach: guidedBuildPortPlacementCoach,
+guidedBuildPrimaryTarget: guidedBuildPrimaryTarget,
+guidedPortKeyboard: guidedPortKeyboard,
+guidedPortKeyboardSessionRef: guidedPortKeyboardSessionRef,
+inspectRecentPlacedOhb: inspectRecentPlacedOhb,
+modelSyncPending: modelSyncPending,
+ohbPlacementIntent: ohbPlacementIntent,
+ordinaryEqRowExit: ordinaryEqRowExit,
+ordinaryOhbNextPortHandoff: ordinaryOhbNextPortHandoff,
+ordinaryPortKeyboardEntryVisible: ordinaryPortKeyboardEntryVisible,
+ordinaryPortProcessLoopFeedback: ordinaryPortProcessLoopFeedback,
+ordinaryPortProcessLoopFeedbackRef: ordinaryPortProcessLoopFeedbackRef,
+ordinaryPortProcessLoopTargetId: ordinaryPortProcessLoopTargetId,
+portRowDragActive: portRowDragRef.current !== null,
+portTargetZoomHidden: cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM &&
+							cameraFitScopeRef.current !== "stk-selection",
+portTargetZoomButtonRef: portTargetZoomButtonRef,
+reframeGuidedPortRecommendations: reframeGuidedPortRecommendations,
+removeLastStkDraftPort: removeLastStkDraftPort,
+resumeOrdinaryPortKeyboard: resumeOrdinaryPortKeyboard,
+selectedEquipmentProcessLoopChoice: selectedEquipmentProcessLoopChoice,
+selectedEquipmentProcessLoopScope: selectedEquipmentProcessLoopScope,
+setEqPitchMillimeters: setEqPitchMillimeters,
+setEqRecipe: setEqRecipe,
+setOrdinaryPortProcessLoopFeedback: setOrdinaryPortProcessLoopFeedback,
+setStatus: setStatus,
+setStkTemplate: setStkTemplate,
+showNextOrdinaryPort: showNextOrdinaryPort,
+showStkSelection: showStkSelection,
+startOrdinaryPortKeyboard: startOrdinaryPortKeyboard,
+stkDraftReady: stkDraftReady,
+stkDraftReview: stkDraftReview,
+stkDraftSelection: stkDraftSelection,
+stkTemplate: stkTemplate,
+tool: tool,
+visibleRecentPlacedOhb: visibleRecentPlacedOhb,
+workerState: workerState,
+zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
+	const authoringTaskActions = activeBayPlacement ? <div className="tilefab-authoring-task-actions" data-testid="authoring-bay-actions">
+		<label className="tilefab-authoring-repeat"><input type="checkbox" checked={repeatBayPlacement}
+			onChange={(event) => { repeatBayPlacementRef.current = event.currentTarget.checked; setRepeatBayPlacement(event.currentTarget.checked); }} /> 연속 배치</label>
+		<button type="button" disabled={blueprintPlacementPending || modelSyncPending || activeBayConfigurationError !== null} onClick={(event) => applyBlueprintPlacementKeyboard(event.shiftKey)}>현재 위치에 배치</button>
+		<button type="button" disabled={activeBayConfigurationError !== null} onClick={() => { if (compactAuthoringViewport) setAuthoringSurface(null); restoreCanvasFocusAfterAction(); }}>캔버스에서 위치 선택</button>
+		<button type="button" onClick={cancelProductionBayPlacement}>배치 취소</button>
+	</div> : portWorkspaceProps ? <PortEquipmentPlacementActions {...portWorkspaceProps} /> : null;
+
 	return (
 		<div
 			ref={appRootRef}
+			data-authoring-layout="unified"
+			data-authoring-compact={compactAuthoringViewport}
 			data-testid="tilefab-app"
 			className="tilefab-app"
 			data-view-mode={viewMode}
@@ -35023,6 +35139,7 @@ export default function TileFabApp(): React.ReactElement {
 							openFabStartReturnFocusRef.current ?? canvasRef.current;
 						setOpenFabStartDialogOpen(false);
 						setGuidedBuildOpen(false);
+						setFabPresetIntent("project");
 						setFabPresetDialogOpen(true);
 					}}
 					onBlankCanvas={() => {
@@ -35283,35 +35400,7 @@ export default function TileFabApp(): React.ReactElement {
 					>
 						<FilePlus2 size={16} />
 					</IconButton>
-					<IconButton
-						label="FAB 조립"
-						disabled={
-							viewMode === "3d" ||
-							!startupReady ||
-							projectBusy ||
-							modelSyncPending ||
-							staticFabExclusiveCommandActive
-						}
-						pressed={templatePaletteOpen}
-						expanded={templatePaletteOpen}
-						controls="tilefab-static-fab-assemble-panel"
-						buttonRef={assembleLauncherRef}
-						onClick={toggleStaticFabAssemblePalette}
-					>
-						<LayoutTemplate size={16} />
-					</IconButton>
-					<IconButton
-						label="FAB 프리셋"
-						exclusiveCommandScope="project"
-						disabled={viewMode === "3d" || projectBusy || modelSyncPending || projectSourceOperationPending}
-						onClick={(event) => {
-							if (blockPendingLoopOrHistoryCommand()) return;
-							fabPresetDialogReturnFocusRef.current = event.currentTarget;
-							setFabPresetDialogOpen(true);
-						}}
-					>
-						<Factory size={16} />
-					</IconButton>
+
 					<IconButton
 						label="프로젝트 열기"
 						exclusiveCommandScope="project"
@@ -35396,92 +35485,7 @@ export default function TileFabApp(): React.ReactElement {
 							</button>
 						) : null}
 					</fieldset>
-					{viewMode === "3d" ? (
-						<>
-							<IconButton
-								label="선택 전체 프레임"
-								keyShortcuts="F"
-								tooltip="선택한 레일 또는 장비 그룹 전체 보기 (F)"
-								onClick={() => issueInspection3DCommand("frame-selection")}
-							>
-								<Maximize2 size={16} />
-							</IconButton>
-							<IconButton label="위에서 보기" onClick={() => issueInspection3DCommand("top")}>
-								<Home size={16} />
-							</IconButton>
-							<IconButton
-								label="아이소메트릭 보기"
-								onClick={() => issueInspection3DCommand("isometric")}
-							>
-								<Orbit size={16} />
-							</IconButton>
-							<IconButton
-								label="3D 표시 레이어"
-								expanded={inspection3DVisibilityMenuOpen}
-								controls="tilefab-3d-visibility-menu"
-								onClick={() => setInspection3DVisibilityMenuOpen((open) => !open)}
-							>
-								<Layers3 size={16} />
-							</IconButton>
-							{inspection3DVisibilityMenuOpen ? (
-								<fieldset
-									id="tilefab-3d-visibility-menu"
-									className="tilefab-3d-visibility-menu"
-								>
-									<legend className="tilefab-sr-only">3D 표시 레이어 선택</legend>
-									<button
-										type="button"
-										aria-label="3D 레일 표시"
-										aria-pressed={inspection3DVisibility.rail}
-										data-active={inspection3DVisibility.rail}
-										onClick={() => toggleInspection3DVisibility("rail")}
-									>
-										<Route size={16} /> <span>레일</span>
-									</button>
-									<button
-										type="button"
-										aria-label="3D 스위치 하드웨어 표시"
-										aria-pressed={inspection3DVisibility.switches}
-										data-active={inspection3DVisibility.switches}
-										onClick={() => toggleInspection3DVisibility("switches")}
-									>
-										<GitBranch size={16} /> <span>스위치</span>
-									</button>
-									<button
-										type="button"
-										aria-label="3D 설비와 포트 표시"
-										aria-pressed={inspection3DVisibility.equipment}
-										data-active={inspection3DVisibility.equipment}
-										onClick={() => toggleInspection3DVisibility("equipment")}
-									>
-										<Factory size={16} /> <span>설비·포트</span>
-									</button>
-								</fieldset>
-							) : null}
-						</>
-					) : null}
-					<IconButton
-						label="전체 보기"
-						exclusiveCommandScope="view"
-						touchTarget
-						onClick={viewMode === "3d" ? () => issueInspection3DCommand("fit-all") : fitMap}
-					>
-						<Maximize2 size={16} />
-					</IconButton>
-					<IconButton
-						label="물리 레일 외형"
-						exclusiveCommandScope="view"
-						disabled={viewMode === "3d"}
-						tooltip={
-							railPresentationMode === "profiled"
-								? "중심선 진단 보기로 전환"
-								: "물리 레일 외형 보기로 전환"
-						}
-						pressed={railPresentationMode === "profiled"}
-						onClick={toggleRailPresentation}
-					>
-						<Layers3 size={16} />
-					</IconButton>
+
 					<IconButton
 						label="전체 삭제"
 						disabled={
@@ -35594,95 +35598,7 @@ export default function TileFabApp(): React.ReactElement {
 						onApply={applyStaticFabBayFlowEdit}
 					/>
 				) : null}
-				<StaticFabAssemblyConnectorPanel
-					phase={staticFabAssemblyConnector?.session.phase ?? "idle"}
-					hierarchyRole={assemblyConnectorHierarchyRolePresentation}
-					purpose={assemblyConnectorPurposePresentation}
-					sourceBayName={
-						assemblyConnectorSourceOrganizationId !== null
-							? (assemblyConnectorOrganizationNames.get(assemblyConnectorSourceOrganizationId) ??
-								null)
-							: null
-					}
-					sourceGatewayLabel={
-						assemblyConnectorSource
-							? `${directionNames(assemblyConnectorSource.forward)} · ${assemblyConnectorSource.runLengthMeters} m · X ${assemblyConnectorSource.anchor.x} · Z ${assemblyConnectorSource.anchor.y}`
-							: null
-					}
-					targetBayName={
-						assemblyConnectorTargetOrganizationId !== null
-							? (assemblyConnectorOrganizationNames.get(assemblyConnectorTargetOrganizationId) ??
-								null)
-							: null
-					}
-					targetGatewayLabel={
-						assemblyConnectorTarget
-							? `${directionNames(assemblyConnectorTarget.forward)} · ${assemblyConnectorTarget.runLengthMeters} m · X ${assemblyConnectorTarget.anchor.x} · Z ${assemblyConnectorTarget.anchor.y}`
-							: null
-					}
-					sourceCandidates={assemblyConnectorSourcePanelCandidates}
-					sourceCandidateIndex={
-						assemblyConnectorSource
-							? assemblyConnectorSourceGatewayCandidates.findIndex(
-									(candidate) => candidate.id === assemblyConnectorSource.id,
-								)
-							: null
-					}
-					targetCandidates={assemblyConnectorTargetPanelCandidates}
-					targetCandidateIndex={
-						assemblyConnectorTarget
-							? assemblyConnectorTargetGatewayCandidates.findIndex(
-									(candidate) => candidate.id === assemblyConnectorTarget.id,
-								)
-							: null
-					}
-					side={staticFabAssemblyConnector?.session.side ?? null}
-					result={assemblyConnectorResult}
-					reason={staticFabAssemblyConnector?.session.reason ?? null}
-					conflictCount={staticFabAssemblyConnector?.session.conflictCount ?? 0}
-					issueCode={staticFabAssemblyConnector?.plan?.assemblyConnector.issueCode ?? null}
-					timings={staticFabAssemblyConnector?.session.timings ?? null}
-					recoveryTarget={staticFabAssemblyConnectorRecovery.target}
-					recoveryAutomaticRecommendationAttempts={
-						staticFabAssemblyConnectorRecovery.automaticRecommendationAttempts
-					}
-					guidedApplyActionId={
-						guidedBuildConnectorApplyOwnsNextStep ? "connector:apply" : null
-					}
-					guidedApplyDescriptionId="tilefab-guided-primary-target-description"
-					onSelectSource={(index) =>
-						selectAssemblyConnectorCandidateAt(assemblyConnectorSourceGatewayCandidates, index)
-					}
-					onSelectTarget={(index) =>
-						selectAssemblyConnectorCandidateAt(assemblyConnectorTargetGatewayCandidates, index)
-					}
-					onCycleSource={(step) =>
-						cycleAssemblyConnectorCandidates(
-							assemblyConnectorSourceGatewayCandidates,
-							assemblyConnectorSource?.id ?? null,
-							step,
-						)
-					}
-					onCycleTarget={(step) =>
-						cycleAssemblyConnectorCandidates(
-							assemblyConnectorTargetGatewayCandidates,
-							assemblyConnectorTarget?.id ?? null,
-							step,
-						)
-					}
-					onSide={setStaticFabAssemblyConnectorSide}
-					onApply={applyStaticFabAssemblyConnector}
-					onCancel={() => {
-						cancelStaticFabAssemblyConnectorAndRestoreFocus(
-							staticFabAssemblyConnectorCancelledStatus(
-								assemblyConnectorHierarchyRolePresentation,
-								assemblyConnectorPurposePresentation,
-								staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current,
-							),
-						);
 
-					}}
-				/>
 				{staticFabAssemblyConnector ? (
 					<p id="tilefab-assembly-connector-canvas-description" className="tilefab-sr-only">
 						{staticFabAssemblyConnectorGatewayPrompt(
@@ -35757,11 +35673,7 @@ export default function TileFabApp(): React.ReactElement {
 						건설할 수 있습니다.
 					</p>
 				) : null}
-				{ordinaryBuildSurfaceHandoff && ordinaryBuildSurfaceHandoffDescriptionId ? (
-					<p id={ordinaryBuildSurfaceHandoffDescriptionId} className="tilefab-sr-only">
-						{ordinaryBuildSurfaceHandoff.description}
-					</p>
-				) : null}
+
 				{guidedPortKeyboard ? (
 					<>
 						<p id="tilefab-guided-port-keyboard-description" className="tilefab-sr-only">
@@ -36166,9 +36078,7 @@ export default function TileFabApp(): React.ReactElement {
 				>
 					<span>{`여기를 탭 · ${guidedOrganizationPlacementKind}`}</span>
 				</button>
-				{viewMode === "2d" ? (
-					<nav className="tilefab-camera-controls" aria-label="2D 화면 배율">
-						<IconButton
+				<nav id="openfab-camera-controls" className="tilefab-camera-controls" aria-label="화면 보기">{viewMode === "2d" ? <><IconButton
 							label="화면 축소"
 							exclusiveCommandScope="view"
 							tooltip="화면 축소"
@@ -36180,25 +36090,97 @@ export default function TileFabApp(): React.ReactElement {
 							onClick={() => zoomMapFromCenter(1 / 1.25)}
 						>
 							<Minus size={16} />
-						</IconButton>
-						<IconButton
+						</IconButton><IconButton
 							label="화면 확대"
 							exclusiveCommandScope="view"
 							tooltip="화면 확대"
 							onClick={() => zoomMapFromCenter(1.25)}
 						>
 							<Plus size={16} />
-						</IconButton>
-						<IconButton
+						</IconButton><IconButton
 							label="전체 화면 맞춤"
 							exclusiveCommandScope="view"
 							tooltip="전체 화면 맞춤"
 							onClick={fitMap}
 						>
 							<Maximize2 size={16} />
-						</IconButton>
-					</nav>
-				) : null}
+						</IconButton></> : <IconButton label="전체 보기" onClick={() => issueInspection3DCommand("fit-all")}><Maximize2 size={16}/></IconButton>}{viewMode === "3d" ? (
+						<>
+							<IconButton
+								label="선택 전체 프레임"
+								keyShortcuts="F"
+								tooltip="선택한 레일 또는 장비 그룹 전체 보기 (F)"
+								onClick={() => issueInspection3DCommand("frame-selection")}
+							>
+								<Maximize2 size={16} />
+							</IconButton>
+							<IconButton label="위에서 보기" onClick={() => issueInspection3DCommand("top")}>
+								<Home size={16} />
+							</IconButton>
+							<IconButton
+								label="아이소메트릭 보기"
+								onClick={() => issueInspection3DCommand("isometric")}
+							>
+								<Orbit size={16} />
+							</IconButton>
+							<IconButton
+								label="3D 표시 레이어"
+								expanded={inspection3DVisibilityMenuOpen}
+								controls="tilefab-3d-visibility-menu"
+								onClick={() => setInspection3DVisibilityMenuOpen((open) => !open)}
+							>
+								<Layers3 size={16} />
+							</IconButton>
+							{inspection3DVisibilityMenuOpen ? (
+								<fieldset
+									id="tilefab-3d-visibility-menu"
+									className="tilefab-3d-visibility-menu"
+								>
+									<legend className="tilefab-sr-only">3D 표시 레이어 선택</legend>
+									<button
+										type="button"
+										aria-label="3D 레일 표시"
+										aria-pressed={inspection3DVisibility.rail}
+										data-active={inspection3DVisibility.rail}
+										onClick={() => toggleInspection3DVisibility("rail")}
+									>
+										<Route size={16} /> <span>레일</span>
+									</button>
+									<button
+										type="button"
+										aria-label="3D 스위치 하드웨어 표시"
+										aria-pressed={inspection3DVisibility.switches}
+										data-active={inspection3DVisibility.switches}
+										onClick={() => toggleInspection3DVisibility("switches")}
+									>
+										<GitBranch size={16} /> <span>스위치</span>
+									</button>
+									<button
+										type="button"
+										aria-label="3D 설비와 포트 표시"
+										aria-pressed={inspection3DVisibility.equipment}
+										data-active={inspection3DVisibility.equipment}
+										onClick={() => toggleInspection3DVisibility("equipment")}
+									>
+										<Factory size={16} /> <span>설비·포트</span>
+									</button>
+								</fieldset>
+							) : null}
+						</>
+					) : null}<IconButton
+						label="물리 레일 외형"
+						exclusiveCommandScope="view"
+						disabled={viewMode === "3d"}
+						tooltip={
+							railPresentationMode === "profiled"
+								? "중심선 진단 보기로 전환"
+								: "물리 레일 외형 보기로 전환"
+						}
+						pressed={railPresentationMode === "profiled"}
+						onClick={toggleRailPresentation}
+					>
+						<Layers3 size={16} />
+					</IconButton></nav>
 				{staticFabOrganizationOverlapSelection ? (
 					<CanvasOrganizationOverlapChooser
 						candidates={staticFabOrganizationOverlapSelection.candidates}
@@ -36544,117 +36526,6 @@ export default function TileFabApp(): React.ReactElement {
 					</div>
 				) : null}
 
-				{guidedBuildOpen && startupReady && viewMode === "2d" && !staticFabCheckRepairChooser ? (
-					<DeferredGuidedBuildPanel
-						key={guidedBuildEvaluation.currentMissionId ?? "complete"}
-						evaluation={guidedBuildEvaluation}
-						copyRecovery={guidedBuildCopyPhase ? {
-							phase: guidedBuildCopyPhase,
-							busy: guidedBuildCopyUndoPending,
-							canRetry: guidedBuildCommandsActionable && railDocument.canUndo,
-							error: guidedBuildCopyRecoveryError,
-						} : null}
-						onRetryCopy={() => void retryGuidedBuildCopy()}
-						practiceGraduated={
-							guidedBuildPreferences?.graduatedProjectId === projectSession.manifest.id
-						}
-						currentEquipmentGroupCount={railDocument.portEquipment.equipmentGroups.length}
-						currentPortCount={railDocument.portEquipment.ports.length}
-						registeredProcessLoopCount={activeOrganizations.records.filter((record) => organizationSemanticRoles.get(record.id) === "PROCESS_LOOP").length}
-						suggestedActionActive={guidedBuildSuggestedActionActive}
-						suggestedActionGuidedActionId={guidedBuildPanelActionTargetId ?? undefined}
-						suggestedActionGuidedTarget={guidedBuildPanelActionOwnsNextStep}
-						suggestedActionDescriptionId="tilefab-guided-primary-target-description"
-						completionActionGuidedActionId={
-							guidedBuildCompletionActionTargetId ?? undefined
-						}
-						completionActionGuidedTarget={guidedBuildCompletionActionOwnsNextStep}
-						completionActionDescriptionId="tilefab-guided-primary-target-description"
-						primaryTargetInstruction={guidedBuildPrimaryTargetInstruction}
-						primaryTargetManaged={guidedBuildPrimaryTargetManaged}
-						primaryTargetActionable={guidedBuildCommandsActionable}
-						chapterCheckpointId={guidedBuildCopyRecovering ? null : guidedBuildChapterCheckpoint}
-						keyboardRail={
-							guidedRailKeyboard?.scope === "guided"
-								? {
-										mission: guidedRailKeyboard.mission,
-										phase: guidedRailKeyboard.phase,
-									}
-								: null
-						}
-						keyboardPort={guidedPortKeyboard}
-						equipmentWorkspaceType={equipmentWorkspaceActive ? activePortAuthoringType : null}
-						exclusiveCommandActive={
-							staticFabArrangement !== null || staticFabAssemblyConnector !== null
-						}
-						keyboardRailEntryRef={guidedRailKeyboardEntryRef}
-						onAcknowledgeNavigation={() => {
-							persistGuidedBuildPreferences(
-								acknowledgeGuidedBuildNavigation(guidedBuildPreferences),
-							);
-							requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
-						}}
-						onActivateSuggestedAction={activateGuidedBuildSuggestedAction}
-						onStartKeyboardRail={startGuidedRailKeyboard}
-						onApplyKeyboardRail={applyGuidedRailKeyboard}
-						onCancelKeyboardRail={() => cancelGuidedRailKeyboard()}
-						onCancelKeyboardPort={(resumeKeyboard) =>
-							cancelGuidedPortKeyboard(undefined, true, resumeKeyboard)
-						}
-						onReviewingChange={(reviewing) => {
-							setGuidedBuildReviewing(reviewing);
-							if (reviewing && guidedBuildOrganizationPickerSurfaceOpen) {
-								closeStaticFabNavigator();
-							}
-						}}
-						onContinueChapter={() => {
-							const entryTool = guidedBuildChapterEntryTool(
-								guidedBuildChapterCheckpoint,
-								guidedBuildEvaluation.currentMissionId,
-								guidedBuildCurrentSuggestedAction,
-							);
-							if (entryTool) {
-								if (!guidedBuildCommandsActionable) {
-									setStatus(guidedBuildCommandsBlockedReason ?? "현재 작업을 마친 뒤 계속하세요");
-									return;
-								}
-								if (entryTool === "inspect") {
-									if (!chooseExplicitEditorTool(entryTool)) return;
-									clearPortEquipmentSelection();
-								} else if (!chooseGuidedEquipmentTool(entryTool)) return;
-								setGuidedBuildChapterCheckpoint(null);
-								requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
-								return;
-							}
-							const checkpointTrigger =
-								document.activeElement instanceof HTMLElement ? document.activeElement : null;
-							setGuidedBuildChapterCheckpoint(null);
-							requestAnimationFrame(() => {
-								requestAnimationFrame(() => {
-									const active = document.activeElement;
-									if (active !== document.body && active !== checkpointTrigger) return;
-									const nextAction = appRootRef.current?.querySelector<HTMLElement>(
-										'[data-testid="guided-build-suggested-action"]',
-									);
-									(nextAction ?? canvasRef.current)?.focus({ preventScroll: true });
-								});
-							});
-						}}
-						onStartEditing={() => {
-							setGuidedBuildReviewing(false);
-							minimizeGuidedBuild();
-						}}
-						onMinimize={() => {
-							setGuidedBuildReviewing(false);
-							minimizeGuidedBuild();
-						}}
-						onExit={() => {
-							setGuidedBuildReviewing(false);
-							exitGuidedBuild();
-						}}
-					/>
-				) : null}
-
 				{starterDialogOpen ? (
 					<SyntheticFabStarterDialog
 						busy={projectBusy}
@@ -36731,27 +36602,11 @@ export default function TileFabApp(): React.ReactElement {
 					/>
 				) : null}
 
-				{productionBayConfiguration && productionBayPanelExpanded ? (
-					<DeferredProductionBayModulePanel
-						request={productionBayConfiguration}
-						continuation={placedTwinBayDuplicateAction}
-						rotationDegrees={organizationBundlePlacementSession?.rotationDegrees ?? 0}
-						placementPending={blueprintPlacementPending}
-						onRequestChange={updateProductionBayConfiguration}
-						onClose={closeProductionBayPanel}
-						onCancel={cancelProductionBayPlacement}
-						onFocusCanvas={() => {
-							setCollapsedProductionBayRequest(productionBayConfiguration);
-							restoreCanvasFocusAfterAction();
-						}}
-						focusRequestRef={productionBayConfigurationFocusRequestRef}
-					/>
-				) : null}
-
 				{fabPresetDialogOpen ? (
 					<SyntheticFabStarterDialog
 						busy={projectBusy}
 						mode="preset"
+						presetIntent={fabPresetIntent}
 						returnFocus={fabPresetDialogReturnFocusRef.current}
 						operationError={starterDialogOperationError}
 						placementBlockedReason={
@@ -36775,6 +36630,7 @@ export default function TileFabApp(): React.ReactElement {
 						onCancelBusy={cancelActiveProjectOperation}
 						onClearOperationError={() => setStarterDialogOperationError(null)}
 						onClose={() => {
+							if (compactAuthoringViewport && fabPresetDialogReturnFocusRef.current?.closest(".tilefab-authoring-sidebar")) setAuthoringSurface("catalog");
 							setFabPresetDialogOpen(false);
 							setStarterDialogOperationError(null);
 						}}
@@ -36999,7 +36855,695 @@ export default function TileFabApp(): React.ReactElement {
 					/>
 				) : null}
 
-				{startupReady && navigatorMapOpen ? (
+				<nav className="tilefab-authoring-navigation" ref={editorNavigationRef} aria-label="제작과 편집" hidden={viewMode === "3d"}>
+ <AuthoringSidebar browseCategory={browseCategory} sections={authoringSections} utilityActions={authoringUtilityActions}
+ compact={compactAuthoringViewport} expanded={authoringSidebarExpanded}
+ onExpandedChange={(expanded) => setAuthoringSurface(expanded ? "catalog" : null)}
+ onBrowseCategory={(category) => { setBrowseCategory(category); if (compactAuthoringViewport) setAuthoringSurface("catalog"); setStatus("제작 도구를 선택하세요 · 진행 중인 작업과 입력은 유지됩니다"); }} />
+ </nav>
+
+				{contextPalette ? (
+					<div
+						ref={contextPaletteRef}
+						className="tilefab-context-palette"
+						data-testid="context-construction-palette"
+						data-context={
+							templateSession
+								? "template"
+								: areaStampSession
+									? "area-stamp"
+									: areaSelection
+										? "area"
+										: selectedPortDetails
+											? "port"
+											: selectedOwnership
+												? "rail"
+												: "construction"
+						}
+						style={{ left: contextPalette.left, top: contextPalette.top }}
+						role="menu"
+						aria-label="상황별 편집 명령"
+						aria-describedby={contextPortActionReasons.length > 0 ? "context-port-action-reasons" : undefined}
+						onKeyDown={handleContextPaletteKeyDown}
+					>
+						<header>
+							<span>
+								{templateSession ? (
+									<LayoutTemplate size={15} />
+								) : areaStampSession ? (
+									<Copy size={15} />
+								) : selectedPortDetails ? (
+									<PackagePlus size={15} />
+								) : selectedOwnership || areaSelection ? (
+									<MousePointer2 size={15} />
+								) : (
+									<Route size={15} />
+								)}
+								<strong>
+									{templateSession
+										? activeTemplateItem?.label
+										: areaStampSession
+											? `${areaStampSession.template.sourceModuleCount} MODULE AREA`
+											: areaSelection
+												? `${areaSelection.ownerships.length} MODULES`
+												: selectedPortDetails
+													? `${selectedPortDetails.equipmentGroup.kind} PORT`
+													: selectedOwnership
+														? "RAIL MODULE"
+														: "QUICK BUILD"}
+								</strong>
+							</span>
+							<button type="button" data-testid="close-context-construction-palette" aria-label="상황별 명령 닫기" aria-describedby={contextPortActionReasons.length > 0 ? "context-port-action-reasons" : undefined} onClick={closeContextPalette}>
+								<X size={14} />
+							</button>
+						</header>
+						{contextPortActionReasons.length > 0 ? (
+							<div id="context-port-action-reasons" className="tilefab-context-action-reasons" role="note">
+								{contextPortActionReasons.map((reason) => <p key={reason}>{reason}</p>)}
+							</div>
+						) : null}
+						<section>
+							{templateSession ? (
+								<>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(() => rotateConstruction(-1))}
+									>
+										<RotateCcw size={16} /> 반시계 회전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(() => rotateConstruction(1))}
+									>
+										<RotateCw size={16} /> 시계 회전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(flipTemplateFlow)}
+									>
+										<ArrowLeftRight size={16} /> 진행 방향 반전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={(event) => openActiveTemplateConfiguration(event.currentTarget)}
+									>
+										<LayoutTemplate size={16} /> 패턴 설정
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(() => resizeActiveTemplate(-1))}
+									>
+										<Minus size={16} /> 선택 치수 축소
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(() => resizeActiveTemplate(1))}
+									>
+										<Plus size={16} /> 선택 치수 확대
+									</button>
+								</>
+							) : organizationBundlePlacementSession ? (
+								<>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(() => rotateConstruction(-1))}
+									>
+										<RotateCcw size={16} /> 반시계 회전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(() => rotateConstruction(1))}
+									>
+										<RotateCw size={16} /> 시계 회전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() =>
+											runContextPaletteAction(() =>
+												clearTransientConstruction(
+													organizationBundlePlacementExitStatus(
+														organizationBundlePlacementSession,
+													),
+												),
+											)
+										}
+									>
+										<X size={16} /> 배치 종료
+									</button>
+								</>
+							) : areaStampSession ? (
+								<>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(() => rotateConstruction(-1))}
+									>
+										<RotateCcw size={16} /> 반시계 회전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(() => rotateConstruction(1))}
+									>
+										<RotateCw size={16} /> 시계 회전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(flipAreaStampFlow)}
+									>
+										<ArrowLeftRight size={16} /> 진행 방향 반전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() =>
+											runContextPaletteAction(() =>
+												clearTransientConstruction(areaStampExitStatus(areaStampSession)),
+											)
+										}
+									>
+										<X size={16} /> 복제 종료
+									</button>
+								</>
+							) : areaSelection ? (
+								<>
+									{areaReusableCatalogCandidates.map((candidate) => {
+										const item = railTemplateCatalogItem(candidate.templateId);
+										return (
+											<button
+												type="button"
+												role="menuitem"
+												key={`reuse-${candidate.templateId}:${patternDimensionSummary(candidate)}`}
+												onClick={() =>
+													runContextPaletteAction(() => startRecognizedRailTemplate(candidate))
+												}
+											>
+												<LayoutTemplate size={16} />
+												{candidate.scope === "attached-delta"
+													? `같은 ${item.label} 배치`
+													: `${item.label} 치수 편집 복제`}
+											</button>
+										);
+									})}
+									{areaStampEligibility?.valid === true ? (
+										<>
+											<button
+												type="button"
+												role="menuitem"
+												onClick={() =>
+													runContextPaletteAction(() =>
+														startAreaStamp(
+															areaSelection,
+															areaStampEligibility.template,
+															areaStampEligibility.staticFabTemplate ?? undefined,
+														),
+													)
+												}
+											>
+												<Copy size={16} /> 선택 영역 그대로 복제
+											</button>
+											<button
+												type="button"
+												role="menuitem"
+												onClick={() => runContextPaletteAction(cutSelectionToRailClipboard)}
+											>
+												<Scissors size={16} /> 잘라내기
+											</button>
+											<button
+												type="button"
+												role="menuitem"
+											onClick={() => {
+													closeContextPalette();
+													openBlueprintLibraryFromActivity();
+												}}
+											>
+												<LibraryBig size={16} /> 청사진으로 저장
+											</button>
+										</>
+									) : null}
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(deleteSelected)}
+									>
+										<Trash2 size={16} />
+										{staticFabEquipmentGroupCount > 0 ? "장비 포함 영역 철거" : "선택 영역 철거"}
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(clearAreaSelection)}
+									>
+										<X size={16} /> 선택 해제
+									</button>
+								</>
+							) : selectedPortDetails && selectedPortTransform ? (
+								<>
+									{selectedPortTransform.editor === "group" ? (
+										<button
+											type="button"
+											role="menuitem"
+											disabled={!selectedPortActions.editMembership.allowed}
+											title={selectedPortActions.editMembership.reason ?? undefined}
+											onClick={() => runContextPaletteAction(startSelectedPortEquipmentMembershipEdit)}
+										>
+											<MousePointer2 size={16} /> {selectedPortDetails.equipmentGroup.kind === "EQ" ? "Port 수 편집" : "포트 구성 편집"}
+										</button>
+									) : null}
+									{selectedPortDetails.equipmentGroup.kind === "EQ" ? (
+										<button
+											type="button"
+											role="menuitem"
+											data-testid="context-edit-eq-port-pitch"
+											disabled={!selectedPortActions.editMembership.allowed || modelSyncPending || workerState.status !== "ready"}
+											title={selectedPortActions.editMembership.reason ?? `PORT-${selectedPortDetails.port.id} 고정 · Port 수 유지`}
+											onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentMembershipEdit("pitch"))}
+										>
+											<ArrowLeftRight size={16} /> Port 간격 · {selectedPortDetails.equipmentGroup.pitchMillimeters / 1_000} m
+										</button>
+									) : null}
+									<button
+										type="button"
+										role="menuitem"
+										disabled={!selectedPortActions.move.allowed}
+										title={selectedPortActions.move.reason ?? undefined}
+										onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentTransform("move", selectedPortDetails.equipmentGroup.kind))}
+									>
+										<Move size={16} /> {selectedPortTransform.move.contextLabel}
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										disabled={!selectedPortActions.copy.allowed}
+										title={selectedPortActions.copy.reason ?? undefined}
+										onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentTransform("copy", selectedPortDetails.equipmentGroup.kind))}
+									>
+										<Copy size={16} /> {selectedPortTransform.copy.contextLabel}
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										data-testid="context-reverse-port-equipment-service-direction"
+										disabled={!selectedPortActions.reverseServiceDirection.allowed || modelSyncPending || workerState.status !== "ready"}
+										title={selectedPortActions.reverseServiceDirection.reason ?? "전체 Port의 서비스 방향을 반전합니다 · 레일 흐름과 위치는 유지됩니다"}
+										onClick={() => runContextPaletteAction(reverseSelectedPortEquipmentServiceDirection)}
+									>
+										<RotateCw size={16} /> 서비스 방향 반전
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										disabled={!selectedPortActions.delete.allowed}
+										title={selectedPortActions.delete.reason ?? undefined}
+										onClick={() => runContextPaletteAction(deleteSelected)}
+									>
+										<Trash2 size={16} /> 장비 그룹 철거
+									</button>
+								</>
+							) : selectedOwnership ? (
+								<>
+									{selectedReshapeSourceReason ? (
+										<div id="context-reshape-source-reason" className="tilefab-context-action-reasons" role="note">
+											{selectedReshapeSourceReason}
+										</div>
+									) : null}
+									{selectedContextualRailTemplates.map((item) => (
+										<button
+											type="button"
+											role="menuitem"
+											key={item.id}
+											data-testid={`rail-template-${item.id}`}
+											data-template-context={item.anchorRequirement}
+											title={item.title}
+											onClick={() =>
+												runContextPaletteAction(() => startRailTemplate(item.id, selected))
+											}
+										>
+											<LayoutTemplate size={16} /> {item.label}
+										</button>
+									))}
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(continueFromSelected)}
+									>
+										<Crosshair size={16} /> 여기서 연장
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() =>
+											runContextPaletteAction(() => startModuleStamp(selectedOwnership))
+										}
+									>
+										<Stamp size={16} /> 모듈 복제
+									</button>
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(cutSelectionToRailClipboard)}
+									>
+										<Scissors size={16} /> 모듈 잘라내기
+									</button>
+									{selectedType === "LEFT_CURVE" || selectedType === "RIGHT_CURVE" ? (
+										<button
+											type="button"
+											role="menuitem"
+											aria-disabled={selectedReshapeSourceReason !== null}
+											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
+											onClick={() => startReshape("corner")}
+										>
+											<CornerDownRight size={16} /> 코너 재배치
+										</button>
+									) : selectedType === "TERMINAL" ? (
+										<button
+											type="button"
+											role="menuitem"
+											aria-disabled={selectedReshapeSourceReason !== null}
+											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
+											onClick={() => startReshape("endpoint")}
+										>
+											<Move size={16} /> 끝점 재배치
+										</button>
+									) : selectedType === "LINEAR" ? (
+										<button
+											type="button"
+											role="menuitem"
+											aria-disabled={selectedReshapeSourceReason !== null}
+											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
+											onClick={() => startReshape("straight")}
+										>
+											<Move size={16} /> 직선 평행 이동
+										</button>
+									) : null}
+									<button
+										type="button"
+										role="menuitem"
+										onClick={() => runContextPaletteAction(deleteSelected)}
+									>
+										<Trash2 size={16} /> 모듈 철거
+									</button>
+								</>
+							) : (
+								<>
+									{presentedRailConstructionCatalog.map((item) => (
+										<button
+											type="button"
+											role="menuitem"
+											key={item.id}
+											onClick={() => runContextPaletteAction(() => chooseBuildMode(item.id))}
+										>
+											{constructionCatalogIcon(item.icon)} {item.label}
+											{constructionQuickSlot(item.id) ? (
+												<kbd>{constructionQuickSlot(item.id)}</kbd>
+											) : null}
+										</button>
+									))}
+									{!guidedBuildExperienceActive || guidedBuildVisibleActivities.includes("assemble") ? (
+										<button
+										type="button"
+										role="menuitem"
+										onClick={() => {
+											closeContextPalette();
+											openStaticFabAssemblePalette();
+										}}
+									>
+											<LayoutTemplate size={16} /> FAB 패턴
+										</button>
+									) : null}
+									{selectedContextualRailTemplates.map((item) => (
+										<button
+											type="button"
+											role="menuitem"
+											key={item.id}
+											data-testid={`rail-template-${item.id}`}
+											data-template-context="empty-map"
+											title={item.title}
+											onClick={() =>
+												runContextPaletteAction(() => startRailTemplate(item.id))
+											}
+										>
+											<LayoutTemplate size={16} /> {item.label}
+										</button>
+									))}
+								</>
+							)}
+						</section>
+					</div>
+				) : null}
+
+				<div className="tilefab-scale" role="img" aria-label="지도 거리 눈금 준비 중">
+					<span className="tilefab-scale-line" ref={mapScaleLineRef} aria-hidden="true" />
+					<strong ref={mapScaleLabelRef} />
+				</div>
+			<div className="tilefab-active-workspace-host" hidden={viewMode === "3d" || !authoringWorkspaceVisible}>
+ <ActiveAuthoringWorkspace task={authoringTask} compact={compactAuthoringViewport} expanded={authoringWorkspaceExpanded}
+ onExpandedChange={(expanded) => setAuthoringSurface(expanded ? "task" : null)} actions={authoringTaskActions}>
+ {visibleAuthoringResult ? <section className="tilefab-authoring-result" data-testid="authoring-result">
+ <strong>{visibleAuthoringResult.label} {visibleAuthoringResult.kind === "fab" ? "생성" : "배치"} 완료</strong>
+ <p>결과가 현재 프로젝트에 반영되었습니다. 다음 작업을 선택하세요.</p>
+ <div>
+ {visibleAuthoringResult.bayRequest ? <button type="button" disabled={modelSyncPending} onClick={() => {
+ const request = visibleAuthoringResult.bayRequest;
+ if (!request || !prepareEditorActivityTransition("assemble")) return;
+ setAuthoringResult(null); setProductionBayConfiguration(request); updateEditorActivity("assemble");
+ publishProductionBayPlacementSession(request, false); setAuthoringSurface("task");
+ }}>하나 더 배치</button> : <button type="button" disabled={modelSyncPending} onClick={(event) => bayAction.onActivate(event.currentTarget)}>Bay 추가</button>}
+ <button type="button" onClick={() => { setBrowseCategory("equipment"); if (compactAuthoringViewport) setAuthoringSurface("catalog"); }}>장비 놓기</button>
+ <button type="button" disabled={modelSyncPending} onClick={(event) => { setAuthoringResult(null); chooseStaticFabNavigatorTab("organizations", event.currentTarget); }}>구조 수정</button>
+ </div></section> : null}
+ <StaticFabAssemblyConnectorPanel
+					phase={staticFabAssemblyConnector?.session.phase ?? "idle"}
+					hierarchyRole={assemblyConnectorHierarchyRolePresentation}
+					purpose={assemblyConnectorPurposePresentation}
+					sourceBayName={
+						assemblyConnectorSourceOrganizationId !== null
+							? (assemblyConnectorOrganizationNames.get(assemblyConnectorSourceOrganizationId) ??
+								null)
+							: null
+					}
+					sourceGatewayLabel={
+						assemblyConnectorSource
+							? `${directionNames(assemblyConnectorSource.forward)} · ${assemblyConnectorSource.runLengthMeters} m · X ${assemblyConnectorSource.anchor.x} · Z ${assemblyConnectorSource.anchor.y}`
+							: null
+					}
+					targetBayName={
+						assemblyConnectorTargetOrganizationId !== null
+							? (assemblyConnectorOrganizationNames.get(assemblyConnectorTargetOrganizationId) ??
+								null)
+							: null
+					}
+					targetGatewayLabel={
+						assemblyConnectorTarget
+							? `${directionNames(assemblyConnectorTarget.forward)} · ${assemblyConnectorTarget.runLengthMeters} m · X ${assemblyConnectorTarget.anchor.x} · Z ${assemblyConnectorTarget.anchor.y}`
+							: null
+					}
+					sourceCandidates={assemblyConnectorSourcePanelCandidates}
+					sourceCandidateIndex={
+						assemblyConnectorSource
+							? assemblyConnectorSourceGatewayCandidates.findIndex(
+									(candidate) => candidate.id === assemblyConnectorSource.id,
+								)
+							: null
+					}
+					targetCandidates={assemblyConnectorTargetPanelCandidates}
+					targetCandidateIndex={
+						assemblyConnectorTarget
+							? assemblyConnectorTargetGatewayCandidates.findIndex(
+									(candidate) => candidate.id === assemblyConnectorTarget.id,
+								)
+							: null
+					}
+					side={staticFabAssemblyConnector?.session.side ?? null}
+					result={assemblyConnectorResult}
+					reason={staticFabAssemblyConnector?.session.reason ?? null}
+					conflictCount={staticFabAssemblyConnector?.session.conflictCount ?? 0}
+					issueCode={staticFabAssemblyConnector?.plan?.assemblyConnector.issueCode ?? null}
+					timings={staticFabAssemblyConnector?.session.timings ?? null}
+					recoveryTarget={staticFabAssemblyConnectorRecovery.target}
+					recoveryAutomaticRecommendationAttempts={
+						staticFabAssemblyConnectorRecovery.automaticRecommendationAttempts
+					}
+					guidedApplyActionId={
+						guidedBuildConnectorApplyOwnsNextStep ? "connector:apply" : null
+					}
+					guidedApplyDescriptionId="tilefab-guided-primary-target-description"
+					onSelectSource={(index) =>
+						selectAssemblyConnectorCandidateAt(assemblyConnectorSourceGatewayCandidates, index)
+					}
+					onSelectTarget={(index) =>
+						selectAssemblyConnectorCandidateAt(assemblyConnectorTargetGatewayCandidates, index)
+					}
+					onCycleSource={(step) =>
+						cycleAssemblyConnectorCandidates(
+							assemblyConnectorSourceGatewayCandidates,
+							assemblyConnectorSource?.id ?? null,
+							step,
+						)
+					}
+					onCycleTarget={(step) =>
+						cycleAssemblyConnectorCandidates(
+							assemblyConnectorTargetGatewayCandidates,
+							assemblyConnectorTarget?.id ?? null,
+							step,
+						)
+					}
+					onSide={setStaticFabAssemblyConnectorSide}
+					onApply={applyStaticFabAssemblyConnector}
+					onCancel={() => {
+						cancelStaticFabAssemblyConnectorAndRestoreFocus(
+							staticFabAssemblyConnectorCancelledStatus(
+								assemblyConnectorHierarchyRolePresentation,
+								assemblyConnectorPurposePresentation,
+								staticFabAssemblyConnectorReturnsToConnectedFabHandoffRef.current,
+							),
+						);
+
+					}}
+				/>
+{ordinaryBuildSurfaceHandoff && ordinaryBuildSurfaceHandoffDescriptionId ? (
+					<p id={ordinaryBuildSurfaceHandoffDescriptionId} className="tilefab-sr-only">
+						{ordinaryBuildSurfaceHandoff.description}
+					</p>
+				) : null}
+{guidedBuildOpen && startupReady && viewMode === "2d" && !staticFabCheckRepairChooser ? (
+					<section className="tilefab-authoring-guidance"><div><strong>실습 · {guidedBuildCurrentPrompt?.title}</strong><button type="button" onClick={minimizeGuidedBuild}>안내 접기</button></div><p>{guidedBuildCurrentPrompt?.objective}</p><details><summary>실습 단계와 조작 보기</summary><DeferredGuidedBuildPanel
+						key={guidedBuildEvaluation.currentMissionId ?? "complete"}
+						evaluation={guidedBuildEvaluation}
+						copyRecovery={guidedBuildCopyPhase ? {
+							phase: guidedBuildCopyPhase,
+							busy: guidedBuildCopyUndoPending,
+							canRetry: guidedBuildCommandsActionable && railDocument.canUndo,
+							error: guidedBuildCopyRecoveryError,
+						} : null}
+						onRetryCopy={() => void retryGuidedBuildCopy()}
+						practiceGraduated={
+							guidedBuildPreferences?.graduatedProjectId === projectSession.manifest.id
+						}
+						currentEquipmentGroupCount={railDocument.portEquipment.equipmentGroups.length}
+						currentPortCount={railDocument.portEquipment.ports.length}
+						registeredProcessLoopCount={activeOrganizations.records.filter((record) => organizationSemanticRoles.get(record.id) === "PROCESS_LOOP").length}
+						suggestedActionActive={guidedBuildSuggestedActionActive}
+						suggestedActionGuidedActionId={guidedBuildPanelActionTargetId ?? undefined}
+						suggestedActionGuidedTarget={guidedBuildPanelActionOwnsNextStep}
+						suggestedActionDescriptionId="tilefab-guided-primary-target-description"
+						completionActionGuidedActionId={
+							guidedBuildCompletionActionTargetId ?? undefined
+						}
+						completionActionGuidedTarget={guidedBuildCompletionActionOwnsNextStep}
+						completionActionDescriptionId="tilefab-guided-primary-target-description"
+						primaryTargetInstruction={guidedBuildPrimaryTargetInstruction}
+						primaryTargetManaged={guidedBuildPrimaryTargetManaged}
+						primaryTargetActionable={guidedBuildCommandsActionable}
+						chapterCheckpointId={guidedBuildCopyRecovering ? null : guidedBuildChapterCheckpoint}
+						keyboardRail={
+							guidedRailKeyboard?.scope === "guided"
+								? {
+										mission: guidedRailKeyboard.mission,
+										phase: guidedRailKeyboard.phase,
+									}
+								: null
+						}
+						keyboardPort={guidedPortKeyboard}
+						equipmentWorkspaceType={equipmentWorkspaceActive ? activePortAuthoringType : null}
+						exclusiveCommandActive={
+							staticFabArrangement !== null || staticFabAssemblyConnector !== null
+						}
+						keyboardRailEntryRef={guidedRailKeyboardEntryRef}
+						onAcknowledgeNavigation={() => {
+							persistGuidedBuildPreferences(
+								acknowledgeGuidedBuildNavigation(guidedBuildPreferences),
+							);
+							requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+						}}
+						onActivateSuggestedAction={activateGuidedBuildSuggestedAction}
+						onStartKeyboardRail={startGuidedRailKeyboard}
+						onApplyKeyboardRail={applyGuidedRailKeyboard}
+						onCancelKeyboardRail={() => cancelGuidedRailKeyboard()}
+						onCancelKeyboardPort={(resumeKeyboard) =>
+							cancelGuidedPortKeyboard(undefined, true, resumeKeyboard)
+						}
+						onReviewingChange={(reviewing) => {
+							setGuidedBuildReviewing(reviewing);
+							if (reviewing && guidedBuildOrganizationPickerSurfaceOpen) {
+								closeStaticFabNavigator();
+							}
+						}}
+						onContinueChapter={() => {
+							const entryTool = guidedBuildChapterEntryTool(
+								guidedBuildChapterCheckpoint,
+								guidedBuildEvaluation.currentMissionId,
+								guidedBuildCurrentSuggestedAction,
+							);
+							if (entryTool) {
+								if (!guidedBuildCommandsActionable) {
+									setStatus(guidedBuildCommandsBlockedReason ?? "현재 작업을 마친 뒤 계속하세요");
+									return;
+								}
+								if (entryTool === "inspect") {
+									if (!chooseExplicitEditorTool(entryTool)) return;
+									clearPortEquipmentSelection();
+								} else if (!chooseGuidedEquipmentTool(entryTool)) return;
+								setGuidedBuildChapterCheckpoint(null);
+								requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+								return;
+							}
+							const checkpointTrigger =
+								document.activeElement instanceof HTMLElement ? document.activeElement : null;
+							setGuidedBuildChapterCheckpoint(null);
+							requestAnimationFrame(() => {
+								requestAnimationFrame(() => {
+									const active = document.activeElement;
+									if (active !== document.body && active !== checkpointTrigger) return;
+									const nextAction = appRootRef.current?.querySelector<HTMLElement>(
+										'[data-testid="guided-build-suggested-action"]',
+									);
+									(nextAction ?? canvasRef.current)?.focus({ preventScroll: true });
+								});
+							});
+						}}
+						onStartEditing={() => {
+							setGuidedBuildReviewing(false);
+							minimizeGuidedBuild();
+						}}
+						onMinimize={() => {
+							setGuidedBuildReviewing(false);
+							minimizeGuidedBuild();
+						}}
+						onExit={() => {
+							setGuidedBuildReviewing(false);
+							exitGuidedBuild();
+						}}
+					/></details></section>
+				) : null}
+{productionBayConfiguration && productionBayPanelExpanded ? (
+					<DeferredProductionBayModulePanel
+						externalActions
+						request={productionBayConfiguration}
+						continuation={placedTwinBayDuplicateAction}
+						rotationDegrees={organizationBundlePlacementSession?.rotationDegrees ?? 0}
+						placementPending={blueprintPlacementPending}
+						onRequestChange={updateProductionBayConfiguration}
+						onClose={closeProductionBayPanel}
+						onCancel={cancelProductionBayPlacement}
+						onFocusCanvas={() => {
+							setCollapsedProductionBayRequest(productionBayConfiguration);
+							restoreCanvasFocusAfterAction();
+						}}
+						focusRequestRef={productionBayConfigurationFocusRequestRef}
+					/>
+				) : null}
+{startupReady && navigatorMapOpen ? (
 					<aside
 						id="tilefab-fab-navigator"
 						className="tilefab-navigator-panel"
@@ -37055,8 +37599,7 @@ export default function TileFabApp(): React.ReactElement {
 						/>
 					</aside>
 				) : null}
-
-				{startupReady && readinessOpen ? (
+{startupReady && readinessOpen ? (
 					<aside
 						ref={staticFabChecksPanelRef}
 						id="tilefab-fab-navigator"
@@ -37605,141 +38148,7 @@ export default function TileFabApp(): React.ReactElement {
 						)}
 					</aside>
 				) : null}
-
-				<nav
-					className="tilefab-tools"
-					ref={editorNavigationRef}
-					aria-label="편집 활동과 도구"
-					aria-hidden={
-						guidedBuildOrganizationCommandOwnsWorkspace ||
-						guidedBuildPanelActionOwnsNextStep ||
-						guidedBuildCompletionActionOwnsNextStep
-							? true
-							: undefined
-					}
-					inert={
-						guidedBuildOrganizationCommandOwnsWorkspace ||
-						guidedBuildPanelActionOwnsNextStep ||
-						guidedBuildCompletionActionOwnsNextStep
-							? true
-							: undefined
-					}
-					data-tool-density={editorToolDescriptionsExpanded ? "expanded" : "compact"}
-					data-tool-density-preference={editorToolDescriptionPreference}
-					data-tool-density-constrained={editorToolDescriptionConstraint !== null}
-					data-tool-density-context={compactPortToolContextActive ? "ordinary-port" : "default"}
-				>
-					<EditorActivityRail
-						activeActivity={editorActivity}
-						blockedReason={editorActivityBlockedReason}
-						controls={{ assemble: "tilefab-static-fab-assemble-panel" }}
-						expanded={{ assemble: templatePaletteOpen }}
-						guidedTargetActivity={
-							guidedBuildOpen && guidedBuildCurrentTargetActivity !== editorActivity
-								? guidedBuildCurrentTargetActivity
-								: null
-						}
-						guidedTargetDescriptionId={
-							guidedBuildPrimaryTarget?.kind === "activity"
-								? "tilefab-guided-primary-target-description"
-								: undefined
-						}
-						label="OpenFab 편집 활동"
-						visibleActivities={
-							guidedBuildExperienceActive ? guidedBuildVisibleActivities : undefined
-						}
-						onActivityChange={chooseEditorActivity}
-						onBlockedActivityAttempt={(_activity, reason) => {
-							setStatus(reason);
-							scheduleRender();
-						}}
-					/>
-					{!guidedBuildExperienceActive ? (
-						<>
-							<button
-								type="button"
-								className="tilefab-tool-density-toggle"
-								data-testid="editor-tool-description-toggle"
-								aria-label="메뉴 설명"
-								aria-pressed={editorToolDescriptionsExpanded}
-								aria-controls="tilefab-editor-activity-tools"
-								aria-disabled={editorToolDescriptionConstraint !== null || undefined}
-								aria-describedby={
-									editorToolDescriptionConstraint
-										? "tilefab-tool-density-constraint"
-										: compactPortToolFocusActive
-											? "tilefab-port-tool-density-context"
-											: undefined
-								}
-								title={
-									editorToolDescriptionConstraint ??
-									(compactPortToolFocusActive
-										? editorToolDescriptionsExpanded
-											? "현재 Port 도구 설명 접기"
-											: "현재 Port 도구 설명 펼치기"
-										: editorToolDescriptionsExpanded
-											? "메뉴 설명 숨기기"
-											: "메뉴 설명 표시")
-								}
-								onClick={toggleEditorToolDescriptions}
-							>
-								<span className="tilefab-tool-density-icon" aria-hidden="true">
-									{editorToolDescriptionsExpanded ? (
-										<PanelLeftClose size={18} />
-									) : (
-										<PanelLeftOpen size={18} />
-									)}
-								</span>
-								<span className="tilefab-tool-density-copy" aria-hidden="true">
-									<strong>메뉴 설명</strong>
-									<small>{editorToolDescriptionsExpanded ? "접기" : "펼치기"}</small>
-								</span>
-							</button>
-							{editorToolDescriptionConstraint ? (
-								<span id="tilefab-tool-density-constraint" className="tilefab-sr-only">
-									{editorToolDescriptionConstraint}. 패널을 닫으면 이전 설정으로 돌아갑니다.
-								</span>
-							) : null}
-							{compactPortToolFocusActive && !editorToolDescriptionConstraint ? (
-								<span id="tilefab-port-tool-density-context" className="tilefab-sr-only">
-									Port 배치 중에는 캔버스를 넓게 쓰도록 도구 설명을 접었습니다. 이 버튼으로
-									언제든 펼칠 수 있으며 Port 작업을 끝내면 이전 메뉴 설정으로 돌아갑니다.
-								</span>
-							) : null}
-						</>
-					) : null}
-					<EditorActivityTools
-						editorActivity={editorActivity}
-						tool={tool}
-						guidedBuildExperienceActive={guidedBuildExperienceActive}
-						guidedBuildEraseRevealed={guidedBuildEraseRevealed}
-						guidedBuildOpen={guidedBuildOpen}
-						guidedBuildPrimaryTarget={guidedBuildPrimaryTarget}
-						guidedBuildVisibleEquipmentToolIds={guidedBuildVisibleEquipmentToolIds}
-						guidedBuildCurrentSuggestedAction={guidedBuildCurrentSuggestedAction}
-						guidedBuildComplete={guidedBuildEvaluation.complete}
-						staticFabExclusiveCommandActive={staticFabExclusiveCommandActive}
-						editorMutationWaitActive={editorMutationWaitActive}
-						blueprintLibraryOpen={blueprintLibraryOpen}
-						stationProposalReviewActive={stationProposalReview !== null}
-						staticFabNavigatorOpen={staticFabNavigatorOpen}
-						startupReady={startupReady}
-						projectBusy={projectBusy}
-						modelSyncPending={modelSyncPending}
-						contextPaletteOpen={contextPalette !== null}
-						chooseExplicitEditorTool={chooseExplicitEditorTool}
-						closeBlueprintLibrary={closeBlueprintLibrary}
-						openBlueprintLibraryFromActivity={openBlueprintLibraryFromActivity}
-						chooseGuidedEquipmentTool={chooseGuidedEquipmentTool}
-						openStationProposalReview={openStationProposalReview}
-						closeStaticFabNavigator={closeStaticFabNavigator}
-						chooseStaticFabNavigatorTab={chooseStaticFabNavigatorTab}
-						toggleContextPalette={toggleContextPalette}
-					/>
-					<span className="tilefab-navigation-scroll-hint" aria-hidden="true">아래 도구 · 스크롤 ↓</span>
-				</nav>
-
-				{stationProposalReview ? (
+{stationProposalReview ? (
 					<OpenFabStationProposalReviewPanel
 						sourceName={stationProposalReview.sourceName}
 						proposal={stationProposalReview.proposal}
@@ -37756,448 +38165,7 @@ export default function TileFabApp(): React.ReactElement {
 						onCancel={() => cancelStationProposalReview("Station review를 취소했습니다")}
 					/>
 				) : null}
-
-				{contextPalette ? (
-					<div
-						ref={contextPaletteRef}
-						className="tilefab-context-palette"
-						data-testid="context-construction-palette"
-						data-context={
-							templateSession
-								? "template"
-								: areaStampSession
-									? "area-stamp"
-									: areaSelection
-										? "area"
-										: selectedPortDetails
-											? "port"
-											: selectedOwnership
-												? "rail"
-												: "construction"
-						}
-						style={{ left: contextPalette.left, top: contextPalette.top }}
-						role="menu"
-						aria-label="상황별 편집 명령"
-						aria-describedby={contextPortActionReasons.length > 0 ? "context-port-action-reasons" : undefined}
-						onKeyDown={handleContextPaletteKeyDown}
-					>
-						<header>
-							<span>
-								{templateSession ? (
-									<LayoutTemplate size={15} />
-								) : areaStampSession ? (
-									<Copy size={15} />
-								) : selectedPortDetails ? (
-									<PackagePlus size={15} />
-								) : selectedOwnership || areaSelection ? (
-									<MousePointer2 size={15} />
-								) : (
-									<Route size={15} />
-								)}
-								<strong>
-									{templateSession
-										? activeTemplateItem?.label
-										: areaStampSession
-											? `${areaStampSession.template.sourceModuleCount} MODULE AREA`
-											: areaSelection
-												? `${areaSelection.ownerships.length} MODULES`
-												: selectedPortDetails
-													? `${selectedPortDetails.equipmentGroup.kind} PORT`
-													: selectedOwnership
-														? "RAIL MODULE"
-														: "QUICK BUILD"}
-								</strong>
-							</span>
-							<button type="button" data-testid="close-context-construction-palette" aria-label="상황별 명령 닫기" aria-describedby={contextPortActionReasons.length > 0 ? "context-port-action-reasons" : undefined} onClick={closeContextPalette}>
-								<X size={14} />
-							</button>
-						</header>
-						{contextPortActionReasons.length > 0 ? (
-							<div id="context-port-action-reasons" className="tilefab-context-action-reasons" role="note">
-								{contextPortActionReasons.map((reason) => <p key={reason}>{reason}</p>)}
-							</div>
-						) : null}
-						<section>
-							{templateSession ? (
-								<>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(() => rotateConstruction(-1))}
-									>
-										<RotateCcw size={16} /> 반시계 회전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(() => rotateConstruction(1))}
-									>
-										<RotateCw size={16} /> 시계 회전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(flipTemplateFlow)}
-									>
-										<ArrowLeftRight size={16} /> 진행 방향 반전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={(event) => openActiveTemplateConfiguration(event.currentTarget)}
-									>
-										<LayoutTemplate size={16} /> 패턴 설정
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(() => resizeActiveTemplate(-1))}
-									>
-										<Minus size={16} /> 선택 치수 축소
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(() => resizeActiveTemplate(1))}
-									>
-										<Plus size={16} /> 선택 치수 확대
-									</button>
-								</>
-							) : organizationBundlePlacementSession ? (
-								<>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(() => rotateConstruction(-1))}
-									>
-										<RotateCcw size={16} /> 반시계 회전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(() => rotateConstruction(1))}
-									>
-										<RotateCw size={16} /> 시계 회전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() =>
-											runContextPaletteAction(() =>
-												clearTransientConstruction(
-													organizationBundlePlacementExitStatus(
-														organizationBundlePlacementSession,
-													),
-												),
-											)
-										}
-									>
-										<X size={16} /> 배치 종료
-									</button>
-								</>
-							) : areaStampSession ? (
-								<>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(() => rotateConstruction(-1))}
-									>
-										<RotateCcw size={16} /> 반시계 회전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(() => rotateConstruction(1))}
-									>
-										<RotateCw size={16} /> 시계 회전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(flipAreaStampFlow)}
-									>
-										<ArrowLeftRight size={16} /> 진행 방향 반전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() =>
-											runContextPaletteAction(() =>
-												clearTransientConstruction(areaStampExitStatus(areaStampSession)),
-											)
-										}
-									>
-										<X size={16} /> 복제 종료
-									</button>
-								</>
-							) : areaSelection ? (
-								<>
-									{areaReusableCatalogCandidates.map((candidate) => {
-										const item = railTemplateCatalogItem(candidate.templateId);
-										return (
-											<button
-												type="button"
-												role="menuitem"
-												key={`reuse-${candidate.templateId}:${patternDimensionSummary(candidate)}`}
-												onClick={() =>
-													runContextPaletteAction(() => startRecognizedRailTemplate(candidate))
-												}
-											>
-												<LayoutTemplate size={16} />
-												{candidate.scope === "attached-delta"
-													? `같은 ${item.label} 배치`
-													: `${item.label} 치수 편집 복제`}
-											</button>
-										);
-									})}
-									{areaStampEligibility?.valid === true ? (
-										<>
-											<button
-												type="button"
-												role="menuitem"
-												onClick={() =>
-													runContextPaletteAction(() =>
-														startAreaStamp(
-															areaSelection,
-															areaStampEligibility.template,
-															areaStampEligibility.staticFabTemplate ?? undefined,
-														),
-													)
-												}
-											>
-												<Copy size={16} /> 선택 영역 그대로 복제
-											</button>
-											<button
-												type="button"
-												role="menuitem"
-												onClick={() => runContextPaletteAction(cutSelectionToRailClipboard)}
-											>
-												<Scissors size={16} /> 잘라내기
-											</button>
-											<button
-												type="button"
-												role="menuitem"
-											onClick={() => {
-													closeContextPalette();
-													openBlueprintLibraryFromActivity();
-												}}
-											>
-												<LibraryBig size={16} /> 청사진으로 저장
-											</button>
-										</>
-									) : null}
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(deleteSelected)}
-									>
-										<Trash2 size={16} />
-										{staticFabEquipmentGroupCount > 0 ? "장비 포함 영역 철거" : "선택 영역 철거"}
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(clearAreaSelection)}
-									>
-										<X size={16} /> 선택 해제
-									</button>
-								</>
-							) : selectedPortDetails && selectedPortTransform ? (
-								<>
-									{selectedPortTransform.editor === "group" ? (
-										<button
-											type="button"
-											role="menuitem"
-											disabled={!selectedPortActions.editMembership.allowed}
-											title={selectedPortActions.editMembership.reason ?? undefined}
-											onClick={() => runContextPaletteAction(startSelectedPortEquipmentMembershipEdit)}
-										>
-											<MousePointer2 size={16} /> {selectedPortDetails.equipmentGroup.kind === "EQ" ? "Port 수 편집" : "포트 구성 편집"}
-										</button>
-									) : null}
-									{selectedPortDetails.equipmentGroup.kind === "EQ" ? (
-										<button
-											type="button"
-											role="menuitem"
-											data-testid="context-edit-eq-port-pitch"
-											disabled={!selectedPortActions.editMembership.allowed || modelSyncPending || workerState.status !== "ready"}
-											title={selectedPortActions.editMembership.reason ?? `PORT-${selectedPortDetails.port.id} 고정 · Port 수 유지`}
-											onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentMembershipEdit("pitch"))}
-										>
-											<ArrowLeftRight size={16} /> Port 간격 · {selectedPortDetails.equipmentGroup.pitchMillimeters / 1_000} m
-										</button>
-									) : null}
-									<button
-										type="button"
-										role="menuitem"
-										disabled={!selectedPortActions.move.allowed}
-										title={selectedPortActions.move.reason ?? undefined}
-										onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentTransform("move", selectedPortDetails.equipmentGroup.kind))}
-									>
-										<Move size={16} /> {selectedPortTransform.move.contextLabel}
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										disabled={!selectedPortActions.copy.allowed}
-										title={selectedPortActions.copy.reason ?? undefined}
-										onClick={() => runContextPaletteAction(() => startSelectedPortEquipmentTransform("copy", selectedPortDetails.equipmentGroup.kind))}
-									>
-										<Copy size={16} /> {selectedPortTransform.copy.contextLabel}
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										data-testid="context-reverse-port-equipment-service-direction"
-										disabled={!selectedPortActions.reverseServiceDirection.allowed || modelSyncPending || workerState.status !== "ready"}
-										title={selectedPortActions.reverseServiceDirection.reason ?? "전체 Port의 서비스 방향을 반전합니다 · 레일 흐름과 위치는 유지됩니다"}
-										onClick={() => runContextPaletteAction(reverseSelectedPortEquipmentServiceDirection)}
-									>
-										<RotateCw size={16} /> 서비스 방향 반전
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										disabled={!selectedPortActions.delete.allowed}
-										title={selectedPortActions.delete.reason ?? undefined}
-										onClick={() => runContextPaletteAction(deleteSelected)}
-									>
-										<Trash2 size={16} /> 장비 그룹 철거
-									</button>
-								</>
-							) : selectedOwnership ? (
-								<>
-									{selectedReshapeSourceReason ? (
-										<div id="context-reshape-source-reason" className="tilefab-context-action-reasons" role="note">
-											{selectedReshapeSourceReason}
-										</div>
-									) : null}
-									{selectedContextualRailTemplates.map((item) => (
-										<button
-											type="button"
-											role="menuitem"
-											key={item.id}
-											data-testid={`rail-template-${item.id}`}
-											data-template-context={item.anchorRequirement}
-											title={item.title}
-											onClick={() =>
-												runContextPaletteAction(() => startRailTemplate(item.id, selected))
-											}
-										>
-											<LayoutTemplate size={16} /> {item.label}
-										</button>
-									))}
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(continueFromSelected)}
-									>
-										<Crosshair size={16} /> 여기서 연장
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() =>
-											runContextPaletteAction(() => startModuleStamp(selectedOwnership))
-										}
-									>
-										<Stamp size={16} /> 모듈 복제
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(cutSelectionToRailClipboard)}
-									>
-										<Scissors size={16} /> 모듈 잘라내기
-									</button>
-									{selectedType === "LEFT_CURVE" || selectedType === "RIGHT_CURVE" ? (
-										<button
-											type="button"
-											role="menuitem"
-											aria-disabled={selectedReshapeSourceReason !== null}
-											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
-											onClick={() => startReshape("corner")}
-										>
-											<CornerDownRight size={16} /> 코너 재배치
-										</button>
-									) : selectedType === "TERMINAL" ? (
-										<button
-											type="button"
-											role="menuitem"
-											aria-disabled={selectedReshapeSourceReason !== null}
-											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
-											onClick={() => startReshape("endpoint")}
-										>
-											<Move size={16} /> 끝점 재배치
-										</button>
-									) : selectedType === "LINEAR" ? (
-										<button
-											type="button"
-											role="menuitem"
-											aria-disabled={selectedReshapeSourceReason !== null}
-											aria-describedby={selectedReshapeSourceReason ? "context-reshape-source-reason" : undefined}
-											onClick={() => startReshape("straight")}
-										>
-											<Move size={16} /> 직선 평행 이동
-										</button>
-									) : null}
-									<button
-										type="button"
-										role="menuitem"
-										onClick={() => runContextPaletteAction(deleteSelected)}
-									>
-										<Trash2 size={16} /> 모듈 철거
-									</button>
-								</>
-							) : (
-								<>
-									{presentedRailConstructionCatalog.map((item) => (
-										<button
-											type="button"
-											role="menuitem"
-											key={item.id}
-											onClick={() => runContextPaletteAction(() => chooseBuildMode(item.id))}
-										>
-											{constructionCatalogIcon(item.icon)} {item.label}
-											{constructionQuickSlot(item.id) ? (
-												<kbd>{constructionQuickSlot(item.id)}</kbd>
-											) : null}
-										</button>
-									))}
-									{!guidedBuildExperienceActive || guidedBuildVisibleActivities.includes("assemble") ? (
-										<button
-										type="button"
-										role="menuitem"
-										onClick={() => {
-											closeContextPalette();
-											openStaticFabAssemblePalette();
-										}}
-									>
-											<LayoutTemplate size={16} /> FAB 패턴
-										</button>
-									) : null}
-									{selectedContextualRailTemplates.map((item) => (
-										<button
-											type="button"
-											role="menuitem"
-											key={item.id}
-											data-testid={`rail-template-${item.id}`}
-											data-template-context="empty-map"
-											title={item.title}
-											onClick={() =>
-												runContextPaletteAction(() => startRailTemplate(item.id))
-											}
-										>
-											<LayoutTemplate size={16} /> {item.label}
-										</button>
-									))}
-								</>
-							)}
-						</section>
-					</div>
-				) : null}
-
-				{blueprintLibraryOpen ? (
+{blueprintLibraryOpen ? (
 					<BlueprintLibraryPanel
 						projectBlueprintNameDraft={projectBlueprintNameDraft}
 						projectBlueprintNameRef={projectBlueprintNameRef}
@@ -38307,8 +38275,7 @@ export default function TileFabApp(): React.ReactElement {
 						wholeMapBlueprintAvailable={wholeMapBlueprintAvailable}
 					/>
 				) : null}
-
-				{editorActivity === "assemble" && templatePaletteOpen ? (
+{editorActivity === "assemble" && templatePaletteOpen ? (
 					<aside
 						id="tilefab-static-fab-assemble-panel"
 						ref={assemblePaletteRef}
@@ -38326,10 +38293,7 @@ export default function TileFabApp(): React.ReactElement {
 									<button
 										type="button"
 										aria-label="패턴 목록으로 돌아가기"
-										onClick={() => {
-											clearTransientConstruction("FAB 패턴 목록");
-											setTemplatePaletteOpen(true);
-										}}
+										onClick={returnToAuthoringPatterns}
 									>
 										<ArrowLeft size={14} />
 									</button>
@@ -38575,6 +38539,7 @@ export default function TileFabApp(): React.ReactElement {
 							</section>
 						) : (
 							<StaticFabAssembleMenu
+ creationActionsVisible={false}
 								selectionCount={organizationMultiSelection.selectedOrganizationIds.length}
 								selectedBayCount={selectedProductionBayCount}
 								selectedBankCount={selectedBayBankCount}
@@ -38699,8 +38664,7 @@ export default function TileFabApp(): React.ReactElement {
 						)}
 					</aside>
 				) : null}
-
-				<aside
+<aside
 					ref={templateFeedbackPanelRef}
 					id="tilefab-template-placement-feedback"
 					className="tilefab-template-feedback"
@@ -38730,8 +38694,7 @@ export default function TileFabApp(): React.ReactElement {
 						aria-live="polite"
 					/>
 				</aside>
-
-				{activeEquipmentDeletionRecovery ? (
+{activeEquipmentDeletionRecovery ? (
 					<aside
 						className="tilefab-equipment-delete-recovery"
 						data-testid="equipment-delete-recovery"
@@ -38783,8 +38746,7 @@ export default function TileFabApp(): React.ReactElement {
 						</div>
 					</aside>
 				) : null}
-
-				{ordinaryBuildSurfaceHandoff &&
+{ordinaryBuildSurfaceHandoff &&
 				ordinaryBuildSurfaceHandoffKind &&
 				ordinaryBuildSurfaceHandoffDescriptionId &&
 					!staticFabMutationHistory &&
@@ -38862,8 +38824,7 @@ export default function TileFabApp(): React.ReactElement {
 						</button>
 					</fieldset>
 				) : null}
-
-				{!staticFabMutationHistory &&
+{!staticFabMutationHistory &&
 					!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
 				!staticFabSemanticFabDelete && !staticFabSemanticBankDelete && !staticFabSemanticBankDetach && !staticFabSemanticBayMutation &&
@@ -39088,16 +39049,15 @@ export default function TileFabApp(): React.ReactElement {
 						</fieldset>
 					</>
 				) : null}
-
-				<StandaloneProcessLoopAuthoringBar ownerName={processLoopRailEdit?.document === railDocument ? activeOrganizations.records.find((record) => record.id === processLoopRailEdit.organizationId)?.name ?? null : null}
+<StandaloneProcessLoopAuthoringBar ownerName={processLoopRailEdit?.document === railDocument ? activeOrganizations.records.find((record) => record.id === processLoopRailEdit.organizationId)?.name ?? null : null}
 					pendingLabel={processLoopOperation} feedback={processLoopRailEditFeedback} onSelectRail={selectProcessLoopRailForRepair} onExit={exitProcessLoopRailEdit} onCancel={() => cancelProcessLoopOperation()} returnToChecks={staticFabCheckRepairReturnRef.current?.kind === "loop" && staticFabCheckRepairReturnRef.current.backend === processLoopRailEditRef.current} />
-				{staticFabMutationHistory ? (
+{staticFabMutationHistory ? (
 					<section className="tilefab-arrangement-historybar" data-testid="static-fab-arrangement-history" aria-label={`${staticFabHistoryLabel} 이력 처리`} aria-busy="true">
 						<p className="tilefab-arrangement-history-copy" role="status">{staticFabHistoryLabel} {staticFabMutationHistory === "undo" ? "실행 취소" : "다시 실행"} 준비 중</p>
 						<button className="tilefab-arrangement-history-cancel" type="button" aria-label={`${staticFabHistoryLabel} 이력 처리 취소`} onClick={() => staticFabMutationHistoryRef.current?.abort()}>취소 <kbd>ESC</kbd></button>
 					</section>
 				) : null}
-				{staticFabArrangement ? (
+{staticFabArrangement ? (
 					<section
 						className="tilefab-buildbar tilefab-arrangementbar"
 						data-testid="static-fab-arrangement-bar"
@@ -39279,8 +39239,7 @@ export default function TileFabApp(): React.ReactElement {
 						</div>
 					</section>
 				) : null}
-
-				{!staticFabArrangement &&
+{!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
 				tool === "build" &&
 				(!guidedBuildExperienceActive || guidedBuildVisibleActivities.includes("assemble")) &&
@@ -39348,8 +39307,7 @@ export default function TileFabApp(): React.ReactElement {
 						) : null}
 					</fieldset>
 				) : null}
-
-				{constructionBarVisible ? (
+{constructionBarVisible ? (
 					<div
 						className="tilefab-buildbar"
 						data-testid="rail-buildbar"
@@ -39474,126 +39432,7 @@ export default function TileFabApp(): React.ReactElement {
 								</strong>
 							</span>
 						) : null}
-						{tool === "build" &&
-						!templateSession &&
-						!areaStampSession &&
-						!organizationBundlePlacementSession &&
-						!stampSession &&
-						!resilientFabChecksHandoff &&
-						!connectedFabLoopHandoff &&
-						!duplicatedBayBankConnectorHandoff &&
-						!duplicatedTwinBayConnectorHandoff &&
-						!connectedBayBankDuplicateHandoff ? (
-							<fieldset className="tilefab-segmented" aria-label="레일 건설 모듈">
-								{presentedRailConstructionCatalog.map((item) => {
-									const applicability = railConstructionApplicability(
-										activeMap,
-										item.id,
-										buildAnchor,
-										networkLinkContextRef.current,
-									);
-									return (
-										<button
-											type="button"
-											key={item.id}
-											data-testid={
-												item.id === "advanced-switch" ? "build-mode-advanced-switch" : undefined
-											}
-											data-catalog-id={item.id}
-											data-guided-action-id={`mode:${item.id}`}
-											data-catalog-state={applicability.state}
-											data-active={!templateSession && buildMode === item.id}
-											data-guided-target={
-												guidedBuildPrimaryTarget?.kind === "route-mode" && item.id === "route"
-													? true
-													: undefined
-											}
-											aria-pressed={!templateSession && buildMode === item.id}
-											aria-label={item.label}
-											aria-describedby={
-												guidedBuildPrimaryTarget?.kind === "route-mode" && item.id === "route"
-													? "tilefab-guided-primary-target-description"
-													: undefined
-											}
-											onClick={() => {
-												chooseBuildMode(item.id);
-												setRailOptionsExpanded(false);
-												if (compactNavigatorViewport && !guidedBuildExperienceActive) {
-													requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
-												}
-											}}
-											title={`${item.title} · ${applicability.reason}`}
-										>
-											{constructionCatalogIcon(item.icon)}
-											<span className="tilefab-catalog-label">{item.label}</span>
-											{constructionQuickSlot(item.id) ? (
-												<kbd>{constructionQuickSlot(item.id)}</kbd>
-											) : null}
-										</button>
-									);
-								})}
-							</fieldset>
-						) : null}
-						{tool === "build" &&
-						(!guidedBuildExperienceActive || guidedBuildVisibleActivities.includes("assemble")) &&
-						!templateSession &&
-						!areaStampSession &&
-						!organizationBundlePlacementSession &&
-						!stampSession &&
-						!resilientFabChecksHandoff &&
-						!connectedFabLoopHandoff &&
-						!duplicatedBayBankConnectorHandoff &&
-						!duplicatedTwinBayConnectorHandoff &&
-						!connectedBayBankDuplicateHandoff ? (
-							<fieldset
-								className="tilefab-segmented tilefab-template-catalog"
-								aria-label="규격 FAB 레일 템플릿"
-							>
-								<button
-									type="button"
-									data-testid="rail-pattern-browser-toggle"
-									ref={assembleBottomLauncherRef}
-									data-active={templatePaletteOpen || templateSession !== null}
-									aria-pressed={templatePaletteOpen}
-									aria-expanded={templatePaletteOpen}
-									aria-controls="tilefab-static-fab-assemble-panel"
-									onClick={toggleStaticFabAssemblePalette}
-									title="Process Loop, Bay Assembly, Bay Bank 조립 패턴 선택"
-								>
-									<LayoutTemplate size={14} /> 조립
-								</button>
-								<button
-									type="button"
-									data-testid="rail-blueprint-library-toggle"
-									data-active={blueprintLibraryOpen}
-									aria-pressed={blueprintLibraryOpen}
-									aria-expanded={blueprintLibraryOpen}
-									aria-controls="tilefab-blueprint-library"
-									onClick={() => {
-										if (blueprintLibraryOpen) closeBlueprintLibrary();
-										else openBlueprintLibraryFromActivity("saved");
-									}}
-									title="프로젝트에 저장된 청사진 라이브러리"
-								>
-									<LibraryBig size={14} /> BLUEPRINTS{" "}
-									{projectBlueprints.records.length + userBlueprints.length}
-								</button>
-								{railClipboardKind &&
-								!templateSession &&
-								!areaStampSession &&
-								!organizationBundlePlacementSession &&
-								!stampSession ? (
-									<button
-										type="button"
-										data-testid="rail-blueprint-recent"
-										onClick={pasteRecentRailClipboard}
-										title="최근 복제한 레일 청사진 다시 배치"
-									>
-										<Copy size={14} /> RECENT
-									</button>
-								) : null}
-							</fieldset>
-						) : null}
+
 						{templateSession && activeTemplateItem ? (
 							<fieldset
 								className="tilefab-segmented tilefab-template-direct-controls"
@@ -39722,7 +39561,7 @@ export default function TileFabApp(): React.ReactElement {
 										</button>
 									) : null}
 								</fieldset>
-								<div className="tilefab-organization-placement-actions">
+								{!activeBayPlacement ? (<div className="tilefab-organization-placement-actions">
 									<button
 										type="button"
 										className="tilefab-placement-apply"
@@ -39738,7 +39577,7 @@ export default function TileFabApp(): React.ReactElement {
 									{!duplicatedTwinBayConnectorHandoff && !duplicatedBayBankConnectorHandoff
 										? organizationBundlePlacementExitAction
 										: null}
-								</div>
+								</div>) : null}
 								{heldBlueprintSaveAction}
 							</>
 						) : areaStampSession ? (
@@ -39921,47 +39760,10 @@ export default function TileFabApp(): React.ReactElement {
 						) : tool === "reshape" ||
 							(activeCatalogItem.controls.includes("bend") &&
 							(!guidedBuildExperienceActive || guidedBuildRouteBendControlsRevealed || bend !== "auto")) ? (
-							<fieldset
-								className="tilefab-segmented"
-								aria-label="코너 경로"
-								disabled={tool === "reshape" && reshapeKind === "straight"}
-							>
-								<button
-									type="button"
-									data-active={bend === "auto"}
-									aria-pressed={bend === "auto"}
-									onClick={() => {
-										setBendPreference("auto");
-										setStatus("충돌을 피하는 코너를 자동 선택합니다");
-										if (guidedBuildOpen && !guidedBuildRouteBendControlsRevealed) {
-											requestAnimationFrame(() =>
-												canvasRef.current?.focus({ preventScroll: true }),
-											);
-										}
-									}}
-									title="충돌을 피하는 코너를 자동 선택"
-								>
-									AUTO
-								</button>
-								<button
-									type="button"
-									data-active={bend === "horizontal-first"}
-									aria-pressed={bend === "horizontal-first"}
-									onClick={() => setBendPreference("horizontal-first")}
-									title="X축 이후 Z축"
-								>
-									<CornerDownRight size={14} /> X→Z
-								</button>
-								<button
-									type="button"
-									data-active={bend === "vertical-first"}
-									aria-pressed={bend === "vertical-first"}
-									onClick={() => setBendPreference("vertical-first")}
-									title="Z축 이후 X축"
-								>
-									<CornerDownRight className="tilefab-turn-icon" size={14} /> Z→X
-								</button>
-							</fieldset>
+							<RailAuthoringSettings bend={bend} disabled={tool === "reshape" && reshapeKind === "straight"} onChange={(next) => {
+setBendPreference(next);
+if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합니다"); if (guidedBuildOpen && !guidedBuildRouteBendControlsRevealed) requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true })); }
+}} />
 						) : activeCatalogItem.controls.includes("switch-profile") ? (
 							<fieldset
 								className="tilefab-segmented tilefab-switch-profiles"
@@ -40051,8 +39853,7 @@ export default function TileFabApp(): React.ReactElement {
 						</span>
 					</div>
 				) : null}
-
-				{!staticFabExclusiveCommandActive && portEquipmentMembershipEditSession ? (
+{!staticFabExclusiveCommandActive && portEquipmentMembershipEditSession ? (
 					<PortEquipmentMembershipEditBar
 						clearTransientConstruction={clearTransientConstruction}
 						completePortEquipmentMembershipEdit={completePortEquipmentMembershipEdit}
@@ -40076,72 +39877,10 @@ export default function TileFabApp(): React.ReactElement {
 						moveDistanceError={stkPortMoveDistanceError}
 						onMoveDistanceChange={chooseStkPortMoveDistance}
 					/>
-				) : equipmentWorkspaceActive && activePortAuthoringType && activePortAuthoringPresentation ? (
-					<PortEquipmentPlacementWorkspace
-						applyGuidedPortKeyboard={applyGuidedPortKeyboard}
-						key={tool}
-						activeMap={activeMap}
-						activePortAuthoringInstruction={activePortAuthoringInstruction}
-						activePortAuthoringPresentation={activePortAuthoringPresentation}
-						activePortAuthoringType={activePortAuthoringType}
-						activeStkZoomActionLabel={activeStkZoomActionLabel}
-						basePortAuthoringInstruction={basePortAuthoringInstruction}
-						bindEquipmentSelectionReadout={bindEquipmentSelectionReadout}
-						cancelGuidedPortKeyboard={cancelGuidedPortKeyboard}
-						canvasRef={canvasRef}
-						chooseExplicitEditorTool={chooseExplicitEditorTool}
-						chooseGuidedEquipmentTool={chooseGuidedEquipmentTool}
-						chooseOrdinaryPortProcessLoop={chooseOrdinaryPortProcessLoop}
-						completeStkDraft={completeStkDraft}
-						editorMutationWaitActive={editorMutationWaitActive}
-						eqPitchMillimeters={eqPitchMillimeters}
-						eqRecipe={eqRecipe}
-						equipmentProcessLoopChoices={equipmentProcessLoopChoices}
-						exitOrdinaryPortAuthoring={exitOrdinaryPortAuthoring}
-						guidedBuildCommandsActionable={guidedBuildCommandsActionable}
-						guidedBuildExperienceActive={guidedBuildExperienceActive}
-						guidedBuildPortPlacementCoach={guidedBuildPortPlacementCoach}
-						guidedBuildPrimaryTarget={guidedBuildPrimaryTarget}
-						guidedPortKeyboard={guidedPortKeyboard}
-						guidedPortKeyboardSessionRef={guidedPortKeyboardSessionRef}
-						inspectRecentPlacedOhb={inspectRecentPlacedOhb}
-						modelSyncPending={modelSyncPending}
-						ohbPlacementIntent={ohbPlacementIntent}
-						ordinaryEqRowExit={ordinaryEqRowExit}
-						ordinaryOhbNextPortHandoff={ordinaryOhbNextPortHandoff}
-						ordinaryPortKeyboardEntryVisible={ordinaryPortKeyboardEntryVisible}
-						ordinaryPortProcessLoopFeedback={ordinaryPortProcessLoopFeedback}
-						ordinaryPortProcessLoopFeedbackRef={ordinaryPortProcessLoopFeedbackRef}
-						ordinaryPortProcessLoopTargetId={ordinaryPortProcessLoopTargetId}
-						portRowDragActive={portRowDragRef.current !== null}
-						portTargetZoomHidden={cameraRef.current.zoom >= ORDINARY_STK_ACQUISITION_MIN_ZOOM &&
-							cameraFitScopeRef.current !== "stk-selection"}
-						portTargetZoomButtonRef={portTargetZoomButtonRef}
-						reframeGuidedPortRecommendations={reframeGuidedPortRecommendations}
-						removeLastStkDraftPort={removeLastStkDraftPort}
-						resumeOrdinaryPortKeyboard={resumeOrdinaryPortKeyboard}
-						selectedEquipmentProcessLoopChoice={selectedEquipmentProcessLoopChoice}
-						selectedEquipmentProcessLoopScope={selectedEquipmentProcessLoopScope}
-						setEqPitchMillimeters={setEqPitchMillimeters}
-						setEqRecipe={setEqRecipe}
-						setOrdinaryPortProcessLoopFeedback={setOrdinaryPortProcessLoopFeedback}
-						setStatus={setStatus}
-						setStkTemplate={setStkTemplate}
-						showNextOrdinaryPort={showNextOrdinaryPort}
-						showStkSelection={showStkSelection}
-						startOrdinaryPortKeyboard={startOrdinaryPortKeyboard}
-						stkDraftReady={stkDraftReady}
-						stkDraftReview={stkDraftReview}
-						stkDraftSelection={stkDraftSelection}
-						stkTemplate={stkTemplate}
-						tool={tool}
-						visibleRecentPlacedOhb={visibleRecentPlacedOhb}
-						workerState={workerState}
-						zoomCurrentPortTarget={zoomCurrentPortTarget}
-					/>
+				) : portWorkspaceProps ? (
+					<PortEquipmentPlacementWorkspace {...portWorkspaceProps} externalActions />
 				) : null}
-
-				{organizationLibraryOpen && !readinessOpen ? (
+{organizationLibraryOpen && !readinessOpen ? (
 					<StaticFabOrganizationLibrary
 						view={organizationLibraryView}
 						onOpenDetails={() => setOrganizationLibraryView("detail")}
@@ -40247,8 +39986,7 @@ export default function TileFabApp(): React.ReactElement {
 						updateStaticFabOrganizationSearch={updateStaticFabOrganizationSearch}
 					/>
 				) : null}
-
-				{areaSelection && railAreaSelectionInspectorVisible ? (
+{areaSelection && railAreaSelectionInspectorVisible ? (
 					<aside
 						className="tilefab-inspector"
 						aria-label="레일 영역 선택"
@@ -40885,8 +40623,7 @@ export default function TileFabApp(): React.ReactElement {
 						</div>
 					</aside>
 				) : null}
-
-				{selectedPortDetails && selectedEquipmentGroup && portEquipmentInspectorVisible ? (
+{selectedPortDetails && selectedEquipmentGroup && portEquipmentInspectorVisible ? (
 					<PortEquipmentInspector
 						eqRecipeSource={selectedEquipmentGroup.kind === "EQ" && selectedPortEquipment ? {
 							...selectedPortEquipment, modelGeneration: editorModel.generation,
@@ -40955,8 +40692,7 @@ export default function TileFabApp(): React.ReactElement {
 						workerState={workerState}
 					/>
 				) : null}
-
-				{selected && selectedRail && railModuleInspectorVisible ? (
+{selected && selectedRail && railModuleInspectorVisible ? (
 					<RailModuleInspector
 						selected={selected}
 						selectedRail={selectedRail}
@@ -40996,12 +40732,8 @@ export default function TileFabApp(): React.ReactElement {
 						deleteSelected={deleteSelected}
 					/>
 				) : null}
-
-				<div className="tilefab-scale" role="img" aria-label="지도 거리 눈금 준비 중">
-					<span className="tilefab-scale-line" ref={mapScaleLineRef} aria-hidden="true" />
-					<strong ref={mapScaleLabelRef} />
-				</div>
-			</main>
+ </ActiveAuthoringWorkspace></div>
+</main>
 
 			<footer
 				className="tilefab-statusbar"
@@ -42536,6 +42268,25 @@ function fitMapInsets(
 	const workspace = canvas.closest(".tilefab-workspace");
 	if (!workspace) return Object.freeze({ left: 0, right: 0, top: 12, bottom: 0 });
 	const canvasRect = canvas.getBoundingClientRect();
+	if (workspace.closest('[data-authoring-layout="unified"]')) {
+		const compact = workspace.closest('[data-authoring-compact="true"]') !== null;
+		const insets = { left: 12, right: 12, top: 12, bottom: 12 };
+		for (const [selector, edge] of [
+			[".tilefab-authoring-sidebar", "left"],
+			[".tilefab-active-authoring-workspace", "right"],
+			...(includeCameraControls ? [[".tilefab-camera-controls", "top"]] : []),
+		] as const) {
+			const element = workspace.querySelector<HTMLElement>(selector);
+			if (!element || element.offsetParent === null || element.closest("[hidden]")) continue;
+			const rect = element.getBoundingClientRect();
+			if (edge === "top") insets.top = Math.max(insets.top, rect.bottom - canvasRect.top + 12);
+			else if (compact && edge === "right") insets.bottom = Math.max(insets.bottom, canvasRect.bottom - rect.top + 12);
+			else if (compact) insets.top = Math.max(insets.top, rect.bottom - canvasRect.top + 12);
+			else if (edge === "left") insets.left = Math.max(insets.left, rect.right - canvasRect.left + 12);
+			else insets.right = Math.max(insets.right, canvasRect.right - rect.left + 12);
+		}
+		return Object.freeze(insets);
+	}
 	let left = 0;
 	let right = 0;
 	let top = 12;
@@ -42717,7 +42468,6 @@ function authoritativeUserBlueprintLibraryError(
 	}
 	return null;
 }
-
 
 function processLoopRailFailureFeedback(
 	reason: string,

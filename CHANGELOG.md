@@ -6,6 +6,22 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.106] - 2026-10-10
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Discover FAB, rail, equipment and Blueprint tools from one creation home and catalog. Keep
+  the full catalog available during optional Guided practice and after closing it.
+- Use one task workspace for settings, validation, actions and inspection. Preserve unfinished
+  inputs while browsing or collapsing panels; keep the desktop workspace open during browsing
+  and alternate catalog/task panels on mobile with a visible "제작 도구" launcher.
+- Select the result after creating a FAB or placing one Bay and offer the next editing actions.
+  Keep repeated Bay placement explicit and distinguish adding a preset from creating a project.
+- Preserve native keyboard navigation through collapsed workspaces; apply structure reviews
+  only from their explicit controls or the focused Canvas. Return pattern placement to its catalog.
+- Keep Bay dimensions readable, correct short-screen camera bounds, and fit a newly created FAB
+  above its result sheet. Preserve the user's camera when browsing tools or resizing the viewport.
+
 ## [0.1.105] - 2026-10-10
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

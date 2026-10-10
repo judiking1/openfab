@@ -1,15 +1,4 @@
-import {
-	Check,
-	ChevronRight,
-	Factory,
-	Move,
-	PackagePlus,
-	Route,
-	Search,
-	Undo2,
-	Warehouse,
-	X,
-} from "lucide-react";
+import { ChevronRight, Factory, Move, PackagePlus, Route, Search, Warehouse } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { EQ_PORT_PITCHES_MILLIMETERS } from "../compile/EqRowDraftSelector";
 import type { StkAuthoringTemplate, StkDraftSelection } from "../compile/StkDraftSelector";
@@ -24,7 +13,6 @@ import type {
 	GuidedPortKeyboardSession,
 	GuidedPortKeyboardType,
 } from "./GuidedPortKeyboardSession";
-import { ordinaryPortKeyboardEscapePresentation } from "./GuidedPortKeyboardSession";
 import type { OrdinaryEqExitPresentation } from "./OrdinaryEqAuthoringPresentation";
 import type { OrdinaryNextPortHandoffPresentation } from "./OrdinaryNextPortHandoff";
 import {
@@ -35,9 +23,11 @@ import type { OrdinaryPortProcessLoopScope } from "./OrdinaryPortProcessLoopScop
 import type { PortAuthoringSurfacePresentation } from "./PortAuthoringSurfacePresentation";
 import type { PortEquipmentSelectionIdentity } from "./PortEquipmentInspectorSelection";
 import { PORT_EQUIPMENT_NEXT_CANDIDATE_RADIUS_METERS } from "./PortEquipmentKeyboardNavigation";
+import { PortEquipmentPlacementActions } from "./PortEquipmentPlacementActions";
 import { stkTemplatePresentation } from "./StkDraftPresentation";
 
 export interface PortEquipmentPlacementWorkspaceProps {
+	readonly externalActions?: boolean;
 	readonly applyGuidedPortKeyboard: () => void;
 	readonly activeMap: Readonly<{ size: number }>;
 	readonly activePortAuthoringInstruction: string;
@@ -126,6 +116,7 @@ export interface PortEquipmentPlacementWorkspaceProps {
 }
 
 export function PortEquipmentPlacementWorkspace({
+	externalActions = false,
 	applyGuidedPortKeyboard,
 	activeMap,
 	activePortAuthoringInstruction,
@@ -213,46 +204,7 @@ export function PortEquipmentPlacementWorkspace({
 				</span>
 			}
 			exitInActions={tool === "eq" && activePortAuthoringPresentation.configurationAvailable}
-			exit={
-				!guidedBuildExperienceActive || ordinaryEqRowExit ? (
-					<button
-						type="button"
-						className="tilefab-placement-exit tilefab-port-authoring-exit"
-						data-testid="ordinary-port-authoring-exit"
-						aria-keyshortcuts={
-							tool === "stk" && (stkDraftSelection?.rows.length ?? 0) > 0 ? undefined : "Escape"
-						}
-						aria-label={
-							ordinaryEqRowExit?.ariaLabel ??
-							(ohbPlacementIntent
-								? "OHB 이동·복제 취소"
-								: tool === "stk"
-									? "Stocker 배치 종료"
-									: "Port 배치 종료")
-						}
-						data-exit-scope={ordinaryEqRowExit ? "eq-row" : "port-authoring"}
-						onClick={() => {
-							if (ordinaryEqRowExit) {
-								cancelGuidedPortKeyboard(
-									ordinaryPortKeyboardEscapePresentation("EQ", "choose-end").message,
-									true,
-									true,
-								);
-								return;
-							}
-							exitOrdinaryPortAuthoring();
-						}}
-					>
-						<X size={14} />{" "}
-						{ordinaryEqRowExit?.label ??
-							(ohbPlacementIntent
-								? "이동·복제 취소"
-								: tool === "stk"
-									? "Stocker 배치 종료"
-									: "Port 배치 종료")}
-					</button>
-				) : null
-			}
+			exit={null}
 			selection={
 				<>
 					{activePortAuthoringPresentation.configurationAvailable ? (
@@ -493,79 +445,28 @@ export function PortEquipmentPlacementWorkspace({
 				) : null
 			}
 			actions={
-				tool === "eq" && activePortAuthoringPresentation.configurationAvailable ? (
-					<button
-						type="button"
-						className="tilefab-equipment-confirm"
-						data-testid="eq-placement-confirm"
-						disabled={editorMutationWaitActive || !guidedPortKeyboard}
-						aria-keyshortcuts="Enter"
-						onClick={() => {
-							applyGuidedPortKeyboard();
-							canvasRef.current?.focus({ preventScroll: true });
+				externalActions ? null : (
+					<PortEquipmentPlacementActions
+						{...{
+							applyGuidedPortKeyboard,
+							activePortAuthoringPresentation,
+							cancelGuidedPortKeyboard,
+							canvasRef,
+							completeStkDraft,
+							editorMutationWaitActive,
+							exitOrdinaryPortAuthoring,
+							guidedBuildExperienceActive,
+							guidedBuildPrimaryTarget,
+							guidedPortKeyboard,
+							ohbPlacementIntent,
+							ordinaryEqRowExit,
+							removeLastStkDraftPort,
+							stkDraftReady,
+							stkDraftSelection,
+							tool,
 						}}
-					>
-						<Check size={15} />{" "}
-						{guidedPortKeyboard?.phase === "choose-end" ? "EQ 배치" : "시작점 선택"}
-					</button>
-				) : tool === "stk" && activePortAuthoringPresentation.configurationAvailable ? (
-					<fieldset
-						className="tilefab-segmented tilefab-stk-actions"
-						aria-label="Stocker 포트 선택 작업"
-					>
-						<button
-							type="button"
-							data-testid="stk-remove-last"
-							aria-label="마지막 Port 제거"
-							title="마지막 Port 제거"
-							disabled={!stkDraftSelection?.rows.length}
-							onClick={removeLastStkDraftPort}
-						>
-							<Undo2 size={13} />
-						</button>
-						<button
-							type="button"
-							className="tilefab-stk-cancel"
-							data-testid="stk-cancel"
-							aria-label="선택한 Stocker 포트 모두 취소"
-							title="선택한 Stocker 포트 모두 취소"
-							aria-keyshortcuts="Escape"
-							disabled={!stkDraftSelection?.rows.length}
-							onClick={() =>
-								cancelGuidedPortKeyboard(
-									ordinaryPortKeyboardEscapePresentation(
-										"STK",
-										"choose-slot",
-										stkDraftSelection?.rows.length ?? 0,
-									).message,
-									true,
-									true,
-								)
-							}
-						>
-							<X size={13} /> 선택 초기화
-						</button>
-						<button
-							type="button"
-							className="tilefab-stk-complete"
-							data-testid="stk-complete"
-							data-guided-action-id="command:stk.complete"
-							data-guided-target={
-								guidedBuildPrimaryTarget?.id === "command:stk.complete" ? "true" : undefined
-							}
-							disabled={editorMutationWaitActive || !stkDraftReady}
-							aria-keyshortcuts="Shift+Enter"
-							aria-describedby={
-								guidedBuildPrimaryTarget?.id === "command:stk.complete"
-									? "tilefab-port-authoring-instruction tilefab-guided-primary-target-description"
-									: "tilefab-port-authoring-instruction"
-							}
-							onClick={completeStkDraft}
-						>
-							<Check size={13} /> Stocker 생성
-						</button>
-					</fieldset>
-				) : null
+					/>
+				)
 			}
 			continuation={
 				ordinaryOhbNextPortHandoff ||
