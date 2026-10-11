@@ -22,6 +22,8 @@
 - Local equipment rail-return candidate: OHB/EQ/STK prerequisite navigation retains only the current document and requested tool. Missing rail offers construction with a short reason; prepared rail returns to that tool. Explicit tool changes, preparation cancellation, and document replacement clear the intent. No equipment is placed automatically.
 - Candidate verification: 5 focused files / 57 tests, ordinary production build, ESLint, Biome (one existing warning), diff check, and public tracked-source audit PASS. Chrome 390/1440 return/cancel/Esc/tool-change, insufficient rail, cancellation followed by Undo/Redo, and new-document checks PASS; primary targets remain 44 px with no horizontal overflow. Independent code review found no blocker. Full unit/authoring suites not run; candidate is not published.
 
+- Integrated authoring at 760x1000 PASS: from a fresh blank document, the public FAB-making task created 2 Banks / 12 Twin Bays / 24 Process Loops; EQ pitch and body edits, OHB service reversal with Undo/Redo, and FLEX Stocker placement completed in the same project. Final Checks passed with 6,506 rail cells, 5 Ports, 3 equipment groups and 39 organizations; zero issues/page errors and simulation remained disabled. No blocking defect or code change was needed. Save/reopen/native chooser and full suites were not run; no additional viewport checks were needed for an unobserved defect.
+
 ## Development commands
 
 Use the Node and pnpm versions declared in `package.json`.
