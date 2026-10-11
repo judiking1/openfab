@@ -7,7 +7,7 @@
 - The active app is `src/App.tsx -> src/tilefab/editor/TileFabApp.tsx`.
 - The canonical document, compiled physical paths, atomic history, and typed Worker mirror
   remain the common boundary for editing, rendering, and read-only 3D inspection.
-- v0.1.111 is published; AISLE-to-Bay integration is committed locally and remains unpublished.
+- v0.1.112 bundles AISLE-to-Bay integration and compact authoring fixes.
   A synchronized rail mirror does not authorize simulation.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
@@ -16,9 +16,9 @@
   safety/hook scenarios, 6 additional hook/index-flag checks, and 10 fixture-provenance tests. App and release checks are separate.
 
 - 0.1.111 adds rail-structure descriptions, certified default metrics and one fixed crossover rail skeleton (808 cells; no Bay organizations or equipment).
-- Candidate verification: ordinary build and source Biome/ESLint PASS; full unit suite 460 files / 5,835 tests PASS, 2 existing tests skipped, no failures.
-- AISLE implementation: 36 focused tests, TypeScript, ordinary build, public safety and independent core review PASS. Earlier candidate Chrome 1440/390 Apply/Undo/Redo/cancel/Escape PASS; switch-fixture 1440 and final compact-action/draft-preservation 390 checks PASS. Full unit/authoring/scale/native-OS suites not run for this change.
-- Compact UI candidate: ordinary build, Biome/ESLint, public safety, and Chrome 390/1440 tool-draft preservation and Bay settings/cancel/Apply/Undo/Redo PASS. Bay fields/actions fit without horizontal scrolling; collapsed targets remain 44 px. At 844x390, categories scroll with tools and keyboard-focused rail/FAB actions are fully visible. Full suites not run.
+- Release verification: full unit suite 463 files / 5,858 tests PASS, 2 existing tests skipped; no functional or timeout failures. Ordinary production build and public release checks PASS.
+- AISLE implementation: 36 focused tests, TypeScript, ordinary build, public safety and independent core review PASS. Earlier candidate Chrome 1440/390 Apply/Undo/Redo/cancel/Escape PASS; switch-fixture 1440 and final compact-action/draft-preservation 390 checks PASS. Full authoring/scale/native-OS suites not run for this change.
+- Compact UI candidate: ordinary build, Biome/ESLint, public safety, and Chrome 390/1440 tool-draft preservation and Bay settings/cancel/Apply/Undo/Redo PASS. Bay fields/actions fit without horizontal scrolling; collapsed targets remain 44 px. At 844x390, categories scroll with tools and keyboard-focused rail/FAB actions are fully visible. Independent code review PASS; independent GUI not run because browser launch was blocked.
 
 ## Development commands
 
@@ -47,7 +47,7 @@ in this repository. Routine development does not export or reinstall a second so
 
 ## Next work and completion conditions
 
-1. Review the combined tool-discovery and Bay panel-fit candidate before committing; preserve the verified
+1. Complete the approved 0.1.112 publication and verify the deployed version and edit/Undo; preserve the verified
    production build. Preserve unfinished work and saved user data outside public commits.
 2. Record the candidate's actual checks and any omissions here. Do not carry private execution
    logs or claim unrun suites passed.

@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.112] - 2026-10-11
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Integrate an eligible detached AISLE into a Bay through a reviewed, explicit action,
+  preserving advanced switches, equipment, unfinished relationship inputs and Undo/Redo.
+- Keep rail, equipment, FAB and Blueprint tools visible when the mobile catalog is collapsed;
+  preserve drafts and make catalog actions reachable by keyboard on short landscape screens.
+- Fit Bay placement settings and actions within the workspace without horizontal scrolling.
+
 ## [0.1.111] - 2026-10-11
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
