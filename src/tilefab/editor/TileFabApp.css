@@ -14524,6 +14524,26 @@ button.tilefab-action-hint[data-guided-target="true"] {
 .tilefab-organization-library[data-view="detail"] .tilefab-navigator-tabpanel--organizations {
 	overflow: hidden;
 }
+.tilefab-organization-library[data-view="detail"]:has(.tilefab-aisle-integration-primary)
+	:is(.tilefab-organization-editor, .tilefab-navigator-tabpanel--organizations) {
+	overflow: visible;
+}
+.tilefab-aisle-integration-primary {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: #151d1e;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 10px;
+	border-bottom: 1px solid #2c383a;
+}
+.tilefab-aisle-integration-primary > p {
+	grid-column: 1 / -1;
+}
 .tilefab-organization-detail-identity {
 	display: grid;
 	gap: 3px;

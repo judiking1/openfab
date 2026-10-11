@@ -1,3 +1,6 @@
+import { staticFabAisleIntegrationSourceError } from "../core/StaticFabAisleIntegration";
+import { StaticFabAisleIntegrationDialog } from "./StaticFabAisleIntegrationDialog";
+import { useStaticFabAisleIntegration } from "./useStaticFabAisleIntegration";
 import { staticFabTranslationSelectionReason } from "../compile/StaticFabTranslationSelection";
 import {
 	AlertTriangle,
@@ -2467,6 +2470,7 @@ export default function TileFabApp(): React.ReactElement {
 	const [renderPerformance] = useState(() => new RenderPerformanceTelemetry());
 	const draftEvaluatorRef = useRef(new RailDraftEvaluator());
 	const workerBridgeRef = useRef<RailWorkerBridgeHandle | null>(null);
+ const cancelAisleIntegrationRef = useRef<(restoreFocus?: boolean) => void>(() => undefined);
 	const railMirrorRetryButtonRef = useRef<HTMLButtonElement | null>(null);
 	const railMirrorRetryAttemptRef = useRef<Readonly<{
 		document: RailDocument;
@@ -4720,7 +4724,24 @@ export default function TileFabApp(): React.ReactElement {
 		startupState.status === "ready";
 	// A saved/resumable lesson is not an active exercise. Keep progress while restoring ordinary tools.
 	const guidedBuildExperienceActive = !guidedBuildCopyRecovering && guidedBuildOpen;
-	const staticFabExclusiveCommandActive = processLoopOperation !== null || staticFabMutationHistory !== null ||
+ const aisleIntegration = useStaticFabAisleIntegration({
+  getSource: () => ({ document: editorModelRef.current.document, scope: { projectId: projectSessionRef.current.manifest.id, projectGeneration: editorModelRef.current.generation } }),
+  ready: () => {
+   const doc = editorModelRef.current.document, mirror = workerBridgeRef.current?.getState();
+   return editorViewModeRef.current === "2d" && projectSessionRef.current.operation === "idle" && !projectOperationControllerRef.current && !modelSyncPendingRef.current && workerBridgeDocumentRef.current === doc && mirror?.status === "ready" && mirror.sequence === doc.getPatchSequence() && mirror.revision === doc.map.getRevision() && mirror.targetSequence === mirror.sequence && mirror.targetRevision === mirror.revision;
+  },
+  captureSnapshot: signal => {
+   const mirror = workerBridgeRef.current;
+   return mirror ? mirror.captureCurrentSnapshot(signal) : Promise.reject(new Error("문서 동기화를 기다리세요"));
+  },
+  onCommitted: aisle => {
+   syncModelUi(`${aisle.name} · Bay 편입 완료 · 한 번의 실행 취소로 복원할 수 있습니다`);
+   requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+  },
+ });
+ const staticFabAisleIntegrationUiRef = aisleIntegration.current;
+ cancelAisleIntegrationRef.current = aisleIntegration.cancel;
+	const staticFabExclusiveCommandActive = aisleIntegration.session !== null || processLoopOperation !== null || staticFabMutationHistory !== null ||
 		operationalConfigurationOpen ||
 		stationProposalReview !== null ||
 		staticFabArrangement !== null ||
@@ -5666,6 +5687,7 @@ export default function TileFabApp(): React.ReactElement {
 				);
 				cancelStaticFabArrangementRef.current();
 				cancelStaticFabAssemblyConnectorRef.current();
+				cancelAisleIntegrationRef.current(false);
 				cancelStaticFabSemanticBayMutationRef.current(undefined, false);
 				cancelStaticFabSemanticFabDeleteRef.current(undefined, false);
 				cancelStaticFabSemanticBankDeleteRef.current(undefined, false);
@@ -7054,6 +7076,7 @@ export default function TileFabApp(): React.ReactElement {
 	): void => {
 		cancelStaticFabArrangementRef.current();
 		cancelStaticFabAssemblyConnectorRef.current();
+		cancelAisleIntegrationRef.current();
 		cancelStaticFabSemanticBayMutationRef.current();
 		cancelStaticFabSemanticFabDeleteRef.current();
 		cancelStaticFabSemanticBankDeleteRef.current();
@@ -7366,6 +7389,9 @@ export default function TileFabApp(): React.ReactElement {
 			scheduleRender();
 			return true;
 		}
+  if (staticFabAisleIntegrationUiRef.current) {
+   setStatus("현재 구역 편입을 적용하거나 취소하세요"); return true;
+  }
 		if (staticFabBayFlowEditUiRef.current) {
 			setStatus("현재 Bay 흐름 검토를 적용하거나 취소한 뒤 다른 편집 명령을 사용하세요");
 			scheduleRender();
@@ -7605,7 +7631,8 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		cancelStaticFabArrangementRef.current();
 		cancelStaticFabAssemblyConnectorRef.current();
-		cancelStaticFabSemanticBayMutationRef.current(undefined, false);
+		cancelAisleIntegrationRef.current(false);
+				cancelStaticFabSemanticBayMutationRef.current(undefined, false);
 		cancelStaticFabSemanticFabDeleteRef.current(undefined, false);
 		cancelStaticFabSemanticBankDeleteRef.current(undefined, false);
 		cancelStaticFabSemanticBankDetachRef.current(undefined, false);
@@ -9095,6 +9122,7 @@ export default function TileFabApp(): React.ReactElement {
 		clearInspectAreaKeyboardSession();
 		cancelStaticFabArrangementRef.current();
 		cancelStaticFabAssemblyConnectorRef.current();
+		cancelAisleIntegrationRef.current();
 		cancelStaticFabSemanticBayMutationRef.current();
 		cancelStaticFabSemanticFabDeleteRef.current();
 		cancelStaticFabSemanticBankDeleteRef.current();
@@ -9937,7 +9965,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (
 			staticFabArrangementUiRef.current ||
 			staticFabAssemblyConnectorUiRef.current ||
-			staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
+			staticFabAisleIntegrationUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
 			staticFabBayFlowEditUiRef.current
 		) {
 			return "현재 FAB 명령을 적용하거나 Esc로 취소한 뒤 조직을 선택하세요";
@@ -14746,6 +14774,7 @@ export default function TileFabApp(): React.ReactElement {
 		schedule();
 
 		const onKeyDown = (event: KeyboardEvent): void => {
+   if (staticFabAisleIntegrationUiRef.current) return;
 			if (["ControlLeft", "ControlRight", "MetaLeft", "MetaRight"].includes(event.code)) {
 				primaryModifierDownRef.current = true;
 			}
@@ -14836,7 +14865,7 @@ export default function TileFabApp(): React.ReactElement {
 				!guidedRailKeyboardSessionRef.current &&
 				!guidedPortKeyboardSessionRef.current &&
 				!stationProposalReviewUiRef.current &&
-				!staticFabSemanticFabDeleteUiRef.current && !staticFabSemanticBankDeleteUiRef.current && !staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
+				!staticFabAisleIntegrationUiRef.current && !staticFabSemanticFabDeleteUiRef.current && !staticFabSemanticBankDeleteUiRef.current && !staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
 				!staticFabBayFlowEditUiRef.current &&
 				!staticFabAssemblyConnectorUiRef.current &&
 				!staticFabArrangementUiRef.current &&
@@ -22293,7 +22322,7 @@ export default function TileFabApp(): React.ReactElement {
 			locationIndex: readinessIssueRef.current ? readinessIssueLocationRef.current : staticFabProjectIssueLocationRef.current,
 			projectIdle: domain.projectIdle && !processLoopOperationRef.current && !processLoopRailEditRef.current &&
 				!staticFabMutationHistoryRef.current && !staticFabArrangementUiRef.current &&
-				!staticFabAssemblyConnectorUiRef.current && !staticFabSemanticFabDeleteUiRef.current && !staticFabSemanticBankDeleteUiRef.current && !staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
+				!staticFabAssemblyConnectorUiRef.current && !staticFabAisleIntegrationUiRef.current && !staticFabSemanticFabDeleteUiRef.current && !staticFabSemanticBankDeleteUiRef.current && !staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
 				!staticFabBayFlowEditUiRef.current && !stationProposalReviewUiRef.current,
 			modelSyncPending: domain.modelSyncPending, checksCurrent };
 	}
@@ -22332,7 +22361,7 @@ export default function TileFabApp(): React.ReactElement {
 		const current = readStaticFabCheckRepairDomainCurrent();
 		if (!current || processLoopOperationRef.current || staticFabMutationHistoryRef.current ||
 			staticFabArrangementUiRef.current || staticFabAssemblyConnectorUiRef.current ||
-			staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current || stationProposalReviewUiRef.current) return false;
+			staticFabAisleIntegrationUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current || stationProposalReviewUiRef.current) return false;
 		// A repair may have authored changes. Verify today's exact domain/mirror, then run fresh
 		// Checks; the original issue ID is a navigation origin, never a cached diagnosis or Apply proof.
 		const currentContinuation = captureStaticFabCheckRepairContinuation(current.source as StaticFabCheckRepairSource,
@@ -24541,7 +24570,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		if (
 			staticFabArrangementUiRef.current ||
-			staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
+			staticFabAisleIntegrationUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
 			staticFabBayFlowEditUiRef.current ||
 			stampSessionRef.current ||
 			areaStampSessionRef.current ||
@@ -25162,7 +25191,7 @@ export default function TileFabApp(): React.ReactElement {
 						projectIdle: projectOperationControllerRef.current === null && projectSessionRef.current.operation === "idle" &&
 							!modelSyncPendingRef.current && workerBridgeDocumentRef.current === model.document &&
 							!staticFabMutationHistoryRef.current && !staticFabArrangementUiRef.current &&
-							!staticFabAssemblyConnectorUiRef.current && !staticFabSemanticFabDeleteUiRef.current && !staticFabSemanticBankDeleteUiRef.current && !staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
+							!staticFabAssemblyConnectorUiRef.current && !staticFabAisleIntegrationUiRef.current && !staticFabSemanticFabDeleteUiRef.current && !staticFabSemanticBankDeleteUiRef.current && !staticFabSemanticBankDetachUiRef.current && !staticFabSemanticBayMutationUiRef.current &&
 							!staticFabBayFlowEditUiRef.current && !stationProposalReviewUiRef.current };
 				},
 				createCheckpoint: createStaticFabArrangementCheckpoint,
@@ -26592,7 +26621,7 @@ export default function TileFabApp(): React.ReactElement {
 				reason: "분리하거나 삭제할 runtime-recognized Bay 조직 하나만 선택하세요",
 			});
 		}
-		if (staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current) {
+		if (staticFabAisleIntegrationUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current) {
 			return Object.freeze({
 				state: "blocked" as const,
 				reason: "현재 Bay 검토를 적용하거나 취소한 뒤 새 명령을 시작하세요",
@@ -26712,7 +26741,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (
 			(staticFabBayFlowEditUiRef.current &&
 				staticFabBayFlowEditUiRef.current !== retryingSession) ||
-			staticFabSemanticBayMutationUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current
+			staticFabSemanticBayMutationUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabAisleIntegrationUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current
 		) {
 			return Object.freeze({
 				state: "blocked" as const,
@@ -26800,6 +26829,18 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const semanticBayFlowEditAvailability = resolveStaticFabBayFlowEditAvailability();
 
+ const aisleIntegrationUnavailableReason = useMemo(() =>
+  selectedStaticFabOrganization?.kind === "AISLE" && selectedStaticFabOrganization.declaredSemanticRole !== "PROCESS_LOOP"
+   ? staticFabAisleIntegrationSourceError(activeOrganizations, railDocument.relationships, selectedStaticFabOrganization.id)
+   : null,
+  [activeOrganizations, railDocument.relationships, selectedStaticFabOrganization]);
+ const startAisleIntegration = (launcher: HTMLButtonElement): void => {
+  if (blockStaticFabExclusiveCommand() || !selectedStaticFabOrganization || projectBusy || modelSyncPendingRef.current || editorViewModeRef.current !== "2d") return;
+  const doc = editorModelRef.current.document;
+  const reason = staticFabAisleIntegrationSourceError(doc.organizations, doc.relationships, selectedStaticFabOrganization.id);
+  if (reason) { setStatus(reason); return; }
+  aisleIntegration.start(selectedStaticFabOrganization, launcher);
+ };
 	const publishStaticFabSemanticBayMutation = (
 		next: StaticFabSemanticBayMutationSession | null,
 	): void => {
@@ -26822,7 +26863,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (startupState.status !== "ready" || projectSessionRef.current.operation !== "idle" || projectOperationControllerRef.current ||
 			editorModelRef.current.document !== railDocument || modelSyncPendingRef.current) return blocked("현재 프로젝트 준비와 동기화를 기다리세요");
 		if ((staticFabSemanticBankDetachUiRef.current && staticFabSemanticBankDetachUiRef.current !== retrying) ||
-			staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current ||
+			staticFabAisleIntegrationUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current ||
 			staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current || staticFabAssemblyConnectorUiRef.current ||
 			staticFabArrangementUiRef.current || processLoopOperationRef.current || staticFabMutationHistoryRef.current ||
 			stationProposalReviewUiRef.current || operationalConfigurationOpen) return blocked("현재 구조 검토·편집을 완료하거나 취소하세요");
@@ -27002,7 +27043,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (startupState.status !== "ready" || projectSessionRef.current.operation !== "idle" || projectOperationControllerRef.current ||
 			editorModelRef.current.document !== railDocument || modelSyncPendingRef.current) return blocked("현재 프로젝트 준비와 동기화를 기다리세요");
 		if ((staticFabSemanticBankDeleteUiRef.current && staticFabSemanticBankDeleteUiRef.current !== retrying) ||
-			staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current ||
+			staticFabAisleIntegrationUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current ||
 			staticFabSemanticBayMutationUiRef.current || staticFabBayFlowEditUiRef.current || staticFabAssemblyConnectorUiRef.current ||
 			staticFabArrangementUiRef.current || processLoopOperationRef.current || staticFabMutationHistoryRef.current ||
 			stationProposalReviewUiRef.current || operationalConfigurationOpen) return blocked("현재 구조 검토·편집을 완료하거나 취소하세요");
@@ -28354,7 +28395,11 @@ export default function TileFabApp(): React.ReactElement {
 		if (!organizationLibraryOpen || guidedBuildOrganizationPickerSurfaceOpen) return;
 		const frame = requestAnimationFrame(() => {
 			if (organizationLibraryView === "detail") {
-				organizationEditorRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+				const editor = organizationEditorRef.current;
+				if (editor?.querySelector('[data-testid="integrate-aisle-into-bay"]')) {
+					editor.querySelector("header")?.scrollIntoView({ block: "start" });
+				}
+				editor?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
 			} else {
 				const selected = organizationListRef.current?.querySelector<HTMLElement>('[data-active="true"]');
 				(selected ?? organizationSearchInputRef.current)?.focus();
@@ -33032,7 +33077,7 @@ export default function TileFabApp(): React.ReactElement {
 			portEquipmentMembershipEditSessionRef.current ||
 			staticFabArrangementUiRef.current ||
 			staticFabAssemblyConnectorUiRef.current ||
-			staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
+			staticFabAisleIntegrationUiRef.current || staticFabSemanticFabDeleteUiRef.current || staticFabSemanticBankDeleteUiRef.current || staticFabSemanticBankDetachUiRef.current || staticFabSemanticBayMutationUiRef.current ||
 			staticFabBayFlowEditUiRef.current ||
 			stampSessionRef.current ||
 			areaStampSessionRef.current ||
@@ -36282,7 +36327,10 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 						onAnalyze={analyzeFabDelete} onCancel={() => cancelFabDelete(undefined, false)}
 						onRetry={retryFabDelete} onApply={applyFabDelete} />
 				) : null}
-				{staticFabSemanticBayMutation ? (
+	   {aisleIntegration.session ? <StaticFabAisleIntegrationDialog session={aisleIntegration.session}
+    onBay={id => { void aisleIntegration.chooseBay(id); }} onOption={id => { void aisleIntegration.chooseOption(id); }}
+    onCancel={() => aisleIntegration.cancel()} onApply={aisleIntegration.apply} /> : null}
+			{staticFabSemanticBayMutation ? (
 					<StaticFabSemanticBayMutationDialog
 						session={staticFabSemanticBayMutation}
 						returnFocus={staticFabSemanticBayMutationReturnFocusRef.current}
@@ -39494,7 +39542,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 					!staticFabMutationHistory &&
 				!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
-				!staticFabSemanticFabDelete && !staticFabSemanticBankDelete && !staticFabSemanticBankDetach && !staticFabSemanticBayMutation &&
+				!aisleIntegration.session && !staticFabSemanticFabDelete && !staticFabSemanticBankDelete && !staticFabSemanticBankDetach && !staticFabSemanticBayMutation &&
 				!staticFabBayFlowEdit &&
 				!ordinaryStaticFabIssueRecheck ? (
 					<fieldset
@@ -39569,7 +39617,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 {!staticFabMutationHistory &&
 					!staticFabArrangement &&
 				!staticFabAssemblyConnector &&
-				!staticFabSemanticFabDelete && !staticFabSemanticBankDelete && !staticFabSemanticBankDetach && !staticFabSemanticBayMutation &&
+				!aisleIntegration.session && !staticFabSemanticFabDelete && !staticFabSemanticBankDelete && !staticFabSemanticBankDetach && !staticFabSemanticBayMutation &&
 				!staticFabBayFlowEdit &&
 				!ordinaryStaticFabIssueRecheck &&
 				!portEquipmentGroupEditSession &&
@@ -40645,6 +40693,8 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 				) : null}
 {organizationLibraryOpen && !readinessOpen ? (
 					<StaticFabOrganizationLibrary
+      onIntegrateAisle={startAisleIntegration}
+      aisleIntegrationUnavailableReason={aisleIntegrationUnavailableReason}
 						blueprintSelectionActive={blueprintSelectionFocused}
 						view={organizationLibraryView}
 						onOpenDetails={() => {

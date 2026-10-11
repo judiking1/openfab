@@ -1,3 +1,4 @@
+import { STATIC_FAB_AISLE_INTEGRATION_KIND, assertStaticFabAisleIntegrationPatchSource } from "../core/StaticFabAisleIntegration";
 import {
 	type CompiledPhysicalPathMigration,
 	compilePhysicalPathMigration,
@@ -469,6 +470,9 @@ export class RailPatchMirror {
 			);
 		}
 		validateStaticFabBayFlowEditPatch(patch, this.mirroredOrganizations, historyOriginKind);
+  if (historyOriginKind === STATIC_FAB_AISLE_INTEGRATION_KIND && patch.kind !== "undo") {
+   assertStaticFabAisleIntegrationPatchSource({ map: this.mirroredMap, portEquipment: this.mirroredPortEquipment, organizations: this.mirroredOrganizations, relationships: this.mirroredRelationships }, this.currentSequence, patch);
+  }
 		if (patch.sequence !== expectedSequence) {
 			throw new Error(
 				`Rail patch sequence gap: expected ${expectedSequence}, received ${patch.sequence}.`,
@@ -965,6 +969,7 @@ function validateOrganizationImpactAuthorizations(
 		kind !== STATIC_FAB_ARRANGEMENT_PLAN_KIND &&
 		kind !== STATIC_FAB_ASSEMBLY_CONNECTOR_PATCH_KIND &&
 		kind !== STATIC_FAB_BAY_FLOW_EDIT_KIND &&
+  kind !== STATIC_FAB_AISLE_INTEGRATION_KIND &&
 		kind !== STATIC_FAB_SEMANTIC_BAY_DISCONNECT_KIND &&
 		kind !== STATIC_FAB_SEMANTIC_BAY_DELETE_KIND &&
 		kind !== STATIC_FAB_SEMANTIC_BANK_DETACH_KIND &&

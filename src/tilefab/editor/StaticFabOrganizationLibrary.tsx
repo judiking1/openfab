@@ -53,6 +53,8 @@ export type OrganizationDetailTab = "overview" | "relations" | "properties";
 
 interface StaticFabOrganizationLibraryProps {
 	readonly blueprintSelectionActive?: boolean;
+	readonly onIntegrateAisle?: (launcher: HTMLButtonElement) => void;
+	readonly aisleIntegrationUnavailableReason?: string | null;
 	readonly view: "list" | "detail";
 	readonly onOpenDetails: () => void;
 	readonly onShowList: () => void;
@@ -193,6 +195,8 @@ interface StaticFabOrganizationLibraryProps {
 
 export function StaticFabOrganizationLibrary({
 	blueprintSelectionActive = false,
+	onIntegrateAisle,
+	aisleIntegrationUnavailableReason = null,
 	view,
 	onOpenDetails,
 	onShowList,
@@ -301,6 +305,21 @@ export function StaticFabOrganizationLibrary({
 		view === "detail" && !!selectedStaticFabOrganization && !guidedBuildOrganizationPickerActive;
 	const bankReviewBlocked =
 		bankDetachSupport?.state === "blocked" && bankDeleteSupport?.state === "blocked";
+	const savedParentIds = selectedStaticFabOrganization
+		? staticFabOrganizationParentIds(selectedStaticFabOrganization)
+		: [];
+	const parentRelationsDirty =
+		savedParentIds.length !== organizationParentIdsDraft.length ||
+		savedParentIds.some((id) => !organizationParentIdsDraft.includes(id));
+	const integrationBlockedReason =
+		aisleIntegrationUnavailableReason ??
+		(projectBusy
+			? "프로젝트 작업을 마친 뒤 편입하세요"
+			: modelSyncPending
+				? "문서 동기화를 기다리세요"
+				: staticFabExclusiveCommandActive
+					? "현재 검토를 마친 뒤 편입하세요"
+					: null);
 	const reuseActions = (
 		<details
 			className="tilefab-organization-reuse"
@@ -693,6 +712,38 @@ export function StaticFabOrganizationLibrary({
 								{organizationDetailsStale ? "STALE" : organizationEditorDirty ? "UNSAVED" : "SAVED"}
 							</small>
 						</header>
+						{selectedStaticFabOrganization.kind === "AISLE" &&
+						selectedStaticFabOrganization.declaredSemanticRole !== "PROCESS_LOOP" &&
+						onIntegrateAisle ? (
+							<div className="tilefab-aisle-integration-primary">
+								<div className="tilefab-organization-editor-actions">
+									<button
+										type="button"
+										data-testid="integrate-aisle-into-bay"
+										disabled={integrationBlockedReason !== null}
+										aria-description={integrationBlockedReason ?? undefined}
+										onClick={(event) => onIntegrateAisle(event.currentTarget)}
+									>
+										<Link2 size={14} /> Bay에 편입
+									</button>
+								</div>
+								{integrationBlockedReason ? (
+									<EditorInfoPopover
+										key={selectedStaticFabOrganization.id}
+										label="Bay 편입 불가 사유"
+										text={integrationBlockedReason}
+									/>
+								) : null}
+								{parentRelationsDirty ? (
+									<p
+										className="tilefab-organization-support"
+										data-testid="aisle-integration-parent-draft-note"
+									>
+										관계 초안은 편입에 반영되지 않습니다.
+									</p>
+								) : null}
+							</div>
+						) : null}
 						<div
 							className="tilefab-organization-detail-tabs"
 							role="tablist"
@@ -902,10 +953,10 @@ export function StaticFabOrganizationLibrary({
 								aria-labelledby="organization-detail-tab-relations"
 							>
 								<div className="tilefab-organization-section-heading">
-									<span>SAVED PARENTS</span>
-									<small>
-										{organizationParentIdsDraft.length} SELECTED ·{" "}
-										{organizationParentCandidateCount} MATCHES
+									<span>부모 관계</span>
+									<small data-testid="organization-parent-draft-status">
+										{parentRelationsDirty ? `미적용 ${organizationParentIdsDraft.length}개 · ` : ""}
+										저장됨 {savedParentIds.length}개 · {organizationParentCandidateCount}개 검색됨
 									</small>
 								</div>
 								<p
@@ -952,6 +1003,13 @@ export function StaticFabOrganizationLibrary({
 														<strong>{candidate.name}</strong>
 														<small>
 															{candidate.kind}-{candidate.id}
+															{savedParentIds.includes(candidate.id)
+																? organizationParentIdsDraft.includes(candidate.id)
+																	? " · 저장됨"
+																	: " · 제거 예정 (저장됨)"
+																: organizationParentIdsDraft.includes(candidate.id)
+																	? " · 추가 예정"
+																	: ""}
 															{blocked ? " · DESCENDANT" : ""}
 														</small>
 													</span>

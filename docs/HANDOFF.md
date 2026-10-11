@@ -7,7 +7,7 @@
 - The active app is `src/App.tsx -> src/tilefab/editor/TileFabApp.tsx`.
 - The canonical document, compiled physical paths, atomic history, and typed Worker mirror
   remain the common boundary for editing, rendering, and read-only 3D inspection.
-- The current preset and rotation changes are a candidate until their checks complete.
+- v0.1.111 is published; AISLE-to-Bay integration is committed locally and remains unpublished.
   A synchronized rail mirror does not authorize simulation.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
@@ -17,7 +17,7 @@
 
 - 0.1.111 adds rail-structure descriptions, certified default metrics and one fixed crossover rail skeleton (808 cells; no Bay organizations or equipment).
 - Candidate verification: ordinary build and source Biome/ESLint PASS; full unit suite 460 files / 5,835 tests PASS, 2 existing tests skipped, no failures.
-- Chrome 1440/390 preset-to-Checks PASS; rail erase/Undo restores the checksum. Full authoring/scale/native-OS suites were not run; independent review and publication remain pending.
+- AISLE implementation: 36 focused tests, TypeScript, ordinary build, public safety and independent core review PASS. Earlier candidate Chrome 1440/390 Apply/Undo/Redo/cancel/Escape PASS; switch-fixture 1440 and final compact-action/draft-preservation 390 checks PASS. Full unit/authoring/scale/native-OS suites not run for this change.
 
 ## Development commands
 
@@ -46,7 +46,7 @@ in this repository. Routine development does not export or reinstall a second so
 
 ## Next work and completion conditions
 
-1. Finish the current preset and rotation candidate; verify focused behavior and the ordinary
+1. Review compact tool discovery as the next small V1 task; preserve the verified
    production build. Preserve unfinished work and saved user data outside public commits.
 2. Record the candidate's actual checks and any omissions here. Do not carry private execution
    logs or claim unrun suites passed.

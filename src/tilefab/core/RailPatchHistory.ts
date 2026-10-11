@@ -83,6 +83,7 @@ export function appendBoundedRailHistoryEntry<T>(
 }
 
 const RAIL_HISTORY_ORIGIN_KINDS = Object.freeze({
+ "integrate-static-fab-aisle": true,
 	build: true,
 	edit: true,
 	erase: true,

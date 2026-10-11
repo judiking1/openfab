@@ -1,0 +1,83 @@
+.tilefab-aisle-integration-dialog {
+	box-sizing: border-box;
+	width: min(680px, calc(100vw - 24px));
+	max-height: calc(100dvh - 32px);
+	padding: 20px;
+	border: 1px solid #4c6b64;
+	border-radius: 10px;
+	background: #13201e;
+	color: #e2ede9;
+	overflow-y: auto;
+}
+.tilefab-aisle-integration-dialog::backdrop {
+	background: #030b0bd1;
+}
+.tilefab-aisle-integration-dialog h2 {
+	margin: 0 0 8px;
+	font-size: 19px;
+}
+.tilefab-aisle-integration-dialog p {
+	margin: 10px 0;
+	font-size: 13px;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+.tilefab-aisle-integration-fields {
+	display: grid;
+	gap: 12px;
+	margin: 16px 0;
+}
+.tilefab-aisle-integration-fields label {
+	display: grid;
+	gap: 6px;
+	font-size: 13px;
+}
+.tilefab-aisle-integration-fields select {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	min-height: 44px;
+	padding: 8px;
+	background: #1c302b;
+	border: 1px solid #658a7e;
+	color: inherit;
+	border-radius: 5px;
+}
+.tilefab-aisle-integration-dialog svg {
+	width: 100%;
+	height: 240px;
+	display: block;
+	background: #0c1614;
+	border-radius: 6px;
+}
+.tilefab-aisle-integration-dialog footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 10px;
+	position: sticky;
+	bottom: -20px;
+	padding: 12px 0 0;
+	background: #13201e;
+}
+.tilefab-aisle-integration-dialog button {
+	min-width: 88px;
+	min-height: 44px;
+	border: 1px solid #789e90;
+	border-radius: 6px;
+	color: inherit;
+	background: #284a3f;
+	font-weight: 700;
+}
+.tilefab-aisle-integration-dialog button:disabled {
+	opacity: 0.45;
+}
+.tilefab-aisle-integration-dialog :focus-visible {
+	outline: 2px solid #80e7bd;
+	outline-offset: 3px;
+}
+.tilefab-aisle-integration-legend span:first-child {
+	color: #69e2b4;
+}
+.tilefab-aisle-integration-legend span:last-child {
+	color: #ffbe75;
+}

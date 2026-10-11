@@ -1,3 +1,5 @@
+import { STATIC_FAB_AISLE_INTEGRATION_KIND, type StaticFabAisleIntegrationPlan } from "./StaticFabAisleIntegration";
+import { consumeStaticFabAisleIntegrationPlan, type StaticFabAisleIntegrationScope } from "./StaticFabAisleIntegrationCertification";
 import {
 	type AdvancedSwitchMutation,
 	copyAdvancedSwitch,
@@ -234,6 +236,7 @@ import {
 import { decodeRailCell, TileMap } from "./TileMap";
 
 export type RailPatchKind =
+ | typeof STATIC_FAB_AISLE_INTEGRATION_KIND
 	| "build"
 	| "edit"
 	| "erase"
@@ -1541,6 +1544,20 @@ export class RailDocument {
 				throw new Error("조직 청사진이 보호된 기존 조직 장비를 변경합니다");
 		}
 	}
+
+	/** The two AISLE connections and its Bay parent are one certified, reversible command. */
+ commitStaticFabAisleIntegration(plan: StaticFabAisleIntegrationPlan, scope: StaticFabAisleIntegrationScope): boolean {
+  this.lastCommandError = null;
+  const error = consumeStaticFabAisleIntegrationPlan(plan, this, scope);
+  if (error) return this.rejectCommand(error, "구역 편입을 거부했습니다");
+  const entry = createHistoryEntry(plan.kind, plan.draft.mutations, [], [], [], plan.organizationMutations, plan.nextOrganizationId, plan.nextOrganizationId, plan.organizationImpactAuthorizations);
+  try {
+   this.applyChanges(entry.changes, [], [], [], entry.organizationChanges, entry.organizationNextIdBefore, entry.organizationNextIdAfter, false, entry.organizationImpactAuthorizations);
+  } catch (error) { return this.rejectCommand(error, "구역 편입을 원자적으로 적용할 수 없습니다"); }
+  this.pushUndoEntry(entry);
+  this.emit(plan.kind, plan.baseRevision, entry.changes, [], [], [], entry.organizationChanges, entry.organizationNextIdBefore, entry.organizationNextIdAfter, entry.organizationImpactAuthorizations);
+  return true;
+ }
 
 	/** Commit one exact typed hierarchy connector as one history entry and one Worker patch. */
 	commitStaticFabAssemblyConnector(plan: StaticFabAssemblyConnectorPlan): boolean {
