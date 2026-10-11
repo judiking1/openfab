@@ -1,0 +1,23 @@
+#!/bin/sh
+# Audit the exact index snapshot that Git will commit.
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+for directory in .githooks scripts; do
+  if [ ! -d "$directory" ] || [ -L "$directory" ]; then
+    echo "The public hook and audit must use regular repository directories." >&2
+    exit 1
+  fi
+done
+for file in .githooks/pre-commit scripts/openfab-public-safety-audit.mjs; do
+  if [ ! -f "$file" ] || [ -L "$file" ]; then
+    echo "The public hook and audit must be regular repository files." >&2
+    exit 1
+  fi
+  staged_object=$(git rev-parse --verify ":$file")
+  working_object=$(git hash-object --no-filters -- "$file")
+  if [ "$staged_object" != "$working_object" ]; then
+    echo "Stage or restore the public audit and hook before committing." >&2
+    exit 1
+  fi
+done
+node scripts/openfab-public-safety-audit.mjs --staged

@@ -111,6 +111,19 @@ function respondWithClonedStarter(
 }
 
 describe("SyntheticFabStarterBridge", () => {
+	it("admits the fixed crossover route batch through the ordinary Worker contract", async () => {
+		const request = defaultSyntheticFabStarterRequest("spine-crossover");
+		const worker = new FakeStarterWorker();
+		const bridge = new SyntheticFabStarterBridge(() => worker);
+		const prepared = await bridge.prepare(request);
+		expect(prepared.summary.railCells).toBe(808);
+		expect(prepared.summary.bayCount).toBe(0);
+		expect(prepared.steps[0]?.kind).toBe("route-batch");
+		expect(prepared.placementBundle).toBeNull();
+		expect(preparedSyntheticFabStarterMatchesRequest(prepared, request)).toBe(true);
+		bridge.dispose();
+	});
+
 	it("cancels a response while cooperative admission is suspended", async () => {
 		const worker = new ManualStarterWorker();
 		const pause = pausedAdmission();

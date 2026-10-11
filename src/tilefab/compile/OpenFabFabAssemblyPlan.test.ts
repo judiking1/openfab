@@ -63,7 +63,7 @@ describe("OpenFabFabAssemblyPlan", () => {
 		expect(plan.interBlockBridges).toHaveLength(0);
 		expect(plan.layoutContractFingerprint).toBe(openFabFabAssemblyLayoutContractFingerprint());
 		expect(plan.layoutContractFingerprint).toBe("121f1a6b:088df943");
-		expect(plan.fingerprint).toBe("d76c56ba:3cdf23f4");
+		expect(plan.fingerprint).toBe("a83ba2e5:0f26cd96");
 	});
 
 	it("keeps every Bay shell inside its Block and preserves the requested pitch allocation", () => {

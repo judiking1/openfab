@@ -1,9 +1,11 @@
 {
 	"schemaVersion": 1,
 	"includeFiles": [
+		".githooks/pre-commit",
 		".github/pull_request_template.md",
 		".github/workflows/ci.yml",
 		".gitignore",
+		"AGENTS.md",
 		"CHANGELOG.md",
 		"CONTRIBUTING.md",
 		"DEPLOYMENT_STRATEGY.md",
@@ -13,6 +15,7 @@
 		"THIRD_PARTY_NOTICES.md",
 		"VISION.md",
 		"biome.json",
+		"docs/HANDOFF.md",
 		"docs/fab-layout-authoring-rules.md",
 		"docs/fab-layout-grammar.md",
 		"docs/openfab-editor-v1-release-baseline.md",
@@ -27,6 +30,7 @@
 		"index.html",
 		"package.json",
 		"pnpm-lock.yaml",
+		"scripts/openfab-public-safety-audit.mjs",
 		"tsconfig.app.json",
 		"tsconfig.core.json",
 		"tsconfig.json",
@@ -56,7 +60,6 @@
 	],
 	"excludedPrivatePrefixes": [
 		".claude/",
-		".githooks/",
 		"artifacts/",
 		"dist/",
 		"logs/",
@@ -67,7 +70,7 @@
 		"Owner-approved open-source license",
 		"Final human source-originality and synthetic-fixture provenance approval",
 		"Final human dependency-license and third-party-notice approval",
-		"Clean history-independent export review",
-		"Live demo built from the exact exported commit"
+		"Public tracked-source and release-commit review",
+		"Live demo built from the exact public release commit"
 	]
 }

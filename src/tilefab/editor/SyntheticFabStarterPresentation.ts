@@ -11,6 +11,11 @@ interface StarterCopy {
 
 /** Editor wording is independent of persisted preset IDs and certified geometry. */
 const STARTER_COPY = {
+	"spine-crossover": {
+		name: "척추형 + 지름길 레일 골격",
+		category: "레일 구조 예제",
+		description: "반대 방향 두 순환 루프를 일정 간격의 지름길로 연결합니다.",
+	},
 	blank: {
 		name: "빈 격자",
 		category: "직접 만들기",
@@ -29,27 +34,27 @@ const STARTER_COPY = {
 	"paired-circulation-fab-52": {
 		name: "이중 순환 FAB",
 		category: "기본 FAB",
-		description: "반대 방향의 두 외곽 레일과 공정 홀 2개·Bank 4개를 연결합니다.",
+		description: "이중 순환형 · 반대 방향의 두 외곽 레일에 공정 홀 2개·Bank 4개를 연결합니다.",
 	},
 	"full-fab-52": {
 		name: "단일 외곽 순환 FAB",
 		category: "비교용 FAB",
-		description: "하나의 외곽 순환 레일에 공정 홀 2개·Bank 4개를 연결한 비교용 구성입니다.",
+		description: "외곽 순환형 · 하나의 외곽 레일이 공정 홀 2개·Bank 4개를 감쌉니다.",
 	},
 	"parallel-hall-fab-12": {
 		name: "평행 공정 홀",
 		category: "공정 홀",
-		description: "긴 Bay를 남·북 연결 레일에 배치합니다. 더 큰 FAB에 반복 배치할 수 있습니다.",
+		description: "평행 공정 홀 · 긴 Bay를 남·북 집결 레일에 나란히 연결합니다.",
 	},
 	"central-spine-fab-24": {
 		name: "중앙 통로 FAB",
 		category: "밀집 공정 홀",
-		description: "중앙 연결 레일 양쪽에 Bay와 Process Loop를 밀집 배치합니다.",
+		description: "중앙 척추형 · 중앙 연결 레일 양옆에 Bay와 Process Loop를 배치합니다.",
 	},
 	"production-fab-60": {
 		name: "대규모 검증 FAB",
 		category: "성능 검증용",
-		description: "Bay 수와 Bank 수를 조절해 큰 FAB의 편집과 배치를 검증합니다.",
+		description: "다중 Bank 구성 · 반복 Bay를 Bank로 묶어 공용 순환 레일에 연결합니다.",
 	},
 	"single-loop": {
 		name: "단일 Process Loop",

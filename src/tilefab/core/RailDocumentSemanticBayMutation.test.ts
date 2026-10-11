@@ -80,9 +80,14 @@ describe("RailDocument semantic Bay mutation", () => {
 			expect(mirror.applyPatch(roundTripPatch(events[0] as RailPatchEvent)).checksum).toBe(
 				prospectiveChecksum,
 			);
-			expect(checksumRailMap(document.map, document.portEquipment, document.organizations)).toBe(
-				prospectiveChecksum,
-			);
+			expect(
+				checksumRailMap(
+					document.map,
+					document.portEquipment,
+					document.organizations,
+					document.relationships,
+				),
+			).toBe(prospectiveChecksum);
 			const committedBay = document.organizations.records.find((record) => record.id === bayId);
 			if (action === "DISCONNECT") {
 				if (!committedBay) throw new Error("Disconnect unexpectedly removed the selected Bay.");
@@ -346,6 +351,7 @@ function certifiedFixture(
 		document.getPatchSequence(),
 		document.portEquipment,
 		document.organizations,
+		document.relationships,
 	);
 	const intent: StaticFabSemanticBayMutationIntent = Object.freeze({
 		version: STATIC_FAB_SEMANTIC_BAY_MUTATION_VERSION,

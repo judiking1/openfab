@@ -11,16 +11,20 @@ node_modules
 dist
 dist-ssr
 *.local
-artifacts/rail-scale/
-artifacts/openfab-project/
-artifacts/static-fab-authoring/
-artifacts/static-fab-3d/
-artifacts/simulation-runtime/
-artifacts/user-blueprint-library-recovery/
-artifacts/openfab-live-demo/
-
-# Local map fixtures and proprietary source data must never be committed.
+# Local evidence, saved user projects, and credentials are never public inputs.
+artifacts/
 public/railConfig/
+*.openfab
+*.openfab.json
+*.openfabbp
+*.openfablib
+*.heapsnapshot
+*.cpuprofile
+.env
+.env.*
+*.pem
+*.key
+*.p12
 
 # Editor directories and files
 .vscode/*
@@ -33,5 +37,6 @@ public/railConfig/
 *.sln
 *.sw?
 
-# Claude Code worktrees (이 디렉토리 안에 별도 git worktree들이 생성됨)
-.claude/worktrees/
+# Local agent settings and worktrees
+.claude/
+.codex/

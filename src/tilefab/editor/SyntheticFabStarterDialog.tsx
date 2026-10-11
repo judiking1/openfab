@@ -52,7 +52,11 @@ import {
 	isDefaultSyntheticFabCertifiedRequest,
 	type SyntheticFabStarterCertificationEvidence,
 } from "./SyntheticFabStarterCertifiedArtifact";
-import { loadCertifiedSyntheticFabStarter } from "./SyntheticFabStarterCertifiedCatalog";
+import {
+	loadCertifiedSyntheticFabStarter,
+	type SyntheticFabStarterCatalogSummary,
+	syntheticFabStarterCatalogSummaryForRequest,
+} from "./SyntheticFabStarterCertifiedCatalog";
 import { largeFabDialogMetadata } from "./SyntheticFabStarterDialogMetadata";
 import {
 	syntheticFabStarterParameterLabel,
@@ -132,7 +136,9 @@ export function SyntheticFabStarterDialog({
 		mode === "pattern"
 			? SYNTHETIC_FAB_PATTERN_CATALOG
 			: mode === "preset"
-				? SYNTHETIC_FAB_PRESET_CATALOG
+				? SYNTHETIC_FAB_PRESET_CATALOG.filter(
+						(candidate) => presetIntent !== "placement" || candidate.id !== "spine-crossover",
+					)
 				: SYNTHETIC_FAB_PROJECT_CATALOG;
 	const activeStarterIndex = Math.max(
 		0,
@@ -141,6 +147,7 @@ export function SyntheticFabStarterDialog({
 	const item = syntheticFabStarterCatalogItem(request.id);
 	const presentation = syntheticFabStarterPresentation(request);
 	const previewLabel = presentation.label;
+	const catalogSummary = syntheticFabStarterCatalogSummaryForRequest(request);
 	const largeFabMetadata = useMemo(() => largeFabDialogMetadata(request), [request]);
 	const largeFabAssembly = largeFabMetadata?.assembly ?? null;
 	const productionFabAssembly = useMemo(
@@ -521,7 +528,7 @@ export function SyntheticFabStarterDialog({
 									? "FAB 구성 시작점"
 									: mode === "preset"
 										? createsProject
-											? "프리셋으로 새 FAB 시작"
+											? "FAB 레일 골격에서 시작"
 											: "FAB 프리셋 추가"
 										: "생산 Bay 조립 패턴"}
 							</strong>
@@ -728,7 +735,7 @@ export function SyntheticFabStarterDialog({
 										? "미리보기 실패 · 다시 시도하세요"
 										: "레일 검증 실패 · 설정을 확인하세요"
 									: previewIdle
-										? "프리셋 사양 준비 · 실행 시 레일 검증"
+										? "레일 골격 · 장비는 직접 추가"
 										: preview === undefined
 											? certifiedPreviewPending
 												? "검증된 프리셋을 불러오는 중"
@@ -743,6 +750,7 @@ export function SyntheticFabStarterDialog({
 						<StarterMetrics
 							requestId={request.id}
 							summary={preview?.summary ?? null}
+							catalogSummary={catalogSummary}
 							scaleUnit={
 								request.id === "paired-circulation-fab-52" ||
 								request.id === "full-fab-52" ||
@@ -763,6 +771,15 @@ export function SyntheticFabStarterDialog({
 								<li>
 									<AlertTriangle size={13} /> 생성할 레일을 확인할 수 없습니다
 								</li>
+							) : request.id === "spine-crossover" ? (
+								<>
+									<li>
+										<Route size={13} /> 반대 방향 순환 루프 2개 · 지름길 3쌍
+									</li>
+									<li>
+										<Route size={13} /> 공정용 우회 레일 6개 · Bay 조직 없음
+									</li>
+								</>
 							) : request.id === "paired-circulation-fab-52" ? (
 								pairedCirculationFabPresetBuildStages(request.parameters.bayCount).map(
 									(stage, index) => (
@@ -851,8 +868,12 @@ export function SyntheticFabStarterDialog({
 							<div className="tilefab-starter-empty-config">
 								<Grid3X3 size={18} />
 								<span>
-									<strong>1 m 격자</strong>
-									<small>레일 없음</small>
+									<strong>
+										{request.id === "spine-crossover" ? "지름길 3쌍 · 고정 구성" : "1 m 격자"}
+									</strong>
+									<small>
+										{request.id === "spine-crossover" ? "Bay 조직·장비는 직접 추가" : "레일 없음"}
+									</small>
 								</span>
 							</div>
 						) : (
@@ -1933,6 +1954,7 @@ function StarterVerificationScopes(): React.ReactElement {
 function StarterMetrics({
 	requestId,
 	summary,
+	catalogSummary,
 	scaleUnit,
 	pending,
 	idle,
@@ -1940,6 +1962,7 @@ function StarterMetrics({
 }: Readonly<{
 	requestId: SyntheticFabStarterId;
 	summary: PreparedSyntheticFabStarter["summary"] | null;
+	catalogSummary: SyntheticFabStarterCatalogSummary | null;
 	scaleUnit: "ZONES" | "BANKS" | "WINGS";
 	pending: boolean;
 	idle: boolean;
@@ -1954,8 +1977,19 @@ function StarterMetrics({
 				<dd>
 					{failed ? (
 						"확인 불가"
+					) : requestId === "spine-crossover" ? (
+						<>
+							{" "}
+							<span>지름길 3쌍 · 우회 레일 6개</span>
+							<span>Bay 조직 0 · 장비 0</span>{" "}
+						</>
 					) : idle ? (
-						"실행 시 계산"
+						<>
+							<span>
+								{catalogSummary ? `${catalogSummary.zoneCount} ${scaleUnit}` : "실행 시 계산"}
+							</span>
+							{catalogSummary ? <span>{catalogSummary.bayCount} BAYS · 기본값</span> : null}
+						</>
 					) : pending ? (
 						"검증 중"
 					) : summary?.zoneCount ? (
@@ -1988,7 +2022,9 @@ function StarterMetrics({
 					{failed
 						? "확인 불가"
 						: idle
-							? "실행 시 계산"
+							? catalogSummary
+								? `${catalogSummary.widthMeters} × ${catalogSummary.heightMeters} m · 기본값`
+								: "실행 시 계산"
 							: pending
 								? "검증 중"
 								: `${width} × ${height} m`}
@@ -2000,7 +2036,9 @@ function StarterMetrics({
 					{failed
 						? "확인 불가"
 						: idle
-							? "실행 시 계산"
+							? catalogSummary
+								? `${(catalogSummary.totalLengthMeters / 1000).toFixed(2)} km · 기본값`
+								: "실행 시 계산"
 							: pending
 								? "검증 중"
 								: `${summary ? Math.round(summary.totalLengthMeters) : 0} m`}

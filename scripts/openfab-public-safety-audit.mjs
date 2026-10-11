@@ -1,5 +1,5 @@
-import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -7,24 +7,46 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const manifestPath = path.join(root, "docs", "openfab-public-export-manifest.json");
+const manifestFile = "docs/openfab-public-export-manifest.json";
 const strictRelease = process.argv.includes("--strict-release");
 const listOnly = process.argv.includes("--list");
 
-const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-validateManifest(manifest);
-
-const { stdout } = await execFileAsync("git", ["ls-files", "-z"], {
+const staged = process.argv.includes("--staged");
+const { stdout } = await execFileAsync("git", ["ls-files", "--stage", "-z"], {
 	cwd: root,
 	encoding: "utf8",
 	maxBuffer: 32 * 1024 * 1024,
 });
-const trackedFiles = stdout.split("\0").filter(Boolean).sort();
+const entries = stdout
+	.split("\0")
+	.filter(Boolean)
+	.map((record) => {
+		const match = /^(\d{6}) ([a-f0-9]+) ([0-3])\t(.+)$/s.exec(record);
+		if (!match) throw new Error("Invalid Git index entry.");
+		if (match[3] !== "0") throw new Error(`Unresolved Git index entry: ${match[4]}`);
+		return { mode: match[1], oid: match[2], file: match[4] };
+	});
+const index = new Map(entries.map((entry) => [entry.file, entry]));
+const ordinaryEntries = entries.filter(
+	(entry) => ["100644", "100755"].includes(entry.mode) && !forbiddenTrackedAssetReason(entry.file),
+);
+if (!["100644", "100755"].includes(index.get(manifestFile)?.mode)) {
+	throw new Error("The public manifest must be a regular file in the index.");
+}
+const stagedBlobs = staged ? await readIndexBlobs(ordinaryEntries) : null;
+const manifestBytes = staged ? stagedBlobs.get(manifestFile) : await workingTreeBytes(manifestFile);
+if (!manifestBytes) throw new Error("The public manifest must be a regular file in the index.");
+const manifest = JSON.parse(manifestBytes.toString("utf8"));
+validateManifest(manifest);
+const trackedFiles = [...index.keys()].sort();
 const tracked = new Set(trackedFiles);
 const exportCandidates = trackedFiles.filter((file) => exportCandidate(file, manifest));
 const exportCandidateSet = new Set(exportCandidates);
 const excludedTrackedFiles = trackedFiles.filter((file) => !exportCandidateSet.has(file));
 const failures = [];
+for (const file of excludedTrackedFiles) {
+	failures.push(`tracked file is outside the public allowlist: ${file}`);
+}
 
 for (const file of manifest.includeFiles) {
 	if (!tracked.has(file)) failures.push(`manifest include is not tracked: ${file}`);
@@ -42,9 +64,12 @@ for (const file of trackedFiles) {
 	const forbiddenReason = forbiddenTrackedAssetReason(file);
 	if (forbiddenReason) failures.push(`${forbiddenReason}: ${file}`);
 }
-for (const file of exportCandidates) {
+for (const file of trackedFiles) {
+	if (!["100644", "100755"].includes(index.get(file).mode)) {
+		failures.push(`symlink or non-file index entry is not permitted: ${file}`);
+	}
 	if (manifest.excludedPrivatePrefixes.some((prefix) => file.startsWith(prefix))) {
-		failures.push(`private prefix entered export allowlist: ${file}`);
+		failures.push(`private prefix is tracked: ${file}`);
 	}
 }
 
@@ -74,20 +99,29 @@ const contentPatterns = [
 	{ label: "Slack access token", pattern: /xox[baprs]-[A-Za-z0-9-]{20,}/ },
 ];
 let scannedTextFiles = 0;
-let skippedBinaryFiles = 0;
-for (const file of exportCandidates) {
-	const bytes = await readFile(path.join(root, file));
-	if (bytes.includes(0)) {
-		skippedBinaryFiles += 1;
+let scannedBinaryFiles = 0;
+for (const file of trackedFiles) {
+	if (!["100644", "100755"].includes(index.get(file).mode) || forbiddenTrackedAssetReason(file))
 		continue;
+	let bytes;
+	if (staged) {
+		bytes = stagedBlobs.get(file);
+	} else {
+		bytes = await workingTreeBytes(file);
+		if (!bytes) {
+			failures.push(`tracked working-tree entry has a symlink or is not a regular file: ${file}`);
+			continue;
+		}
 	}
-	scannedTextFiles += 1;
+	const binary = bytes.includes(0);
+	if (binary) scannedBinaryFiles += 1;
+	else scannedTextFiles += 1;
 	const text = bytes.toString("utf8");
 	for (const { label, pattern } of contentPatterns) {
 		const match = pattern.exec(text);
 		if (!match) continue;
 		const line = text.slice(0, match.index).split("\n").length;
-		failures.push(`${label}: ${file}:${line}`);
+		failures.push(`${label}: ${file}:${binary ? "binary" : line}`);
 	}
 }
 
@@ -102,11 +136,11 @@ if (listOnly) {
 } else {
 	console.log(
 		[
-			`OpenFab public ${strictRelease ? "release" : "safety"} audit`,
+			`OpenFab public ${strictRelease ? "release" : "safety"} audit (${staged ? "index" : "working tree"})`,
 			`${exportCandidates.length} allowlisted tracked files`,
-			`${excludedTrackedFiles.length} private-incubator files excluded`,
+			`${excludedTrackedFiles.length} tracked files outside public allowlist`,
 			`${scannedTextFiles} text files scanned`,
-			`${skippedBinaryFiles} binary files skipped from content scan`,
+			`${scannedBinaryFiles} binary files scanned for forbidden content`,
 			`${missingReleaseFiles.length} release files still missing`,
 		].join(" | "),
 	);
@@ -116,10 +150,71 @@ if (listOnly) {
 }
 
 if (failures.length > 0) {
-	for (const failure of failures) console.error(`PUBLIC EXPORT AUDIT: ${failure}`);
+	for (const failure of failures) console.error(`PUBLIC SAFETY AUDIT: ${failure}`);
 	process.exitCode = 1;
 } else if (!listOnly) {
-	console.log("PASS OpenFab public-safe export allowlist");
+	console.log("PASS OpenFab public tracked-source safety");
+}
+
+async function workingTreeBytes(file) {
+	const parts = file.split("/");
+	let location = root;
+	for (let index = 0; index < parts.length; index += 1) {
+		location = path.join(location, parts[index]);
+		const status = await lstat(location);
+		if (status.isSymbolicLink()) return null;
+		if (index === parts.length - 1 ? !status.isFile() : !status.isDirectory()) return null;
+	}
+	return readFile(location);
+}
+
+async function readIndexBlobs(indexEntries) {
+	const objectIds = [...new Set(indexEntries.map((entry) => entry.oid))];
+	if (objectIds.length === 0) return new Map();
+	const output = await new Promise((resolve, reject) => {
+		const child = spawn("git", ["cat-file", "--batch"], {
+			cwd: root,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		const chunks = [];
+		const errors = [];
+		child.stdout.on("data", (chunk) => chunks.push(chunk));
+		child.stderr.on("data", (chunk) => errors.push(chunk));
+		child.once("error", reject);
+		child.stdin.once("error", reject);
+		child.once("close", (code) => {
+			if (code === 0) resolve(Buffer.concat(chunks));
+			else
+				reject(new Error(`Git index blob read failed: ${Buffer.concat(errors).toString("utf8")}`));
+		});
+		child.stdin.end(`${objectIds.join("\n")}\n`);
+	});
+	const blobs = new Map();
+	let offset = 0;
+	for (const oid of objectIds) {
+		const newline = output.indexOf(10, offset);
+		const [returnedOid, type, sizeText] = output
+			.subarray(offset, newline)
+			.toString("ascii")
+			.split(" ");
+		const size = Number(sizeText);
+		if (
+			newline < offset ||
+			returnedOid !== oid ||
+			type !== "blob" ||
+			!Number.isSafeInteger(size) ||
+			size < 0
+		) {
+			throw new Error("Invalid Git index blob response.");
+		}
+		const start = newline + 1;
+		const end = start + size;
+		if (end >= output.length || output[end] !== 10)
+			throw new Error("Truncated Git index blob response.");
+		blobs.set(oid, output.subarray(start, end));
+		offset = end + 1;
+	}
+	return new Map(indexEntries.map((entry) => [entry.file, blobs.get(entry.oid)]));
 }
 
 function exportCandidate(file, candidateManifest) {
@@ -140,7 +235,7 @@ function forbiddenTrackedAssetReason(file) {
 	}
 	if (
 		/(^|\/)(\.env(?:\..*)?|\.ds_store)$/.test(lower) ||
-		/\.(?:map|csv|log|heapsnapshot|cpuprofile|pem|key|p12|openfab(?:\.json|bp|lib))$/.test(lower)
+		/\.(?:map|csv|log|heapsnapshot|cpuprofile|pem|key|p12|openfab(?:\.json|bp|lib)?)$/.test(lower)
 	) {
 		return "forbidden local data or credential-shaped file is tracked";
 	}

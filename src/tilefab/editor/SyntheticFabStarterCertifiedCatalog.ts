@@ -44,20 +44,65 @@ export type SyntheticFabStarterCertifiedArtifactHydrator = (
 export type SyntheticFabStarterCertifiedArtifactHydrationBridgeFactory =
 	() => SyntheticFabStarterCertifiedArtifactHydrationBridge;
 
+export interface SyntheticFabStarterCatalogSummary {
+	readonly bayCount: number;
+	readonly zoneCount: number;
+	readonly totalLengthMeters: number;
+	readonly widthMeters: number;
+	readonly heightMeters: number;
+}
+
 export interface SyntheticFabStarterCertifiedCatalogMetadata {
 	readonly requestId: SyntheticFabStarterRequest["id"];
 	readonly artifactId: SyntheticFabStarterCertifiedArtifactId;
 	readonly loading: "lazy-raw-import";
+	readonly summary: SyntheticFabStarterCatalogSummary;
 }
 
-/** Static catalog identity only. It never imports, parses, hydrates, or validates artifact payloads. */
+/** Default summaries copied from certified payloads; browsing never loads their geometry. */
 export const SYNTHETIC_FAB_STARTER_CERTIFIED_CATALOG_METADATA = Object.freeze([
-	metadata("paired-circulation-fab-52", PAIRED_CIRCULATION_FAB_STARTER_CERTIFIED_ARTIFACT_ID),
-	metadata("full-fab-52", FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID),
-	metadata("large-fab-60", SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID),
-	metadata("production-fab-60", PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID),
-	metadata("central-spine-fab-24", CENTRAL_SPINE_FAB_STARTER_CERTIFIED_ARTIFACT_ID),
-	metadata("parallel-hall-fab-12", PARALLEL_HALL_FAB_STARTER_CERTIFIED_ARTIFACT_ID),
+	metadata("paired-circulation-fab-52", PAIRED_CIRCULATION_FAB_STARTER_CERTIFIED_ARTIFACT_ID, {
+		bayCount: 52,
+		zoneCount: 4,
+		totalLengthMeters: 33893.318566173315,
+		widthMeters: 712,
+		heightMeters: 524,
+	}),
+	metadata("full-fab-52", FULL_FAB_STARTER_CERTIFIED_ARTIFACT_ID, {
+		bayCount: 52,
+		zoneCount: 4,
+		totalLengthMeters: 44265.21237409115,
+		widthMeters: 632,
+		heightMeters: 608,
+	}),
+	metadata("large-fab-60", SYNTHETIC_FAB_STARTER_CERTIFIED_ARTIFACT_ID, {
+		bayCount: 60,
+		zoneCount: 12,
+		totalLengthMeters: 10018.469020605087,
+		widthMeters: 376,
+		heightMeters: 572,
+	}),
+	metadata("production-fab-60", PRODUCTION_FAB_STARTER_CERTIFIED_ARTIFACT_ID, {
+		bayCount: 60,
+		zoneCount: 3,
+		totalLengthMeters: 30697.6238771677,
+		widthMeters: 1176,
+		heightMeters: 376,
+	}),
+	metadata("central-spine-fab-24", CENTRAL_SPINE_FAB_STARTER_CERTIFIED_ARTIFACT_ID, {
+		bayCount: 24,
+		zoneCount: 2,
+		totalLengthMeters: 14698.477869451046,
+		widthMeters: 668,
+		heightMeters: 200,
+	}),
+	metadata("parallel-hall-fab-12", PARALLEL_HALL_FAB_STARTER_CERTIFIED_ARTIFACT_ID, {
+		bayCount: 12,
+		zoneCount: 2,
+		totalLengthMeters: 11078.23008453846,
+		widthMeters: 324,
+		heightMeters: 316,
+	}),
 ]);
 
 const CATALOG_METADATA_BY_ARTIFACT_ID = new Map(
@@ -257,6 +302,23 @@ export function loadCertifiedSyntheticFabStarter(
 	return sharedCertifiedCatalog.load(request);
 }
 
+const SPINE_CROSSOVER_CATALOG_SUMMARY: SyntheticFabStarterCatalogSummary = Object.freeze({
+	bayCount: 0,
+	zoneCount: 0,
+	totalLengthMeters: 822.5575212240219,
+	widthMeters: 120,
+	heightMeters: 52,
+});
+
+/** Display metadata is not certification; custom rail presets still pass the ordinary Worker gates. */
+export function syntheticFabStarterCatalogSummaryForRequest(
+	request: SyntheticFabStarterRequest,
+): SyntheticFabStarterCatalogSummary | null {
+	return request.id === "spine-crossover"
+		? SPINE_CROSSOVER_CATALOG_SUMMARY
+		: (syntheticFabStarterCertifiedCatalogMetadataForRequest(request)?.summary ?? null);
+}
+
 export function syntheticFabStarterCertifiedCatalogMetadataForRequest(
 	request: SyntheticFabStarterRequest,
 ): SyntheticFabStarterCertifiedCatalogMetadata | null {
@@ -373,8 +435,14 @@ const SHIPPED_ARTIFACT_SOURCE_IMPORTERS: Readonly<
 function metadata(
 	requestId: SyntheticFabStarterRequest["id"],
 	artifactId: SyntheticFabStarterCertifiedArtifactId,
+	summary: SyntheticFabStarterCatalogSummary,
 ): SyntheticFabStarterCertifiedCatalogMetadata {
-	return Object.freeze({ requestId, artifactId, loading: "lazy-raw-import" });
+	return Object.freeze({
+		requestId,
+		artifactId,
+		loading: "lazy-raw-import",
+		summary: Object.freeze(summary),
+	});
 }
 
 function decodeArtifactSource(source: unknown): unknown {

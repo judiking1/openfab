@@ -201,6 +201,7 @@ describe("StaticFabBayFlowEdit disposable Worker certification", () => {
 			fixture.snapshot.sequence + 1,
 			forward.prospectiveState.portEquipment,
 			forward.prospectiveState.organizations,
+			fixture.document.relationships,
 		).snapshot;
 		const targetSession = hydrateStaticFabBayFlowEditSession(targetSnapshot);
 		const reverseIntent = Object.freeze({

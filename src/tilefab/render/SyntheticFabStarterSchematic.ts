@@ -22,6 +22,7 @@ import {
 	type ProductionFabAssemblyPlan,
 	type ProductionFabBayPlacement,
 } from "../compile/ProductionFabAssemblyPlan";
+import { SPINE_CROSSOVER_WAYPOINTS } from "../compile/SpineCrossoverRailPreset";
 import {
 	createSyntheticFabAssemblyPlan,
 	type SyntheticFabAssemblyBayPlacement,
@@ -98,6 +99,19 @@ export function syntheticFabStarterSchematic(
 	switch (normalized.id) {
 		case "blank":
 			return null;
+		case "spine-crossover":
+			return schematic(
+				SPINE_CROSSOVER_WAYPOINTS.map((route) =>
+					route.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" "),
+				).join(" "),
+				EMPTY_CONNECTORS,
+				120,
+				52,
+				0,
+				0,
+				0,
+				-12,
+			);
 		case "bay-assembly": {
 			const endMargin = 6;
 			const loopGap = 8;

@@ -76,6 +76,7 @@ describe("SyntheticFabStarter", () => {
 			["parallel-hall-fab-12", 44],
 			["central-spine-fab-24", 74],
 			["production-fab-60", 185],
+			["spine-crossover", 1],
 			["single-loop", 1],
 			["dual-loop", 1],
 			["nested-bay", 1],
@@ -1108,6 +1109,7 @@ describe("SyntheticFabStarter", () => {
 			"parallel-hall-fab-12",
 			"central-spine-fab-24",
 			"production-fab-60",
+			"spine-crossover",
 		]);
 		const preset = SYNTHETIC_FAB_PRESET_CATALOG.find((item) => item.id === "production-fab-60");
 		if (!preset) throw new Error("Missing production FAB preset.");

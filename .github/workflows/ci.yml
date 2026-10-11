@@ -87,21 +87,25 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The clean export runs the complete authoring journey, bundle audit, and production smoke.
+      # Validate the public source directly; no temporary export or second dependency install.
       - name: Install Korean fonts for browser evidence
         run: |
           sudo apt-get update
           sudo apt-get install --yes fonts-noto-cjk
           test -n "$(fc-list :lang=ko family)"
-      - run: pnpm check:public-export
+      - run: pnpm check:public-safety
+      - run: pnpm check:authoring
         env:
-          OPENFAB_PUBLIC_EXPORT_EVIDENCE_DIR: ${{ runner.temp }}/openfab-public-export-evidence
           OPENFAB_BAY_FLOW_PAINT_TRACE: "1"
+      - run: pnpm check:public-bundle
+      - run: pnpm test:live-demo
       - name: Preserve authoring evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: openfab-authoring-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/openfab-public-export-evidence
+          path: |
+            artifacts/static-fab-authoring/
+            artifacts/openfab-live-demo/
           if-no-files-found: warn
           retention-days: 7

@@ -145,6 +145,7 @@ import {
 	productionFabOrganizationKeys,
 } from "./ProductionFabRelationships";
 import { createTopologyOnlyRailDraftPreview, RailDraftEvaluator } from "./RailDraftEvaluator";
+import { spineCrossoverRailRoutes } from "./SpineCrossoverRailPreset";
 import {
 	resolveStaticFabGeneratorRelationships,
 	type StaticFabGeneratorRelationshipDescriptor,
@@ -168,6 +169,7 @@ import {
 export const SYNTHETIC_FAB_STARTER_VERSION = 7 as const;
 export const SYNTHETIC_FAB_STARTER_IDS = [
 	"blank",
+	"spine-crossover",
 	"bay-assembly",
 	"bay-bank",
 	"paired-circulation-fab-52",
@@ -231,8 +233,18 @@ export interface SyntheticFabStarterCatalogItem {
 
 export interface SyntheticFabStarterBuildStep {
 	readonly ordinal: number;
-	readonly kind: "template" | "paired-corridor" | "paired-turnback" | "network-link";
-	readonly templateId: RailTemplateId | "paired-corridor" | "paired-turnback" | "network-link";
+	readonly kind:
+		| "route-batch"
+		| "template"
+		| "paired-corridor"
+		| "paired-turnback"
+		| "network-link";
+	readonly templateId:
+		| "route-batch"
+		| RailTemplateId
+		| "paired-corridor"
+		| "paired-turnback"
+		| "network-link";
 	readonly hierarchyRole:
 		| "assembly"
 		| "process-loop"
@@ -680,6 +692,15 @@ const CATALOG: readonly SyntheticFabStarterCatalogItem[] = Object.freeze([
 		expectedTopology: "single-closed-scc",
 	}),
 	starterItem({
+		id: "spine-crossover",
+		label: "SPINE + CROSSOVER",
+		stage: "RAIL SKELETON",
+		title: "반대 방향 두 순환 루프를 일정 간격의 지름길로 연결합니다.",
+		defaultProjectName: "OpenFab Spine Crossover Rail Skeleton",
+		parameters: [],
+		expectedTopology: "single-closed-scc",
+	}),
+	starterItem({
 		id: "large-fab-60",
 		label: "LARGE FAB",
 		stage: "FAB PRESET 01",
@@ -696,6 +717,7 @@ const CATALOG_BY_ID = new Map(CATALOG.map((item) => [item.id, item]));
 export const SYNTHETIC_FAB_STARTER_CATALOG = Object.freeze(
 	CATALOG.filter(
 		(item) =>
+			item.id !== "spine-crossover" &&
 			item.id !== "large-fab-60" &&
 			item.id !== "paired-circulation-fab-52" &&
 			item.id !== "full-fab-52" &&
@@ -712,6 +734,7 @@ export const SYNTHETIC_FAB_PROJECT_CATALOG = Object.freeze(
 export const SYNTHETIC_FAB_PRESET_CATALOG = Object.freeze(
 	CATALOG.filter(
 		(item) =>
+			item.id === "spine-crossover" ||
 			item.id === "paired-circulation-fab-52" ||
 			item.id === "full-fab-52" ||
 			item.id === "parallel-hall-fab-12" ||
@@ -1009,7 +1032,39 @@ export function buildSyntheticFabStarter(
 	let relationshipDescriptor: StaticFabGeneratorRelationshipDescriptor | null = null;
 	let planFingerprint: string | null = null;
 
-	if (normalized.id === "bay-assembly") {
+	if (normalized.id === "spine-crossover") {
+		const plan = planRailRouteBatch(
+			document.map,
+			spineCrossoverRailRoutes(),
+			"free-closed-primary",
+		);
+		if (!plan.valid) throw new Error(`Crossover planning failed: ${plan.reason}`);
+		const evaluation = evaluator.evaluate(document.map, compilePhysicalRail(document.map), plan);
+		if (!evaluation.valid) throw new Error(`Crossover evaluation failed: ${evaluation.reason}`);
+		if (!document.commit(evaluation.plan))
+			throw new Error("Crossover batch could not be committed.");
+		steps.push(
+			Object.freeze({
+				ordinal: 1,
+				kind: "route-batch",
+				templateId: "route-batch",
+				hierarchyRole: "assembly",
+				entityId: null,
+				connectionId: null,
+				connectionRole: null,
+				bayCount: 0,
+				bayIds: Object.freeze([]),
+				label: "반대 방향 루프 2개 · 지름길 3쌍 · 공정용 우회 레일 6개",
+				anchor: Object.freeze({ x: 0, y: 0 }),
+				targetAnchor: null,
+				junctions: null,
+				pose: null,
+				addedEdges: plan.newEdges,
+				outboundTurns: null,
+				returnTurns: null,
+			}),
+		);
+	} else if (normalized.id === "bay-assembly") {
 		commitBayAssembly(
 			document,
 			evaluator,
@@ -2991,6 +3046,7 @@ function starterScale(
 ): Readonly<{ zoneCount: number; bayCount: number }> {
 	switch (request.id) {
 		case "blank":
+		case "spine-crossover":
 			return Object.freeze({ zoneCount: 0, bayCount: 0 });
 		case "bay-assembly":
 			return Object.freeze({ zoneCount: 1, bayCount: 1 });

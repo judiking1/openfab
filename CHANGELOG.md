@@ -6,6 +6,19 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.111] - 2026-10-11
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Describe preset rail structures and show certified default Bay counts, dimensions and rail
+  lengths before opening; identify the presets as rail skeletons with equipment added separately.
+- Add one fixed synthetic spine/crossover rail skeleton with three shortcut pairs and six
+  process bypasses, through ordinary exact geometry and Worker validation; no Bay ownership
+  or equipment is implied.
+- Preserve Canvas keyboard movement after pointer rotation of a Blueprint and retain button
+  focus for keyboard rotation.
+- Refresh test expectations for current relationship checksums and Worker transfer contracts.
+
 ## [0.1.110] - 2026-10-11
 
 Builder preview; V1 remains incomplete and simulation stays disabled.

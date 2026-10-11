@@ -1355,7 +1355,8 @@ function isPreparedSyntheticFabStarterPayload(prepared: PreparedSyntheticFabStar
 				isRecord(step) &&
 				step.ordinal === index + 1 &&
 				typeof step.label === "string" &&
-				(step.kind === "template" ||
+				(step.kind === "route-batch" ||
+					step.kind === "template" ||
 					step.kind === "paired-corridor" ||
 					step.kind === "paired-turnback" ||
 					step.kind === "network-link") &&

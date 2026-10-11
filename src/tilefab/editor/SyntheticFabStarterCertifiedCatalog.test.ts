@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+	buildSyntheticFabStarter,
 	defaultSyntheticFabStarterRequest,
 	type SyntheticFabStarterRequest,
 	setSyntheticFabStarterParameter,
 } from "../compile/SyntheticFabStarter";
+import generatedCentralSpineArtifactSource from "../generated/synthetic-fab-presets/central-spine-fab-24.default.v10.json?raw";
 import generatedFullFabArtifactSource from "../generated/synthetic-fab-presets/full-fab-52.default.v10.json?raw";
 import generatedArtifactSource from "../generated/synthetic-fab-presets/large-fab-60.default.v10.json?raw";
 import generatedPairedCirculationArtifactSource from "../generated/synthetic-fab-presets/paired-circulation-fab-52.default.v11.json?raw";
@@ -21,6 +23,7 @@ import {
 	preloadDefaultProductionFabCertifiedStarter,
 	SYNTHETIC_FAB_STARTER_CERTIFIED_CATALOG_METADATA,
 	SyntheticFabStarterCertifiedCatalog,
+	syntheticFabStarterCatalogSummaryForRequest,
 	syntheticFabStarterCertifiedCatalogMetadataForRequest,
 } from "./SyntheticFabStarterCertifiedCatalog";
 
@@ -37,6 +40,19 @@ describe("SyntheticFabStarterCertifiedCatalog", () => {
 	const generatedPairedCirculationArtifact = JSON.parse(
 		generatedPairedCirculationArtifactSource,
 	) as unknown;
+
+	it("describes the fixed crossover without implying a certified payload or Bay ownership", () => {
+		const request = defaultSyntheticFabStarterRequest("spine-crossover");
+		const build = buildSyntheticFabStarter(request);
+		expect(syntheticFabStarterCertifiedCatalogMetadataForRequest(request)).toBeNull();
+		expect(syntheticFabStarterCatalogSummaryForRequest(request)).toEqual({
+			bayCount: 0,
+			zoneCount: 0,
+			totalLengthMeters: build.summary.totalLengthMeters,
+			widthMeters: build.summary.bounds?.widthMeters,
+			heightMeters: build.summary.bounds?.heightMeters,
+		});
+	});
 
 	it("exposes static lightweight identities without loading or hydrating an artifact", () => {
 		let loads = 0;
@@ -57,6 +73,13 @@ describe("SyntheticFabStarterCertifiedCatalog", () => {
 			requestId: "paired-circulation-fab-52",
 			artifactId: "paired-circulation-fab-52.default.v11",
 			loading: "lazy-raw-import",
+			summary: {
+				bayCount: 52,
+				zoneCount: 4,
+				totalLengthMeters: 33893.318566173315,
+				widthMeters: 712,
+				heightMeters: 524,
+			},
 		});
 		expect(
 			syntheticFabStarterCertifiedCatalogMetadataForRequest(
@@ -65,6 +88,49 @@ describe("SyntheticFabStarterCertifiedCatalog", () => {
 		).toBeNull();
 		expect(loads).toBe(0);
 		expect(hydrations).toBe(0);
+	});
+
+	it("keeps the lightweight summaries equal to all six shipped certified defaults", () => {
+		for (const source of [
+			generatedArtifactSource,
+			generatedFullFabArtifactSource,
+			generatedProductionArtifactSource,
+			generatedParallelHallArtifactSource,
+			generatedPairedCirculationArtifactSource,
+			generatedCentralSpineArtifactSource,
+		]) {
+			const artifact: {
+				artifactId: string;
+				payload: {
+					request: SyntheticFabStarterRequest;
+					summary: {
+						bayCount: number;
+						zoneCount: number;
+						totalLengthMeters: number;
+						bounds: { widthMeters: number; heightMeters: number };
+					};
+				};
+			} = JSON.parse(source);
+			const entry = syntheticFabStarterCertifiedCatalogMetadataForRequest(artifact.payload.request);
+			const { bayCount, zoneCount, totalLengthMeters, bounds } = artifact.payload.summary;
+			expect(entry?.artifactId).toBe(artifact.artifactId);
+			expect(entry?.summary).toEqual({
+				bayCount,
+				zoneCount,
+				totalLengthMeters,
+				widthMeters: bounds.widthMeters,
+				heightMeters: bounds.heightMeters,
+			});
+		}
+	});
+
+	it("never presents a default summary as the result of changed settings", () => {
+		for (const entry of SYNTHETIC_FAB_STARTER_CERTIFIED_CATALOG_METADATA) {
+			const original = defaultSyntheticFabStarterRequest(entry.requestId);
+			const changed = setSyntheticFabStarterParameter(original, "bayCount", 36);
+			expect(changed).not.toEqual(original);
+			expect(syntheticFabStarterCertifiedCatalogMetadataForRequest(changed)).toBeNull();
+		}
 	});
 
 	it("does not load an artifact for non-fixed or custom requests", async () => {

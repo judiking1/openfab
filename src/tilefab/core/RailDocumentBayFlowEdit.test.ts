@@ -76,6 +76,7 @@ describe("RailDocument Bay flow edit", () => {
 				fixture.document.map,
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(fixture.prospectiveChecksum);
 
@@ -94,6 +95,7 @@ describe("RailDocument Bay flow edit", () => {
 				fixture.document.map,
 				fixture.document.portEquipment,
 				fixture.document.organizations,
+				fixture.document.relationships,
 			),
 		).toBe(fixture.sourceChecksum);
 
@@ -131,6 +133,7 @@ describe("RailDocument Bay flow edit", () => {
 			fixture.document.getPatchSequence(),
 			fixture.document.portEquipment,
 			fixture.document.organizations,
+			fixture.document.relationships,
 		);
 		resynchronizedMirror.sync(
 			resynchronizedCapture.snapshot,
@@ -212,6 +215,7 @@ function certifiedDocumentFixture(
 		result.prospectiveState.map,
 		result.prospectiveState.portEquipment,
 		result.prospectiveState.organizations,
+		document.relationships,
 	);
 	const permit = issueStaticFabBayFlowEditPermit(
 		document.map,

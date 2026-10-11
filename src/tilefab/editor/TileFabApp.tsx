@@ -34013,6 +34013,14 @@ export default function TileFabApp(): React.ReactElement {
 			canvasRef.current?.focus({ preventScroll: true });
 		});
 	};
+	const rotateBlueprintFromButton = (
+		event: ReactMouseEvent<HTMLButtonElement>,
+		quarterTurns: -1 | 1,
+	): void => {
+		rotateConstruction(quarterTurns);
+		// Return pointer focus now, so a later Tab or exit cannot be overwritten by a queued frame.
+		if (event.detail > 0) canvasRef.current?.focus({ preventScroll: true });
+	};
 	const minimizeGuidedBuild = (): void => {
 		guidedBuildWasOpenRef.current = false;
 		setGuidedBuildReviewing(false);
@@ -35159,7 +35167,7 @@ export default function TileFabApp(): React.ReactElement {
 		setFabPresetIntent(intent);
 		setFabPresetDialogOpen(true);
 	};
-	const presetFabAction = authoringAction("fab-presets", "완성된 FAB에서 시작", "검증된 프리셋으로 새 프로젝트를 만듭니다 · 현재 문서는 전환 전에 보호됩니다",
+	const presetFabAction = authoringAction("fab-presets", "FAB 레일 골격에서 시작", "검증된 레일 골격으로 새 프로젝트를 만듭니다 · 장비는 직접 추가합니다",
 		(trigger) => openAuthoringFabPreset("project", trigger));
 	const addFabPresetAction = authoringAction("add-fab-preset", "FAB 프리셋 추가", "현재 프로젝트를 유지하고 검증된 FAB를 1회 배치합니다",
 		(trigger) => openAuthoringFabPreset("placement", trigger));
@@ -40290,7 +40298,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 										type="button"
 										className="tilefab-organization-rotate"
 										aria-label="조직 청사진 반시계 방향 회전"
-										onClick={() => rotateConstruction(-1)}
+										onClick={(event) => rotateBlueprintFromButton(event, -1)}
 									>
 										<RotateCcw size={14} />
 									</button>
@@ -40299,7 +40307,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 										type="button"
 										className="tilefab-organization-rotate"
 										aria-label="조직 청사진 시계 방향 회전"
-										onClick={() => rotateConstruction(1)}
+										onClick={(event) => rotateBlueprintFromButton(event, 1)}
 									>
 										<RotateCw size={14} />
 									</button>
@@ -40399,7 +40407,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 									<button
 										type="button"
 										data-testid="area-stamp-rotate-counterclockwise"
-										onClick={() => rotateConstruction(-1)}
+										onClick={(event) => rotateBlueprintFromButton(event, -1)}
 										title="선택 영역 고스트를 반시계 방향으로 90도 회전"
 									>
 										<RotateCcw size={14} />
@@ -40408,7 +40416,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 									<button
 										type="button"
 										data-testid="area-stamp-rotate-clockwise"
-										onClick={() => rotateConstruction(1)}
+										onClick={(event) => rotateBlueprintFromButton(event, 1)}
 										title="선택 영역 고스트를 시계 방향으로 90도 회전"
 									>
 										<RotateCw size={14} />
@@ -40471,7 +40479,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 									<button
 										type="button"
 										data-testid="stamp-rotate-counterclockwise"
-										onClick={() => rotateConstruction(-1)}
+										onClick={(event) => rotateBlueprintFromButton(event, -1)}
 										title="복제 고스트를 반시계 방향으로 90도 회전"
 									>
 										<RotateCcw size={14} />
@@ -40480,7 +40488,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 									<button
 										type="button"
 										data-testid="stamp-rotate-clockwise"
-										onClick={() => rotateConstruction(1)}
+										onClick={(event) => rotateBlueprintFromButton(event, 1)}
 										title="복제 고스트를 시계 방향으로 90도 회전"
 									>
 										<RotateCw size={14} />
