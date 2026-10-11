@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.113] - 2026-10-11
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Return to the requested OHB, EQ or Stocker placement after prerequisite rail construction;
+  explain insufficient rail and clear the temporary intent on cancellation, tool changes or
+  project replacement without placing equipment automatically.
+- Verify the 760 px FAB-making and equipment-editing journey through Checks, and isolated
+  automatic recovery followed by EQ/OHB/STK editing. Native file Save/Open remains unverified:
+  the QA save-picker attempt returned cancellation and was stopped without a workaround.
+
 ## [0.1.112] - 2026-10-11
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
