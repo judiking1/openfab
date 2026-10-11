@@ -51,6 +51,7 @@ const CATEGORIES = [
 	{ id: "equipment", label: "장비", icon: Warehouse },
 	{ id: "blueprints", label: "청사진", icon: LibraryBig },
 ] as const;
+const COMPACT_CATEGORIES = [CATEGORIES[1], CATEGORIES[2], CATEGORIES[0], CATEGORIES[3]];
 
 /** Browsing is presentation only; the caller owns command admission and active tasks. */
 export function AuthoringSidebar({
@@ -67,6 +68,7 @@ export function AuthoringSidebar({
 	const bodyId = `${instanceId}-body`;
 	const contentId = `${instanceId}-content`;
 	const utilityTitleId = `${instanceId}-utility-title`;
+	const compactStrip = compact && !expanded;
 	const currentLabel = CATEGORIES.find(({ id }) => id === browseCategory)?.label ?? "제작 홈";
 
 	return (
@@ -77,9 +79,10 @@ export function AuthoringSidebar({
 			data-browse-category={browseCategory ?? "home"}
 			data-compact={compact}
 			data-expanded={expanded}
-			aria-labelledby={titleId}
+			aria-labelledby={compactStrip ? undefined : titleId}
+			aria-label={compactStrip ? "제작 도구" : undefined}
 		>
-			<header className="tilefab-authoring-sidebar-heading">
+			<header className="tilefab-authoring-sidebar-heading" hidden={compactStrip}>
 				<div className="tilefab-authoring-sidebar-heading-copy">
 					<h2 id={titleId}>만들기</h2>
 					<p className="tilefab-authoring-sidebar-current">{currentLabel}</p>
@@ -91,7 +94,16 @@ export function AuthoringSidebar({
 					aria-label={expanded ? "제작 도구 접기" : "제작 도구 펼치기"}
 					aria-expanded={expanded}
 					aria-controls={bodyId}
-					onClick={() => onExpandedChange(!expanded)}
+					onClick={(event) => {
+						const category = event.currentTarget
+							.closest("aside")
+							?.querySelector<HTMLButtonElement>(
+								`[data-authoring-category="${browseCategory ?? "rail"}"]`,
+							);
+						onExpandedChange(!expanded);
+						if (compact && expanded)
+							requestAnimationFrame(() => category?.focus({ preventScroll: true }));
+					}}
 				>
 					{expanded ? (
 						<ChevronLeft size={18} aria-hidden="true" />
@@ -101,17 +113,17 @@ export function AuthoringSidebar({
 					<span>{expanded ? "접기" : "제작 도구"}</span>
 				</button>
 			</header>
-			<div
-				id={bodyId}
-				className="tilefab-authoring-sidebar-body"
-				hidden={!expanded}
-				inert={!expanded}
-			>
-				<nav className="tilefab-authoring-sidebar-categories" aria-label="제작 카테고리">
+			<div className="tilefab-authoring-sidebar-scroll">
+				<nav
+					className="tilefab-authoring-sidebar-categories"
+					aria-label="제작 카테고리"
+					data-compact-strip={compactStrip}
+				>
 					<button
 						type="button"
 						className="tilefab-authoring-sidebar-category tilefab-authoring-sidebar-home"
 						data-authoring-category="home"
+						hidden={compactStrip}
 						data-active={browseCategory === null}
 						aria-current={browseCategory === null ? "true" : undefined}
 						aria-expanded={browseCategory === null && expanded}
@@ -125,12 +137,13 @@ export function AuthoringSidebar({
 						)}
 						<span>{browseCategory === null ? "제작 홈" : "제작 홈으로"}</span>
 					</button>
-					{CATEGORIES.map(({ id, label, icon: Icon }) => (
+					{(compactStrip ? COMPACT_CATEGORIES : CATEGORIES).map(({ id, label, icon: Icon }) => (
 						<button
 							key={id}
 							type="button"
 							className="tilefab-authoring-sidebar-category"
 							data-authoring-category={id}
+							aria-label={label}
 							data-active={browseCategory === id}
 							aria-current={browseCategory === id ? "true" : undefined}
 							aria-expanded={browseCategory === id && expanded}
@@ -138,30 +151,40 @@ export function AuthoringSidebar({
 							onClick={(event) => onBrowseCategory(id, event.currentTarget)}
 						>
 							<Icon size={20} aria-hidden="true" />
-							<span>{label}</span>
+							<span>{compactStrip && id === "fab" ? "FAB" : label}</span>
 						</button>
 					))}
 				</nav>
-				<div id={contentId} className="tilefab-authoring-sidebar-content">
-					{sections.map((section) => (
-						<AuthoringSectionView key={section.id} section={section} />
-					))}
+				<div
+					id={bodyId}
+					className="tilefab-authoring-sidebar-body"
+					hidden={!expanded}
+					inert={!expanded}
+				>
+					<div id={contentId} className="tilefab-authoring-sidebar-content">
+						{sections.map((section) => (
+							<AuthoringSectionView key={section.id} section={section} />
+						))}
+					</div>
+					{utilityActions.length > 0 ? (
+						<section
+							className="tilefab-authoring-sidebar-utilities"
+							aria-labelledby={utilityTitleId}
+						>
+							<h3 id={utilityTitleId}>
+								<Search size={16} aria-hidden="true" />
+								<span>선택·검사</span>
+							</h3>
+							<ul className="tilefab-authoring-sidebar-actions">
+								{utilityActions.map((action) => (
+									<li key={action.id}>
+										<AuthoringActionButton action={action} />
+									</li>
+								))}
+							</ul>
+						</section>
+					) : null}
 				</div>
-				{utilityActions.length > 0 ? (
-					<section className="tilefab-authoring-sidebar-utilities" aria-labelledby={utilityTitleId}>
-						<h3 id={utilityTitleId}>
-							<Search size={16} aria-hidden="true" />
-							<span>선택·검사</span>
-						</h3>
-						<ul className="tilefab-authoring-sidebar-actions">
-							{utilityActions.map((action) => (
-								<li key={action.id}>
-									<AuthoringActionButton action={action} />
-								</li>
-							))}
-						</ul>
-					</section>
-				) : null}
 			</div>
 		</aside>
 	);

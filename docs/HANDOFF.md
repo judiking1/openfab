@@ -18,6 +18,7 @@
 - 0.1.111 adds rail-structure descriptions, certified default metrics and one fixed crossover rail skeleton (808 cells; no Bay organizations or equipment).
 - Candidate verification: ordinary build and source Biome/ESLint PASS; full unit suite 460 files / 5,835 tests PASS, 2 existing tests skipped, no failures.
 - AISLE implementation: 36 focused tests, TypeScript, ordinary build, public safety and independent core review PASS. Earlier candidate Chrome 1440/390 Apply/Undo/Redo/cancel/Escape PASS; switch-fixture 1440 and final compact-action/draft-preservation 390 checks PASS. Full unit/authoring/scale/native-OS suites not run for this change.
+- Compact UI candidate: ordinary build, Biome/ESLint, public safety, and Chrome 390/1440 tool-draft preservation and Bay settings/cancel/Apply/Undo/Redo PASS. Bay fields/actions fit without horizontal scrolling; collapsed targets remain 44 px. At 844x390, categories scroll with tools and keyboard-focused rail/FAB actions are fully visible. Full suites not run.
 
 ## Development commands
 
@@ -46,7 +47,7 @@ in this repository. Routine development does not export or reinstall a second so
 
 ## Next work and completion conditions
 
-1. Review compact tool discovery as the next small V1 task; preserve the verified
+1. Review the combined tool-discovery and Bay panel-fit candidate before committing; preserve the verified
    production build. Preserve unfinished work and saved user data outside public commits.
 2. Record the candidate's actual checks and any omissions here. Do not carry private execution
    logs or claim unrun suites passed.

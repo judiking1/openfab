@@ -70,12 +70,15 @@
 	outline: 2px solid #a4efda;
 	outline-offset: 2px;
 }
+.tilefab-authoring-sidebar-scroll {
+	display: contents;
+}
 .tilefab-authoring-sidebar-body {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
 	overflow: hidden;
-	padding: 10px;
+	padding: 0 10px 10px;
 }
 .tilefab-authoring-sidebar-content {
 	min-height: 0;
@@ -84,6 +87,7 @@
 }
 .tilefab-authoring-sidebar-categories {
 	flex-shrink: 0;
+	padding: 10px 10px 0;
 }
 .tilefab-authoring-sidebar-categories {
 	display: grid;
@@ -636,6 +640,18 @@
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
 }
+/* Organization placement keeps legacy row flex bases from wrapping into sideways columns. */
+.tilefab-app[data-authoring-layout="unified"] .tilefab-active-authoring-workspace
+	.tilefab-buildbar:where([data-organization-bundle]:not([data-organization-bundle=""])) {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-buildbar:where([data-organization-bundle]:not([data-organization-bundle=""]))
+	> * {
+	min-width: 0;
+}
 /* Copy controls stay in one column even when the mobile handoff has a row flex basis. */
 .tilefab-app[data-authoring-layout="unified"] .tilefab-active-authoring-workspace
 	.tilefab-buildbar:has(> .tilefab-area-stamp-auto-pose) {
@@ -744,20 +760,31 @@
 }
 @media (max-width: 1000px) {
 	.tilefab-authoring-navigation {
-		top: 10px;
+		top: 66px;
 		left: 10px;
 		bottom: 78px;
 		width: min(340px, calc(100% - 20px));
 	}
-	.tilefab-authoring-navigation:has([data-expanded="true"]) {
-		top: 66px;
-	}
 	.tilefab-authoring-sidebar[data-expanded="false"] {
-		width: max-content;
-		max-width: 180px;
+		width: 100%;
 	}
-	.tilefab-authoring-sidebar[data-expanded="false"] .tilefab-authoring-sidebar-heading-copy {
-		display: none;
+	.tilefab-authoring-sidebar-categories[data-compact-strip="true"] {
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 4px;
+		padding: 4px;
+	}
+	.tilefab-authoring-sidebar-categories[data-compact-strip="true"] button {
+		min-width: 44px;
+		height: 44px;
+		justify-content: center;
+		gap: 4px;
+		padding: 4px;
+		font-size: 12px;
+		white-space: nowrap;
+	}
+	.tilefab-authoring-sidebar-categories[data-compact-strip="true"] svg {
+		width: 18px;
+		flex-shrink: 0;
 	}
 	.tilefab-active-workspace-host {
 		top: auto;
@@ -791,9 +818,14 @@
 	.tilefab-authoring-sidebar-heading {
 		flex-shrink: 0;
 	}
-	.tilefab-authoring-sidebar-body {
+	.tilefab-authoring-sidebar[data-expanded="true"] .tilefab-authoring-sidebar-scroll {
+		display: block;
+		min-height: 0;
 		overflow-y: auto;
 		overscroll-behavior: contain;
+	}
+	.tilefab-authoring-sidebar-body {
+		overflow: visible;
 	}
 	.tilefab-authoring-sidebar-content {
 		flex-shrink: 0;
@@ -829,4 +861,8 @@
 .tilefab-active-authoring-workspace .tilefab-production-bay-controls input {
 	min-width: 64px;
 	box-sizing: border-box;
+}
+.tilefab-active-authoring-workspace .tilefab-production-bay-validation :is(strong, small) {
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
