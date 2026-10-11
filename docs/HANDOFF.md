@@ -19,6 +19,8 @@
 - Release verification: full unit suite 463 files / 5,858 tests PASS, 2 existing tests skipped; no functional or timeout failures. Ordinary production build and public release checks PASS.
 - AISLE implementation: 36 focused tests, TypeScript, ordinary build, public safety and independent core review PASS. Earlier candidate Chrome 1440/390 Apply/Undo/Redo/cancel/Escape PASS; switch-fixture 1440 and final compact-action/draft-preservation 390 checks PASS. Full authoring/scale/native-OS suites not run for this change.
 - Compact UI candidate: ordinary build, Biome/ESLint, public safety, and Chrome 390/1440 tool-draft preservation and Bay settings/cancel/Apply/Undo/Redo PASS. Bay fields/actions fit without horizontal scrolling; collapsed targets remain 44 px. At 844x390, categories scroll with tools and keyboard-focused rail/FAB actions are fully visible. Independent code review PASS; independent GUI not run because browser launch was blocked.
+- Local equipment rail-return candidate: OHB/EQ/STK prerequisite navigation retains only the current document and requested tool. Missing rail offers construction with a short reason; prepared rail returns to that tool. Explicit tool changes, preparation cancellation, and document replacement clear the intent. No equipment is placed automatically.
+- Candidate verification: 5 focused files / 57 tests, ordinary production build, ESLint, Biome (one existing warning), diff check, and public tracked-source audit PASS. Chrome 390/1440 return/cancel/Esc/tool-change, insufficient rail, cancellation followed by Undo/Redo, and new-document checks PASS; primary targets remain 44 px with no horizontal overflow. Independent code review found no blocker. Full unit/authoring suites not run; candidate is not published.
 
 ## Development commands
 
@@ -47,8 +49,8 @@ in this repository. Routine development does not export or reinstall a second so
 
 ## Next work and completion conditions
 
-1. Complete the approved 0.1.112 publication and verify the deployed version and edit/Undo; preserve the verified
-   production build. Preserve unfinished work and saved user data outside public commits.
+1. Keep the reviewed equipment rail-return change local for the next feature bundle. The published
+   version remains 0.1.112; preserve unfinished work and saved user data outside public commits.
 2. Record the candidate's actual checks and any omissions here. Do not carry private execution
    logs or claim unrun suites passed.
 3. Publish only a reviewed release bundle using the existing Pages path. Verify the deployed

@@ -866,3 +866,19 @@
 	white-space: normal;
 	overflow-wrap: anywhere;
 }
+
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-action-hints[data-context="equipment-rail-return-handoff"] {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+}
+.tilefab-action-hints[data-context="equipment-rail-return-handoff"] .tilefab-action-hint {
+	min-width: 0;
+	min-height: 44px;
+	white-space: normal;
+}
+.tilefab-action-hints[data-context="equipment-rail-return-handoff"]
+	.tilefab-next-port-handoff-copy {
+	min-width: 0;
+}

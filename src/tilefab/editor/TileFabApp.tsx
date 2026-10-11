@@ -717,6 +717,7 @@ import {
 	ORDINARY_EQ_HANDOFF_ENTRY_STATUS,
 	ordinaryNextPortHandoff,
 } from "./OrdinaryNextPortHandoff";
+import { type EquipmentRailPreparation, equipmentRailPreparationHandoff } from "./EquipmentRailPreparation";
 import { ordinaryCompletedModuleHandoff } from "./OrdinaryCompletedModuleHandoff";
 import { ordinaryConnectedCopyTwinBayHandoff } from "./OrdinaryConnectedCopyTwinBayHandoff";
 import {
@@ -2834,6 +2835,7 @@ export default function TileFabApp(): React.ReactElement {
 	const reshapeRef = useRef<ReshapeIntent | null>(null);
 	const reshapeApplyButtonRef = useRef<HTMLButtonElement>(null);
 	const editorActivityRef = useRef<EditorActivity>("build");
+	const [equipmentRailPreparation, setEquipmentRailPreparation] = useState<EquipmentRailPreparation | null>(null);
 	const lastEquipmentToolRef = useRef<Extract<EditorTool, "ohb" | "eq" | "stk">>("ohb");
 	const toolRef = useRef<EditorTool>("build");
 	const bendRef = useRef<BendPreference>("auto");
@@ -10008,6 +10010,7 @@ export default function TileFabApp(): React.ReactElement {
 			| "preserve-port" = "clear",
 	): void => {
 		if (blockStaticFabExclusiveCommand()) return;
+		if (next !== "build" && next !== "erase") setEquipmentRailPreparation(null);
 		setAuthoringToolActivated(true);
 		setAuthoringSurface("task");
 		setBlueprintSelectionEntry(null);
@@ -13469,6 +13472,10 @@ export default function TileFabApp(): React.ReactElement {
 					(toolRef.current === "ohb" || toolRef.current === "eq" || toolRef.current === "stk")
 				) {
 					exitOrdinaryPortAuthoring();
+					return;
+				}
+				if (equipmentRailPreparation?.document === railDocument) {
+					cancelEquipmentRailPreparation();
 					return;
 				}
 				clearTransientConstruction("건설을 취소했습니다");
@@ -20648,6 +20655,7 @@ export default function TileFabApp(): React.ReactElement {
 		needsSave: boolean,
 		sourceOperation: Exclude<ProjectOperation, "idle" | "saving">,
 	): void => {
+		setEquipmentRailPreparation(null);
 		const nextModel = nextSnapshot.model;
 		// A prepared replacement owns a new document/Worker generation. Invalidate any derived-model
 		// activation for the outgoing document before publishing the replacement so an aborted stale
@@ -32221,17 +32229,40 @@ export default function TileFabApp(): React.ReactElement {
 		nextPortHandoff?.surface === "ohb-authoring" ? nextPortHandoff : null;
 	const ordinaryEqRailReturnHandoff =
 		nextPortHandoff?.surface === "build-return" ? nextPortHandoff : null;
-	const ordinaryBuildSurfaceHandoff = firstPortHandoff ?? ordinaryEqRailReturnHandoff;
-	const ordinaryBuildSurfaceHandoffKind = firstPortHandoff
-		? "first-port-handoff"
-		: ordinaryEqRailReturnHandoff
-			? "eq-rail-return-handoff"
-			: null;
-	const ordinaryBuildSurfaceHandoffDescriptionId = firstPortHandoff
-		? "tilefab-first-port-handoff-description"
-		: ordinaryEqRailReturnHandoff
-			? "tilefab-eq-rail-return-handoff-description"
-			: undefined;
+	const equipmentRailPreparationActive = equipmentRailPreparation?.document === railDocument &&
+		!guidedBuildExperienceActive;
+	const equipmentRailPlacementReady = useMemo(() => {
+		if (!equipmentRailPreparationActive || !equipmentRailPreparation || !ordinaryNextPortHandoffBase.readyForMutation) return false;
+		const type = equipmentRailPreparation.tool.toUpperCase() as GuidedPortKeyboardType;
+		const artifacts = editorModel.portSlotArtifacts[type];
+		if (artifacts.slots.legalCount === 0) return false;
+		const availability = createPreparedPortSlotAvailabilityIndex(
+			physical, artifacts, activePortEquipment, activePortEquipmentPresentation.resolvedPositions,
+		);
+		if (type === "EQ") return hasAvailableEqRowDraftSpan(
+			artifacts.slots, artifacts.spatialIndex, availability, eqPitchMillimeters,
+		);
+		for (let row = 0; row < artifacts.slots.count; row++) {
+			if (availability.statusFor(artifacts.slots, row).status === PORT_SLOT_STATUS.LEGAL) return true;
+		}
+		return false;
+	}, [equipmentRailPreparationActive, equipmentRailPreparation, ordinaryNextPortHandoffBase.readyForMutation,
+		editorModel, physical, activePortEquipment, activePortEquipmentPresentation, eqPitchMillimeters]);
+	const equipmentRailReturnHandoff = equipmentRailPreparationActive &&
+		ordinaryNextPortHandoffBase.surface === "build-return" &&
+		!ordinaryNextPortHandoffBase.railKeyboardActive && !ordinaryNextPortHandoffBase.portKeyboardActive &&
+		!ordinaryNextPortHandoffBase.transientConstructionActive && !ordinaryNextPortHandoffBase.exclusiveCommandActive &&
+		ordinaryNextPortHandoffBase.readyForMutation
+		? equipmentRailPreparationHandoff(equipmentRailPreparation, railDocument, equipmentRailPlacementReady, eqPitchMillimeters)
+		: null;
+	// A requested equipment detour owns the return, including its still-unready explanation.
+	const ordinaryBuildSurfaceHandoff = equipmentRailPreparationActive
+		? equipmentRailReturnHandoff : firstPortHandoff ?? ordinaryEqRailReturnHandoff;
+	const ordinaryBuildSurfaceHandoffKind = equipmentRailPreparationActive
+		? equipmentRailReturnHandoff ? "equipment-rail-return-handoff" : null
+		: firstPortHandoff ? "first-port-handoff" : ordinaryEqRailReturnHandoff ? "eq-rail-return-handoff" : null;
+	const ordinaryBuildSurfaceHandoffDescriptionId = ordinaryBuildSurfaceHandoffKind
+		? `tilefab-${ordinaryBuildSurfaceHandoffKind}-description` : undefined;
 	const ordinaryPortInstructionOwner =
 		!guidedBuildExperienceActive &&
 		editorActivity === "equip" &&
@@ -33497,6 +33528,20 @@ export default function TileFabApp(): React.ReactElement {
 			startOrdinaryPortKeyboard(next.toUpperCase() as GuidedPortKeyboardType);
 		}
 		return true;
+	};
+	const beginEquipmentRailPreparation = (): void => {
+		const next = toolRef.current;
+		if (guidedBuildExperienceActive || (next !== "ohb" && next !== "eq" && next !== "stk")) return;
+		if (!chooseExplicitEditorTool("build")) return;
+		chooseBuildMode("route");
+		setEquipmentRailPreparation({ document: editorModelRef.current.document, tool: next });
+		setStatus(`${next === "stk" ? "Stocker" : next.toUpperCase()}용 직선 레일을 만드세요 · 준비 후 장비 배치로 돌아갑니다`);
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+	};
+	const cancelEquipmentRailPreparation = (): void => {
+		setEquipmentRailPreparation(null);
+		setStatus("장비용 레일 준비를 취소했습니다 · 확정한 레일은 유지됩니다");
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const resumeOrdinaryPortKeyboard = (): void => {
 		const portType = portTypeForTool(toolRef.current);
@@ -35515,7 +35560,7 @@ export default function TileFabApp(): React.ReactElement {
 	const authoringSidebarExpanded = !compactAuthoringViewport || authoringSurface === "catalog";
 	const authoringWorkspaceExpanded = authoringSurface === "task";
 	const portWorkspaceProps: PortEquipmentPlacementWorkspaceProps | null = equipmentWorkspaceActive && activePortAuthoringType && activePortAuthoringPresentation ? {applyGuidedPortKeyboard: applyGuidedPortKeyboard,
-activeMap: activeMap,
+beginEquipmentRailPreparation: beginEquipmentRailPreparation,
 activePortAuthoringInstruction: activePortAuthoringInstruction,
 activePortAuthoringPresentation: activePortAuthoringPresentation,
 activePortAuthoringType: activePortAuthoringType,
@@ -39547,17 +39592,13 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 				!ordinaryStaticFabIssueRecheck ? (
 					<fieldset
 						className="tilefab-action-hints"
-						data-testid={
-							ordinaryBuildSurfaceHandoffKind === "first-port-handoff"
-								? "ordinary-first-port-handoff-owner"
-								: "ordinary-eq-rail-return-handoff-owner"
-						}
+						data-testid={`ordinary-${ordinaryBuildSurfaceHandoffKind}-owner`}
 						data-context={ordinaryBuildSurfaceHandoffKind}
 						data-presentation="ordinary-next"
 						data-obstruction={`${ordinaryBuildSurfaceHandoffKind}:raised`}
 						data-raised="true"
 						aria-label={
-							ordinaryBuildSurfaceHandoffKind === "first-port-handoff"
+							equipmentRailReturnHandoff ? "장비용 레일 준비" : ordinaryBuildSurfaceHandoffKind === "first-port-handoff"
 								? "첫 레일 다음 작업"
 								: "EQ용 레일 다음 작업"
 						}
@@ -39565,12 +39606,10 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 						<button
 							type="button"
 							className="tilefab-action-hint"
-							data-testid={
-								ordinaryBuildSurfaceHandoffKind === "first-port-handoff"
-									? "ordinary-first-port-handoff"
-									: "ordinary-eq-rail-return-handoff"
-							}
-							data-handoff-action={
+							data-testid={`ordinary-${ordinaryBuildSurfaceHandoffKind}`}
+							data-handoff-action={equipmentRailReturnHandoff
+								? equipmentRailReturnHandoff.railReady ? `return-${equipmentRailReturnHandoff.tool}` : "prepare-rail"
+								:
 								ordinaryBuildSurfaceHandoffKind === "eq-rail-return-handoff"
 									? "start-eq"
 									: undefined
@@ -39585,8 +39624,11 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 							data-primary="true"
 							aria-label={ordinaryBuildSurfaceHandoff.ariaLabel}
 							aria-describedby={ordinaryBuildSurfaceHandoffDescriptionId}
-							onClick={() => {
-								if (ordinaryBuildSurfaceHandoffKind === "first-port-handoff") {
+							onClick={(event) => {
+								if (equipmentRailReturnHandoff) {
+									if (equipmentRailReturnHandoff.railReady) chooseGuidedEquipmentTool(equipmentRailReturnHandoff.tool);
+									else startOrdinaryRailKeyboard(event.currentTarget);
+								} else if (ordinaryBuildSurfaceHandoffKind === "first-port-handoff") {
 									if (chooseGuidedEquipmentTool("ohb")) {
 										setStatus(ORDINARY_FIRST_OHB_ENTRY_STATUS);
 									}
@@ -39612,6 +39654,11 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 							</span>
 							<ChevronRight size={15} aria-hidden="true" />
 						</button>
+						{equipmentRailReturnHandoff ? (
+							<button type="button" className="tilefab-action-hint"
+								data-testid="equipment-rail-preparation-cancel"
+								onClick={cancelEquipmentRailPreparation}>준비 취소</button>
+						) : null}
 					</fieldset>
 				) : null}
 {!staticFabMutationHistory &&

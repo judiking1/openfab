@@ -29,7 +29,7 @@ import { stkTemplatePresentation } from "./StkDraftPresentation";
 export interface PortEquipmentPlacementWorkspaceProps {
 	readonly externalActions?: boolean;
 	readonly applyGuidedPortKeyboard: () => void;
-	readonly activeMap: Readonly<{ size: number }>;
+	readonly beginEquipmentRailPreparation: () => void;
 	readonly activePortAuthoringInstruction: string;
 	readonly activePortAuthoringPresentation: PortAuthoringSurfacePresentation;
 	readonly activePortAuthoringType: PortType;
@@ -118,7 +118,7 @@ export interface PortEquipmentPlacementWorkspaceProps {
 export function PortEquipmentPlacementWorkspace({
 	externalActions = false,
 	applyGuidedPortKeyboard,
-	activeMap,
+	beginEquipmentRailPreparation,
 	activePortAuthoringInstruction,
 	activePortAuthoringPresentation,
 	activePortAuthoringType,
@@ -483,15 +483,7 @@ export function PortEquipmentPlacementWorkspace({
 								data-testid="ordinary-port-build-prerequisite"
 								aria-label={activePortAuthoringPresentation.prerequisiteAction.ariaLabel}
 								aria-describedby="tilefab-port-authoring-instruction"
-								onClick={() => {
-									if (!chooseExplicitEditorTool("build")) return;
-									setStatus(
-										activeMap.size === 0
-											? "빈 FAB · 드래그 또는 Enter로 첫 직선 레일을 만드세요"
-											: "레일 · 직선 레일을 늘리거나 새로 만드세요",
-									);
-									requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
-								}}
+								onClick={beginEquipmentRailPreparation}
 							>
 								<Route size={14} aria-hidden="true" />
 								<strong>{activePortAuthoringPresentation.prerequisiteAction.label}</strong>
