@@ -51,6 +51,11 @@
   390×844, 390×600 and 844×390 checks PASS for inventory open/close/scroll, full 44 px authoring
   actions, no horizontal overflow, and actual rail Apply/Undo/Redo with the inventory open.
   No new acceptance script was added; full authoring/scale/native-OS suites were not run.
+- Final Close/recovery candidate verification (`56a69fb` app source): one full `pnpm test` run,
+  464 files / 5,985 tests PASS and 2 existing tests skipped; no failures. Ordinary production build,
+  public release checks and independent source review PASS. Only this verification record changed
+  after the full run; tests/build were not repeated. Independent Close GUI review remains pending;
+  the candidate, version and publication state are unchanged.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.
