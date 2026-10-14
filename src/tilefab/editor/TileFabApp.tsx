@@ -36577,6 +36577,168 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 				aria-hidden={openFabStartDialogOpen || commandHelpOpen ? true : undefined}
 				inert={openFabStartDialogOpen || commandHelpOpen ? true : undefined}
 			>
+				{recoveryProject && !openFabStartDialogOpen ? (
+					<section
+						className="tilefab-recovery"
+						aria-label={`${recoveryProject.name} 별도 복구본`}
+						data-exclusive-command-scope="project"
+						data-replaces-current-project={recoveryReplacesCurrentProject}
+						data-recovery-project-id={recoveryProject.projectId}
+						data-recovery-count={recoveryInventory.totalCount}
+						data-inventory-open={recoveryInventoryOpen}
+						data-cleanup-available={
+							recoveryInventory.totalCount >
+							OPENFAB_RECOVERY_CLEANUP_DEFAULT_RETAINED_PROJECTS
+						}
+						data-guided-build={guidedBuildExperienceActive}
+					>
+						<FolderClock size={16} />
+						<span>
+							<strong>
+								{guidedBuildExperienceActive
+									? `로컬 복구본 ${recoveryInventory.totalCount.toLocaleString()}개 · 가이드 종료 후 관리`
+									: `${recoveryProject.name} · 별도 복구본${
+											recoveryInventory.totalCount > 1
+												? ` 외 ${recoveryInventory.totalCount - 1}개`
+												: ""
+										}`}
+							</strong>
+							<small>{guidedBuildExperienceActive ? "가이드 종료 후 복구·정리 가능" : recoveryOfferDetail}</small>
+						</span>
+						{!guidedBuildExperienceActive ? <div className="tilefab-recovery-actions">
+							<button
+								ref={recoveryRestoreButtonRef}
+								type="button"
+								disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
+								onClick={() =>
+									requestProjectAction({ kind: "recover", project: recoveryProject })
+								}
+							>
+								현재 프로젝트를 교체해 복구
+							</button>
+							<button
+								ref={recoveryDiscardButtonRef}
+								type="button"
+								className="tilefab-recovery-delete"
+								disabled={projectBusy}
+								onClick={(event) =>
+									openRecoveryDiscardConfirmation(recoveryProject, event.currentTarget)
+								}
+							>
+								복구본 삭제
+							</button>
+							{recoveryInventoryOpen || recoveryInventory.totalCount > 1 ? (
+								<button
+									type="button"
+									className="tilefab-recovery-list-trigger"
+									aria-expanded={recoveryInventoryOpen}
+									aria-controls="tilefab-recovery-inventory"
+									onClick={() => {
+										setRecoveryInventoryOpen((open) => !open);
+										if (recoveryInventoryOpen && recoveryInventory.totalCount <= 1) {
+											requestAnimationFrame(() => recoveryRestoreButtonRef.current?.focus({ preventScroll: true }));
+										}
+									}}
+								>
+									{recoveryInventoryOpen
+										? "목록 닫기"
+										: `목록 ${recoveryInventory.totalCount}개`}
+								</button>
+							) : null}
+						</div> : null}
+						{recoveryInventoryOpen && !guidedBuildExperienceActive ? (
+							<section
+								id="tilefab-recovery-inventory"
+								className="tilefab-recovery-inventory"
+								aria-label="로컬 복구본 목록"
+							>
+								<header>
+									<span>
+										<strong>로컬 복구본</strong>
+										<small>{recoveryInventoryPageLabel} · 최신순</small>
+									</span>
+									{recoveryInventory.totalCount >
+									OPENFAB_RECOVERY_CLEANUP_DEFAULT_RETAINED_PROJECTS ? (
+										<button
+											type="button"
+											className="tilefab-recovery-cleanup-trigger"
+											disabled={projectBusy || recoveryCleanupBusy}
+											onClick={(event) =>
+												void openRecoveryCleanupConfirmation(event.currentTarget)
+											}
+										>
+											<Trash2 size={12} /> 오래된 복구본 정리
+										</button>
+									) : null}
+								</header>
+								<ul>
+									{recoveryInventory.records.map((project, index) => (
+										<li key={project.projectId}>
+											<span className="tilefab-recovery-item-copy">
+												<strong>
+													{project.name}
+													{index === 0 ? " · 최신" : ""}
+												</strong>
+												<small>{formatRecoveryProjectTimestamp(project.updatedAt)}</small>
+											</span>
+											<div className="tilefab-recovery-item-actions">
+											<button
+												type="button"
+												className="tilefab-recovery-delete"
+												disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
+													aria-label={`${project.name} 복구`}
+													onClick={() =>
+														requestProjectAction({ kind: "recover", project })
+													}
+												>
+													복구
+												</button>
+												<button
+													type="button"
+													disabled={projectBusy}
+													aria-label={`${project.name} 복구본 삭제`}
+													onClick={(event) =>
+														openRecoveryDiscardConfirmation(project, event.currentTarget)
+													}
+												>
+													삭제
+												</button>
+											</div>
+										</li>
+									))}
+								</ul>
+								{recoveryInventoryHasPrevious || recoveryInventoryHasNext ? (
+									<footer className="tilefab-recovery-inventory-pagination">
+										<button
+											type="button"
+											disabled={projectBusy || !recoveryInventoryHasPrevious}
+											onClick={() =>
+												void refreshRecoveryInventory(
+													Math.max(0, recoveryInventory.offset - recoveryInventory.pageSize),
+												).catch(() => setStatus("이전 복구본 목록을 불러오지 못했습니다"))
+											}
+										>
+											<ArrowLeft size={13} /> 이전
+										</button>
+										<small>{recoveryInventoryPageLabel}</small>
+										<button
+											type="button"
+											disabled={projectBusy || !recoveryInventoryHasNext}
+											onClick={() =>
+												void refreshRecoveryInventory(
+													recoveryInventory.offset + recoveryInventory.pageSize,
+												).catch(() => setStatus("다음 복구본 목록을 불러오지 못했습니다"))
+											}
+										>
+											다음 <ChevronRight size={13} />
+										</button>
+									</footer>
+								) : null}
+							</section>
+						) : null}
+					</section>
+				) : null}
+				<div className="tilefab-workspace-content">
 				{startupState.status === "ready" &&
 					(workerState.status === "error" || currentRailMirrorRetryPending) ? (
 					<div className="tilefab-mirror-recovery" data-testid="rail-mirror-recovery"
@@ -37312,167 +37474,6 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 					</StaticFabInspection3DErrorBoundary>
 				) : null}
 
-				{recoveryProject && !openFabStartDialogOpen ? (
-					<section
-						className="tilefab-recovery"
-						aria-label={`${recoveryProject.name} 별도 복구본`}
-						data-exclusive-command-scope="project"
-						data-replaces-current-project={recoveryReplacesCurrentProject}
-						data-recovery-project-id={recoveryProject.projectId}
-						data-recovery-count={recoveryInventory.totalCount}
-						data-inventory-open={recoveryInventoryOpen}
-						data-cleanup-available={
-							recoveryInventory.totalCount >
-							OPENFAB_RECOVERY_CLEANUP_DEFAULT_RETAINED_PROJECTS
-						}
-						data-guided-build={guidedBuildExperienceActive}
-					>
-						<FolderClock size={16} />
-						<span>
-							<strong>
-								{guidedBuildExperienceActive
-									? `로컬 복구본 ${recoveryInventory.totalCount.toLocaleString()}개 · 가이드 종료 후 관리`
-									: `${recoveryProject.name} · 별도 복구본${
-											recoveryInventory.totalCount > 1
-												? ` 외 ${recoveryInventory.totalCount - 1}개`
-												: ""
-										}`}
-							</strong>
-							<small>{guidedBuildExperienceActive ? "가이드 종료 후 복구·정리 가능" : recoveryOfferDetail}</small>
-						</span>
-						{!guidedBuildExperienceActive ? <div className="tilefab-recovery-actions">
-							<button
-								ref={recoveryRestoreButtonRef}
-								type="button"
-								disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
-								onClick={() =>
-									requestProjectAction({ kind: "recover", project: recoveryProject })
-								}
-							>
-								현재 프로젝트를 교체해 복구
-							</button>
-							<button
-								ref={recoveryDiscardButtonRef}
-								type="button"
-								className="tilefab-recovery-delete"
-								disabled={projectBusy}
-								onClick={(event) =>
-									openRecoveryDiscardConfirmation(recoveryProject, event.currentTarget)
-								}
-							>
-								복구본 삭제
-							</button>
-							{recoveryInventoryOpen || recoveryInventory.totalCount > 1 ? (
-								<button
-									type="button"
-									className="tilefab-recovery-list-trigger"
-									aria-expanded={recoveryInventoryOpen}
-									aria-controls="tilefab-recovery-inventory"
-									onClick={() => {
-										setRecoveryInventoryOpen((open) => !open);
-										if (recoveryInventoryOpen && recoveryInventory.totalCount <= 1) {
-											requestAnimationFrame(() => recoveryRestoreButtonRef.current?.focus({ preventScroll: true }));
-										}
-									}}
-								>
-									{recoveryInventoryOpen
-										? "목록 닫기"
-										: `목록 ${recoveryInventory.totalCount}개`}
-								</button>
-							) : null}
-						</div> : null}
-						{recoveryInventoryOpen && !guidedBuildExperienceActive ? (
-							<section
-								id="tilefab-recovery-inventory"
-								className="tilefab-recovery-inventory"
-								aria-label="로컬 복구본 목록"
-							>
-								<header>
-									<span>
-										<strong>로컬 복구본</strong>
-										<small>{recoveryInventoryPageLabel} · 최신순</small>
-									</span>
-									{recoveryInventory.totalCount >
-									OPENFAB_RECOVERY_CLEANUP_DEFAULT_RETAINED_PROJECTS ? (
-										<button
-											type="button"
-											className="tilefab-recovery-cleanup-trigger"
-											disabled={projectBusy || recoveryCleanupBusy}
-											onClick={(event) =>
-												void openRecoveryCleanupConfirmation(event.currentTarget)
-											}
-										>
-											<Trash2 size={12} /> 오래된 복구본 정리
-										</button>
-									) : null}
-								</header>
-								<ul>
-									{recoveryInventory.records.map((project, index) => (
-										<li key={project.projectId}>
-											<span className="tilefab-recovery-item-copy">
-												<strong>
-													{project.name}
-													{index === 0 ? " · 최신" : ""}
-												</strong>
-												<small>{formatRecoveryProjectTimestamp(project.updatedAt)}</small>
-											</span>
-											<div className="tilefab-recovery-item-actions">
-											<button
-												type="button"
-												className="tilefab-recovery-delete"
-												disabled={projectBusy || modelSyncPending || projectSourceOperationPending}
-													aria-label={`${project.name} 복구`}
-													onClick={() =>
-														requestProjectAction({ kind: "recover", project })
-													}
-												>
-													복구
-												</button>
-												<button
-													type="button"
-													disabled={projectBusy}
-													aria-label={`${project.name} 복구본 삭제`}
-													onClick={(event) =>
-														openRecoveryDiscardConfirmation(project, event.currentTarget)
-													}
-												>
-													삭제
-												</button>
-											</div>
-										</li>
-									))}
-								</ul>
-								{recoveryInventoryHasPrevious || recoveryInventoryHasNext ? (
-									<footer className="tilefab-recovery-inventory-pagination">
-										<button
-											type="button"
-											disabled={projectBusy || !recoveryInventoryHasPrevious}
-											onClick={() =>
-												void refreshRecoveryInventory(
-													Math.max(0, recoveryInventory.offset - recoveryInventory.pageSize),
-												).catch(() => setStatus("이전 복구본 목록을 불러오지 못했습니다"))
-											}
-										>
-											<ArrowLeft size={13} /> 이전
-										</button>
-										<small>{recoveryInventoryPageLabel}</small>
-										<button
-											type="button"
-											disabled={projectBusy || !recoveryInventoryHasNext}
-											onClick={() =>
-												void refreshRecoveryInventory(
-													recoveryInventory.offset + recoveryInventory.pageSize,
-												).catch(() => setStatus("다음 복구본 목록을 불러오지 못했습니다"))
-											}
-										>
-											다음 <ChevronRight size={13} />
-										</button>
-									</footer>
-								) : null}
-							</section>
-						) : null}
-					</section>
-				) : null}
 
 				{recoveryDiscardProject ? (
 					<div className="tilefab-project-guard tilefab-recovery-discard-guard" role="presentation">
@@ -41861,6 +41862,7 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 					/>
 				) : null}
  </ActiveAuthoringWorkspace></div>
+</div>
 </main>
 
 			<footer

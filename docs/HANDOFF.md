@@ -44,6 +44,13 @@
   Verification: 2 focused files / 36 tests PASS, ordinary production build, changed-file lint
   (one existing Biome warning), diff and public release checks PASS. Independent Close GUI review,
   full authoring/scale/native-OS suites are not run; this candidate is not published.
+- Unreleased recovery layout: at widths up to 430 px and compact landscape heights up to 430 px,
+  the existing recovery offer occupies an automatic-height row above the editing surface. Its
+  conditions, records and actions are unchanged; bounded scrolling keeps the inventory reachable.
+  Ordinary production build, changed-file lint and public release checks PASS. Isolated Chrome
+  390×844, 390×600 and 844×390 checks PASS for inventory open/close/scroll, full 44 px authoring
+  actions, no horizontal overflow, and actual rail Apply/Undo/Redo with the inventory open.
+  No new acceptance script was added; full authoring/scale/native-OS suites were not run.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.

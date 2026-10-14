@@ -882,3 +882,48 @@
 	.tilefab-next-port-handoff-copy {
 	min-width: 0;
 }
+
+/* Keep the recovery offer in normal flow on narrow or short screens, above the whole editing surface. */
+.tilefab-workspace-content {
+	display: contents;
+}
+@media (max-width: 430px), (max-width: 1000px) and (max-height: 430px) {
+	.tilefab-app[data-authoring-layout="unified"] > .tilefab-workspace {
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
+	}
+	.tilefab-app[data-authoring-layout="unified"] .tilefab-workspace-content {
+		display: block;
+		position: relative;
+		grid-row: 2;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+	}
+	.tilefab-app[data-authoring-layout="unified"] > .tilefab-workspace > .tilefab-recovery {
+		position: static;
+		inset: auto;
+		z-index: auto;
+		grid-row: 1;
+		grid-auto-rows: max-content;
+		align-content: start;
+		width: 100%;
+		max-width: none;
+		min-height: 0;
+		max-height: min(220px, 32dvh);
+		margin: 0;
+		border-radius: 0;
+		box-sizing: border-box;
+		box-shadow: none;
+		transform: none;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+	}
+}
+
+@media (max-width: 1000px) and (max-height: 430px) {
+	.tilefab-app[data-authoring-layout="unified"] > .tilefab-workspace > .tilefab-recovery {
+		/* Leave room for a full 44 px authoring action while the inventory scrolls. */
+		max-height: 22dvh;
+	}
+}
