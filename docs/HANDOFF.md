@@ -7,7 +7,7 @@
 - The active app is `src/App.tsx -> src/tilefab/editor/TileFabApp.tsx`.
 - The canonical document, compiled physical paths, atomic history, and typed Worker mirror
   remain the common boundary for editing, rendering, and read-only 3D inspection.
-- v0.1.115 bundles selected-file read-failure handling and EQ/fixed-module rail-preparation guidance.
+- v0.1.116 bundles explicit rail Close previews and compact recovery/catalog layout improvements.
   A synchronized rail mirror does not authorize simulation.
 - 0.1.115 file-open boundary: project, Blueprint and library restore share picker-only
   cancellation handling. Selected-file getFile/text/stream failures remain failures; input
@@ -35,7 +35,7 @@
   tests skipped; no failures. Only version/release records changed after that run; the full suite
   was not repeated. Ordinary production build, public release checks and the normal staged safety
   hook PASS. V1 remains incomplete; actual native OS Save/Open acceptance remains outstanding.
-- Unreleased Close preview: an unowned directed path can propose closure from its sink to its
+- 0.1.116 Close preview: an unowned directed path can propose closure from its sink to its
   own source. Branches, merges, switches, owned paths and reuse of other rail cells are rejected.
   Both L-shaped bends pass the existing physical/Port evaluator before selection. Explicit Apply
   uses one ordinary history/Worker command; no organization is created. Cancel, selection/tool
@@ -43,24 +43,26 @@
   model generation, patch sequence, rail revision and mutation generation.
   Verification: 2 focused files / 36 tests PASS, ordinary production build, changed-file lint
   (one existing Biome warning), diff and public release checks PASS. Independent source and Chrome
-  Close GUI review PASS; full authoring/scale/native-OS suites were not run. This is not published.
-- Unreleased recovery layout: at widths up to 430 px and compact landscape heights up to 430 px,
+  Close GUI review PASS; full authoring/scale/native-OS suites were not run.
+- 0.1.116 recovery layout: at widths up to 430 px and compact landscape heights up to 430 px,
   the existing recovery offer occupies an automatic-height row above the editing surface. Its
   conditions, records and actions are unchanged; bounded scrolling keeps the inventory reachable.
   Ordinary production build, changed-file lint and public release checks PASS. Isolated Chrome
   390×844, 390×600 and 844×390 checks PASS for inventory open/close/scroll, full 44 px authoring
   actions, no horizontal overflow, and actual rail Apply/Undo/Redo with the inventory open.
   No new acceptance script was added; full authoring/scale/native-OS suites were not run.
-- Final Close/recovery candidate verification (`56a69fb` app source): one full `pnpm test` run,
+- 0.1.116 bundle verification (`56a69fb` full-suite source): one full `pnpm test` run,
   464 files / 5,985 tests PASS and 2 existing tests skipped; no failures. Ordinary production build,
   public release checks and independent source/Close GUI review PASS. The later CSS-only compact
   layout correction retains this full-suite result without repeating the full run.
-- Unreleased short-landscape correction: at 701–1000 px wide and up to 430 px high, the collapsed
+- 0.1.116 short-landscape correction: at 701–1000 px wide and up to 430 px high, the collapsed
   catalog shares the camera-control row so it cannot cover the Close preview heading. Expanded
   catalog and portrait layouts retain their placement. Ordinary build, CSS lint, public release
   checks and 15 Chrome viewport/recovery states PASS (701/844/1000 compact, 390 portrait, 1440 desktop).
   Headings and full 44 px actions remain visible; actual Apply/Undo/Redo passes with and without
-  recovery offers. Version and publication state are unchanged.
+  recovery offers. Independent Chrome verification also passes 844×390 heading/keyboard actions
+  and 390×844 recovery/task placement. Only version/release records change after these checks;
+  actual native OS Save/Open remains unverified and V1 remains incomplete.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.

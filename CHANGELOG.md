@@ -6,6 +6,17 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.116] - 2026-10-14
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Preview closure from an unowned directed rail path's sink to its own source, with explicit
+  Apply or Cancel and one atomic Undo/Redo command. Preserve topology, physical and Port checks;
+  reject branched, merged, switched or owned paths and reuse of other rail cells.
+- Reserve compact workspace space for recovery offers and their scrollable inventory, keeping
+  editing actions reachable. Keep collapsed categories clear of task headings on short landscapes.
+- Native OS project file Save/Open roundtrip remains unverified.
+
 ## [0.1.115] - 2026-10-14
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
