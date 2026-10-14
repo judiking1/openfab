@@ -1373,6 +1373,239 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		expect(input.remove).toHaveBeenCalledOnce();
 	});
 
+	describe.each([
+		{
+			method: "chooseOpen",
+			accept: ".openfab,.json,application/json",
+			budget: OPENFAB_PROJECT_MAX_JSON_CHARACTERS,
+		},
+		{
+			method: "chooseImport",
+			accept: ".openfabbp,application/json",
+			budget: OPENFAB_USER_BLUEPRINT_MAX_JSON_BYTES,
+		},
+		{
+			method: "chooseLibraryImport",
+			accept: ".openfablib,application/json",
+			budget: OPENFAB_USER_BLUEPRINT_LIBRARY_MAX_JSON_BYTES,
+		},
+	] as const)("$method selection/read boundary", ({ method, accept, budget }) => {
+		it("starts the native chooser synchronously and reads the selected file", async () => {
+			const file = new File(['{"selected":true}'], "Selected.json");
+			const picker = vi.fn(async () => [
+				{ kind: "file", name: file.name, getFile: async () => file },
+			]);
+			vi.stubGlobal("window", { showOpenFilePicker: picker });
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			const opening = persistence[method]();
+			expect(picker).toHaveBeenCalledOnce();
+			await expect(opening).resolves.toMatchObject({ json: '{"selected":true}' });
+		});
+
+		it("returns null only for native chooser cancellation without starting input fallback", async () => {
+			vi.stubGlobal("window", {
+				showOpenFilePicker: async () => {
+					throw new DOMException("cancelled", "AbortError");
+				},
+			});
+			const input = stubProjectFileInput();
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method]()).resolves.toBeNull();
+			expect(input.click).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			"SecurityError",
+			"NotAllowedError",
+		])("propagates native chooser %s without fallback", async (name) => {
+			const failure = new DOMException("unavailable", name);
+			vi.stubGlobal("window", {
+				showOpenFilePicker: async () => {
+					throw failure;
+				},
+			});
+			const input = stubProjectFileInput();
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method]()).rejects.toBe(failure);
+			expect(input.click).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			{ stage: "getFile", name: "AbortError" },
+			{ stage: "read", name: "AbortError" },
+			{ stage: "read", name: "NotReadableError" },
+		])("propagates $stage $name after selection and preserves the library", async ({
+			stage,
+			name,
+		}) => {
+			const failure = new DOMException("selected file unavailable", name);
+			const file = new File(["{}"], "Selected.json");
+			vi.spyOn(file, "text").mockRejectedValue(failure);
+			vi.spyOn(file, "stream").mockImplementation(
+				() =>
+					new ReadableStream({
+						start(controller) {
+							controller.error(failure);
+						},
+					}),
+			);
+			const getFile = vi.fn(async () => {
+				if (stage === "getFile") throw failure;
+				return file;
+			});
+			vi.stubGlobal("window", {
+				showOpenFilePicker: async () => [{ kind: "file", name: file.name, getFile }],
+			});
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			const existing = userBlueprint("preserved-library", "Preserved Bay", null);
+			await insertUserBlueprint(persistence, existing);
+			await expect(persistence[method]()).rejects.toBe(failure);
+			expect(await persistence.get(existing.id)).toEqual(existing);
+			await expect(persistence.listRecent()).resolves.toEqual([]);
+		});
+
+		it("rejects operation abort while the native picker is pending", async () => {
+			const controller = new AbortController();
+			vi.stubGlobal("window", {
+				showOpenFilePicker: async () => {
+					controller.abort();
+					throw new DOMException("chooser interrupted", "AbortError");
+				},
+			});
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method](controller.signal)).rejects.toMatchObject({
+				name: "AbortError",
+			});
+		});
+
+		it("rejects operation abort after getFile without reading selected bytes", async () => {
+			const controller = new AbortController();
+			const file = new File(["{}"], "Selected.json");
+			const text = vi.spyOn(file, "text");
+			const stream = vi.spyOn(file, "stream");
+			vi.stubGlobal("window", {
+				showOpenFilePicker: async () => [
+					{
+						kind: "file",
+						name: file.name,
+						getFile: async () => {
+							controller.abort();
+							return file;
+						},
+					},
+				],
+			});
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method](controller.signal)).rejects.toMatchObject({
+				name: "AbortError",
+			});
+			expect(text).not.toHaveBeenCalled();
+			expect(stream).not.toHaveBeenCalled();
+		});
+
+		it("reads file input with the matching extension filter", async () => {
+			const input = stubProjectFileInput();
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase(), {
+				forceFileInputFallback: true,
+			});
+			const opening = persistence[method]();
+			expect(input.click).toHaveBeenCalledOnce();
+			expect(input.accept).toBe(accept);
+			input.files = [new File(['{"selected":true}'], "Selected.json")];
+			input.dispatchEvent(new Event("change"));
+			await expect(opening).resolves.toMatchObject({ json: '{"selected":true}' });
+			expect(input.remove).toHaveBeenCalledOnce();
+		});
+
+		it("returns null for input cancellation before a selection", async () => {
+			const input = stubProjectFileInput();
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase(), {
+				forceFileInputFallback: true,
+			});
+			const opening = persistence[method]();
+			input.dispatchEvent(new Event("cancel"));
+			await expect(opening).resolves.toBeNull();
+			expect(input.remove).toHaveBeenCalledOnce();
+		});
+
+		it("keeps a selected read failure despite late cancel and duplicate change events", async () => {
+			const input = stubProjectFileInput();
+			const selected = pendingSelectedFile(method === "chooseLibraryImport");
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase(), {
+				forceFileInputFallback: true,
+			});
+			const opening = persistence[method]();
+			const failure = new DOMException("selected read failed", "AbortError");
+			const rejected = expect(opening).rejects.toBe(failure);
+			input.files = [selected.file];
+			input.dispatchEvent(new Event("change"));
+			input.dispatchEvent(new Event("cancel"));
+			input.dispatchEvent(new Event("change"));
+			selected.fail(failure);
+			await rejected;
+			expect(selected.read).toHaveBeenCalledOnce();
+			expect(input.remove).toHaveBeenCalledOnce();
+		});
+
+		it.each([
+			false,
+			true,
+		])("rejects input operation abort with selected=%s and ignores late events", async (selectedFirst) => {
+			const input = stubProjectFileInput();
+			const selected = pendingSelectedFile(method === "chooseLibraryImport");
+			const controller = new AbortController();
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase(), {
+				forceFileInputFallback: true,
+			});
+			const opening = persistence[method](controller.signal);
+			const rejected = expect(opening).rejects.toMatchObject({ name: "AbortError" });
+			input.files = [selected.file];
+			if (selectedFirst) input.dispatchEvent(new Event("change"));
+			controller.abort();
+			await rejected;
+			input.dispatchEvent(new Event("change"));
+			input.dispatchEvent(new Event("cancel"));
+			selected.finish();
+			await Promise.resolve();
+			expect(selected.read).toHaveBeenCalledTimes(selectedFirst ? 1 : 0);
+			expect(input.remove).toHaveBeenCalledOnce();
+		});
+
+		it.each(["append", "click"])("cleans input and propagates %s failure", async (stage) => {
+			const input = stubProjectFileInput();
+			const failure = new DOMException("input unavailable", "SecurityError");
+			const invocation = stage === "append" ? vi.mocked(document.body.append) : input.click;
+			invocation.mockImplementation(() => {
+				throw failure;
+			});
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase(), {
+				forceFileInputFallback: true,
+			});
+			await expect(persistence[method]()).rejects.toBe(failure);
+			const text = vi.fn(async () => "{}");
+			input.files = [{ name: "Late.json", size: 2, text }];
+			input.dispatchEvent(new Event("change"));
+			expect(text).not.toHaveBeenCalled();
+			expect(input.remove).toHaveBeenCalledOnce();
+		});
+
+		it("rejects oversized input before reading bytes", async () => {
+			const input = stubProjectFileInput();
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase(), {
+				forceFileInputFallback: true,
+			});
+			const opening = persistence[method]();
+			const text = vi.fn(async () => "{}");
+			const stream = vi.fn();
+			input.files = [{ name: "Oversized.json", size: budget + 1, text, stream }];
+			input.dispatchEvent(new Event("change"));
+			await expect(opening).rejects.toThrow("MiB");
+			expect(text).not.toHaveBeenCalled();
+			expect(stream).not.toHaveBeenCalled();
+			expect(input.remove).toHaveBeenCalledOnce();
+		});
+	});
+
 	it("treats native save chooser AbortError as a cancellation without retaining a file handle", async () => {
 		const savePicker = vi.fn(async () => {
 			throw new DOMException("user cancelled", "AbortError");
@@ -2888,7 +3121,7 @@ function stubProjectFileInput() {
 		type: "",
 		accept: "",
 		hidden: false,
-		files: [] as { name: string; size: number; text(): Promise<string> }[],
+		files: [] as (Pick<File, "name" | "size" | "text"> & Partial<Pick<File, "stream">>)[],
 		click: vi.fn(),
 		remove: vi.fn(),
 	});
@@ -2897,6 +3130,36 @@ function stubProjectFileInput() {
 		createElement: () => input,
 	});
 	return input;
+}
+
+function pendingSelectedFile(streamed: boolean) {
+	const file = new File(["{}"], "Selected.json");
+	let fail: (error: Error) => void = () => undefined;
+	let finish: () => void = () => undefined;
+	const read = streamed
+		? vi.spyOn(file, "stream").mockImplementation(
+				() =>
+					new ReadableStream<Uint8Array<ArrayBuffer>>({
+						start(controller) {
+							fail = (error) => controller.error(error);
+							finish = () => {
+								controller.enqueue(new TextEncoder().encode("{}"));
+								controller.close();
+							};
+						},
+						cancel() {
+							finish = () => undefined;
+						},
+					}),
+			)
+		: vi.spyOn(file, "text").mockImplementation(
+				() =>
+					new Promise<string>((resolve, reject) => {
+						fail = reject;
+						finish = () => resolve("{}");
+					}),
+			);
+	return { file, read, fail: (error: Error) => fail(error), finish: () => finish() };
 }
 
 function createFileHandle(name: string): {

@@ -257,16 +257,7 @@ export class BrowserOpenFabProjectPersistence
 			? null
 			: browserFunction<BrowserOpenPicker>("showOpenFilePicker");
 		if (!picker) return this.chooseOpenWithFileInput(signal);
-		let handles: readonly BrowserFileHandle[];
-		try {
-			handles = await picker({ multiple: false, types: PROJECT_FILE_TYPES });
-		} catch (error) {
-			throwIfAborted(signal);
-			if (isUserCancellation(error)) return null;
-			throw error;
-		}
-		throwIfAborted(signal);
-		const handle = handles[0];
+		const handle = await chooseNativeOpenHandle(picker, PROJECT_FILE_TYPES, signal);
 		if (!handle) return null;
 		const reference = await this.rememberHandle(handle);
 		return this.readHandle(reference, handle, signal);
@@ -376,20 +367,14 @@ export class BrowserOpenFabProjectPersistence
 			? null
 			: browserFunction<BrowserOpenPicker>("showOpenFilePicker");
 		if (!picker) return chooseUserBlueprintOpenWithInput(signal);
-		try {
-			const handles = await picker({ multiple: false, types: USER_BLUEPRINT_FILE_TYPES });
-			throwIfAborted(signal);
-			const handle = handles[0];
-			if (!handle) return null;
-			const file = await handle.getFile();
-			assertUserBlueprintFileSize(file.size);
-			const json = await file.text();
-			throwIfAborted(signal);
-			return Object.freeze({ name: file.name, json });
-		} catch (error) {
-			if (isUserCancellation(error) || signal?.aborted) return null;
-			throw error;
-		}
+		const handle = await chooseNativeOpenHandle(picker, USER_BLUEPRINT_FILE_TYPES, signal);
+		if (!handle) return null;
+		const file = await handle.getFile();
+		throwIfAborted(signal);
+		assertUserBlueprintFileSize(file.size);
+		const json = await file.text();
+		throwIfAborted(signal);
+		return Object.freeze({ name: file.name, json });
 	}
 
 	async chooseExport(
@@ -417,23 +402,13 @@ export class BrowserOpenFabProjectPersistence
 			? null
 			: browserFunction<BrowserOpenPicker>("showOpenFilePicker");
 		if (!picker) return chooseUserBlueprintLibraryOpenWithInput(signal);
-		try {
-			const handles = await picker({
-				multiple: false,
-				types: USER_BLUEPRINT_LIBRARY_FILE_TYPES,
-			});
-			throwIfAborted(signal);
-			const handle = handles[0];
-			if (!handle) return null;
-			const file = await handle.getFile();
-			assertUserBlueprintLibraryFileSize(file.size);
-			const json = await readUserBlueprintLibraryFileText(file, signal);
-			throwIfAborted(signal);
-			return Object.freeze({ name: file.name, json });
-		} catch (error) {
-			if (isUserCancellation(error) || signal?.aborted) return null;
-			throw error;
-		}
+		const handle = await chooseNativeOpenHandle(picker, USER_BLUEPRINT_LIBRARY_FILE_TYPES, signal);
+		if (!handle) return null;
+		const file = await handle.getFile();
+		throwIfAborted(signal);
+		const json = await readUserBlueprintLibraryFileText(file, signal);
+		throwIfAborted(signal);
+		return Object.freeze({ name: file.name, json });
 	}
 
 	async chooseLibraryExport(
@@ -2475,40 +2450,113 @@ const USER_BLUEPRINT_DIAGNOSTIC_FILE_TYPES = Object.freeze([
 	}),
 ]);
 
+/** Only the chooser owns user cancellation; selected-file reads must remain failures. */
+async function chooseNativeOpenHandle(
+	picker: BrowserOpenPicker,
+	types: Parameters<BrowserOpenPicker>[0]["types"],
+	signal?: AbortSignal,
+): Promise<BrowserFileHandle | null> {
+	throwIfAborted(signal);
+	let handles: readonly BrowserFileHandle[];
+	try {
+		handles = await picker({ multiple: false, types });
+	} catch (error) {
+		throwIfAborted(signal);
+		if (isUserCancellation(error)) return null;
+		throw error;
+	}
+	throwIfAborted(signal);
+	return handles[0] ?? null;
+}
+
 async function chooseOpenWithInput(signal?: AbortSignal): Promise<OpenFabProjectFileRead | null> {
+	return chooseFileWithInput(
+		".openfab,.json,application/json",
+		async (file) => {
+			assertProjectFileSize(file.size);
+			const json = await file.text();
+			return {
+				reference: Object.freeze({
+					id: createRuntimeId(),
+					name: file.name,
+					writable: false,
+					reopenable: false,
+				}),
+				json,
+			};
+		},
+		signal,
+	);
+}
+
+async function chooseUserBlueprintOpenWithInput(
+	signal?: AbortSignal,
+): Promise<OpenFabUserBlueprintFileRead | null> {
+	return chooseFileWithInput(
+		`${OPENFAB_USER_BLUEPRINT_FILE_EXTENSION},application/json`,
+		async (file) => {
+			assertUserBlueprintFileSize(file.size);
+			return Object.freeze({ name: file.name, json: await file.text() });
+		},
+		signal,
+	);
+}
+
+async function chooseUserBlueprintLibraryOpenWithInput(
+	signal?: AbortSignal,
+): Promise<OpenFabUserBlueprintLibraryBundleFileRead | null> {
+	return chooseFileWithInput(
+		`${OPENFAB_USER_BLUEPRINT_LIBRARY_FILE_EXTENSION},application/json`,
+		async (file) => {
+			const json = await readUserBlueprintLibraryFileText(file, signal);
+			return Object.freeze({ name: file.name, json });
+		},
+		signal,
+	);
+}
+
+function chooseFileWithInput<T>(
+	accept: string,
+	read: (file: File) => Promise<T>,
+	signal?: AbortSignal,
+): Promise<T | null> {
+	throwIfAborted(signal);
 	return new Promise((resolve, reject) => {
 		const input = document.createElement("input");
 		input.type = "file";
-		input.accept = ".openfab,.json,application/json";
+		input.accept = accept;
 		input.hidden = true;
-		const finish = (result: OpenFabProjectFileRead | null): void => {
+		let settled = false;
+		let selected = false;
+		const finish = (result: T | null): void => {
+			if (settled) return;
+			settled = true;
 			cleanup();
 			resolve(result);
 		};
-		const cancel = (): void => finish(null);
-		const abort = (): void => {
+		const fail = (error: unknown): void => {
+			if (settled) return;
+			settled = true;
 			cleanup();
-			reject(new DOMException("Project operation was aborted.", "AbortError"));
+			reject(error);
 		};
+		const cancel = (): void => {
+			if (!selected) finish(null);
+		};
+		const abort = (): void =>
+			fail(new DOMException("Project operation was aborted.", "AbortError"));
 		const change = async (): Promise<void> => {
+			if (settled || selected) return;
+			selected = true;
 			try {
+				throwIfAborted(signal);
 				const file = input.files?.[0];
 				if (!file) return finish(null);
-				assertProjectFileSize(file.size);
-				const json = await file.text();
+				const result = await read(file);
 				throwIfAborted(signal);
-				finish({
-					reference: Object.freeze({
-						id: createRuntimeId(),
-						name: file.name,
-						writable: false,
-						reopenable: false,
-					}),
-					json,
-				});
+				finish(result);
 			} catch (error) {
-				cleanup();
-				reject(error);
+				fail(error);
 			}
 		};
 		const cleanup = (): void => {
@@ -2524,91 +2572,8 @@ async function chooseOpenWithInput(signal?: AbortSignal): Promise<OpenFabProject
 			document.body.append(input);
 			input.click();
 		} catch (error) {
-			cleanup();
-			reject(error);
+			fail(error);
 		}
-	});
-}
-
-async function chooseUserBlueprintOpenWithInput(
-	signal?: AbortSignal,
-): Promise<OpenFabUserBlueprintFileRead | null> {
-	return new Promise((resolve, reject) => {
-		const input = document.createElement("input");
-		input.type = "file";
-		input.accept = `${OPENFAB_USER_BLUEPRINT_FILE_EXTENSION},application/json`;
-		input.hidden = true;
-		const finish = (result: OpenFabUserBlueprintFileRead | null): void => {
-			cleanup();
-			resolve(result);
-		};
-		const cancel = (): void => finish(null);
-		const abort = (): void => finish(null);
-		const change = async (): Promise<void> => {
-			try {
-				const file = input.files?.[0];
-				if (!file) return finish(null);
-				assertUserBlueprintFileSize(file.size);
-				const json = await file.text();
-				if (signal?.aborted) return finish(null);
-				finish(Object.freeze({ name: file.name, json }));
-			} catch (error) {
-				cleanup();
-				reject(error);
-			}
-		};
-		const cleanup = (): void => {
-			input.removeEventListener("change", change);
-			input.removeEventListener("cancel", cancel);
-			signal?.removeEventListener("abort", abort);
-			input.remove();
-		};
-		input.addEventListener("change", change);
-		input.addEventListener("cancel", cancel);
-		signal?.addEventListener("abort", abort, { once: true });
-		document.body.append(input);
-		input.click();
-	});
-}
-
-async function chooseUserBlueprintLibraryOpenWithInput(
-	signal?: AbortSignal,
-): Promise<OpenFabUserBlueprintLibraryBundleFileRead | null> {
-	return new Promise((resolve, reject) => {
-		const input = document.createElement("input");
-		input.type = "file";
-		input.accept = `${OPENFAB_USER_BLUEPRINT_LIBRARY_FILE_EXTENSION},application/json`;
-		input.hidden = true;
-		const finish = (result: OpenFabUserBlueprintLibraryBundleFileRead | null): void => {
-			cleanup();
-			resolve(result);
-		};
-		const cancel = (): void => finish(null);
-		const abort = (): void => finish(null);
-		const change = async (): Promise<void> => {
-			try {
-				const file = input.files?.[0];
-				if (!file) return finish(null);
-				assertUserBlueprintLibraryFileSize(file.size);
-				const json = await readUserBlueprintLibraryFileText(file, signal);
-				if (signal?.aborted) return finish(null);
-				finish(Object.freeze({ name: file.name, json }));
-			} catch (error) {
-				cleanup();
-				reject(error);
-			}
-		};
-		const cleanup = (): void => {
-			input.removeEventListener("change", change);
-			input.removeEventListener("cancel", cancel);
-			signal?.removeEventListener("abort", abort);
-			input.remove();
-		};
-		input.addEventListener("change", change);
-		input.addEventListener("cancel", cancel);
-		signal?.addEventListener("abort", abort, { once: true });
-		document.body.append(input);
-		input.click();
 	});
 }
 

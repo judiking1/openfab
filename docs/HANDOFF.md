@@ -9,6 +9,16 @@
   remain the common boundary for editing, rendering, and read-only 3D inspection.
 - v0.1.114 bundles guarded-save guidance, safe Blueprint file handling and straight organization placement.
   A synchronized rail mirror does not authorize simulation.
+- Unreleased file-open boundary: project, Blueprint and library restore share picker-only
+  cancellation handling. Selected-file getFile/text/stream failures remain failures; input
+  fallback rejects operation aborts and ignores late cancel/change events after selection.
+  Existing failure UI preserves the document, library and unfinished import metadata.
+  Verification: 177 adapter tests PASS (51 new stage-specific regressions), ordinary production
+  build, changed-file lint, public release checks and independent code review PASS. Controlled
+  Chrome 1440/390 picker/read-failure checks preserve project identity/checksum, dirty state,
+  library and import drafts; Undo/Redo PASS. All 73 candidate assets load with matching hashes.
+  Actual OS file acceptance and full authoring/scale/unit suites were not run for this change.
+  Hold this local candidate for the next release bundle; v0.1.114 remains deployed.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.
