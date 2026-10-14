@@ -1,6 +1,7 @@
 import { AlertTriangle, ArchiveRestore, Download, FileArchive, ShieldCheck, X } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { OpenFabUserBlueprintFileExportResult } from "../project/OpenFabUserBlueprintLibrary";
 import type {
 	OpenFabUserBlueprintLibraryConflictDecision,
 	OpenFabUserBlueprintLibraryReplaceImpact,
@@ -19,7 +20,7 @@ export interface UserBlueprintLibraryRestoreDialogProps {
 	readonly busyOperation: string | null;
 	readonly error: string | null;
 	readonly onCancel: () => void;
-	readonly onBackupCurrent: () => Promise<boolean>;
+	readonly onBackupCurrent: () => Promise<OpenFabUserBlueprintFileExportResult | "failed">;
 	readonly onPreview: (
 		mode: OpenFabUserBlueprintLibraryRestoreMode,
 		decisions: ReadonlyMap<string, OpenFabUserBlueprintLibraryConflictDecision>,
@@ -163,9 +164,13 @@ export function UserBlueprintLibraryRestoreDialog({
 		setBackupFeedback(null);
 		const exported = await onBackupCurrent();
 		setBackupFeedback(
-			exported
-				? "현재 라이브러리의 .openfablib 백업을 완료했습니다. 이제 교체를 계속할 수 있습니다."
-				: "현재 라이브러리 백업 파일을 생성하지 않았습니다.",
+			exported === "written"
+				? "현재 라이브러리의 .openfablib 파일을 저장했습니다. 교체할 내용을 확인한 뒤 계속하세요."
+				: exported === "download-requested"
+					? "다운로드를 요청했습니다. 다운로드한 .openfablib 파일을 확인하세요. 백업 완료는 확인되지 않았으며 현재 라이브러리는 유지됩니다."
+					: exported === "cancelled"
+						? "백업을 취소했습니다. 현재 라이브러리는 유지됩니다."
+						: "백업을 완료하지 못했습니다. 현재 라이브러리는 유지됩니다.",
 		);
 	};
 	const showMoreConflicts = (): void => {

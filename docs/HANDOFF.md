@@ -31,6 +31,18 @@
   code review and controlled-picker UI checks at 390/760/1440 px PASS; native OS acceptance and
   the full suites were not run. No change to write completion, dirty/recovery or transition gates.
 
+- Unreleased blueprint file handling distinguishes completed writes, download requests and picker
+  cancellation. Quarantined source rows remain until a completed write and the existing comparison
+  check permit removal; write failures remain failures. Import metadata and cancel controls are
+  disabled during insertion. Straight organization blueprints now pass the same span rule in the
+  Worker transport as in the domain validator, including all four rotations.
+  Verification: 8 focused files / 263 tests and 2 filtered Worker cleanup tests PASS; ordinary build,
+  changed-file lint, public safety and independent code review PASS. Isolated Chrome 390 px checks
+  passed for import cancel/busy controls, mocked write outcomes, download-request guidance, and
+  synthetic export/import followed by placement, Port/equipment/organization preservation and
+  Undo/Redo. File pickers/writes were controlled test doubles; downloads were observed only as
+  requests. Actual OS file roundtrip and full authoring/scale suites were not run.
+
 - Isolated automatic recovery PASS: exact project identity/checksum restored, followed by EQ pitch editing, OHB service reversal, and Stocker Port membership editing with Undo/Redo. Native Save/Open remains unverified: the native save action immediately returned cancellation, retained the dirty document and produced no file; the cause was not established and no workaround was attempted.
 
 ## Development commands

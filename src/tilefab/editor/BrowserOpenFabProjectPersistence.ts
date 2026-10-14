@@ -33,6 +33,7 @@ import {
 	OPENFAB_USER_BLUEPRINT_MAX_REJECTED_DIAGNOSTICS,
 	OPENFAB_USER_BLUEPRINT_MAX_TOTAL_EDGES,
 	OPENFAB_USER_BLUEPRINT_MAX_TOTAL_JSON_BYTES,
+	type OpenFabUserBlueprintFileExportResult,
 	type OpenFabUserBlueprintFileGateway,
 	type OpenFabUserBlueprintFileRead,
 	type OpenFabUserBlueprintInsertResult,
@@ -391,26 +392,21 @@ export class BrowserOpenFabProjectPersistence
 		}
 	}
 
-	async chooseExport(suggestedName: string, json: string, signal?: AbortSignal): Promise<boolean> {
+	async chooseExport(
+		suggestedName: string,
+		json: string,
+		signal?: AbortSignal,
+	): Promise<OpenFabUserBlueprintFileExportResult> {
 		throwIfAborted(signal);
 		assertUserBlueprintFileSize(openFabUtf8ByteLength(json));
-		const safeName = normalizeSuggestedUserBlueprintFileName(suggestedName);
-		const picker = this.forceFileInputFallback
-			? null
-			: browserFunction<BrowserSavePicker>("showSaveFilePicker");
-		if (!picker) {
-			downloadJsonFile(safeName, json);
-			return true;
-		}
-		try {
-			const handle = await picker({ suggestedName: safeName, types: USER_BLUEPRINT_FILE_TYPES });
-			throwIfAborted(signal);
-			await writeHandle(handle, json, signal);
-			return true;
-		} catch (error) {
-			if (isUserCancellation(error) || signal?.aborted) return false;
-			throw error;
-		}
+		return this.exportBlueprintFile(
+			{
+				suggestedName: normalizeSuggestedUserBlueprintFileName(suggestedName),
+				types: USER_BLUEPRINT_FILE_TYPES,
+			},
+			json,
+			signal,
+		);
 	}
 
 	async chooseLibraryImport(
@@ -444,58 +440,59 @@ export class BrowserOpenFabProjectPersistence
 		suggestedName: string,
 		json: string,
 		signal?: AbortSignal,
-	): Promise<boolean> {
+	): Promise<OpenFabUserBlueprintFileExportResult> {
 		throwIfAborted(signal);
 		assertUserBlueprintLibraryFileSize(openFabUtf8ByteLength(json));
-		const safeName = normalizeSuggestedUserBlueprintLibraryFileName(suggestedName);
-		const picker = this.forceFileInputFallback
-			? null
-			: browserFunction<BrowserSavePicker>("showSaveFilePicker");
-		if (!picker) {
-			downloadJsonFile(safeName, json);
-			return true;
-		}
-		try {
-			const handle = await picker({
-				suggestedName: safeName,
+		return this.exportBlueprintFile(
+			{
+				suggestedName: normalizeSuggestedUserBlueprintLibraryFileName(suggestedName),
 				types: USER_BLUEPRINT_LIBRARY_FILE_TYPES,
-			});
-			throwIfAborted(signal);
-			await writeHandle(handle, json, signal);
-			return true;
-		} catch (error) {
-			if (isUserCancellation(error) || signal?.aborted) return false;
-			throw error;
-		}
+			},
+			json,
+			signal,
+		);
 	}
 
 	async chooseDiagnosticExport(
 		suggestedName: string,
 		json: string,
 		signal?: AbortSignal,
-	): Promise<boolean> {
+	): Promise<OpenFabUserBlueprintFileExportResult> {
 		throwIfAborted(signal);
 		assertUserBlueprintFileSize(openFabUtf8ByteLength(json));
-		const safeName = normalizeSuggestedUserBlueprintDiagnosticFileName(suggestedName);
+		return this.exportBlueprintFile(
+			{
+				suggestedName: normalizeSuggestedUserBlueprintDiagnosticFileName(suggestedName),
+				types: USER_BLUEPRINT_DIAGNOSTIC_FILE_TYPES,
+			},
+			json,
+			signal,
+		);
+	}
+
+	private async exportBlueprintFile(
+		options: Parameters<BrowserSavePicker>[0],
+		json: string,
+		signal?: AbortSignal,
+	): Promise<OpenFabUserBlueprintFileExportResult> {
 		const picker = this.forceFileInputFallback
 			? null
 			: browserFunction<BrowserSavePicker>("showSaveFilePicker");
 		if (!picker) {
-			downloadJsonFile(safeName, json);
-			return true;
+			downloadJsonFile(options.suggestedName, json);
+			return "download-requested";
 		}
+		let handle: BrowserFileHandle;
 		try {
-			const handle = await picker({
-				suggestedName: safeName,
-				types: USER_BLUEPRINT_DIAGNOSTIC_FILE_TYPES,
-			});
-			throwIfAborted(signal);
-			await writeHandle(handle, json, signal);
-			return true;
+			handle = await picker(options);
 		} catch (error) {
-			if (isUserCancellation(error) || signal?.aborted) return false;
+			throwIfAborted(signal);
+			if (isUserCancellation(error)) return "cancelled";
 			throw error;
 		}
+		throwIfAborted(signal);
+		await writeHandle(handle, json, signal);
+		return "written";
 	}
 
 	async listRecent(): Promise<readonly OpenFabRecentProject[]> {

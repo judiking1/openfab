@@ -90,14 +90,21 @@ export interface OpenFabUserBlueprintFileRead {
 	readonly json: string;
 }
 
+/** A browser download request is not evidence that a file reached durable storage. */
+export type OpenFabUserBlueprintFileExportResult = "written" | "download-requested" | "cancelled";
+
 export interface OpenFabUserBlueprintFileGateway {
 	chooseImport(signal?: AbortSignal): Promise<OpenFabUserBlueprintFileRead | null>;
-	chooseExport(suggestedName: string, json: string, signal?: AbortSignal): Promise<boolean>;
+	chooseExport(
+		suggestedName: string,
+		json: string,
+		signal?: AbortSignal,
+	): Promise<OpenFabUserBlueprintFileExportResult>;
 	chooseDiagnosticExport(
 		suggestedName: string,
 		json: string,
 		signal?: AbortSignal,
-	): Promise<boolean>;
+	): Promise<OpenFabUserBlueprintFileExportResult>;
 }
 
 export type OpenFabUserBlueprintMutationDurability = "persistent" | "session-only";
@@ -150,6 +157,27 @@ export interface OpenFabUserBlueprintRejectedDiagnosticRead {
 
 export interface OpenFabUserBlueprintRejectedDiagnosticRemoveResult {
 	readonly status: "removed" | "missing" | "conflict" | "not-recoverable";
+}
+
+/** Export a recoverable row before applying its existing compare-and-delete contract. */
+export async function exportOpenFabUserBlueprintRecovery(
+	ports: Pick<OpenFabUserBlueprintFileGateway, "chooseExport"> &
+		Pick<OpenFabUserBlueprintLibraryStore, "removeRejectedDiagnostic">,
+	read: OpenFabUserBlueprintRejectedDiagnosticRead,
+): Promise<
+	Readonly<{
+		delivery: OpenFabUserBlueprintFileExportResult;
+		removal: OpenFabUserBlueprintRejectedDiagnosticRemoveResult | null;
+	}>
+> {
+	if (!read.recoverableRecord) throw new TypeError("A recoverable blueprint is required.");
+	const delivery = await ports.chooseExport(read.recoverableRecord.blueprint.name, read.json);
+	if (delivery !== "written") return Object.freeze({ delivery, removal: null });
+	const removal = await ports.removeRejectedDiagnostic(
+		read.diagnostic.token,
+		read.recoverableRecord,
+	);
+	return Object.freeze({ delivery, removal });
 }
 
 export type OpenFabUserBlueprintParseErrorCode =

@@ -5,6 +5,7 @@ import {
 	OPENFAB_USER_BLUEPRINT_MAX_RECORDS,
 	OPENFAB_USER_BLUEPRINT_MAX_TOTAL_EDGES,
 	OPENFAB_USER_BLUEPRINT_MAX_TOTAL_JSON_BYTES,
+	type OpenFabUserBlueprintFileExportResult,
 	OpenFabUserBlueprintParseError,
 	type OpenFabUserBlueprintRecord,
 	openFabUserBlueprintRecordJsonByteLength,
@@ -40,7 +41,11 @@ export interface OpenFabUserBlueprintLibraryBundleFileGateway {
 	chooseLibraryImport(
 		signal?: AbortSignal,
 	): Promise<OpenFabUserBlueprintLibraryBundleFileRead | null>;
-	chooseLibraryExport(suggestedName: string, json: string, signal?: AbortSignal): Promise<boolean>;
+	chooseLibraryExport(
+		suggestedName: string,
+		json: string,
+		signal?: AbortSignal,
+	): Promise<OpenFabUserBlueprintFileExportResult>;
 }
 
 export type OpenFabUserBlueprintLibraryRestoreMode = "merge" | "replace";

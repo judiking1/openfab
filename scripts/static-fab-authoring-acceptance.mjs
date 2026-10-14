@@ -27036,6 +27036,17 @@ async function exercisePersistedLargeFabUserBlueprint(page) {
 	await importPreview.waitFor({ state: "visible", timeout: 10_000 });
 	await importPreview.getByLabel("가져올 청사진 이름").fill("Imported Phase 4 Mixed Bay");
 	await importPreview.getByLabel("가져올 청사진 폴더").fill("Process/Photo/Reusable/Bays");
+	await importPreview.evaluate((form) => {
+		window.__openFabImportBusyControls = [];
+		const observer = new MutationObserver(() => {
+			if (form.getAttribute("aria-busy") !== "true") return;
+			window.__openFabImportBusyControls.push(
+				[...form.querySelectorAll("input, button")].every((control) => control.disabled),
+			);
+		});
+		observer.observe(form, { attributes: true, subtree: true, attributeFilter: ["aria-busy", "disabled"] });
+		window.__openFabImportBusyObserver = observer;
+	});
 	await importPreview.getByRole("button", { name: "IMPORT", exact: true }).click();
 	await page.waitForFunction(
 		() => document.querySelector(".tilefab-app")?.dataset.userBlueprints === "2",
@@ -27046,6 +27057,12 @@ async function exercisePersistedLargeFabUserBlueprint(page) {
 		.getByTestId("user-blueprint-record")
 		.filter({ hasText: "Imported Phase 4 Mixed Bay" });
 	await importedBlueprintRecord.waitFor({ state: "visible", timeout: 10_000 });
+	const busyImportControls = await page.evaluate(() => {
+		window.__openFabImportBusyObserver.disconnect();
+		return window.__openFabImportBusyControls;
+	});
+	assertEqual(busyImportControls.length > 0, true, "import commit exposes its busy state");
+	assertEqual(busyImportControls.every(Boolean), true, "import commit disables metadata, cancel and submit");
 	reportAcceptanceProgress("user-library:portable-import-pass");
 	const importedEnvelopeId = await importedBlueprintRecord.getAttribute("data-blueprint-id");
 	if (!importedEnvelopeId) throw new Error("Imported .openfabbp envelope id is unavailable.");

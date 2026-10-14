@@ -286,8 +286,7 @@ function placementMetadataShapeError(value: unknown, mode: "compact" | "full"): 
 		(value.sourceModuleCount === 0 ||
 			value.railEdgeCount === 0 ||
 			value.organizationCount === 0 ||
-			value.widthMeters === 0 ||
-			value.heightMeters === 0)
+			(value.widthMeters === 0 && value.heightMeters === 0))
 	) {
 		return "full placement metadata cannot be empty";
 	}

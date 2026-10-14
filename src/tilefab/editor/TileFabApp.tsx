@@ -549,6 +549,8 @@ import {
 	OpenFabUserBlueprintDiagnosticExportError,
 	type OpenFabUserBlueprintLibraryStatus,
 	type OpenFabUserBlueprintMutationDurability,
+	exportOpenFabUserBlueprintRecovery,
+	type OpenFabUserBlueprintFileExportResult,
 	type OpenFabUserBlueprintRecord,
 	type OpenFabUserBlueprintRejectedDiagnostic,
 	parseOpenFabUserBlueprintJson,
@@ -29747,10 +29749,12 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	};
 	const cancelUserBlueprintImport = (): void => {
+		if (userBlueprintLibraryBusyRef.current !== null) return;
 		setPendingUserBlueprintImport(null);
 		requestAnimationFrame(() => userBlueprintImportButtonRef.current?.focus());
 	};
 	const confirmUserBlueprintImport = async (): Promise<void> => {
+		if (userBlueprintLibraryBusyRef.current !== null) return;
 		const pending = pendingUserBlueprintImport;
 		if (!pending) return;
 		const requestedName = normalizeBlueprintName(pending.name);
@@ -29804,7 +29808,11 @@ export default function TileFabApp(): React.ReactElement {
 		try {
 			const json = serializeOpenFabUserBlueprintRecord(record);
 			const exported = await projectPersistence.chooseExport(record.blueprint.name, json);
-			if (exported) setStatus(`${record.blueprint.name}.openfabbp 파일을 내보냈습니다`);
+			setStatus(exported === "written"
+				? `${record.blueprint.name}.openfabbp 파일을 저장했습니다`
+				: exported === "download-requested"
+					? `${record.blueprint.name}.openfabbp 다운로드를 요청했습니다 · 다운로드한 파일을 확인하세요`
+					: "청사진 내보내기를 취소했습니다 · 라이브러리를 유지합니다");
 		} catch (error) {
 			setStatus(
 				error instanceof Error
@@ -29815,7 +29823,7 @@ export default function TileFabApp(): React.ReactElement {
 			finishUserBlueprintLibraryMutation(operationId);
 		}
 	};
-	const backupUserBlueprintLibrary = async (): Promise<boolean> => {
+	const backupUserBlueprintLibrary = async (): Promise<OpenFabUserBlueprintFileExportResult | "failed"> => {
 		const blockedReason = authoritativeUserBlueprintLibraryError(
 			userBlueprintStorageStatus,
 			"전체 백업",
@@ -29823,10 +29831,10 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockedReason) {
 			setUserBlueprintLibraryRestoreError(blockedReason);
 			setStatus(blockedReason);
-			return false;
+			return "failed";
 		}
 		const operationId = "backup-library";
-		if (!beginUserBlueprintLibraryMutation(operationId)) return false;
+		if (!beginUserBlueprintLibraryMutation(operationId)) return "failed";
 		setUserBlueprintLibraryRestoreError(null);
 		try {
 			const records = await refreshUserBlueprintLibrary();
@@ -29838,10 +29846,14 @@ export default function TileFabApp(): React.ReactElement {
 				`OpenFab Blueprint Library ${exportedAt.slice(0, 10)}`,
 				json,
 			);
-			if (exported) {
+			if (exported === "written") {
 				setStatus(
 					`전체 라이브러리 백업 파일을 생성했습니다 · ${bundle.recordCount.toLocaleString()}개 · ${bundle.aggregateEdgeCount.toLocaleString()} edges · 브라우저 동기화 파일이 아닙니다`,
 				);
+			} else {
+				setStatus(exported === "download-requested"
+					? "전체 라이브러리 다운로드를 요청했습니다 · 다운로드한 .openfablib 파일을 확인하세요 · 백업 완료는 확인되지 않았습니다"
+					: "전체 라이브러리 백업을 취소했습니다 · 라이브러리를 유지합니다");
 			}
 			return exported;
 		} catch (error) {
@@ -29849,7 +29861,7 @@ export default function TileFabApp(): React.ReactElement {
 				error instanceof Error ? error.message : "전체 라이브러리를 백업하지 못했습니다";
 			setUserBlueprintLibraryRestoreError(message);
 			setStatus(`전체 라이브러리를 백업하지 못했습니다 · ${message}`);
-			return false;
+			return "failed";
 		} finally {
 			finishUserBlueprintLibraryMutation(operationId);
 		}
@@ -30019,18 +30031,18 @@ export default function TileFabApp(): React.ReactElement {
 				return;
 			}
 			if (read.recoverableRecord) {
-				const exported = await projectPersistence.chooseExport(
-					read.recoverableRecord.blueprint.name,
-					read.json,
+				const { delivery: exported, removal: removed } = await exportOpenFabUserBlueprintRecovery(
+					projectPersistence, read,
 				);
-				if (!exported) return;
-				const removed = await projectPersistence.removeRejectedDiagnostic(
-					read.diagnostic.token,
-					read.recoverableRecord,
-				);
+				if (exported !== "written") {
+					setStatus(exported === "download-requested"
+						? "청사진 다운로드를 요청했습니다 · 다운로드한 파일을 확인하세요 · 백업 완료를 확인할 수 없어 원본 레코드를 유지합니다"
+						: "청사진 백업을 취소했습니다 · 원본 레코드를 유지합니다");
+					return;
+				}
 				await refreshUserBlueprintLibrary();
 				setStatus(
-					removed.status === "removed"
+					removed?.status === "removed"
 						? `한도 초과 레코드 ${read.diagnostic.ordinal}를 .openfabbp로 백업하고 브라우저 저장소에서 제거했습니다 · 필요하면 다시 가져올 수 있습니다`
 						: `한도 초과 레코드 ${read.diagnostic.ordinal} 백업은 완료했지만 저장소가 변경되어 원본은 제거하지 않았습니다 · 최신 격리 목록을 확인하세요`,
 				);
@@ -30040,10 +30052,14 @@ export default function TileFabApp(): React.ReactElement {
 				`Quarantined Blueprint ${read.diagnostic.ordinal}`,
 				read.json,
 			);
-			if (exported) {
+			if (exported === "written") {
 				setStatus(
 					`손상 레코드 ${read.diagnostic.ordinal}의 원본 진단 JSON을 내보냈습니다 · 이 파일은 청사진으로 가져올 수 없습니다`,
 				);
+			} else {
+				setStatus(exported === "download-requested"
+					? "진단 JSON 다운로드를 요청했습니다 · 다운로드한 파일을 확인하세요 · 원본 레코드를 유지합니다"
+					: "진단 JSON 내보내기를 취소했습니다 · 원본 레코드를 유지합니다");
 			}
 		} catch (error) {
 			setStatus(

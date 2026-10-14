@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPortEquipmentMutationPlan } from "../core/PortEquipmentPlan";
 import type { PortRecord } from "../core/PortRecord";
 import { planRailConstruction } from "../core/paint";
@@ -25,10 +25,13 @@ import {
 	compareOpenFabUserBlueprintRecords,
 	copyOpenFabUserBlueprintRecord,
 	createOpenFabUserBlueprintRecord,
+	exportOpenFabUserBlueprintRecovery,
 	OPENFAB_USER_BLUEPRINT_MAX_JSON_BYTES,
 	OpenFabUserBlueprintDiagnosticExportError,
+	type OpenFabUserBlueprintFileExportResult,
 	OpenFabUserBlueprintParseError,
 	type OpenFabUserBlueprintRecord,
+	type OpenFabUserBlueprintRejectedDiagnosticRead,
 	openFabUserBlueprintsShareFolderAndName,
 	openFabUtf8ByteLength,
 	parseOpenFabUserBlueprintJson,
@@ -574,3 +577,82 @@ function organizationOhbPlan(document: RailDocument) {
 		[{ id: 1, before: null, after: group }],
 	);
 }
+
+describe("recoverable blueprint export", () => {
+	function recoveryRead(): OpenFabUserBlueprintRejectedDiagnosticRead {
+		const record = createRecord("recoverable", "Recoverable synthetic rail");
+		const json = serializeOpenFabUserBlueprintRecord(record);
+		return {
+			diagnostic: {
+				token: "recovery-token",
+				ordinal: 1,
+				code: "LIMIT_EXCEEDED",
+				path: "$.records",
+				message: "capacity",
+			},
+			json,
+			byteLength: openFabUtf8ByteLength(json),
+			recoverableRecord: record,
+		};
+	}
+	it.each([
+		"download-requested",
+		"cancelled",
+	] as const)("keeps the original recoverable row after %s", async (delivery) => {
+		const read = recoveryRead();
+		const ports = {
+			chooseExport: vi.fn(async () => delivery),
+			removeRejectedDiagnostic: vi.fn(async () => ({ status: "removed" as const })),
+		};
+		await expect(exportOpenFabUserBlueprintRecovery(ports, read)).resolves.toEqual({
+			delivery,
+			removal: null,
+		});
+		expect(ports.removeRejectedDiagnostic).not.toHaveBeenCalled();
+	});
+	it("does not remove the original while native writing is still pending", async () => {
+		let finish!: (value: OpenFabUserBlueprintFileExportResult) => void;
+		const read = recoveryRead();
+		const ports = {
+			chooseExport: vi.fn(
+				() =>
+					new Promise<OpenFabUserBlueprintFileExportResult>((resolve) => {
+						finish = resolve;
+					}),
+			),
+			removeRejectedDiagnostic: vi.fn(async () => ({ status: "removed" as const })),
+		};
+		const operation = exportOpenFabUserBlueprintRecovery(ports, read);
+		expect(ports.removeRejectedDiagnostic).not.toHaveBeenCalled();
+		finish("written");
+		await expect(operation).resolves.toEqual({
+			delivery: "written",
+			removal: { status: "removed" },
+		});
+		expect(ports.removeRejectedDiagnostic).toHaveBeenCalledExactlyOnceWith(
+			read.diagnostic.token,
+			read.recoverableRecord,
+		);
+	});
+	it("retains a changed original when compare-and-delete reports a conflict", async () => {
+		const ports = {
+			chooseExport: vi.fn(async () => "written" as const),
+			removeRejectedDiagnostic: vi.fn(async () => ({ status: "conflict" as const })),
+		};
+		await expect(exportOpenFabUserBlueprintRecovery(ports, recoveryRead())).resolves.toEqual({
+			delivery: "written",
+			removal: { status: "conflict" },
+		});
+	});
+	it("preserves the original on an export failure, including a write AbortError", async () => {
+		const error = new DOMException("write failed", "AbortError");
+		const ports = {
+			chooseExport: vi.fn(async (): Promise<OpenFabUserBlueprintFileExportResult> => {
+				throw error;
+			}),
+			removeRejectedDiagnostic: vi.fn(async () => ({ status: "removed" as const })),
+		};
+		await expect(exportOpenFabUserBlueprintRecovery(ports, recoveryRead())).rejects.toBe(error);
+		expect(ports.removeRejectedDiagnostic).not.toHaveBeenCalled();
+	});
+});

@@ -38,6 +38,7 @@ import {
 	type OpenFabProjectBlueprint,
 } from "../project/OpenFabBlueprintLibrary";
 import type {
+	OpenFabUserBlueprintFileExportResult,
 	OpenFabUserBlueprintLibraryStatus,
 	OpenFabUserBlueprintRecord,
 	OpenFabUserBlueprintRejectedDiagnostic,
@@ -71,7 +72,7 @@ interface BlueprintLibraryPanelProps {
 	readonly cancelProjectBlueprintRename: () => void;
 	readonly saveProjectBlueprintName: () => void;
 	readonly areaStampSelectionValid: boolean;
-	readonly backupUserBlueprintLibrary: () => Promise<boolean>;
+	readonly backupUserBlueprintLibrary: () => Promise<OpenFabUserBlueprintFileExportResult | "failed">;
 	readonly beginUserBlueprintDrag: (
 		event: ReactDragEvent<HTMLElement>,
 		record: OpenFabUserBlueprintRecord,
@@ -1004,6 +1005,7 @@ export function BlueprintLibraryPanel({
 						<form
 							className="tilefab-blueprint-import-preview"
 							data-testid="user-blueprint-import-preview"
+							aria-busy={userBlueprintLibraryBusy !== null}
 							onSubmit={(event) => {
 								event.preventDefault();
 								void confirmUserBlueprintImport();
@@ -1048,6 +1050,7 @@ export function BlueprintLibraryPanel({
 										ref={userBlueprintImportNameRef}
 										value={pendingUserBlueprintImport.name}
 										aria-label="가져올 청사진 이름"
+										disabled={userBlueprintLibraryBusy !== null}
 										onChange={(event) => {
 											const name = event.currentTarget.value;
 											setPendingUserBlueprintImport((current) =>
@@ -1061,6 +1064,7 @@ export function BlueprintLibraryPanel({
 									<input
 										value={pendingUserBlueprintImport.folder}
 										aria-label="가져올 청사진 폴더"
+										disabled={userBlueprintLibraryBusy !== null}
 										placeholder="Process/Photo"
 										onChange={(event) => {
 											const folder = event.currentTarget.value;
@@ -1076,7 +1080,7 @@ export function BlueprintLibraryPanel({
 								{pendingUserBlueprintImportPreview.name || "NAME REQUIRED"}
 							</small>
 							<footer>
-								<button type="button" onClick={cancelUserBlueprintImport}>
+								<button type="button" disabled={userBlueprintLibraryBusy !== null} onClick={cancelUserBlueprintImport}>
 									CANCEL
 								</button>
 								<button

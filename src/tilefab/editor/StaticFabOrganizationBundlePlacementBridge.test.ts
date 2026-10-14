@@ -25,6 +25,8 @@ import {
 	isCertifiedStaticFabOrganizationBundlePlacementPlanIssuedFor,
 	isIssuedStaticFabOrganizationBundlePlacementPlan,
 } from "../core/StaticFabOrganizationBundlePlacement";
+import legacyOrganizationRecord from "../project/fixtures/legacy-organization-blueprint-v1.json";
+import { parseOpenFabUserBlueprintJson } from "../project/OpenFabUserBlueprintLibrary";
 import { captureRailMirrorSnapshot } from "../worker/RailMirrorChecksum";
 import type {
 	StaticFabOrganizationBundlePlacementWorkerRequest,
@@ -157,6 +159,9 @@ class CorruptedPlanWorker extends RuntimeWorker {
 type ResponseCorruption =
 	| "conflict-cap"
 	| "fractional-count"
+	| "zero-span"
+	| "negative-span"
+	| "fractional-span"
 	| "invalid-rail-byte"
 	| "out-of-range-cell"
 	| "out-of-range-mutation"
@@ -187,7 +192,16 @@ class MalformedPreparedWorker extends RuntimeWorker {
 			Object.assign(payload.prepared, { conflictCount: 0.5 });
 		else if (payload.kind === "additions") {
 			const additions = payload.additions;
-			if (this.corruption === "invalid-rail-byte") additions.encoded[0] = 0xff;
+			if (this.corruption === "zero-span")
+				Object.assign(payload.prepared.plan.organizationBundle, {
+					widthMeters: 0,
+					heightMeters: 0,
+				});
+			else if (this.corruption === "negative-span")
+				Object.assign(payload.prepared.plan.organizationBundle, { widthMeters: -1 });
+			else if (this.corruption === "fractional-span")
+				Object.assign(payload.prepared.plan.organizationBundle, { heightMeters: 0.5 });
+			else if (this.corruption === "invalid-rail-byte") additions.encoded[0] = 0xff;
 			else if (
 				this.corruption === "out-of-range-cell" ||
 				this.corruption === "out-of-range-mutation"
@@ -209,6 +223,70 @@ class MalformedPreparedWorker extends RuntimeWorker {
 }
 
 describe("StaticFabOrganizationBundlePlacementBridge", () => {
+	it.each([
+		[0, false],
+		[1, false],
+		[2, false],
+		[3, false],
+		[0, true],
+		[1, true],
+		[2, true],
+		[3, true],
+	] as const)("places a straight portable organization at turn %i with existing rails %s", async (quarterTurns, populated) => {
+		const record = parseOpenFabUserBlueprintJson(JSON.stringify(legacyOrganizationRecord));
+		if (record.blueprint.kind !== "STATIC_FAB_ORGANIZATION")
+			throw new Error("Expected an organization fixture.");
+		const { document, input } = placementInput();
+		if (populated) {
+			expect(
+				document.commit(planRailConstruction(document.map, { x: 0, y: 100 }, { x: 5, y: 100 })),
+			).toBe(true);
+		}
+		const snapshot = () =>
+			captureRailMirrorSnapshot(
+				document.map,
+				document.getPatchSequence(),
+				document.portEquipment,
+				document.organizations,
+				document.relationships,
+			).snapshot;
+		const before = snapshot();
+		const bridge = new StaticFabOrganizationBundlePlacementBridge(() => new RuntimeWorker());
+		const prepared = await bridge.prepare({
+			...input,
+			bundle: record.blueprint.bundle,
+			quarterTurns,
+			snapshot: snapshot(),
+		});
+		expect(prepared.certified).toBe(true);
+		if (!prepared.plan) throw new Error("Expected an exact straight placement plan.");
+		expect([
+			prepared.plan.organizationBundle.widthMeters,
+			prepared.plan.organizationBundle.heightMeters,
+		]).toEqual(quarterTurns % 2 === 0 ? [5, 0] : [0, 5]);
+		expect(document.commitStaticFabOrganizationBundle(prepared.plan)).toBe(true);
+		expect(document.portEquipment.ports).toHaveLength(1);
+		expect(document.portEquipment.equipmentGroups).toHaveLength(1);
+		expect(document.organizations.records).toHaveLength(2);
+		const area = document.organizations.records.find((row) => row.name === "Portable Area");
+		const bay = document.organizations.records.find((row) => row.name === "Portable Bay");
+		expect(area).toBeDefined();
+		expect(bay?.parentOrganizationIds).toEqual([area?.id]);
+		const after = snapshot();
+		expect(document.undo()).toBe(true);
+		const undone = snapshot();
+		expect(undone.xs).toEqual(before.xs);
+		expect(undone.ys).toEqual(before.ys);
+		expect(undone.encoded).toEqual(before.encoded);
+		// Undo retains issued organization IDs while removing the authored records.
+		expect(document.organizations.nextOrganizationId).toBe(prepared.plan.nextOrganizationIdAfter);
+		expect(document.portEquipment.ports).toHaveLength(0);
+		expect(document.portEquipment.equipmentGroups).toHaveLength(0);
+		expect(document.organizations.records).toHaveLength(0);
+		expect(document.redo()).toBe(true);
+		expect(snapshot().checksum).toBe(after.checksum);
+	});
+
 	it("keeps cancellation live after transport termination through the final admission yield", async () => {
 		const baselineGate = admissionGate(Infinity);
 		const baseline = placementInput();
@@ -575,6 +653,9 @@ describe("StaticFabOrganizationBundlePlacementBridge", () => {
 	it.each([
 		"conflict-cap",
 		"fractional-count",
+		"zero-span",
+		"negative-span",
+		"fractional-span",
 		"invalid-rail-byte",
 		"out-of-range-cell",
 		"out-of-range-mutation",

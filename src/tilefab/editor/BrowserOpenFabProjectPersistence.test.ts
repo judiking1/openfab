@@ -965,6 +965,101 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		expect(text).not.toHaveBeenCalled();
 	});
 
+	describe.each([
+		"chooseExport",
+		"chooseLibraryExport",
+		"chooseDiagnosticExport",
+	] as const)("blueprint export receipt: %s", (method) => {
+		it("reports a download request without implying a completed file", async () => {
+			vi.stubGlobal("window", {});
+			const download = stubProjectDownload();
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method]("Synthetic", "{}")).resolves.toBe("download-requested");
+			expect(download.click).toHaveBeenCalledOnce();
+		});
+		it("starts the native picker on the click stack and waits for close before written", async () => {
+			let close!: () => void;
+			const file = createFileHandle("Synthetic");
+			const stream = createWritable(() => undefined);
+			stream.close = vi.fn(
+				() =>
+					new Promise<void>((resolve) => {
+						close = resolve;
+					}),
+			);
+			vi.spyOn(file.handle, "createWritable").mockResolvedValue(stream);
+			const picker = vi.fn(async () => file.handle);
+			vi.stubGlobal("window", { showSaveFilePicker: picker });
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			let settled = false;
+			const result = persistence[method]("Synthetic", "{}").then((value) => {
+				settled = true;
+				return value;
+			});
+			expect(picker).toHaveBeenCalledOnce();
+			await vi.waitFor(() => expect(stream.close).toHaveBeenCalledOnce());
+			expect(settled).toBe(false);
+			close();
+			await expect(result).resolves.toBe("written");
+		});
+		it("returns cancelled only for picker cancellation without falling back", async () => {
+			const download = stubProjectDownload();
+			vi.stubGlobal("window", {
+				showSaveFilePicker: async () => {
+					throw new DOMException("cancel", "AbortError");
+				},
+			});
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method]("Synthetic", "{}")).resolves.toBe("cancelled");
+			expect(download.click).not.toHaveBeenCalled();
+		});
+		it("propagates picker failure without starting a download", async () => {
+			const download = stubProjectDownload();
+			const error = new DOMException("denied", "SecurityError");
+			vi.stubGlobal("window", {
+				showSaveFilePicker: async () => {
+					throw error;
+				},
+			});
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method]("Synthetic", "{}")).rejects.toBe(error);
+			expect(download.click).not.toHaveBeenCalled();
+		});
+		it.each([
+			"createWritable",
+			"write",
+			"close",
+		] as const)("propagates %s AbortError as a failed write", async (stage) => {
+			const file = createFileHandle("Synthetic");
+			const error = new DOMException("write failed", "AbortError");
+			const stream = createWritable(() => undefined);
+			const abort = vi.spyOn(stream, "abort");
+			if (stage === "createWritable")
+				vi.spyOn(file.handle, "createWritable").mockRejectedValue(error);
+			else {
+				vi.spyOn(stream, stage).mockRejectedValue(error);
+				vi.spyOn(file.handle, "createWritable").mockResolvedValue(stream);
+			}
+			vi.stubGlobal("window", { showSaveFilePicker: async () => file.handle });
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method]("Synthetic", "{}")).rejects.toBe(error);
+			if (stage !== "createWritable") expect(abort).toHaveBeenCalledOnce();
+		});
+		it("rejects an operation abort instead of treating it as user cancellation", async () => {
+			const controller = new AbortController();
+			vi.stubGlobal("window", {
+				showSaveFilePicker: async () => {
+					controller.abort();
+					throw new DOMException("aborted", "AbortError");
+				},
+			});
+			const persistence = new BrowserOpenFabProjectPersistence(new MemoryProjectDatabase());
+			await expect(persistence[method]("Synthetic", "{}", controller.signal)).rejects.toMatchObject(
+				{ name: "AbortError" },
+			);
+		});
+	});
+
 	it("uses the UTF-8 byte budget for portable blueprint import and export", async () => {
 		const text = vi.fn(async () => "should not be read");
 		const handle = {
@@ -1015,7 +1110,7 @@ describe("BrowserOpenFabProjectPersistence", () => {
 		vi.stubGlobal("window", { showSaveFilePicker: savePicker });
 		await expect(
 			persistence.chooseLibraryExport("Production Library", '{"records":[]}'),
-		).resolves.toBe(true);
+		).resolves.toBe("written");
 		expect(savePicker).toHaveBeenCalledWith(
 			expect.objectContaining({
 				suggestedName: `Production Library${OPENFAB_USER_BLUEPRINT_LIBRARY_FILE_EXTENSION}`,
@@ -1570,7 +1665,7 @@ describe("BrowserOpenFabProjectPersistence", () => {
 
 		await expect(
 			persistence.chooseDiagnosticExport("Corrupt Bay", '{\n\t"bad": true\n}\n'),
-		).resolves.toBe(true);
+		).resolves.toBe("written");
 
 		expect(savePicker).toHaveBeenCalledWith(
 			expect.objectContaining({
