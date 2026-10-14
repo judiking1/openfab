@@ -7,9 +7,9 @@
 - The active app is `src/App.tsx -> src/tilefab/editor/TileFabApp.tsx`.
 - The canonical document, compiled physical paths, atomic history, and typed Worker mirror
   remain the common boundary for editing, rendering, and read-only 3D inspection.
-- v0.1.114 bundles guarded-save guidance, safe Blueprint file handling and straight organization placement.
+- v0.1.115 bundles selected-file read-failure handling and EQ/fixed-module rail-preparation guidance.
   A synchronized rail mirror does not authorize simulation.
-- Unreleased file-open boundary: project, Blueprint and library restore share picker-only
+- 0.1.115 file-open boundary: project, Blueprint and library restore share picker-only
   cancellation handling. Selected-file getFile/text/stream failures remain failures; input
   fallback rejects operation aborts and ignores late cancel/change events after selection.
   Existing failure UI preserves the document, library and unfinished import metadata.
@@ -17,9 +17,8 @@
   build, changed-file lint, public release checks and independent code review PASS. Controlled
   Chrome 1440/390 picker/read-failure checks preserve project identity/checksum, dirty state,
   library and import drafts; Undo/Redo PASS. All 73 candidate assets load with matching hashes.
-  Actual OS file acceptance and full authoring/scale/unit suites were not run for this change.
-  Hold this local candidate for the next release bundle; v0.1.114 remains deployed.
-- Unreleased rail-preparation guidance: EQ offers a visible reason and rail preparation when
+  Actual OS file acceptance and full authoring/scale suites remain unverified for this change.
+- 0.1.115 rail-preparation guidance: EQ offers a visible reason and rail preparation when
   the current pitch/continuity/occupancy cannot form a complete row; pitch controls stay available.
   Empty-document U-TURN, SHIFT and 2×2SWITCH offer rail preparation, preserving module span,
   switch profile and side until explicit return. Cancel, tool/activity change and document
@@ -30,8 +29,12 @@
   Chrome 390/1440 checks PASS for insufficient EQ rail, invalid row rejection, pitch changes,
   preparation/cancel/Escape/reentry, all three module-setting returns, Undo and explicit tool
   change. Primary actions remain at least 44 px without horizontal overflow; simulation stays
-  disabled. Full unit/authoring/scale/native-OS suites were not run for this change.
-  Hold with the file-open candidate for the next release bundle; v0.1.114 remains deployed.
+  disabled. Independent GUI also passed actual EQ creation and U-TURN, SHIFT and switch placement
+  with preserved settings and Undo/Redo. Full authoring/scale/native-OS suites were not run.
+- 0.1.115 bundle verification: one full `pnpm test` run, 464 files / 5,971 tests PASS and 2 existing
+  tests skipped; no failures. Only version/release records changed after that run; the full suite
+  was not repeated. Ordinary production build, public release checks and the normal staged safety
+  hook PASS. V1 remains incomplete; actual native OS Save/Open acceptance remains outstanding.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.

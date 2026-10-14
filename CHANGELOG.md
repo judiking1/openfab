@@ -6,6 +6,19 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.115] - 2026-10-14
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Distinguish file-picker cancellation from selected-file read failures for projects, Blueprints
+  and library restore; preserve the current document, library and unfinished import inputs.
+- Offer EQ rail preparation when current pitch, continuity or occupancy cannot form a complete
+  row, while keeping pitch controls available and preserving the requested equipment return.
+- Guide empty-document U-TURN, SHIFT and 2×2SWITCH users through rail preparation and explicit
+  return with their module settings intact. Clear the temporary intent on cancellation or tool
+  changes, and keep module settings reachable in the compact unified workspace.
+- Native OS project file Save/Open roundtrip remains unverified.
+
 ## [0.1.114] - 2026-10-14
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
