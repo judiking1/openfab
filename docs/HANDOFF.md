@@ -35,6 +35,15 @@
   tests skipped; no failures. Only version/release records changed after that run; the full suite
   was not repeated. Ordinary production build, public release checks and the normal staged safety
   hook PASS. V1 remains incomplete; actual native OS Save/Open acceptance remains outstanding.
+- Unreleased Close preview: an unowned directed path can propose closure from its sink to its
+  own source. Branches, merges, switches, owned paths and reuse of other rail cells are rejected.
+  Both L-shaped bends pass the existing physical/Port evaluator before selection. Explicit Apply
+  uses one ordinary history/Worker command; no organization is created. Cancel, selection/tool
+  changes, model publication and project replacement clear the draft; Apply rechecks document,
+  model generation, patch sequence, rail revision and mutation generation.
+  Verification: 2 focused files / 36 tests PASS, ordinary production build, changed-file lint
+  (one existing Biome warning), diff and public release checks PASS. Independent Close GUI review,
+  full authoring/scale/native-OS suites are not run; this candidate is not published.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.

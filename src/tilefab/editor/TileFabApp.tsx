@@ -276,7 +276,7 @@ import {
 	transformRailAreaStampTemplate,
 } from "../core/RailAreaStamp";
 import { classifyRailCell } from "../core/RailCellClassification";
-import { resolveRailClosureSnap } from "../core/RailClosureSnap";
+import { proposeOpenRailClosure, resolveRailClosureSnap } from "../core/RailClosureSnap";
 import {
 	planCatalogRailConstruction,
 	RAIL_CONSTRUCTION_CATALOG,
@@ -1888,6 +1888,18 @@ interface RailTemplateSession {
 	readonly activeParameterKey: RailTemplateParameterKey;
 }
 
+interface OpenRailClosureDraft {
+	readonly document: RailDocument;
+	readonly baseMutationGeneration: number;
+	readonly modelGeneration: number;
+	readonly basePatchSequence: number;
+	readonly start: Cell;
+	readonly target: Cell | null;
+	readonly plan: RailConstructionPlan;
+	readonly valid: boolean;
+	readonly reason: string;
+}
+
 interface RailPatternResizeDraft {
 	readonly candidate: RailPatternCandidate;
 	readonly parameters: RailTemplateParameters;
@@ -2642,6 +2654,7 @@ export default function TileFabApp(): React.ReactElement {
 	const areaSelectionRef = useRef<RailAreaSelection | null>(null);
 	const areaSelectionProvenanceRef = useRef<StaticFabAreaSelectionProvenance>(null);
 	const staticFabSelectionRef = useRef<StaticFabSelection | null>(null);
+	const openRailClosureDraftRef = useRef<OpenRailClosureDraft | null>(null);
 	const patternResizeDraftRef = useRef<RailPatternResizeDraft | null>(null);
 	const areaStampAttachmentIndexRef = useRef<RailAreaStampAttachmentIndex | null>(null);
 	const attachmentGuideRef = useRef<RailTemplateAttachmentGuide | null>(null);
@@ -3677,6 +3690,7 @@ export default function TileFabApp(): React.ReactElement {
 		useState<StaticFabSemanticFabDeleteSession | null>(null);
 	const [staticFabBayFlowEdit, setStaticFabBayFlowEdit] =
 		useState<StaticFabBayFlowEditSession | null>(null);
+	const [openRailClosureDraft, setOpenRailClosureDraft] = useState<OpenRailClosureDraft | null>(null);
 	const [patternResizeDraft, setPatternResizeDraft] = useState<RailPatternResizeDraft | null>(null);
 	const [selectedPortEquipment, setSelectedPortEquipmentState] =
 		useState<PortEquipmentSelection | null>(null);
@@ -5712,6 +5726,8 @@ export default function TileFabApp(): React.ReactElement {
 				workerBridgeRef.current = mirrorBridge;
 				workerBridgeDocumentRef.current = nextModel.document;
 				draftEvaluatorRef.current = candidate.draftEvaluator;
+				openRailClosureDraftRef.current = null;
+				setOpenRailClosureDraft(null);
 				editorModelRef.current = nextModel;
 				// Cancellation can change the tool; the layout effect rebinds availability
 				// to the final tool using this same prepared presentation.
@@ -7085,6 +7101,17 @@ export default function TileFabApp(): React.ReactElement {
 		scheduleRender();
 		return true;
 	};
+	const clearOpenRailClosureDraft = (): void => {
+		const draft = openRailClosureDraftRef.current;
+		if (!draft) return;
+		openRailClosureDraftRef.current = null;
+		setOpenRailClosureDraft(null);
+		scheduleRender();
+		if (previewRef.current?.plan === draft.plan) {
+			previewRef.current = null;
+			if (previewReadoutRef.current) previewReadoutRef.current.textContent = "";
+		}
+	};
 	const updateOrganizationMultiSelection = (
 		next: StaticFabOrganizationMultiSelectionState,
 	): void => {
@@ -7096,6 +7123,7 @@ export default function TileFabApp(): React.ReactElement {
 		cancelStaticFabSemanticBankDeleteRef.current();
 		cancelStaticFabSemanticBankDetachRef.current();
 		cancelStaticFabBayFlowEditRef.current();
+		clearOpenRailClosureDraft();
 		organizationMultiSelectionRef.current = next;
 		setOrganizationMultiSelection(next);
 	};
@@ -7152,6 +7180,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const clearAreaSelection = (): void => updateAreaSelection(null);
 	const updateEditorActivity = (next: EditorActivity): void => {
+		clearOpenRailClosureDraft();
 		editorActivityRef.current = next;
 		setEditorActivity(next);
 	};
@@ -7345,6 +7374,7 @@ export default function TileFabApp(): React.ReactElement {
 		return true;
 	};
 	const setPortEquipmentSelection = (next: PortEquipmentSelection | null): void => {
+		clearOpenRailClosureDraft();
 		selectedPortEquipmentRef.current = next;
 		setSelectedPortEquipmentState(next);
 		if (!next) return;
@@ -7358,6 +7388,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 	const clearPortEquipmentSelection = (): void => setPortEquipmentSelection(null);
 	const setRailSelection = (cell: Cell | null, module: RailModuleOwnership | null): void => {
+		clearOpenRailClosureDraft();
 		const model = editorModelRef.current;
 		reshapeSelectionHistory.select(model.document, model.map, model.ownership, cell, module?.key ?? null);
 		if (cell) {
@@ -7633,6 +7664,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const publishEditorModel = (nextModel: ActiveRailEditorModel, message: string): void => {
+		clearOpenRailClosureDraft();
 		cancelProcessLoopOperation();
 		const loopContext = processLoopRailEditRef.current;
 		const retainedLoop = loopContext?.document === nextModel.document ? nextModel.document.organizations.records.find((record) => record.id === loopContext.organizationId) : null;
@@ -8242,6 +8274,7 @@ export default function TileFabApp(): React.ReactElement {
 		closedMessage?: string,
 		resolveMessage?: (model: ActiveRailEditorModel) => string,
 	): RailNetworkAnalysis | null => {
+		clearOpenRailClosureDraft();
 		const map = editorModelRef.current.document.map;
 		if (
 			map.getRevision() !== editorModelRef.current.map.getRevision() &&
@@ -9102,6 +9135,7 @@ export default function TileFabApp(): React.ReactElement {
 		message?: string,
 		options: Readonly<{ scheduleCanvas?: boolean }> = {},
 	): void => {
+		clearOpenRailClosureDraft();
 		cancelProcessLoopOperation();
 		ordinaryPortScopeReturnSessionRef.current = null;
 		if (cameraFitScopeRef.current === "assembly-review") cameraFitScopeRef.current = null;
@@ -10142,6 +10176,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const refreshBuildPreview = (): void => {
+		if (openRailClosureDraftRef.current) return;
 		const organizationBundle = organizationBundlePlacementSessionRef.current;
 		if (organizationBundle) {
 			const anchor = hoverRef.current;
@@ -12822,6 +12857,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handleUndo = async (): Promise<boolean> => {
+		clearOpenRailClosureDraft();
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return false;
 		if (blockStaticFabExclusiveCommand()) return false;
 		const bankHistoryReceipt = connectedBayBankHistoryReceiptRef.current;
@@ -13007,6 +13043,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handleRedo = async (): Promise<void> => {
+		clearOpenRailClosureDraft();
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return;
 		if (blockStaticFabExclusiveCommand()) return;
 		const bankHistoryReceipt = connectedBayBankHistoryReceiptRef.current;
@@ -13325,6 +13362,7 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		keyboardActionsRef.current = {
 			cancel: () => {
+				if (openRailClosureDraftRef.current) { cancelOpenRailClosure(); return; }
 				if (staticFabCheckRepairChooserRef.current?.view) { closeStaticFabCheckRepairChooser(); return; }
 				if (processLoopOperationRef.current) { cancelProcessLoopOperation(); return; }
 				if (processLoopRailEditRef.current && !guidedRailKeyboardSessionRef.current && !inspectAreaKeyboardSessionRef.current) { exitProcessLoopRailEdit(); return; }
@@ -14001,7 +14039,7 @@ export default function TileFabApp(): React.ReactElement {
 				dpr,
 				hoverTile: hoverRef.current,
 				hoverWorld: hoverWorldRef.current,
-				anchorTile: anchorRef.current,
+				anchorTile: openRailClosureDraftRef.current?.start ?? anchorRef.current,
 				anchorIntent:
 					buildModeRef.current === "network-link" || activeNetworkLinkPlan
 						? "network-link-source"
@@ -14012,8 +14050,8 @@ export default function TileFabApp(): React.ReactElement {
 							networkLinkContextRef.current?.sourceForward ??
 							null)
 						: null,
-				snapTargetTile: closureSnapRef.current,
-				snapTargetRadiusPixels: closureSnapRadiusPixelsRef.current,
+				snapTargetTile: openRailClosureDraftRef.current?.target ?? closureSnapRef.current,
+				snapTargetRadiusPixels: openRailClosureDraftRef.current ? 18 : closureSnapRadiusPixelsRef.current,
 				selectedTile: selectedRef.current,
 				selectedModule: selectedModuleRef.current,
 				railAreaSelection: areaSelectionRef.current,
@@ -14857,6 +14895,16 @@ export default function TileFabApp(): React.ReactElement {
 				return;
 			}
 			if (document.querySelector('[aria-modal="true"]')) return;
+			if (openRailClosureDraftRef.current && event.code === "Escape") {
+				event.preventDefault();
+				keyboardActionsRef.current.cancel();
+				return;
+			}
+			if (openRailClosureDraftRef.current && target === canvas &&
+				["Enter", "NumpadEnter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.code)) {
+				event.preventDefault();
+				return;
+			}
 			if (editorViewModeRef.current === "3d") {
 				if (event.code === "Escape") {
 					event.preventDefault();
@@ -18779,6 +18827,11 @@ export default function TileFabApp(): React.ReactElement {
 			scheduleRender();
 			return;
 		}
+		if (openRailClosureDraftRef.current) {
+			event.preventDefault();
+			setAuthoringSurface("task");
+			return;
+		}
 		if (event.button === 0) {
 			setAuthoringToolActivated(true);
 			setAuthoringSurface(compactAuthoringViewport && currentGuidedTask && !currentGuidedTask.paused ? null : "task");
@@ -19282,6 +19335,7 @@ export default function TileFabApp(): React.ReactElement {
 			}
 			return;
 		}
+		if (openRailClosureDraftRef.current) return;
 		if (staticFabArrangementUiRef.current) {
 			const pointer = pointerPosition(event);
 			updateCursor(pointer.cell, pointer.world);
@@ -19747,6 +19801,11 @@ export default function TileFabApp(): React.ReactElement {
 				const tile = resolveBuildPointerCell(pointer, anchorRef.current);
 				updateCursor(tile, pointer.world);
 				refreshBuildPreview();
+			}
+			if (openRailClosureDraftRef.current) {
+				if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+				scheduleRender();
+				return;
 			}
 			if (pan.button === 1 && !pan.moved) {
 				openContextPalette();
@@ -20317,6 +20376,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handlePointerLeave = (): void => {
+		if (openRailClosureDraftRef.current) return;
 		if (toolRef.current === "reshape" && reshapeRef.current?.retainedDraft) {
 			scheduleRender();
 			return;
@@ -20733,6 +20793,7 @@ export default function TileFabApp(): React.ReactElement {
 		workerBridgeDocumentRef.current = nextModel.document;
 		draftEvaluatorRef.current = prepared.candidate.draftEvaluator;
 		setOrganizationBundlePublicationNotice(null);
+		clearOpenRailClosureDraft();
 		editorModelRef.current = nextModel;
 		// Cancellation can change the tool; the layout effect rebinds availability
 		// to the final tool using this same prepared presentation.
@@ -23782,6 +23843,74 @@ export default function TileFabApp(): React.ReactElement {
 		);
 		refreshBuildPreview();
 		scheduleRender();
+	};
+
+	const prepareOpenRailClosureDraft = (start: Cell): OpenRailClosureDraft => {
+		const model = editorModelRef.current;
+		const proposal = proposeOpenRailClosure(model.document, start);
+		const evaluated = proposal.candidates.map((plan) => ({ plan, evaluation: evaluateBuildPlan(plan) }));
+		const chosen = evaluated.find(({ evaluation }) => evaluation.valid) ??
+			evaluated.find(({ plan }) => plan.valid) ?? evaluated[0];
+		if (!chosen) throw new Error("Missing rail closure candidate");
+		return Object.freeze({
+			document: model.document, modelGeneration: model.generation,
+			basePatchSequence: model.document.getPatchSequence(), baseMutationGeneration: model.document.map.getMutationGeneration(),
+			start: proposal.start, target: proposal.target,
+			plan: chosen.plan, valid: chosen.evaluation.valid,
+			reason: chosen.evaluation.valid ? "대상 시작점과 경로를 확인한 뒤 적용하세요" : railDraftDisplayReason(chosen.evaluation),
+		});
+	};
+	const publishOpenRailClosureDraft = (draft: OpenRailClosureDraft): void => {
+		openRailClosureDraftRef.current = draft;
+		setOpenRailClosureDraft(draft);
+		publishBuildPreview(draft.plan);
+		setStatus(draft.reason);
+		scheduleRender();
+	};
+	const startOpenRailClosure = (): void => {
+		const start = selectedRef.current;
+		if (!start || editorViewModeRef.current !== "2d" || blockStaticFabExclusiveCommand()) return;
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		clearTransientConstruction();
+		closeContextPalette();
+		toolRef.current = "inspect";
+		setTool("inspect");
+		updateEditorActivity("inspect");
+		setAuthoringSurface("task");
+		publishOpenRailClosureDraft(prepareOpenRailClosureDraft(start));
+		requestAnimationFrame(() => appRootRef.current?.querySelector<HTMLButtonElement>(
+			'[data-testid="apply-rail-closure"]:not(:disabled), [data-testid="continue-rail-closure"]',
+		)?.focus({ preventScroll: true }));
+	};
+	const cancelOpenRailClosure = (): void => {
+		clearTransientConstruction("레일 닫기를 취소했습니다");
+		canvasRef.current?.focus({ preventScroll: true });
+	};
+	const applyOpenRailClosure = (): void => {
+		const draft = openRailClosureDraftRef.current;
+		const model = editorModelRef.current;
+		if (!draft || editorViewModeRef.current !== "2d") return;
+		if (draft.document !== model.document || draft.modelGeneration !== model.generation ||
+			draft.basePatchSequence !== model.document.getPatchSequence() || draft.plan.baseRevision !== model.document.map.getRevision() ||
+			draft.baseMutationGeneration !== model.document.map.getMutationGeneration()) {
+			clearTransientConstruction("원본이 바뀌었습니다 · 끝점을 다시 선택하세요");
+			return;
+		}
+		const blocked = editorMutationWaitBlockedReason();
+		if (blocked) { setStatus(blocked); return; }
+		const refreshed = prepareOpenRailClosureDraft(draft.start);
+		publishOpenRailClosureDraft(refreshed);
+		if (!refreshed.valid) return;
+		const result = commitPlan(refreshed.plan);
+		if (!result.committed) {
+			publishOpenRailClosureDraft({ ...refreshed, valid: false, reason: result.reason });
+			return;
+		}
+		clearTransientConstruction();
+		clearRailSelection();
+		syncModelUi("레일을 하나의 방향 순환로로 닫았습니다 · Undo로 되돌릴 수 있습니다");
+		canvasRef.current?.focus({ preventScroll: true });
 	};
 
 	const updatePatternResizeDraft = (next: RailPatternResizeDraft | null): void => {
@@ -33181,6 +33310,7 @@ export default function TileFabApp(): React.ReactElement {
 			dragRef.current ||
 			anchorRef.current ||
 			patternResizeDraftRef.current ||
+			openRailClosureDraftRef.current ||
 			reshapeRef.current ||
 			ohbPlacementIntentRef.current ||
 			portRowDragRef.current ||
@@ -34548,7 +34678,7 @@ export default function TileFabApp(): React.ReactElement {
 			viewMode === "2d",
 	});
 	const railModuleInspectorVisible = Boolean(
-		selected &&
+		!openRailClosureDraft && selected &&
 			selectedRail &&
 			!guidedBuildExpertSelectionInspectorsHidden &&
 			!staticFabExclusiveCommandActive &&
@@ -35661,7 +35791,13 @@ export default function TileFabApp(): React.ReactElement {
 		kind: selectedPortDetails || equipmentWorkspaceActive ? "equipment" : areaStampSession || stampSession || blueprintLibraryOpen ? "blueprint" : organizationBundlePlacementSession || staticFabExclusiveCommandActive ? "structure" : editorActivity === "inspect" || staticFabNavigatorOpen ? "selection" : "rail",
 		title: equipmentBrowserOpen ? "기존 장비 찾기" : processLoopRegistrationFocused ? "작업 루프 등록" : visibleAuthoringResult ? `${visibleAuthoringResult.kind === "fab" ? "FAB 생성" : "Bay 배치"} 완료` : readinessOpen ? "FAB 검사" : organizationLibraryOpen ? "구조 선택·편집" : navigatorMapOpen ? "FAB 지도" : blueprintLibraryOpen ? "청사진" : selectedPortDetails && portEquipmentInspectorVisible ? "장비 선택·편집" : productionBayConfiguration ? "Bay 배치" : templateSession ? railTemplateCatalogItem(templateSession.id).statusLabel : organizationBundlePlacementSession ? "구조 배치" : areaStampSession || stampSession ? "청사진 배치" : staticFabExclusiveCommandActive ? "구조 편집 검토" : equipmentWorkspaceActive ? `${tool === "stk" ? "Stocker" : tool.toUpperCase()} 배치` : tool === "inspect" ? "선택·편집" : tool === "erase" ? "레일 철거" : "레일 제작",
 	};
-	const authoringTask: AuthoringTaskPresentation = blueprintSelectionFocused ? {
+	const authoringTask: AuthoringTaskPresentation = openRailClosureDraft ? {
+		id: "rail-closure", kind: "rail", title: "레일 닫기 미리보기",
+		instruction: openRailClosureDraft.target
+			? `끝점 (${openRailClosureDraft.start.x}, ${openRailClosureDraft.start.y}) → 시작점 (${openRailClosureDraft.target.x}, ${openRailClosureDraft.target.y}) · ${openRailClosureDraft.plan.lengthMeters} m`
+			: "조직 미소속 단일 경로의 끝점 한 쌍을 닫습니다",
+		status: { tone: openRailClosureDraft.valid ? "ready" : "blocked", message: openRailClosureDraft.reason },
+	} : blueprintSelectionFocused ? {
 		...baseAuthoringTask, title: "새 청사진 만들기",
 		instruction: organizationSelectionCount > 0
 			? `선택 조직 ${organizationSelectionCount}개 · ${organizationSelectionMode === "EFFECTIVE" ? "하위 조직의 레일·장비 포함" : "선택 조직에 직접 속한 레일·장비만 포함"}`
@@ -35731,7 +35867,13 @@ tool: tool,
 visibleRecentPlacedOhb: visibleRecentPlacedOhb,
 workerState: workerState,
 zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
-	const authoringTaskActions = blueprintSelectionFocused ? <div className="tilefab-authoring-task-actions tilefab-blueprint-selection-actions" data-testid="blueprint-selection-actions">
+	const authoringTaskActions = openRailClosureDraft ? <div className="tilefab-authoring-task-actions" data-testid="rail-closure-actions">
+		<button type="button" data-testid="apply-rail-closure"
+			disabled={!openRailClosureDraft.valid || modelSyncPending || projectBusy || workerState.status !== "ready"}
+			onClick={applyOpenRailClosure}>레일 닫기 적용</button>
+		<button type="button" data-testid="continue-rail-closure" onClick={() => continueFromCell(openRailClosureDraft.start, "끝점에서 계속 건설합니다 · 필요하면 우회 경로를 그리세요", true)}>계속 건설</button>
+		<button type="button" data-testid="cancel-rail-closure" onClick={cancelOpenRailClosure}>취소</button>
+	</div> : blueprintSelectionFocused ? <div className="tilefab-authoring-task-actions tilefab-blueprint-selection-actions" data-testid="blueprint-selection-actions">
 		<button type="button" data-testid="save-blueprint-selection" disabled={!blueprintSelectionAvailable || projectBusy || modelSyncPending || userBlueprintLibraryBusy !== null}
 			onClick={(event) => requestContextualBlueprintSave(organizationMultiSelectionRef.current.selectedOrganizationIds.length > 0 ? "organization" : "area", event.currentTarget)}>선택을 청사진으로 저장</button>
 		<button type="button" data-testid="return-blueprint-selection" onClick={returnFromBlueprintSelection}>청사진으로 돌아가기</button>
@@ -35773,6 +35915,8 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 			data-view-mode={viewMode}
 			data-editor-activity={editorActivity}
 			data-editor-tool={tool}
+			data-rail-closure-active={openRailClosureDraft !== null}
+			data-rail-closure-valid={openRailClosureDraft?.valid ?? false}
 			data-openfab-start-dialog={openFabStartDialogOpen}
 			data-guided-build-active={guidedBuildOpen}
 			data-guided-task={currentGuidedTask?.task ?? ""}
@@ -38099,6 +38243,8 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 											{selectedReshapeSourceReason}
 										</div>
 									) : null}
+									{selectedOpenTerminal ? <button type="button" role="menuitem" data-testid="context-preview-rail-closure"
+										onClick={() => runContextPaletteAction(startOpenRailClosure)}>닫기 미리보기</button> : null}
 									{selectedContextualRailTemplates.map((item) => (
 										<button
 											type="button"
@@ -41694,6 +41840,7 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 						selectedSwitchOutputConnected={selectedSwitchOutputConnected}
 						continueFromSwitchOutput={continueFromSwitchOutput}
 						continueFromSelected={continueFromSelected}
+						previewClosure={selectedOpenTerminal ? startOpenRailClosure : null}
 						directionNames={directionNames}
 						advancedSwitchSide={advancedSwitchSide}
 						advancedSwitchPortSummary={advancedSwitchPortSummary}

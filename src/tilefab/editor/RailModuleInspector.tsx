@@ -45,6 +45,7 @@ export interface RailModuleInspectorProps {
 	readonly selectedSwitchOutputConnected: readonly [boolean, boolean];
 	readonly continueFromSwitchOutput: (outputIndex: 0 | 1) => void;
 	readonly continueFromSelected: () => void;
+	readonly previewClosure: (() => void) | null;
 	readonly directionNames: (mask: number) => string;
 	readonly advancedSwitchSide: (switchRecord: AdvancedSwitchRecord) => "LEFT" | "RIGHT";
 	readonly advancedSwitchPortSummary: (switchRecord: AdvancedSwitchRecord) => string;
@@ -87,6 +88,7 @@ export function RailModuleInspector({
 	selectedSwitchOutputConnected,
 	continueFromSwitchOutput,
 	continueFromSelected,
+	previewClosure,
 	directionNames,
 	advancedSwitchSide,
 	advancedSwitchPortSummary,
@@ -226,6 +228,16 @@ export function RailModuleInspector({
 						<Crosshair size={15} /> 이 모듈에서 계속 건설
 					</button>
 				)}
+				{previewClosure ? (
+					<button
+						type="button"
+						className="tilefab-inspector-primary"
+						data-testid="preview-rail-closure"
+						onClick={previewClosure}
+					>
+						닫기 미리보기
+					</button>
+				) : null}
 				<dl>
 					{selectedSwitch && selectedSwitchGeometry ? (
 						<>
