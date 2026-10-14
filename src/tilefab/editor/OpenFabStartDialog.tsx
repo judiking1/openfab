@@ -112,7 +112,7 @@ export function OpenFabStartDialog({
 					{recovery
 						? "저장되지 않은 작업의 로컬 복구본이 있습니다. 이어서 열거나 새 FAB를 시작하세요. 새로 시작해도 복구본은 자동으로 삭제되지 않습니다."
 						: onTask
-							? "필요한 작업만 골라 직접 해 보세요. 실습을 닫아도 편집 내용은 유지됩니다."
+							? "필요한 작업만 골라 직접 해 보세요. 실습을 끝내도 편집 내용은 유지되며, 다시 고르면 안내를 처음부터 시작합니다."
 							: hasCurrentFabContent
 								? "현재 FAB를 계속 편집할 수 있습니다. 빈 프로젝트가 필요하면 프로젝트 메뉴에서 새 프로젝트를 선택하세요."
 								: "처음이라면 Guided Build로 첫 정적 FAB를 완성하세요. 같은 프로젝트와 편집 명령으로 레일부터 검증·저장까지 이어집니다."}
@@ -172,7 +172,7 @@ export function OpenFabStartDialog({
 								<GraduationCap size={22} />
 								<span>
 									<strong>{task.title}</strong>
-									<small>{task.description}</small>
+									<small>처음부터 실습 · {task.description}</small>
 								</span>
 							</button>
 						))}

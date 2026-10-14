@@ -93,8 +93,8 @@ describe("OpenFabStartDialog", () => {
 		);
 		expect(markup).toContain('data-complete="false"');
 		expect(markup).toContain('class="tilefab-guided-task-primary" disabled=""');
-		expect(markup).toContain("건너뛰고 편집");
-		expect(markup).toContain("실습 종료");
+		expect(markup).toContain("안내 접기");
+		expect(markup).toContain("실습 끝내기");
 		expect(markup).not.toContain("<details");
 		expect(markup).not.toContain("완료로 표시");
 	});

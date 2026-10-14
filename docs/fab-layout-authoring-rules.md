@@ -6,8 +6,9 @@
 
 > 상태 구분: 공개 hierarchy, directed topology, exact ownership, IP, atomic Worker/history 규칙은
 > 현재 불변조건이다. Profile wizard, layout-block/Bay-packing controls, exact prepared
-> `OPENFAB VERIFIED` evidence UI는 현재 구현되어 있다. Contextual terminal actions는 roadmap의
-> 다음 **target UX**이며 아직 출시되지 않았다.
+> `OPENFAB VERIFIED` evidence UI는 현재 구현되어 있다. 끝점의 Continue와 소유 조직이 없는 단일
+> 방향 경로의 명시적 Close 미리보기·적용은 구현되어 있다. 모든 terminal 상황을 포괄하는
+> `Close / Turn Around / Continue` 구성은 여전히 **target UX**다.
 
 > IP 경계: `docs/agent-working-principles.md` 4장을 따른다. 로컬 레퍼런스는 공통 계층과
 > 비율을 교차 확인하는 데만 쓸 수 있다. 원본 좌표, 식별자, 행, source code, 자산, 정확한
@@ -199,7 +200,10 @@ open end는 미완성 상태 또는 repair context다.
 
 Advanced rail motifs는 호환성과 repair를 위해 보존하되, complete Fab/Bay를 만드는 주 UX로
 노출하지 않는다. `Open End`는 별도 카테고리가 아니라 열린 terminal 선택 시의
-`Close / Turn Around / Continue` 문맥 action으로 제공한다.
+`Close / Turn Around / Continue` 문맥 action으로 제공하는 것이 목표다. 현재 Continue와
+`닫기 미리보기`가 제공되며, Close는 소유 조직이 없는 단일 방향 경로를 자기 시작점에 연결하는
+범위다. 분기·합류·switch·조직 소유 경로나 다른 레일 셀 재사용은 거절하고, topology/physical/Port
+검증 후 명시적 적용 한 번으로 Undo/Redo한다. 나머지 terminal UX까지 완료한 것은 아니다.
 
 이 문서는 `docs/fab-layout-grammar.md`와 `docs/paired-circulation-fab-grammar.md`의 현재
 topology grammar를 대체하지 않고, 그 위의 제품 profile/UX를 제한한다. 명시적 core migration

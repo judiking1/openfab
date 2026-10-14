@@ -104,7 +104,7 @@ export function ActiveAuthoringWorkspace({
 					<div className="tilefab-guided-task-pinned" data-testid="guided-task-pinned">
 						<span role="status">{guidanceGoal}</span>
 						<button type="button" onClick={onExitGuidance} data-testid="guided-task-pinned-exit">
-							실습 종료
+							실습 끝내기
 						</button>
 					</div>
 				) : null}

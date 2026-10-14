@@ -415,13 +415,13 @@ The visible UI uses icons and tooltips; this table is documentation, not an in-a
   Four rotations, explicit chirality, transformed occupied/reserved footprints, fingerprints,
   full cyan/red ghosts, one undo event, and one typed Worker patch remain shared. Attach patterns
   prove tangent branch/merge SCC preservation on an existing directed trunk.
-- [x] categorized `CLOSED/ATTACH/CONNECT` pattern browser, blueprint-derived directional miniatures,
+- [x] categorized `CLOSED/ATTACH/CONNECT` pattern browser, physical-path-derived directional miniatures,
   construction-context Q/E transforms, north-up project view normalization, and zoom-stable directed
   terminal closure magnet with overlay-only target rendering.
 - [x] runtime-proven repeatable closed motifs, temporary disconnected closed work-in-progress,
   compatible same-direction overlap, exact duplicate rejection, and existing parent-loop reuse.
-- [x] install-time exact-dimension steppers plus `[`/`]` and Tab controls. Wheel remains zoom and
-  post-placement resize is reserved for a future topology-preserving structural replace command.
+- [x] install-time exact-dimension steppers plus `[`/`]` and Tab controls. Wheel remains zoom;
+  recognized detached closed patterns also support post-placement structural resize.
 - [x] revision-bound cyan/red attachment intervals compile from one pose-relative footprint, compress
   a 50k-cell trunk, and leave final topology/clearance acceptance to the shared draft evaluator. One
   immutable 16-pose index resolves nearest-axis pointer focus without rescanning authored rail.
@@ -437,8 +437,11 @@ The visible UI uses icons and tooltips; this table is documentation, not an in-a
 - [x] Free-closed Area selections derive transient catalog identity and integer parameters by exact
   directed-edge comparison. Equivalent pose aliases fold into one candidate; semantically different
   identical geometries remain explicit ambiguity, and custom loops remain supported Area Stamps.
-- [ ] A recognized candidate can replace its own selected edge graph through one atomic in-place
-  structural `edit`; affine Canvas scaling and delete/rebuild history remain prohibited.
+- [x] A recognized detached closed candidate can replace its selected edge graph through one atomic
+  in-place structural `edit`; external attachments and Ports remain explicit rejection boundaries.
+  Affine Canvas scaling and delete/rebuild history remain prohibited.
+- [x] Card and Configurator miniatures derive from compiled physical geometry through
+  `RailTemplatePhysicalPreview` and `RailTemplateMiniature`, using the shared authored grammar.
 - [x] Pattern placement assessment combines typed core planning, physical evaluation, port validity,
   and revision identity. Canvas renders transformed entry/exit/origin handles and exact hard-
   reservation bounds; a ref-driven contextual panel updates without React pointer-state churn or
@@ -467,13 +470,12 @@ The visible UI uses icons and tooltips; this table is documentation, not an in-a
 ### Rail-only work remaining
 
 The graph, physical compiler, editor command, persistence, readiness, and scale baseline is complete.
-Atomic two-way component linking and exact one-way bridge conversion are complete. User acceptance
-keeps the final game-facing pattern composition surface open for:
-
-- catalog-pattern recognition from selected directed edges plus one-command topology-preserving
-  structural resize with explicit ambiguous/unsupported outcomes;
-- card miniatures derived from compiled physical geometry rather than authored-cell polylines;
-- starter plus multiple attachments, save/load, narrow viewport, and scale browser acceptance.
+Atomic two-way component linking and exact one-way bridge conversion are complete. Catalog-pattern
+recognition, one-command structural resize for eligible detached closed patterns, and physical-path
+card miniatures are implemented. Recognition retains explicit ambiguous/unsupported outcomes;
+external attachments and Ports block in-place resize. Broader starter/attachment, save/load,
+narrow-viewport and scale acceptance must use current release evidence in `HANDOFF.md`;
+these implementations do not declare V1 complete.
 
 Phase 3 port-first construction remains implemented and preserved. The 2026-07-19 correction added
 explicit EQ anchored/ready/blocked feedback and safe FLEX STK groups with odd, asymmetric one/two-lane

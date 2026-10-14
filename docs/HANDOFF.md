@@ -63,6 +63,15 @@
   recovery offers. Independent Chrome verification also passes 844×390 heading/keyboard actions
   and 390×844 recovery/task placement. Only version/release records change after these checks;
   actual native OS Save/Open remains unverified and V1 remains incomplete.
+- Unreleased practice wording: `안내 접기` preserves guidance progress; `실습 끝내기` ends the
+  practice session. The chooser labels fresh starts `처음부터 실습` and explains that authored
+  edits remain. Existing pause/resume/session behavior is unchanged. Verification: 27 existing
+  UI tests, ordinary build, changed-file lint, public safety and Chrome 390/1440 pause/resume,
+  exit/restart and document/checksum/dirty preservation PASS. Full suites were not repeated.
+  Rail plans now reflect implemented structural resize, physical miniatures and scoped Close.
+- Independent 390 px integrated GUI on v0.1.116 PASS: 1 Bank / 6 Bays / 12 Loops, Bay flow change,
+  five-Port EQ pitch/body editing, guidance pause/resume, keyboard and Undo/Redo, and Checks with
+  zero fixes. The run stopped before the OS chooser; native file roundtrip and V1 completion remain open.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.

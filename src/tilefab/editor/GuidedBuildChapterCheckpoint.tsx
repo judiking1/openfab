@@ -48,11 +48,11 @@ export function GuidedBuildTaskCoach({
 			<div className="tilefab-guided-task-secondary">
 				{!complete ? (
 					<button type="button" onClick={onPause}>
-						건너뛰고 편집
+						안내 접기
 					</button>
 				) : null}
 				<button type="button" onClick={onExit}>
-					{complete ? "편집 계속" : "실습 종료"}
+					{complete ? "편집 계속" : "실습 끝내기"}
 				</button>
 			</div>
 		</section>
