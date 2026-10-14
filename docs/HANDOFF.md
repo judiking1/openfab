@@ -24,6 +24,13 @@
 
 - Integrated authoring at 760x1000 PASS: from a fresh blank document, the public FAB-making task created 2 Banks / 12 Twin Bays / 24 Process Loops; EQ pitch and body edits, OHB service reversal with Undo/Redo, and FLEX Stocker placement completed in the same project. Final Checks passed with 6,506 rail cells, 5 Ports, 3 equipment groups and 39 organizations; zero issues/page errors and simulation remained disabled. No blocking defect or code change was needed. Save/reopen/native chooser and full suites were not run; no additional viewport checks were needed for an unobserved defect.
 
+- Unreleased: guarded project transitions now keep save cancellation, failure, download-request,
+  changed-source and Save As guidance inside the dialog, with matching accessible status. Open
+  retry guidance preserves the existing saved receipt. Focused persistence tests: 3 files / 136
+  PASS; ordinary build, ESLint, changed outcome-file Biome and public safety PASS. Independent
+  code review and controlled-picker UI checks at 390/760/1440 px PASS; native OS acceptance and
+  the full suites were not run. No change to write completion, dirty/recovery or transition gates.
+
 - Isolated automatic recovery PASS: exact project identity/checksum restored, followed by EQ pitch editing, OHB service reversal, and Stocker Port membership editing with Undo/Redo. Native Save/Open remains unverified: the native save action immediately returned cancellation, retained the dirty document and produced no file; the cause was not established and no workaround was attempted.
 
 ## Development commands

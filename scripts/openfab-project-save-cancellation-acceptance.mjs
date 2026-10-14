@@ -115,7 +115,10 @@ try {
 	const saveAndContinue = guard.getByRole("button", { name: "저장 후 계속", exact: true });
 	await saveAndContinue.click();
 	const guardStatus = "저장이 취소되었습니다 · 현재 프로젝트와 전환 선택을 유지합니다";
-	await page.getByText(guardStatus, { exact: true }).waitFor({ state: "visible" });
+	await guard.getByTestId("project-guard-feedback").filter({ hasText: guardStatus }).waitFor({ state: "visible" });
+	assertEqual(await guard.getByTestId("project-guard-feedback").textContent(), guardStatus, "guard displays its cancellation result");
+	assertEqual(await guard.locator('[role="status"]').textContent(), guardStatus, "guard announces its result");
+	assertEqual(await page.getByTestId("rail-status-message").getAttribute("aria-live"), "off", "background status does not duplicate guard announcements");
 	await page.waitForFunction(
 		() => document.activeElement?.classList.contains("tilefab-project-guard-save") === true,
 		undefined,
@@ -423,9 +426,10 @@ async function exerciseNativeSaveContinuation(activeBrowser, viewport) {
 			window.__openFabNativeSaveAudit.cancelSave = true;
 		});
 		await saveAs.click();
-		await activePage
-			.getByText("저장이 취소되었습니다 · 현재 프로젝트와 전환 선택을 유지합니다", { exact: true })
-			.waitFor({ state: "visible" });
+		const cancelledMessage = "저장이 취소되었습니다 · 현재 프로젝트와 전환 선택을 유지합니다";
+		await guard.getByTestId("project-guard-feedback")
+			.filter({ hasText: cancelledMessage }).waitFor({ state: "visible" });
+		assertEqual(await guard.getByTestId("project-guard-feedback").textContent(), cancelledMessage, `${label} Save As cancellation feedback`);
 		assertEqual(await guard.isVisible(), true, `${label} Save As cancellation retains guard`);
 		assertInvariantEquality(
 			await readCancellationInvariants(activePage),

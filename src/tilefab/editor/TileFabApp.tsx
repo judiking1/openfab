@@ -1014,6 +1014,7 @@ import {
 import { nextProjectMenuIndex } from "./ProjectMenuNavigation";
 import {
 	describeOpenFabProjectSaveCancellation,
+	describeOpenFabProjectSaveRetry,
 	planOpenFabProjectSaveContinuation,
 	type OpenFabProjectSaveOutcome,
 } from "./OpenFabProjectSaveOutcome";
@@ -5522,10 +5523,15 @@ export default function TileFabApp(): React.ReactElement {
 	const [pendingProjectAction, setPendingProjectActionState] = useState<PendingProjectAction | null>(
 		null,
 	);
+	const [projectGuardFeedback, setProjectGuardFeedback] = useState<Readonly<{
+		action: PendingProjectAction;
+		message: string;
+	}> | null>(null);
 	const pendingProjectActionRef = useRef(pendingProjectAction);
 	const setPendingProjectAction = useCallback((next: PendingProjectAction | null): void => {
 		pendingProjectActionRef.current = next;
 		setPendingProjectActionState(next);
+		setProjectGuardFeedback(null);
 	}, []);
 	const [projectGuardSaveAsRequired, setProjectGuardSaveAsRequired] = useState(false);
 	const [projectGuardSavedOpen, setProjectGuardSavedOpen] = useState<Readonly<{
@@ -21737,10 +21743,13 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockPendingLoopOrHistoryCommand()) return;
 		const action = pendingProjectActionRef.current;
 		if (!action) return;
+		setProjectGuardFeedback(null);
 		if (projectGuardSavedOpen?.action === action) {
 			if (!projectGuardSavedOpen.receipt.isCurrent()) {
 				setProjectGuardSavedOpen(null);
-				setStatus("저장 후 프로젝트가 바뀌었습니다 · 현재 변경 사항을 다시 저장하세요");
+				const message = describeOpenFabProjectSaveRetry("saved");
+				setProjectGuardFeedback({ action, message });
+				setStatus(message);
 				return;
 			}
 			// The native Open chooser starts on this new Continue click, without another save.
@@ -21750,7 +21759,15 @@ export default function TileFabApp(): React.ReactElement {
 				pendingProjectActionReturnFocusRef.current = null;
 				setProjectGuardSavedOpen(null);
 				setPendingProjectAction(null);
-			} else requestAnimationFrame(() => projectGuardSaveRef.current?.focus({ preventScroll: true }));
+			} else {
+				setProjectGuardFeedback({
+					action,
+					message: opened === "cancelled"
+						? "파일 선택을 취소했습니다 · 현재 프로젝트를 유지합니다 · 계속 열기로 다시 선택할 수 있습니다"
+						: "프로젝트를 열지 못했습니다 · 현재 프로젝트를 유지합니다 · 계속 열기로 다시 선택할 수 있습니다",
+				});
+				requestAnimationFrame(() => projectGuardSaveRef.current?.focus({ preventScroll: true }));
+			}
 			return;
 		}
 		const outcome = await handleSaveProject(projectGuardSaveAsRequired, "project-guard");
@@ -21760,6 +21777,7 @@ export default function TileFabApp(): React.ReactElement {
 			setProjectGuardSaveAsRequired(false);
 		if (continuation === "save-as") setProjectGuardSaveAsRequired(true);
 		if (continuation === "retry" || continuation === "save-as") {
+			setProjectGuardFeedback({ action, message: describeOpenFabProjectSaveRetry(outcome.status) });
 			if (outcome.status === "cancelled")
 				setStatus(describeOpenFabProjectSaveCancellation("pending-transition"));
 			requestAnimationFrame(() => projectGuardSaveRef.current?.focus({ preventScroll: true }));
@@ -31815,6 +31833,13 @@ export default function TileFabApp(): React.ReactElement {
 				? "사본 있음"
 				: null;
 	const projectBusy = projectSession.operation !== "idle";
+	const projectGuardStatusMessage = projectBusy
+		? projectSession.operation === "opening"
+			? "프로젝트 파일을 열고 있습니다…"
+			: "프로젝트 파일을 저장하고 있습니다…"
+		: projectGuardFeedback?.action === pendingProjectAction
+			? projectGuardFeedback?.message ?? ""
+			: "";
 	const projectSourceOperationPending = processLoopOperation !== null || staticFabMutationHistory !== null;
 	useEffect(() => {
 		if (
@@ -37533,7 +37558,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 							data-project-busy={projectBusy}
 							aria-modal="true"
 							aria-labelledby="tilefab-project-guard-title"
-							aria-describedby="tilefab-project-guard-context tilefab-project-guard-description"
+							aria-describedby="tilefab-project-guard-context tilefab-project-guard-description tilefab-project-guard-status"
 							onKeyDown={(event) => {
 								if (event.key === "Escape" && projectSession.operation === "idle") {
 									event.preventDefault();
@@ -37572,8 +37597,8 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 											? pendingGuidedPracticeTransition.explanation
 											: "현재 레일 편집 내용을 저장한 뒤 프로젝트를 전환하시겠습니까?"}
 								</p>
-								<span className="tilefab-project-guard-progress" aria-hidden="true">
-									{projectBusy ? projectSession.operation === "opening" ? "프로젝트 파일을 열고 있습니다…" : "프로젝트 파일을 저장하고 있습니다…" : ""}
+								<span className="tilefab-project-guard-progress" data-testid="project-guard-feedback" aria-hidden="true">
+									{projectGuardStatusMessage}
 								</span>
 								<footer>
 									<button
@@ -37614,12 +37639,13 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 								</footer>
 							</div>
 							<span
+								id="tilefab-project-guard-status"
 								className="tilefab-sr-only"
 								role="status"
 								aria-live="polite"
 								aria-atomic="true"
 							>
-								{projectBusy ? projectSession.operation === "opening" ? "프로젝트 파일을 열고 있습니다…" : "프로젝트 파일을 저장하고 있습니다…" : ""}
+								{projectGuardStatusMessage}
 							</span>
 						</section>
 					</div>
@@ -41605,9 +41631,9 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 				<span
 					data-testid="rail-status-message"
 					title={currentPublicationWarning ?? currentAreaStampPlacementFailure ?? undefined}
-					role={currentPublicationWarning ? "alert" : guidedPortKeyboard ? undefined : "status"}
+					role={pendingProjectAction ? undefined : currentPublicationWarning ? "alert" : guidedPortKeyboard ? undefined : "status"}
 					aria-live={
-						currentPublicationWarning ? "assertive" : guidedPortKeyboard ||
+						pendingProjectAction ? "off" : currentPublicationWarning ? "assertive" : guidedPortKeyboard ||
 						areaStampSession ||
 						organizationBundlePlacementSession ||
 						stampSession ||
