@@ -24,7 +24,7 @@ describe("portAuthoringSurfacePresentation", () => {
 	});
 
 	it("distinguishes EQ and STK target vocabulary", () => {
-		expect(portAuthoringSurfacePresentation("EQ", 2, 2).instruction).toBe(
+		expect(portAuthoringSurfacePresentation("EQ", 2, 2, false, true).instruction).toBe(
 			"포트 후보 2곳 · 시작점과 끝점 클릭 · 드래그도 가능",
 		);
 		expect(portAuthoringSurfacePresentation("STK", 3, 3).instruction).toBe(
@@ -50,12 +50,29 @@ describe("portAuthoringSurfacePresentation", () => {
 		for (const portType of ["OHB", "EQ", "STK"] as const) {
 			expect(portAuthoringSurfacePresentation(portType, 0, 0).configurationAvailable).toBe(false);
 			expect(portAuthoringSurfacePresentation(portType, 0, 0).prerequisiteAction).toEqual({
-				label: "먼저 레일 만들기",
-				ariaLabel: "레일 메뉴로 이동해 직선 레일 만들기",
+				label: portType === "EQ" ? "EQ용 레일 준비" : "먼저 레일 만들기",
+				ariaLabel: portType === "EQ" ? "EQ용 레일 준비" : "레일 메뉴로 이동해 직선 레일 만들기",
 			});
-			expect(portAuthoringSurfacePresentation(portType, 1, 1).prerequisiteAction).toBeNull();
+			if (portType !== "EQ")
+				expect(portAuthoringSurfacePresentation(portType, 1, 1).prerequisiteAction).toBeNull();
 			expect(portAuthoringSurfacePresentation(portType, 1, 1).configurationAvailable).toBe(true);
 		}
+	});
+
+	it.each([
+		1, 2, 100,
+	])("offers EQ rail preparation despite %i legal slots when no complete span exists", (count) => {
+		const blocked = portAuthoringSurfacePresentation("EQ", count, count, true, false);
+		expect(blocked.prerequisiteAction?.label).toBe("EQ용 레일 준비");
+		expect(blocked.instruction).toBe("현재 피치로 완성할 빈 EQ 행이 없습니다");
+		expect(blocked.configurationAvailable).toBe(true);
+	});
+
+	it("removes the EQ prerequisite only when the canonical row probe succeeds", () => {
+		const ready = portAuthoringSurfacePresentation("EQ", 5, 2, true, true);
+		expect(ready.prerequisiteAction).toBeNull();
+		expect(ready.configurationAvailable).toBe(true);
+		expect(ready.instruction).toContain("시작점과 끝점");
 	});
 
 	it("rejects an invalid count", () => {

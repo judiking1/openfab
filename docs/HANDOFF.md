@@ -19,6 +19,19 @@
   library and import drafts; Undo/Redo PASS. All 73 candidate assets load with matching hashes.
   Actual OS file acceptance and full authoring/scale/unit suites were not run for this change.
   Hold this local candidate for the next release bundle; v0.1.114 remains deployed.
+- Unreleased rail-preparation guidance: EQ offers a visible reason and rail preparation when
+  the current pitch/continuity/occupancy cannot form a complete row; pitch controls stay available.
+  Empty-document U-TURN, SHIFT and 2×2SWITCH offer rail preparation, preserving module span,
+  switch profile and side until explicit return. Cancel, tool/activity change and document
+  replacement clear that intent. Returning never installs a module automatically.
+  Compact unified workspaces now keep module settings visible instead of applying the legacy
+  collapsed-toolbar rule. Verification: 4 focused files / 40 tests, ordinary production build,
+  changed-file lint, public release checks and independent review PASS (existing CSS warnings).
+  Chrome 390/1440 checks PASS for insufficient EQ rail, invalid row rejection, pitch changes,
+  preparation/cancel/Escape/reentry, all three module-setting returns, Undo and explicit tool
+  change. Primary actions remain at least 44 px without horizontal overflow; simulation stays
+  disabled. Full unit/authoring/scale/native-OS suites were not run for this change.
+  Hold with the file-open candidate for the next release bundle; v0.1.114 remains deployed.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.

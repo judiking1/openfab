@@ -10,8 +10,8 @@ export interface PortAuthoringSurfacePresentation {
 }
 
 export interface PortAuthoringPrerequisiteAction {
-	readonly label: "먼저 레일 만들기";
-	readonly ariaLabel: "레일 메뉴로 이동해 직선 레일 만들기";
+	readonly label: "먼저 레일 만들기" | "EQ용 레일 준비";
+	readonly ariaLabel: "레일 메뉴로 이동해 직선 레일 만들기" | "EQ용 레일 준비";
 }
 
 /** Counts describe rail-compatible candidates; live occupancy is reported for the current target. */
@@ -20,6 +20,7 @@ export function portAuthoringSurfacePresentation(
 	slotCount: number,
 	legalSlotCount: number,
 	keyboardTargetActive = false,
+	eqRowReady = false,
 ): PortAuthoringSurfacePresentation {
 	if (
 		!Number.isSafeInteger(slotCount) ||
@@ -32,13 +33,15 @@ export function portAuthoringSurfacePresentation(
 	}
 	const count = legalSlotCount.toLocaleString("ko-KR");
 	const configurationAvailable = legalSlotCount > 0;
-	const prerequisiteAction =
-		legalSlotCount === 0
-			? Object.freeze({
-					label: "먼저 레일 만들기",
-					ariaLabel: "레일 메뉴로 이동해 직선 레일 만들기",
-				})
-			: null;
+	const prerequisiteAction: PortAuthoringPrerequisiteAction | null =
+		portType === "EQ" && !eqRowReady
+			? Object.freeze({ label: "EQ용 레일 준비", ariaLabel: "EQ용 레일 준비" })
+			: legalSlotCount === 0
+				? Object.freeze({
+						label: "먼저 레일 만들기",
+						ariaLabel: "레일 메뉴로 이동해 직선 레일 만들기",
+					})
+				: null;
 	if (portType === "OHB") {
 		return Object.freeze({
 			toolCaption: "OHB Port",
@@ -63,7 +66,9 @@ export function portAuthoringSurfacePresentation(
 			buildbarTitle: "EQ PORT ROW",
 			instruction:
 				legalSlotCount > 0
-					? `포트 후보 ${count}곳 · 시작점과 끝점 클릭 · 드래그도 가능`
+					? eqRowReady
+						? `포트 후보 ${count}곳 · 시작점과 끝점 클릭 · 드래그도 가능`
+						: "현재 피치로 완성할 빈 EQ 행이 없습니다"
 					: "배치 가능 슬롯 없음 · 연속된 직선 레일을 먼저 만드세요",
 			configurationAvailable,
 			prerequisiteAction,

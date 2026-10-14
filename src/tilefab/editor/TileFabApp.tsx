@@ -999,6 +999,9 @@ import {
 	equipmentAuthoringContinuationStatus,
 } from "./EquipmentAuthoringContinuation";
 import {
+	captureRailModulePreparation,
+	type RailModulePreparation,
+	railModulePreparationHandoff,
 	nextRailConstructionAnchor,
 	rejectedRailConstructionAnchor,
 } from "./RailConstructionContinuation";
@@ -2839,6 +2842,7 @@ export default function TileFabApp(): React.ReactElement {
 	const reshapeApplyButtonRef = useRef<HTMLButtonElement>(null);
 	const editorActivityRef = useRef<EditorActivity>("build");
 	const [equipmentRailPreparation, setEquipmentRailPreparation] = useState<EquipmentRailPreparation | null>(null);
+	const [moduleRailPreparation, setModuleRailPreparation] = useState<RailModulePreparation | null>(null);
 	const lastEquipmentToolRef = useRef<Extract<EditorTool, "ohb" | "eq" | "stk">>("ohb");
 	const toolRef = useRef<EditorTool>("build");
 	const bendRef = useRef<BendPreference>("auto");
@@ -10018,7 +10022,7 @@ export default function TileFabApp(): React.ReactElement {
 			| "preserve-port" = "clear",
 	): void => {
 		if (blockStaticFabExclusiveCommand()) return;
-		if (next !== "build" && next !== "erase") setEquipmentRailPreparation(null);
+		if (next !== "build" && next !== "erase") { setEquipmentRailPreparation(null); setModuleRailPreparation(null); }
 		setAuthoringToolActivated(true);
 		setAuthoringSurface("task");
 		setBlueprintSelectionEntry(null);
@@ -10695,9 +10699,10 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => restoreAreaStampRepeatPreviewRef.current());
 	}
 
-	const chooseBuildMode = (next: RailBuildMode): void => {
+	const chooseBuildMode = (next: RailBuildMode, preserveModulePreparation = false): void => {
 		if (processLoopOperationRef.current) { setStatus("작업 루프 준비를 기다리거나 Esc로 취소하세요"); return; }
 		if (processLoopRailEditRef.current && next !== "route") { setStatus("작업 루프에서는 일반 레일 그리기를 사용하세요 · 다른 모듈 배치는 편집 종료 후 사용할 수 있습니다"); return; }
+		if (!preserveModulePreparation) setModuleRailPreparation(null);
 		const guidedRailKeyboardEndpoint = guidedRailKeyboardSessionRef.current?.endpoint ?? null;
 		if (guidedRailKeyboardEndpoint) {
 			clearGuidedRailKeyboardAccessibility();
@@ -10957,7 +10962,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		updateEditorActivity("build");
 		chooseTool("build");
-		chooseBuildMode("route");
+		chooseBuildMode("route", true);
 		const canvas = canvasRef.current;
 		if (!canvas) return;
 		const frame = visibleCanvasFrame(canvas, fitMapInsets(canvas));
@@ -13480,6 +13485,10 @@ export default function TileFabApp(): React.ReactElement {
 					(toolRef.current === "ohb" || toolRef.current === "eq" || toolRef.current === "stk")
 				) {
 					exitOrdinaryPortAuthoring();
+					return;
+				}
+				if (moduleRailPreparation?.document === railDocument) {
+					cancelModuleRailPreparation();
 					return;
 				}
 				if (equipmentRailPreparation?.document === railDocument) {
@@ -20663,6 +20672,7 @@ export default function TileFabApp(): React.ReactElement {
 		needsSave: boolean,
 		sourceOperation: Exclude<ProjectOperation, "idle" | "saving">,
 	): void => {
+		setModuleRailPreparation(null);
 		setEquipmentRailPreparation(null);
 		const nextModel = nextSnapshot.model;
 		// A prepared replacement owns a new document/Worker generation. Invalidate any derived-model
@@ -31381,12 +31391,24 @@ export default function TileFabApp(): React.ReactElement {
 		organizationSemanticRoles,
 		projectSession.manifest.id,
 	]);
+	const activeEqRowReady = useMemo(() => {
+		if (activePortAuthoringType !== "EQ") return false;
+		const artifacts = editorModel.portSlotArtifacts.EQ;
+		return hasAvailableEqRowDraftSpan(
+			artifacts.slots, artifacts.spatialIndex,
+			createPreparedPortSlotAvailabilityIndex(physical, artifacts, activePortEquipment,
+				activePortEquipmentPresentation.resolvedPositions),
+			eqPitchMillimeters,
+		);
+	}, [activePortAuthoringType, editorModel, physical, activePortEquipment,
+		activePortEquipmentPresentation, eqPitchMillimeters]);
 	const activePortAuthoringPresentation = activePortAuthoringType
 		? portAuthoringSurfacePresentation(
 				activePortAuthoringType,
 				editorModel.portSlotArtifacts[activePortAuthoringType].slots.count,
 				editorModel.portSlotArtifacts[activePortAuthoringType].slots.legalCount,
 				guidedPortKeyboard?.portType === activePortAuthoringType,
+				activeEqRowReady,
 			)
 		: null;
 	const equipmentWorkspaceActive =
@@ -31415,6 +31437,7 @@ export default function TileFabApp(): React.ReactElement {
 					editorModel.portSlotArtifacts[activePortAuthoringType].slots.count,
 					scopedPortLegalSlotCount,
 					guidedPortKeyboard?.portType === activePortAuthoringType,
+					activeEqRowReady,
 				).instruction
 		: null;
 	const activeStkZoomActionLabel = (stkDraftSelection?.rows.length ?? 0) === 0 ? "첫 Port 확대" : "현재 Port 확대";
@@ -31425,7 +31448,9 @@ export default function TileFabApp(): React.ReactElement {
 		guidedPortKeyboard === null &&
 		activePortLegalSlotCount > 0;
 	const basePortAuthoringInstruction =
-		scopedPortLegalSlotCount === 0 && !guidedBuildExperienceActive && !ohbPlacementIntent
+		tool === "eq" && !activeEqRowReady
+			? activePortAuthoringPresentation?.instruction ?? ""
+			: scopedPortLegalSlotCount === 0 && !guidedBuildExperienceActive && !ohbPlacementIntent
 			? scopedPortAuthoringInstruction ?? ""
 			: tool === "stk"
 			? activePortLegalSlotCount === 0
@@ -32296,8 +32321,23 @@ export default function TileFabApp(): React.ReactElement {
 		ordinaryNextPortHandoffBase.readyForMutation
 		? equipmentRailPreparationHandoff(equipmentRailPreparation, railDocument, equipmentRailPlacementReady, eqPitchMillimeters)
 		: null;
+	const moduleRailPreparationActive = moduleRailPreparation?.document === railDocument && !guidedBuildExperienceActive;
+	const moduleRailPrerequisite = !guidedBuildExperienceActive && editorActivity === "build" && tool === "build"
+		? captureRailModulePreparation(railDocument, buildMode, {
+			span: moduleSpan, profile: advancedSwitchProfile, copiedSide, explicitSide,
+		}) : null;
+	const moduleRailForwardTerminalReady = useMemo(() => moduleRailPreparationActive &&
+		physical.terminals.some((cell) => terminalForwardDirection(activeMap, cell) !== null),
+		[moduleRailPreparationActive, physical, activeMap]);
+	const moduleRailHandoff = !ordinaryNextPortHandoffBase.railKeyboardActive &&
+		!ordinaryNextPortHandoffBase.transientConstructionActive && !ordinaryNextPortHandoffBase.exclusiveCommandActive &&
+		ordinaryNextPortHandoffBase.readyForMutation && editorActivity === "build" && tool === "build" &&
+		(moduleRailPrerequisite || (moduleRailPreparationActive && buildMode === "route"))
+		? railModulePreparationHandoff(moduleRailPreparationActive ? moduleRailPreparation : moduleRailPrerequisite,
+			railDocument, moduleRailPreparationActive && moduleRailForwardTerminalReady)
+		: null;
 	// A requested equipment detour owns the return, including its still-unready explanation.
-	const ordinaryBuildSurfaceHandoff = equipmentRailPreparationActive
+	const ordinaryBuildSurfaceHandoff = moduleRailHandoff || moduleRailPreparationActive ? null : equipmentRailPreparationActive
 		? equipmentRailReturnHandoff : firstPortHandoff ?? ordinaryEqRailReturnHandoff;
 	const ordinaryBuildSurfaceHandoffKind = equipmentRailPreparationActive
 		? equipmentRailReturnHandoff ? "equipment-rail-return-handoff" : null
@@ -32315,7 +32355,7 @@ export default function TileFabApp(): React.ReactElement {
 		? guidedSelectionCommandHintId
 			? Object.freeze(actionHints.filter((hint) => hint.id === guidedSelectionCommandHintId))
 			: Object.freeze([])
-		: ordinaryBuildSurfaceHandoff || ordinaryPortInstructionOwner ||
+		: moduleRailHandoff || ordinaryBuildSurfaceHandoff || ordinaryPortInstructionOwner ||
 			(processLoopRailEdit?.document === railDocument && (tool === "inspect" || tool === "erase") && !ordinaryRailKeyboardHints)
 			? Object.freeze([])
 			: (ordinaryRailKeyboardHints ??
@@ -33332,6 +33372,7 @@ export default function TileFabApp(): React.ReactElement {
 			assemblePaletteReturnFocusRef.current = null;
 		}
 		setAuthoringResult(null);
+		if (next !== "build") setModuleRailPreparation(null);
 		return true;
 	};
 	const openStaticFabAssemblePalette = (
@@ -33569,6 +33610,36 @@ export default function TileFabApp(): React.ReactElement {
 			startOrdinaryPortKeyboard(next.toUpperCase() as GuidedPortKeyboardType);
 		}
 		return true;
+	};
+	const beginModuleRailPreparation = (): void => {
+		const preparation = captureRailModulePreparation(editorModelRef.current.document, buildModeRef.current, {
+			span: moduleSpanRef.current, profile: advancedSwitchProfileRef.current,
+			copiedSide: copiedSideRef.current, explicitSide: explicitSideRef.current,
+		});
+		if (!preparation || guidedBuildExperienceActive || !chooseExplicitEditorTool("build")) return;
+		chooseBuildMode("route");
+		setEquipmentRailPreparation(null);
+		setModuleRailPreparation(preparation);
+		setStatus("먼저 레일을 그리세요 · 선택한 모듈 설정은 유지됩니다");
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+	};
+	const returnToPreparedRailModule = (): void => {
+		const preparation = moduleRailPreparation;
+		if (!preparation || preparation.document !== editorModelRef.current.document ||
+			!moduleRailForwardTerminalReady || !chooseExplicitEditorTool("build")) return;
+		chooseBuildMode(preparation.mode);
+		chooseModuleSpan(preparation.span);
+		chooseAdvancedSwitchProfile(preparation.profile);
+		updateCopiedSide(preparation.copiedSide);
+		updateExplicitSide(preparation.explicitSide);
+		refreshBuildPreview();
+		setStatus(`${railConstructionCatalogItem(preparation.mode).label} · 진행 방향의 열린 끝점을 선택하세요`);
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
+	};
+	const cancelModuleRailPreparation = (): void => {
+		setModuleRailPreparation(null);
+		setStatus("모듈용 레일 준비를 취소했습니다 · 확정한 레일은 유지됩니다");
+		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	const beginEquipmentRailPreparation = (): void => {
 		const next = toolRef.current;
@@ -35585,6 +35656,7 @@ export default function TileFabApp(): React.ReactElement {
 		editorActivity === "inspect" && tool === "inspect" && !blueprintLibraryOpen &&
 		(!staticFabNavigatorOpen || organizationLibraryOpen) && !processLoopRegistrationFocused;
 	const baseAuthoringTask: AuthoringTaskPresentation = {
+		instruction: moduleRailHandoff?.instruction,
 		id: portEquipmentInspectorVisible ? `equipment-${selectedEquipmentGroup?.id}` : templateSession ? `template-${templateSession.id}` : `${editorActivity}-${tool}`,
 		kind: selectedPortDetails || equipmentWorkspaceActive ? "equipment" : areaStampSession || stampSession || blueprintLibraryOpen ? "blueprint" : organizationBundlePlacementSession || staticFabExclusiveCommandActive ? "structure" : editorActivity === "inspect" || staticFabNavigatorOpen ? "selection" : "rail",
 		title: equipmentBrowserOpen ? "기존 장비 찾기" : processLoopRegistrationFocused ? "작업 루프 등록" : visibleAuthoringResult ? `${visibleAuthoringResult.kind === "fab" ? "FAB 생성" : "Bay 배치"} 완료` : readinessOpen ? "FAB 검사" : organizationLibraryOpen ? "구조 선택·편집" : navigatorMapOpen ? "FAB 지도" : blueprintLibraryOpen ? "청사진" : selectedPortDetails && portEquipmentInspectorVisible ? "장비 선택·편집" : productionBayConfiguration ? "Bay 배치" : templateSession ? railTemplateCatalogItem(templateSession.id).statusLabel : organizationBundlePlacementSession ? "구조 배치" : areaStampSession || stampSession ? "청사진 배치" : staticFabExclusiveCommandActive ? "구조 편집 검토" : equipmentWorkspaceActive ? `${tool === "stk" ? "Stocker" : tool.toUpperCase()} 배치` : tool === "inspect" ? "선택·편집" : tool === "erase" ? "레일 철거" : "레일 제작",
@@ -35679,6 +35751,16 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 		<button type="button" disabled={blueprintPlacementPending || modelSyncPending || activeBayConfigurationError !== null} onClick={(event) => applyBlueprintPlacementKeyboard(event.shiftKey)}>현재 위치에 배치</button>
 		<button type="button" disabled={activeBayConfigurationError !== null} onClick={() => { if (compactAuthoringViewport) setAuthoringSurface(null); restoreCanvasFocusAfterAction(); }}>캔버스에서 위치 선택</button>
 		<button type="button" onClick={cancelProductionBayPlacement}>배치 취소</button>
+	</div> : moduleRailHandoff ? <div className="tilefab-authoring-task-actions" data-testid="module-rail-preparation-actions">
+		<button type="button" data-testid="module-rail-preparation-action"
+			data-ready={moduleRailHandoff.railReady}
+			onClick={(event) => {
+				if (moduleRailHandoff.railReady) returnToPreparedRailModule();
+				else if (moduleRailPreparationActive) startOrdinaryRailKeyboard(event.currentTarget);
+				else beginModuleRailPreparation();
+			}}>{moduleRailHandoff.label}</button>
+		{moduleRailPreparationActive ? <button type="button" data-testid="module-rail-preparation-cancel"
+			onClick={cancelModuleRailPreparation}>준비 취소</button> : null}
 	</div> : portWorkspaceProps ? <PortEquipmentPlacementActions {...portWorkspaceProps} /> : null;
 
 	return (

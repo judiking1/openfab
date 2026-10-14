@@ -270,6 +270,7 @@ export function PortEquipmentPlacementWorkspace({
 							</span>
 						) : null}
 						{!activePortAuthoringPresentation.configurationAvailable ||
+						activePortAuthoringPresentation.prerequisiteAction !== null ||
 						(ordinaryPortProcessLoopTargetId !== null &&
 							!selectedEquipmentProcessLoopScope?.eligibleCount) ? (
 							<span className="tilefab-port-authoring-detail" role="status">

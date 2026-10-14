@@ -14469,7 +14469,7 @@ button.tilefab-action-hint[data-guided-target="true"] {
 		overflow-y: auto;
 		transform: none;
 	}
-	.tilefab-app
+	.tilefab-app:not([data-authoring-layout="unified"])
 		.tilefab-buildbar[data-compact-rail="true"][data-options-expanded="false"]
 		> :not(.tilefab-rail-options-toggle):not(.tilefab-network-link-steps) {
 		display: none;

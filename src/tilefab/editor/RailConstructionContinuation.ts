@@ -1,3 +1,10 @@
+import type { AdvancedSwitchProfileClass } from "../core/AdvancedSwitch";
+import {
+	type RailConstructionCatalogId,
+	railConstructionCatalogItem,
+} from "../core/RailConstructionCatalog";
+import type { RailDocument } from "../core/RailDocument";
+import type { RailModuleSide, RailModuleSpan } from "../core/RailModulePlanner";
 import type { Cell } from "../core/TileMap";
 
 export type RailConstructionContinuation =
@@ -30,4 +37,44 @@ export function rejectedRailConstructionAnchor(
 	attemptedStart: Cell,
 ): Cell | null {
 	return continuation.kind === "direct-route" ? null : attemptedStart;
+}
+
+/** Retain only this document's module choice while ordinary rail construction prepares its anchor. */
+export interface RailModulePreparation {
+	readonly document: RailDocument;
+	readonly mode: RailConstructionCatalogId;
+	readonly span: RailModuleSpan;
+	readonly profile: AdvancedSwitchProfileClass;
+	readonly copiedSide: RailModuleSide | null;
+	readonly explicitSide: RailModuleSide | null;
+}
+
+export function captureRailModulePreparation(
+	document: RailDocument,
+	mode: RailConstructionCatalogId,
+	settings: Pick<RailModulePreparation, "span" | "profile" | "copiedSide" | "explicitSide">,
+): RailModulePreparation | null {
+	if (document.map.edgeCount !== 0 || !railConstructionCatalogItem(mode).requiresOpenTerminal)
+		return null;
+	return Object.freeze({ document, mode, ...settings });
+}
+
+export function railModulePreparationHandoff(
+	preparation: RailModulePreparation | null,
+	document: RailDocument,
+	hasForwardTerminal: boolean,
+) {
+	if (!preparation || preparation.document !== document) return null;
+	const name = railConstructionCatalogItem(preparation.mode).label;
+	const label = hasForwardTerminal ? `${name} 배치로 돌아가기` : "먼저 레일 그리기";
+	const instruction = hasForwardTerminal
+		? "레일 준비됨 · 열린 끝점을 선택하세요"
+		: `${name}에는 진행 방향의 열린 끝점이 필요합니다`;
+	return {
+		label,
+		instruction,
+		ariaLabel: label,
+		description: instruction,
+		railReady: hasForwardTerminal,
+	};
 }
