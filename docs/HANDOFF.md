@@ -7,7 +7,7 @@
 - The active app is `src/App.tsx -> src/tilefab/editor/TileFabApp.tsx`.
 - The canonical document, compiled physical paths, atomic history, and typed Worker mirror
   remain the common boundary for editing, rendering, and read-only 3D inspection.
-- v0.1.113 bundles equipment return after rail preparation and the 760 px authoring verification.
+- v0.1.114 bundles guarded-save guidance, safe Blueprint file handling and straight organization placement.
   A synchronized rail mirror does not authorize simulation.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
@@ -16,7 +16,7 @@
   safety/hook scenarios, 6 additional hook/index-flag checks, and 10 fixture-provenance tests. App and release checks are separate.
 
 - 0.1.111 adds rail-structure descriptions, certified default metrics and one fixed crossover rail skeleton (808 cells; no Bay organizations or equipment).
-- 0.1.113 release verification: one full `pnpm test` run, 464 files / 5,866 tests PASS and 2 existing tests skipped; no failures. Ordinary production build (including TypeScript) and public release checks PASS. Full authoring/scale/native-OS suites were not run.
+- 0.1.114 release verification: one full `pnpm test` run, 464 files / 5,911 tests PASS and 2 existing tests skipped; no failures. Ordinary production build (including TypeScript), public release checks and normal staged safety hook PASS. Independent code review and fixed-candidate Chrome 1440/390 Blueprint placement, Undo/Redo and save-cancellation checks PASS. Full authoring/scale/native-OS suites were not run.
 - AISLE implementation: 36 focused tests, TypeScript, ordinary build, public safety and independent core review PASS. Earlier candidate Chrome 1440/390 Apply/Undo/Redo/cancel/Escape PASS; switch-fixture 1440 and final compact-action/draft-preservation 390 checks PASS. Full authoring/scale/native-OS suites not run for this change.
 - Compact UI candidate: ordinary build, Biome/ESLint, public safety, and Chrome 390/1440 tool-draft preservation and Bay settings/cancel/Apply/Undo/Redo PASS. Bay fields/actions fit without horizontal scrolling; collapsed targets remain 44 px. At 844x390, categories scroll with tools and keyboard-focused rail/FAB actions are fully visible. Independent code review PASS; independent GUI not run because browser launch was blocked.
 - Equipment rail return: OHB/EQ/STK prerequisite navigation retains only the current document and requested tool. Missing rail offers construction with a short reason; prepared rail returns to that tool. Explicit tool changes, preparation cancellation, and document replacement clear the intent. No equipment is placed automatically.
@@ -24,14 +24,14 @@
 
 - Integrated authoring at 760x1000 PASS: from a fresh blank document, the public FAB-making task created 2 Banks / 12 Twin Bays / 24 Process Loops; EQ pitch and body edits, OHB service reversal with Undo/Redo, and FLEX Stocker placement completed in the same project. Final Checks passed with 6,506 rail cells, 5 Ports, 3 equipment groups and 39 organizations; zero issues/page errors and simulation remained disabled. No blocking defect or code change was needed. Save/reopen/native chooser and full suites were not run; no additional viewport checks were needed for an unobserved defect.
 
-- Unreleased: guarded project transitions now keep save cancellation, failure, download-request,
+- 0.1.114: guarded project transitions now keep save cancellation, failure, download-request,
   changed-source and Save As guidance inside the dialog, with matching accessible status. Open
   retry guidance preserves the existing saved receipt. Focused persistence tests: 3 files / 136
   PASS; ordinary build, ESLint, changed outcome-file Biome and public safety PASS. Independent
-  code review and controlled-picker UI checks at 390/760/1440 px PASS; native OS acceptance and
-  the full suites were not run. No change to write completion, dirty/recovery or transition gates.
+  code review and controlled-picker UI checks at 390/760/1440 px PASS; native OS acceptance
+  remains unverified. No change to write completion, dirty/recovery or transition gates.
 
-- Unreleased blueprint file handling distinguishes completed writes, download requests and picker
+- 0.1.114 Blueprint file handling distinguishes completed writes, download requests and picker
   cancellation. Quarantined source rows remain until a completed write and the existing comparison
   check permit removal; write failures remain failures. Import metadata and cancel controls are
   disabled during insertion. Straight organization blueprints now pass the same span rule in the

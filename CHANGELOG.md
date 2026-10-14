@@ -6,6 +6,20 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.114] - 2026-10-14
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Keep save cancellation, failure and download-request guidance visible inside guarded project
+  transitions while preserving the current document, unsaved changes and pending action.
+- Distinguish completed Blueprint writes from download requests. Preserve quarantined source
+  records until a completed write and the existing source comparison allow removal; report
+  write failures separately from picker cancellation.
+- Disable import metadata and cancellation controls while a Blueprint insertion is in progress.
+- Allow valid straight organization Blueprints with one zero-length axis through Worker
+  transport, preserving Ports, equipment, organization membership and atomic Undo/Redo.
+- Native OS project file Save/Open roundtrip remains unverified.
+
 ## [0.1.113] - 2026-10-11
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
