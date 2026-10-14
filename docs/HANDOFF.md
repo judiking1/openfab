@@ -42,8 +42,8 @@
   changes, model publication and project replacement clear the draft; Apply rechecks document,
   model generation, patch sequence, rail revision and mutation generation.
   Verification: 2 focused files / 36 tests PASS, ordinary production build, changed-file lint
-  (one existing Biome warning), diff and public release checks PASS. Independent Close GUI review,
-  full authoring/scale/native-OS suites are not run; this candidate is not published.
+  (one existing Biome warning), diff and public release checks PASS. Independent source and Chrome
+  Close GUI review PASS; full authoring/scale/native-OS suites were not run. This is not published.
 - Unreleased recovery layout: at widths up to 430 px and compact landscape heights up to 430 px,
   the existing recovery offer occupies an automatic-height row above the editing surface. Its
   conditions, records and actions are unchanged; bounded scrolling keeps the inventory reachable.
@@ -53,9 +53,14 @@
   No new acceptance script was added; full authoring/scale/native-OS suites were not run.
 - Final Close/recovery candidate verification (`56a69fb` app source): one full `pnpm test` run,
   464 files / 5,985 tests PASS and 2 existing tests skipped; no failures. Ordinary production build,
-  public release checks and independent source review PASS. Only this verification record changed
-  after the full run; tests/build were not repeated. Independent Close GUI review remains pending;
-  the candidate, version and publication state are unchanged.
+  public release checks and independent source/Close GUI review PASS. The later CSS-only compact
+  layout correction retains this full-suite result without repeating the full run.
+- Unreleased short-landscape correction: at 701–1000 px wide and up to 430 px high, the collapsed
+  catalog shares the camera-control row so it cannot cover the Close preview heading. Expanded
+  catalog and portrait layouts retain their placement. Ordinary build, CSS lint, public release
+  checks and 15 Chrome viewport/recovery states PASS (701/844/1000 compact, 390 portrait, 1440 desktop).
+  Headings and full 44 px actions remain visible; actual Apply/Undo/Redo passes with and without
+  recovery offers. Version and publication state are unchanged.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.
