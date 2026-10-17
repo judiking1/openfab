@@ -6,6 +6,7 @@ import { EQ_PORT_PITCHES_MILLIMETERS } from "../core/EquipmentGroup";
 import { observePortDockClearance } from "./observePortDockClearance";
 
 export interface PortEquipmentMembershipEditBarProps {
+	readonly externalActions?: boolean;
 	readonly clearTransientConstruction: (message?: string) => void;
 	readonly completePortEquipmentMembershipEdit: () => void;
 	readonly setEqMembershipEditMode: (mode: "membership" | "pitch") => void;
@@ -35,6 +36,7 @@ export interface PortEquipmentMembershipEditBarProps {
 }
 
 export function PortEquipmentMembershipEditBar({
+	externalActions = false,
 	clearTransientConstruction,
 	completePortEquipmentMembershipEdit,
 	setEqMembershipEditMode,
@@ -196,43 +198,68 @@ export function PortEquipmentMembershipEditBar({
 					</p>
 				</details>
 			) : null}
-			<div className="tilefab-equipment-transform-actions">
-				<span
-					id="tilefab-port-membership-apply-reason"
-					className="tilefab-equipment-transform-state"
-					aria-live="polite"
-				>
-					{pitchMode
-						? ""
-						: `추가 ${portEquipmentMembershipSummary?.added ?? 0} · 제거 ${portEquipmentMembershipSummary?.removed ?? 0} · `}
-					{portEquipmentMembershipSummary?.reason ?? "포트 슬롯을 선택하세요"}
-				</span>
-				<button
-					type="button"
-					className="tilefab-inspector-primary"
-					data-testid="complete-port-equipment-membership"
-					aria-describedby="tilefab-port-membership-apply-reason"
-					disabled={!portEquipmentMembershipSummary?.canComplete}
-					onClick={completePortEquipmentMembershipEdit}
-					aria-keyshortcuts="Enter"
-				>
-					<Check size={14} /> {pitchMode ? "적용" : "완료"}
-				</button>
-				<button
-					type="button"
-					className="tilefab-placement-exit"
-					data-testid="cancel-port-equipment-membership"
-					aria-keyshortcuts="Escape"
-					aria-label={pitchMode ? "간격 편집 취소" : "포트 구성 편집 취소"}
-					onClick={() =>
-						clearTransientConstruction(
-							pitchMode ? "간격 편집을 취소했습니다" : "포트 구성 편집을 취소했습니다",
-						)
-					}
-				>
-					<X size={14} /> 취소
-				</button>
-			</div>
+			{!externalActions ? (
+				<PortEquipmentMembershipActions
+					clearTransientConstruction={clearTransientConstruction}
+					completePortEquipmentMembershipEdit={completePortEquipmentMembershipEdit}
+					portEquipmentMembershipEditSession={portEquipmentMembershipEditSession}
+					portEquipmentMembershipSummary={portEquipmentMembershipSummary}
+				/>
+			) : null}
+		</div>
+	);
+}
+
+export function PortEquipmentMembershipActions({
+	clearTransientConstruction,
+	completePortEquipmentMembershipEdit,
+	portEquipmentMembershipEditSession,
+	portEquipmentMembershipSummary,
+}: Pick<
+	PortEquipmentMembershipEditBarProps,
+	| "clearTransientConstruction"
+	| "completePortEquipmentMembershipEdit"
+	| "portEquipmentMembershipEditSession"
+	| "portEquipmentMembershipSummary"
+>): ReactNode {
+	const pitchMode = portEquipmentMembershipEditSession.editMode === "pitch";
+	return (
+		<div className="tilefab-equipment-transform-actions">
+			<span
+				id="tilefab-port-membership-apply-reason"
+				className="tilefab-equipment-transform-state"
+				aria-live="polite"
+			>
+				{pitchMode
+					? ""
+					: `추가 ${portEquipmentMembershipSummary?.added ?? 0} · 제거 ${portEquipmentMembershipSummary?.removed ?? 0} · `}
+				{portEquipmentMembershipSummary?.reason ?? "포트 슬롯을 선택하세요"}
+			</span>
+			<button
+				type="button"
+				className="tilefab-inspector-primary"
+				data-testid="complete-port-equipment-membership"
+				aria-describedby="tilefab-port-membership-apply-reason"
+				disabled={!portEquipmentMembershipSummary?.canComplete}
+				onClick={completePortEquipmentMembershipEdit}
+				aria-keyshortcuts="Enter"
+			>
+				<Check size={14} /> {pitchMode ? "적용" : "완료"}
+			</button>
+			<button
+				type="button"
+				className="tilefab-placement-exit"
+				data-testid="cancel-port-equipment-membership"
+				aria-keyshortcuts="Escape"
+				aria-label={pitchMode ? "간격 편집 취소" : "포트 구성 편집 취소"}
+				onClick={() =>
+					clearTransientConstruction(
+						pitchMode ? "간격 편집을 취소했습니다" : "포트 구성 편집을 취소했습니다",
+					)
+				}
+			>
+				<X size={14} /> 취소
+			</button>
 		</div>
 	);
 }

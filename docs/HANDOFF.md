@@ -81,6 +81,17 @@
   deletion and Bay-flow history PASS; delayed Worker delivery preserves a new organization
   selection or explicit clear. Final independent GUI review is pending; full authoring/scale
   suites and native OS file acceptance were not run for this change.
+- Unreleased compact follow-up: Port-count and pitch actions use the existing fixed task footer,
+  preserving the same drafts, reasons and command handlers. Recovery-visible home cards are
+  compact, the factory picture explicitly describes a rail skeleton without equipment, mobile
+  Redo is visible, and the selected-equipment status distinguishes placement from Loop membership.
+  Verification: 3 existing focused files / 61 tests PASS; ordinary build and changed-file lint PASS
+  (one existing App warning). Chrome 390/1440 equipment Apply/Cancel and Undo/Redo pass with full
+  44 px footer actions. Inspection succeeds after creation and equipment edits, including the
+  reported 1 Bank / 12 Single Loop / 14 m profile. The independent candidate inspection Worker
+  startup failure remains unreproduced; inspection code and validation are unchanged and final
+  independent retesting remains a release gate. Full suites and native OS file acceptance were
+  not run for this follow-up.
 - Independent 390 px integrated GUI on v0.1.116 PASS: 1 Bank / 6 Bays / 12 Loops, Bay flow change,
   five-Port EQ pitch/body editing, guidance pause/resume, keyboard and Undo/Redo, and Checks with
   zero fixes. The run stopped before the OS chooser; native file roundtrip and V1 completion remain open.

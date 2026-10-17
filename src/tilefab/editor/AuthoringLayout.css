@@ -1143,3 +1143,92 @@
 	padding: 8px 2px;
 	font-size: 11px;
 }
+
+/* Keep result captions attached to the picture, including the compact recovery layout. */
+.tilefab-authoring-sidebar-action[data-primary="true"] > .tilefab-authoring-action-preview {
+	position: relative;
+	padding-bottom: 18px;
+	box-sizing: border-box;
+}
+.tilefab-authoring-preview-label {
+	position: absolute;
+	bottom: 2px;
+	font-size: 10px;
+	line-height: 14px;
+	color: #bce5d8;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-active-authoring-actions
+	> .tilefab-equipment-transform-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	padding: 10px 12px;
+	border-top: 1px solid #435656;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-active-authoring-actions
+	> .tilefab-equipment-transform-actions
+	> .tilefab-equipment-transform-state {
+	grid-column: 1 / -1;
+	max-height: 4.5em;
+	overflow-y: auto;
+	white-space: normal;
+}
+@media (max-width: 700px) {
+	.tilefab-authoring-sidebar[data-browse-category="home"]
+		.tilefab-authoring-sidebar-action[data-primary="true"]
+		.tilefab-authoring-sidebar-description {
+		display: none;
+	}
+	.tilefab-app[data-authoring-layout="unified"] .tilefab-commands button[aria-label="다시 실행"] {
+		display: grid;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"] .tilefab-authoring-sidebar-heading {
+		padding: 8px 10px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"] section {
+		margin-top: 10px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"] .tilefab-authoring-sidebar-category {
+		min-height: 44px;
+		padding: 4px 2px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"]
+		.tilefab-authoring-sidebar-action[data-primary="true"] {
+		padding: 7px;
+		gap: 5px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"]
+		.tilefab-authoring-sidebar-action[data-primary="true"]
+		> .tilefab-authoring-action-preview {
+		height: 68px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"]
+		[data-authoring-section="home-manual"]
+		.tilefab-authoring-sidebar-action {
+		gap: 4px;
+		padding: 6px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"]
+		[data-authoring-section="home-manual"]
+		.tilefab-authoring-action-preview {
+		height: 32px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"]
+		[data-authoring-section="home-manual"]
+		.tilefab-authoring-action-preview
+		> :is(svg, img) {
+		height: 28px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"] .tilefab-authoring-sidebar-utilities {
+		padding-top: 6px;
+	}
+	.tilefab-authoring-sidebar[data-browse-category="home"]
+		.tilefab-authoring-sidebar-utilities
+		.tilefab-authoring-sidebar-action {
+		padding: 4px 2px;
+	}
+}

@@ -778,7 +778,7 @@ import {
 } from "./EditorCommandRegistry";
 import { deriveEditorActionHints, editorActionHint } from "./EditorActionHintPresentation";
 import type { EditorTool } from "./EditorTool";
-import { PortEquipmentMembershipEditBar } from "./PortEquipmentMembershipEditBar";
+import { PortEquipmentMembershipActions, PortEquipmentMembershipEditBar } from "./PortEquipmentMembershipEditBar";
 import { PortEquipmentGroupTransformBar } from "./PortEquipmentGroupTransformBar";
 import { PortEquipmentPlacementActions } from "./PortEquipmentPlacementActions";
 import { PortEquipmentPlacementWorkspace, type PortEquipmentPlacementWorkspaceProps } from "./PortEquipmentPlacementWorkspace";
@@ -31514,7 +31514,7 @@ export default function TileFabApp(): React.ReactElement {
 	useEffect(() => {
 		if (selectedEquipmentGroupMoveRecoveryId === null) return;
 		const frame = window.requestAnimationFrame(() => {
-			setStatus(`${selectedEquipmentGroup?.kind}-${selectedEquipmentGroupMoveRecoveryId} · 이 위치에서 소속 가능한 Loop 없음 · 미소속 유지 또는 장비 전체 이동`);
+			setStatus(`${selectedEquipmentGroup?.kind}-${selectedEquipmentGroupMoveRecoveryId} · 장비 배치됨 · Loop 미소속 · 현재 배치를 유지하거나 장비 전체 이동`);
 		});
 		return () => window.cancelAnimationFrame(frame);
 	}, [selectedEquipmentGroupMoveRecoveryId, selectedEquipmentGroup?.kind]);
@@ -35508,7 +35508,7 @@ export default function TileFabApp(): React.ReactElement {
 		if (blockPendingLoopOrHistoryCommand()) return;
 		newFabProfileWizardReturnFocusRef.current = trigger;
 		setNewFabProfileWizardOpen(true);
-	}), preview: <StarterMiniature id="production-fab-60" />, hint: "새 프로젝트 · 크기와 구역 구성 선택" };
+	}), preview: <><StarterMiniature id="production-fab-60" /><span className="tilefab-authoring-preview-label">레일 골격 예시 · 장비는 별도 배치</span></>, hint: "새 프로젝트 · 크기와 구역 구성 선택" };
 	const openAuthoringFabPreset = (intent: "project" | "placement", trigger: HTMLButtonElement): void => {
 		if (blockPendingLoopOrHistoryCommand()) return;
 		fabPresetDialogReturnFocusRef.current = trigger;
@@ -35896,7 +35896,17 @@ tool: tool,
 visibleRecentPlacedOhb: visibleRecentPlacedOhb,
 workerState: workerState,
 zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
-	const authoringTaskActions = openRailClosureDraft ? <div className="tilefab-authoring-task-actions" data-testid="rail-closure-actions">
+	const membershipEditBarProps = !staticFabExclusiveCommandActive && portEquipmentMembershipEditSession ? {
+		clearTransientConstruction,
+		completePortEquipmentMembershipEdit,
+		setEqMembershipEditMode,
+		chooseEqMembershipPitch,
+		portEquipmentMembershipEditSession,
+		portEquipmentMembershipSummary,
+		showStkSelection,
+		switchEqMembershipEndpoint,
+	} : null;
+	const authoringTaskActions = membershipEditBarProps ? <PortEquipmentMembershipActions {...membershipEditBarProps} /> : openRailClosureDraft ? <div className="tilefab-authoring-task-actions" data-testid="rail-closure-actions">
 		<button type="button" data-testid="apply-rail-closure"
 			disabled={!openRailClosureDraft.valid || modelSyncPending || projectBusy || workerState.status !== "ready"}
 			onClick={applyOpenRailClosure}>레일 닫기 적용</button>
@@ -41015,17 +41025,8 @@ if (next === "auto") { setStatus("충돌을 피하는 코너를 자동 선택합
 						</span>
 					</div>
 				) : null}
-{!staticFabExclusiveCommandActive && portEquipmentMembershipEditSession ? (
-					<PortEquipmentMembershipEditBar
-						clearTransientConstruction={clearTransientConstruction}
-						completePortEquipmentMembershipEdit={completePortEquipmentMembershipEdit}
-						setEqMembershipEditMode={setEqMembershipEditMode}
-						chooseEqMembershipPitch={chooseEqMembershipPitch}
-						portEquipmentMembershipEditSession={portEquipmentMembershipEditSession}
-						portEquipmentMembershipSummary={portEquipmentMembershipSummary}
-						showStkSelection={showStkSelection}
-						switchEqMembershipEndpoint={switchEqMembershipEndpoint}
-					/>
+{membershipEditBarProps ? (
+					<PortEquipmentMembershipEditBar {...membershipEditBarProps} externalActions />
 				) : !staticFabExclusiveCommandActive && portEquipmentGroupEditSession ? (
 					<PortEquipmentGroupTransformBar
 						onApply={() => commitPortEquipmentGroupEditRef.current()}
