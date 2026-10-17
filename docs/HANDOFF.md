@@ -107,7 +107,7 @@
 - Independent 390 px integrated GUI on v0.1.116 PASS: 1 Bank / 6 Bays / 12 Loops, Bay flow change,
   five-Port EQ pitch/body editing, guidance pause/resume, keyboard and Undo/Redo, and Checks with
   zero fixes. The run stopped before the OS chooser; native file roundtrip and V1 completion remain open.
-- Post-0.1.117 review candidate: compact 3D ignores hidden/non-overlapping inspectors and
+- 0.1.118: compact 3D ignores hidden/non-overlapping inspectors and
   measures their inset from the actual containing surface, avoiding a zero-height canvas.
   OHB canvas, placement and move/copy messages use the equipment-group name; Port IDs and
   stored barcodes remain unchanged and available in connection details.
@@ -115,8 +115,10 @@
   (one existing App warning), diff and public release checks PASS. Isolated Chrome small-Bay /
   three-Port EQ / OHB checks pass for 1440-to-390 resizing, camera views, 2D/3D reentry,
   unchanged document checksum and final zero-issue Checks. OHB group 2 / Port 4 / barcode OHB-4
-  consistently displays OHB-2; move/copy completion and Undo/Redo pass. Independent candidate
-  review is pending. Full suites and native OS file acceptance were not run for this follow-up.
+  consistently displays OHB-2; move/copy completion and Undo/Redo pass. Independent source and
+  Chrome GUI review PASS for the integrated small-Bay/equipment/Checks/3D flow. Only version
+  and release records change after these checks. Full suites and native OS file acceptance
+  were not run for this follow-up.
 - CI builds pushes and pull requests. Full regression and authoring checks run only when
   `run_full_validation` is enabled in a manual workflow dispatch.
 - Pages publication continues through `gh-pages`; CI build completion alone is not publication.

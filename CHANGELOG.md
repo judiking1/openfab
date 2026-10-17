@@ -6,6 +6,16 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.118] - 2026-10-17
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Keep the compact 3D inspection canvas visible when the selected-equipment inspector is hidden,
+  including desktop-to-mobile resizing and returning from 2D editing.
+- Use the same equipment-group name for OHB canvas labels, properties and placement/move/copy
+  messages. Preserve Port IDs and stored barcodes in connection details.
+- Native OS project file Save/Open roundtrip remains unverified.
+
 ## [0.1.117] - 2026-10-17
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
