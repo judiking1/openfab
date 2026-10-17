@@ -116,9 +116,21 @@ export default function StaticFabInspection3DViewport({
 				root.style.setProperty("--tilefab-3d-inspector-inset", "0px");
 				return;
 			}
-			const workspaceBounds = workspace.getBoundingClientRect();
+			const surface = root.offsetParent instanceof HTMLElement ? root.offsetParent : workspace;
+			const surfaceBounds = surface.getBoundingClientRect();
 			const inspectorBounds = inspector.getBoundingClientRect();
-			const inset = Math.max(0, workspaceBounds.bottom - inspectorBounds.top + 8);
+			const inspectorVisible =
+				inspectorBounds.width > 0 &&
+				inspectorBounds.height > 0 &&
+				!inspector.closest("[hidden]") &&
+				getComputedStyle(inspector).visibility !== "hidden" &&
+				inspectorBounds.right > surfaceBounds.left &&
+				inspectorBounds.left < surfaceBounds.right &&
+				inspectorBounds.bottom > surfaceBounds.top &&
+				inspectorBounds.top < surfaceBounds.bottom;
+			const inset = inspectorVisible
+				? Math.max(0, surfaceBounds.bottom - inspectorBounds.top + 8)
+				: 0;
 			root.style.setProperty("--tilefab-3d-inspector-inset", `${Math.ceil(inset)}px`);
 			inspectorObserver = new ResizeObserver(updateInset);
 			inspectorObserver.observe(inspector);

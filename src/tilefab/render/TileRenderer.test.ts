@@ -2331,6 +2331,10 @@ describe("port slot rendering", () => {
 			selectedTile: null,
 		};
 		renderer.render(staticContext.context, createRecordingContext().context, input);
+		expect(staticContext.labels).toContain("OHB-11");
+		expect(staticContext.labels).not.toContain("OHB-007");
+		expect(presentation.barcodes[0]).toBe("OHB-007");
+		expect(state.ports[0]?.barcode).toBe("OHB-007");
 		expect(
 			staticContext.strokes.some(
 				(stroke) => stroke.style === "rgba(238, 255, 246, 0.92)" && stroke.width === 1.6,

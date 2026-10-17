@@ -2256,13 +2256,16 @@ export class TileRenderer {
 			if (input.camera.zoom >= 12) {
 				this.drawPortEquipmentFacingIndicator(ctx, input.camera.zoom, portType, port, facingTip);
 			}
-			const barcode = presentation.barcodes[row];
-			if (portType === "OHB" && barcode && input.camera.zoom >= 30) {
+			if (portType === "OHB" && input.camera.zoom >= 30) {
 				ctx.fillStyle = "rgba(222, 239, 238, 0.88)";
 				ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
 				ctx.textAlign = "center";
 				ctx.textBaseline = "bottom";
-				ctx.fillText(barcode, port.x, port.y - input.camera.zoom * 0.24);
+				ctx.fillText(
+					`OHB-${presentation.equipmentGroupIds[row]}`,
+					port.x,
+					port.y - input.camera.zoom * 0.24,
+				);
 			}
 		}
 	}

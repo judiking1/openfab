@@ -12179,8 +12179,8 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		syncModelUi(
 			placementIntent.kind === "move"
-				? `${targetPort?.barcode ?? "OHB"} 포트를 합법 슬롯으로 이동했습니다`
-				: `${targetPort?.barcode ?? "OHB"} 포트를 복제했습니다`,
+				? `OHB-${targetPort?.equipmentGroupId ?? "?"}를 합법 슬롯으로 이동했습니다`
+				: `OHB-${targetPort?.equipmentGroupId ?? "?"}를 복제했습니다`,
 		);
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 		return true;
@@ -19754,7 +19754,7 @@ export default function TileFabApp(): React.ReactElement {
 		}
 		const completionStatus =
 			portDrag.portType === "OHB" && selection.rows.length === 1 && !portDrag.moved
-				? `OHB ${portDrag.document.portEquipment.ports.at(-1)?.barcode ?? "port"}를 배치했습니다`
+				? `OHB-${firstPort?.equipmentGroupId ?? "?"}를 배치했습니다`
 				: portDrag.portType === "OHB"
 					? `OHB ${selection.rows.length}개를 한 번의 명령으로 배치했습니다${exclusionMessage}`
 					: `EQ-${firstPort?.equipmentGroupId ?? "?"} · ${selection.rows.length} PORT · PITCH ${portDrag.pitchMillimeters / 1_000} m`;
@@ -23273,8 +23273,8 @@ export default function TileFabApp(): React.ReactElement {
 		startOrdinaryPortKeyboard("OHB", undefined, initialTarget);
 		setStatus(
 			kind === "move"
-				? `${resolved.port.barcode ?? `PORT-${resolved.port.id}`} 이동${directlyOwned ? " · 현재 Loop 소속 유지 · 같은 Loop 안의 슬롯을 선택하세요" : ""} · 방향키/WASD로 합법 슬롯 이동 · Enter 또는 클릭으로 확정 · Esc 취소`
-				: `${resolved.port.barcode ?? `PORT-${resolved.port.id}`} 복제 · 방향키/WASD로 합법 슬롯 이동 · Enter 또는 클릭으로 확정 · Esc 취소`,
+				? `OHB-${resolved.equipmentGroup.id} 이동${directlyOwned ? " · 현재 Loop 소속 유지 · 같은 Loop 안의 슬롯을 선택하세요" : ""} · 방향키/WASD로 합법 슬롯 이동 · Enter 또는 클릭으로 확정 · Esc 취소`
+				: `OHB-${resolved.equipmentGroup.id} 복제 · 방향키/WASD로 합법 슬롯 이동 · Enter 또는 클릭으로 확정 · Esc 취소`,
 		);
 		scheduleRender();
 	};
