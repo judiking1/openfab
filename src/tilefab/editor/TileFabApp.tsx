@@ -2412,6 +2412,8 @@ function useEditorSurfaceRestoration({
 	]);
 }
 
+const PORT_EDIT_COMMAND_HINT = "포트 편집을 완료하거나 취소한 뒤 다른 편집 명령을 실행하세요";
+
 const INTERACTIVE_EDITOR_ACTION_HINTS = new Set([
 	"build-track",
 	"place-blueprint",
@@ -12864,7 +12866,14 @@ export default function TileFabApp(): React.ReactElement {
 		}
 	};
 
+	const blockHistoryDuringPortMembershipEdit = (): boolean => {
+		if (portEquipmentMembershipEditSessionRef.current === null) return false;
+		setStatus(PORT_EDIT_COMMAND_HINT);
+		return true;
+	};
+
 	const handleUndo = async (): Promise<boolean> => {
+		if (blockHistoryDuringPortMembershipEdit()) return false;
 		clearOpenRailClosureDraft();
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return false;
 		if (blockStaticFabExclusiveCommand()) return false;
@@ -13054,6 +13063,7 @@ export default function TileFabApp(): React.ReactElement {
 	};
 
 	const handleRedo = async (): Promise<void> => {
+		if (blockHistoryDuringPortMembershipEdit()) return;
 		clearOpenRailClosureDraft();
 		if (startupState.status !== "ready" || modelSyncPendingRef.current) return;
 		if (blockStaticFabExclusiveCommand()) return;
@@ -15244,7 +15254,7 @@ export default function TileFabApp(): React.ReactElement {
 					["KeyA", "KeyC", "KeyS", "KeyV", "KeyX", "KeyZ"].includes(event.code)
 				) {
 					event.preventDefault();
-					setStatus("포트 편집을 완료하거나 취소한 뒤 다른 편집 명령을 실행하세요");
+					setStatus(PORT_EDIT_COMMAND_HINT);
 					return;
 				}
 				if (target === canvas && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -33910,6 +33920,7 @@ export default function TileFabApp(): React.ReactElement {
 		requestAnimationFrame(() => canvasRef.current?.focus({ preventScroll: true }));
 	};
 	historyUndoRef.current = (): void => {
+		if (blockHistoryDuringPortMembershipEdit()) return;
 		const recovery = equipmentDeletionRecovery;
 		if (
 			recovery?.document === railDocument &&
@@ -35825,6 +35836,7 @@ export default function TileFabApp(): React.ReactElement {
 	} : !staticFabExclusiveCommandActive && portEquipmentMembershipEditSession ? {
 		id: `equipment-ports-${portEquipmentMembershipEditSession.sourceEquipmentGroupId}`,
 		kind: "equipment",
+		instruction: PORT_EDIT_COMMAND_HINT,
 		title: `${portEquipmentMembershipEditSession.portType}-${portEquipmentMembershipEditSession.sourceEquipmentGroupId} · ${portEquipmentMembershipEditSession.portType === "EQ" && portEquipmentMembershipEditSession.editMode === "pitch" ? "Port 간격" : "Port 구성"} 편집`,
 	} : blueprintSelectionFocused ? {
 		...baseAuthoringTask, title: "새 청사진 만들기",
@@ -36376,7 +36388,8 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 									<SaveAll size={14} /> 다른 이름으로 파일 저장
 								</button>
 								<button type="button" data-testid="project-redo"
-									disabled={viewMode === "3d" || !startupReady || modelSyncPending || !history.canRedo || staticFabExclusiveCommandActive}
+									title={portEquipmentMembershipEditSession ? PORT_EDIT_COMMAND_HINT : "다시 실행"}
+									disabled={viewMode === "3d" || !startupReady || modelSyncPending || !history.canRedo || staticFabExclusiveCommandActive || portEquipmentMembershipEditSession !== null}
 									onClick={() => { setProjectMenuOpen(false); void handleRedo(); }}>
 									<Redo2 size={14} /> 다시 실행 (Redo)
 								</button>
@@ -36529,7 +36542,9 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 					<span className="tilefab-separator" />
 					<IconButton
 						label="실행 취소"
+						tooltip={portEquipmentMembershipEditSession ? PORT_EDIT_COMMAND_HINT : undefined}
 						disabled={
+							portEquipmentMembershipEditSession !== null ||
 							viewMode === "3d" ||
 							!startupReady ||
 							modelSyncPending ||
@@ -36542,7 +36557,9 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 					</IconButton>
 					<IconButton
 						label="다시 실행"
+						tooltip={portEquipmentMembershipEditSession ? PORT_EDIT_COMMAND_HINT : undefined}
 						disabled={
+							portEquipmentMembershipEditSession !== null ||
 							viewMode === "3d" ||
 							!startupReady ||
 							modelSyncPending ||

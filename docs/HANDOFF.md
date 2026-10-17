@@ -92,6 +92,15 @@
   startup failure remains unreproduced; inspection code and validation are unchanged and final
   independent retesting remains a release gate. Full suites and native OS file acceptance were
   not run for this follow-up.
+- Beginner bundle full regression at `dbca58d`: one ordinary `pnpm test` run,
+  464 files / 5,985 tests PASS and 2 existing skips; no failures (291.26 s).
+  Subsequent Port-history correction blocks Undo/Redo at the common handlers before transient
+  cleanup, using the current edit-session ref. Toolbar/menu availability and keyboard guidance
+  agree; explicit Apply/Cancel retain their existing handlers. Verification after this correction:
+  3 existing focused files / 85 tests, ordinary build and changed-file lint PASS (one existing
+  App warning). Chrome 390 px Port-count/pitch drafts survive disabled controls, keyboard history,
+  and replayed pre-edit UI callbacks; Cancel restores history availability and Apply/Undo/Redo
+  preserves the expected checksum. The full suite was not repeated after this focused correction.
 - Independent 390 px integrated GUI on v0.1.116 PASS: 1 Bank / 6 Bays / 12 Loops, Bay flow change,
   five-Port EQ pitch/body editing, guidance pause/resume, keyboard and Undo/Redo, and Checks with
   zero fixes. The run stopped before the OS chooser; native file roundtrip and V1 completion remain open.
