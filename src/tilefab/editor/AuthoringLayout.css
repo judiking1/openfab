@@ -634,9 +634,9 @@
 	.tilefab-buildbar.tilefab-equipment-group-transformbar {
 	flex-wrap: nowrap;
 }
-/* Pitch controls share one column; legacy row flex bases must not create sideways columns. */
+/* Port edits share one column; legacy row flex bases must not create sideways columns. */
 .tilefab-app[data-authoring-layout="unified"] .tilefab-active-authoring-workspace
-	.tilefab-buildbar.tilefab-equipment-membershipbar[data-edit-mode="pitch"] {
+	.tilefab-buildbar.tilefab-equipment-membershipbar {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
 }
@@ -681,7 +681,7 @@
 }
 .tilefab-app[data-authoring-layout="unified"]
 	.tilefab-active-authoring-workspace
-	.tilefab-equipment-membershipbar[data-edit-mode="pitch"]
+	.tilefab-equipment-membershipbar
 	.tilefab-equipment-transform-actions {
 	position: static;
 }
@@ -934,4 +934,212 @@
 		top: 10px;
 		bottom: auto;
 	}
+}
+
+/* Catalog pictures identify tools without replacing their names or command owners. */
+.tilefab-authoring-action-icon {
+	display: grid;
+	place-items: center;
+	flex: 0 0 28px;
+	min-height: 28px;
+	color: #a4dfcf;
+}
+.tilefab-authoring-action-icon .tilefab-catalog-glyph {
+	width: 26px;
+	height: 22px;
+}
+.tilefab-authoring-disclosure {
+	margin-top: 16px;
+	border-top: 1px solid #304244;
+}
+.tilefab-authoring-disclosure > summary {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 44px;
+	cursor: pointer;
+	list-style: none;
+	color: #a5cfc4;
+}
+.tilefab-authoring-disclosure > summary::-webkit-details-marker {
+	display: none;
+}
+.tilefab-authoring-disclosure[open] > summary > svg {
+	transform: rotate(90deg);
+}
+.tilefab-authoring-disclosure > summary:focus-visible {
+	outline: 2px solid #a4efda;
+	outline-offset: -2px;
+}
+.tilefab-authoring-sidebar .tilefab-authoring-return {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 0 0 auto;
+	margin-top: 10px;
+	text-align: left;
+	color: #c4f2e5;
+	border-color: #649b8e;
+}
+.tilefab-authoring-sidebar-utilities .tilefab-authoring-action-icon {
+	flex-basis: 20px;
+}
+
+.tilefab-authoring-action-preview {
+	display: grid;
+	flex: 0 0 72px;
+	height: 60px;
+	place-items: center;
+	overflow: hidden;
+	border: 1px solid #31444a;
+	border-radius: 6px;
+	background: #0b151a;
+	color: #8de4cc;
+}
+.tilefab-authoring-action-preview > svg,
+.tilefab-authoring-action-preview > img {
+	width: 64px;
+	height: 48px;
+	margin: 0;
+}
+.tilefab-authoring-action-preview .tilefab-catalog-glyph {
+	width: 44px;
+	height: 36px;
+}
+.tilefab-authoring-action-preview .tilefab-starter-list-miniature {
+	width: 100%;
+	height: 100%;
+	border: 0;
+}
+.tilefab-authoring-sidebar-action[data-primary="true"] {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	border-color: #438573;
+	background: #16382f;
+}
+.tilefab-authoring-sidebar-action[data-primary="true"] > .tilefab-authoring-action-preview {
+	grid-column: 1 / -1;
+	width: 100%;
+	height: 108px;
+}
+.tilefab-authoring-action-hint {
+	color: #9cd8c9;
+	font-size: 11px;
+	line-height: 1.45;
+}
+.tilefab-authoring-sidebar-action[data-has-preview="true"] {
+	gap: 9px;
+}
+
+.tilefab-authoring-sidebar-utilities h3 {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+}
+.tilefab-authoring-sidebar-utilities .tilefab-authoring-sidebar-actions {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.tilefab-authoring-sidebar-utilities li:last-child {
+	grid-column: auto;
+}
+.tilefab-authoring-sidebar-utilities .tilefab-authoring-sidebar-action {
+	display: grid;
+	justify-items: center;
+	align-content: center;
+	gap: 4px;
+	padding: 6px 2px;
+	text-align: center;
+}
+.tilefab-authoring-sidebar-utilities .tilefab-authoring-sidebar-action > svg {
+	display: none;
+}
+.tilefab-authoring-sidebar-utilities .tilefab-authoring-action-icon {
+	min-height: 20px;
+}
+.tilefab-authoring-sidebar-utilities strong {
+	font-size: 11px;
+}
+[data-authoring-section="home-manual"] .tilefab-authoring-sidebar-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+[data-authoring-section="home-manual"] .tilefab-authoring-sidebar-action {
+	display: grid;
+	justify-items: start;
+	height: calc(100% - 12px);
+	padding: 8px;
+}
+[data-authoring-section="home-manual"] .tilefab-authoring-action-preview {
+	width: 100%;
+	height: 44px;
+}
+[data-authoring-section="home-manual"] .tilefab-authoring-action-preview > svg,
+[data-authoring-section="home-manual"] .tilefab-authoring-action-preview > img {
+	height: 36px;
+}
+[data-authoring-section="home-manual"] .tilefab-authoring-sidebar-action > svg,
+[data-authoring-section="home-manual"] .tilefab-authoring-sidebar-description {
+	display: none;
+}
+.tilefab-authoring-sidebar-action[data-primary="true"] > .tilefab-authoring-action-preview {
+	height: 84px;
+}
+
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-equipment-membershipbar
+	> * {
+	min-width: 0;
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-equipment-membershipbar
+	.tilefab-equipment-transform-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.tilefab-app[data-authoring-layout="unified"]
+	.tilefab-active-authoring-workspace
+	.tilefab-equipment-membershipbar
+	.tilefab-equipment-transform-state {
+	grid-column: 1 / -1;
+}
+
+[data-authoring-section="equipment-create"] .tilefab-authoring-sidebar-actions {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 6px;
+}
+[data-authoring-section="equipment-create"] .tilefab-authoring-sidebar-action {
+	display: grid;
+	justify-items: center;
+	height: calc(100% - 12px);
+	text-align: center;
+	padding: 9px 4px;
+}
+[data-authoring-section="equipment-create"] .tilefab-authoring-sidebar-action > svg,
+[data-authoring-section="equipment-create"]
+	.tilefab-authoring-sidebar-action-copy
+	> .tilefab-authoring-sidebar-description {
+	display: none;
+}
+[data-authoring-section="equipment-create"] .tilefab-authoring-sidebar-action strong {
+	font-size: 12px;
+	word-break: keep-all;
+}
+
+.tilefab-authoring-sidebar[data-compact="true"][data-browse-category="home"]
+	.tilefab-authoring-sidebar-categories {
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.tilefab-authoring-sidebar[data-compact="true"][data-browse-category="home"]
+	.tilefab-authoring-sidebar-category {
+	flex-direction: column;
+	justify-content: center;
+	gap: 4px;
+	padding: 8px 2px;
+	font-size: 11px;
 }

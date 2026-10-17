@@ -1327,7 +1327,9 @@ function fullFabPresetBuildStages(bayCount: number): readonly string[] {
 	]);
 }
 
-function StarterMiniature({ id }: Readonly<{ id: SyntheticFabStarterId }>): React.ReactElement {
+export function StarterMiniature({
+	id,
+}: Readonly<{ id: SyntheticFabStarterId }>): React.ReactElement {
 	const request = useMemo(() => defaultSyntheticFabStarterRequest(id), [id]);
 	const [ready, setReady] = useState(false);
 	useEffect(() => {

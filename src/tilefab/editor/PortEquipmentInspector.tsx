@@ -382,7 +382,7 @@ export function PortEquipmentInspector({
 					ref={processLoopPrimaryActionRef}
 					type="button"
 					data-testid="move-port-equipment-group-primary"
-					aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 이 위치에서 소속 가능한 Loop 없음. 장비 전체 이동. 미소속으로 유지할 수도 있습니다.`}
+					aria-label={`${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}: 장비 배치됨. 이 위치에는 소속 가능한 Loop가 없습니다. 장비 전체 이동 또는 현재 배치 유지.`}
 					disabled={modelSyncPending || workerState.status !== "ready" || !actions.move.allowed}
 					aria-describedby={equipmentActionDescriptionId(actions.move)}
 					onClick={() => startSelectedPortEquipmentTransform("move")}
@@ -394,10 +394,10 @@ export function PortEquipmentInspector({
 					/>
 					<span className="tilefab-equipment-process-loop-primary-copy">
 						<strong className="tilefab-equipment-process-loop-primary-title">
-							이 위치에서 소속 가능한 Loop 없음
+							장비 배치됨 · Loop 미소속
 						</strong>
 						<small className="tilefab-equipment-process-loop-primary-name">
-							장비 전체 이동 · 미소속 유지 가능
+							장비 전체 이동 · 현재 배치 유지 가능
 						</small>
 					</span>
 				</button>
@@ -409,7 +409,7 @@ export function PortEquipmentInspector({
 					className="tilefab-equipment-process-loop-primary-owned tilefab-equipment-process-loop-primary-unavailable"
 					data-testid="equipment-process-loop-unavailable"
 					role="status"
-					aria-label={`이 위치에서 소속 가능한 Loop 없음 · ${selectedEquipmentNoProcessLoopHint}`}
+					aria-label={`장비 배치됨 · 이 위치에는 소속 가능한 Loop가 없습니다 · ${selectedEquipmentNoProcessLoopHint}`}
 					title={selectedEquipmentUnownedProcessLoopMembership?.reason ?? undefined}
 					tabIndex={-1}
 				>
@@ -420,7 +420,7 @@ export function PortEquipmentInspector({
 					/>
 					<span className="tilefab-equipment-process-loop-primary-copy">
 						<strong className="tilefab-equipment-process-loop-primary-title">
-							이 위치에서 소속 가능한 Loop 없음
+							장비 배치됨 · Loop 미소속
 						</strong>
 						<small className="tilefab-equipment-process-loop-primary-name">
 							{selectedEquipmentNoProcessLoopHint}

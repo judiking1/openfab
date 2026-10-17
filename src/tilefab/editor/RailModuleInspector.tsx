@@ -457,7 +457,8 @@ export function RailModuleInspector({
 						aria-label="스위치 형상 변경"
 						data-testid="advanced-switch-reshape-controls"
 					>
-						<span>TOPOLOGY</span>
+						<small>선택 즉시 변경 · 실행 취소로 되돌릴 수 있습니다</small>
+						<span>연결 형태</span>
 						<fieldset className="tilefab-segmented" aria-label="선택한 스위치 토폴로지 클래스 변경">
 							{ADVANCED_SWITCH_PROFILE_CLASSES.map((profileClass) => (
 								<button
@@ -475,7 +476,7 @@ export function RailModuleInspector({
 								</button>
 							))}
 						</fieldset>
-						<span>CHIRALITY</span>
+						<span>분기 방향</span>
 						<fieldset className="tilefab-segmented" aria-label="선택한 스위치 좌우 변경">
 							{(["left", "right"] as const).map((side) => {
 								const active = advancedSwitchSide(selectedSwitch) === side.toUpperCase();
@@ -489,7 +490,7 @@ export function RailModuleInspector({
 										disabled={active}
 										onClick={() => reshapeSelectedSwitch(selectedSwitch.profileClass, side)}
 									>
-										{side.toUpperCase()}
+										{side === "left" ? "왼쪽" : "오른쪽"}
 									</button>
 								);
 							})}

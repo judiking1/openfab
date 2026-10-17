@@ -692,7 +692,7 @@ import { type EditorActivity, editorActivityCanvasLabel } from "./EditorActivity
 import { RailAuthoringSettings } from "./RailAuthoringSettings";
 import { AuthoringSidebar, type AuthoringAction, type AuthoringCategory, type AuthoringSection } from "./AuthoringSidebar";
 import { ActiveAuthoringWorkspace } from "./ActiveAuthoringWorkspace";
-import type { AuthoringTaskPresentation } from "./AuthoringTaskPresentation";
+import { RAIL_AUTHORING_PRESENTATION, type AuthoringTaskPresentation } from "./AuthoringTaskPresentation";
 import { editorToolDensityPresentation } from "./EditorToolDensityPresentation";
 import { DeferredEditorCommandHelpDialog } from "./DeferredEditorCommandHelpDialog";
 import { deriveEditorHelpContext } from "./EditorHelpContext";
@@ -844,7 +844,6 @@ import {
 } from "./GuidedBuildMission";
 import { resolveGuidedBuildPrimaryTarget } from "./GuidedBuildPrimaryTarget";
 import {
-	DEFAULT_RAIL_BUILD_STATUS,
 	guidedBuildPresentedStatus,
 	guidedFirstRailPreviewStatus,
 	RAIL_ROUTE_DRAG_STATUS,
@@ -1246,7 +1245,8 @@ import {
 	certificationEvidenceMatchesPreparedCooperatively,
 	type SyntheticFabStarterCertificationEvidence,
 } from "./SyntheticFabStarterCertifiedArtifact";
-import { SyntheticFabStarterDialog } from "./SyntheticFabStarterDialog";
+import twinBaySchematic from "./assets/production-bay-twin.svg?no-inline";
+import { StarterMiniature, SyntheticFabStarterDialog } from "./SyntheticFabStarterDialog";
 import { syntheticFabStarterPresentation } from "./SyntheticFabStarterPresentation";
 import { acquireVerifiedSyntheticFabStarter } from "./SyntheticFabStarterVerificationCache";
 import {
@@ -3527,21 +3527,6 @@ export default function TileFabApp(): React.ReactElement {
 		useState<StaticFabOrganizationColor>("TEAL");
 	const [organizationDetailsError, setOrganizationDetailsError] = useState<string | null>(null);
 	const [organizationDetailsStale, setOrganizationDetailsStale] = useState(false);
-	const organizationHistoryInteraction = useMemo(() => ({
-		selectedOrganizationId,
-		organizationMultiSelection,
-		organizationRenameDraft,
-		organizationParentIdsDraft,
-		organizationDescriptionDraft,
-		organizationColorDraft,
-	}), [
-		selectedOrganizationId,
-		organizationMultiSelection,
-		organizationRenameDraft,
-		organizationParentIdsDraft,
-		organizationDescriptionDraft,
-		organizationColorDraft,
-	]);
 	const [projectBlueprints, setProjectBlueprintsState] = useState<OpenFabProjectBlueprintSection>(
 		createEmptyOpenFabProjectBlueprintSection,
 	);
@@ -3655,7 +3640,7 @@ export default function TileFabApp(): React.ReactElement {
 	const [status, setStatus] = useState(
 		scaleProbeCellCount > 0
 			? `${scaleProbeCellCount.toLocaleString()}셀 맵을 Worker에서 준비합니다`
-			: DEFAULT_RAIL_BUILD_STATUS,
+			: "공장 만들기로 레일 골격을 생성하거나, 레일을 직접 그려 시작하세요",
 	);
 	const hierarchyCommandFeedbackRef = useRef<OrdinaryHierarchyCommandFeedback | null>(null);
 	const rememberHierarchyCommandFeedback = (message: string): string => {
@@ -3694,6 +3679,29 @@ export default function TileFabApp(): React.ReactElement {
 	const [patternResizeDraft, setPatternResizeDraft] = useState<RailPatternResizeDraft | null>(null);
 	const [selectedPortEquipment, setSelectedPortEquipmentState] =
 		useState<PortEquipmentSelection | null>(null);
+	const organizationHistoryInteraction = useMemo(() => ({
+		selected,
+		areaSelection,
+		staticFabSelection,
+		selectedPortEquipment,
+		selectedOrganizationId,
+		organizationMultiSelection,
+		organizationRenameDraft,
+		organizationParentIdsDraft,
+		organizationDescriptionDraft,
+		organizationColorDraft,
+	}), [
+		selected,
+		areaSelection,
+		staticFabSelection,
+		selectedPortEquipment,
+		selectedOrganizationId,
+		organizationMultiSelection,
+		organizationRenameDraft,
+		organizationParentIdsDraft,
+		organizationDescriptionDraft,
+		organizationColorDraft,
+	]);
 	const [equipmentDeletionRecovery, setEquipmentDeletionRecovery] =
 		useState<EquipmentDeletionRecovery | null>(null);
 	const [recentPlacedOhb, setRecentPlacedOhb] = useState<RecentPlacedOhb | null>(null);
@@ -12917,10 +12925,13 @@ export default function TileFabApp(): React.ReactElement {
 		const renameDraft = organizationRenameDraft;
 		const preserveDetailsDraft = organizationDetailsDirtyRef.current || organizationDetailsStale;
 		const organizationContext =
-			organizationId === null || retained?.organization
+			organizationId === null || retained?.organization ||
+			!organizationMultiSelectionRef.current.selectedOrganizationIds.includes(organizationId)
 				? null
 				: captureOrganizationHistoryContext(organizationId, renameDraft, preserveDetailsDraft);
-		const removedOrganizationContext = retained?.organization
+		const removedOrganizationContext = retained?.organization || selectedOrganizationId !== null ||
+			selectedPortEquipmentRef.current !== null || selectedRef.current !== null || areaSelectionRef.current !== null ||
+			organizationMultiSelectionRef.current.selectedOrganizationIds.length > 0
 			? null
 			: removedOrganizationContextRef.current;
 		const endingPortMove = portEquipmentGroupEditSessionRef.current?.scope === "port" ? portEquipmentGroupEditSessionRef.current : null;
@@ -13112,10 +13123,13 @@ export default function TileFabApp(): React.ReactElement {
 		const renameDraft = organizationRenameDraft;
 		const preserveDetailsDraft = organizationDetailsDirtyRef.current || organizationDetailsStale;
 		const organizationContext =
-			organizationId === null || retained?.organization
+			organizationId === null || retained?.organization ||
+			!organizationMultiSelectionRef.current.selectedOrganizationIds.includes(organizationId)
 				? null
 				: captureOrganizationHistoryContext(organizationId, renameDraft, preserveDetailsDraft);
-		const removedOrganizationContext = retained?.organization
+		const removedOrganizationContext = retained?.organization || selectedOrganizationId !== null ||
+			selectedPortEquipmentRef.current !== null || selectedRef.current !== null || areaSelectionRef.current !== null ||
+			organizationMultiSelectionRef.current.selectedOrganizationIds.length > 0
 			? null
 			: removedOrganizationContextRef.current;
 		const endingPortMove = portEquipmentGroupEditSessionRef.current?.scope === "port" ? portEquipmentGroupEditSessionRef.current : null;
@@ -26611,7 +26625,8 @@ export default function TileFabApp(): React.ReactElement {
 	// Worker completion may outlive the selection or input captured before Undo/Redo.
 	currentOrganizationHistoryContextRef.current = {
 		interaction: organizationHistoryInteraction,
-		context: selectedOrganizationId === null ? null : captureOrganizationHistoryContext(
+		context: selectedOrganizationId === null ||
+			!organizationMultiSelection.selectedOrganizationIds.includes(selectedOrganizationId) ? null : captureOrganizationHistoryContext(
 			selectedOrganizationId,
 			organizationRenameDraft,
 			organizationDetailsDirty || organizationDetailsStale,
@@ -32323,6 +32338,7 @@ export default function TileFabApp(): React.ReactElement {
 				])
 			: null;
 	const ordinaryRailKeyboardIdleAvailable =
+		authoringToolActivated &&
 		!guidedBuildExperienceActive &&
 		guidedRailKeyboard === null &&
 		editorActivity === "build" &&
@@ -35488,32 +35504,32 @@ export default function TileFabApp(): React.ReactElement {
 			target?.focus({ preventScroll: true });
 		});
 	};
-	const newFabAction = authoringAction("new-fab", "새 FAB 프로젝트", "설정한 규모로 새 문서를 만듭니다 · 현재 문서는 전환 전에 보호됩니다", (trigger) => {
+	const newFabAction: AuthoringAction = { ...authoringAction("new-fab", "공장 만들기", "연결된 레일 골격부터 시작 · 장비는 나중에 배치", (trigger) => {
 		if (blockPendingLoopOrHistoryCommand()) return;
 		newFabProfileWizardReturnFocusRef.current = trigger;
 		setNewFabProfileWizardOpen(true);
-	});
+	}), preview: <StarterMiniature id="production-fab-60" />, hint: "새 프로젝트 · 크기와 구역 구성 선택" };
 	const openAuthoringFabPreset = (intent: "project" | "placement", trigger: HTMLButtonElement): void => {
 		if (blockPendingLoopOrHistoryCommand()) return;
 		fabPresetDialogReturnFocusRef.current = trigger;
 		setFabPresetIntent(intent);
 		setFabPresetDialogOpen(true);
 	};
-	const presetFabAction = authoringAction("fab-presets", "FAB 레일 골격에서 시작", "검증된 레일 골격으로 새 프로젝트를 만듭니다 · 장비는 직접 추가합니다",
+	const presetFabAction = authoringAction("fab-presets", "예제로 시작", "검증된 공장 레일 골격 · 장비는 직접 배치",
 		(trigger) => openAuthoringFabPreset("project", trigger));
-	const addFabPresetAction = authoringAction("add-fab-preset", "FAB 프리셋 추가", "현재 프로젝트를 유지하고 검증된 FAB를 1회 배치합니다",
+	const addFabPresetAction = authoringAction("add-fab-preset", "공장 예제 추가", "현재 프로젝트에 검증된 레일 골격 배치",
 		(trigger) => openAuthoringFabPreset("placement", trigger));
-	const bayAction = authoringAction("add-bay", "Bay 추가", "현재 프로젝트에 작업 구역을 배치합니다", (trigger) => {
+	const bayAction: AuthoringAction = { ...authoringAction("add-bay", "작업 구역 추가", "Bay · 여러 작업 루프를 묶은 구역 배치", (trigger) => {
 		productionBayLauncherRef.current = trigger;
 		startProductionBayPlacementFromContext(true);
-	});
-	const loopAction = authoringAction("add-process-loop", "Process Loop 레일", "크기를 정해 폐쇄 레일을 배치합니다 · 조직 등록은 선택 후", () => startAuthoringTemplate("long-bay"));
-	const railActions = RAIL_CONSTRUCTION_CATALOG.map((item) => authoringAction(
-		`rail-${item.id}`, item.id === "route" ? "레일 그리기" : item.label,
-		`${item.title} · ${railConstructionApplicability(activeMap, item.id, buildAnchor, networkLinkContextRef.current).reason}`,
+	}), preview: <img src={twinBaySchematic} width={120} height={72} alt="" />, hint: "빈 곳에 배치 · 현재 프로젝트에 추가" };
+	const loopAction: AuthoringAction = { ...authoringAction("add-process-loop", "순환 레일 추가", "Process Loop · 한 방향으로 도는 레일", () => startAuthoringTemplate("long-bay")), preview: <RailTemplateMiniature item={railTemplateCatalogItem("long-bay")} />, hint: "빈 곳에 배치" };
+	const railActions = RAIL_CONSTRUCTION_CATALOG.map((item) => ({ ...authoringAction(
+		`rail-${item.id}`, RAIL_AUTHORING_PRESENTATION[item.id].label,
+		RAIL_AUTHORING_PRESENTATION[item.id].description,
 		() => { if (chooseExplicitEditorTool("build")) chooseBuildMode(item.id); },
 		authoringAvailability, authoringToolActivated && tool === "build" && !templateSession && !areaStampSession && !stampSession && !organizationBundlePlacementSession && buildMode === item.id,
-	));
+	), preview: constructionCatalogIcon(item.icon), hint: item.id === "route" ? "직접 그리기 · 드래그" : item.id === "network-link" ? "두 루프에 연결" : "열린 끝점에 연결" }));
 	const blueprintActions = [
 		authoringAction("blueprints", "저장된 청사진", "프로젝트와 내 라이브러리에서 찾아 배치", (trigger) => openBlueprintLibraryFromActivity("saved", trigger)),
 		authoringAction("blueprint-recent", "최근 복제 항목 배치", "레일·장비·구조의 마지막 복제 항목", () => {
@@ -35561,31 +35577,31 @@ export default function TileFabApp(): React.ReactElement {
 		authoringAction("blueprint-select-organization", "구조 선택으로 시작", "FAB · Bank · Bay · Process Loop를 목록에서 선택", (trigger) => startBlueprintSelection("organization", trigger)),
 	];
 	const equipmentActions = (["ohb", "eq", "stk"] as const)
-		.map((id) => authoringAction(`equipment-${id}`, id === "ohb" ? "OHB 배치" : id === "eq" ? "EQ 장비 배치" : "Stocker 배치",
+		.map((id) => ({ ...authoringAction(`equipment-${id}`, id === "ohb" ? "임시 보관대" : id === "eq" ? "공정 장비" : "자동 창고",
 			id === "ohb" ? "레일 옆 Port를 선택해 보관 위치 생성" : id === "eq" ? "직선 레일의 시작·끝을 선택해 장비 생성" : "입출고 Port를 선택한 뒤 Stocker 생성",
-			() => { chooseGuidedEquipmentTool(id); }, authoringAvailability, tool === id));
+			() => { chooseGuidedEquipmentTool(id); }, authoringAvailability, tool === id), hint: id === "stk" ? "Stocker" : id.toUpperCase() }));
 	const structureActions = [
-		authoringAction("structure-list", "구조 선택·관리", "FAB · Bank · Bay · Process Loop", (trigger) => chooseStaticFabNavigatorTab("organizations", trigger)),
+		authoringAction("structure-list", "공장·구역 선택", "목록에서 찾아 이동·복제·연결", (trigger) => chooseStaticFabNavigatorTab("organizations", trigger)),
 		authoringAction("structure-copy", "선택 구조 복제", assemblyDuplicateAvailability.reason, duplicateSelectedFabAssembly, assemblyDuplicateAvailability),
 		authoringAction("structure-connect", "선택 구조 연결", assemblyConnectorAvailability.reason, startStaticFabAssemblyConnector, assemblyConnectorAvailability),
 	];
 	const authoringSections: readonly AuthoringSection[] = browseCategory === null ? [
-		{ id: "home-new", title: "새 프로젝트 시작", description: "공장 전체를 만들거나 검증된 예제로 시작합니다", actions: [newFabAction, presetFabAction] },
-		{ id: "home-add", title: "현재 프로젝트에 추가", description: "지금 열린 문서에서 제작을 시작합니다", actions: [bayAction, loopAction, addFabPresetAction, ...railActions.filter((action) => action.id === "rail-route")] },
+		{ id: "home-start", title: "공장 전체부터 시작", actions: [{ ...newFabAction, primary: true }] },
+		{ id: "home-manual", title: "작게 시작해 직접 만들기", actions: [...railActions.filter((action) => action.id === "rail-route").map((action) => ({ ...action, hint: "직접 드래그" })), { ...bayAction, hint: "모듈 배치 · Bay" }] },
 	] : browseCategory === "fab" ? [
 		{ id: "fab-new", title: "새 프로젝트", actions: [newFabAction, presetFabAction] },
 		{ id: "fab-add", title: "현재 프로젝트에 추가", actions: [bayAction, loopAction, addFabPresetAction] },
 		{ id: "fab-selection", title: "선택한 구조 편집", actions: structureActions },
-		{ id: "fab-patterns", title: "추가 레일 패턴", actions: RAIL_TEMPLATE_CATALOG.filter((item) => item.id !== "long-bay").map((item) => authoringAction(`template-${item.id}`, item.statusLabel, item.title,
+		{ id: "fab-patterns", title: "고급 레일 패턴", collapsible: true, actions: RAIL_TEMPLATE_CATALOG.filter((item) => item.id !== "long-bay").map((item) => ({ ...authoringAction(`template-${item.id}`, item.statusLabel, item.title,
 			() => startAuthoringTemplate(item.id), item.anchorRequirement === "free-closed" || selectedContextualRailTemplates.some((candidate) => candidate.id === item.id)
-				? authoringAvailability : { state: "blocked", reason: item.anchorRequirement === "directed-straight-trunk" ? "연결할 직선 레일을 먼저 선택하세요" : "열린 레일 끝점을 먼저 선택하세요" })) },
+				? authoringAvailability : { state: "blocked", reason: item.anchorRequirement === "directed-straight-trunk" ? "연결할 직선 레일을 먼저 선택하세요" : "열린 레일 끝점을 먼저 선택하세요" }), preview: <RailTemplateMiniature item={item} />, hint: item.anchorRequirement === "free-closed" ? "빈 곳에 배치" : item.anchorRequirement === "directed-straight-trunk" ? "직선 레일에 연결" : "열린 끝점에 연결" })) },
 	] : browseCategory === "rail" ? [
-		{ id: "rail-build", title: "레일 제작", description: "도구를 고른 뒤 캔버스에서 배치합니다", actions: railActions },
+		{ id: "rail-build", title: "모양 선택", description: "도구 선택 → 캔버스 미리보기 → 배치", actions: railActions },
 		{ id: "rail-edit", title: "레일 편집", actions: [authoringAction("rail-erase", "레일 철거", "선택한 모듈 구간을 제거 · 실행 취소 가능", () => { chooseExplicitEditorTool("erase"); })] },
 	] : browseCategory === "equipment" ? [
-		{ id: "equipment-create", title: "Port 기준 장비 제작", description: activeMap.size === 0 ? "장비가 연결될 직선 레일을 먼저 만드세요" : "기존 레일에서 유효한 Port 위치를 선택합니다", actions: equipmentActions },
+		{ id: "equipment-create", title: "레일에 장비 연결", description: activeMap.size === 0 ? "레일 준비 → 연결 위치(Port) 선택 → 장비 배치" : "Port는 장비가 레일과 연결되는 위치입니다", actions: equipmentActions },
 		{ id: "equipment-find", title: "기존 장비 편집", actions: [authoringAction("find-equipment", "기존 장비 찾기", "ID·Port·Loop로 찾아 속성 편집", (trigger) => chooseStaticFabNavigatorTab("equipment", trigger))] },
-		{ id: "equipment-import", title: "고급 가져오기", actions: [authoringAction("station-proposal", "Station proposal 검토", "외부 제안을 검토한 뒤 반영", (trigger) => void openStationProposalReview(trigger))] },
+		{ id: "equipment-import", title: "고급 가져오기", collapsible: true, actions: [authoringAction("station-proposal", "Station proposal 검토", "외부 제안을 검토한 뒤 반영", (trigger) => void openStationProposalReview(trigger))] },
 	] : [
 		{ id: "blueprint-create", title: "새 청사진 만들기", description: "저장할 대상을 선택한 뒤 이름과 저장 위치를 정합니다", actions: blueprintCreateActions },
 		{ id: "blueprint-library", title: "청사진 재사용", actions: blueprintActions },
@@ -35786,10 +35802,10 @@ export default function TileFabApp(): React.ReactElement {
 		editorActivity === "inspect" && tool === "inspect" && !blueprintLibraryOpen &&
 		(!staticFabNavigatorOpen || organizationLibraryOpen) && !processLoopRegistrationFocused;
 	const baseAuthoringTask: AuthoringTaskPresentation = {
-		instruction: moduleRailHandoff?.instruction,
+		instruction: moduleRailHandoff?.instruction ?? (tool === "build" && !templateSession && !areaStampSession && !stampSession && !organizationBundlePlacementSession ? RAIL_AUTHORING_PRESENTATION[buildMode].instruction : undefined),
 		id: portEquipmentInspectorVisible ? `equipment-${selectedEquipmentGroup?.id}` : templateSession ? `template-${templateSession.id}` : `${editorActivity}-${tool}`,
 		kind: selectedPortDetails || equipmentWorkspaceActive ? "equipment" : areaStampSession || stampSession || blueprintLibraryOpen ? "blueprint" : organizationBundlePlacementSession || staticFabExclusiveCommandActive ? "structure" : editorActivity === "inspect" || staticFabNavigatorOpen ? "selection" : "rail",
-		title: equipmentBrowserOpen ? "기존 장비 찾기" : processLoopRegistrationFocused ? "작업 루프 등록" : visibleAuthoringResult ? `${visibleAuthoringResult.kind === "fab" ? "FAB 생성" : "Bay 배치"} 완료` : readinessOpen ? "FAB 검사" : organizationLibraryOpen ? "구조 선택·편집" : navigatorMapOpen ? "FAB 지도" : blueprintLibraryOpen ? "청사진" : selectedPortDetails && portEquipmentInspectorVisible ? "장비 선택·편집" : productionBayConfiguration ? "Bay 배치" : templateSession ? railTemplateCatalogItem(templateSession.id).statusLabel : organizationBundlePlacementSession ? "구조 배치" : areaStampSession || stampSession ? "청사진 배치" : staticFabExclusiveCommandActive ? "구조 편집 검토" : equipmentWorkspaceActive ? `${tool === "stk" ? "Stocker" : tool.toUpperCase()} 배치` : tool === "inspect" ? "선택·편집" : tool === "erase" ? "레일 철거" : "레일 제작",
+		title: equipmentBrowserOpen ? "기존 장비 찾기" : processLoopRegistrationFocused ? "작업 루프 등록" : visibleAuthoringResult ? `${visibleAuthoringResult.kind === "fab" ? "FAB 생성" : "Bay 배치"} 완료` : readinessOpen ? "FAB 검사" : organizationLibraryOpen ? "구조 선택·편집" : navigatorMapOpen ? "FAB 지도" : blueprintLibraryOpen ? "청사진" : selectedPortDetails && portEquipmentInspectorVisible ? `${selectedEquipmentGroup ? `${selectedEquipmentGroup.kind}-${selectedEquipmentGroup.id}` : `Port-${selectedPortDetails.port.id}`} 편집` : productionBayConfiguration ? "Bay 배치" : templateSession ? railTemplateCatalogItem(templateSession.id).statusLabel : organizationBundlePlacementSession ? "구조 배치" : areaStampSession || stampSession ? "청사진 배치" : staticFabExclusiveCommandActive ? "구조 편집 검토" : equipmentWorkspaceActive ? `${tool === "stk" ? "Stocker" : tool.toUpperCase()} 배치` : tool === "inspect" ? "선택·편집" : tool === "erase" ? "레일 철거" : RAIL_AUTHORING_PRESENTATION[buildMode].label,
 	};
 	const authoringTask: AuthoringTaskPresentation = openRailClosureDraft ? {
 		id: "rail-closure", kind: "rail", title: "레일 닫기 미리보기",
@@ -35797,6 +35813,19 @@ export default function TileFabApp(): React.ReactElement {
 			? `끝점 (${openRailClosureDraft.start.x}, ${openRailClosureDraft.start.y}) → 시작점 (${openRailClosureDraft.target.x}, ${openRailClosureDraft.target.y}) · ${openRailClosureDraft.plan.lengthMeters} m`
 			: "조직 미소속 단일 경로의 끝점 한 쌍을 닫습니다",
 		status: { tone: openRailClosureDraft.valid ? "ready" : "blocked", message: openRailClosureDraft.reason },
+	} : !staticFabExclusiveCommandActive && portEquipmentGroupEditSession ? {
+		id: `equipment-transform-${portEquipmentGroupEditSession.sourceEquipmentGroupId}`,
+		kind: "equipment",
+		title: portEquipmentGroupEditSession.scope === "port"
+			? `STK-${portEquipmentGroupEditSession.sourceEquipmentGroupId} · Port ${portEquipmentGroupEditSession.sourceAnchorPortId} 이동`
+			: `${portEquipmentGroupEditSession.portType}-${portEquipmentGroupEditSession.sourceEquipmentGroupId} ${portEquipmentGroupEditSession.mode === "move" ? "이동" : "복제"}`,
+		instruction: portEquipmentGroupEditSession.scope === "port"
+			? "새 위치를 미리 본 뒤 이동 적용을 누르세요 · 취소하면 원래 위치를 유지합니다"
+			: "마우스: 미리보기 후 클릭하면 배치 · 터치·키보드: 위치를 고른 뒤 적용",
+	} : !staticFabExclusiveCommandActive && portEquipmentMembershipEditSession ? {
+		id: `equipment-ports-${portEquipmentMembershipEditSession.sourceEquipmentGroupId}`,
+		kind: "equipment",
+		title: `${portEquipmentMembershipEditSession.portType}-${portEquipmentMembershipEditSession.sourceEquipmentGroupId} · ${portEquipmentMembershipEditSession.portType === "EQ" && portEquipmentMembershipEditSession.editMode === "pitch" ? "Port 간격" : "Port 구성"} 편집`,
 	} : blueprintSelectionFocused ? {
 		...baseAuthoringTask, title: "새 청사진 만들기",
 		instruction: organizationSelectionCount > 0
@@ -36226,7 +36255,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 					</span>
 					<span>
 						<strong>OpenFab</strong>
-						<small>Factory Digital Twin · Rail Authoring</small>
+						<small>공장 레일·장비 설계</small>
 					</span>
 				</div>
 				<div className="tilefab-project" ref={projectMenuRef}>
@@ -37925,6 +37954,10 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 				<nav className="tilefab-authoring-navigation" ref={editorNavigationRef} aria-label="제작과 편집" hidden={viewMode === "3d"}>
  <AuthoringSidebar browseCategory={browseCategory} sections={authoringSections} utilityActions={authoringUtilityActions}
  compact={compactAuthoringViewport} expanded={authoringSidebarExpanded}
+ currentTask={authoringWorkspaceVisible ? { title: authoringTask.title, onReturn: () => {
+ setAuthoringSurface("task");
+ requestAnimationFrame(() => appRootRef.current?.querySelector<HTMLButtonElement>(".tilefab-active-authoring-toggle")?.focus({ preventScroll: true }));
+ } } : undefined}
  onExpandedChange={(expanded) => setAuthoringSurface(expanded ? "catalog" : null)}
  onBrowseCategory={(category) => { setBrowseCategory(category); if (compactAuthoringViewport) setAuthoringSurface("catalog"); setStatus("제작 도구를 선택하세요 · 진행 중인 작업과 입력은 유지됩니다"); }} />
  </nav>
@@ -38332,7 +38365,7 @@ zoomCurrentPortTarget: zoomCurrentPortTarget} : null;
 											key={item.id}
 											onClick={() => runContextPaletteAction(() => chooseBuildMode(item.id))}
 										>
-											{constructionCatalogIcon(item.icon)} {item.label}
+											{constructionCatalogIcon(item.icon)} {RAIL_AUTHORING_PRESENTATION[item.id].label}
 											{constructionQuickSlot(item.id) ? (
 												<kbd>{constructionQuickSlot(item.id)}</kbd>
 											) : null}
