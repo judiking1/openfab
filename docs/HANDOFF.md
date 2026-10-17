@@ -7,7 +7,8 @@
 - The active app is `src/App.tsx -> src/tilefab/editor/TileFabApp.tsx`.
 - The canonical document, compiled physical paths, atomic history, and typed Worker mirror
   remain the common boundary for editing, rendering, and read-only 3D inspection.
-- v0.1.116 bundles explicit rail Close previews and compact recovery/catalog layout improvements.
+- v0.1.117 bundles illustrated beginner entry, editing-context preservation, compact Port actions,
+  draft-safe Undo/Redo, and clearer practice guidance.
   A synchronized rail mirror does not authorize simulation.
 - 0.1.115 file-open boundary: project, Blueprint and library restore share picker-only
   cancellation handling. Selected-file getFile/text/stream failures remain failures; input
@@ -63,13 +64,13 @@
   recovery offers. Independent Chrome verification also passes 844×390 heading/keyboard actions
   and 390×844 recovery/task placement. Only version/release records change after these checks;
   actual native OS Save/Open remains unverified and V1 remains incomplete.
-- Unreleased practice wording: `안내 접기` preserves guidance progress; `실습 끝내기` ends the
+- 0.1.117 practice wording: `안내 접기` preserves guidance progress; `실습 끝내기` ends the
   practice session. The chooser labels fresh starts `처음부터 실습` and explains that authored
   edits remain. Existing pause/resume/session behavior is unchanged. Verification: 27 existing
   UI tests, ordinary build, changed-file lint, public safety and Chrome 390/1440 pause/resume,
   exit/restart and document/checksum/dirty preservation PASS. Full suites were not repeated.
   Rail plans now reflect implemented structural resize, physical miniatures and scoped Close.
-- Unreleased beginner surface: a Korean purpose, factory overview and three distinct start paths;
+- 0.1.117 beginner surface: a Korean purpose, factory overview and three distinct start paths;
   illustrated rail/module choices, compact equipment choices, and explicit return to the active task.
   Equipment edit headings identify the target and operation. Port-count Apply/Cancel stay inside
   the task column; placement success is distinguished from Loop membership status.
@@ -79,19 +80,19 @@
   checks PASS. Isolated Chrome 390/1440 home discovery, equipment editing, button Apply/Cancel,
   body/Port Undo/Redo and equipment-creation Undo/Redo PASS. Organization name/draft, metadata
   deletion and Bay-flow history PASS; delayed Worker delivery preserves a new organization
-  selection or explicit clear. Final independent GUI review is pending; full authoring/scale
-  suites and native OS file acceptance were not run for this change.
-- Unreleased compact follow-up: Port-count and pitch actions use the existing fixed task footer,
+  selection or explicit clear. Independent code and Chrome 1440/390 GUI review PASS. Full
+  authoring/scale suites and native OS file acceptance were not run for this change.
+- 0.1.117 compact follow-up: Port-count and pitch actions use the existing fixed task footer,
   preserving the same drafts, reasons and command handlers. Recovery-visible home cards are
   compact, the factory picture explicitly describes a rail skeleton without equipment, mobile
   Redo is visible, and the selected-equipment status distinguishes placement from Loop membership.
   Verification: 3 existing focused files / 61 tests PASS; ordinary build and changed-file lint PASS
   (one existing App warning). Chrome 390/1440 equipment Apply/Cancel and Undo/Redo pass with full
   44 px footer actions. Inspection succeeds after creation and equipment edits, including the
-  reported 1 Bank / 12 Single Loop / 14 m profile. The independent candidate inspection Worker
-  startup failure remains unreproduced; inspection code and validation are unchanged and final
-  independent retesting remains a release gate. Full suites and native OS file acceptance were
-  not run for this follow-up.
+  reported 1 Bank / 12 Single Loop / 14 m profile. Independent 1440/390 creation, equipment edits,
+  history and Checks close/reopen PASS with zero issues. An earlier candidate inspection Worker
+  failure was not reproduced; its cause remains unconfirmed and no inspection-code fix is claimed.
+  Full authoring/scale suites and native OS file acceptance were not run for this follow-up.
 - Beginner bundle full regression at `dbca58d`: one ordinary `pnpm test` run,
   464 files / 5,985 tests PASS and 2 existing skips; no failures (291.26 s).
   Subsequent Port-history correction blocks Undo/Redo at the common handlers before transient
@@ -100,7 +101,9 @@
   3 existing focused files / 85 tests, ordinary build and changed-file lint PASS (one existing
   App warning). Chrome 390 px Port-count/pitch drafts survive disabled controls, keyboard history,
   and replayed pre-edit UI callbacks; Cancel restores history availability and Apply/Undo/Redo
-  preserves the expected checksum. The full suite was not repeated after this focused correction.
+  preserves the expected checksum. Independent code review and Chrome 390 px draft protection,
+  resumed history and final zero-issue Checks PASS. The full suite was not repeated after this
+  focused correction; only version and release records change for publication.
 - Independent 390 px integrated GUI on v0.1.116 PASS: 1 Bank / 6 Bays / 12 Loops, Bay flow change,
   five-Port EQ pitch/body editing, guidance pause/resume, keyboard and Undo/Redo, and Checks with
   zero fixes. The run stopped before the OS chooser; native file roundtrip and V1 completion remain open.

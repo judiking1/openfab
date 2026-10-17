@@ -6,6 +6,21 @@ All notable public OpenFab changes will be documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.117] - 2026-10-17
+
+Builder preview; V1 remains incomplete and simulation stays disabled.
+
+- Introduce a Korean-first home with illustrated factory, rail and work-area entry points,
+  compact equipment choices and an explicit return to the current editing task.
+- Describe factory examples as rail skeletons with equipment placed separately. Keep mobile
+  home actions visible with recovery offers and expose Redo in the top toolbar.
+- Keep Port-count and pitch Apply/Cancel actions visible in the task footer. Protect unfinished
+  Port edits from toolbar, menu and keyboard Undo/Redo until explicit Apply or Cancel.
+- Preserve the current equipment or organization selection through history operations, including
+  selection changes while a Worker result is pending; distinguish placement from Loop membership.
+- Distinguish folded guidance from ending a practice session and starting fresh practice.
+- Native OS project file Save/Open roundtrip remains unverified.
+
 ## [0.1.116] - 2026-10-14
 
 Builder preview; V1 remains incomplete and simulation stays disabled.
